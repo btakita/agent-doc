@@ -532,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn wait_for_start_ack_prefers_terminal_projection_over_stale_open_sidecar() {
+    fn wait_for_start_ack_uses_terminal_projection() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("route-stale-open-projection.md");
@@ -541,10 +541,6 @@ mod tests {
 
         let baseline =
             agent_doc_cycle_state_io::start_preflight(&doc, None, Some(content)).unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle state path");
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -553,10 +549,9 @@ mod tests {
             Some(content),
         )
         .unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::Committed
         );
 
         let ack = wait_for_start_ack(&doc, Some(&baseline), Duration::from_millis(250))
@@ -731,7 +726,12 @@ Body\n\
 <!-- /agent:exchange -->\n";
         let current = snapshot.replacen("agent: claude", "agent: codex", 1);
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
@@ -766,7 +766,12 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
@@ -802,7 +807,12 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None).unwrap();
         assert!(
@@ -835,7 +845,12 @@ Body\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None)
             .unwrap()

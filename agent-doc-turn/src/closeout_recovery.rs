@@ -1,6 +1,6 @@
 //! Pure closeout recovery policy.
 //!
-//! Orchestration owns file, git, and sidecar mutation effects. This module owns
+//! Orchestration owns file, git, and recovery-projection effects. This module owns
 //! action-independent turn recovery decisions that can be proven from document
 //! content facts.
 
@@ -172,7 +172,7 @@ fn repair_prompt_target_immediately_before_existing_response(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetadataDriftAuthority {
     /// The local side (snapshot for queue metadata drift, visible file for
-    /// sidecar-visible drift) is authoritative and can be committed forward.
+    /// projection-visible drift) is authoritative and can be committed forward.
     Local,
     /// HEAD is authoritative and the local side should be restored from it.
     Head,
@@ -268,9 +268,9 @@ pub enum CloseoutRecoveryState {
     /// Snapshot differs from HEAD only by agent-doc-generated queue/frontmatter
     /// metadata; user/response and tracked-item content is byte-identical.
     QueueMetadataDrift,
-    /// The visible/working file is stale relative to its sidecars (or vice versa)
+    /// The visible/working file is stale relative to its state projections (or vice versa)
     /// by metadata only, after an accepted metadata change.
-    SidecarVisibleDrift,
+    RecoveryProjectionVisibleDrift,
     /// User-authored prompt/response content drifted vs HEAD.
     UnsafeUserContentDrift,
 }
@@ -330,12 +330,11 @@ pub struct CloseoutRecoveryStateInput {
     pub nested_parent_pointer_stale: bool,
 }
 
-/// Open-cycle sidecar facts needed to render a durable recovery command.
+/// Open-cycle ledger facts needed to render a durable recovery command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenCycleRecoveryCommandInput {
     pub cycle_id: String,
     pub phase: CyclePhase,
-    pub baseline_file: Option<String>,
     pub target: Option<String>,
     pub has_pending_mutations: bool,
     pub capture_id: Option<String>,
@@ -360,7 +359,7 @@ impl CloseoutRecoveryState {
         Self::NestedParentPointerStale,
         Self::OpenEmptyPreflight,
         Self::QueueMetadataDrift,
-        Self::SidecarVisibleDrift,
+        Self::RecoveryProjectionVisibleDrift,
         Self::UnsafeUserContentDrift,
     ];
 
@@ -375,7 +374,7 @@ impl CloseoutRecoveryState {
             Self::NestedParentPointerStale => "nested_parent_pointer_stale",
             Self::OpenEmptyPreflight => "open_empty_preflight",
             Self::QueueMetadataDrift => "queue_metadata_drift",
-            Self::SidecarVisibleDrift => "sidecar_visible_drift",
+            Self::RecoveryProjectionVisibleDrift => "recovery_projection_visible_drift",
             Self::UnsafeUserContentDrift => "unsafe_user_content_drift",
         }
     }
@@ -409,8 +408,8 @@ pub fn closeout_recovery_command(input: CloseoutRecoveryCommandInput) -> Option<
         CloseoutRecoveryState::QueueMetadataDrift => format!(
             "`agent-doc commit {f}` (queue / `queue_active` / status metadata only — user/response content is unchanged, no response body to write)"
         ),
-        CloseoutRecoveryState::SidecarVisibleDrift => format!(
-            "`agent-doc reset --from-current --preserve-session {f}` then `agent-doc commit {f}` to rebuild stale sidecars from the visible file (metadata-only visible drift)"
+        CloseoutRecoveryState::RecoveryProjectionVisibleDrift => format!(
+            "`agent-doc reset --from-current --preserve-session {f}` then `agent-doc commit {f}` to rebuild stale recovery projections from the visible file (metadata-only visible drift)"
         ),
         CloseoutRecoveryState::UnsafeUserContentDrift => format!(
             "preserve the user-authored content and finish through `agent-doc finalize {f}` (or `agent-doc write --commit {f}`) — do NOT `agent-doc commit`, which would commit unreviewed content drift as metadata"
@@ -480,11 +479,6 @@ pub fn open_cycle_recovery_command(
         );
     };
     let phase = state.phase.as_str();
-    let baseline_arg = state
-        .baseline_file
-        .as_deref()
-        .map(|path| format!(" --baseline-file {path}"))
-        .unwrap_or_default();
     let target = state
         .target
         .as_deref()
@@ -501,7 +495,7 @@ pub fn open_cycle_recovery_command(
         .map(|capture_id| format!(" capture_id={capture_id}"))
         .unwrap_or_default();
     format!(
-        "resume durable checkpoint cycle={} phase={phase}{target}{pending}{capture}; finish the response, then `agent-doc finalize {document}{baseline_arg}` (or `agent-doc write --commit {document}` to absorb an already-visible response)",
+        "resume durable checkpoint cycle={} phase={phase}{target}{pending}{capture}; finish the response, then `agent-doc finalize {document}` (or `agent-doc write --commit {document}` to absorb an already-visible response)",
         state.cycle_id
     )
 }
@@ -551,7 +545,7 @@ pub fn classify_closeout_recovery_state_from_input(
 
     match input.snapshot_visible_drift {
         Some(CloseoutRecoveryDrift::BoundaryOnly | CloseoutRecoveryDrift::MetadataOnly) => {
-            return CloseoutRecoveryState::SidecarVisibleDrift;
+            return CloseoutRecoveryState::RecoveryProjectionVisibleDrift;
         }
         Some(CloseoutRecoveryDrift::Content) => {
             return CloseoutRecoveryState::UnsafeUserContentDrift;
@@ -655,9 +649,9 @@ pub enum CloseoutRecoveryDecision {
         state: CloseoutRecoveryState,
         proof: String,
     },
-    /// Sidecars are stale relative to the visible markdown and can be rebuilt
+    /// Recovery projections are stale relative to the visible markdown and can be rebuilt
     /// from the visible file.
-    ResetSidecarsFromVisible {
+    RefreshRecoveryProjectionsFromVisible {
         state: CloseoutRecoveryState,
         command: String,
     },
@@ -677,7 +671,7 @@ pub enum CloseoutRecoveryDecision {
 
 /// Evidence for deriving `write_applied` from the durable captured-response
 /// intent plus the observable editor-authority and disk projections. No
-/// per-document capture-state sidecar participates in this decision.
+/// per-document capture-state compatibility file participates in this decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WriteAppliedReconciliationEvidence {
     pub cycle_phase: crate::CyclePhase,
@@ -719,7 +713,9 @@ impl CloseoutRecoveryDecision {
             Self::AlreadyCommitted => "already_committed",
             Self::ReplaySafe { .. } => "replay_safe",
             Self::RetireStaleCapture { .. } => "retire_stale_capture",
-            Self::ResetSidecarsFromVisible { .. } => "reset_sidecars_from_visible",
+            Self::RefreshRecoveryProjectionsFromVisible { .. } => {
+                "refresh_recovery_projections_from_visible"
+            }
             Self::QueuePromptForAfterCloseout { .. } => "queue_prompt_for_after_closeout",
             Self::Blocked { .. } => "blocked",
         }
@@ -730,7 +726,7 @@ impl CloseoutRecoveryDecision {
             Self::AlreadyCommitted => None,
             Self::ReplaySafe { state, .. }
             | Self::RetireStaleCapture { state, .. }
-            | Self::ResetSidecarsFromVisible { state, .. }
+            | Self::RefreshRecoveryProjectionsFromVisible { state, .. }
             | Self::QueuePromptForAfterCloseout { state, .. }
             | Self::Blocked { state, .. } => Some(*state),
         }
@@ -749,8 +745,8 @@ impl CloseoutRecoveryDecision {
                 state.as_str(),
                 proof
             ),
-            Self::ResetSidecarsFromVisible { state, command } => format!(
-                "closeout recovery reset_sidecars_from_visible [{}]: {}",
+            Self::RefreshRecoveryProjectionsFromVisible { state, command } => format!(
+                "closeout recovery refresh_recovery_projections_from_visible [{}]: {}",
                 state.as_str(),
                 command
             ),
@@ -816,8 +812,8 @@ pub fn closeout_recovery_decision_from_state(
             state,
             command: command(),
         },
-        CloseoutRecoveryState::SidecarVisibleDrift => {
-            CloseoutRecoveryDecision::ResetSidecarsFromVisible {
+        CloseoutRecoveryState::RecoveryProjectionVisibleDrift => {
+            CloseoutRecoveryDecision::RefreshRecoveryProjectionsFromVisible {
                 state,
                 command: command(),
             }
@@ -1129,7 +1125,10 @@ mod tests {
             (NestedParentPointerStale, "nested_parent_pointer_stale"),
             (OpenEmptyPreflight, "open_empty_preflight"),
             (QueueMetadataDrift, "queue_metadata_drift"),
-            (SidecarVisibleDrift, "sidecar_visible_drift"),
+            (
+                RecoveryProjectionVisibleDrift,
+                "recovery_projection_visible_drift",
+            ),
             (UnsafeUserContentDrift, "unsafe_user_content_drift"),
         ];
         assert_eq!(cases.len(), CloseoutRecoveryState::ALL.len());
@@ -1184,8 +1183,8 @@ mod tests {
                 "agent-doc commit",
             ),
             (
-                SidecarVisibleDrift,
-                "sidecar_visible_drift",
+                RecoveryProjectionVisibleDrift,
+                "recovery_projection_visible_drift",
                 "reset --from-current",
             ),
             (
@@ -1220,7 +1219,6 @@ mod tests {
             open_cycle: Some(OpenCycleRecoveryCommandInput {
                 cycle_id: "cycle-123".to_string(),
                 phase: CyclePhase::ResponseCaptured,
-                baseline_file: Some("/tmp/baseline.md".to_string()),
                 target: Some("#durablerecycle".to_string()),
                 has_pending_mutations: true,
                 capture_id: Some("capture-123".to_string()),
@@ -1233,7 +1231,7 @@ mod tests {
         assert!(cmd.contains("target=\"#durablerecycle\""), "{cmd}");
         assert!(cmd.contains("pending_mutations=true"), "{cmd}");
         assert!(cmd.contains("capture_id=capture-123"), "{cmd}");
-        assert!(cmd.contains("--baseline-file /tmp/baseline.md"), "{cmd}");
+        assert!(!cmd.contains("--baseline-file"), "{cmd}");
     }
 
     #[test]
@@ -1244,7 +1242,7 @@ mod tests {
             Some("agent-doc finalize /abs/session.md")
         );
         assert!(short_recovery_command_from_recommendation("just finish the response").is_none());
-        let mixed = "Rebuild sidecars: `agent-doc reset --from-current --preserve-session /path/session.md`";
+        let mixed = "Rebuild recovery projections: `agent-doc reset --from-current --preserve-session /path/session.md`";
         assert_eq!(
             short_recovery_command_from_recommendation(mixed).as_deref(),
             Some("agent-doc reset --from-current --preserve-session /path/session.md")
@@ -1382,7 +1380,7 @@ mod tests {
                 snapshot_visible_drift: Some(CloseoutRecoveryDrift::MetadataOnly),
                 ..CloseoutRecoveryStateInput::default()
             }),
-            CloseoutRecoveryState::SidecarVisibleDrift
+            CloseoutRecoveryState::RecoveryProjectionVisibleDrift
         );
         assert_eq!(
             classify_closeout_recovery_state_from_input(CloseoutRecoveryStateInput {
@@ -1493,7 +1491,10 @@ mod tests {
             (NestedParentPointerStale, "replay_safe"),
             (OpenEmptyPreflight, "replay_safe"),
             (QueueMetadataDrift, "replay_safe"),
-            (SidecarVisibleDrift, "reset_sidecars_from_visible"),
+            (
+                RecoveryProjectionVisibleDrift,
+                "refresh_recovery_projections_from_visible",
+            ),
             (UnsafeUserContentDrift, "blocked"),
         ];
         assert_eq!(default_cases.len(), CloseoutRecoveryState::ALL.len());
@@ -1519,7 +1520,7 @@ mod tests {
                 ReplaySafe {
                     command: rendered, ..
                 }
-                | ResetSidecarsFromVisible {
+                | RefreshRecoveryProjectionsFromVisible {
                     command: rendered, ..
                 } => {
                     assert_eq!(rendered, command);

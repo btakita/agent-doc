@@ -6,10 +6,12 @@
 //!
 //! ## Architecture
 //!
-//! - **Listener** (plugin side): The editor plugin starts a socket listener
-//!   at `.agent-doc/ipc.sock`. It accepts connections and processes JSON messages.
+//! - **Listener** (plugin side): each editor process starts a socket listener
+//!   at `.agent-doc/ipc-<pid>.sock`. The pid is the same identity carried by the
+//!   Lazily editor registration, so multi-head delivery cannot hit another editor.
 //! - **Sender** (CLI side): The `agent-doc write` command connects to the socket
-//!   and sends patch JSON. Falls back to file-based IPC if socket unavailable.
+//!   and sends patch JSON to that registered editor endpoint. An unavailable
+//!   endpoint retains the state-machine transition for retry; no patch file is emitted.
 //!
 //! ## Protocol
 //!
@@ -17,30 +19,26 @@
 //! terminated by `\n`. The receiver reads lines and parses each as JSON.
 //!
 //! Message types:
-//! - `{"type": "patch", "file": "...", "patches": [...], "frontmatter": "..."}` — apply patches
+//! - `{"type": "apply_canonical", "file": "...", "patches": [...], "frontmatter": "..."}` — apply canonical deltas
 //! - `{"type": "reposition", "file": "...", "boundary_id": "..."}` — reposition
 //!   boundary marker; `boundary_id` is optional and lets the plugin reuse the
 //!   already-committed marker instead of generating a fresh boundary-only diff
 //! - `{"type": "refresh_content", "file": "...", "content": "...",
 //!   "expected_content_hash": "...", "expected_content_len": N}` — replace a
 //!   stale editor buffer with committed content after a HEAD-authoritative repair
-//! - `{"type": "publish_live_buffer", "file": "...", "early_receipt": true}` —
-//!   ask the editor to republish its current visible-buffer proof without mutating the document
-//! - `{"type": "vcs_refresh"}` — trigger VCS refresh
+//! - `{"type": "observe_lazily_current", "file": "...", "early_receipt": true}` —
+//!   ask the editor to observe Lazily's current value without mutating the document
+//! - `{"type": "refresh_vcs"}` — trigger VCS refresh
 //! - `{"type": "receipt", "status": "applied"}` — terminal plugin receipt
 //!
-//! VS Code does not run the socket listener. For read-only live-buffer proof
-//! refreshes it consumes `.agent-doc/patches/publish-live-buffer.signal` with the
-//! same `{type,file}` payload; for editor-owned save recovery it consumes
-//! `.agent-doc/patches/save-document.signal` with the same
-//! `{type,file,patch_id}` payload as the socket `save_document` message.
+//! VS Code and JetBrains continuously observe Lazily current and receive the
+//! same typed socket messages; neither plugin consumes filesystem delivery signals.
 
 use agent_doc_ipc_protocol::{
     SocketReceiptClassification, classify_socket_receipt, early_receipt_line,
     early_receipt_ops_marker, early_receipt_tagged_message, ipc_accept_thread_ops_marker,
-    message_requests_early_receipt, patch_message, publish_live_buffer_message,
-    queue_convergence_message, refresh_content_message, reposition_message, save_document_message,
-    vcs_refresh_message, vcs_refresh_probe_message,
+    message_requests_early_receipt, observe_lazily_current_message, refresh_content_message,
+    reload_lib_message, save_document_message, vcs_refresh_message,
 };
 use anyhow::{Context, Result};
 use interprocess::local_socket::{
@@ -55,8 +53,7 @@ use std::time::Duration;
 
 pub mod editor_target;
 
-/// Socket filename within `.agent-doc/` directory.
-const SOCKET_FILENAME: &str = "ipc.sock";
+const SOCKET_FILENAME_PREFIX: &str = "ipc";
 
 /// Best-effort transport marker logger used by the listener.
 pub type OpsLogger = fn(&Path, &str);
@@ -108,19 +105,30 @@ const IPC_LISTENER_RESOURCE_BACKOFF: Duration = Duration::from_millis(250);
 /// still emit legacy ACK lines are rejected as incompatible.
 const EARLY_RECEIPT_ENABLED: bool = true;
 
-/// Get the socket path for a project.
+/// Get the endpoint for the current process. Delivery code should prefer
+/// [`socket_path_for_pid`] with the pid from the selected Lazily registration.
 pub fn socket_path(project_root: &Path) -> PathBuf {
-    project_root.join(".agent-doc").join(SOCKET_FILENAME)
+    socket_path_for_pid(project_root, u64::from(std::process::id()))
+}
+
+pub fn socket_path_for_pid(project_root: &Path, pid: u64) -> PathBuf {
+    project_root
+        .join(".agent-doc")
+        .join(format!("{SOCKET_FILENAME_PREFIX}-{pid}.sock"))
 }
 
 /// Check if a socket listener is active.
 pub fn is_listener_active(project_root: &Path) -> bool {
-    let sock = socket_path(project_root);
+    is_listener_active_for_pid(project_root, u64::from(std::process::id()))
+}
+
+pub fn is_listener_active_for_pid(project_root: &Path, pid: u64) -> bool {
+    let sock = socket_path_for_pid(project_root, pid);
     if !sock.exists() {
         return false;
     }
     // Try connecting — if it succeeds, the listener is active
-    match try_connect(project_root) {
+    match try_connect_for_pid(project_root, pid) {
         Ok(_) => true,
         Err(_) => {
             // Stale socket file — clean it up
@@ -132,17 +140,29 @@ pub fn is_listener_active(project_root: &Path) -> bool {
 
 /// Connect to the socket. Returns a stream for sending messages.
 fn try_connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
-    try_connect_with_timeout(project_root, Duration::from_secs(IPC_CONNECT_TIMEOUT_SECS))
+    try_connect_for_pid(project_root, u64::from(std::process::id()))
+}
+
+fn try_connect_for_pid(
+    project_root: &Path,
+    pid: u64,
+) -> Result<interprocess::local_socket::Stream> {
+    try_connect_with_timeout_for_pid(
+        project_root,
+        pid,
+        Duration::from_secs(IPC_CONNECT_TIMEOUT_SECS),
+    )
 }
 
 /// Connect with a bounded deadline (`#af88` F). `connect_sync` is blocking with
 /// no native timeout, so run it on a watchdog thread and fail closed after
 /// `connect_timeout` instead of hanging the caller on a wedged peer.
-fn try_connect_with_timeout(
+fn try_connect_with_timeout_for_pid(
     project_root: &Path,
+    pid: u64,
     connect_timeout: Duration,
 ) -> Result<interprocess::local_socket::Stream> {
-    let path = socket_path(project_root);
+    let path = socket_path_for_pid(project_root, pid);
     let path_for_thread = path.clone();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -180,6 +200,19 @@ pub fn send_message(project_root: &Path, message: &serde_json::Value) -> Result<
     )
 }
 
+pub fn send_message_to_pid(
+    project_root: &Path,
+    pid: u64,
+    message: &serde_json::Value,
+) -> Result<Option<String>> {
+    send_message_to_pid_with_timeout(
+        project_root,
+        pid,
+        message,
+        Duration::from_secs(IPC_RECEIPT_TIMEOUT_SECS),
+    )
+}
+
 /// Send a JSON message with an explicit receipt timeout.
 ///
 /// Most production sends use [`send_message`]. The explicit-timeout variant is
@@ -193,6 +226,22 @@ pub fn send_message_with_timeout(
 ) -> Result<Option<String>> {
     send_message_with_timeout_inner(
         project_root,
+        None,
+        message,
+        receipt_timeout,
+        PendingReceiptMode::WaitForTerminal,
+    )
+}
+
+pub fn send_message_to_pid_with_timeout(
+    project_root: &Path,
+    pid: u64,
+    message: &serde_json::Value,
+    receipt_timeout: Duration,
+) -> Result<Option<String>> {
+    send_message_with_timeout_inner(
+        project_root,
+        Some(pid),
         message,
         receipt_timeout,
         PendingReceiptMode::WaitForTerminal,
@@ -206,11 +255,15 @@ enum PendingReceiptMode {
 
 fn send_message_with_timeout_inner(
     project_root: &Path,
+    target_pid: Option<u64>,
     message: &serde_json::Value,
     receipt_timeout: Duration,
     pending_mode: PendingReceiptMode,
 ) -> Result<Option<String>> {
-    let stream = try_connect(project_root)?;
+    let stream = match target_pid {
+        Some(pid) => try_connect_for_pid(project_root, pid)?,
+        None => try_connect(project_root)?,
+    };
 
     // Bound the outbound write (wedge A): a plugin that accepted the connection
     // but stopped draining its recv buffer would otherwise block `write_all`
@@ -286,12 +339,6 @@ fn send_message_with_timeout_inner(
     }
 }
 
-/// Probe whether the socket listener can accept and receipt a lightweight message.
-pub fn probe_listener_receipt(project_root: &Path, timeout: Duration) -> Result<bool> {
-    let message = vcs_refresh_probe_message("ipc_degraded_self_heal");
-    send_message_with_timeout(project_root, &message, timeout).map(|_| true)
-}
-
 /// `#jbacceptwedge`: number of per-connection handler threads currently
 /// in flight. Under the old single-threaded accept loop this count could
 /// never exceed 1 — the loop blocked on the (potentially slow) apply
@@ -302,7 +349,7 @@ pub fn probe_listener_receipt(project_root: &Path, timeout: Duration) -> Result<
 /// without a backlog.
 static INFLIGHT_CONNECTION_HANDLERS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
-static INFLIGHT_PUBLISH_LIVE_BUFFER: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static INFLIGHT_OBSERVE_LAZILY_CURRENT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 /// RAII guard decrements [`INFLIGHT_CONNECTION_HANDLERS`] on drop so a
 /// panicking handler still releases its slot.
@@ -321,18 +368,18 @@ pub fn inflight_connection_handlers() -> u64 {
     INFLIGHT_CONNECTION_HANDLERS.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-enum PublishLiveBufferAdmission {
-    Admitted(Option<PublishLiveBufferGuard>),
+enum ObserveLazilyCurrentAdmission {
+    Admitted(Option<ObserveLazilyCurrentGuard>),
     Duplicate { key: String },
 }
 
-struct PublishLiveBufferGuard {
+struct ObserveLazilyCurrentGuard {
     key: String,
 }
 
-impl Drop for PublishLiveBufferGuard {
+impl Drop for ObserveLazilyCurrentGuard {
     fn drop(&mut self) {
-        if let Some(projection) = INFLIGHT_PUBLISH_LIVE_BUFFER.get()
+        if let Some(projection) = INFLIGHT_OBSERVE_LAZILY_CURRENT.get()
             && let Ok(mut keys) = projection.lock()
         {
             keys.remove(&self.key);
@@ -340,43 +387,43 @@ impl Drop for PublishLiveBufferGuard {
     }
 }
 
-fn publish_live_buffer_projection() -> &'static Mutex<HashSet<String>> {
-    INFLIGHT_PUBLISH_LIVE_BUFFER.get_or_init(|| Mutex::new(HashSet::new()))
+fn observe_lazily_current_projection() -> &'static Mutex<HashSet<String>> {
+    INFLIGHT_OBSERVE_LAZILY_CURRENT.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-fn publish_live_buffer_projection_key(project_root: &Path, message: &str) -> Option<String> {
+fn observe_lazily_current_projection_key(project_root: &Path, message: &str) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_str(message).ok()?;
-    if parsed.get("type").and_then(|value| value.as_str()) != Some("publish_live_buffer") {
+    if parsed.get("type").and_then(|value| value.as_str()) != Some("observe_lazily_current") {
         return None;
     }
     let file = parsed.get("file").and_then(|value| value.as_str())?;
     Some(format!("{}::{file}", project_root.display()))
 }
 
-fn begin_publish_live_buffer_projection(
+fn begin_observe_lazily_current_projection(
     project_root: &Path,
     message: &str,
-) -> PublishLiveBufferAdmission {
-    let Some(key) = publish_live_buffer_projection_key(project_root, message) else {
-        return PublishLiveBufferAdmission::Admitted(None);
+) -> ObserveLazilyCurrentAdmission {
+    let Some(key) = observe_lazily_current_projection_key(project_root, message) else {
+        return ObserveLazilyCurrentAdmission::Admitted(None);
     };
-    let mut keys = publish_live_buffer_projection()
+    let mut keys = observe_lazily_current_projection()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     if keys.contains(&key) {
-        PublishLiveBufferAdmission::Duplicate { key }
+        ObserveLazilyCurrentAdmission::Duplicate { key }
     } else {
         keys.insert(key.clone());
-        PublishLiveBufferAdmission::Admitted(Some(PublishLiveBufferGuard { key }))
+        ObserveLazilyCurrentAdmission::Admitted(Some(ObserveLazilyCurrentGuard { key }))
     }
 }
 
-fn duplicate_publish_live_buffer_receipt() -> String {
+fn duplicate_observe_lazily_current_receipt() -> String {
     serde_json::json!({
         "type": "receipt",
         "status": "applied",
         "duplicate": true,
-        "reason": "publish_live_buffer_duplicate"
+        "reason": "observe_lazily_current_duplicate"
     })
     .to_string()
 }
@@ -390,29 +437,6 @@ fn ipc_accept_error_is_resource_exhaustion(err: &std::io::Error) -> bool {
     matches!(err.raw_os_error(), Some(23 | 24))
         || err.kind() == ErrorKind::OutOfMemory
         || err.to_string().contains("Too many open files")
-}
-
-/// Send a patch message to the plugin.
-pub fn send_patch(
-    project_root: &Path,
-    file: &str,
-    patches_json: &str,
-    frontmatter_yaml: Option<&str>,
-) -> Result<bool> {
-    let patches = serde_json::from_str::<serde_json::Value>(patches_json)?;
-    let message = patch_message(file, patches, frontmatter_yaml);
-
-    match send_message(project_root, &message) {
-        Ok(Some(receipt)) => {
-            eprintln!("[ipc-socket] patch sent, receipt: {}", receipt);
-            Ok(true)
-        }
-        Ok(None) => {
-            eprintln!("[ipc-socket] patch sent, no receipt");
-            Ok(true)
-        }
-        Err(e) => Err(e),
-    }
 }
 
 /// Send a queue-tag + frontmatter convergence patch to the plugin.
@@ -430,45 +454,6 @@ pub fn send_patch(
 /// corrected queue component body. Sending the body closes the live-editor gap
 /// where an open buffer can keep stale queue lines and flush them back over the
 /// disk/snapshot repair.
-pub fn send_queue_convergence(
-    project_root: &Path,
-    file: &str,
-    queue_auto: bool,
-    frontmatter_yaml: Option<&str>,
-    queue_body: Option<&str>,
-) -> Result<bool> {
-    let message = queue_convergence_message(file, queue_auto, frontmatter_yaml, queue_body);
-
-    match send_message(project_root, &message) {
-        Ok(Some(receipt)) => {
-            eprintln!("[ipc-socket] queue convergence sent, receipt: {}", receipt);
-            Ok(true)
-        }
-        Ok(None) => {
-            eprintln!("[ipc-socket] queue convergence sent, no receipt");
-            Ok(true)
-        }
-        Err(e) => Err(e),
-    }
-}
-
-/// Send a reposition boundary message.
-///
-/// When `preserve_head` is true, the plugin should use
-/// `agent_doc_reposition_boundary_to_end_preserve_head_with_id` (FFI) so
-/// `(HEAD)` annotations remain in the editor buffer. The committed blob and
-/// snapshot are already clean; only the working-tree / editor buffer keeps them.
-pub fn send_reposition(
-    project_root: &Path,
-    file: &str,
-    boundary_id: Option<&str>,
-    preserve_head: bool,
-) -> Result<bool> {
-    let message = reposition_message(file, boundary_id, preserve_head);
-
-    send_message(project_root, &message).map(|_| true)
-}
-
 /// Ask the live editor to flush (save) its buffer for `file` to disk.
 ///
 /// Used to resolve a `live_prompt_drift_after_preflight` divergence at its
@@ -481,10 +466,18 @@ pub fn send_reposition(
 /// publishes the saved buffer through the lazily visible-write receipt bridge
 /// keyed by `patch_id` so the binary can read exactly what was persisted and
 /// adopt it as a clean on-disk snapshot.
-pub fn send_save_document(project_root: &Path, file: &str, patch_id: &str) -> Result<bool> {
-    let message = save_document_message(file, patch_id);
+pub fn send_save_document_to_editor(
+    project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    file: &str,
+    patch_id: &str,
+) -> Result<bool> {
+    let mut message = save_document_message(file, patch_id);
+    message["editor_id"] = serde_json::Value::String(editor_id.to_string());
+    message["editor_pid"] = serde_json::Value::from(editor_pid);
 
-    match send_message(project_root, &message) {
+    match send_message_to_pid(project_root, editor_pid, &message) {
         Ok(Some(receipt)) => {
             eprintln!("[ipc-socket] save_document sent, receipt: {}", receipt);
             Ok(true)
@@ -503,111 +496,87 @@ pub fn send_save_document(project_root: &Path, file: &str, patch_id: &str) -> Re
 /// The expected hash/length describe the stale editor content that is safe to
 /// replace. The plugin must reject the message if the live document changed
 /// before it applies the refresh.
-pub fn send_refresh_content(
+pub fn send_refresh_content_to_editor(
     project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
     file: &str,
     content: &str,
     expected_content_hash: &str,
     expected_content_len: usize,
 ) -> Result<bool> {
-    let message =
+    let mut message =
         refresh_content_message(file, content, expected_content_hash, expected_content_len);
+    message["editor_id"] = serde_json::Value::String(editor_id.to_string());
+    message["editor_pid"] = serde_json::Value::from(editor_pid);
 
-    send_message(project_root, &message).map(|_| true)
+    send_message_to_pid(project_root, editor_pid, &message).map(|_| true)
 }
 
-/// Ask the live editor to republish its current visible-buffer sidecar for
-/// `file` without changing the document.
-pub fn send_publish_live_buffer(project_root: &Path, file: &str) -> Result<bool> {
-    send_publish_live_buffer_with_timeout(
+/// Ask the live editor to observe Lazily current for `file` without changing
+/// the document.
+pub fn send_observe_lazily_current_to_editor(
+    project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    file: &str,
+) -> Result<bool> {
+    send_observe_lazily_current_to_editor_with_timeout(
         project_root,
+        editor_pid,
+        editor_id,
         file,
         Duration::from_secs(IPC_RECEIPT_TIMEOUT_SECS),
     )
 }
 
-/// Ask the editor to publish its current full buffer, bounded by the caller's
+/// Ask the editor to observe Lazily current, bounded by the caller's
 /// authority-recovery budget rather than the generic IPC receipt timeout.
-pub fn send_publish_live_buffer_with_timeout(
+pub fn send_observe_lazily_current_to_editor_with_timeout(
     project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
     file: &str,
     timeout: Duration,
 ) -> Result<bool> {
-    let message = publish_live_buffer_message(file);
+    let mut message = observe_lazily_current_message(file);
+    message["editor_id"] = serde_json::Value::String(editor_id.to_string());
+    message["editor_pid"] = serde_json::Value::from(editor_pid);
 
     // This is a synchronization point for the CRDT relay, not a mere editor
     // liveness probe. Returning on the early `accepted` receipt lets the caller
     // poll the relay before the plugin has registered/refreshed its replica.
-    send_message_with_timeout(project_root, &message, timeout).map(|_| true)
-}
-
-/// Write a VS Code-style file IPC signal asking the editor to republish its
-/// current visible-buffer sidecar for `file` without changing the document.
-pub fn send_publish_live_buffer_file_signal(project_root: &Path, file: &str) -> Result<bool> {
-    let patches_dir = project_root.join(".agent-doc").join("patches");
-    std::fs::create_dir_all(&patches_dir)
-        .with_context(|| format!("failed to create {}", patches_dir.display()))?;
-    let signal_file = patches_dir.join("publish-live-buffer.signal");
-    let tmp_file = patches_dir.join(format!(
-        "publish-live-buffer.signal.{}.tmp",
-        std::process::id()
-    ));
-    let payload = publish_live_buffer_message(file);
-    std::fs::write(&tmp_file, serde_json::to_vec(&payload)?)
-        .with_context(|| format!("failed to write {}", tmp_file.display()))?;
-    match std::fs::rename(&tmp_file, &signal_file) {
-        Ok(()) => Ok(true),
-        Err(first_err) => {
-            let _ = std::fs::remove_file(&signal_file);
-            std::fs::rename(&tmp_file, &signal_file).with_context(|| {
-                format!(
-                    "failed to replace {} after initial rename error: {}",
-                    signal_file.display(),
-                    first_err
-                )
-            })?;
-            Ok(true)
-        }
-    }
-}
-
-/// Write a VS Code-style file IPC signal asking the editor to save the current
-/// visible buffer for `file` and publish a lazily visible-write receipt for
-/// `patch_id`.
-pub fn send_save_document_file_signal(
-    project_root: &Path,
-    file: &str,
-    patch_id: &str,
-) -> Result<bool> {
-    let patches_dir = project_root.join(".agent-doc").join("patches");
-    std::fs::create_dir_all(&patches_dir)
-        .with_context(|| format!("failed to create {}", patches_dir.display()))?;
-    let signal_file = patches_dir.join("save-document.signal");
-    let tmp_file = patches_dir.join(format!("save-document.signal.{}.tmp", std::process::id()));
-    let payload = save_document_message(file, patch_id);
-    std::fs::write(&tmp_file, serde_json::to_vec(&payload)?)
-        .with_context(|| format!("failed to write {}", tmp_file.display()))?;
-    match std::fs::rename(&tmp_file, &signal_file) {
-        Ok(()) => Ok(true),
-        Err(first_err) => {
-            let _ = std::fs::remove_file(&signal_file);
-            std::fs::rename(&tmp_file, &signal_file).with_context(|| {
-                format!(
-                    "failed to replace {} after initial rename error: {}",
-                    signal_file.display(),
-                    first_err
-                )
-            })?;
-            Ok(true)
-        }
-    }
+    send_message_to_pid_with_timeout(project_root, editor_pid, &message, timeout).map(|_| true)
 }
 
 /// Send a VCS refresh signal.
-pub fn send_vcs_refresh(project_root: &Path) -> Result<bool> {
-    let message = vcs_refresh_message();
+pub fn send_vcs_refresh_to_editor(
+    project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+) -> Result<bool> {
+    let mut message = vcs_refresh_message();
+    message["editor_id"] = serde_json::Value::String(editor_id.to_string());
+    message["editor_pid"] = serde_json::Value::from(editor_pid);
 
-    send_message(project_root, &message).map(|_| true)
+    send_message_to_pid(project_root, editor_pid, &message).map(|_| true)
+}
+
+/// Ask one registered editor process to reload the installed native library.
+///
+/// Reload is a typed, PID-scoped control intent. It never falls back to a
+/// broadcast file, so a stale or unrelated editor process cannot consume it.
+pub fn send_reload_library_to_editor(
+    project_root: &Path,
+    editor_pid: u64,
+    editor_id: &str,
+    lib_version: &str,
+) -> Result<bool> {
+    let mut message = reload_lib_message(lib_version);
+    message["editor_id"] = serde_json::Value::String(editor_id.to_string());
+    message["editor_pid"] = serde_json::Value::from(editor_pid);
+
+    send_message_to_pid(project_root, editor_pid, &message).map(|_| true)
 }
 
 /// Start a socket listener (for use by the FFI library / plugin).
@@ -709,18 +678,18 @@ where
                         while reader.read_line(&mut line).unwrap_or(0) > 0 {
                             let trimmed = line.trim();
                             if !trimmed.is_empty() {
-                                match begin_publish_live_buffer_projection(
+                                match begin_observe_lazily_current_projection(
                                     &handler_root_buf,
                                     trimmed,
                                 ) {
-                                    PublishLiveBufferAdmission::Duplicate { key } => {
+                                    ObserveLazilyCurrentAdmission::Duplicate { key } => {
                                         ops_logger(
                                             &handler_root_buf,
                                             &format!(
-                                                "ipc_publish_live_buffer_duplicate_suppressed key={key}"
+                                                "ipc_observe_lazily_current_duplicate_suppressed key={key}"
                                             ),
                                         );
-                                        let mut resp = duplicate_publish_live_buffer_receipt();
+                                        let mut resp = duplicate_observe_lazily_current_receipt();
                                         resp.push('\n');
                                         if let Err(e) = writer_half.write_all(resp.as_bytes()) {
                                             eprintln!(
@@ -735,7 +704,7 @@ where
                                             );
                                         }
                                     }
-                                    PublishLiveBufferAdmission::Admitted(_publish_guard) => {
+                                    ObserveLazilyCurrentAdmission::Admitted(_publish_guard) => {
                                         // Early receipt: if the sender opted in, emit an `accepted`
                                         // receipt before the blocking apply handler runs, so the
                                         // sender's liveness probe is decoupled from apply latency.
@@ -906,7 +875,7 @@ mod tests {
     }
 
     #[test]
-    fn listener_suppresses_duplicate_publish_live_buffer_while_in_flight() {
+    fn listener_suppresses_duplicate_observe_lazily_current_while_in_flight() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
@@ -924,7 +893,8 @@ mod tests {
         let server = thread::spawn(move || {
             start_listener(&root_clone, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                if v.get("type").and_then(|value| value.as_str()) != Some("publish_live_buffer") {
+                if v.get("type").and_then(|value| value.as_str()) != Some("observe_lazily_current")
+                {
                     return Some(
                         serde_json::json!({"type":"receipt","status":"rejected"}).to_string(),
                     );
@@ -959,15 +929,21 @@ mod tests {
 
         let root_for_first = root.clone();
         let file_for_first = file.clone();
-        let first =
-            thread::spawn(move || send_publish_live_buffer(&root_for_first, &file_for_first));
+        let first = thread::spawn(move || {
+            send_observe_lazily_current_to_editor(
+                &root_for_first,
+                u64::from(std::process::id()),
+                "test-editor",
+                &file_for_first,
+            )
+        });
         started_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("first publish should enter the handler and hold the projection");
 
         let second = send_message_with_timeout(
             &root,
-            &publish_live_buffer_message(&file),
+            &observe_lazily_current_message(&file),
             Duration::from_secs(1),
         )
         .expect("duplicate publish should receive a synthetic applied receipt")
@@ -978,7 +954,7 @@ mod tests {
         assert_eq!(
             handler_calls.load(std::sync::atomic::Ordering::SeqCst),
             1,
-            "duplicate publish_live_buffer should not invoke the plugin handler"
+            "duplicate observe_lazily_current should not invoke the plugin handler"
         );
 
         let (lock, condvar) = &*release;
@@ -1012,13 +988,13 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         // Send a message
-        let msg = serde_json::json!({"type": "vcs_refresh"});
+        let msg = serde_json::json!({"type": "refresh_vcs"});
         let result = send_message(&root, &msg).unwrap();
         assert!(result.is_some());
         let receipt: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
         assert_eq!(receipt["type"], "receipt");
         assert_eq!(receipt["status"], "applied");
-        assert_eq!(receipt["id"], "vcs_refresh");
+        assert_eq!(receipt["id"], "refresh_vcs");
 
         // Clean up — remove socket to stop listener
         let _ = std::fs::remove_file(socket_path(&root));
@@ -1045,7 +1021,14 @@ mod tests {
 
         thread::sleep(Duration::from_millis(100));
 
-        let ok = send_save_document(&root, "/tmp/plan.md", "save-pid-123").unwrap();
+        let ok = send_save_document_to_editor(
+            &root,
+            u64::from(std::process::id()),
+            "test-editor",
+            "/tmp/plan.md",
+            "save-pid-123",
+        )
+        .unwrap();
         assert!(ok, "save_document should succeed on an applied receipt");
 
         let msg = captured
@@ -1062,7 +1045,7 @@ mod tests {
     }
 
     #[test]
-    fn send_publish_live_buffer_sends_readonly_file_message() {
+    fn send_observe_lazily_current_sends_readonly_file_message() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
@@ -1080,22 +1063,28 @@ mod tests {
 
         thread::sleep(Duration::from_millis(100));
 
-        let ok = send_publish_live_buffer(&root, "/tmp/plan.md").unwrap();
+        let ok = send_observe_lazily_current_to_editor(
+            &root,
+            u64::from(std::process::id()),
+            "test-editor",
+            "/tmp/plan.md",
+        )
+        .unwrap();
         assert!(
             ok,
-            "publish_live_buffer should succeed on an applied receipt"
+            "observe_lazily_current should succeed on an applied receipt"
         );
 
         let msg = captured_rx
             .recv_timeout(Duration::from_secs(1))
             .expect("listener saw a message");
-        assert_eq!(msg["type"], "publish_live_buffer");
+        assert_eq!(msg["type"], "observe_lazily_current");
         assert_eq!(msg["file"], "/tmp/plan.md");
         assert_eq!(msg["early_receipt"], true);
         assert!(message_requests_early_receipt(&msg.to_string()));
         assert!(
             msg.get("content").is_none() && msg.get("patches").is_none(),
-            "publish_live_buffer must not carry document mutation payload: {msg}"
+            "observe_lazily_current must not carry document mutation payload: {msg}"
         );
 
         let _ = std::fs::remove_file(socket_path(&root));
@@ -1103,7 +1092,7 @@ mod tests {
     }
 
     #[test]
-    fn send_publish_live_buffer_waits_for_terminal_applied_receipt() {
+    fn send_observe_lazily_current_waits_for_terminal_applied_receipt() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
@@ -1124,15 +1113,21 @@ mod tests {
         thread::sleep(Duration::from_millis(100));
 
         let start = Instant::now();
-        let ok = send_publish_live_buffer(&root, "/tmp/plan.md").unwrap();
+        let ok = send_observe_lazily_current_to_editor(
+            &root,
+            u64::from(std::process::id()),
+            "test-editor",
+            "/tmp/plan.md",
+        )
+        .unwrap();
         let elapsed = start.elapsed();
         assert!(
             ok,
-            "publish_live_buffer should succeed on terminal applied receipt"
+            "observe_lazily_current should succeed on terminal applied receipt"
         );
         assert!(
             elapsed >= Duration::from_millis(1200),
-            "publish_live_buffer returned before terminal apply: elapsed={elapsed:?}"
+            "observe_lazily_current returned before terminal apply: elapsed={elapsed:?}"
         );
 
         for _ in 0..50 {
@@ -1143,57 +1138,11 @@ mod tests {
         }
         assert!(
             handler_started.load(std::sync::atomic::Ordering::SeqCst),
-            "listener handler should have run before send_publish_live_buffer returned"
+            "listener handler should have run before send_observe_lazily_current returned"
         );
 
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
-    }
-
-    #[test]
-    fn send_publish_live_buffer_file_signal_writes_readonly_payload() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-
-        let ok = send_publish_live_buffer_file_signal(&root, "/tmp/plan.md").unwrap();
-        assert!(ok, "publish-live-buffer file signal should be written");
-
-        let signal = root
-            .join(".agent-doc")
-            .join("patches")
-            .join("publish-live-buffer.signal");
-        let msg: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(signal).unwrap()).unwrap();
-        assert_eq!(msg["type"], "publish_live_buffer");
-        assert_eq!(msg["file"], "/tmp/plan.md");
-        assert!(msg["issued_at_ms"].as_u64().unwrap() > 0);
-        assert!(
-            msg.get("content").is_none() && msg.get("patches").is_none(),
-            "publish-live-buffer signal must not carry document mutation payload: {msg}"
-        );
-    }
-
-    #[test]
-    fn send_save_document_file_signal_writes_typed_payload_with_patch_id() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-
-        let ok = send_save_document_file_signal(&root, "/tmp/plan.md", "save-signal-123").unwrap();
-        assert!(ok, "save-document file signal should be written");
-
-        let signal = root
-            .join(".agent-doc")
-            .join("patches")
-            .join("save-document.signal");
-        let msg: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(signal).unwrap()).unwrap();
-        assert_eq!(msg["type"], "save_document");
-        assert_eq!(msg["file"], "/tmp/plan.md");
-        assert_eq!(msg["patch_id"], "save-signal-123");
-        assert!(
-            msg.get("content").is_none() && msg.get("patches").is_none(),
-            "save-document signal must not carry document replacement payload: {msg}"
-        );
     }
 
     #[test]
@@ -1212,7 +1161,7 @@ mod tests {
 
         thread::sleep(Duration::from_millis(100));
 
-        let msg = serde_json::json!({"type": "patch"});
+        let msg = serde_json::json!({"type": "apply_canonical"});
         let err = send_message(&root, &msg).unwrap_err().to_string();
         assert!(
             err.contains("IPC receipt rejected"),
@@ -1248,7 +1197,7 @@ mod tests {
 
         // Manually flagged so the listener early-receipts independent of sender
         // auto-injection.
-        let msg = serde_json::json!({"type": "patch", "early_receipt": true});
+        let msg = serde_json::json!({"type": "apply_canonical", "early_receipt": true});
         let result = send_message(&root, &msg).unwrap();
         let receipt: serde_json::Value = serde_json::from_str(&result.unwrap()).unwrap();
         assert_eq!(

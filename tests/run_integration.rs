@@ -1,6 +1,5 @@
 use agent_doc_controller_io::project_controller;
 use agent_doc_cycle_state_io as cycle_state;
-use agent_doc_hash::content_hash;
 use agent_doc_state_backbone as state_backbone;
 use agent_doc_turn::turn_scope::{Address, TurnScope};
 use assert_cmd::Command;
@@ -19,10 +18,8 @@ fn agent_doc() -> Command {
 
 fn init_git_repo(root: &Path, tracked: &Path) {
     fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
-    fs::create_dir_all(root.join(".agent-doc/pending")).unwrap();
     fs::create_dir_all(root.join(".agent-doc/locks")).unwrap();
     fs::create_dir_all(root.join(".agent-doc/state/cycles")).unwrap();
-    fs::create_dir_all(root.join(".agent-doc/captures")).unwrap();
     ProcessCommand::new("git")
         .current_dir(root)
         .args(["init"])
@@ -312,10 +309,14 @@ fn assert_terminal_closeout_proof(_root: &Path, doc: &Path) {
 }
 
 fn seed_snapshot(root: &Path, doc: &Path) {
-    let canonical = doc.canonicalize().unwrap();
-    let hash = content_hash(canonical.to_string_lossy().as_ref());
-    let snapshot = root.join(".agent-doc/snapshots").join(format!("{hash}.md"));
-    fs::write(snapshot, fs::read_to_string(doc).unwrap()).unwrap();
+    let content = fs::read_to_string(doc).unwrap();
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        doc,
+        &content,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
+    assert!(root.join(".agent-doc/state.db").exists());
 }
 
 fn record_selected_queue_head(root: &Path, doc: &Path, content: &str, prompt_text: &str) {
@@ -1037,11 +1038,8 @@ fn codex_owned_pane_active_auto_queue_hands_off_without_drift() {
 
 #[test]
 fn codex_owned_pane_independent_queue_edit_defers_until_closeout() {
-    // #cwsp: a user/operator queue edit can arrive while the Codex owner pane is
-    // busy answering an earlier queue head. That edit must stay as document
-    // state for the current closeout to merge; re-running `agent-doc <FILE>` in
-    // the owner pane must not reinterpret the sibling edit as an immediate
-    // owner-pane queue handoff or increment the wedge counter.
+    // A sibling operator queue edit stays visible for the already-open owner
+    // turn and does not recursively dispatch another child.
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto go -->\n- do [#active]\n<!-- /agent:queue -->\n";
@@ -1251,9 +1249,8 @@ fn preflight_emits_owned_pane_self_invocation_for_active_queue_head() {
 
 #[test]
 fn preflight_suppresses_owned_pane_self_invocation_for_independent_queue_edit() {
-    // #cwsp: the turn-scoped user-intent surface and owner-pane self-invocation
-    // contract must not treat an independent sibling queue edit as work for the
-    // busy owner pane.
+    // The already-open turn owns its original driver; a sibling insertion does
+    // not become a recursive dispatch request.
     let tmp = TempDir::new().unwrap();
     let doc = tmp.path().join("session.md");
     let committed = "---\nagent_doc_session: session-recursive\nagent: codex\nagent_doc_format: template\nagent_doc_write: crdt\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n### Re: prior — gpt-5\n\nAnswered.\n<!-- agent:boundary:committed -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue auto go -->\n- do [#active]\n<!-- /agent:queue -->\n";

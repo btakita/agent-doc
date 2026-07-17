@@ -1741,14 +1741,14 @@ impl SimWorld {
         decision
     }
 
-    pub(crate) fn apply_sidecar_normalization_fallback(
+    pub(crate) fn apply_canonical_normalization_recovery(
         &mut self,
-        sidecar: &str,
+        recovery_projection: &str,
         content_ours: &str,
         normalize_prefix_lines: &[String],
     ) {
-        if !agent_doc_element_exchange::verify_sidecar_normalization(
-            sidecar,
+        if !agent_doc_element_exchange::verify_visible_normalization(
+            recovery_projection,
             normalize_prefix_lines,
         ) {
             let fallback = agent_doc_element_exchange::normalize_exchange_prefixes_for_targets(
@@ -1756,7 +1756,7 @@ impl SimWorld {
                 normalize_prefix_lines,
             );
             self.snapshot = fallback;
-            self.coverage.sidecar_normalization_divergences += 1;
+            self.coverage.recovery_projection_normalization_divergences += 1;
         }
     }
 
@@ -1922,12 +1922,12 @@ impl SimWorld {
         self.snapshot = content_ours.to_string();
     }
 
-    pub(crate) fn handle_ack_sidecar_only_evidence(&mut self, ack_content: &str) {
+    pub(crate) fn handle_ack_projection_only_evidence(&mut self, ack_content: &str) {
         if self.doc == ack_content {
             self.snapshot = ack_content.to_string();
-            self.coverage.ack_sidecar_only_repairs += 1;
+            self.coverage.ack_projection_only_repairs += 1;
         } else {
-            self.coverage.ack_sidecar_only_blocks += 1;
+            self.coverage.ack_projection_only_blocks += 1;
         }
     }
 

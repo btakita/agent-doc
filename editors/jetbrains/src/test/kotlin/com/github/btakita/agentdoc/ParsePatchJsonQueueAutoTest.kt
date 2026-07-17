@@ -14,7 +14,7 @@ class ParsePatchJsonQueueAutoTest {
     @Test
     fun `parses queue_auto false convergence message`() {
         val json = """
-            {"type":"patch","file":"/tmp/plan.md",
+            {"type":"apply_canonical","file":"/tmp/plan.md",
              "patches":[{"component":"queue","content":"- next\n"}],"unmatched":"",
              "frontmatter":"queue: stop","queue_auto":false}
         """.trimIndent()
@@ -30,7 +30,7 @@ class ParsePatchJsonQueueAutoTest {
     @Test
     fun `parses queue_auto true convergence message`() {
         val json =
-            """{"type":"patch","file":"/tmp/plan.md","patches":[],"queue_auto":true}"""
+            """{"type":"apply_canonical","file":"/tmp/plan.md","patches":[],"queue_auto":true}"""
         val patch = parsePatchJson(json)
         assertNotNull(patch)
         assertEquals(true, patch!!.queueAuto)
@@ -39,7 +39,7 @@ class ParsePatchJsonQueueAutoTest {
     @Test
     fun `queueAuto is null when field absent`() {
         val json =
-            """{"type":"patch","file":"/tmp/plan.md","patches":[],"frontmatter":"model: opus"}"""
+            """{"type":"apply_canonical","file":"/tmp/plan.md","patches":[],"frontmatter":"model: opus"}"""
         val patch = parsePatchJson(json)
         assertNotNull(patch)
         assertNull(patch!!.queueAuto)
@@ -48,7 +48,7 @@ class ParsePatchJsonQueueAutoTest {
     @Test
     fun `queueAuto is null when field is json null`() {
         val json =
-            """{"type":"patch","file":"/tmp/plan.md","patches":[],"queue_auto":null}"""
+            """{"type":"apply_canonical","file":"/tmp/plan.md","patches":[],"queue_auto":null}"""
         val patch = parsePatchJson(json)
         assertNotNull(patch)
         assertNull(patch!!.queueAuto)
@@ -57,7 +57,7 @@ class ParsePatchJsonQueueAutoTest {
     @Test
     fun `parses per-editor broadcast ids`() {
         val json = """
-            {"type":"patch","file":"/tmp/plan.md",
+            {"type":"apply_canonical","file":"/tmp/plan.md",
              "editor_id":"jetbrains-1","origin_editor_id":"vscode-1",
              "patches":[{"component":"exchange","content":"merged\n","op":"replace"}],
              "unmatched":""}

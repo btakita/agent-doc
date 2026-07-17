@@ -3,7 +3,7 @@
 //! ## Spec
 //! - `run(file, title, agent, mode, config)`: dispatches on whether a file path was provided.
 //!   - No file: calls `init_project()` — checks prerequisites, creates `.agent-doc/snapshots/` and
-//!     `.agent-doc/patches/`, and installs `SKILL.md`.
+//!     `.agent-doc/snapshots/`, and installs `SKILL.md`.
 //!   - With file: calls `init_file()` — lazily runs project init if `.agent-doc/` is absent, then
 //!     scaffolds a new session document.  Fails if the file already exists.
 //! - `init_file` scaffolds two document formats depending on `mode`:
@@ -23,7 +23,7 @@
 //! - `SKILL.md` installation is delegated to `crate::skill::install_and_check_updated`.
 //!
 //! ## Evals
-//! - init_project_creates_dirs: `.agent-doc/snapshots` and `.agent-doc/patches` are created → both dirs exist
+//! - init_project_creates_dirs: `.agent-doc/snapshots` is created.
 //! - init_file_template_mode: `mode="template"` → scaffolded file contains `agent_doc_format: template` and `agent:exchange` component
 //! - init_file_append_mode: `mode="append"` → scaffolded file contains `## User` block, no exchange component
 //! - init_file_already_exists: target file exists → returns Err
@@ -41,11 +41,9 @@ fn init_project() -> Result<()> {
 
     // Create .agent-doc/ directory structure
     let agent_doc_dir = Path::new(".agent-doc");
-    for subdir in &["snapshots", "patches"] {
-        let dir = agent_doc_dir.join(subdir);
-        std::fs::create_dir_all(&dir)?;
-        eprintln!("[init] Created {}", dir.display());
-    }
+    let snapshots_dir = agent_doc_dir.join("snapshots");
+    std::fs::create_dir_all(&snapshots_dir)?;
+    eprintln!("[init] Created {}", snapshots_dir.display());
 
     // Install SKILL.md
     crate::skill::install_and_check_updated()?;

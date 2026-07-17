@@ -177,7 +177,7 @@ supervisor/ipc.rs
 ```
 
 ### Invariants to pin
-1. **Socket file is cleaned up on normal exit and on `stop`.** Stale detection via `connect()` in `register()` — if `ECONNREFUSED` and `sessions.json` pid is dead, unlink and rebind.
+1. **Socket file is cleaned up on normal exit and on `stop`.** Stale detection via `connect()` in `register()` — if `ECONNREFUSED` and the controller-recorded supervisor PID is dead, unlink and rebind.
 2. **One request per connection.** Keep the protocol request/response only — no long-lived subscriptions in phase 1. Simplifies the accept loop and avoids state leaks.
 3. **Accept loop is terminatable via `stop` request.** A `stop` message closes the listener and joins the accept thread. No `SIGTERM` dance required.
 4. **`inject` does not block on pty backpressure.** Write with a 100ms timeout; return `Err` if the pty master is full. Otherwise a slow child blocks the IPC thread.

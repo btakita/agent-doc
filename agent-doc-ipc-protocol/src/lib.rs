@@ -8,6 +8,36 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
+/// Cross-language names for intents sent to a registered editor endpoint.
+/// Rust, JetBrains, and VS Code use the same semantic names and wire tokens so
+/// transport code cannot silently reinterpret an operation at a seam.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EditorIntent {
+    ApplyCanonical,
+    Reposition,
+    SaveDocument,
+    RefreshContent,
+    ObserveLazilyCurrent,
+    DeliverCrdtRemote,
+    RefreshVcs,
+    ReloadLibrary,
+}
+
+impl EditorIntent {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ApplyCanonical => "apply_canonical",
+            Self::Reposition => "reposition",
+            Self::SaveDocument => "save_document",
+            Self::RefreshContent => "refresh_content",
+            Self::ObserveLazilyCurrent => "observe_lazily_current",
+            Self::DeliverCrdtRemote => "deliver_crdt_remote",
+            Self::RefreshVcs => "refresh_vcs",
+            Self::ReloadLibrary => "reload_library",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallbackRequest {
     pub doc_path: String,
@@ -182,8 +212,8 @@ pub fn is_socket_status_error(message: impl AsRef<str>) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Provenance of the candidate used for CPC write reconciliation.
 pub enum IpcSnapshotSource {
-    LegacySidecarProjection,
     LazilyVisibleWriteEvent,
     ContentOurs,
     FileRead,
@@ -192,7 +222,6 @@ pub enum IpcSnapshotSource {
 impl IpcSnapshotSource {
     pub const fn label(self) -> &'static str {
         match self {
-            Self::LegacySidecarProjection => "legacy_sidecar_projection",
             Self::LazilyVisibleWriteEvent => "lazily_visible_write_event",
             Self::ContentOurs => "content_ours",
             Self::FileRead => "file_read",
@@ -434,7 +463,7 @@ pub enum FullContentRepairRedelivery {
 impl FullContentRepairRedelivery {
     pub const fn label(self) -> &'static str {
         match self {
-            Self::NormalizationFallback => "sidecar_normalization_fallback",
+            Self::NormalizationFallback => "canonical_normalization_recovery",
             Self::IpcDedupe => "ipc_dedupe",
             Self::LivePromptDrift => "live_prompt_drift",
         }
@@ -443,7 +472,7 @@ impl FullContentRepairRedelivery {
     pub const fn success_message(self) -> &'static str {
         match self {
             Self::NormalizationFallback => {
-                "[write] sidecar normalization fallback re-delivered to editor via full-content IPC"
+                "[write] canonical normalization recovery delivered to the editor endpoint"
             }
             Self::IpcDedupe => "[write] IPC duplicate-response repair re-delivered to editor",
             Self::LivePromptDrift => "[write] live prompt drift repair re-delivered to editor",
@@ -453,7 +482,7 @@ impl FullContentRepairRedelivery {
     pub const fn not_consumed_message(self) -> &'static str {
         match self {
             Self::NormalizationFallback => {
-                "[write] sidecar normalization fallback editor repair was not consumed; refusing direct document write"
+                "[write] recovery-projection normalization editor repair was not consumed; refusing direct document write"
             }
             Self::IpcDedupe => {
                 "[write] IPC duplicate-response repair was not consumed; refusing direct document write"
@@ -467,7 +496,7 @@ impl FullContentRepairRedelivery {
     pub fn failed_message(self, error: impl fmt::Display) -> String {
         match self {
             Self::NormalizationFallback => format!(
-                "[write] sidecar normalization fallback editor repair failed: {}; refusing direct document write",
+                "[write] recovery-projection normalization editor repair failed: {}; refusing direct document write",
                 error
             ),
             Self::IpcDedupe => format!(
@@ -480,25 +509,6 @@ impl FullContentRepairRedelivery {
             ),
         }
     }
-}
-
-pub fn existing_patch_is_reposition_only(payload: &serde_json::Value) -> bool {
-    payload
-        .get("reposition_boundary")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-        && payload
-            .get("patches")
-            .and_then(|value| value.as_array())
-            .is_none_or(|patches| patches.is_empty())
-        && payload
-            .get("unmatched")
-            .and_then(|value| value.as_str())
-            .is_none_or(|unmatched| unmatched.trim().is_empty())
-        && payload
-            .get("fullContent")
-            .and_then(|value| value.as_str())
-            .is_none_or(|content| content.is_empty())
 }
 
 /// Return the `unmatched` field that should be carried in a patch payload.
@@ -518,7 +528,7 @@ pub fn effective_unmatched_for_patch_payload(
     }
 }
 
-/// Tag a `patch` message with the `early_receipt` opt-in when enabled.
+/// Tag an `apply_canonical` message with the `early_receipt` opt-in when enabled.
 ///
 /// Non-patch traffic is returned unchanged; non-mutating operations that can
 /// tolerate accepted-before-terminal semantics should opt in through their own
@@ -530,12 +540,12 @@ pub fn early_receipt_tagged_message(
     if !enabled {
         return message.clone();
     }
-    let is_patch = message
+    let is_apply = message
         .get("type")
         .and_then(|t| t.as_str())
-        .map(|t| t == "patch")
+        .map(|t| t == EditorIntent::ApplyCanonical.as_str())
         .unwrap_or(false);
-    if !is_patch {
+    if !is_apply {
         return message.clone();
     }
     let mut tagged = message.clone();
@@ -578,7 +588,7 @@ pub fn patch_message(
     frontmatter_yaml: Option<&str>,
 ) -> serde_json::Value {
     serde_json::json!({
-        "type": "patch",
+        "type": EditorIntent::ApplyCanonical.as_str(),
         "file": file,
         "patches": patches,
         "frontmatter": frontmatter_yaml,
@@ -601,7 +611,7 @@ pub fn queue_convergence_message(
         })
         .unwrap_or_else(|| serde_json::json!([]));
     serde_json::json!({
-        "type": "patch",
+        "type": EditorIntent::ApplyCanonical.as_str(),
         "file": file,
         "patches": patches,
         "unmatched": "",
@@ -617,7 +627,7 @@ pub fn reposition_message(
     preserve_head: bool,
 ) -> serde_json::Value {
     let mut message = serde_json::json!({
-        "type": "reposition",
+        "type": EditorIntent::Reposition.as_str(),
         "file": file,
     });
     if let Some(boundary_id) = boundary_id {
@@ -632,7 +642,7 @@ pub fn reposition_message(
 /// Build an editor save request payload.
 pub fn save_document_message(file: &str, patch_id: &str) -> serde_json::Value {
     serde_json::json!({
-        "type": "save_document",
+        "type": EditorIntent::SaveDocument.as_str(),
         "file": file,
         "patch_id": patch_id,
     })
@@ -646,7 +656,7 @@ pub fn refresh_content_message(
     expected_content_len: usize,
 ) -> serde_json::Value {
     serde_json::json!({
-        "type": "refresh_content",
+        "type": EditorIntent::RefreshContent.as_str(),
         "file": file,
         "content": content,
         "expected_content_hash": expected_content_hash,
@@ -677,15 +687,16 @@ pub fn normalization_repair_patch_message(
         "expected_content_len": expected_content_len,
     });
     if include_type {
-        message["type"] = serde_json::Value::String("patch".to_string());
+        message["type"] =
+            serde_json::Value::String(EditorIntent::ApplyCanonical.as_str().to_string());
     }
     message
 }
 
-/// Build a read-only live-buffer publication request payload.
-pub fn publish_live_buffer_message(file: &str) -> serde_json::Value {
+/// Build a read-only request for the editor to observe Lazily's current value.
+pub fn observe_lazily_current_message(file: &str) -> serde_json::Value {
     serde_json::json!({
-        "type": "publish_live_buffer",
+        "type": EditorIntent::ObserveLazilyCurrent.as_str(),
         "file": file,
         "early_receipt": true,
         "issued_at_ms": now_millis(),
@@ -702,7 +713,7 @@ fn now_millis() -> u64 {
 /// Build a VCS refresh payload.
 pub fn vcs_refresh_message() -> serde_json::Value {
     serde_json::json!({
-        "type": "vcs_refresh",
+        "type": EditorIntent::RefreshVcs.as_str(),
     })
 }
 
@@ -715,7 +726,7 @@ pub fn vcs_refresh_message() -> serde_json::Value {
 /// already resolves, never by mutating a document.
 pub fn reload_lib_message(lib_version: &str) -> serde_json::Value {
     serde_json::json!({
-        "type": "reload_lib",
+        "type": EditorIntent::ReloadLibrary.as_str(),
         "lib_version": lib_version,
     })
 }
@@ -723,7 +734,7 @@ pub fn reload_lib_message(lib_version: &str) -> serde_json::Value {
 /// Build a VCS refresh probe payload.
 pub fn vcs_refresh_probe_message(probe: &str) -> serde_json::Value {
     serde_json::json!({
-        "type": "vcs_refresh",
+        "type": EditorIntent::RefreshVcs.as_str(),
         "probe": probe,
     })
 }
@@ -930,13 +941,12 @@ mod tests {
         callback_request_is_expired, callback_response, callback_response_matches_request,
         callback_urgency_for_elapsed, classify_socket_receipt, early_receipt_line,
         early_receipt_ops_marker, early_receipt_tagged_message,
-        effective_unmatched_for_patch_payload, existing_patch_is_reposition_only,
-        ipc_accept_thread_ops_marker, is_already_applied_receipt_error_message,
-        is_socket_receipt_timeout_error, is_socket_status_error, message_requests_early_receipt,
-        normalization_repair_patch_message, patch_message, pending_callback_from_request,
-        publish_live_buffer_message, queue_convergence_message, refresh_content_message,
-        reload_lib_message, reposition_message, save_document_message, vcs_refresh_message,
-        vcs_refresh_probe_message,
+        effective_unmatched_for_patch_payload, ipc_accept_thread_ops_marker,
+        is_already_applied_receipt_error_message, is_socket_receipt_timeout_error,
+        is_socket_status_error, message_requests_early_receipt, normalization_repair_patch_message,
+        observe_lazily_current_message, patch_message, pending_callback_from_request,
+        queue_convergence_message, refresh_content_message, reload_lib_message, reposition_message,
+        save_document_message, vcs_refresh_message, vcs_refresh_probe_message,
     };
 
     #[test]
@@ -1062,27 +1072,29 @@ mod tests {
     #[test]
     fn message_requests_early_receipt_reads_flag() {
         assert!(message_requests_early_receipt(
-            r#"{"type":"patch","early_receipt":true}"#
+            r#"{"type":"apply_canonical","early_receipt":true}"#
         ));
-        assert!(!message_requests_early_receipt(r#"{"type":"patch"}"#));
         assert!(!message_requests_early_receipt(
-            r#"{"type":"patch","early_receipt":false}"#
+            r#"{"type":"apply_canonical"}"#
+        ));
+        assert!(!message_requests_early_receipt(
+            r#"{"type":"apply_canonical","early_receipt":false}"#
         ));
         assert!(!message_requests_early_receipt("not json"));
     }
 
     #[test]
     fn early_receipt_tagging_marks_only_enabled_patch_messages() {
-        let patch = serde_json::json!({"type": "patch", "file": "x.md"});
+        let patch = serde_json::json!({"type": "apply_canonical", "file": "x.md"});
         let tagged = early_receipt_tagged_message(&patch, true);
         assert_eq!(tagged["early_receipt"], serde_json::Value::Bool(true));
-        assert_eq!(tagged["type"], "patch");
+        assert_eq!(tagged["type"], "apply_canonical");
         assert_eq!(tagged["file"], "x.md");
         assert!(message_requests_early_receipt(&tagged.to_string()));
 
         assert_eq!(early_receipt_tagged_message(&patch, false), patch);
 
-        let other = serde_json::json!({"type": "vcs_refresh"});
+        let other = serde_json::json!({"type": "refresh_vcs"});
         assert_eq!(early_receipt_tagged_message(&other, true), other);
     }
 
@@ -1160,7 +1172,7 @@ mod tests {
             Some("queue: []"),
         );
 
-        assert_eq!(message["type"], "patch");
+        assert_eq!(message["type"], "apply_canonical");
         assert_eq!(message["file"], "/tmp/plan.md");
         assert_eq!(message["frontmatter"], "queue: []");
         assert_eq!(message["patches"][0]["component"], "exchange");
@@ -1170,7 +1182,7 @@ mod tests {
     fn queue_convergence_message_uses_patch_shape() {
         let message = queue_convergence_message("/tmp/plan.md", false, None, Some("- item"));
 
-        assert_eq!(message["type"], "patch");
+        assert_eq!(message["type"], "apply_canonical");
         assert_eq!(message["file"], "/tmp/plan.md");
         assert_eq!(message["unmatched"], "");
         assert_eq!(message["queue_auto"], false);
@@ -1190,45 +1202,6 @@ mod tests {
         let full = reposition_message("/tmp/plan.md", Some("boundary-1"), true);
         assert_eq!(full["boundary_id"], "boundary-1");
         assert_eq!(full["preserve_head"], true);
-    }
-
-    #[test]
-    fn existing_patch_is_reposition_only_classifies_empty_reposition_payload() {
-        let payload = serde_json::json!({
-            "reposition_boundary": true,
-            "patches": [],
-            "unmatched": "   ",
-            "fullContent": "",
-        });
-
-        assert!(existing_patch_is_reposition_only(&payload));
-    }
-
-    #[test]
-    fn existing_patch_is_reposition_only_rejects_response_body_payloads() {
-        assert!(!existing_patch_is_reposition_only(&serde_json::json!({
-            "reposition_boundary": true,
-            "patches": [{"component": "response", "content": "body"}],
-            "unmatched": "",
-            "fullContent": "",
-        })));
-        assert!(!existing_patch_is_reposition_only(&serde_json::json!({
-            "reposition_boundary": true,
-            "patches": [],
-            "unmatched": "body",
-            "fullContent": "",
-        })));
-        assert!(!existing_patch_is_reposition_only(&serde_json::json!({
-            "reposition_boundary": true,
-            "patches": [],
-            "unmatched": "",
-            "fullContent": "body",
-        })));
-        assert!(!existing_patch_is_reposition_only(&serde_json::json!({
-            "patches": [],
-            "unmatched": "",
-            "fullContent": "",
-        })));
     }
 
     #[test]
@@ -1285,7 +1258,7 @@ mod tests {
             true,
         );
 
-        assert_eq!(message["type"], "patch");
+        assert_eq!(message["type"], "apply_canonical");
         assert_eq!(message["file"], "/tmp/plan.md");
         assert_eq!(message["patch_id"], "repair-1");
         assert_eq!(message["patches"], serde_json::json!([]));
@@ -1310,10 +1283,10 @@ mod tests {
     }
 
     #[test]
-    fn publish_live_buffer_message_is_readonly_and_requests_early_receipt() {
-        let message = publish_live_buffer_message("/tmp/plan.md");
+    fn observe_lazily_current_message_is_readonly_and_requests_early_receipt() {
+        let message = observe_lazily_current_message("/tmp/plan.md");
 
-        assert_eq!(message["type"], "publish_live_buffer");
+        assert_eq!(message["type"], "observe_lazily_current");
         assert_eq!(message["file"], "/tmp/plan.md");
         assert_eq!(message["early_receipt"], true);
         assert!(message["issued_at_ms"].as_u64().unwrap() > 0);
@@ -1326,7 +1299,7 @@ mod tests {
     fn reload_lib_message_is_typed_and_readonly() {
         let message = reload_lib_message("0.34.68");
 
-        assert_eq!(message["type"], "reload_lib");
+        assert_eq!(message["type"], "reload_library");
         assert_eq!(message["lib_version"], "0.34.68");
         assert!(message.get("patch_id").is_none());
         assert!(message.get("patches").is_none());
@@ -1337,11 +1310,11 @@ mod tests {
     #[test]
     fn vcs_refresh_messages_have_stable_type_and_probe_field() {
         let message = vcs_refresh_message();
-        assert_eq!(message["type"], "vcs_refresh");
+        assert_eq!(message["type"], "refresh_vcs");
         assert!(message.get("probe").is_none());
 
         let probe = vcs_refresh_probe_message("ipc_degraded_self_heal");
-        assert_eq!(probe["type"], "vcs_refresh");
+        assert_eq!(probe["type"], "refresh_vcs");
         assert_eq!(probe["probe"], "ipc_degraded_self_heal");
     }
 
@@ -1422,12 +1395,7 @@ mod tests {
 
     #[test]
     fn ipc_repair_vocabulary_labels_and_messages_are_stable() {
-        assert_eq!(
-            IpcSnapshotSource::LegacySidecarProjection.label(),
-            "legacy_sidecar_projection"
-        );
         assert!(IpcSnapshotSource::LazilyVisibleWriteEvent.is_visible_write_proven());
-        assert!(!IpcSnapshotSource::LegacySidecarProjection.is_visible_write_proven());
         assert!(!IpcSnapshotSource::FileRead.is_visible_write_proven());
 
         assert_eq!(

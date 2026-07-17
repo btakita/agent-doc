@@ -13,24 +13,24 @@ use agent_doc_document_realtime::write_policy::{
     AckMismatchRecovery, FullContentSourceProof, OperatorReconcileStep, WholeBufferAuthority,
     WholeBufferAuthorityFacts, WholeBufferDelivery, WholeBufferDeliveryAction,
     classify_socket_receipt_mismatch_recovery, decide_whole_buffer_delivery,
-    dropped_prompt_lines_after_content_ours, first_response_heading,
-    ipc_snapshot_would_absorb_live_prompt_drift_after_preflight, live_prompt_drift_recovery_target,
-    new_agent_response_headings, normalize_visible_recovery_compare, operator_reconcile_step,
-    response_already_in_current, response_converged_in_visible_target,
-    response_target_disjoint_from_user_edit, should_refuse_disk_fallback,
+    dropped_prompt_lines_after_content_ours, editor_authority_blocks_disk_write,
+    first_response_heading, ipc_snapshot_would_absorb_live_prompt_drift_after_preflight,
+    live_prompt_drift_recovery_target, new_agent_response_headings,
+    normalize_visible_recovery_compare, operator_reconcile_step, response_already_in_current,
+    response_converged_in_visible_target, response_target_disjoint_from_user_edit,
     snapshot_contains_dropped_prompt,
 };
 use agent_doc_element_exchange::{
     duplicate_prompt_line_count, normalization_prefix_observation_counts,
     normalize_exchange_prefixes_for_targets, user_prompt_count_growth,
-    verify_sidecar_normalization,
+    verify_visible_normalization,
 };
 use agent_doc_element_exchange_io::DuplicatePromptRepairOptions;
 use agent_doc_ipc_io::editor_target::target_payload_to_editor;
 use agent_doc_ipc_protocol::{
     AlreadyAppliedSnapshotOutcome, EditorBadStateFingerprint, FullContentIpcMode,
     FullContentRepairRedelivery, IpcDiskRepairReason, IpcLivePromptDriftState, IpcRepairDecision,
-    IpcSnapshotSource, is_socket_receipt_timeout_error, is_socket_status_error,
+    IpcSnapshotSource, is_socket_receipt_timeout_error,
 };
 use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, merge_visible_queue_additions_into_content_ours,
@@ -58,10 +58,16 @@ fn target_payload_to_registered_editor(
     file: &Path,
     payload: &mut serde_json::Value,
     transport: &str,
-) -> Option<String> {
+) -> Option<agent_doc_reliable_sync_io::liveness::EditorRegistration> {
     let registration = live_editor_registration(file)?;
-    target_payload_to_editor(file, payload, transport, &registration.editor_id);
-    Some(registration.editor_id)
+    target_payload_to_editor(
+        file,
+        payload,
+        transport,
+        &registration.editor_id,
+        registration.pid,
+    );
+    Some(registration)
 }
 
 #[derive(Debug, Clone)]
@@ -69,7 +75,7 @@ pub struct EditorAuthorityGap {
     pub editor_id: Option<String>,
 }
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[cfg(any(test, feature = "test-support"))]
 const VISIBLE_WRITE_RECEIPT_TIMEOUT_MS: u64 = 100;
@@ -102,7 +108,7 @@ fn current_text_via_recovery_authority(
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
     #[cfg(any(test, feature = "test-support"))]
-    if test_local_crdt_relay_enabled(file) {
+    if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
         return Ok(Some(agent_doc_crdt_relay_io::current_text_for_file(file)?));
     }
     agent_doc_controller_io::project_controller::current_text_via_controller_model_for_doc(
@@ -110,34 +116,26 @@ fn current_text_via_recovery_authority(
     )
 }
 
-#[cfg(any(test, feature = "test-support"))]
-fn test_local_crdt_relay_enabled(file: &Path) -> bool {
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
-        .or_else(|| file.parent().map(Path::to_path_buf))
-    else {
-        return false;
-    };
-    project_root
-        .join(".agent-doc/test-local-crdt-relay")
-        .is_file()
-}
-
-pub fn save_document_snapshot_and_crdt(file: &Path, snapshot_content: &str) -> Result<()> {
-    agent_doc_snapshot_io::save(file, snapshot_content, agent_doc_ops_log_io::log_op)?;
-    let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(snapshot_content);
-    agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), snapshot_content)?;
+pub fn checkpoint_document_baseline(file: &Path, snapshot_content: &str) -> Result<()> {
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        snapshot_content,
+        agent_doc_ops_log_io::log_op,
+    )?;
     Ok(())
 }
 
-pub fn save_ipc_snapshot_and_crdt_nonfatal(
+pub fn checkpoint_ipc_baseline_nonfatal(
     file: &Path,
     snapshot_content: &str,
     saved_log_event: &str,
     success_message: Option<&str>,
 ) -> bool {
-    if let Err(e) =
-        agent_doc_snapshot_io::save(file, snapshot_content, agent_doc_ops_log_io::log_op)
-    {
+    if let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        snapshot_content,
+        agent_doc_ops_log_io::log_op,
+    ) {
         eprintln!(
             "[write] WARNING: IPC write succeeded but snapshot save failed: {}. \
              Commit will auto-recover via divergence detection.",
@@ -162,12 +160,6 @@ pub fn save_ipc_snapshot_and_crdt_nonfatal(
             snapshot_content.len()
         ),
     );
-    let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(snapshot_content);
-    if let Err(e) =
-        agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), snapshot_content)
-    {
-        eprintln!("[write] WARNING: CRDT state save failed: {}", e);
-    }
     if let Some(message) = success_message {
         eprintln!("{message}");
     }
@@ -419,7 +411,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
     if visible_write_content.is_none() && !patch_id.is_empty() {
         publish_attempted = true;
         match effects
-            .publish_live_buffer_content(file, "socket_already_applied_upgrade_legacy_receipt")
+            .observe_lazily_current_text(file, "socket_already_applied_upgrade_legacy_receipt")
         {
             Ok(Some(content)) => {
                 let response_present =
@@ -448,7 +440,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
                         "socket_already_applied",
                         Some(patch_id),
                         "published_live_buffer_missing_response",
-                        "retry_response_cell_via_cpc_without_file_ipc",
+                        "retry_response_cell_via_cpc",
                         &format!(
                             "published_len={} published_hash={} response_sha256={}",
                             content.len(),
@@ -489,7 +481,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             (!patch_id.is_empty()).then_some(patch_id),
             invariant,
-            "retry_without_file_ipc_or_disk_write",
+            "retry_without_secondary_transport_or_disk_write",
             &format!(
                 "wait_ms=0 publish_attempted={} editor_buffer_authority_required=true disk_projection_ignored=true",
                 publish_attempted,
@@ -565,9 +557,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
                 IpcSnapshotSource::LazilyVisibleWriteEvent => {
                     IpcRepairDecision::lazily_visible_write(current.to_string())
                 }
-                IpcSnapshotSource::LegacySidecarProjection
-                | IpcSnapshotSource::FileRead
-                | IpcSnapshotSource::ContentOurs => {
+                IpcSnapshotSource::FileRead | IpcSnapshotSource::ContentOurs => {
                     IpcRepairDecision::file_read(current.to_string())
                 }
             };
@@ -613,9 +603,9 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             IpcSnapshotSource::LazilyVisibleWriteEvent => {
                 IpcRepairDecision::lazily_visible_write(current.to_string())
             }
-            IpcSnapshotSource::LegacySidecarProjection
-            | IpcSnapshotSource::FileRead
-            | IpcSnapshotSource::ContentOurs => IpcRepairDecision::file_read(current.to_string()),
+            IpcSnapshotSource::FileRead | IpcSnapshotSource::ContentOurs => {
+                IpcRepairDecision::file_read(current.to_string())
+            }
         };
     }
 
@@ -633,7 +623,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             Some(patch_id),
             "visible_write_receipt_superseded_by_worktree",
-            "refresh_editor_cut_without_file_ipc_or_disk_write",
+            "refresh_editor_cut_without_secondary_transport_or_disk_write",
             &format!(
                 "worktree_len={} worktree_hash={}",
                 repair_decision.snapshot_content.len(),
@@ -649,7 +639,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             Some(patch_id),
             "already_applied_empty_response_probe",
-            "authoritative_retry_without_file_ipc",
+            "authoritative_cpc_retry",
             &format!(
                 "snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
                 repair_decision.snapshot_content.len(),
@@ -667,7 +657,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             Some(patch_id),
             "already_applied_unproven_content_ours",
-            "authoritative_retry_without_file_ipc",
+            "authoritative_cpc_retry",
             &format!(
                 "snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
                 repair_decision.snapshot_content.len(),
@@ -690,7 +680,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             Some(patch_id),
             "already_applied_snapshot_missing_response",
-            "retry_response_cell_via_cpc_without_file_ipc",
+            "retry_response_cell_via_cpc",
             &format!(
                 "response_sha256={} snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
                 agent_doc_hash::content_hash(expected_response),
@@ -732,7 +722,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
                 "socket_already_applied",
                 Some(patch_id),
                 "visible_write_receipt_superseded_by_live_editor",
-                "refresh_editor_cut_without_file_ipc_or_disk_write",
+                "refresh_editor_cut_without_secondary_transport_or_disk_write",
                 &format!(
                     "receipt_len={} receipt_hash={}",
                     repair_decision.snapshot_content.len(),
@@ -748,7 +738,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             &repair_decision.snapshot_content,
         );
     }
-    save_document_snapshot_and_crdt(file, &repair_decision.snapshot_content)?;
+    checkpoint_document_baseline(file, &repair_decision.snapshot_content)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -1752,7 +1742,7 @@ pub trait EditorConvergenceEffects {
     /// Request and return one fresh, editor-authored full-buffer publication.
     /// The default is deliberately inert so pure convergence fixtures cannot
     /// accidentally manufacture editor authority.
-    fn publish_live_buffer_content(&self, file: &Path, source: &str) -> Result<Option<String>> {
+    fn observe_lazily_current_text(&self, file: &Path, source: &str) -> Result<Option<String>> {
         let _ = (file, source);
         Ok(None)
     }
@@ -1768,7 +1758,7 @@ pub trait EditorConvergenceEffects {
         Ok(None)
     }
 
-    fn guard_visible_write_idle_and_current(
+    fn guard_visible_write_expected_current(
         &self,
         file: &Path,
         source: &str,
@@ -1782,44 +1772,6 @@ pub trait EditorConvergenceEffects {
         expected_current: &str,
         source: &str,
     ) -> Result<()>;
-
-    fn cycle_already_committed(&self, file: &Path) -> Option<String>;
-
-    fn log_file_ipc_already_committed(&self, file: &Path, cycle_id: &str);
-
-    fn cleanup_fallback_patch_files(&self, file: &Path);
-
-    fn file_ipc_patch_rejected(&self, file: &Path, patch_id: &str) -> Option<String>;
-
-    fn log_file_ipc_proof_failure(
-        &self,
-        file: &Path,
-        patch_id: Option<&str>,
-        invariant: &str,
-        recovery: &str,
-        detail: &str,
-    );
-}
-
-#[cfg(test)]
-const VISIBLE_WRITE_TYPING_SETTLE_MS: u64 = 75;
-#[cfg(not(test))]
-const VISIBLE_WRITE_TYPING_SETTLE_MS: u64 = 500;
-#[cfg(test)]
-const VISIBLE_WRITE_TYPING_TIMEOUT_MS: u64 = 1_000;
-#[cfg(not(test))]
-const VISIBLE_WRITE_TYPING_TIMEOUT_MS: u64 = 2_000;
-
-fn live_buffer_file_keys(file: &Path) -> Vec<String> {
-    let mut keys = Vec::new();
-    if let Ok(canonical) = file.canonicalize() {
-        keys.push(canonical.to_string_lossy().to_string());
-    }
-    let raw = file.to_string_lossy().to_string();
-    if !keys.iter().any(|key| key == &raw) {
-        keys.push(raw);
-    }
-    keys
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1846,30 +1798,6 @@ pub fn visible_write_disk_proof(
         return VisibleWriteDiskProof::unproven();
     };
     let content_hash = agent_doc_hash::content_hash(content);
-
-    if let Some(typing_key) = live_buffer_file_keys(file).into_iter().find(|file_key| {
-        agent_doc_debounce::is_typing_via_file(file_key, VISIBLE_WRITE_TYPING_SETTLE_MS)
-    }) {
-        let settled = agent_doc_debounce::await_idle_via_file(
-            &typing_key,
-            VISIBLE_WRITE_TYPING_SETTLE_MS,
-            VISIBLE_WRITE_TYPING_TIMEOUT_MS,
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "visible_write_disk_proof_typing_settle file={} settled={} settle_ms={} timeout_ms={} key={}",
-                file.display(),
-                settled,
-                VISIBLE_WRITE_TYPING_SETTLE_MS,
-                VISIBLE_WRITE_TYPING_TIMEOUT_MS,
-                typing_key
-            ),
-        );
-        if !settled {
-            return VisibleWriteDiskProof::unproven();
-        }
-    }
 
     match current_text_via_recovery_authority(file, "visible_write_disk_proof") {
         Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => {
@@ -1931,34 +1859,20 @@ fn newest_operator_authoritative_buffer(file: &Path, editor_id: &str) -> Option<
     }
 }
 
-/// Settle the editor (wait out active typing) so the next live-buffer read is
-/// quiescent. Bounded by the visible-write settle/timeout budget; a no-op when
-/// the editor is not typing.
-fn settle_editor_typing(file: &Path) {
-    for key in live_buffer_file_keys(file) {
-        if agent_doc_debounce::is_typing_via_file(&key, VISIBLE_WRITE_TYPING_SETTLE_MS) {
-            agent_doc_debounce::await_idle_via_file(
-                &key,
-                VISIBLE_WRITE_TYPING_SETTLE_MS,
-                VISIBLE_WRITE_TYPING_TIMEOUT_MS,
-            );
-        }
-    }
-}
-
 /// Max rounds of the bounded reconcile-before-accept loop. Each round settles the
-/// editor and re-samples the operator buffer; the loop ends when the buffer is
+/// Lazily current authority and re-samples it; the loop ends when the revision is
 /// stable across two reads (a fixpoint) or this bound is hit.
 const VISIBLE_WRITE_RECONCILE_MAX_ROUNDS: usize = 4;
 
 /// `#adoc-live-prompt-drift-operator-edit` (Phase 2): the bounded
 /// reconcile-before-accept loop. When the operator kept editing past the ack
 /// capture (so the visible-write snapshot is stale relative to the live buffer),
-/// settle the editor and re-sample its buffer until it reaches a fixpoint
+/// re-sample Lazily current authority until it reaches a fixpoint
 /// (unchanged across two reads) or the round bound is hit, then adopt that
 /// settled operator-authoritative buffer as the snapshot, provided it still
 /// presents this cycle's response. This owns only the IO/settling; the decision
-/// each round is owned by the realtime model.
+/// each round is owned by the realtime model. Concurrent operator changes remain
+/// protected by the expected-current CAS at the eventual delivery boundary.
 pub fn reconcile_visible_write_snapshot_to_newer_operator_buffer(
     file: &Path,
     editor_id: Option<&str>,
@@ -1969,7 +1883,6 @@ pub fn reconcile_visible_write_snapshot_to_newer_operator_buffer(
     };
     let mut prev: Option<String> = None;
     for round in 0..VISIBLE_WRITE_RECONCILE_MAX_ROUNDS {
-        settle_editor_typing(file);
         let Some(curr) = newest_operator_authoritative_buffer(file, editor_id) else {
             return false;
         };
@@ -2142,126 +2055,6 @@ pub fn mark_visible_write_live_buffer_synced_after_write(
             proof.source_buffer_matches
         ),
     );
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct FileIpcDeliveryOptions {
-    pub guard_committed_cycle: bool,
-}
-
-impl FileIpcDeliveryOptions {
-    pub fn guard_committed_cycle() -> Self {
-        Self {
-            guard_committed_cycle: true,
-        }
-    }
-}
-
-const FILE_IPC_TIMEOUT_MS_ENV: &str = "AGENT_DOC_FILE_IPC_TIMEOUT_MS";
-
-fn file_ipc_delivery_timeout() -> std::time::Duration {
-    std::env::var(FILE_IPC_TIMEOUT_MS_ENV)
-        .ok()
-        .and_then(|raw| raw.parse::<u64>().ok())
-        .filter(|millis| *millis > 0)
-        .map(std::time::Duration::from_millis)
-        .unwrap_or_else(|| std::time::Duration::from_secs(2))
-}
-
-/// Write a file-IPC patch and prove the plugin consumed it.
-///
-/// This owns the durable delivery loop: atomic patch write, committed-cycle
-/// fence, lazily rejection receipt handling, and no-receipt timeout proof logging. The
-/// caller remains responsible for post-consumption snapshot/response validation.
-pub fn write_file_ipc_and_poll_delivery(
-    effects: &dyn EditorConvergenceEffects,
-    patch_file: &Path,
-    payload: &serde_json::Value,
-    doc_file: &Path,
-    patch_count: usize,
-    options: FileIpcDeliveryOptions,
-) -> Result<bool> {
-    let patch_id_for_diagnostics = payload.get("patch_id").and_then(|value| value.as_str());
-
-    effects.atomic_write(patch_file, &serde_json::to_string_pretty(payload)?)?;
-
-    eprintln!(
-        "[write] IPC patch written to {} ({} components)",
-        patch_file.display(),
-        patch_count
-    );
-
-    let timeout = file_ipc_delivery_timeout();
-    let poll_interval = std::time::Duration::from_millis(100);
-    let start = std::time::Instant::now();
-
-    while start.elapsed() < timeout {
-        if options.guard_committed_cycle
-            && let Some(ref cycle_id) = effects.cycle_already_committed(doc_file)
-        {
-            eprintln!(
-                "[write] IPC poll skipped: cycle {} already committed for {}",
-                cycle_id,
-                doc_file.display()
-            );
-            effects.log_file_ipc_already_committed(doc_file, cycle_id);
-            agent_doc_ops_log_io::log_op(
-                doc_file,
-                &format!(
-                    "file_ipc_poll_skip file={} cycle_id={} reason=already_committed",
-                    doc_file.display(),
-                    cycle_id
-                ),
-            );
-            effects.cleanup_fallback_patch_files(doc_file);
-            return Ok(false);
-        }
-
-        if let Some(patch_id) = patch_id_for_diagnostics
-            && let Some(reason) = effects.file_ipc_patch_rejected(doc_file, patch_id)
-        {
-            let _ = std::fs::remove_file(patch_file);
-            eprintln!(
-                "[write] IPC lazily rejection receipt: plugin rejected patch {} — refusing direct document write",
-                patch_file.display()
-            );
-            effects.log_file_ipc_proof_failure(
-                doc_file,
-                patch_id_for_diagnostics,
-                "editor_patch_rejected",
-                "retry_without_disk_write",
-                &format!(
-                    "receipt_reason={} patch_file={}",
-                    reason,
-                    patch_file.display()
-                ),
-            );
-            return Ok(false);
-        }
-
-        if !patch_file.exists() {
-            return Ok(true);
-        }
-
-        std::thread::sleep(poll_interval);
-    }
-
-    eprintln!(
-        "[write] IPC timeout ({}s) — leaving patch for editor retry; refusing direct document write",
-        timeout.as_secs()
-    );
-    effects.log_file_ipc_proof_failure(
-        doc_file,
-        patch_id_for_diagnostics,
-        "no_ack",
-        "retry_without_disk_write",
-        &format!(
-            "timeout_secs={} patch_file={}",
-            timeout.as_secs(),
-            patch_file.display()
-        ),
-    );
-    Ok(false)
 }
 
 #[allow(dead_code)]
@@ -2450,7 +2243,7 @@ pub fn full_content_ipc_scope_allows(
 }
 
 pub fn try_ipc_full_content_with_mode(
-    effects: &dyn EditorConvergenceEffects,
+    _effects: &dyn EditorConvergenceEffects,
     file: &Path,
     content: &str,
     mode: FullContentIpcMode,
@@ -2463,27 +2256,6 @@ pub fn try_ipc_full_content_with_mode(
         _ => source_content,
     };
     let patch_id = uuid::Uuid::new_v4().to_string();
-
-    if mode == FullContentIpcMode::ResponseFallback
-        && let Some(ref cycle_id) = effects.cycle_already_committed(file)
-    {
-        eprintln!(
-            "[write] full-content IPC skipped: cycle {} already committed for {}",
-            cycle_id,
-            file.display()
-        );
-        effects.log_file_ipc_already_committed(file, cycle_id);
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "late_fallback_patch_rejected file={} cycle_id={} patch_id=full_content reason=already_committed transport=full_content",
-                file.display(),
-                cycle_id
-            ),
-        );
-        effects.cleanup_fallback_patch_files(file);
-        return Ok(false);
-    }
 
     let scope_rejection =
         agent_doc_document_realtime::write_policy::full_content_scope_rejection_reason(&[
@@ -2596,10 +2368,7 @@ pub fn try_auto_recover_live_prompt_drift(
         .canonicalize()
         .ok()
         .map(|c| agent_doc_project_root_io::resolve_ipc_project_root(&c));
-    let ipc_listener_active = ipc_project_root
-        .as_deref()
-        .map(agent_doc_ipc_io::is_listener_active)
-        .unwrap_or(false);
+    let ipc_listener_active = editor_ipc_listener_active(file);
 
     if let Some(project_root) = ipc_project_root.as_deref()
         && ipc_listener_active
@@ -2668,7 +2437,7 @@ pub fn try_auto_recover_live_prompt_drift(
                 file.display()
             )
         })?;
-    save_document_snapshot_and_crdt(file, &recovery_target)?;
+    checkpoint_document_baseline(file, &recovery_target)?;
     log_live_prompt_drift_auto_recovered(
         file,
         &recovery_target,
@@ -2720,6 +2489,9 @@ pub fn try_editor_converge_live_prompt_drift(
     target: &str,
     file_content: &str,
 ) -> Result<Option<String>> {
+    let Some(registration) = live_editor_registration(file) else {
+        return Ok(None);
+    };
     let patches = live_prompt_drift_response_patches(file_content, target)?;
     let frontmatter = None;
     if patches.is_empty() && frontmatter.is_none() {
@@ -2736,7 +2508,7 @@ pub fn try_editor_converge_live_prompt_drift(
     let canonical = file.canonicalize()?;
     let patch_id = uuid::Uuid::new_v4().to_string();
     let mut payload = serde_json::json!({
-        "type": "patch",
+        "type": agent_doc_ipc_protocol::EditorIntent::ApplyCanonical.as_str(),
         "file": canonical.to_string_lossy(),
         "patches": patches,
         "node_patches": [],
@@ -2751,6 +2523,13 @@ pub fn try_editor_converge_live_prompt_drift(
     if let Some(cycle_id) = write_converge_cycle_id_for_payload(file) {
         payload["cycle_id"] = serde_json::Value::String(cycle_id);
     }
+    target_payload_to_editor(
+        file,
+        &mut payload,
+        "live_prompt_drift",
+        &registration.editor_id,
+        registration.pid,
+    );
 
     agent_doc_ops_log_io::log_op(
         file,
@@ -2771,7 +2550,7 @@ pub fn try_editor_converge_live_prompt_drift(
         ),
     );
 
-    match agent_doc_ipc_io::send_message(project_root, &payload) {
+    match agent_doc_ipc_io::send_message_to_pid(project_root, registration.pid, &payload) {
         Ok(Some(_ack)) => {
             let patch_id = payload
                 .get("patch_id")
@@ -2890,10 +2669,7 @@ fn refuse_unproven_editor_delivery(
     reason: &str,
     patch_id: Option<&str>,
 ) -> Result<bool> {
-    let editor_endpoint = if should_refuse_disk_fallback(
-        live_editor_attached(file),
-        editor_ipc_listener_active(file),
-    ) {
+    let editor_endpoint = if editor_authority_blocks_disk_write(live_editor_attached(file)) {
         "live"
     } else {
         "absent"
@@ -2932,10 +2708,13 @@ fn live_editor_attached(file: &Path) -> bool {
 }
 
 fn editor_ipc_listener_active(file: &Path) -> bool {
+    let Some(registration) = live_editor_registration(file) else {
+        return false;
+    };
     file.canonicalize()
         .ok()
-        .map(|c| agent_doc_project_root_io::resolve_ipc_project_root(&c))
-        .map(|root| agent_doc_ipc_io::is_listener_active(&root))
+        .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))
+        .map(|root| agent_doc_ipc_io::is_listener_active_for_pid(&root, registration.pid))
         .unwrap_or(false)
 }
 
@@ -2948,7 +2727,7 @@ fn try_detached_disk_write(
     reason: &str,
 ) -> Result<bool> {
     let editor_attached = live_editor_attached(file);
-    if should_refuse_disk_fallback(editor_attached, editor_ipc_listener_active(file)) {
+    if editor_authority_blocks_disk_write(editor_attached) {
         return Ok(false);
     }
 
@@ -3033,8 +2812,13 @@ fn refresh_editor_after_ack_mismatch(
             "safe_missing_agent_response_refresh_failed"
         }
     };
-    match agent_doc_ipc_io::send_refresh_content(
+    let Some(registration) = live_editor_registration(file) else {
+        return AckMismatchRefreshOutcome::NoRecovery;
+    };
+    match agent_doc_ipc_io::send_refresh_content_to_editor(
         project_root,
+        registration.pid,
+        &registration.editor_id,
         &canonical.to_string_lossy(),
         refresh_content,
         &stale_hash,
@@ -3101,7 +2885,7 @@ fn editor_authority_gap(file: &Path) -> Option<EditorAuthorityGap> {
         registration
             .capabilities
             .iter()
-            .any(|capability| capability == agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
+            .any(|capability| capability == agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
     }) {
         return None;
     }
@@ -3138,7 +2922,7 @@ pub fn ipc_repair_decision_from_visible_write(
 ) -> IpcRepairDecision {
     if let Some(lines) = normalize_prefix_lines
         && !lines.is_empty()
-        && !verify_sidecar_normalization(&snap_content, lines)
+        && !verify_visible_normalization(&snap_content, lines)
     {
         let bad_state = snap_content;
         let normalized = normalize_exchange_prefixes_for_targets(&bad_state, lines);
@@ -3206,13 +2990,17 @@ pub fn redelivery_missing_operator_text_authority(
             } else {
                 &disk
             };
-            let _ = agent_doc_ipc_io::send_refresh_content(
-                &project_root,
-                &canonical.to_string_lossy(),
-                refresh_target,
-                &stale_hash,
-                expected_bad_state.len(),
-            );
+            if let Some(registration) = live_editor_registration(file) {
+                let _ = agent_doc_ipc_io::send_refresh_content_to_editor(
+                    &project_root,
+                    registration.pid,
+                    &registration.editor_id,
+                    &canonical.to_string_lossy(),
+                    refresh_target,
+                    &stale_hash,
+                    expected_bad_state.len(),
+                );
+            }
         }
         agent_doc_ops_log_io::log_op(
             file,
@@ -3228,7 +3016,7 @@ pub fn redelivery_missing_operator_text_authority(
     }
     eprintln!(
         "[write] {label} editor repair skipped: live editor buffer {editor_id} lacks required capability {}",
-        agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
+        agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY
     );
     agent_doc_ops_log_io::log_op(
         file,
@@ -3236,7 +3024,7 @@ pub fn redelivery_missing_operator_text_authority(
             "{label}_editor_redelivery_skipped file={} patch_id={} skip=editor_capability_missing capability={} editor_id={} live_len={} live_hash={}",
             file.display(),
             source_patch_id.unwrap_or("-"),
-            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
             editor_id,
             expected_bad_state.len(),
             agent_doc_hash::content_hash(expected_bad_state)
@@ -3264,7 +3052,7 @@ pub fn verify_normalization_repair_observed(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "sidecar_normalization_fallback_narrow_repair_lazily_receipt_missing file={} patch_id={} transport={}",
+                    "canonical_normalization_recovery_narrow_repair_lazily_receipt_missing file={} patch_id={} transport={}",
                     file.display(),
                     patch_id,
                     transport,
@@ -3276,7 +3064,7 @@ pub fn verify_normalization_repair_observed(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "sidecar_normalization_fallback_narrow_repair_lazily_receipt_read_failed file={} patch_id={} transport={} error={}",
+                    "canonical_normalization_recovery_narrow_repair_lazily_receipt_read_failed file={} patch_id={} transport={} error={}",
                     file.display(),
                     patch_id,
                     transport,
@@ -3292,7 +3080,7 @@ pub fn verify_normalization_repair_observed(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "sidecar_normalization_fallback_narrow_repair_observed file={} patch_id={} transport={} observed_len={} observed_hash={} expected_len={} expected_hash={} matched={}",
+            "canonical_normalization_recovery_narrow_repair_observed file={} patch_id={} transport={} observed_len={} observed_hash={} expected_len={} expected_hash={} matched={}",
             file.display(),
             patch_id,
             transport,
@@ -3321,7 +3109,7 @@ pub fn try_ipc_normalization_repair_patch(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "sidecar_normalization_fallback_narrow_repair_ineligible file={} patch_id={} skip=normalization_only_patch_not_equivalent normalize_targets={}",
+                "canonical_normalization_recovery_narrow_repair_ineligible file={} patch_id={} skip=normalization_only_patch_not_equivalent normalize_targets={}",
                 file.display(),
                 source_patch_id.unwrap_or("-"),
                 normalize_prefix_lines.len()
@@ -3340,7 +3128,7 @@ pub fn try_ipc_normalization_repair_patch(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "sidecar_normalization_fallback_narrow_repair_skipped file={} patch_id={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={}",
+                "canonical_normalization_recovery_narrow_repair_skipped file={} patch_id={} skip=stale_bad_state expected_len={} expected_hash={} current_len={} current_hash={}",
                 file.display(),
                 source_patch_id.unwrap_or("-"),
                 expected_bad_state.len(),
@@ -3355,7 +3143,7 @@ pub fn try_ipc_normalization_repair_patch(
     if redelivery_missing_operator_text_authority(
         file,
         expected_bad_state,
-        "sidecar_normalization_fallback_narrow_repair",
+        "canonical_normalization_recovery_narrow_repair",
         source_patch_id,
     ) {
         return Ok(false);
@@ -3366,7 +3154,7 @@ pub fn try_ipc_normalization_repair_patch(
     let patch_id = uuid::Uuid::new_v4().to_string();
     let canonical_path = canonical.to_string_lossy();
     let proof = FullContentSourceProof::from_content(expected_bad_state);
-    let payload = agent_doc_ipc_protocol::normalization_repair_patch_message(
+    let mut payload = agent_doc_ipc_protocol::normalization_repair_patch_message(
         canonical_path.as_ref(),
         &patch_id,
         normalize_prefix_lines,
@@ -3377,7 +3165,7 @@ pub fn try_ipc_normalization_repair_patch(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "sidecar_normalization_fallback_narrow_repair_attempt file={} patch_id={} source_patch_id={} normalize_targets={} expected_bad_len={} expected_bad_hash={} repaired_len={} repaired_hash={}",
+            "canonical_normalization_recovery_narrow_repair_attempt file={} patch_id={} source_patch_id={} normalize_targets={} expected_bad_len={} expected_bad_hash={} repaired_len={} repaired_hash={}",
             file.display(),
             patch_id,
             source_patch_id.unwrap_or("-"),
@@ -3389,8 +3177,11 @@ pub fn try_ipc_normalization_repair_patch(
         ),
     );
 
-    if agent_doc_ipc_io::is_listener_active(&project_root) {
-        match agent_doc_ipc_io::send_message(&project_root, &payload) {
+    if let Some(registration) =
+        target_payload_to_registered_editor(file, &mut payload, "normalization_repair")
+        && agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid)
+    {
+        match agent_doc_ipc_io::send_message_to_pid(&project_root, registration.pid, &payload) {
             Ok(Some(_)) => {
                 if verify_normalization_repair_observed(
                     file,
@@ -3402,7 +3193,7 @@ pub fn try_ipc_normalization_repair_patch(
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
-                            "sidecar_normalization_fallback_narrow_repaired_editor file={} patch_id={} transport=socket",
+                            "canonical_normalization_recovery_narrow_repaired_editor file={} patch_id={} transport=socket",
                             file.display(),
                             patch_id
                         ),
@@ -3415,7 +3206,7 @@ pub fn try_ipc_normalization_repair_patch(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "sidecar_normalization_fallback_narrow_repair_not_consumed file={} patch_id={} transport=socket",
+                        "canonical_normalization_recovery_narrow_repair_not_consumed file={} patch_id={} transport=socket",
                         file.display(),
                         patch_id
                     ),
@@ -3425,7 +3216,7 @@ pub fn try_ipc_normalization_repair_patch(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "sidecar_normalization_fallback_narrow_repair_failed file={} patch_id={} transport=socket error={}",
+                        "canonical_normalization_recovery_narrow_repair_failed file={} patch_id={} transport=socket error={}",
                         file.display(),
                         patch_id,
                         e
@@ -3435,54 +3226,10 @@ pub fn try_ipc_normalization_repair_patch(
         }
     }
 
-    let patches_dir = project_root.join(".agent-doc/patches");
-    if !patches_dir.exists() {
-        return Ok(false);
-    }
-
-    let hash = agent_doc_fs::document_state_hash(file)?;
-    let patch_file = patches_dir.join(format!("{hash}.json"));
-    let payload = agent_doc_ipc_protocol::normalization_repair_patch_message(
-        canonical_path.as_ref(),
-        &patch_id,
-        normalize_prefix_lines,
-        &proof.expected_content_hash,
-        proof.expected_content_len,
-        false,
-    );
-    atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
-
-    let timeout = file_ipc_delivery_timeout();
-    let poll_interval = std::time::Duration::from_millis(100);
-    let start = std::time::Instant::now();
-    while start.elapsed() < timeout {
-        if !patch_file.exists() {
-            if verify_normalization_repair_observed(
-                file,
-                &project_root,
-                &patch_id,
-                repaired_content,
-                "file",
-            ) {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "sidecar_normalization_fallback_narrow_repaired_editor file={} patch_id={} transport=file",
-                        file.display(),
-                        patch_id
-                    ),
-                );
-                return Ok(true);
-            }
-            return Ok(false);
-        }
-        std::thread::sleep(poll_interval);
-    }
-    let _ = std::fs::remove_file(&patch_file);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "sidecar_normalization_fallback_narrow_repair_not_consumed file={} patch_id={} transport=file",
+            "canonical_normalization_recovery_narrow_repair_not_consumed file={} patch_id={} transport=targeted_socket",
             file.display(),
             patch_id
         ),
@@ -3501,7 +3248,7 @@ pub fn redeliver_normalization_fallback_to_editor(
     if redelivery_missing_operator_text_authority(
         file,
         expected_bad_state,
-        "sidecar_normalization_fallback_narrow_repair",
+        "canonical_normalization_recovery_narrow_repair",
         source_patch_id,
     ) {
         return false;
@@ -3520,7 +3267,7 @@ pub fn redeliver_normalization_fallback_to_editor(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "sidecar_normalization_fallback_narrow_repair_failed file={} patch_id={} error={}",
+                    "canonical_normalization_recovery_narrow_repair_failed file={} patch_id={} error={}",
                     file.display(),
                     source_patch_id.unwrap_or("-"),
                     e
@@ -3839,10 +3586,7 @@ pub fn repair_ipc_decision_visible_state(
             .canonicalize()
             .ok()
             .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical));
-        let listener_active = ipc_project_root
-            .as_deref()
-            .map(agent_doc_ipc_io::is_listener_active)
-            .unwrap_or(false);
+        let listener_active = editor_ipc_listener_active(file);
 
         let log_reconciled = |transport: &str| {
             agent_doc_ops_log_io::log_op(
@@ -3880,7 +3624,7 @@ pub fn repair_ipc_decision_visible_state(
                 .editor_bad_state
                 .as_ref()
                 .is_some_and(|state| state.content() == file_content);
-            if !listener_active && bad_state_matches {
+            if !live_editor_attached(file) && bad_state_matches {
                 effects
                     .atomic_write(file, &decision.snapshot_content)
                     .with_context(|| {
@@ -3889,7 +3633,7 @@ pub fn repair_ipc_decision_visible_state(
                             file.display()
                         )
                     })?;
-                save_document_snapshot_and_crdt(file, &decision.snapshot_content)?;
+                checkpoint_document_baseline(file, &decision.snapshot_content)?;
                 log_reconciled("disk_fallback");
                 log_flow_event(
                     file,
@@ -3978,7 +3722,6 @@ pub fn try_editor_converge(
         .canonicalize()
         .with_context(|| format!("{source}: failed to resolve {}", file.display()))?;
     let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical_file);
-    cleanup_legacy_ipc_degraded(&project_root);
     if current_content == target {
         agent_doc_ops_log_io::log_op(
             file,
@@ -4008,7 +3751,7 @@ pub fn try_editor_converge(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "{source}_writeback file={} transport=crdt_relay content_hash={} live_editors={} delivery_converged={} legacy_ipc=skipped",
+                "{source}_writeback file={} transport=crdt_relay content_hash={} live_editors={} delivery_converged={} secondary_transport=none",
                 file.display(),
                 relay_write.content_hash,
                 relay_write.live_editors,
@@ -4024,7 +3767,7 @@ pub fn try_editor_converge(
             &format!(
                 "{source}_writeback file={} transport=blocked reason=editor_capability_missing capability={} editor_id={} live_len={} live_hash={} action=editor_reload_required",
                 file.display(),
-                agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+                agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
                 editor_id,
                 current_content.len(),
                 agent_doc_hash::content_hash(current_content)
@@ -4034,83 +3777,10 @@ pub fn try_editor_converge(
             "{source}: refused editor convergence for {} because live editor buffer {} lacks required capability {}",
             file.display(),
             editor_id,
-            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
+            agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY
         );
     }
-    match ipc_direct_disk_degraded(&project_root, file) {
-        Ok(true) => {
-            log_ipc_dewedge_prefer_file_ipc(file, source);
-            let canonical = file.canonicalize()?;
-            let patch_id = uuid::Uuid::new_v4().to_string();
-            let Some(mut payload) =
-                editor_convergence_payload(&canonical, target, current_content, source, &patch_id)?
-            else {
-                if try_detached_disk_write(
-                    effects,
-                    file,
-                    current_content,
-                    target,
-                    source,
-                    "listener_degraded_no_component_delta",
-                )? {
-                    return Ok(true);
-                }
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "{source}_writeback file={} transport=blocked degraded_cause=no_component_delta action=refuse_external_disk_write",
-                        file.display()
-                    ),
-                );
-                anyhow::bail!(
-                    "{source}: refused direct disk write for {} while editor IPC listener is degraded (cause=no_component_delta)",
-                    file.display()
-                );
-            };
-            target_payload_to_registered_editor(file, &mut payload, "file_ipc_convergence");
-            if try_editor_converge_file_ipc(
-                effects,
-                FileIpcConvergenceRequest {
-                    file,
-                    project_root: &project_root,
-                    payload: &payload,
-                    patch_id: &patch_id,
-                    source,
-                    reason: "listener_degraded",
-                },
-            )? {
-                return Ok(true);
-            }
-            if try_detached_disk_write(
-                effects,
-                file,
-                current_content,
-                target,
-                source,
-                "listener_degraded_editor_detached",
-            )? {
-                return Ok(true);
-            }
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{source}_writeback file={} transport=blocked degraded_cause=listener_degraded action=refuse_external_disk_write",
-                    file.display()
-                ),
-            );
-            anyhow::bail!(
-                "{source}: refused direct disk write for {} while editor IPC listener is degraded",
-                file.display()
-            );
-        }
-        Ok(false) => {}
-        Err(e) => {
-            eprintln!(
-                "[write] WARNING: {source} converge degradation check failed (non-fatal): {e}"
-            );
-        }
-    }
-    if !agent_doc_ipc_io::is_listener_active(&project_root) {
+    let Some(registration) = live_editor_registration(file) else {
         if try_detached_disk_write(
             effects,
             file,
@@ -4121,6 +3791,9 @@ pub fn try_editor_converge(
         )? {
             return Ok(true);
         }
+        return refuse_unproven_editor_delivery(file, source, "no_registration", None);
+    };
+    if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid) {
         return refuse_unproven_editor_delivery(file, source, "no_listener", None);
     }
 
@@ -4151,7 +3824,13 @@ pub fn try_editor_converge(
             file.display()
         );
     };
-    target_payload_to_registered_editor(file, &mut payload, "editor_convergence");
+    target_payload_to_editor(
+        file,
+        &mut payload,
+        "editor_convergence",
+        &registration.editor_id,
+        registration.pid,
+    );
 
     agent_doc_ops_log_io::log_op(
         file,
@@ -4173,7 +3852,7 @@ pub fn try_editor_converge(
         ),
     );
 
-    match agent_doc_ipc_io::send_message(&project_root, &payload) {
+    match agent_doc_ipc_io::send_message_to_pid(&project_root, registration.pid, &payload) {
         Ok(Some(_ack)) => {
             let visible_write = poll_visible_write_text_lazily_event_or_projection(
                 file,
@@ -4301,21 +3980,6 @@ pub fn try_editor_converge(
                     err
                 ),
             );
-            if is_socket_status_error(err.to_string())
-                && try_editor_converge_file_ipc(
-                    effects,
-                    FileIpcConvergenceRequest {
-                        file,
-                        project_root: &project_root,
-                        payload: &payload,
-                        patch_id: &patch_id,
-                        source,
-                        reason: "socket_status_error",
-                    },
-                )?
-            {
-                return Ok(true);
-            }
             if is_socket_receipt_timeout_error(err.to_string()) {
                 match record_ipc_socket_ack_timeout(&project_root, file, Some(&patch_id), source) {
                     Ok(true) => {
@@ -4344,90 +4008,6 @@ pub fn try_editor_converge(
             refuse_unproven_editor_delivery(file, source, "send_failed", Some(&patch_id))
         }
     }
-}
-
-struct FileIpcConvergenceRequest<'a> {
-    file: &'a Path,
-    project_root: &'a Path,
-    payload: &'a serde_json::Value,
-    patch_id: &'a str,
-    source: &'a str,
-    reason: &'a str,
-}
-
-fn try_editor_converge_file_ipc(
-    effects: &dyn EditorConvergenceEffects,
-    request: FileIpcConvergenceRequest<'_>,
-) -> Result<bool> {
-    let FileIpcConvergenceRequest {
-        file,
-        project_root,
-        payload,
-        patch_id,
-        source,
-        reason,
-    } = request;
-    let patches_dir = project_root.join(".agent-doc/patches");
-    if !patches_dir.exists() {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "{source}_writeback file={} transport=blocked degraded_cause={reason}_no_file_ipc action=refuse_external_disk_write",
-                file.display()
-            ),
-        );
-        return Ok(false);
-    }
-    let patch_file = patches_dir.join(format!("{patch_id}.json"));
-    let patch_count = payload
-        .get("patches")
-        .and_then(|value| value.as_array())
-        .map(Vec::len)
-        .unwrap_or(0)
-        + payload
-            .get("node_patches")
-            .and_then(|value| value.as_array())
-            .map(Vec::len)
-            .unwrap_or(0)
-        + usize::from(payload.get("frontmatter").is_some());
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "{source}_file_ipc_convergence_attempt file={} patch_id={} degraded_cause={} patches={}",
-            file.display(),
-            patch_id,
-            reason,
-            patch_count
-        ),
-    );
-    if write_file_ipc_and_poll_delivery(
-        effects,
-        &patch_file,
-        payload,
-        file,
-        patch_count,
-        FileIpcDeliveryOptions::guard_committed_cycle(),
-    )? {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "{source}_writeback file={} patch_id={} transport=file_ipc degraded_cause={}",
-                file.display(),
-                patch_id,
-                reason
-            ),
-        );
-        return Ok(true);
-    }
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "{source}_writeback file={} patch_id={} transport=blocked degraded_cause={reason}_file_ipc_unproven action=refuse_external_disk_write",
-            file.display(),
-            patch_id
-        ),
-    );
-    Ok(false)
 }
 
 pub fn editor_convergence_payload(
@@ -4465,7 +4045,7 @@ pub fn editor_convergence_payload(
             current_content,
         );
     let mut payload = serde_json::json!({
-        "type": "patch",
+        "type": agent_doc_ipc_protocol::EditorIntent::ApplyCanonical.as_str(),
         "file": canonical_file.to_string_lossy(),
         "patches": patches,
         "node_patches": node_patches,
@@ -4541,116 +4121,32 @@ pub fn live_prompt_drift_convergence_frontmatter(
     }
 }
 
-pub fn cleanup_legacy_ipc_degraded(project_root: &Path) {
-    let marker = project_root.join(".agent-doc/ipc-degraded");
-    if marker.is_file()
-        && let Err(e) = std::fs::remove_file(&marker)
-    {
-        eprintln!(
-            "[write] WARNING: failed to remove legacy IPC degraded marker {}: {}",
-            marker.display(),
-            e
-        );
-    }
-}
-
 pub const IPC_DEWEDGE_TIMEOUT_THRESHOLD: u64 = 2;
 
-pub fn ipc_dewedge_marker_path(project_root: &Path, file: &Path) -> Result<PathBuf> {
-    let hash = agent_doc_fs::document_state_hash(file)?;
-    Ok(project_root
-        .join(".agent-doc/ipc-degraded")
-        .join(format!("{hash}.json")))
-}
-
-pub fn ipc_dewedge_marker_for_current_session(
+fn editor_transport_health_for_current_session(
     project_root: &Path,
     file: &Path,
 ) -> Result<Option<serde_json::Value>> {
-    let marker = ipc_dewedge_marker_path(project_root, file)?;
-    if !marker.exists() {
-        return Ok(None);
-    }
-    let text = std::fs::read_to_string(&marker)
-        .with_context(|| format!("failed to read IPC degraded marker {}", marker.display()))?;
-    let value: serde_json::Value = serde_json::from_str(&text)
-        .with_context(|| format!("failed to parse IPC degraded marker {}", marker.display()))?;
-    let marker_session = value
-        .get("session_id")
-        .and_then(|v| v.as_str())
-        .unwrap_or("-");
     let session_id =
         agent_doc_frontmatter_io::session::read_session_id(file).unwrap_or_else(|| "-".to_string());
-    if marker_session != session_id {
-        return Ok(None);
-    }
-    Ok(Some(value))
-}
-
-pub fn ipc_direct_disk_degraded(project_root: &Path, file: &Path) -> Result<bool> {
-    let degraded = ipc_dewedge_marker_for_current_session(project_root, file)?
-        .and_then(|value| value.get("degraded").and_then(|v| v.as_bool()))
-        .unwrap_or(false);
-    if !degraded {
-        return Ok(false);
-    }
-    // `#ipc-degrade-self-heal`: the degrade latch is a circuit breaker, not a
-    // permanent session verdict. It may clear only when the plugin proves it can
-    // accept and receipt a lightweight message.
-    match agent_doc_ipc_io::probe_listener_receipt(project_root, ipc_dewedge_probe_timeout()) {
-        Ok(true) => {
-            remove_ipc_dewedge_marker(project_root, file, "listener_receipt_recovered")?;
-            return Ok(false);
-        }
-        Ok(false) => {}
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "ipc_socket_degraded_self_heal_probe_failed file={} reason={}",
-                    file.display(),
-                    err.to_string().replace(char::is_whitespace, "_")
-                ),
-            );
-        }
-    }
-    Ok(true)
-}
-
-fn ipc_dewedge_probe_timeout() -> std::time::Duration {
-    if cfg!(test) {
-        std::time::Duration::from_millis(250)
-    } else {
-        std::time::Duration::from_millis(750)
-    }
-}
-
-pub fn log_ipc_dewedge_direct_disk_skip(file: &Path, transport: &str) {
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "ipc_listener_degraded_direct_disk file={} transport={} reason=repeated_ack_timeout",
-            file.display(),
-            transport
-        ),
-    );
-}
-
-/// `#ipc-degraded-prefers-file-ipc`: a latched-degraded socket means only the
-/// plugin's *socket* listener is wedged. The file-IPC patch queue uses a
-/// separate plugin file watcher that is very likely still alive, so a degraded
-/// write routes through it (the plugin applies via the Document API) instead of
-/// a raw disk write that manufactures an IDEA "File Cache Conflict". If file IPC
-/// also fails to prove delivery, the write fails closed for retry.
-pub fn log_ipc_dewedge_prefer_file_ipc(file: &Path, transport: &str) {
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "ipc_socket_degraded_prefer_file_ipc file={} transport={} reason=repeated_ack_timeout disk_write=disabled",
-            file.display(),
-            transport
-        ),
-    );
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    Ok(
+        agent_doc_controller_io::project_controller::load_editor_transport_health(
+            project_root,
+            &document_hash,
+        )?
+        .filter(|health| health.session_id == session_id)
+        .map(|health| {
+            serde_json::json!({
+                "session_id": health.session_id,
+                "consecutive_timeouts": health.consecutive_timeouts,
+                "degraded": health.degraded,
+                "recycle_attempted": health.recycle_attempted,
+                "last_patch_id": health.last_delivery_id.as_deref().unwrap_or("-"),
+                "last_transport": health.last_transport,
+            })
+        }),
+    )
 }
 
 pub fn record_ipc_socket_ack_timeout(
@@ -4659,17 +4155,7 @@ pub fn record_ipc_socket_ack_timeout(
     patch_id: Option<&str>,
     transport: &str,
 ) -> Result<bool> {
-    cleanup_legacy_ipc_degraded(project_root);
-    let marker = ipc_dewedge_marker_path(project_root, file)?;
-    if let Some(parent) = marker.parent() {
-        std::fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "failed to create IPC degraded marker directory {}",
-                parent.display()
-            )
-        })?;
-    }
-    let prior = ipc_dewedge_marker_for_current_session(project_root, file)?;
+    let prior = editor_transport_health_for_current_session(project_root, file)?;
     let prior_timeouts = prior
         .as_ref()
         .and_then(|value| value.get("consecutive_timeouts").and_then(|v| v.as_u64()))
@@ -4689,16 +4175,24 @@ pub fn record_ipc_socket_ack_timeout(
         true,
         IPC_DEWEDGE_TIMEOUT_THRESHOLD,
     );
-    let value = serde_json::json!({
-        "session_id": agent_doc_frontmatter_io::session::read_session_id(file)
-            .unwrap_or_else(|| "-".to_string()),
-        "consecutive_timeouts": consecutive_timeouts,
-        "degraded": degraded,
-        "recycle_attempted": prior_recycle_attempted,
-        "last_patch_id": patch_id.unwrap_or("-"),
-        "last_transport": transport,
-    });
-    atomic_write(&marker, &serde_json::to_string_pretty(&value)?)?;
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    agent_doc_controller_io::project_controller::upsert_editor_transport_health(
+        project_root,
+        &agent_doc_controller_io::project_controller::EditorTransportHealthRecord {
+            document_hash,
+            session_id: agent_doc_frontmatter_io::session::read_session_id(file)
+                .unwrap_or_else(|| "-".to_string()),
+            consecutive_timeouts,
+            degraded,
+            recycle_attempted: prior_recycle_attempted,
+            last_delivery_id: patch_id.map(str::to_string),
+            last_transport: transport.to_string(),
+            updated_at_secs: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs())
+                .unwrap_or_default(),
+        },
+    )?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -4713,12 +4207,12 @@ pub fn record_ipc_socket_ack_timeout(
     Ok(degraded)
 }
 
-pub fn remove_ipc_dewedge_marker(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
-    let marker = ipc_dewedge_marker_path(project_root, file)?;
-    if marker.exists() {
-        std::fs::remove_file(&marker).with_context(|| {
-            format!("failed to remove IPC degraded marker {}", marker.display())
-        })?;
+fn clear_editor_transport_health(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    if agent_doc_controller_io::project_controller::clear_editor_transport_health(
+        project_root,
+        &document_hash,
+    )? {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -4732,20 +4226,8 @@ pub fn remove_ipc_dewedge_marker(project_root: &Path, file: &Path, reason: &str)
 }
 
 pub fn clear_ipc_socket_ack_timeouts(project_root: &Path, file: &Path, reason: &str) -> Result<()> {
-    let Some(value) = ipc_dewedge_marker_for_current_session(project_root, file)? else {
-        return Ok(());
-    };
-    // A routine successful write clears accrued timeout votes, but it must NOT
-    // clear a *degraded* latch on its own. The degraded latch is cleared only by
-    // a proven-live listener re-probe (`#ipc-degrade-self-heal`).
-    if value
-        .get("degraded")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-    {
-        return Ok(());
-    }
-    remove_ipc_dewedge_marker(project_root, file, reason)
+    // A receipt from the selected PID proves recovery and clears health votes.
+    clear_editor_transport_health(project_root, file, reason)
 }
 
 /// `#supselfheal` Phase 2 — read the persisted editor-IPC wedge fact for `file`
@@ -4753,7 +4235,7 @@ pub fn clear_ipc_socket_ack_timeouts(project_root: &Path, file: &Path, reason: &
 /// `supervisor_recycle_action`. Best effort: a missing/unreadable marker is
 /// "not wedged".
 pub fn editor_ipc_write_wedged(project_root: &Path, file: &Path) -> bool {
-    ipc_dewedge_marker_for_current_session(project_root, file)
+    editor_transport_health_for_current_session(project_root, file)
         .ok()
         .flatten()
         .and_then(|value| value.get("degraded").and_then(|v| v.as_bool()))
@@ -4767,7 +4249,7 @@ pub fn editor_ipc_write_wedged(project_root: &Path, file: &Path) -> bool {
 /// episode drives at most one auto-recycle and cannot spin. Best effort: a
 /// missing/unreadable marker is "no recycle needed".
 pub fn editor_ipc_write_wedge_needs_recycle(project_root: &Path, file: &Path) -> bool {
-    let Some(value) = ipc_dewedge_marker_for_current_session(project_root, file)
+    let Some(value) = editor_transport_health_for_current_session(project_root, file)
         .ok()
         .flatten()
     else {
@@ -4789,17 +4271,20 @@ pub fn editor_ipc_write_wedge_needs_recycle(project_root: &Path, file: &Path) ->
 /// re-read the still-latched wedge and recycle-loop. Called right before the
 /// recycle `execve`. A no-op (Ok) when there is no current-session marker.
 pub fn mark_ipc_wedge_recycle_attempted(project_root: &Path, file: &Path) -> Result<()> {
-    let Some(mut value) = ipc_dewedge_marker_for_current_session(project_root, file)? else {
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let Some(mut health) =
+        agent_doc_controller_io::project_controller::load_editor_transport_health(
+            project_root,
+            &document_hash,
+        )?
+    else {
         return Ok(());
     };
-    if let Some(obj) = value.as_object_mut() {
-        obj.insert(
-            "recycle_attempted".to_string(),
-            serde_json::Value::Bool(true),
-        );
-    }
-    let marker = ipc_dewedge_marker_path(project_root, file)?;
-    atomic_write(&marker, &serde_json::to_string_pretty(&value)?)?;
+    health.recycle_attempted = true;
+    agent_doc_controller_io::project_controller::upsert_editor_transport_health(
+        project_root,
+        &health,
+    )?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -4842,6 +4327,7 @@ pub fn log_write_wedge_requests_supervisor_recycle(file: &Path, source: &str) {
     );
 }
 
+#[cfg(test)]
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, content)?;
@@ -4870,7 +4356,7 @@ mod tests {
             Ok(())
         }
 
-        fn publish_live_buffer_content(
+        fn observe_lazily_current_text(
             &self,
             _file: &Path,
             _source: &str,
@@ -4878,7 +4364,7 @@ mod tests {
             Ok(Some(self.content.clone()))
         }
 
-        fn guard_visible_write_idle_and_current(
+        fn guard_visible_write_expected_current(
             &self,
             _file: &Path,
             _source: &str,
@@ -4900,28 +4386,6 @@ mod tests {
             );
             fs::write(file, content)?;
             Ok(())
-        }
-
-        fn cycle_already_committed(&self, _file: &Path) -> Option<String> {
-            None
-        }
-
-        fn log_file_ipc_already_committed(&self, _file: &Path, _cycle_id: &str) {}
-
-        fn cleanup_fallback_patch_files(&self, _file: &Path) {}
-
-        fn file_ipc_patch_rejected(&self, _file: &Path, _patch_id: &str) -> Option<String> {
-            None
-        }
-
-        fn log_file_ipc_proof_failure(
-            &self,
-            _file: &Path,
-            _patch_id: Option<&str>,
-            _invariant: &str,
-            _recovery: &str,
-            _detail: &str,
-        ) {
         }
     }
 
@@ -4948,7 +4412,7 @@ mod tests {
             }))
         }
 
-        fn guard_visible_write_idle_and_current(
+        fn guard_visible_write_expected_current(
             &self,
             _file: &Path,
             _source: &str,
@@ -4966,37 +4430,10 @@ mod tests {
         ) -> Result<()> {
             panic!("CRDT convergence must not enter the legacy write path")
         }
-
-        fn cycle_already_committed(&self, _file: &Path) -> Option<String> {
-            None
-        }
-
-        fn log_file_ipc_already_committed(&self, _file: &Path, _cycle_id: &str) {
-            panic!("CRDT convergence must not enter file IPC")
-        }
-
-        fn cleanup_fallback_patch_files(&self, _file: &Path) {
-            panic!("CRDT convergence must not enter file IPC")
-        }
-
-        fn file_ipc_patch_rejected(&self, _file: &Path, _patch_id: &str) -> Option<String> {
-            panic!("CRDT convergence must not enter file IPC")
-        }
-
-        fn log_file_ipc_proof_failure(
-            &self,
-            _file: &Path,
-            _patch_id: Option<&str>,
-            _invariant: &str,
-            _recovery: &str,
-            _detail: &str,
-        ) {
-            panic!("CRDT convergence must not enter file IPC")
-        }
     }
 
     #[test]
-    fn attached_crdt_write_skips_legacy_ipc_replay() {
+    fn attached_crdt_write_has_no_secondary_transport() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("test.md");
@@ -5016,7 +4453,7 @@ mod tests {
         );
         let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("transport=crdt_relay"));
-        assert!(log.contains("legacy_ipc=skipped"));
+        assert!(log.contains("secondary_transport=none"));
         assert!(!log.contains("editor_convergence_attempt"));
     }
 
@@ -5099,7 +4536,12 @@ mod tests {
         let response = "### Re: Please reply — gpt-5\n\nRecovered once.\n";
         let patch_id = "legacy-hash-only-receipt";
         fs::write(&file, baseline).unwrap();
-        agent_doc_snapshot_io::save(&file, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let canonical = file.canonicalize().unwrap();
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
         let candidate_hash = visible_write_content_hash(candidate);
@@ -5168,13 +4610,15 @@ mod tests {
             Some(candidate)
         );
         assert_eq!(
-            agent_doc_snapshot_io::load(&file).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&file)
+                .unwrap()
+                .as_deref(),
             Some(candidate)
         );
     }
 
     #[test]
-    fn write_converge_payload_cycle_id_prefers_latest_projection_over_stale_sidecar() {
+    fn write_converge_payload_cycle_id_uses_latest_state_projection() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("test.md");
@@ -5190,9 +4634,6 @@ mod tests {
             Some(content),
         )
         .unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc).unwrap().unwrap();
-        let stale_first_sidecar = fs::read(&sidecar_path).unwrap();
-
         std::thread::sleep(std::time::Duration::from_millis(2));
         let second =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -5204,15 +4645,6 @@ mod tests {
             Some(content),
         )
         .unwrap();
-        fs::write(&sidecar_path, stale_first_sidecar).unwrap();
-
-        assert_eq!(
-            agent_doc_cycle_state_io::load(&doc)
-                .unwrap()
-                .unwrap()
-                .cycle_id,
-            first.cycle_id
-        );
         assert_eq!(
             write_converge_cycle_id_for_payload(&doc).as_deref(),
             Some(second.cycle_id.as_str())
@@ -5220,7 +4652,7 @@ mod tests {
     }
 
     #[test]
-    fn ipc_ack_timeouts_degrade_current_session_to_file_ipc_retry() {
+    fn ipc_ack_timeouts_record_health_without_authorizing_disk() {
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -5235,20 +4667,17 @@ mod tests {
             record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap(),
             "second consecutive timeout should mark the listener degraded"
         );
-        assert!(
-            ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
-            "current session should now bypass IPC"
-        );
+        assert!(editor_ipc_write_wedged(dir.path(), &doc));
 
         fs::write(&doc, "---\nsession: next-session\n---\n\ncontent").unwrap();
         assert!(
-            !ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
-            "a new session id must not inherit the old session's degraded marker"
+            !editor_ipc_write_wedged(dir.path(), &doc),
+            "a new session id must not inherit old transport health"
         );
     }
 
     #[test]
-    fn degraded_latch_self_heals_when_listener_recovers() {
+    fn successful_delivery_clears_transport_health_without_a_sidecar() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         let doc = dir.path().join("test.md");
@@ -5256,31 +4685,10 @@ mod tests {
 
         record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p1"), "socket_ipc").unwrap();
         record_ipc_socket_ack_timeout(dir.path(), &doc, Some("p2"), "socket_ipc").unwrap();
-        assert!(
-            ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
-            "two timeouts with no live listener should stay degraded"
-        );
-
-        let root_clone = dir.path().to_path_buf();
-        let server = std::thread::spawn(move || {
-            let _ = agent_doc_ipc_io::start_listener(&root_clone, |_msg| {
-                Some(r#"{"type":"receipt","status":"applied","id":"x"}"#.to_string())
-            });
-        });
-        std::thread::sleep(std::time::Duration::from_millis(150));
-
-        assert!(
-            !ipc_direct_disk_degraded(dir.path(), &doc).unwrap(),
-            "a recovered live listener must self-heal the degrade latch"
-        );
-        let marker = ipc_dewedge_marker_path(dir.path(), &doc).unwrap();
-        assert!(
-            !marker.exists(),
-            "self-heal must remove the degraded marker"
-        );
-
-        let _ = std::fs::remove_file(agent_doc_ipc_io::socket_path(dir.path()));
-        drop(server);
+        assert!(editor_ipc_write_wedged(dir.path(), &doc));
+        clear_ipc_socket_ack_timeouts(dir.path(), &doc, "delivery_receipt").unwrap();
+        assert!(!editor_ipc_write_wedged(dir.path(), &doc));
+        assert!(!dir.path().join(".agent-doc/ipc-degraded").exists());
     }
 
     #[test]
@@ -5338,7 +4746,7 @@ mod tests {
         );
 
         // A full self-heal removal starts a clean episode.
-        remove_ipc_dewedge_marker(project_root, &file, "test_self_heal").unwrap();
+        clear_ipc_socket_ack_timeouts(project_root, &file, "test_self_heal").unwrap();
         for _ in 0..IPC_DEWEDGE_TIMEOUT_THRESHOLD {
             record_ipc_socket_ack_timeout(project_root, &file, Some("p3"), "finalize").unwrap();
         }

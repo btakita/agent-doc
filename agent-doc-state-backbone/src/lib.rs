@@ -20,6 +20,7 @@ use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
 
 /// Phase E (`#adstatechart`) local-process Harel state chart consolidation.
 pub mod adstatechart;
+pub mod write_pipeline;
 
 /// Project-scoped supervisor graph document. Most state facts are per session
 /// document; supervisor recycle is a project-wide gate shared by every routed
@@ -198,6 +199,19 @@ pub enum StateFact {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tracked_work_maintenance_required: Option<bool>,
     },
+    /// Complete turn intent checkpoint stored in the durable Lazily ledger.
+    ///
+    /// This replaces the former `.agent-doc/state/cycles/*.json` hot-path
+    /// authority. The opaque JSON is owned by `agent-doc-cycle-state-io`; the
+    /// backbone only retains and projects the newest checkpoint for a cycle.
+    TurnIntentCheckpointed {
+        document_hash: String,
+        cycle_id: String,
+        #[serde(default)]
+        checkpoint_sequence: u64,
+        state_sha256: String,
+        state_json: String,
+    },
     RealtimeSteeringObserved {
         document_hash: String,
         cycle_id: String,
@@ -211,11 +225,64 @@ pub enum StateFact {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         baseline_path: Option<String>,
     },
+    /// Content-bearing merge baseline used by normal document transitions.
+    /// Filesystem snapshots are cold recovery projections and never feed this
+    /// authority.
+    DocumentBaselineCheckpointed {
+        document_hash: String,
+        generation: u64,
+        content_hash: String,
+        content: String,
+    },
+    /// Explicitly clear the normal merge baseline without deleting history.
+    DocumentBaselineCleared {
+        document_hash: String,
+        generation: u64,
+    },
+    /// Content-bearing checkpoint used by undo/extract after an agent write.
+    UndoCheckpointed {
+        document_hash: String,
+        generation: u64,
+        content_hash: String,
+        content: String,
+    },
+    /// Clear the active undo checkpoint while retaining its ledger history.
+    UndoCheckpointCleared {
+        document_hash: String,
+        generation: u64,
+    },
+    /// Cold CRDT recovery projection retained in the durable state ledger.
+    /// Live editor reads always come from Lazily; this is restart evidence only.
+    CrdtRecoveryProjectionCheckpointed {
+        document_hash: String,
+        generation: u64,
+        projection_sha256: String,
+        projection_base64: String,
+        lineage: String,
+    },
+    /// Clear the cold CRDT restart projection while retaining ledger history.
+    CrdtRecoveryProjectionCleared {
+        document_hash: String,
+        generation: u64,
+    },
     FileWatchChangeObserved {
         document_hash: String,
         path: String,
         watch_generation: u64,
         content_hash: String,
+    },
+    /// A document projection written by agent-doc reached the filesystem.
+    ///
+    /// This durable fact replaces the former `.agent-doc/write-provenance`
+    /// sidecar. The generation makes replay monotonic even when events are
+    /// duplicated or delivered out of order.
+    DocumentDiskWriteObserved {
+        document_hash: String,
+        generation: u64,
+        content_len: u64,
+        content_hash: String,
+        write_id: String,
+        actor: String,
     },
     DocumentAuthorityObserved {
         document_hash: String,
@@ -369,18 +436,16 @@ pub enum StateFact {
     },
     /// Project-scoped supervisor recycle/restart was REQUESTED (stale binary,
     /// `admin recycle`, install fan-out, or a wedge trigger) but has not begun.
-    /// The PCP owns this pending-intent fact on the lazily statechart instead of
-    /// the on-disk `recycle_request` marker so route callers and the editor
-    /// projection see the pending restart durably.
+    /// The PCP owns this pending-intent fact on the Lazily statechart so route
+    /// callers and the editor projection see the pending restart durably.
     SupervisorRecycleRequested {
         document_hash: String,
         reason: String,
         recycle_epoch: u64,
         marked_secs: u64,
     },
-    /// Project-scoped supervisor recycle began. The PCP owns this fact instead
-    /// of an on-disk recycle marker so route callers can wait on the lazily
-    /// state graph.
+    /// Project-scoped supervisor recycle began. Route callers wait on this
+    /// Lazily state transition.
     SupervisorRecycleStarted {
         document_hash: String,
         reason: String,
@@ -432,6 +497,10 @@ pub enum StateFact {
         response_sha256: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         response_body: Option<String>,
+        /// Full replayable turn payload, including typed component mutations.
+        /// The canonical response body remains separate for materialization proof.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intent_body: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         file_hash: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -442,32 +511,52 @@ pub enum StateFact {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         baseline_content: Option<String>,
     },
-    /// The currently durable pending response body for an open closeout cycle.
-    ///
-    /// This is the lazily state-backbone authority. Files under
-    /// `.agent-doc/pending/` are crash-recovery projections of this fact, not
-    /// hot-path read or gating state.
-    PendingResponseCaptured {
+    /// Retire one content-bearing response projection after its materialization
+    /// has been durably superseded (for example by compact archive placement).
+    CapturedResponseRetired {
         document_hash: String,
         cycle_id: String,
         capture_id: String,
-        response_sha256: String,
-        response_body: String,
+        reason: String,
     },
-    /// The pending response projection was retired after write/commit success
-    /// or explicit discard.
-    PendingResponseCleared {
+    /// Reactivate the exact retired payload after false-stale proof succeeds.
+    CapturedResponseReactivated {
         document_hash: String,
         cycle_id: String,
+        capture_id: String,
+    },
+    /// Latest streamed response draft for an open turn. Draft checkpoints are
+    /// durable ledger facts, not filesystem sidecars, and do not advance the
+    /// closeout phase.
+    ResponseDraftCheckpointed {
+        document_hash: String,
+        cycle_id: String,
+        checkpoint_id: String,
+        checkpoint_count: u64,
+        response_sha256: String,
+        response_body: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        capture_id: Option<String>,
+        file_hash: Option<String>,
+    },
+    ResponseDraftCleared {
+        document_hash: String,
+        cycle_id: String,
         reason: String,
+    },
+    ResponseReplayObserved {
+        document_hash: String,
+        cycle_id: String,
+        capture_id: String,
     },
     WriteApplied {
         document_hash: String,
         cycle_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         patch_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file_hash: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_hash: Option<String>,
     },
     /// One body-aware assistant response cell was applied to the canonical
     /// realtime document. This is both the durable CRDT operation receipt and
@@ -486,6 +575,10 @@ pub enum StateFact {
         document_hash: String,
         cycle_id: String,
         commit: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file_hash: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_hash: Option<String>,
     },
     SessionCheckPassed {
         document_hash: String,
@@ -645,6 +738,38 @@ pub enum StateFact {
         generation: u64,
         capability: String,
     },
+    StartingActorTimeoutRecorded {
+        document_hash: String,
+        pane_id: String,
+        generation: u64,
+        log_line: String,
+    },
+    StartingActorTimeoutCleared {
+        document_hash: String,
+        pane_id: String,
+        generation: u64,
+    },
+    /// Durable ownership miss for a routed session start. This replaces the
+    /// former per-document startup-miss JSON marker.
+    StartupMissRecorded {
+        document_hash: String,
+        file: String,
+        pane_id: String,
+        session_id: String,
+        harness: String,
+        timestamp: u64,
+        origin: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cycle_baseline_id: Option<String>,
+    },
+    /// Identity-CAS clear for the current startup miss. A delayed clear cannot
+    /// erase a newer miss for another pane/session.
+    StartupMissCleared {
+        document_hash: String,
+        pane_id: String,
+        session_id: String,
+        timestamp: u64,
+    },
     RoutePaneObserved {
         document_hash: String,
         pane_id: String,
@@ -676,9 +801,17 @@ impl StateFact {
     pub fn document_hash(&self) -> &str {
         match self {
             Self::PreflightStarted { document_hash, .. }
+            | Self::TurnIntentCheckpointed { document_hash, .. }
             | Self::RealtimeSteeringObserved { document_hash, .. }
             | Self::BaselineSaved { document_hash, .. }
+            | Self::DocumentBaselineCheckpointed { document_hash, .. }
+            | Self::DocumentBaselineCleared { document_hash, .. }
+            | Self::UndoCheckpointed { document_hash, .. }
+            | Self::UndoCheckpointCleared { document_hash, .. }
+            | Self::CrdtRecoveryProjectionCheckpointed { document_hash, .. }
+            | Self::CrdtRecoveryProjectionCleared { document_hash, .. }
             | Self::FileWatchChangeObserved { document_hash, .. }
+            | Self::DocumentDiskWriteObserved { document_hash, .. }
             | Self::DocumentAuthorityObserved { document_hash, .. }
             | Self::DocumentWriteDeferred { document_hash, .. }
             | Self::DocumentWriteConverged { document_hash, .. }
@@ -692,6 +825,11 @@ impl StateFact {
             | Self::QueueDrainStallContinuationRecorded { document_hash, .. }
             | Self::QueueDrainStallContinuationCleared { document_hash, .. }
             | Self::ResponseCaptured { document_hash, .. }
+            | Self::CapturedResponseRetired { document_hash, .. }
+            | Self::CapturedResponseReactivated { document_hash, .. }
+            | Self::ResponseDraftCheckpointed { document_hash, .. }
+            | Self::ResponseDraftCleared { document_hash, .. }
+            | Self::ResponseReplayObserved { document_hash, .. }
             | Self::WriteApplied { document_hash, .. }
             | Self::ResponseCellAdded { document_hash, .. }
             | Self::CommitObserved { document_hash, .. }
@@ -714,6 +852,10 @@ impl StateFact {
             | Self::ActorLifecycleObserved { document_hash, .. }
             | Self::AgentRestartPerformed { document_hash, .. }
             | Self::CapabilityProofObserved { document_hash, .. }
+            | Self::StartingActorTimeoutRecorded { document_hash, .. }
+            | Self::StartingActorTimeoutCleared { document_hash, .. }
+            | Self::StartupMissRecorded { document_hash, .. }
+            | Self::StartupMissCleared { document_hash, .. }
             | Self::RoutePaneObserved { document_hash, .. }
             | Self::RouteReadinessObserved { document_hash, .. }
             | Self::DispatchProofObserved { document_hash, .. }
@@ -722,8 +864,6 @@ impl StateFact {
             | Self::RouteSubmitBlocked { document_hash, .. }
             | Self::ProofMarkerObserved { document_hash, .. }
             | Self::ProofMarkerDisproved { document_hash, .. }
-            | Self::PendingResponseCaptured { document_hash, .. }
-            | Self::PendingResponseCleared { document_hash, .. }
             | Self::SupervisorHosting { document_hash, .. }
             | Self::SupervisorRecycleRequested { document_hash, .. }
             | Self::SupervisorRecycleStarted { document_hash, .. }
@@ -734,10 +874,14 @@ impl StateFact {
     pub fn domain(&self) -> StateDomain {
         match self {
             Self::PreflightStarted { .. }
+            | Self::TurnIntentCheckpointed { .. }
             | Self::RealtimeSteeringObserved { .. }
             | Self::ResponseCaptured { .. }
-            | Self::PendingResponseCaptured { .. }
-            | Self::PendingResponseCleared { .. }
+            | Self::CapturedResponseRetired { .. }
+            | Self::CapturedResponseReactivated { .. }
+            | Self::ResponseDraftCheckpointed { .. }
+            | Self::ResponseDraftCleared { .. }
+            | Self::ResponseReplayObserved { .. }
             | Self::WriteApplied { .. }
             | Self::ResponseCellAdded { .. }
             | Self::CommitObserved { .. }
@@ -747,7 +891,14 @@ impl StateFact {
             | Self::DocumentCellMergeAckRecorded { .. }
             | Self::DocumentCellMergeAckCarriedForward { .. } => StateDomain::Closeout,
             Self::BaselineSaved { .. }
+            | Self::DocumentBaselineCheckpointed { .. }
+            | Self::DocumentBaselineCleared { .. }
+            | Self::UndoCheckpointed { .. }
+            | Self::UndoCheckpointCleared { .. }
+            | Self::CrdtRecoveryProjectionCheckpointed { .. }
+            | Self::CrdtRecoveryProjectionCleared { .. }
             | Self::FileWatchChangeObserved { .. }
+            | Self::DocumentDiskWriteObserved { .. }
             | Self::DocumentAuthorityObserved { .. }
             | Self::DocumentWriteDeferred { .. }
             | Self::DocumentWriteConverged { .. } => StateDomain::Document,
@@ -775,8 +926,12 @@ impl StateFact {
             | Self::SupervisorHosting { .. }
             | Self::SupervisorRecycleRequested { .. }
             | Self::SupervisorRecycleStarted { .. }
-            | Self::SupervisorRecycleSettled { .. } => StateDomain::Supervisor,
-            Self::RoutePaneObserved { .. }
+            | Self::SupervisorRecycleSettled { .. }
+            | Self::StartupMissRecorded { .. }
+            | Self::StartupMissCleared { .. } => StateDomain::Supervisor,
+            Self::StartingActorTimeoutRecorded { .. }
+            | Self::StartingActorTimeoutCleared { .. }
+            | Self::RoutePaneObserved { .. }
             | Self::RouteReadinessObserved { .. }
             | Self::DispatchProofObserved { .. }
             | Self::RouteSubmitStarted { .. }
@@ -792,9 +947,19 @@ impl StateFact {
     pub fn label(&self) -> &'static str {
         match self {
             Self::PreflightStarted { .. } => "preflight_started",
+            Self::TurnIntentCheckpointed { .. } => "turn_intent_checkpointed",
             Self::RealtimeSteeringObserved { .. } => "realtime_steering_observed",
             Self::BaselineSaved { .. } => "baseline_saved",
+            Self::DocumentBaselineCheckpointed { .. } => "document_baseline_checkpointed",
+            Self::DocumentBaselineCleared { .. } => "document_baseline_cleared",
+            Self::UndoCheckpointed { .. } => "undo_checkpointed",
+            Self::UndoCheckpointCleared { .. } => "undo_checkpoint_cleared",
+            Self::CrdtRecoveryProjectionCheckpointed { .. } => {
+                "crdt_recovery_projection_checkpointed"
+            }
+            Self::CrdtRecoveryProjectionCleared { .. } => "crdt_recovery_projection_cleared",
             Self::FileWatchChangeObserved { .. } => "file_watch_change_observed",
+            Self::DocumentDiskWriteObserved { .. } => "document_disk_write_observed",
             Self::DocumentAuthorityObserved { .. } => "document_authority_observed",
             Self::DocumentWriteDeferred { .. } => "document_write_deferred",
             Self::DocumentWriteConverged { .. } => "document_write_converged",
@@ -813,8 +978,11 @@ impl StateFact {
             }
             Self::SupervisorHosting { .. } => "supervisor_hosting",
             Self::ResponseCaptured { .. } => "response_captured",
-            Self::PendingResponseCaptured { .. } => "pending_response_captured",
-            Self::PendingResponseCleared { .. } => "pending_response_cleared",
+            Self::CapturedResponseRetired { .. } => "captured_response_retired",
+            Self::CapturedResponseReactivated { .. } => "captured_response_reactivated",
+            Self::ResponseDraftCheckpointed { .. } => "response_draft_checkpointed",
+            Self::ResponseDraftCleared { .. } => "response_draft_cleared",
+            Self::ResponseReplayObserved { .. } => "response_replay_observed",
             Self::WriteApplied { .. } => "write_applied",
             Self::ResponseCellAdded { .. } => "response_cell_added",
             Self::CommitObserved { .. } => "commit_observed",
@@ -843,6 +1011,10 @@ impl StateFact {
             Self::ActorLifecycleObserved { .. } => "actor_lifecycle_observed",
             Self::AgentRestartPerformed { .. } => "agent_restart_performed",
             Self::CapabilityProofObserved { .. } => "capability_proof_observed",
+            Self::StartingActorTimeoutRecorded { .. } => "starting_actor_timeout_recorded",
+            Self::StartingActorTimeoutCleared { .. } => "starting_actor_timeout_cleared",
+            Self::StartupMissRecorded { .. } => "startup_miss_recorded",
+            Self::StartupMissCleared { .. } => "startup_miss_cleared",
             Self::RoutePaneObserved { .. } => "route_pane_observed",
             Self::RouteReadinessObserved { .. } => "route_readiness_observed",
             Self::DispatchProofObserved { .. } => "dispatch_proof_observed",
@@ -1087,6 +1259,20 @@ impl DocumentStateProjection {
 
     fn apply(&mut self, fact: &StateFact) {
         match fact {
+            StateFact::TurnIntentCheckpointed {
+                cycle_id,
+                checkpoint_sequence,
+                state_sha256,
+                state_json,
+                ..
+            } => {
+                self.closeout.turn_intent_checkpoint = Some(TurnIntentCheckpointProjection {
+                    cycle_id: cycle_id.clone(),
+                    checkpoint_sequence: *checkpoint_sequence,
+                    state_sha256: state_sha256.clone(),
+                    state_json: state_json.clone(),
+                });
+            }
             StateFact::BaselineSaved {
                 cycle_id,
                 baseline_hash,
@@ -1099,6 +1285,59 @@ impl DocumentStateProjection {
                     baseline_path: baseline_path.clone(),
                 });
             }
+            StateFact::DocumentBaselineCheckpointed {
+                generation,
+                content_hash,
+                content,
+                ..
+            } => {
+                self.document.merge_baseline_generation = *generation;
+                self.document.merge_baseline = Some(DocumentBaselineProjection {
+                    generation: *generation,
+                    content_hash: content_hash.clone(),
+                    content: content.clone(),
+                });
+            }
+            StateFact::DocumentBaselineCleared { generation, .. } => {
+                self.document.merge_baseline_generation = *generation;
+                self.document.merge_baseline = None;
+            }
+            StateFact::UndoCheckpointed {
+                generation,
+                content_hash,
+                content,
+                ..
+            } => {
+                self.document.undo_checkpoint_generation = *generation;
+                self.document.undo_checkpoint = Some(DocumentBaselineProjection {
+                    generation: *generation,
+                    content_hash: content_hash.clone(),
+                    content: content.clone(),
+                });
+            }
+            StateFact::UndoCheckpointCleared { generation, .. } => {
+                self.document.undo_checkpoint_generation = *generation;
+                self.document.undo_checkpoint = None;
+            }
+            StateFact::CrdtRecoveryProjectionCheckpointed {
+                generation,
+                projection_sha256,
+                projection_base64,
+                lineage,
+                ..
+            } => {
+                self.document.crdt_recovery_projection_generation = *generation;
+                self.document.crdt_recovery_projection = Some(CrdtRecoveryProjection {
+                    generation: *generation,
+                    projection_sha256: projection_sha256.clone(),
+                    projection_base64: projection_base64.clone(),
+                    lineage: lineage.clone(),
+                });
+            }
+            StateFact::CrdtRecoveryProjectionCleared { generation, .. } => {
+                self.document.crdt_recovery_projection_generation = *generation;
+                self.document.crdt_recovery_projection = None;
+            }
             StateFact::FileWatchChangeObserved {
                 path,
                 watch_generation,
@@ -1110,6 +1349,40 @@ impl DocumentStateProjection {
                     watch_generation: *watch_generation,
                     content_hash: content_hash.clone(),
                 });
+            }
+            StateFact::DocumentDiskWriteObserved {
+                generation,
+                content_len,
+                content_hash,
+                write_id,
+                actor,
+                ..
+            } => {
+                let accept = self
+                    .document
+                    .latest_disk_write
+                    .as_ref()
+                    .is_none_or(|current| *generation > current.generation);
+                if accept {
+                    self.document.latest_disk_write = Some(DocumentDiskWriteProjection {
+                        generation: *generation,
+                        content_len: *content_len,
+                        content_hash: content_hash.clone(),
+                        write_id: write_id.clone(),
+                        actor: actor.clone(),
+                    });
+                } else {
+                    self.reject_stale(StateDomain::Document, StateOwner::DocumentWriter);
+                }
+                if self
+                    .closeout
+                    .response_cell
+                    .as_ref()
+                    .is_some_and(|cell| cell.content_hash.eq_ignore_ascii_case(content_hash))
+                {
+                    self.closeout
+                        .prove_write_through(write_pipeline::DocumentWritePhase::DiskProjected);
+                }
             }
             StateFact::DocumentAuthorityObserved {
                 authority,
@@ -1195,6 +1468,15 @@ impl DocumentStateProjection {
                     pending.intent_id == *intent_id && pending.target_hash == *target_hash
                 }) {
                     self.document.pending_write = None;
+                }
+                if self
+                    .closeout
+                    .response_cell
+                    .as_ref()
+                    .is_some_and(|cell| cell.content_hash.eq_ignore_ascii_case(target_hash))
+                {
+                    self.closeout
+                        .prove_write_through(write_pipeline::DocumentWritePhase::DiskProjected);
                 }
                 if self
                     .document
@@ -1404,6 +1686,7 @@ impl DocumentStateProjection {
                 capture_id,
                 response_sha256,
                 response_body,
+                intent_body,
                 file_hash,
                 snapshot_hash,
                 baseline_content,
@@ -1411,6 +1694,12 @@ impl DocumentStateProjection {
             } => {
                 self.closeout
                     .apply_cycle_event(cycle_id, CycleEvent::ResponseCaptured);
+                self.closeout.write_phase =
+                    Some(write_pipeline::DocumentWritePhase::IntentCaptured);
+                self.closeout.captured_response_retired_reason = None;
+                self.closeout.response_draft = None;
+                self.closeout.response_draft_clear_reason =
+                    Some("final_response_captured".to_string());
                 self.closeout.capture_id = Some(capture_id.clone());
                 self.closeout.response_sha256 = Some(response_sha256.clone());
                 if file_hash.is_some() {
@@ -1425,6 +1714,7 @@ impl DocumentStateProjection {
                         capture_id: capture_id.clone(),
                         response_sha256: response_sha256.clone(),
                         response_body: response_body.clone(),
+                        intent_body: intent_body.clone(),
                         file_hash: file_hash
                             .clone()
                             .or_else(|| self.closeout.response_file_hash.clone()),
@@ -1433,61 +1723,134 @@ impl DocumentStateProjection {
                             .or_else(|| self.closeout.response_snapshot_hash.clone()),
                         baseline_content: baseline_content.clone(),
                     });
+                    self.closeout.pending_response = Some(PendingResponseProjection {
+                        cycle_id: cycle_id.clone(),
+                        capture_id: capture_id.clone(),
+                        response_sha256: response_sha256.clone(),
+                        response_body: intent_body.clone().unwrap_or_else(|| response_body.clone()),
+                    });
                 }
             }
-            StateFact::PendingResponseCaptured {
-                cycle_id,
-                capture_id,
-                response_sha256,
-                response_body,
-                ..
-            } => {
-                if self.closeout.cycle_id.as_deref() != Some(cycle_id) {
-                    self.closeout.cycle_id = Some(cycle_id.clone());
-                    self.closeout.phase = Some(CyclePhase::ResponseCaptured);
-                    self.closeout.session_check_passed = false;
-                }
-                self.closeout.capture_id = Some(capture_id.clone());
-                self.closeout.response_sha256 = Some(response_sha256.clone());
-                self.closeout.pending_response = Some(PendingResponseProjection {
-                    cycle_id: cycle_id.clone(),
-                    capture_id: capture_id.clone(),
-                    response_sha256: response_sha256.clone(),
-                    response_body: response_body.clone(),
-                });
-            }
-            StateFact::PendingResponseCleared {
+            StateFact::CapturedResponseRetired {
                 cycle_id,
                 capture_id,
                 reason,
                 ..
             } => {
-                if self.closeout.cycle_id.as_deref() != Some(cycle_id) {
-                    self.closeout.cycle_id = Some(cycle_id.clone());
-                }
-                let pending_matches =
-                    self.closeout
+                if self.closeout.cycle_id.as_deref() == Some(cycle_id)
+                    && self
+                        .closeout
+                        .captured_response
+                        .as_ref()
+                        .is_some_and(|capture| capture.capture_id == *capture_id)
+                {
+                    // Retirement removes this capture from the active closeout
+                    // path, but its payload remains durable evidence. Exact
+                    // false-stale recovery must be able to prove and reactivate
+                    // the same response without consulting a filesystem
+                    // sidecar or recapturing agent output.
+                    self.closeout.captured_response_retired_reason = Some(reason.clone());
+                    if self
+                        .closeout
                         .pending_response
                         .as_ref()
-                        .is_none_or(|pending| {
-                            pending.cycle_id == *cycle_id
-                                && capture_id
-                                    .as_ref()
-                                    .is_none_or(|id| pending.capture_id == *id)
-                        });
-                if pending_matches {
-                    self.closeout.pending_response = None;
-                    self.closeout.pending_response_clear_reason = Some(reason.clone());
+                        .is_some_and(|pending| {
+                            pending.cycle_id == *cycle_id && pending.capture_id == *capture_id
+                        })
+                    {
+                        self.closeout.pending_response = None;
+                        self.closeout.pending_response_clear_reason = Some(reason.clone());
+                    }
+                }
+            }
+            StateFact::CapturedResponseReactivated {
+                cycle_id,
+                capture_id,
+                ..
+            } => {
+                if self.closeout.cycle_id.as_deref() == Some(cycle_id)
+                    && self
+                        .closeout
+                        .captured_response
+                        .as_ref()
+                        .is_some_and(|capture| capture.capture_id == *capture_id)
+                {
+                    self.closeout.captured_response_retired_reason = None;
+                }
+            }
+            StateFact::ResponseDraftCheckpointed {
+                cycle_id,
+                checkpoint_id,
+                checkpoint_count,
+                response_sha256,
+                response_body,
+                file_hash,
+                ..
+            } => {
+                let should_replace = self.closeout.response_draft.as_ref().is_none_or(|draft| {
+                    draft.cycle_id != *cycle_id || *checkpoint_count >= draft.checkpoint_count
+                });
+                if should_replace {
+                    self.closeout.response_draft = Some(ResponseDraftProjection {
+                        cycle_id: cycle_id.clone(),
+                        checkpoint_id: checkpoint_id.clone(),
+                        checkpoint_count: *checkpoint_count,
+                        response_sha256: response_sha256.clone(),
+                        response_body: response_body.clone(),
+                        file_hash: file_hash.clone(),
+                    });
+                }
+            }
+            StateFact::ResponseDraftCleared {
+                cycle_id, reason, ..
+            } => {
+                if self
+                    .closeout
+                    .response_draft
+                    .as_ref()
+                    .is_some_and(|draft| draft.cycle_id == *cycle_id)
+                {
+                    self.closeout.response_draft = None;
+                    self.closeout.response_draft_clear_reason = Some(reason.clone());
+                }
+            }
+            StateFact::ResponseReplayObserved {
+                cycle_id,
+                capture_id,
+                ..
+            } => {
+                if self.closeout.cycle_id.as_deref() == Some(cycle_id)
+                    && self.closeout.capture_id.as_deref() == Some(capture_id)
+                {
+                    self.closeout.capture_replayed = true;
                 }
             }
             StateFact::WriteApplied {
-                cycle_id, patch_id, ..
+                cycle_id,
+                patch_id,
+                file_hash,
+                snapshot_hash,
+                ..
             } => {
                 self.closeout
                     .apply_cycle_event(cycle_id, CycleEvent::WriteApplied);
                 self.closeout.patch_id = patch_id.clone();
                 self.closeout
+                    .prove_write_through(write_pipeline::DocumentWritePhase::CanonicalApplied);
+                if patch_id.as_ref().is_some_and(|patch_id| {
+                    self.transport.patch_terminal_receipt_outcome(patch_id)
+                        == Some(ReceiptOutcome::Applied)
+                }) {
+                    self.closeout
+                        .prove_write_through(write_pipeline::DocumentWritePhase::ReplicaVisible);
+                }
+                self.closeout
                     .clear_pending_response_for_cycle(cycle_id, "write_applied");
+                self.closeout.refresh_capture_content_hashes(
+                    cycle_id,
+                    file_hash.as_deref(),
+                    snapshot_hash.as_deref(),
+                );
             }
             StateFact::ResponseCellAdded {
                 cycle_id,
@@ -1508,18 +1871,33 @@ impl DocumentStateProjection {
                     content_hash: content_hash.clone(),
                     applied: *applied,
                 });
+                if *applied {
+                    self.closeout
+                        .prove_write_through(write_pipeline::DocumentWritePhase::CanonicalApplied);
+                }
                 self.closeout
                     .clear_pending_response_for_cycle(cycle_id, "response_cell_added");
             }
             StateFact::CommitObserved {
-                cycle_id, commit, ..
+                cycle_id,
+                commit,
+                file_hash,
+                snapshot_hash,
+                ..
             } => {
                 self.closeout
                     .apply_cycle_event(cycle_id, CycleEvent::Committed);
                 self.closeout.commit = Some(commit.clone());
+                self.closeout
+                    .prove_write_through(write_pipeline::DocumentWritePhase::Committed);
                 self.closeout.realtime_steering = TurnSteeringProjection::none();
                 self.closeout
                     .clear_pending_response_for_cycle(cycle_id, "committed");
+                self.closeout.refresh_capture_content_hashes(
+                    cycle_id,
+                    file_hash.as_deref(),
+                    snapshot_hash.as_deref(),
+                );
             }
             StateFact::SessionCheckPassed { cycle_id, .. } => {
                 if self.closeout.cycle_id.as_deref() == Some(cycle_id) {
@@ -1630,6 +2008,11 @@ impl DocumentStateProjection {
                 if self.current_generation_matches(StateOwner::EditorIpcBridge, *actor_generation) {
                     self.transport
                         .apply_patch_applied_receipt(patch_id, *actor_generation);
+                    if self.closeout.patch_id.as_deref() == Some(patch_id) {
+                        self.closeout.prove_write_through(
+                            write_pipeline::DocumentWritePhase::ReplicaVisible,
+                        );
+                    }
                 } else {
                     self.reject_stale(StateDomain::Transport, StateOwner::EditorIpcBridge);
                 }
@@ -1821,6 +2204,68 @@ impl DocumentStateProjection {
                     *recycle_epoch,
                     *marked_secs,
                 );
+            }
+            StateFact::StartingActorTimeoutRecorded {
+                pane_id,
+                generation,
+                log_line,
+                ..
+            } => {
+                self.route.starting_actor_timeout = Some(StartingActorTimeoutProjection {
+                    pane_id: pane_id.clone(),
+                    generation: *generation,
+                    log_line: log_line.clone(),
+                });
+            }
+            StateFact::StartingActorTimeoutCleared {
+                pane_id,
+                generation,
+                ..
+            } => {
+                if self
+                    .route
+                    .starting_actor_timeout
+                    .as_ref()
+                    .is_some_and(|timeout| {
+                        timeout.pane_id == *pane_id && timeout.generation == *generation
+                    })
+                {
+                    self.route.starting_actor_timeout = None;
+                }
+            }
+            StateFact::StartupMissRecorded {
+                file,
+                pane_id,
+                session_id,
+                harness,
+                timestamp,
+                origin,
+                cycle_baseline_id,
+                ..
+            } => {
+                self.supervisor.startup_miss = Some(StartupMissProjection {
+                    file: file.clone(),
+                    pane_id: pane_id.clone(),
+                    session_id: session_id.clone(),
+                    harness: harness.clone(),
+                    timestamp: *timestamp,
+                    origin: origin.clone(),
+                    cycle_baseline_id: cycle_baseline_id.clone(),
+                });
+            }
+            StateFact::StartupMissCleared {
+                pane_id,
+                session_id,
+                timestamp,
+                ..
+            } => {
+                if self.supervisor.startup_miss.as_ref().is_some_and(|miss| {
+                    miss.pane_id == *pane_id
+                        && miss.session_id == *session_id
+                        && miss.timestamp == *timestamp
+                }) {
+                    self.supervisor.startup_miss = None;
+                }
             }
             StateFact::RoutePaneObserved {
                 pane_id,
@@ -2112,7 +2557,24 @@ pub struct DocumentProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_baseline: Option<BaselineProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_baseline: Option<DocumentBaselineProjection>,
+    /// Monotonic checkpoint/clear generation, retained even when no baseline is active.
+    #[serde(default)]
+    pub merge_baseline_generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub undo_checkpoint: Option<DocumentBaselineProjection>,
+    /// Monotonic checkpoint/clear generation for undo state.
+    #[serde(default)]
+    pub undo_checkpoint_generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crdt_recovery_projection: Option<CrdtRecoveryProjection>,
+    /// Monotonic checkpoint/clear generation for cold CRDT restart state.
+    #[serde(default)]
+    pub crdt_recovery_projection_generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_file_watch_change: Option<FileWatchChangeProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_disk_write: Option<DocumentDiskWriteProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_authority: Option<DocumentAuthorityProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2224,10 +2686,34 @@ pub struct BaselineProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentBaselineProjection {
+    pub generation: u64,
+    pub content_hash: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CrdtRecoveryProjection {
+    pub generation: u64,
+    pub projection_sha256: String,
+    pub projection_base64: String,
+    pub lineage: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileWatchChangeProjection {
     pub path: String,
     pub watch_generation: u64,
     pub content_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentDiskWriteProjection {
+    pub generation: u64,
+    pub content_len: u64,
+    pub content_hash: String,
+    pub write_id: String,
+    pub actor: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -2645,8 +3131,17 @@ pub struct CloseoutProjection {
     pub cycle_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Newest complete turn-intent checkpoint from the state ledger. Normal
+    /// execution reads this projection; filesystem projections are recovery-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_intent_checkpoint: Option<TurnIntentCheckpointProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<CyclePhase>,
+    /// Monotonic proof frontier for the current immutable response intent.
+    /// Retry/reconnect events never move this state backward or create a new
+    /// intent; stronger durable facts prove the intervening stages in order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub write_phase: Option<write_pipeline::DocumentWritePhase>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2657,6 +3152,14 @@ pub struct CloseoutProjection {
     pub response_snapshot_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub captured_response: Option<CapturedResponseProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_response_retired_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_draft: Option<ResponseDraftProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_draft_clear_reason: Option<String>,
+    #[serde(default)]
+    pub capture_replayed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub patch_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2679,13 +3182,104 @@ pub struct CloseoutProjection {
     pub pending_semantic_merge_acks: Vec<DocumentCellMergeAckProjection>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnIntentCheckpointProjection {
+    pub cycle_id: String,
+    pub checkpoint_sequence: u64,
+    pub state_sha256: String,
+    pub state_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResponseDraftProjection {
+    pub cycle_id: String,
+    pub checkpoint_id: String,
+    pub checkpoint_count: u64,
+    pub response_sha256: String,
+    pub response_body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_hash: Option<String>,
+}
+
 impl CloseoutProjection {
+    fn refresh_capture_content_hashes(
+        &mut self,
+        cycle_id: &str,
+        file_hash: Option<&str>,
+        snapshot_hash: Option<&str>,
+    ) {
+        if self.cycle_id.as_deref() != Some(cycle_id) {
+            return;
+        }
+        if let Some(file_hash) = file_hash {
+            self.response_file_hash = Some(file_hash.to_string());
+        }
+        if let Some(snapshot_hash) = snapshot_hash {
+            self.response_snapshot_hash = Some(snapshot_hash.to_string());
+        }
+        if let Some(capture) = self.captured_response.as_mut()
+            && capture.cycle_id == cycle_id
+        {
+            if let Some(file_hash) = file_hash {
+                capture.file_hash = Some(file_hash.to_string());
+            }
+            if let Some(snapshot_hash) = snapshot_hash {
+                capture.snapshot_hash = Some(snapshot_hash.to_string());
+            }
+        }
+    }
+
+    fn prove_write_through(&mut self, target: write_pipeline::DocumentWritePhase) {
+        use write_pipeline::{DocumentWriteEvent as Event, DocumentWritePhase as Phase};
+
+        let mut current = self.write_phase.unwrap_or(Phase::IntentCaptured);
+        while current < target {
+            let event = match current {
+                Phase::IntentCaptured => Event::CanonicalApplied,
+                Phase::CanonicalApplied => Event::ReplicaAccepted,
+                Phase::ReplicaAccepted => Event::ReplicaVisible,
+                Phase::ReplicaVisible => Event::DiskProjected,
+                Phase::DiskProjected => Event::Committed,
+                Phase::Committed => break,
+            };
+            let Some(next) = write_pipeline::transition_document_write(&current, &event) else {
+                break;
+            };
+            current = next;
+        }
+        self.write_phase = Some(current);
+    }
+
     fn apply_cycle_event(&mut self, cycle_id: &str, event: CycleEvent) {
         if self.cycle_id.as_deref() != Some(cycle_id) || matches!(event, CycleEvent::StartPreflight)
         {
             if self.cycle_id.as_deref() != Some(cycle_id) {
+                // Every field below is evidence about one immutable turn intent.
+                // Carrying any of it into a new cycle creates a projection whose
+                // phase names the new cycle while its proofs still describe the
+                // old one.
+                // The checkpoint event is appended before the typed transition
+                // event, so it may already describe this new cycle. Keep it;
+                // `load` validates the checkpoint cycle against the projection.
+                self.session_id = None;
+                self.write_phase = None;
+                self.capture_id = None;
+                self.response_sha256 = None;
+                self.response_file_hash = None;
+                self.response_snapshot_hash = None;
+                self.captured_response = None;
                 self.pending_response = None;
                 self.pending_response_clear_reason = None;
+                self.captured_response_retired_reason = None;
+                self.response_draft = None;
+                self.response_draft_clear_reason = None;
+                self.capture_replayed = false;
+                self.patch_id = None;
+                self.response_cell = None;
+                self.commit = None;
+                self.session_check_passed = false;
+                self.tracked_work_maintenance_required = None;
+                self.abandoned_reason = None;
             }
             self.cycle_id = Some(cycle_id.to_string());
             self.phase = Some(CyclePhase::PreflightStarted);
@@ -2694,6 +3288,7 @@ impl CloseoutProjection {
             self.response_snapshot_hash = None;
             self.captured_response = None;
             self.response_cell = None;
+            self.write_phase = None;
             self.realtime_steering = TurnSteeringProjection::none();
             self.pending_semantic_merge_acks.clear();
         }
@@ -2771,6 +3366,8 @@ pub struct CapturedResponseProjection {
     pub capture_id: String,
     pub response_sha256: String,
     pub response_body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent_body: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3125,6 +3722,20 @@ pub struct SupervisorProjection {
     pub owners: BTreeMap<StateOwner, OwnerProjection>,
     #[serde(default)]
     pub recycle: SupervisorRecycleProjection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup_miss: Option<StartupMissProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartupMissProjection {
+    pub file: String,
+    pub pane_id: String,
+    pub session_id: String,
+    pub harness: String,
+    pub timestamp: u64,
+    pub origin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cycle_baseline_id: Option<String>,
 }
 
 impl SupervisorProjection {
@@ -3217,8 +3828,7 @@ pub enum SupervisorRecyclePhase {
     Settled,
     /// A recycle/restart has been REQUESTED (stale binary, `admin recycle`,
     /// install fan-out, or a wedge trigger) but the `execve` has not begun. This
-    /// is the "restart intent" state — previously tracked only by the on-disk
-    /// `recycle_request` marker, now modelled on the lazily statechart so route
+    /// is the "restart intent" state, modelled on the Lazily statechart so route
     /// callers and the editor projection see the pending restart durably. The
     /// request `reason` carries the cause (e.g. `stale_binary`).
     Requested,
@@ -3270,13 +3880,14 @@ pub fn transition_supervisor_recycle(
     event: &SupervisorRecycleEvent,
 ) -> Option<SupervisorRecyclePhase> {
     match event {
-        // A pending recycle/restart request only arms from the settled (idle)
-        // state. Ignore a duplicate request or one that races an already-in-flight
-        // recycle so the chart never walks backwards from `InFlight` to `Requested`
-        // (which would let a stale request re-arm a recycle already underway).
+        // A pending request may be refreshed while still requested, but never
+        // walks an in-flight recycle backwards. The refresh updates its durable
+        // heartbeat without creating a second authority.
         SupervisorRecycleEvent::Requested => match current {
-            SupervisorRecyclePhase::Settled => Some(SupervisorRecyclePhase::Requested),
-            _ => None,
+            SupervisorRecyclePhase::Settled | SupervisorRecyclePhase::Requested => {
+                Some(SupervisorRecyclePhase::Requested)
+            }
+            SupervisorRecyclePhase::InFlight => None,
         },
         SupervisorRecycleEvent::Started => Some(SupervisorRecyclePhase::InFlight),
         SupervisorRecycleEvent::Settled => Some(SupervisorRecyclePhase::Settled),
@@ -3313,6 +3924,15 @@ pub struct RouteProjection {
     pub submit: RouteSubmitProjection,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub dispatch_proofs: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starting_actor_timeout: Option<StartingActorTimeoutProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartingActorTimeoutProjection {
+    pub pane_id: String,
+    pub generation: u64,
+    pub log_line: String,
 }
 
 impl RouteProjection {
@@ -4124,6 +4744,7 @@ mod tests {
             capture_id: "cycle-1".into(),
             response_sha256: "response-1".into(),
             response_body: Some("response body".into()),
+            intent_body: None,
             file_hash: None,
             snapshot_hash: None,
             baseline_content: None,
@@ -4214,6 +4835,8 @@ mod tests {
             document_hash: "doc-steering".into(),
             cycle_id: "cycle-1".into(),
             commit: "abc123".into(),
+            file_hash: None,
+            snapshot_hash: None,
         });
         assert!(!projection.closeout.realtime_steering.is_present());
 
@@ -4514,20 +5137,43 @@ mod tests {
         ));
         ledger.append(state_event(
             "p2",
-            StateFact::PendingResponseCaptured {
+            StateFact::ResponseCaptured {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 capture_id: "capture-1".into(),
                 response_sha256: "sha-response".into(),
-                response_body: "### Re: topic — gpt-5\n\nDone.\n".into(),
+                response_body: Some("### Re: topic — gpt-5\n\nDone.\n".into()),
+                intent_body: Some(
+                    "<!-- agent:patch:exchange -->\nDone.\n<!-- /agent:patch:exchange -->\n<!-- agent:patch:backlog -->\n- [ ] [#bpcontract] Preserve every pending change.\n<!-- /agent:patch:backlog -->\n"
+                        .into(),
+                ),
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
             },
         ));
 
         let projected = ledger.project_document("doc-a").unwrap();
+        let captured = projected
+            .closeout
+            .captured_response
+            .as_ref()
+            .expect("canonical response proof");
+        assert_eq!(captured.response_body, "### Re: topic — gpt-5\n\nDone.\n");
+        assert!(
+            captured
+                .intent_body
+                .as_deref()
+                .is_some_and(|intent| intent.contains("[#bpcontract]")),
+            "canonical response proof and replayable full intent must remain distinct"
+        );
         let pending = projected.closeout.pending_response.unwrap();
         assert_eq!(pending.cycle_id, "cycle-1");
         assert_eq!(pending.capture_id, "capture-1");
-        assert_eq!(pending.response_body, "### Re: topic — gpt-5\n\nDone.\n");
+        assert_eq!(
+            pending.response_body,
+            "<!-- agent:patch:exchange -->\nDone.\n<!-- /agent:patch:exchange -->\n<!-- agent:patch:backlog -->\n- [ ] [#bpcontract] Preserve every pending change.\n<!-- /agent:patch:backlog -->\n"
+        );
 
         ledger.append(state_event(
             "p3",
@@ -4535,6 +5181,8 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 patch_id: Some("patch-1".into()),
+                file_hash: None,
+                snapshot_hash: None,
             },
         ));
         let projected = ledger.project_document("doc-a").unwrap();
@@ -4559,12 +5207,16 @@ mod tests {
         ));
         ledger.append(state_event(
             "cell-pending",
-            StateFact::PendingResponseCaptured {
+            StateFact::ResponseCaptured {
                 document_hash: "doc-cell".into(),
                 cycle_id: "cycle-cell".into(),
                 capture_id: "capture-cell".into(),
                 response_sha256: "response-sha".into(),
-                response_body: "### Re: cell — gpt-5\n\nDone.\n".into(),
+                response_body: Some("### Re: cell — gpt-5\n\nDone.\n".into()),
+                intent_body: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
             },
         ));
         let receipt = state_event(
@@ -4623,6 +5275,7 @@ mod tests {
                 capture_id: "capture-1".into(),
                 response_sha256: "sha-response".into(),
                 response_body: Some("### Re: topic - gpt-5\n\nDone.\n".into()),
+                intent_body: None,
                 file_hash: Some("file-sha".into()),
                 snapshot_hash: Some("snapshot-sha".into()),
                 baseline_content: Some("captured baseline\n".into()),
@@ -4634,6 +5287,8 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 patch_id: Some("patch-1".into()),
+                file_hash: None,
+                snapshot_hash: None,
             },
         ));
         ledger.append(state_event(
@@ -4642,6 +5297,8 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 commit: "head-sha".into(),
+                file_hash: None,
+                snapshot_hash: None,
             },
         ));
 
@@ -4664,7 +5321,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_response_clear_projection_survives_without_capture_event() {
+    fn write_applied_records_pending_response_clear_without_capture_event() {
         let mut ledger = EventLedger::new();
         ledger.append(state_event(
             "p1",
@@ -4681,6 +5338,8 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 patch_id: Some("patch-1".into()),
+                file_hash: None,
+                snapshot_hash: None,
             },
         ));
 
@@ -4689,23 +5348,6 @@ mod tests {
         assert_eq!(
             projected.closeout.pending_response_clear_reason.as_deref(),
             Some("write_applied")
-        );
-
-        let mut explicit_clear = EventLedger::new();
-        explicit_clear.append(state_event(
-            "clear",
-            StateFact::PendingResponseCleared {
-                document_hash: "doc-a".into(),
-                cycle_id: "cycle-1".into(),
-                capture_id: None,
-                reason: "repair_cleanup".into(),
-            },
-        ));
-        let projected = explicit_clear.project_document("doc-a").unwrap();
-        assert_eq!(projected.closeout.cycle_id.as_deref(), Some("cycle-1"));
-        assert_eq!(
-            projected.closeout.pending_response_clear_reason.as_deref(),
-            Some("repair_cleanup")
         );
     }
 
@@ -4796,6 +5438,8 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 commit: "abc123".into(),
+                file_hash: None,
+                snapshot_hash: None,
             },
         ));
         ledger.append(state_event(
@@ -4840,7 +5484,7 @@ mod tests {
     }
 
     #[test]
-    fn closeout_recovery_evidence_projects_sidecar_recovery_payload() {
+    fn closeout_recovery_evidence_projects_recovery_payload() {
         let mut ledger = EventLedger::new();
         ledger.append(state_event(
             "cycle-1-recovery-evidence",
@@ -4983,6 +5627,7 @@ mod tests {
                 capture_id: "capture-1".into(),
                 response_sha256: "sha-response".into(),
                 response_body: None,
+                intent_body: None,
                 file_hash: None,
                 snapshot_hash: None,
                 baseline_content: None,
@@ -5028,6 +5673,8 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 patch_id: Some("patch-1".into()),
+                file_hash: None,
+                snapshot_hash: None,
             },
         ));
         ledger.append(state_event(
@@ -5036,6 +5683,8 @@ mod tests {
                 document_hash: "doc-a".into(),
                 cycle_id: "cycle-1".into(),
                 commit: "abc123".into(),
+                file_hash: None,
+                snapshot_hash: None,
             },
         ));
         ledger.append(state_event(
@@ -5107,6 +5756,39 @@ mod tests {
     }
 
     #[test]
+    fn document_disk_write_projection_is_monotonic_under_reordered_replay() {
+        let newer = StateFact::DocumentDiskWriteObserved {
+            document_hash: "doc-write".into(),
+            generation: 20,
+            content_len: 200,
+            content_hash: "hash-new".into(),
+            write_id: "write-new".into(),
+            actor: "agent".into(),
+        };
+        let older = StateFact::DocumentDiskWriteObserved {
+            document_hash: "doc-write".into(),
+            generation: 10,
+            content_len: 100,
+            content_hash: "hash-old".into(),
+            write_id: "write-old".into(),
+            actor: "agent".into(),
+        };
+
+        let mut projection = DocumentStateProjection::new("doc-write");
+        projection.apply_fact(&newer);
+        projection.apply_fact(&older);
+        projection.apply_fact(&newer);
+
+        let latest = projection
+            .document
+            .latest_disk_write
+            .expect("disk write projection");
+        assert_eq!(latest.generation, 20);
+        assert_eq!(latest.content_hash, "hash-new");
+        assert_eq!(projection.rejected_stale_events.len(), 2);
+    }
+
+    #[test]
     fn cross_editor_live_ipc_projection_summaries_match_bridge_contract() {
         let mut events = Vec::new();
         events.extend(socket_apply_events(
@@ -5148,7 +5830,7 @@ mod tests {
             "doc-vscode-file",
             "vscode-file-patch",
             41,
-            "file_ipc_timeout",
+            "cpc_delivery_timeout",
         ));
         events.extend(route_started_events(
             "vscode-file",
@@ -5225,7 +5907,7 @@ mod tests {
         );
         assert_eq!(
             vscode_file.transport.last_unproven_reason.as_deref(),
-            Some("file_ipc_timeout")
+            Some("cpc_delivery_timeout")
         );
         assert_eq!(
             vscode_file.route.readiness,
@@ -5240,6 +5922,128 @@ mod tests {
         assert_eq!(
             vscode_file.projection_summary().compact(),
             "route=dispatch_proven pane=%13 transport=vscode-file-patch:applied proof_markers=1"
+        );
+    }
+
+    #[test]
+    fn starting_actor_timeout_is_a_clearable_route_projection() {
+        let events = vec![
+            state_event(
+                "timeout-recorded",
+                StateFact::StartingActorTimeoutRecorded {
+                    document_hash: "doc-a".into(),
+                    pane_id: "%15".into(),
+                    generation: 9,
+                    log_line: "actor still starting".into(),
+                },
+            ),
+            state_event(
+                "stale-timeout-clear",
+                StateFact::StartingActorTimeoutCleared {
+                    document_hash: "doc-a".into(),
+                    pane_id: "%old".into(),
+                    generation: 8,
+                },
+            ),
+            state_event(
+                "timeout-cleared",
+                StateFact::StartingActorTimeoutCleared {
+                    document_hash: "doc-a".into(),
+                    pane_id: "%15".into(),
+                    generation: 9,
+                },
+            ),
+        ];
+
+        let recorded = StateBackboneProjection::from_events(&events[..1]);
+        assert_eq!(
+            recorded
+                .document("doc-a")
+                .unwrap()
+                .route
+                .starting_actor_timeout,
+            Some(StartingActorTimeoutProjection {
+                pane_id: "%15".into(),
+                generation: 9,
+                log_line: "actor still starting".into(),
+            })
+        );
+
+        let stale_clear = StateBackboneProjection::from_events(&events[..2]);
+        assert!(
+            stale_clear
+                .document("doc-a")
+                .unwrap()
+                .route
+                .starting_actor_timeout
+                .is_some(),
+            "a stale clear must not erase a newer route timeout record"
+        );
+
+        let cleared = StateBackboneProjection::from_events(&events);
+        assert_eq!(
+            cleared
+                .document("doc-a")
+                .unwrap()
+                .route
+                .starting_actor_timeout,
+            None
+        );
+    }
+
+    #[test]
+    fn startup_miss_clear_is_identity_cas_and_cannot_erase_newer_owner() {
+        let recorded = state_event(
+            "startup-miss-recorded",
+            StateFact::StartupMissRecorded {
+                document_hash: "doc-a".into(),
+                file: "/project/session.md".into(),
+                pane_id: "%15".into(),
+                session_id: "session-new".into(),
+                harness: "claude".into(),
+                timestamp: 20,
+                origin: "routed_trigger".into(),
+                cycle_baseline_id: Some("cycle-20".into()),
+            },
+        );
+        let stale_clear = state_event(
+            "startup-miss-stale-clear",
+            StateFact::StartupMissCleared {
+                document_hash: "doc-a".into(),
+                pane_id: "%14".into(),
+                session_id: "session-old".into(),
+                timestamp: 19,
+            },
+        );
+        let matching_clear = state_event(
+            "startup-miss-matching-clear",
+            StateFact::StartupMissCleared {
+                document_hash: "doc-a".into(),
+                pane_id: "%15".into(),
+                session_id: "session-new".into(),
+                timestamp: 20,
+            },
+        );
+
+        let stale = StateBackboneProjection::from_events([&recorded, &stale_clear]);
+        assert!(
+            stale
+                .document("doc-a")
+                .unwrap()
+                .supervisor
+                .startup_miss
+                .is_some()
+        );
+
+        let cleared =
+            StateBackboneProjection::from_events([&recorded, &stale_clear, &matching_clear]);
+        assert!(
+            cleared
+                .document("doc-a")
+                .unwrap()
+                .supervisor
+                .startup_miss
+                .is_none()
         );
     }
 

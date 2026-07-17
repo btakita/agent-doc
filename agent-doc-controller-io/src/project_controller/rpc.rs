@@ -27,6 +27,7 @@ const CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT: Duration = Duration::from_secs(
 const CONTROLLER_CRDT_REVISION_READ_TIMEOUT: Duration = Duration::from_millis(750);
 const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
 const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
+const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
 /// A CPC-owned git commit (barrier + stage + commit + boundary reposition) can run
 /// several seconds — well past the 5s default RPC timeout — so `commit_document`
 /// gets a generous ceiling.
@@ -37,14 +38,6 @@ const CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT: Duration = Duration::from_secs(35);
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
     connect_path(&socket_path(project_root))
-}
-
-fn controller_model_pressure_paths(project_root: &Path) -> (PathBuf, PathBuf) {
-    let runtime = project_root.join(".agent-doc/runtime");
-    (
-        runtime.join("controller-model-pressure-until"),
-        runtime.join("controller-model-pressure.lock"),
-    )
 }
 
 fn controller_model_pressure_now_secs() -> u64 {
@@ -59,97 +52,61 @@ fn controller_model_pressure_jitter_secs(doc: &Path) -> u64 {
     u64::from_str_radix(hash.get(..2).unwrap_or("00"), 16).unwrap_or(0) % 8
 }
 
-fn read_controller_model_pressure_deadline(project_root: &Path) -> Option<u64> {
-    let (state, _) = controller_model_pressure_paths(project_root);
-    let raw = match std::fs::read_to_string(&state) {
-        Ok(raw) => raw,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(err) => {
-            eprintln!(
-                "[agent-doc] failed to read controller model pressure marker {}: {err}",
-                state.display()
-            );
-            return None;
-        }
-    };
-    match raw.trim().parse() {
-        Ok(deadline) => Some(deadline),
-        Err(err) => {
-            eprintln!(
-                "[agent-doc] invalid controller model pressure marker {}: {err}",
-                state.display()
-            );
-            None
-        }
-    }
+fn read_controller_model_pressure_deadline(project_root: &Path) -> Result<Option<u64>> {
+    let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
+    agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+        &conn,
+        CONTROLLER_MODEL_PRESSURE_STATE_KEY,
+    )?
+    .map(|raw| {
+        raw.parse::<u64>()
+            .context("invalid controller model pressure deadline in state.db")
+    })
+    .transpose()
 }
 
 fn record_controller_model_pressure(project_root: &Path, doc: &Path, source: &str, error: &str) {
-    let (state, lock_path) = controller_model_pressure_paths(project_root);
-    let Some(runtime) = state.parent() else {
-        eprintln!(
-            "[agent-doc] controller model pressure marker has no runtime parent: {}",
-            state.display()
-        );
-        return;
-    };
-    if let Err(err) = std::fs::create_dir_all(runtime) {
-        eprintln!(
-            "[agent-doc] failed to create controller model pressure runtime {}: {err}",
-            runtime.display()
-        );
-        return;
-    }
-    let lock = match std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&lock_path)
-    {
-        Ok(lock) => lock,
+    let mut conn = match agent_doc_sqlite::state_store::open_state_db(project_root) {
+        Ok(conn) => conn,
         Err(err) => {
-            eprintln!(
-                "[agent-doc] failed to open controller model pressure lock {}: {err}",
-                lock_path.display()
-            );
+            eprintln!("[agent-doc] failed to open state.db for controller model pressure: {err:#}");
             return;
         }
     };
-    if let Err(err) = fs2::FileExt::lock_exclusive(&lock) {
-        eprintln!(
-            "[agent-doc] failed to lock controller model pressure marker {}: {err}",
-            lock_path.display()
-        );
-        return;
-    }
+    let tx = match conn.transaction() {
+        Ok(tx) => tx,
+        Err(err) => {
+            eprintln!("[agent-doc] failed to begin controller model pressure transaction: {err}");
+            return;
+        }
+    };
     let now = controller_model_pressure_now_secs();
     let deadline = now.saturating_add(CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs());
-    let existing_deadline = read_controller_model_pressure_deadline(project_root).unwrap_or(0);
+    let existing_deadline = agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+        &tx,
+        CONTROLLER_MODEL_PRESSURE_STATE_KEY,
+    )
+    .ok()
+    .flatten()
+    .and_then(|raw| raw.parse::<u64>().ok())
+    .unwrap_or(0);
     // Do not rewrite/log the same project-wide marker on every foreground
     // retry. Refresh only after half its cooldown has elapsed.
     let refresh_after = now.saturating_add(CONTROLLER_MODEL_PRESSURE_COOLDOWN.as_secs() / 2);
     if existing_deadline > refresh_after {
-        if let Err(err) = fs2::FileExt::unlock(&lock) {
-            eprintln!(
-                "[agent-doc] failed to unlock controller model pressure marker {}: {err}",
-                lock_path.display()
-            );
-        }
         return;
     }
     let retained_deadline = existing_deadline.max(deadline);
-    if let Err(err) = std::fs::write(&state, format!("{retained_deadline}\n")) {
-        eprintln!(
-            "[agent-doc] failed to write controller model pressure marker {}: {err}",
-            state.display()
-        );
-    }
-    if let Err(err) = fs2::FileExt::unlock(&lock) {
-        eprintln!(
-            "[agent-doc] failed to unlock controller model pressure marker {}: {err}",
-            lock_path.display()
-        );
+    if let Err(err) = agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+        &tx,
+        CONTROLLER_MODEL_PRESSURE_STATE_KEY,
+        &retained_deadline.to_string(),
+        now.saturating_mul(1000),
+    )
+    .and_then(|()| tx.commit().map_err(Into::into))
+    {
+        eprintln!("[agent-doc] failed to persist controller model pressure in state.db: {err:#}");
+        return;
     }
     agent_doc_ops_log_io::log_op(
         doc,
@@ -165,20 +122,27 @@ fn record_controller_model_pressure(project_root: &Path, doc: &Path, source: &st
 }
 
 fn clear_expired_controller_model_pressure(project_root: &Path) {
-    let Some(deadline) = read_controller_model_pressure_deadline(project_root) else {
-        return;
+    let deadline = match read_controller_model_pressure_deadline(project_root) {
+        Ok(Some(deadline)) => deadline,
+        Ok(None) => return,
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] failed to read controller model pressure from state.db: {err:#}"
+            );
+            return;
+        }
     };
     if controller_model_pressure_now_secs() < deadline {
         return;
     }
-    let (state, _) = controller_model_pressure_paths(project_root);
-    if let Err(err) = std::fs::remove_file(&state)
-        && err.kind() != std::io::ErrorKind::NotFound
-    {
-        eprintln!(
-            "[agent-doc] failed to clear controller model pressure marker {}: {err}",
-            state.display()
-        );
+    let result = agent_doc_sqlite::state_store::open_state_db(project_root).and_then(|conn| {
+        agent_doc_sqlite::state_store::clear_project_runtime_state_in_db(
+            &conn,
+            CONTROLLER_MODEL_PRESSURE_STATE_KEY,
+        )
+    });
+    if let Err(err) = result {
+        eprintln!("[agent-doc] failed to clear controller model pressure from state.db: {err:#}");
     }
 }
 
@@ -189,8 +153,13 @@ pub fn controller_model_pressure_cooldown_active_for_doc(doc: &Path) -> bool {
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(doc) else {
         return false;
     };
-    let Some(deadline) = read_controller_model_pressure_deadline(&project_root) else {
-        return false;
+    let deadline = match read_controller_model_pressure_deadline(&project_root) {
+        Ok(Some(deadline)) => deadline,
+        Ok(None) => return false,
+        Err(err) => {
+            eprintln!("[agent-doc] controller model pressure state unavailable: {err:#}");
+            return true;
+        }
     };
     controller_model_pressure_now_secs()
         < deadline.saturating_add(controller_model_pressure_jitter_secs(doc))
@@ -636,54 +605,9 @@ pub fn authoritative_actor_binding(
     project_root: &Path,
     file: &Path,
 ) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
-    if is_same_project_controller_pid(project_root, std::process::id()) {
-        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
-            project_root,
-            &file.to_string_lossy(),
-        );
-        return load_actor_record(project_root, &document_id);
-    }
-
-    #[cfg(any(test, feature = "test-support"))]
-    {
-        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
-            project_root,
-            &file.to_string_lossy(),
-        );
-        load_actor_record(project_root, &document_id)
-    }
-
-    #[cfg(not(any(test, feature = "test-support")))]
-    {
-        let response: ActorBindingResponse = request_controller_with_transport_retry(
-            project_root,
-            ControllerRequest {
-                command: "actor_binding".to_string(),
-                file: Some(file.to_path_buf()),
-                session_id: None,
-                pane_id: None,
-                window_id: None,
-                generation: None,
-                state: None,
-                caller: None,
-                reason: None,
-                supervisor_pid: None,
-                supervisor_socket: None,
-                command_kind: None,
-                diagnostic_payload: None,
-            },
-            file,
-        )?;
-        match response.status {
-            ActorBindingStatus::Bound => response.record.map(Some).with_context(|| {
-                format!(
-                    "project controller command `actor_binding` returned bound status without record for {}",
-                    file.display()
-                )
-            }),
-            ActorBindingStatus::NotFound => Ok(None),
-        }
-    }
+    let document_id =
+        agent_doc_session_actor_io::canonical_document_id_in(project_root, &file.to_string_lossy());
+    load_actor_record(project_root, &document_id)
 }
 
 pub fn authorize_dispatch(
@@ -1693,6 +1617,12 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
 /// an unreachable controller, a missing lease, or any stat error yields `None` so the
 /// read-only check can never block a cycle.
 pub fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
+    if let Some(message) = host_supervisor_stale_warning_for_doc(file) {
+        return Some(message);
+    }
+    if !reliable_sync_editor_live_for_file(file) {
+        return None;
+    }
     let project_root = agent_doc_project_root_io::project_root_containing(file)?;
     if let Ok(controller_status) = status(&project_root) {
         let current_binary = current_binary_identity().ok();
@@ -1702,7 +1632,7 @@ pub fn stale_supervisor_warning_for_doc(file: &Path) -> Option<String> {
             return Some(message);
         }
     }
-    host_supervisor_stale_warning_for_doc(file)
+    None
 }
 
 /// Detect a stale route-owned supervisor at a turn stage and unconditionally
@@ -3181,10 +3111,31 @@ pub fn record_visible_write_commit_candidate_for_file(
 ) -> Result<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
+    record_visible_write_commit_candidate_for_project_file(
+        &project_root,
+        file,
+        patch_id,
+        candidate_content,
+        source,
+    )
+}
+
+/// Record a visible-write receipt in the caller's explicit project ledger.
+///
+/// Editor ABIs already carry the owning project root. Keeping that root through
+/// the receipt boundary prevents an out-of-tree document or test fixture from
+/// accidentally resolving against the controller process's current project.
+pub fn record_visible_write_commit_candidate_for_project_file(
+    project_root: &Path,
+    file: &Path,
+    patch_id: &str,
+    candidate_content: &str,
+    source: &str,
+) -> Result<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let commit_candidate_hash = visible_write_commit_candidate_hash(candidate_content);
-    let model_revision = next_visible_write_model_revision(&project_root, &canonical);
+    let model_revision = next_visible_write_model_revision(project_root, &canonical);
     let payload = VisibleWriteCommitCandidatePayload {
         patch_id: patch_id.to_string(),
         model_revision,
@@ -3194,7 +3145,7 @@ pub fn record_visible_write_commit_candidate_for_file(
         source: source.to_string(),
     };
     record_visible_write_commit_candidate_direct(
-        &project_root,
+        project_root,
         &canonical,
         &document_hash,
         &payload,
@@ -3578,7 +3529,7 @@ fn controller_current_text_error_allows_projection_recovery(err: &anyhow::Error)
     controller_transport_drop_is_retryable(err)
         || message.contains("timed out after")
         || (message.contains("document model startup/reconciliation failed")
-            && message.contains("publish-live-buffer request over editor_ipc failed"))
+            && message.contains("Lazily-current request over editor_ipc failed"))
 }
 
 fn recover_current_text_from_local_projection_after_controller_error(
@@ -4263,46 +4214,6 @@ pub fn adopt_editor_text_via_controller_model_for_doc(
     Ok(result.changed)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ControllerDiskChangeReconcileResult {
-    pub outcome: Option<agent_doc_document_realtime::crdt_relay::DiskChangeOutcome>,
-}
-
-pub fn consume_disk_change_reconcile_via_controller_model_for_doc(
-    doc: &Path,
-) -> Result<Option<agent_doc_document_realtime::crdt_relay::DiskChangeOutcome>> {
-    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
-        agent_doc_ops_log_io::log_op(
-            doc,
-            &format!(
-                "controller_crdt_disk_change_reconcile_skipped file={} reason=no_project_root",
-                doc.display(),
-            ),
-        );
-        return Ok(None);
-    };
-    let result: ControllerDiskChangeReconcileResult = request_controller(
-        &project_root,
-        ControllerRequest {
-            command: "crdt_disk_change_reconcile".to_string(),
-            file: Some(canonical),
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: None,
-            caller: None,
-            reason: None,
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: None,
-        },
-    )?;
-    Ok(result.outcome)
-}
-
 pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
@@ -4648,25 +4559,6 @@ pub fn route_disk_change_signal_via_controller_model_for_doc(
         },
     )?;
     watch_action_from_payload(&result.action)
-}
-
-fn handle_crdt_disk_change_reconcile_rpc(
-    bootstrap: &ControllerBootstrap,
-    request: ControllerRequest,
-) -> Result<ControllerDiskChangeReconcileResult> {
-    let requested_file = request_file(&request)?;
-    let canonical = canonical_controller_request_file(bootstrap, &requested_file);
-    let outcome = agent_doc_crdt_relay_io::consume_disk_change_reconcile(&canonical)?;
-    if let Some(outcome) = outcome {
-        agent_doc_ops_log_io::log_op(
-            &canonical,
-            &format!(
-                "controller_crdt_disk_change_consumed file={} outcome={outcome:?}",
-                canonical.display(),
-            ),
-        );
-    }
-    Ok(ControllerDiskChangeReconcileResult { outcome })
 }
 
 fn handle_crdt_commit_barrier_rpc(
@@ -5246,7 +5138,7 @@ fn observe_realtime_steering_after_replica_update(
     if !phase.is_open() {
         return Ok(false);
     }
-    let Some(baseline) = agent_doc_snapshot_io::load(canonical)? else {
+    let Some(baseline) = agent_doc_snapshot_io::load_document_baseline(canonical)? else {
         return Ok(false);
     };
     let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } =
@@ -6045,19 +5937,55 @@ pub fn recycle_supervisors_all_projects_force(force: bool) -> Result<(usize, usi
     Ok((marked, skipped))
 }
 
-/// `#cdylib-reload-broadcast` — best-effort count of editor-connected project
-/// roots the global reload-lib broadcast could ALSO signal directly. There is no
-/// global registry of IDE-hosted IPC listeners, so this is intentionally a lower
-/// bound: it walks `/proc` for controller-serving project roots (the same
-/// enumeration [`recycle_controllers_all_projects_force`] uses) and keeps only
-/// those carrying an `.agent-doc/patches/` directory — the marker that an editor
-/// plugin is wired for that project. The written broadcast file remains the
-/// authoritative fan-out that every plugin watches.
-pub fn editor_broadcast_project_root_count() -> usize {
-    crate::process::controller_project_roots(std::process::id())
-        .into_iter()
-        .filter(|root| root.join(".agent-doc").join("patches").is_dir())
-        .count()
+/// Result of a typed reload-library fan-out to live editor registrations.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReloadLibraryFanoutReport {
+    pub projects: usize,
+    pub endpoints: usize,
+    pub delivered: usize,
+    pub failed: usize,
+}
+
+/// Send one PID-scoped `reload_library` intent to every live editor process.
+///
+/// Registrations come from the reliable-sync Lazily projection. A process that
+/// has several open documents receives one intent per project, not one per
+/// document. Failures are counted so install can remain best-effort without
+/// inventing a filesystem broadcast path.
+pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutReport {
+    let mut report = ReloadLibraryFanoutReport::default();
+    for project_root in crate::process::controller_project_roots(std::process::id()) {
+        if !project_root.join(".agent-doc").is_dir() {
+            continue;
+        }
+        report.projects += 1;
+        let Ok(status) = reliable_sync_status(&project_root) else {
+            report.failed += 1;
+            continue;
+        };
+        let endpoints = status
+            .registrations
+            .into_iter()
+            .map(|registration| (registration.pid, registration.editor_id))
+            .collect::<std::collections::BTreeSet<_>>();
+        report.endpoints += endpoints.len();
+        for (pid, editor_id) in endpoints {
+            if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, pid) {
+                report.failed += 1;
+                continue;
+            }
+            match agent_doc_ipc_io::send_reload_library_to_editor(
+                &project_root,
+                pid,
+                &editor_id,
+                lib_version,
+            ) {
+                Ok(true) => report.delivered += 1,
+                Ok(false) | Err(_) => report.failed += 1,
+            }
+        }
+    }
+    report
 }
 
 /// M4 (#stuckhandoff2) — client handoff drop-guard. The two-phase handoff is
@@ -7920,10 +7848,6 @@ pub(crate) fn handle_request_locked(
         "crdt_text_adopt" => {
             controller_envelope(handle_crdt_text_adopt_rpc(&bootstrap_snapshot, request))
         }
-        "crdt_disk_change_reconcile" => controller_envelope(handle_crdt_disk_change_reconcile_rpc(
-            &bootstrap_snapshot,
-            request,
-        )),
         "crdt_commit_barrier" => {
             controller_envelope(handle_crdt_commit_barrier_rpc(&bootstrap_snapshot, request))
         }
@@ -8031,13 +7955,12 @@ pub struct ControllerReliableSyncResponse {
     pub document_hash: String,
     /// Ack cursor the pushing plugin uses to prune / resume its outbox.
     pub ack_through: u64,
-    /// Whether the Lazily liveness plane consumed the frame
-    /// (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN`).
-    pub dual_run: bool,
+    /// Lazily accepted the frame into the authoritative plane.
+    pub accepted: bool,
 }
 
 /// Client side of the `reliable_sync` RPC: push one liveness envelope to the
-/// controller and return its response (ack cursor + dual-run flag).
+/// controller and return its response (ack cursor + acceptance).
 ///
 /// The plugin-push endpoint's [`agent_doc_reliable_sync_io::push::LivenessPushTransport`]
 /// wraps this. `envelope` is an [`agent_doc_reliable_sync_io::encode_envelope`] value;
@@ -8153,12 +8076,6 @@ fn controller_liveness_plane()
     agent_doc_reliable_sync_io::global_liveness_plane()
 }
 
-fn reliable_sync_database_path(project_root: &Path) -> PathBuf {
-    project_root
-        .join(".agent-doc")
-        .join("reliable_sync_outbox.db")
-}
-
 fn restored_reliable_sync_projects() -> &'static std::sync::Mutex<BTreeSet<PathBuf>> {
     static RESTORED: std::sync::LazyLock<std::sync::Mutex<BTreeSet<PathBuf>>> =
         std::sync::LazyLock::new(|| std::sync::Mutex::new(BTreeSet::new()));
@@ -8180,8 +8097,9 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
         return Ok(());
     }
 
-    let snapshot =
-        agent_doc_sqlite::reliable_sync_inbox::load(&reliable_sync_database_path(project_root))?;
+    let snapshot = agent_doc_sqlite::reliable_sync_inbox::load(
+        &agent_doc_sqlite::state_store::state_db_path(project_root),
+    )?;
     let batches = snapshot
         .liveness
         .iter()
@@ -8214,7 +8132,7 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
             .filter(|pid| {
                 u32::try_from(*pid)
                     .ok()
-                    .is_none_or(|pid| !agent_doc_plugin_owner::plugin_owner_pid_is_live(pid))
+                    .is_none_or(|pid| !agent_doc_reliable_sync_io::process_pid_is_live(pid))
             })
             .collect::<Vec<_>>()
     };
@@ -8262,8 +8180,6 @@ pub fn crdt_authority_for_file(
 /// live-buffer model participates in this response.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ControllerReliableSyncStatusResponse {
-    /// Whether the reliable-sync plane is active.
-    pub dual_run: bool,
     /// Document hashes the plane derives as open (from pushed liveness frames).
     pub plane_open_docs: Vec<String>,
     /// Each plane-open hash resolved through a live editor registration.
@@ -8284,7 +8200,6 @@ pub struct ControllerReliableSyncStatusResponse {
 fn handle_reliable_sync_status(
     _bootstrap: &ControllerBootstrap,
 ) -> Result<ControllerReliableSyncStatusResponse> {
-    let dual_run = agent_doc_reliable_sync_io::dual_run_enabled();
     let plane = controller_liveness_plane()
         .lock()
         .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
@@ -8330,7 +8245,6 @@ fn handle_reliable_sync_status(
             .map(|path| agent_doc_hash::document_id_for_path(std::path::Path::new(&path)))
             .collect();
     Ok(ControllerReliableSyncStatusResponse {
-        dual_run,
         plane_open_docs: plane_open.into_iter().collect(),
         plane_open_paths,
         plane_live_docs: plane_live.into_iter().collect(),
@@ -8366,14 +8280,29 @@ pub fn reliable_sync_status(project_root: &Path) -> Result<ControllerReliableSyn
 pub fn live_editor_registrations_for_file(
     file: &Path,
 ) -> Result<Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>> {
+    // Registration diagnostics are meaningful only when Lazily says an editor
+    // replica is actually attached. Starting or polling a project controller
+    // to prove an already-detached document adds a 45s retry ladder to repair
+    // and can steal focus from unrelated operator activity.
+    if !agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached() {
+        return Ok(Vec::new());
+    }
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .ok_or_else(|| anyhow::anyhow!("no agent-doc project root for {}", file.display()))?;
     let document_hash = agent_doc_hash::document_id_for_path(file);
-    let mut registrations = reliable_sync_status(&project_root)?
-        .registrations
-        .into_iter()
-        .filter(|registration| registration.document_hash == document_hash)
-        .collect::<Vec<_>>();
+    let mut registrations = if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
+        controller_liveness_plane()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("embedded relay liveness plane mutex poisoned"))?
+            .projection()
+            .live_registrations(&document_hash)
+    } else {
+        reliable_sync_status(&project_root)?
+            .registrations
+            .into_iter()
+            .filter(|registration| registration.document_hash == document_hash)
+            .collect::<Vec<_>>()
+    };
     registrations.sort();
     Ok(registrations)
 }
@@ -8395,11 +8324,8 @@ pub fn live_editor_registration_for_file(
 /// Feed the shadow liveness plane the controller's own OS-exit-watcher death
 /// signal (`#s4b`, Phase 3C): a dead editor `pid` writes `Alive{value:false}` at a
 /// fresh stamp, so the derived live-doc aggregate cascades every doc that pid held
-/// to not-live. No-op only when reliable sync is explicitly disabled.
+/// to not-live.
 pub fn record_reliable_sync_editor_exit(project_root: &Path, pid: u64) {
-    if !agent_doc_reliable_sync_io::dual_run_enabled() {
-        return;
-    }
     let wall_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_micros() as u64)
@@ -8424,7 +8350,7 @@ pub fn record_reliable_sync_editor_exit(project_root: &Path, pid: u64) {
     };
     let source_key = format!("controller-alive:{pid}");
     if let Err(error) = agent_doc_sqlite::reliable_sync_inbox::record_local_liveness(
-        &reliable_sync_database_path(project_root),
+        &agent_doc_sqlite::state_store::state_db_path(project_root),
         &source_key,
         wall_time,
         &ops_json,
@@ -8446,9 +8372,7 @@ pub fn record_reliable_sync_editor_exit(project_root: &Path, pid: u64) {
 ///
 /// The plugin sends the 3A `reliable_sync` envelope (from
 /// `agent_doc_reliable_sync_io::encode_envelope`) as the `diagnostic_payload` and
-/// the outbox epoch as `generation`. When reliable sync is explicitly disabled,
-/// the frame is not consumed and the ack is `0`, leaving the document without a
-/// live-editor authority claim. Otherwise the frame folds into the
+/// the outbox epoch as `generation`. The frame folds into the
 /// `ControllerLivenessPlane` and the returned
 /// `ack_through` lets the plugin outbox prune / resume from the frontier.
 fn handle_reliable_sync(
@@ -8467,13 +8391,6 @@ fn handle_reliable_sync(
         })??;
     let epoch = request.generation.unwrap_or(0);
 
-    if !agent_doc_reliable_sync_io::dual_run_enabled() {
-        return Ok(ControllerReliableSyncResponse {
-            document_hash,
-            ack_through: 0,
-            dual_run: false,
-        });
-    }
     let liveness_ops =
         agent_doc_reliable_sync_io::liveness::decode_liveness_frame(&message).transpose()?;
 
@@ -8548,7 +8465,7 @@ fn handle_reliable_sync(
         .map(serde_json::to_string)
         .transpose()?;
     let ack_through = agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
-        &reliable_sync_database_path(project_root),
+        &agent_doc_sqlite::state_store::state_db_path(project_root),
         &document_hash,
         epoch,
         liveness_ops_json.as_deref(),
@@ -8566,7 +8483,7 @@ fn handle_reliable_sync(
     Ok(ControllerReliableSyncResponse {
         document_hash,
         ack_through,
-        dual_run: true,
+        accepted: true,
     })
 }
 
@@ -11592,11 +11509,8 @@ pub(crate) fn repair_projection_from_controller_state(
     _document_id: Option<&str>,
 ) -> Result<()> {
     match projection {
-        "all" => {
-            emit_layout_projection(project_root)?;
-        }
-        "layout" | "last_layout" | "last_layout.json" => {
-            emit_layout_projection(project_root)?;
+        "all" | "layout" => {
+            load_layout_state(project_root)?;
         }
         other => anyhow::bail!("unknown projection repair target: {other}"),
     }
@@ -12552,7 +12466,7 @@ mod tests {
     }
 
     #[test]
-    fn controller_model_pressure_marker_quiets_all_project_idle_watchers() {
+    fn controller_model_pressure_state_quiets_all_project_idle_watchers() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let first = dir.path().join("first.md");
@@ -12570,30 +12484,33 @@ mod tests {
 
         assert!(controller_model_pressure_cooldown_active_for_doc(&first));
         assert!(controller_model_pressure_cooldown_active_for_doc(&second));
-        let deadline = read_controller_model_pressure_deadline(dir.path()).unwrap();
+        let deadline = read_controller_model_pressure_deadline(dir.path())
+            .unwrap()
+            .unwrap();
         assert!(deadline >= controller_model_pressure_now_secs());
     }
 
     #[test]
-    fn controller_model_pressure_marker_is_not_extended_on_every_retry() {
+    fn controller_model_pressure_state_is_not_extended_on_every_retry() {
         let dir = tempfile::TempDir::new().unwrap();
-        let runtime = dir.path().join(".agent-doc/runtime");
-        std::fs::create_dir_all(&runtime).unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "# doc\n").unwrap();
         let retained = controller_model_pressure_now_secs() + 25;
-        std::fs::write(
-            runtime.join("controller-model-pressure-until"),
-            format!("{retained}\n"),
+        let conn = agent_doc_sqlite::state_store::open_state_db(dir.path()).unwrap();
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &conn,
+            CONTROLLER_MODEL_PRESSURE_STATE_KEY,
+            &retained.to_string(),
+            controller_model_pressure_now_secs() * 1000,
         )
         .unwrap();
 
         record_controller_model_pressure(dir.path(), &doc, "retry", "still busy");
 
         assert_eq!(
-            read_controller_model_pressure_deadline(dir.path()),
+            read_controller_model_pressure_deadline(dir.path()).unwrap(),
             Some(retained),
-            "an active marker must not churn disk and ops.log on every retry"
+            "active state must not churn the ledger and ops.log on every retry"
         );
     }
 
@@ -13374,7 +13291,7 @@ mod tests {
         ));
 
         let stale_editor_publish = anyhow::anyhow!(
-            "project controller command `crdt_current_text` failed: document model startup/reconciliation failed for /tmp/tasks/doc.md: publish-live-buffer request over editor_ipc failed: IPC receipt rejected: {{\"type\":\"receipt\",\"status\":\"rejected\"}}; disk remained non-authoritative and was not read as a fallback"
+            "project controller command `crdt_current_text` failed: document model startup/reconciliation failed for /tmp/tasks/doc.md: Lazily-current request over editor_ipc failed: IPC receipt rejected: {{\"type\":\"receipt\",\"status\":\"rejected\"}}; disk remained non-authoritative and was not read as a fallback"
         );
         assert!(controller_current_text_error_allows_projection_recovery(
             &stale_editor_publish
@@ -13472,7 +13389,12 @@ mod tests {
         prior
             .apply_local(editor, 0, 0, "controller projection")
             .unwrap();
-        agent_doc_snapshot_io::save_crdt(&canonical, &prior.projection_bytes()).unwrap();
+        agent_doc_snapshot_io::checkpoint_crdt_recovery_projection(
+            &canonical,
+            &prior.projection_bytes(),
+            "test:controller-current-text",
+        )
+        .unwrap();
 
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
@@ -15384,11 +15306,7 @@ mod tests {
             request.reason,
             agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
         );
-        let replica_event_path = agent_doc_fs::crdt_replica_event_path_for(&file).unwrap();
-        let replica_event: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(replica_event_path).unwrap()).unwrap();
-        assert_eq!(replica_event["reason"], "ack_recovery_force_refresh");
-        assert_eq!(replica_event["targets"], 0);
+        assert!(!dir.path().join(".agent-doc/crdt-replica-events").exists());
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("stale_editor_replica_pcp_recycle_requested")
@@ -16424,34 +16342,14 @@ mod tests {
     }
 
     #[test]
-    fn reliable_sync_handler_explicit_off_is_noop_ack_zero() {
+    fn reliable_sync_handler_folds_frame() {
         let _env = reliable_sync_env_lock();
-        // Explicitly disabled: frame not consumed and no live-editor claim is made.
-        unsafe {
-            std::env::set_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV, "0");
-        }
-        let resp = handle_reliable_sync(Path::new("."), reliable_sync_open_request("docwire-off"))
-            .expect("handler ok");
-        assert!(!resp.dual_run);
-        assert_eq!(resp.ack_through, 0);
-        assert_eq!(resp.document_hash, "docwire-off");
-        unsafe {
-            std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
-        }
-    }
-
-    #[test]
-    fn reliable_sync_handler_default_on_folds_frame() {
-        let _env = reliable_sync_env_lock();
-        // Env unset: the authoritative plane folds the inbound liveness frame and
-        // advances the durable ACK cursor.
-        unsafe {
-            std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
-        }
+        // The authoritative plane folds the inbound liveness frame and advances
+        // the durable ACK cursor; there is no disabled compatibility mode.
         let dir = tempfile::tempdir().unwrap();
         let resp = handle_reliable_sync(dir.path(), reliable_sync_open_request("docwire-on"))
             .expect("handler ok");
-        assert!(resp.dual_run);
+        assert!(resp.accepted);
         assert_eq!(resp.document_hash, "docwire-on");
         // Folded ⇒ the per-channel ack cursor advanced past the initial 0.
         assert!(resp.ack_through >= 1);
@@ -16460,9 +16358,6 @@ mod tests {
     #[test]
     fn reliable_sync_ack_is_receiver_durable_and_stale_delivery_cannot_regress_it() {
         let _env = reliable_sync_env_lock();
-        unsafe {
-            std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
-        }
         let dir = tempfile::tempdir().unwrap();
         let document_hash = "docwire-durable-receiver";
         let mut newest = reliable_sync_open_request(document_hash);
@@ -16475,9 +16370,10 @@ mod tests {
         let replay = handle_reliable_sync(dir.path(), stale).expect("stale replay");
         assert_eq!(replay.ack_through, 12, "receiver ACK must be monotone");
 
-        let snapshot =
-            agent_doc_sqlite::reliable_sync_inbox::load(&reliable_sync_database_path(dir.path()))
-                .expect("durable receiver snapshot");
+        let snapshot = agent_doc_sqlite::reliable_sync_inbox::load(
+            &agent_doc_sqlite::state_store::state_db_path(dir.path()),
+        )
+        .expect("durable receiver snapshot");
         let mut recycled = agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::recycle();
         for record in &snapshot.liveness {
             let ops: Vec<agent_doc_reliable_sync_io::liveness::LivenessOp> =
@@ -16496,9 +16392,6 @@ mod tests {
     #[test]
     fn cold_authority_reader_rehydrates_receiver_journal_without_a_lease() {
         let _env = reliable_sync_env_lock();
-        unsafe {
-            std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
-        }
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("session.md");
@@ -16514,7 +16407,7 @@ mod tests {
             tag: "durable-open".into(),
         }];
         agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
-            &reliable_sync_database_path(dir.path()),
+            &agent_doc_sqlite::state_store::state_db_path(dir.path()),
             &document_hash,
             4,
             Some(&serde_json::to_string(&ops).unwrap()),
@@ -16533,9 +16426,6 @@ mod tests {
         let _env = reliable_sync_env_lock();
         use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
         use agent_doc_reliable_sync_io::liveness::{LivenessOp, encode_liveness_frame};
-        unsafe {
-            std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
-        }
         // Seed the process-global plane with an Open for a specific path's hash.
         let live_path = "/tmp/agent-doc-authority-test/open-doc.md";
         let live_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(live_path));
@@ -16563,35 +16453,14 @@ mod tests {
     }
 
     #[test]
-    fn crdt_authority_for_file_disabled_has_no_live_editor_claim() {
-        let _env = reliable_sync_env_lock();
-        use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
-        // Explicitly disabled: the plane makes no live-editor claim, so the
-        // document resolves as GitAuthoritative without consulting a sidecar.
-        unsafe {
-            std::env::set_var(agent_doc_reliable_sync_io::AUTHORITY_ENV, "0");
-        }
-        assert_eq!(
-            crdt_authority_for_file("/tmp/agent-doc-authority-test/untracked.md"),
-            CrdtAuthority::GitAuthoritative
-        );
-        unsafe {
-            std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
-        }
-    }
-
-    #[test]
     fn commit_document_via_controller_is_none_for_headless_document() {
         let _env = reliable_sync_env_lock();
         use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
         // `#cpc-commit`: a headless document has no live editor authority to defer
         // to, so the CLI commits locally — `commit_document_via_controller` must
         // short-circuit to `Ok(None)` WITHOUT touching a controller socket or
-        // launching one. Disable the reliable-sync plane so a never-tracked path
+        // launching one. A fresh temp path is absent from Lazily liveness and
         // deterministically resolves as GitAuthoritative.
-        unsafe {
-            std::env::set_var(agent_doc_reliable_sync_io::AUTHORITY_ENV, "0");
-        }
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("headless.md");
         std::fs::write(&doc, "# doc\n").unwrap();
@@ -16601,17 +16470,11 @@ mod tests {
         );
         assert_eq!(commit_document_via_controller(&doc, false).unwrap(), None);
         assert_eq!(commit_document_via_controller(&doc, true).unwrap(), None);
-        unsafe {
-            std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
-        }
     }
 
     #[test]
     fn commit_document_consumes_the_stream_that_proved_controller_liveness() {
         let _env = reliable_sync_env_lock();
-        unsafe {
-            std::env::remove_var(agent_doc_reliable_sync_io::AUTHORITY_ENV);
-        }
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
         let doc = dir.path().join("atomic-controller-stream.md");
@@ -16677,9 +16540,6 @@ mod tests {
     #[test]
     fn reliable_sync_status_projects_plane_open_set_without_sidecar_oracle() {
         let _env = reliable_sync_env_lock();
-        unsafe {
-            std::env::remove_var(agent_doc_reliable_sync_io::DUAL_RUN_ENV);
-        }
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let bootstrap = ControllerBootstrap {
@@ -16701,7 +16561,6 @@ mod tests {
         )
         .expect("fold");
         let status = handle_reliable_sync_status(&bootstrap).expect("status ok");
-        assert!(status.dual_run);
         assert!(
             status
                 .plane_open_docs

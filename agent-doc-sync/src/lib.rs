@@ -7,8 +7,6 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
-
 pub const SYNC_FRONTMATTER_STATUS_PREFIX: &str = "[agent-doc sync] malformed frontmatter";
 pub const SAFE_PASSIVE_SYNC_LOCK_SKIPPED_MARKER: &str =
     "[sync] safe_passive_sync_lock_contention_retry";
@@ -156,19 +154,6 @@ pub fn layout_state_scope_root(col_args: &[String], focus: Option<&str>, cwd: &P
     sync_scope_root(col_args, focus, cwd).unwrap_or_else(|| cwd.to_path_buf())
 }
 
-/// Resolve `.agent-doc/last_layout.json` for this sync invocation.
-pub fn layout_state_path(col_args: &[String], focus: Option<&str>, cwd: &Path) -> PathBuf {
-    layout_state_scope_root(col_args, focus, cwd)
-        .join(".agent-doc")
-        .join("last_layout.json")
-}
-
-/// Resolve `.agent-doc/sync-prune-state.json` for this sync invocation.
-pub fn sync_prune_state_path(col_args: &[String], focus: Option<&str>, cwd: &Path) -> PathBuf {
-    let base = sync_scope_root(col_args, focus, cwd).unwrap_or_else(|| cwd.to_path_buf());
-    base.join(".agent-doc").join("sync-prune-state.json")
-}
-
 pub fn latency_budget_status(elapsed: Duration, budget: Duration) -> &'static str {
     if elapsed >= budget {
         "over_budget"
@@ -209,10 +194,6 @@ pub fn safe_passive_lock_contention_message(elapsed: Duration, budget: Duration)
     )
 }
 
-pub fn safe_passive_prune_cleanup_throttle() -> Duration {
-    Duration::from_secs(2)
-}
-
 pub fn duration_millis_saturating(duration: Duration) -> u64 {
     duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
@@ -224,7 +205,7 @@ pub fn epoch_millis_now() -> u64 {
         .unwrap_or(0)
 }
 
-pub fn sanitize_stamp_component(value: &str) -> String {
+pub fn sanitize_coordination_scope_component(value: &str) -> String {
     value
         .chars()
         .map(|c| {
@@ -237,26 +218,15 @@ pub fn sanitize_stamp_component(value: &str) -> String {
         .collect()
 }
 
-pub fn sync_repair_stamp_filename(server_socket: Option<&str>, session_name: &str) -> String {
-    let socket = sanitize_stamp_component(server_socket.unwrap_or("default"));
-    let session = sanitize_stamp_component(session_name);
-    format!("sync-repair-{socket}-{session}.stamp")
-}
-
-/// Resolve the destructive repair throttle stamp path for a server+session.
-///
-/// Missing `.agent-doc/` means there is no durable sync state directory for this
-/// process root, so callers should skip throttling instead of inventing a path.
-pub fn sync_repair_stamp_path(
-    cwd: &Path,
+/// Stable `state.db` key for the destructive-repair throttle shared by one tmux
+/// server/session pair.
+pub fn destructive_repair_throttle_state_key(
     server_socket: Option<&str>,
     session_name: &str,
-) -> Option<PathBuf> {
-    let dir = cwd.join(".agent-doc");
-    if !dir.is_dir() {
-        return None;
-    }
-    Some(dir.join(sync_repair_stamp_filename(server_socket, session_name)))
+) -> String {
+    let socket = sanitize_coordination_scope_component(server_socket.unwrap_or("default"));
+    let session = sanitize_coordination_scope_component(session_name);
+    format!("sync_destructive_repair:{socket}:{session}")
 }
 
 pub fn rename_debounce_expired(age: Duration, ttl: Duration) -> bool {
@@ -356,56 +326,6 @@ pub fn registry_relative_file_path(project_root: &Path, canonical_file: &Path) -
         .strip_prefix(project_root)
         .map(|path| path.to_string_lossy().to_string())
         .unwrap_or_else(|_| canonical_file.to_string_lossy().to_string())
-}
-
-pub fn sync_prune_fingerprint(col_args: &[String], window: Option<&str>) -> String {
-    serde_json::json!({
-        "window": window.unwrap_or(""),
-        "columns": col_args,
-    })
-    .to_string()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct SyncPruneState {
-    pub fingerprint: String,
-    pub last_full_cleanup_ms: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyncPruneStateUpdate {
-    pub state: SyncPruneState,
-    pub should_write: bool,
-}
-
-pub fn sync_prune_state_update(
-    raw_state: Option<&str>,
-    col_args: &[String],
-    window: Option<&str>,
-    now_ms: u64,
-    throttle_ms: u64,
-) -> SyncPruneStateUpdate {
-    let fingerprint = sync_prune_fingerprint(col_args, window);
-    let parsed = raw_state.and_then(|raw| serde_json::from_str::<SyncPruneState>(raw).ok());
-    let fresh_unchanged = parsed.as_ref().is_some_and(|state| {
-        state.fingerprint == fingerprint
-            && now_ms.saturating_sub(state.last_full_cleanup_ms) < throttle_ms
-    });
-
-    if fresh_unchanged {
-        SyncPruneStateUpdate {
-            state: parsed.expect("fresh_unchanged requires parsed state"),
-            should_write: false,
-        }
-    } else {
-        SyncPruneStateUpdate {
-            state: SyncPruneState {
-                fingerprint,
-                last_full_cleanup_ms: now_ms,
-            },
-            should_write: true,
-        }
-    }
 }
 
 /// Return drift sessions that should be closed, excluding the canonical session
@@ -606,7 +526,7 @@ pub fn plan_window_index_normalization(
 pub fn effective_sync_columns(
     col_args: &[String],
     saved_layout: &[String],
-    layout_state_path: &Path,
+    layout_state_root: &Path,
 ) -> anyhow::Result<Vec<String>> {
     if !col_args.is_empty() {
         return Ok(col_args.to_vec());
@@ -614,8 +534,8 @@ pub fn effective_sync_columns(
 
     if saved_layout.iter().all(|col| col.trim().is_empty()) {
         anyhow::bail!(
-            "no sync columns provided and no recorded layout exists at {}",
-            layout_state_path.display()
+            "no sync columns provided and no recorded layout exists in state.db for {}",
+            layout_state_root.display()
         );
     }
 
@@ -766,34 +686,10 @@ mod tests {
     }
 
     #[test]
-    fn layout_state_path_uses_shared_sync_scope_root() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let root = tmp.path();
-        let child = root.join("src/sample-app");
-        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-        std::fs::create_dir_all(child.join(".agent-doc")).unwrap();
-        std::fs::create_dir_all(root.join("tasks")).unwrap();
-        std::fs::create_dir_all(child.join("tasks")).unwrap();
-
-        let root_doc = root.join("tasks/root.md");
-        let child_doc = child.join("tasks/child.md");
-        std::fs::write(&root_doc, "---\nagent_doc_session: root\n---\n").unwrap();
-        std::fs::write(&child_doc, "---\nagent_doc_session: child\n---\n").unwrap();
-
-        let layout_path = layout_state_path(
-            &[format!("{},{}", root_doc.display(), child_doc.display())],
-            None,
-            root,
-        );
-        assert_eq!(layout_path, root.join(".agent-doc/last_layout.json"));
-    }
-
-    #[test]
     fn effective_sync_columns_fall_back_to_recorded_layout() {
         let saved_layout = vec!["left.md".to_string(), "right.md".to_string()];
-        let cols =
-            effective_sync_columns(&[], &saved_layout, Path::new(".agent-doc/last_layout.json"))
-                .expect("recorded layout should satisfy a no-col sync");
+        let cols = effective_sync_columns(&[], &saved_layout, Path::new("."))
+            .expect("recorded layout should satisfy a no-col sync");
         assert_eq!(cols, saved_layout);
     }
 
@@ -888,61 +784,27 @@ mod tests {
     }
 
     #[test]
-    fn sanitize_stamp_component_replaces_path_separators() {
+    fn sanitize_coordination_scope_component_replaces_path_separators() {
         assert_eq!(
-            sanitize_stamp_component("/tmp/socket:name"),
+            sanitize_coordination_scope_component("/tmp/socket:name"),
             "_tmp_socket_name"
         );
-        assert_eq!(sanitize_stamp_component("safe-name_1"), "safe-name_1");
-    }
-
-    #[test]
-    fn sync_repair_stamp_filename_includes_sanitized_socket_and_session() {
         assert_eq!(
-            sync_repair_stamp_filename(Some("/tmp/socket:name"), "agent doc/session"),
-            "sync-repair-_tmp_socket_name-agent_doc_session.stamp"
-        );
-        assert_eq!(
-            sync_repair_stamp_filename(None, "agent-doc"),
-            "sync-repair-default-agent-doc.stamp"
+            sanitize_coordination_scope_component("safe-name_1"),
+            "safe-name_1"
         );
     }
 
     #[test]
-    fn sync_repair_stamp_path_uses_default_socket_under_agent_doc_dir() {
-        let temp = tempfile::tempdir().unwrap();
-        std::fs::create_dir(temp.path().join(".agent-doc")).unwrap();
-
+    fn destructive_repair_throttle_state_key_includes_socket_and_session() {
         assert_eq!(
-            sync_repair_stamp_path(temp.path(), None, "agent-doc"),
-            Some(
-                temp.path()
-                    .join(".agent-doc")
-                    .join("sync-repair-default-agent-doc.stamp")
-            )
+            destructive_repair_throttle_state_key(Some("/tmp/socket:name"), "agent doc/session"),
+            "sync_destructive_repair:_tmp_socket_name:agent_doc_session"
         );
-    }
-
-    #[test]
-    fn sync_repair_stamp_path_sanitizes_custom_socket_and_session() {
-        let temp = tempfile::tempdir().unwrap();
-        std::fs::create_dir(temp.path().join(".agent-doc")).unwrap();
-
         assert_eq!(
-            sync_repair_stamp_path(temp.path(), Some("/tmp/socket:name"), "agent doc/session"),
-            Some(
-                temp.path()
-                    .join(".agent-doc")
-                    .join("sync-repair-_tmp_socket_name-agent_doc_session.stamp")
-            )
+            destructive_repair_throttle_state_key(None, "agent-doc"),
+            "sync_destructive_repair:default:agent-doc"
         );
-    }
-
-    #[test]
-    fn sync_repair_stamp_path_returns_none_without_agent_doc_dir() {
-        let temp = tempfile::tempdir().unwrap();
-
-        assert_eq!(sync_repair_stamp_path(temp.path(), None, "agent-doc"), None);
     }
 
     #[test]
@@ -1081,43 +943,6 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 31% used
             registry_relative_file_path(Path::new("/repo"), Path::new("/other/doc.md")),
             "/other/doc.md"
         );
-    }
-
-    #[test]
-    fn sync_prune_fingerprint_includes_window_and_columns() {
-        let cols = vec!["left.md".to_string(), "right.md".to_string()];
-        let fingerprint = sync_prune_fingerprint(&cols, Some("@1"));
-        assert!(fingerprint.contains("@1"), "{fingerprint}");
-        assert!(fingerprint.contains("left.md"), "{fingerprint}");
-        assert!(fingerprint.contains("right.md"), "{fingerprint}");
-    }
-
-    #[test]
-    fn sync_prune_state_update_skips_write_for_recent_same_layout() {
-        let cols = vec!["left.md".to_string(), "right.md".to_string()];
-        let initial = sync_prune_state_update(None, &cols, Some("@1"), 1_000, 2_000);
-        assert!(initial.should_write);
-        let raw = serde_json::to_string(&initial.state).unwrap();
-
-        let next = sync_prune_state_update(Some(&raw), &cols, Some("@1"), 1_500, 2_000);
-        assert!(!next.should_write);
-        assert_eq!(next.state, initial.state);
-    }
-
-    #[test]
-    fn sync_prune_state_update_rewrites_on_layout_change_or_expiry() {
-        let cols = vec!["left.md".to_string(), "right.md".to_string()];
-        let initial = sync_prune_state_update(None, &cols, Some("@1"), 1_000, 2_000);
-        let raw = serde_json::to_string(&initial.state).unwrap();
-
-        let changed_cols = vec!["left.md".to_string()];
-        let changed = sync_prune_state_update(Some(&raw), &changed_cols, Some("@1"), 1_500, 2_000);
-        assert!(changed.should_write);
-        assert_eq!(changed.state.last_full_cleanup_ms, 1_500);
-
-        let expired = sync_prune_state_update(Some(&raw), &cols, Some("@1"), 3_000, 2_000);
-        assert!(expired.should_write);
-        assert_eq!(expired.state.last_full_cleanup_ms, 3_000);
     }
 
     #[test]

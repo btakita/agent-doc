@@ -238,52 +238,47 @@ pub struct LivePluginGenerationStatus {
 /// Resolve the latest live registration for each editor instance. A plugin
 /// restart may occur after preflight; the newer registration is the authority
 /// for replay/ACK recovery and supersedes the turn-start diagnostic.
-pub fn live_plugin_generation_statuses_from_snapshots(
-    snapshots: &[agent_doc_debounce::LiveBufferSnapshot],
+pub fn live_plugin_generation_statuses_from_registrations(
+    registrations: &[agent_doc_reliable_sync_io::liveness::EditorRegistration],
     expected_for_kind: impl Fn(&str) -> Option<&'static str>,
 ) -> Vec<LivePluginGenerationStatus> {
-    let mut latest: HashMap<(String, String), &agent_doc_debounce::LiveBufferSnapshot> =
-        HashMap::new();
-    for snapshot in snapshots {
-        let (Some(kind), Some(running)) = (
-            snapshot.editor_kind.as_deref(),
-            snapshot.editor_version.as_deref(),
-        ) else {
-            continue;
-        };
+    let mut latest: HashMap<
+        (String, String),
+        &agent_doc_reliable_sync_io::liveness::EditorRegistration,
+    > = HashMap::new();
+    for registration in registrations {
+        let kind = registration.editor_kind.as_str();
+        let running = registration.editor_version.as_str();
         if expected_for_kind(kind).is_none() {
             continue;
         }
-        let key = (
-            kind.to_ascii_lowercase(),
-            snapshot.editor_id.clone().unwrap_or_default(),
-        );
+        let key = (kind.to_ascii_lowercase(), registration.editor_id.clone());
         let replace = latest.get(&key).is_none_or(|current| {
             agent_doc_workflow::capture::decide_plugin_generation_refresh(
                 agent_doc_workflow::capture::PluginGenerationRefreshEvidence {
-                    preflight_generation: current.timestamp_ms,
-                    live_generation: snapshot.timestamp_ms,
+                    preflight_generation: u128::from(current.timestamp_ms),
+                    live_generation: u128::from(registration.timestamp_ms),
                     live_registration_observed: true,
                 },
             ) == agent_doc_workflow::capture::PluginGenerationRefreshDecision::AdoptLive
         });
         if replace {
-            latest.insert(key, snapshot);
+            latest.insert(key, registration);
         }
         let _ = running;
     }
     let mut statuses = latest
         .into_values()
-        .filter_map(|snapshot| {
-            let kind = snapshot.editor_kind.as_deref()?;
-            let running = snapshot.editor_version.as_deref()?;
+        .filter_map(|registration| {
+            let kind = registration.editor_kind.as_str();
+            let running = registration.editor_version.as_str();
             let expected = expected_for_kind(kind)?;
             Some(LivePluginGenerationStatus {
-                editor_id: snapshot.editor_id.clone(),
+                editor_id: Some(registration.editor_id.clone()),
                 kind: kind.to_string(),
                 running: running.to_string(),
                 expected: expected.to_string(),
-                timestamp_ms: snapshot.timestamp_ms,
+                timestamp_ms: u128::from(registration.timestamp_ms),
                 stale: plugin_version_is_older(running, expected),
             })
         })
@@ -297,21 +292,10 @@ pub fn live_plugin_generation_statuses_from_snapshots(
 }
 
 pub fn live_plugin_generation_statuses(file: &Path) -> Vec<LivePluginGenerationStatus> {
-    agent_doc_controller_io::project_controller::live_editor_registrations_for_file(file)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|registration| {
-            let expected = expected_plugin_version(&registration.editor_kind)?;
-            Some(LivePluginGenerationStatus {
-                editor_id: Some(registration.editor_id),
-                kind: registration.editor_kind,
-                stale: plugin_version_is_older(&registration.editor_version, expected),
-                running: registration.editor_version,
-                expected: expected.to_string(),
-                timestamp_ms: u128::from(registration.timestamp_ms),
-            })
-        })
-        .collect()
+    let registrations =
+        agent_doc_controller_io::project_controller::live_editor_registrations_for_file(file)
+            .unwrap_or_default();
+    live_plugin_generation_statuses_from_registrations(&registrations, expected_plugin_version)
 }
 
 /// Emit replay-time generation evidence. This deliberately runs after preflight
@@ -368,16 +352,18 @@ pub fn stale_plugin_warnings(file: &Path) -> Vec<PreflightWarning> {
         .collect()
 }
 
-/// Pure core of [`stale_plugin_warnings`]: given the live per-editor snapshots
+/// Pure core of [`stale_plugin_warnings`]: given the live per-editor registrations
 /// and an expected-version resolver, produce one deduplicated warning per stale
 /// (kind, version) pair.
-pub fn stale_plugin_warnings_from_snapshots(
-    snapshots: &[agent_doc_debounce::LiveBufferSnapshot],
+pub fn stale_plugin_warnings_from_registrations(
+    registrations: &[agent_doc_reliable_sync_io::liveness::EditorRegistration],
     expected_for_kind: impl Fn(&str) -> Option<&'static str>,
 ) -> Vec<PreflightWarning> {
     let mut seen: HashSet<(String, String)> = HashSet::new();
     let mut warnings = Vec::new();
-    for status in live_plugin_generation_statuses_from_snapshots(snapshots, &expected_for_kind) {
+    for status in
+        live_plugin_generation_statuses_from_registrations(registrations, &expected_for_kind)
+    {
         if !status.stale {
             continue;
         }
@@ -436,39 +422,37 @@ mod tests {
         );
     }
 
-    fn snapshot_with_editor(kind: &str, version: &str) -> agent_doc_debounce::LiveBufferSnapshot {
-        agent_doc_debounce::LiveBufferSnapshot {
+    fn registration_with_editor(
+        kind: &str,
+        version: &str,
+    ) -> agent_doc_reliable_sync_io::liveness::EditorRegistration {
+        agent_doc_reliable_sync_io::liveness::EditorRegistration {
+            document_hash: "doc".to_string(),
+            pid: 1,
             path: "/tmp/doc.md".to_string(),
-            len: 0,
-            hash: String::new(),
-            timestamp_ms: 0,
-            edit_epoch: 0,
-            last_synced_epoch: 0,
-            state_vector_b64: None,
-            editor_id: None,
-            editor_kind: Some(kind.to_string()),
-            editor_version: Some(version.to_string()),
+            editor_id: "editor".to_string(),
+            editor_kind: kind.to_string(),
+            editor_version: version.to_string(),
             capabilities: Vec::new(),
-            content: None,
-            no_unsaved_operator_edits: false,
+            timestamp_ms: 0,
         }
     }
 
-    fn snapshot_with_generation(
+    fn registration_with_generation(
         editor_id: &str,
         version: &str,
-        timestamp_ms: u128,
-    ) -> agent_doc_debounce::LiveBufferSnapshot {
-        let mut snapshot = snapshot_with_editor("jetbrains", version);
-        snapshot.editor_id = Some(editor_id.to_string());
-        snapshot.timestamp_ms = timestamp_ms;
-        snapshot
+        timestamp_ms: u64,
+    ) -> agent_doc_reliable_sync_io::liveness::EditorRegistration {
+        let mut registration = registration_with_editor("jetbrains", version);
+        registration.editor_id = editor_id.to_string();
+        registration.timestamp_ms = timestamp_ms;
+        registration
     }
 
     #[test]
     fn stale_plugin_warning_flags_older_live_plugin() {
-        let snapshots = vec![snapshot_with_editor("jetbrains", "0.2.205")];
-        let warnings = stale_plugin_warnings_from_snapshots(&snapshots, |kind| {
+        let registrations = vec![registration_with_editor("jetbrains", "0.2.205")];
+        let warnings = stale_plugin_warnings_from_registrations(&registrations, |kind| {
             (kind == "jetbrains").then_some("0.2.206")
         });
         assert_eq!(warnings.len(), 1);
@@ -485,12 +469,12 @@ mod tests {
 
     #[test]
     fn replay_boundary_uses_latest_live_generation_for_the_same_editor() {
-        let snapshots = vec![
-            snapshot_with_generation("idea-project", "0.2.261", 10),
-            snapshot_with_generation("idea-project", "0.2.263", 20),
+        let registrations = vec![
+            registration_with_generation("idea-project", "0.2.261", 10),
+            registration_with_generation("idea-project", "0.2.263", 20),
         ];
         let statuses =
-            live_plugin_generation_statuses_from_snapshots(&snapshots, |_| Some("0.2.263"));
+            live_plugin_generation_statuses_from_registrations(&registrations, |_| Some("0.2.263"));
         assert_eq!(statuses.len(), 1);
         assert_eq!(statuses[0].running, "0.2.263");
         assert!(!statuses[0].stale);
@@ -498,12 +482,12 @@ mod tests {
 
     #[test]
     fn replay_boundary_keeps_independent_editor_generations_separate() {
-        let snapshots = vec![
-            snapshot_with_generation("idea-a", "0.2.261", 10),
-            snapshot_with_generation("idea-b", "0.2.263", 20),
+        let registrations = vec![
+            registration_with_generation("idea-a", "0.2.261", 10),
+            registration_with_generation("idea-b", "0.2.263", 20),
         ];
         let statuses =
-            live_plugin_generation_statuses_from_snapshots(&snapshots, |_| Some("0.2.263"));
+            live_plugin_generation_statuses_from_registrations(&registrations, |_| Some("0.2.263"));
         assert_eq!(statuses.len(), 2);
         assert!(statuses.iter().any(|status| status.stale));
         assert!(statuses.iter().any(|status| !status.stale));
@@ -511,30 +495,30 @@ mod tests {
 
     #[test]
     fn stale_plugin_warning_silent_for_current_or_unknown() {
-        let current = vec![snapshot_with_editor("jetbrains", "0.2.206")];
+        let current = vec![registration_with_editor("jetbrains", "0.2.206")];
         assert!(
-            stale_plugin_warnings_from_snapshots(&current, |_| Some("0.2.206")).is_empty(),
+            stale_plugin_warnings_from_registrations(&current, |_| Some("0.2.206")).is_empty(),
             "a current plugin must not warn"
         );
-        let newer = vec![snapshot_with_editor("jetbrains", "0.2.207")];
+        let newer = vec![registration_with_editor("jetbrains", "0.2.207")];
         assert!(
-            stale_plugin_warnings_from_snapshots(&newer, |_| Some("0.2.206")).is_empty(),
+            stale_plugin_warnings_from_registrations(&newer, |_| Some("0.2.206")).is_empty(),
             "a newer plugin must not warn"
         );
-        let no_expectation = vec![snapshot_with_editor("jetbrains", "0.2.100")];
+        let no_expectation = vec![registration_with_editor("jetbrains", "0.2.100")];
         assert!(
-            stale_plugin_warnings_from_snapshots(&no_expectation, |_| None).is_empty(),
+            stale_plugin_warnings_from_registrations(&no_expectation, |_| None).is_empty(),
             "no baked expectation must not warn (fail-open)"
         );
     }
 
     #[test]
     fn stale_plugin_warning_dedups_identical_kind_version() {
-        let snapshots = vec![
-            snapshot_with_editor("vscode", "0.2.38"),
-            snapshot_with_editor("vscode", "0.2.38"),
+        let registrations = vec![
+            registration_with_editor("vscode", "0.2.38"),
+            registration_with_editor("vscode", "0.2.38"),
         ];
-        let warnings = stale_plugin_warnings_from_snapshots(&snapshots, |_| Some("0.2.39"));
+        let warnings = stale_plugin_warnings_from_registrations(&registrations, |_| Some("0.2.39"));
         assert_eq!(
             warnings.len(),
             1,
@@ -574,7 +558,7 @@ mod tests {
             ),
         ];
         agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
-            &dir.path().join(".agent-doc/reliable_sync_outbox.db"),
+            &agent_doc_sqlite::state_store::state_db_path(dir.path()),
             &document_hash,
             1,
             Some(&serde_json::to_string(&ops).unwrap()),

@@ -512,7 +512,7 @@ pub fn wait_for_authoritative_actor_ready(
     if last_facts.actor_state != ActorDispatchState::Starting
         && starting_actor_timeout_record_identity_matches(file_path, &last_facts)
     {
-        clear_starting_actor_timeout_record(file_path);
+        clear_starting_actor_timeout_record(file_path, &last_facts);
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -556,7 +556,7 @@ pub fn wait_for_authoritative_actor_ready(
                 PromptReadyBarrierDecision::Ready => {
                     let elapsed = start.elapsed();
                     let file_display = file.display().to_string();
-                    clear_starting_actor_timeout_record(file_path);
+                    clear_starting_actor_timeout_record(file_path, &last_facts);
                     agent_doc_ops_log_io::log_op(
                         file,
                         &starting_actor_ready_log_line(
@@ -583,7 +583,7 @@ pub fn wait_for_authoritative_actor_ready(
                 PromptReadyBarrierDecision::Terminal => {
                     let elapsed = start.elapsed();
                     let file_display = file.display().to_string();
-                    clear_starting_actor_timeout_record(file_path);
+                    clear_starting_actor_timeout_record(file_path, &last_facts);
                     agent_doc_ops_log_io::log_op(
                         file,
                         &starting_actor_terminal_log_line(
@@ -652,7 +652,7 @@ pub fn wait_for_authoritative_actor_ready(
             }
         }
     } else {
-        clear_starting_actor_timeout_record(file_path);
+        clear_starting_actor_timeout_record(file_path, &last_facts);
         agent_doc_ops_log_io::log_op(file, &log_line);
         // Diagnostic: capture the pane content at timeout so we can analyze why
         // ready_prompt_candidate never matched.
@@ -754,7 +754,8 @@ pub fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
         },
     ) {
         Ok(updated) => {
-            clear_starting_actor_timeout_record(file_path);
+            let recovered_facts = authoritative_actor_ready_facts_from_target(actor, true);
+            clear_starting_actor_timeout_record(file_path, &recovered_facts);
             let mut runtime = actor.runtime.clone();
             runtime.actor_state = Some(RouteActorState::Ready);
             agent_doc_ops_log_io::log_op(

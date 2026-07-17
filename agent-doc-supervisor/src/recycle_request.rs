@@ -1,19 +1,16 @@
-//! Pure recycle-REQUEST marker policy.
+//! Pure recycle-request state policy.
 //!
 //! Distinct from `recycle_inflight` (which signals a recycle is *in progress* so
 //! dispatch should defer) and `recycle_yield` (which asks a self-driving loop to
 //! yield one boundary): a recycle-request is a positive cross-process instruction
 //! that a specific route-owned supervisor should recycle onto the freshly-installed
 //! binary at its next idle boundary, EVEN when it is not yet stale and auto-recycle
-//! is opted out. An install fan-out writes it per served document; the supervisor
+//! is opted out. An install fan-out records it per served document; the supervisor
 //! idle loop honors it like an `explicit_admin` recycle.
 
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-
-/// Directory (relative to the project root) holding per-document recycle requests.
-pub const RECYCLE_REQUEST_DIR: &str = ".agent-doc/recycle-request";
 
 /// Default request freshness window. Generous so a supervisor mid-turn still sees
 /// the request when it next reaches an idle boundary.
@@ -28,7 +25,7 @@ pub const RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE: &str = "stale_supervisor_
 /// missing or whose disk projection no longer matches canonical state.
 pub const RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE: &str = "stale_editor_replica_turn_stage";
 
-/// Persisted recycle-request body.
+/// Projected recycle-request state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecycleRequest {
     /// Why the supervisor was asked to recycle.

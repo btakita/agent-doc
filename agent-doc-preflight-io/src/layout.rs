@@ -6,8 +6,8 @@ use std::path::Path;
 /// Trigger an automatic `resync --fix` when session-drift has been detected
 /// on two consecutive preflights.
 ///
-/// The drift counter lives at `.agent-doc/state/drift.count`. Each call either
-/// increments it (drift present) or deletes it (drift absent). When the counter
+/// The drift counter lives in the project `state.db`. Each call either
+/// increments it (drift present) or clears it (drift absent). When the counter
 /// reaches >= 2 we invoke `agent_doc_sync_io::resync::run(true, None, None)` and
 /// reset it to 0 so we do not loop on every cycle.
 pub fn maybe_auto_resync_on_drift(file: &Path, layout_issues: &[String]) {
@@ -21,28 +21,37 @@ pub fn maybe_auto_resync_on_drift(file: &Path, layout_issues: &[String]) {
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         return;
     };
-    let state_dir = project_root.join(".agent-doc/state");
-    let counter_path = state_dir.join("drift.count");
-
     if !has_drift {
-        if counter_path.exists() {
-            let _ = std::fs::remove_file(&counter_path);
-        }
+        let _ = agent_doc_controller_io::project_controller::clear_coordination_lease(
+            &project_root,
+            "preflight_layout_drift",
+            "project",
+        );
         return;
     }
 
-    let current: u32 = std::fs::read_to_string(&counter_path)
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0);
+    let current: u32 = agent_doc_controller_io::project_controller::load_coordination_lease(
+        &project_root,
+        "preflight_layout_drift",
+        "project",
+    )
+    .ok()
+    .flatten()
+    .and_then(|lease| lease.holder.parse().ok())
+    .unwrap_or(0);
     let next = current + 1;
 
-    if let Err(e) = std::fs::create_dir_all(&state_dir) {
-        eprintln!("[preflight] drift state dir create failed: {}", e);
-        return;
-    }
-    if let Err(e) = std::fs::write(&counter_path, next.to_string()) {
-        eprintln!("[preflight] drift counter write failed: {}", e);
+    if let Err(e) = agent_doc_controller_io::project_controller::upsert_coordination_lease(
+        &project_root,
+        &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+            scope_kind: "preflight_layout_drift".to_string(),
+            scope_id: "project".to_string(),
+            holder: next.to_string(),
+            holder_pid: Some(std::process::id()),
+            heartbeat_secs: agent_doc_sqlite::state_store::timestamp_secs(),
+        },
+    ) {
+        eprintln!("[preflight] drift state update failed: {}", e);
     }
 
     if next >= 2 {
@@ -54,7 +63,11 @@ pub fn maybe_auto_resync_on_drift(file: &Path, layout_issues: &[String]) {
         if let Err(e) = agent_doc_sync_io::resync::run(true, None, None) {
             eprintln!("[preflight] auto-resync failed: {}", e);
         } else {
-            let _ = std::fs::remove_file(&counter_path);
+            let _ = agent_doc_controller_io::project_controller::clear_coordination_lease(
+                &project_root,
+                "preflight_layout_drift",
+                "project",
+            );
             close_superseded_drift_sessions(file);
         }
     } else {
@@ -107,19 +120,6 @@ fn close_superseded_drift_sessions(file: &Path) {
     }
 }
 
-fn clear_base_index_repair_counter(file: &Path) {
-    let Ok(canonical) = file.canonicalize() else {
-        return;
-    };
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
-        return;
-    };
-    let counter_path = project_root.join(".agent-doc/state/base-index-repair.count");
-    if counter_path.exists() {
-        let _ = std::fs::remove_file(counter_path);
-    }
-}
-
 fn current_tmux_session_name() -> Option<String> {
     tmux_router::Tmux::default_server().current_session()
 }
@@ -130,15 +130,8 @@ pub fn maybe_auto_repair_base_index(file: &Path, layout_issues: &[String]) -> bo
         .any(|i| i.contains("window index 0 missing"));
 
     if !has_base_index_issue {
-        clear_base_index_repair_counter(file);
         return false;
     }
-
-    // Older builds used a consecutive-detection counter before repairing.
-    // Once the issue is visible in preflight, leaving it for the next turn makes
-    // the active response cycle nondeterministic, so clean the stale marker and
-    // repair immediately.
-    clear_base_index_repair_counter(file);
 
     if !agent_doc_tmux_io::in_tmux() {
         eprintln!(

@@ -941,7 +941,12 @@ mod precommit_pending_capture_tests {
         let doc = root.join("doc.md");
         let content = format!("{frontmatter}## Exchange\n\nHello\n");
         fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
         if had_pending_mutations {
@@ -997,7 +1002,12 @@ mod precommit_pending_capture_tests {
             content.push_str("<!-- /agent:icebox -->\n");
         }
         fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
         if !pending_done_ids.is_empty() {

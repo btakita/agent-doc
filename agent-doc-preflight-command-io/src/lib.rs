@@ -187,7 +187,6 @@ mod th {
     pub(crate) fn setup_project() -> TempDir {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
 
         // Initialize a bare git repo so `git commit` doesn't fail fatally.
@@ -245,7 +244,12 @@ mod th {
     ) -> PathBuf {
         let doc = root.join(rel);
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         commit_all(root, message, commit_date);
         doc
     }
@@ -273,17 +277,7 @@ mod th {
         agent_doc_session_registry_io::save_in(root, &registry).unwrap();
     }
     pub(crate) fn age_cycle_state(file: &Path, age_secs: u64) {
-        let canonical = file.canonicalize().unwrap();
-        let root = agent_doc_project_root_io::project_root_containing(&canonical).unwrap();
-        let hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
-        let path = root
-            .join(".agent-doc/state/cycles")
-            .join(format!("{hash}.json"));
-        let mut state: agent_doc_cycle_state_io::CycleState =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        state.started_at = state.started_at.saturating_sub(age_secs);
-        state.updated_at = state.updated_at.saturating_sub(age_secs);
-        std::fs::write(path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+        agent_doc_cycle_state_io::age_current_cycle_for_tests(file, age_secs).unwrap();
     }
     pub(crate) fn write_cycles_log(doc: &Path, entries: &[agent_doc_ops_log_io::CycleEntry]) {
         let log_path = doc.parent().unwrap().join(".agent-doc/logs/cycles.jsonl");
@@ -367,7 +361,12 @@ mod tests {
         std::fs::write(&doc, original).unwrap();
 
         // Save snapshot of original, then add new content.
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         std::fs::write(
             &doc,
             "---\nsession: test\n---\n\n## User\n\nHello\n\nNew question here.\n",
@@ -376,7 +375,7 @@ mod tests {
 
         // diff::compute should detect changes → no_changes = false.
         let diff_result = agent_doc_diff_io::compute(
-            &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
+            &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
             &doc,
         )
         .unwrap();
@@ -461,7 +460,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, active).unwrap();
-        agent_doc_snapshot_io::save(&doc, active, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            active,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -489,7 +493,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, drained).unwrap();
-        agent_doc_snapshot_io::save(&doc, drained, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            drained,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -555,7 +564,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, active).unwrap();
-        agent_doc_snapshot_io::save(&doc, active, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            active,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -581,7 +595,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, drained_plus_edit).unwrap();
-        agent_doc_snapshot_io::save(&doc, drained_plus_edit, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            drained_plus_edit,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -607,7 +626,12 @@ mod tests {
         let doc = root.join("session.md");
         let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -622,14 +646,18 @@ mod tests {
         let patched =
             "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nRecovered answer\n";
         std::fs::write(&doc, patched).unwrap();
-        agent_doc_snapshot_io::save(&doc, patched, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            patched,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let ops = root.join(".agent-doc/logs/ops.log");
         std::fs::write(
             &ops,
             format!(
-                "[100] snapshot_saved_file_ipc file={} snap_len={}\n",
+                "[100] ipc_write_consumed file={} patches=1\n",
                 doc.display(),
-                patched.len()
             ),
         )
         .unwrap();
@@ -871,7 +899,12 @@ mod tests {
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -891,7 +924,12 @@ mod tests {
             new body\n\
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
-        agent_doc_snapshot_io::save(&doc, visible_snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            visible_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let with_user_edit = format!("{visible_snapshot}\n❯ follow-up question\n");
         std::fs::write(&doc, &with_user_edit).unwrap();
@@ -1090,7 +1128,12 @@ mod tests {
             prompt = prompt
         );
         std::fs::write(&doc, &snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -1128,7 +1171,6 @@ mod tests {
             diff: Some("+new line\n".to_string()),
             no_changes: false,
             linked_changes: vec![],
-            baseline_file: None,
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
@@ -1275,7 +1317,6 @@ mod tests {
             diff: None,
             no_changes: true,
             linked_changes: vec![],
-            baseline_file: None,
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
@@ -1317,7 +1358,6 @@ mod tests {
             diff: None,
             no_changes: true,
             linked_changes: vec![],
-            baseline_file: None,
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
@@ -1529,53 +1569,6 @@ mod tests {
         assert!(p1.extension().unwrap() == "txt");
     }
     #[test]
-    fn preflight_output_includes_baseline_file() {
-        let output = PreflightOutput {
-            layout_issues: vec![],
-            recovered: false,
-            committed: true,
-            claims: vec![],
-            diff: None,
-            no_changes: true,
-            linked_changes: vec![],
-            baseline_file: Some("/tmp/baseline.md".to_string()),
-            diff_type: None,
-            diff_type_reason: None,
-            annotated_diff: None,
-            slash_commands: vec![],
-            builtin_commands: vec![],
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&output).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed["baseline_file"], "/tmp/baseline.md");
-    }
-    #[test]
-    fn preflight_output_omits_baseline_file_when_none() {
-        let output = PreflightOutput {
-            layout_issues: vec![],
-            recovered: false,
-            committed: false,
-            claims: vec![],
-            diff: None,
-            no_changes: true,
-            linked_changes: vec![],
-            baseline_file: None,
-            diff_type: None,
-            diff_type_reason: None,
-            annotated_diff: None,
-            slash_commands: vec![],
-            builtin_commands: vec![],
-            ..Default::default()
-        };
-        let json = serde_json::to_string(&output).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(
-            parsed.get("baseline_file").is_none(),
-            "baseline_file should be omitted when None"
-        );
-    }
-    #[test]
     fn preflight_output_includes_diff_type_when_set() {
         let output = PreflightOutput {
             layout_issues: vec![],
@@ -1585,7 +1578,6 @@ mod tests {
             diff: Some("+go\n".to_string()),
             no_changes: false,
             linked_changes: vec![],
-            baseline_file: None,
             diff_type: Some("approval".to_string()),
             diff_type_reason: Some("single approval word: \"go\"".to_string()),
             annotated_diff: None,
@@ -1608,7 +1600,6 @@ mod tests {
             diff: None,
             no_changes: true,
             linked_changes: vec![],
-            baseline_file: None,
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
@@ -1637,7 +1628,6 @@ mod tests {
             diff: Some("+line\n".to_string()),
             no_changes: false,
             linked_changes: vec![],
-            baseline_file: None,
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: Some("[user+] line".to_string()),
@@ -1659,7 +1649,6 @@ mod tests {
             diff: None,
             no_changes: true,
             linked_changes: vec![],
-            baseline_file: None,
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
@@ -1858,7 +1847,6 @@ mod tests {
             diff: Some(diff.to_string()),
             no_changes: false,
             linked_changes: vec![],
-            baseline_file: None,
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
@@ -1890,7 +1878,6 @@ mod tests {
             diff: None,
             no_changes: true,
             linked_changes: vec![],
-            baseline_file: None,
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,
@@ -1919,7 +1906,6 @@ mod tests {
             diff: Some(format!("+{large_content}")), // diff can include content
             no_changes: false,
             linked_changes: vec![],
-            baseline_file: Some("/tmp/baseline.md".to_string()),
             diff_type: None,
             diff_type_reason: None,
             annotated_diff: None,

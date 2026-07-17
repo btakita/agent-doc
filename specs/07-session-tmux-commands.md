@@ -23,10 +23,10 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 - Routes a harness-native reopen command into the authoritative pane for the document.
 - Unless explicitly disabled with `--debounce 0`, route first waits for both filesystem mtime and the shared editor typing indicator to be idle for the debounce window (default 500ms). If the combined proof does not settle within the bounded wait, route fails before inserting frontmatter, cleaning duplicate answered prompt tails, or submitting pane input.
-- Route must ask the project controller for the document's authoritative actor binding before consulting legacy supervisor-backed registry compatibility evidence. `.agent-doc/session-actors.json` is a projection, not an independent ownership input.
+- Route must ask the project controller for the document's authoritative actor binding and fail closed when that binding cannot be proven; no compatibility file participates in owner resolution.
 - Before route submits a managed or dispatch-only reopen to an actor-owned pane, it must record a controller `dispatch` attempt for the current session id, pane id, generation, and command kind. Stale session, pane, or generation requests fail closed before input is submitted.
 - Existing managed reroutes must use supervisor IPC for the reopen path; they must not fall back to typing directly into a live Claude/Codex pane. If the document path disappeared from the child argv but a healthy supervisor PID still maps to the registered pane, that supervisor-owned binding is enough to keep the managed reroute on supervisor IPC even when a direct pane prompt probe cannot classify the visible prompt.
-- Actor-backed reroutes may refresh `sessions.json` as a projection of the actor pane, but they must not opportunistically steal another same-file pane or re-register to a heuristic winner while the authoritative actor is healthy.
+- Actor-backed reroutes may refresh the transactional registry binding for the actor pane, but they must not opportunistically steal another same-file pane or re-register to a heuristic winner while the authoritative actor is healthy.
 - Session-log owners, `registry_rebind` successors, and generic same-file process-tree matches are repair/diagnostic signals only; route must fail closed with explicit inspect/claim/kill guidance instead of promoting them back to authority on the normal path.
 - Route must fail closed on ambiguity and list concrete follow-up commands instead of guessing.
 - Routed dispatch must target an actually idle composer. Drafted user input, queue-only Codex composer states, reverse-i-search, permission prompts, or similar blockers are not safe.
@@ -42,7 +42,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 ### Startup-miss tracking
 
-- When route/startup acknowledgment times out, the binary records `.agent-doc/state/startup-miss/<doc-hash>.json` with pane/session provenance and shows a visible diagnostic in tmux.
+- When route/startup acknowledgment times out, the binary records a `startup_miss` state row with pane/session provenance in `.agent-doc/state.db` and shows a visible diagnostic in tmux.
 - On the next route/start/sync/session-check path, the tool must distinguish between a stale startup-miss marker and a still-stranded owner. A same-pane marker may only be cleared once newer session-log provenance proves a later open run on that same pane. If the document is now registered to a different pane/session, the old marker is stale and must clear from the current file owner's later `session_start` provenance instead of staying tied to the superseded `session_id`.
 - Successful cycle acknowledgment clears the startup-miss marker.
 - `route --dispatch-only` still uses a one-shot reopen instead of the managed acceptance/cycle-ack path, but for any existing live managed session that one-shot reopen must submit directly through the resolved pane's tmux input path instead of routing back through supervisor IPC or writing raw bytes into the child PTY. Editor callers add `--plain-trigger` and a longer `--wait-for-ready` budget, which makes the one-shot reopen the plain `agent-doc <FILE>` prompt even when the document's harness normally uses slash commands while allowing slow supervisor startup to settle. The route owns the pane input window for that startup-readiness wait too: before waiting on a latest-run or starting pane, it records a controller-backed route-submit projection (`RouteSubmitStarted`, later `RouteSubmitSettled` or bounded `RouteSubmitBlocked`) so supervisor-owned queue drains, context-reset clears, pending queue context-clear projections, and orphan visible `/clear` / `/new` drafts yield instead of pressing Enter into the same composer. That live-pane submit must use the same centralized tmux submit profile as file-scoped `session clear`: Codex, Claude, OpenCode, and default harnesses send the normalized text plus a named `Enter` key in one tmux `send-keys -t <pane> <text> Enter` operation. It must never use literal `\r` or `\n` as the tmux submit key. Raw child-PTY fallback writes may still encode Enter as carriage return, but that path is not a tmux `send-keys` submit. It must reuse the same bounded repair/restart checks before injecting into an existing pane, and it must honor the authoritative actor readiness guard: prompt-bearing reroutes may not inject into `starting` or dispatch-only `busy` actors until the current generation reaches a dispatch-ready prompt (`prompt_ready=true`) and refreshes to `ready`. A tracked Codex `/clear` or missing managed capability proof may still force a fresh restart on the managed non-dispatch route, but dispatch-only editor reroutes must keep the plain reopen on the authoritative live-session boundary once that readiness guard passes.
@@ -84,7 +84,7 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 - Claims a document for a tmux pane that is already running the harness.
 - The command must enforce the one-live-pane-per-document binding invariant. If the requested pane already belongs to another alive document session, `claim` provisions a new pane instead of commandeering the old one.
-- The binding invariant is enforced **across project/submodule roots**, not just against the calling root's `sessions.json`. The calling root's registry only records documents rooted under it, so a pane owned by a document rooted in another project/submodule (for example a submodule `agent-doc start --route-owned <other>.md` Codex session) would not appear as a registry conflict. `claim` must therefore also inspect the requested pane's live process tree: if it runs an agent-doc/codex owner session for a different document, `claim` provisions a new pane instead of commandeering it. Without this, a new document claimed from inside another document's live pane aliases onto that pane (registries can even disagree on the new document's session id) and no real pane for the new document ever appears.
+- The binding invariant is enforced **across project/submodule roots**, not just against the calling root's controller registry. A pane owned by a document rooted in another project/submodule may not appear in the calling root's rows, so `claim` also inspects the requested pane's live process tree: if it runs an agent-doc/codex owner session for a different document, `claim` provisions a new pane instead of commandeering it.
 - Cross-session claim is invalid unless the requested pane is in the operator's current tmux session, the configured project session is stale, or the user forced the claim explicitly. The current-session path lets editor "Claim for Tmux Pane" follow the live `agent-doc` tmux window without rewriting `.agent-doc/config.toml`.
 - On a cross-session **Reject**, `claim` emits a stable machine-readable marker line to stderr **before** the human bail text so editor plugins (JetBrains "Claim for Tmux Pane", VS Code claim command) can branch on it and render a choice dialog (Force claim / Switch project session / Cancel) instead of surfacing the raw exit-1 message. The marker shape is `[claim] cross-session-reject pane_id=<id> pane_session=<session> configured=<session>` (`CROSS_SESSION_REJECT_MARKER` + stable `pane_id`/`pane_session`/`configured` field order, formatted by `cross_session_reject_marker`). The human bail message (`pane <id> is in tmux session '<session>' but project session is '<session>'; switch to the configured session or pass --force`) is preserved unchanged for terminal use. The JetBrains (`ClaimAction.parseCrossSessionReject`) and VS Code (`crossSession.parseCrossSessionReject`) plugins parse this marker from the merged claim output and present a **Force Claim / Switch Project Session / Cancel** dialog: Force Claim re-runs `claim --force`; Switch Project Session runs `session set <pane_session>` then re-claims; Cancel leaves the file unclaimed. Behavioral verification of the live dialog is gated on a live IntelliJ/VS Code session.
 - Pane validation runs **before** any file mutation (`#claim-validate-before-scaffold`). `claim` resolves the pane and applies the cross-session guard before the empty-file auto-scaffold writes/commits the document. A rejected cross-session claim must leave the target file byte-identical (no scaffold, no `agent-doc(<doc>)` commit) — earlier the auto-scaffold ran first, so an empty `.md` opened in a pane on the wrong tmux session was scaffolded and committed and *then* the claim failed with "pane %N is in tmux session '1' but project session is '0'", converting a file the operator never opted into.
@@ -94,15 +94,14 @@ This file covers the session-bound command surface: pane ownership, routing, syn
 
 `agent-doc focus <FILE> [--pane P] [--blocking|--synchronous]` focuses the pane that currently owns the document session.
 
-- When `.agent-doc/session-actors.json` has a live local actor projection for
-  the document session, focus must select that actor-owned pane even if
-  `sessions.json` still points at an older projection.
+- When the controller-local actor cache has a live actor for the document
+  session, focus must select that actor-owned pane.
 - Focus must not launch or wait on the project controller actor-binding RPC; it
   is the editor fast path and must stay independent of slower reconciliation.
-- Focus may use `sessions.json` only as a fallback binding helper when no live
-  local actor projection exists.
-- Live-owner precedence: a pane resolved from the local actor projection or the
-  `sessions.json` registry only proves the pane is alive, not that it still owns
+- Focus may use the transactional registry row only as a fallback binding helper
+  when no live local actor-cache entry exists.
+- Live-owner precedence: a pane resolved from the local actor cache or the
+  transactional registry only proves the pane is alive, not that it still owns
   the document. After a reroute / fresh-restart the session can move to a new
   pane while the old pane stays alive with a dead owner, which previously left
   editor navigation focusing the stale pane (it appeared to "not swap"). Before
@@ -211,7 +210,7 @@ focus <FILE>` selects the resolved pane when it is already visible, but skips
 - When `.agent-doc/state.db` has a live authoritative actor row for a visible
 document, sync must treat that actor-owned pane as the owner-of-record and keep
 tmux-router registry metadata only as a projection of that binding.
-- An alive pane is not reusable solely because the pane id exists; normal sync may reuse the live authoritative actor pane returned by the controller, then supervisor-backed registry compatibility evidence for that specific document.
+- An alive pane is not reusable solely because the pane id exists; normal sync may reuse only the live authoritative actor pane returned by the controller for that specific document.
 - A Project Controller-owned exact-visible passive sync must treat its local authoritative SQLite actor row as resolved ownership proof. This lets an already-running hidden pane replace the stale same-side pane on editor tab selection without autostarting anything; standalone passive CLI sync must still avoid a nested actor-binding RPC.
 - When ownership falls back to legacy associated-pane evidence (`session-log`, `registry_rebind`, generic same-file process tree), sync must fail closed and require explicit claim/repair instead of choosing a winner automatically.
 - When ownership proof weakens but the alive pane still contains protected Codex drafted input or still appears as the newest open pane in the session log, sync must fail closed for that file instead of fabricating `registered_pane_missing`.
@@ -297,7 +296,7 @@ tmux-router registry metadata only as a projection of that binding.
 - A single sync cycle should reuse stable ownership facts it has already
   proven. Repeated checks for the same document/session/pane during
   pre-reconcile ownership proof, synthetic tmux-router registry construction,
-  and post-router `sessions.json` projection must share a per-cycle proof cache
+  and post-router registry transaction must share a per-cycle proof cache
   instead of re-querying controller actor bindings or supervisor/live-owner
   heuristics for unchanged selection state.
 - Safe-passive editor sync must skip expensive stash-window and stash-pane
@@ -318,8 +317,8 @@ tmux-router registry metadata only as a projection of that binding.
   kill-or-preserve decisions belong to full sync/repair paths.
 - Safe-passive focus-only editor sync must not turn a visible split into a
   one-pane `agent-doc` window. If the editor event provides only the focused
-  markdown file, sync must expand that one-column projection from
-  `last_layout.json`; when no saved layout exists, it must derive the sibling
+markdown file, sync must expand that one-column projection from the project
+`state.db` layout row; when no saved layout exists, it must derive the sibling
   projection from the registered panes already visible in the target
   `agent-doc` window. If the focused file is already in the remembered or
   visible projection, sync must select that column rather than replacing the
@@ -420,7 +419,7 @@ single-owner actor controls:
   latest session-log summary for the document. It must fetch the actor record,
   supervisor lease, recent operator/dispatch attempt, and projection drift
   diagnostics from the project controller rather than treating
-  `session-actors.json` as an authority. It must also query tmux directly and
+  diagnostic files as authority. It must also query tmux directly and
   classify the resolved pane as `alive-idle`, `alive-busy`, `closed-clean`, or
   `projection-stale`, including the pane current command and recent output tail
   so operators can distinguish an idle live harness from a turn that is still
@@ -527,8 +526,8 @@ command into the authoritative session through the same canonical
   instead of leaving the operator with a generic busy timeout.
   `agent-doc session interrupt-clear <FILE> --force` is the explicit
   destructive hatch for a wedged owner that cannot settle: it marks the
-  authoritative actor closed when possible, removes the document's sessions.json
-  projection under the registry lock, writes the clear cooldown, signals the
+  authoritative actor closed when possible, removes the document's registry row
+  in the same controller transaction, writes the clear cooldown, signals the
   supervisor/child PIDs when known, kills the bound tmux pane when it is still
   alive, removes the supervisor socket, and reclaims any empty orphaned
   preflight cycle. This force path is intentionally separate from ordinary
@@ -595,7 +594,7 @@ Windowless sync must prefer the live project pin over the caller pane's tmux ses
 `agent-doc controller status [--project-root ROOT] [--ensure]` reports the
 project-local controller bootstrap as JSON. Without `--ensure`, status is
 read-only: it attempts the controller socket and, if inactive, reports the
-last persisted bootstrap state from `.agent-doc/controller-state.json` without
+last persisted bootstrap row from `.agent-doc/state.db` without
 launching a process. With `--ensure`, the command runs the lazy
 connect-or-launch path before printing status.
 
@@ -630,7 +629,7 @@ authority used by route/start/sync:
 
 - socket: `.agent-doc/controller.sock`
 - launch lock: `.agent-doc/locks/controller-launch.lock`
-- bootstrap state: `.agent-doc/controller-state.json`
+- bootstrap state: `.agent-doc/state.db` `controller_bootstrap` row
 
 Lazy startup must connect first, acquire the launch lock only when needed,
 verify that the active controller was started from the same agent-doc binary
@@ -652,7 +651,7 @@ client waiting for a response must fail closed rather than blocking
 indefinitely. `status --ensure` may use the connect-or-launch path only as a
 readiness check; it must close that stream before issuing the status RPC.
 Sync must measure controller actor-binding calls as `controller_actor_lookup`
-and any sessions.json projection update as `projection_refresh`; over-budget
+and any registry refresh as `projection_refresh`; over-budget
 entries should point at the controller phase instead of only reporting broad
 ownership-proof latency.
 Controller actor-binding responses must distinguish `bound` from `not_found`;
@@ -673,7 +672,6 @@ only; pre-lock and post-lock focus are timed separately as
 `prelock_actor_focus` and `postlock_actor_focus`.
 
 `agent-doc start` creates owner generations through the controller. `route`
-and `sync` read actor bindings through the controller before consulting
-supervisor-backed registry compatibility evidence. `session-actors.json`,
-tmux-router state, and session logs remain projections or diagnostic inputs.
+and `sync` read actor bindings through the controller. Tmux-router state and
+session logs remain diagnostic inputs only.
 Destructive or heuristic recovery belongs behind explicit operator repair flows.

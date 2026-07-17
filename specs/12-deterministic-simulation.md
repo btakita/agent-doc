@@ -161,10 +161,9 @@ Closeout invariants currently exercised by the simulator:
   write-closeout, and compact-style exchange replacement, while still proving
   generated duplicate comment residue without ownership proof is scrubbed
   line-by-line.
-- Full-document replacement regressions cover late post-exchange scratch-comment
-  edits: compact exchange direct write must reject stale whole-document
-  replacements, and full-content IPC attempts must be disabled before socket/file
-  payload emission.
+- Intent-scope regressions cover late post-exchange scratch-comment edits:
+compact exchange rebases its semantic component intent, while whole-document
+and file-transport variants are unrepresentable in the maintained ABI.
 - Baseline-drift replay coverage pins the three user-commit branches:
   benign edits outside the captured response auto-refresh replay hashes,
   edits inside the committed response fail closed, and user-normalized response
@@ -183,9 +182,9 @@ actor model:
 
 - Durable actor state is the only authority for the active session actor
   generation, session id, pane id, and supervisor lifecycle.
-- JSON/tmux-style projection state is a compatibility projection. Drift is
-  diagnostic and must be repairable by copying from durable actor state; it
-  must not become independent routing authority.
+- Tmux observations are ephemeral evidence. Durable actor, bootstrap, layout,
+and delivery state live only in `state.db`; simulation must not create a JSON
+compatibility authority.
 - Supervisor lifecycle facts can move through starting, ready, waiting-input,
   blocked, and closed states. Route dispatch is accepted only for the current
   ready generation.

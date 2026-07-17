@@ -37,7 +37,6 @@ pub trait PostCommitCleanupEffects {
         file_content: Option<&str>,
     ) -> Result<()>;
     fn mark_capture_committed(&self, file: &Path, current_content: &str) -> Result<()>;
-    fn clear_queue_journal(&self, file: &Path);
     fn reconcile_queue_continuation(
         &self,
         file: &Path,
@@ -131,7 +130,6 @@ pub fn finalize_successful_commit(
             "[commit] capture-state update skipped: current document content unavailable (non-fatal)"
         );
     }
-    effects.clear_queue_journal(file);
     if let Some(continuation) = effects.reconcile_queue_continuation(file, "commit") {
         effects.log_op(
             file,

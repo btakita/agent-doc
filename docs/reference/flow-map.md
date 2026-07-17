@@ -27,9 +27,9 @@ The recurring bug classes map to a single proposed owner:
 |---|---|---|
 | Starting/busy actor dispatch into an unready pane | `route.rs` readiness loops, controller actor state, supervisor runtime probes | `routed_reopen` |
 | Accepted-only dispatch proof described as submitted/consumed | route log strings, ops summary classification, harness-specific proof checks | `routed_reopen` |
-| Late IPC/file fallback after committed cycle | `write.rs` terminal checks, patch sidecars, `cycle_state.rs`, `git.rs` no-op closeout | `closeout` |
+| Late editor-intent retry after committed cycle | write-pipeline terminal checks, `state.db` closeout projection, git no-op closeout | `closeout` |
 | Malformed or plain template patchback escaping `agent:exchange` | `write.rs`, `orchestrate.rs`, `repair.rs`, template parser callers | `document_mutation` |
-| Prompt prefix or duplicate prompt repair before snapshot trust | Final template reconciliation, IPC socket/file paths, fallback merge, post-commit repair, session-check | `document_mutation` |
+| Prompt prefix or duplicate prompt repair before projection trust | Final template reconciliation, typed editor intent, Lazily rebase, post-commit repair, session-check | `document_mutation` |
 | Pending capture or done guard ambiguity | `write.rs`, `session_check.rs`, `plan.rs`, `pending.rs` | `session_cycle` |
 | Clear Session Context racing active panes | editor actions, `session_cmd.rs`, route readiness classification | `operator_clear` |
 | Queue item mutation between children | `queue.rs` halted-state detection, `orchestrate.rs` child loop, child finalize | `orchestration_batch` |

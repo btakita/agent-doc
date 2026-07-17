@@ -97,7 +97,11 @@ mod tests {
         assert!(committed.get());
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("agent_doc_session:"));
-        assert!(agent_doc_snapshot_io::load(&doc).unwrap().is_some());
+        assert!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
@@ -110,7 +114,8 @@ mod tests {
             "---\nagent_doc_session: existing\nagent_doc_format: template\n---\n\nBody\n",
         )
         .unwrap();
-        agent_doc_snapshot_io::save(&doc, "existing snapshot", noop_log).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, "existing snapshot", noop_log)
+            .unwrap();
 
         let committed = Rc::new(Cell::new(false));
         let did_commit = committed.clone();

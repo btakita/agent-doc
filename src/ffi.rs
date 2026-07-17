@@ -24,20 +24,9 @@
 //!   document's frontmatter additively (never removes keys).
 //! - `agent_doc_reposition_boundary_to_end(doc)`: removes all existing boundary markers and inserts
 //!   a single fresh one at the end of the `exchange` component.
-//! - `agent_doc_document_changed(file_path)`: records a file-backed typing projection.
-//! - `agent_doc_document_changed_digest(file_path, len, hash)`: records typing telemetry. Current
-//!   editor content is resolved through the CRDT relay, not a file-backed live-buffer sidecar.
-//! - `agent_doc_report_editor_state(file_path, version, dirty, last_edit_ts, save_ts, hash, len, session_id)`:
-//!   records editor-authoritative buffer state for debounce/stability. When present,
-//!   `wait_for_stable_content` uses version/hash stability instead of the truncation heuristic.
-//! - `agent_doc_get_editor_state(file_path)`: returns the current editor buffer state as JSON.
-//! - `agent_doc_is_editor_stable(file_path, debounce_ms)`: returns whether the editor buffer is
-//!   stable (not dirty or debounce elapsed).
-//! - `agent_doc_is_typing_via_file(file_path, debounce_ms)`: cross-process check — reads the
-//!   file-based typing indicator written by `document_changed`; `true` if updated within
-//!   `debounce_ms`.  For CLI tools running in a separate process from the editor plugin.
-//! - `agent_doc_await_idle_via_file(file_path, debounce_ms, timeout_ms)`: blocking variant of
-//!   `is_typing_via_file`; polls until idle or `timeout_ms` expires.
+//! - `agent_doc_lazily_current_observed_v1(...)`: publishes the editor's complete current
+//!   document into the Lazily authority model. No typing, live-buffer, or status sidecar is
+//!   created.
 //! - `agent_doc_admin_*_json(...)`: controller-backed admin/editor wrappers for inspect, queue
 //!   pause/resume/drain, handoff, reap, and projection repair. They return the same JSON receipt
 //!   envelopes as the CLI `--json` forms.
@@ -50,8 +39,6 @@
 //!   `agent_doc_free_string`; CRDT `state` pointers must be freed with `agent_doc_free_state`.
 //! - On parse/apply errors, `text` (or `json`) is null and `error` holds a message; callers must
 //!   check nullability before use.
-//! - `agent_doc_await_idle_via_file` returning `false` means the timeout expired — the caller must
-//!   not proceed with the agent run.
 //!
 //! ## Evals
 //! - parse_components_roundtrip: single `agent:status` component → JSON count=1, content="hello\n"
@@ -257,208 +244,20 @@ fn resolve_admin_root(
         .with_context(|| format!("no .agent-doc project root found from {}", cwd.display()))
 }
 
-/// Record a file-backed typing projection.
+/// Current change notification with replica-churn provenance.
 ///
-/// Plugins call this on document modifications as telemetry for Project
-/// Controller-owned
-/// recovery paths. It is not authoritative editor state.
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_document_changed(file_path: *const c_char) {
-    if let Ok(path) = unsafe { CStr::from_ptr(file_path) }.to_str() {
-        agent_doc_debounce::document_changed(path);
-    }
-}
-
-/// Record a document change event plus legacy digest arguments.
-///
-/// Modern editor integrations publish current content through the CRDT replica
-/// relay. The legacy digest arguments are accepted for ABI compatibility, but no
-/// `.agent-doc/live-buffer` sidecar is written from this path.
-///
-/// # Safety
-///
-/// `file_path` and `content_hash` must be valid, NUL-terminated UTF-8 strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_document_changed_digest(
-    file_path: *const c_char,
-    content_len: i64,
-    content_hash: *const c_char,
-) {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(path) => path,
-        Err(_) => return,
-    };
-    let _hash = match unsafe { CStr::from_ptr(content_hash) }.to_str() {
-        Ok(hash) => hash,
-        Err(_) => return,
-    };
-    let Ok(_len) = usize::try_from(content_len) else {
-        return;
-    };
-    agent_doc_debounce::document_changed(path);
-}
-
-/// Record a document change plus digest for one editor instance.
-///
-/// # Safety
-///
-/// `file_path`, `content_hash`, and `editor_id` must be valid, NUL-terminated
-/// UTF-8 strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_document_changed_digest_for_editor(
-    file_path: *const c_char,
-    content_len: i64,
-    content_hash: *const c_char,
-    editor_id: *const c_char,
-) {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(path) => path,
-        Err(_) => return,
-    };
-    let _hash = match unsafe { CStr::from_ptr(content_hash) }.to_str() {
-        Ok(hash) => hash,
-        Err(_) => return,
-    };
-    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
-        Ok(editor) => editor,
-        Err(_) => return,
-    };
-    let Ok(_len) = usize::try_from(content_len) else {
-        return;
-    };
-    agent_doc_debounce::document_changed(path);
-}
-
-/// Record a document change plus legacy full-buffer content.
-///
-/// The buffer text is consumed only for compatibility with older editor flows.
-/// Current editor authority is the CRDT relay, so this path records typing
-/// telemetry and does not persist the content to `.agent-doc/live-buffer`.
-///
-/// # Safety
-///
-/// `file_path` and `content` must be valid, NUL-terminated UTF-8 strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_document_changed_digest_content(
-    file_path: *const c_char,
-    content: *const c_char,
-) {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(path) => path,
-        Err(_) => return,
-    };
-    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
-        Ok(text) => text,
-        Err(_) => return,
-    };
-    agent_doc_debounce::document_changed(path);
-}
-
-/// Record a document change plus legacy full visible buffer content for one
-/// editor instance.
-///
-/// Modern editor integrations publish content by applying local edits to their
-/// CRDT replica and sending `replica_update` through the Project Controller
-/// relay. This ABI remains as a wake/telemetry compatibility hook only; it must
-/// not write a separate editor-content channel.
-///
-/// # Safety
-///
-/// `file_path`, `content`, and `editor_id` must be valid, NUL-terminated UTF-8
-/// strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor(
-    file_path: *const c_char,
-    content: *const c_char,
-    editor_id: *const c_char,
-) {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(path) => path,
-        Err(_) => return,
-    };
-    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
-        Ok(text) => text,
-        Err(_) => return,
-    };
-    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
-        Ok(editor) => editor,
-        Err(_) => return,
-    };
-    agent_doc_debounce::document_changed(path);
-}
-
-/// Remove the obsolete full-buffer filesystem projection once per document in
-/// this native-library generation. Current content and liveness are owned by the
-/// Lazily/CPC CRDT + reliable-sync planes; no editor report may recreate this
-/// sidecar.
-fn retire_legacy_live_buffer_sidecar(path: &str) {
-    static RETIRED: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
-        std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashSet::new()));
-    let first = RETIRED
-        .lock()
-        .map(|mut paths| paths.insert(path.to_string()))
-        .unwrap_or(false);
-    if first && let Err(err) = agent_doc_debounce::clear_live_buffer(path) {
-        eprintln!("[ffi] failed to retire legacy live-buffer sidecar for {path}: {err}");
-    }
-}
-
-/// Compatibility change notification for one editor instance.
-///
-/// The legacy-shaped signature still accepts visible content and frontend
-/// metadata, but neither is persisted here. Identity/version/capabilities travel
-/// with the reliable-sync `Open` epoch, and live text remains solely in the
-/// Lazily/CPC CRDT.
-///
-/// # Safety
-///
-/// `file_path`, `content`, `editor_id`, `editor_kind`, `editor_version`, and
-/// `capabilities_csv` must be valid, NUL-terminated UTF-8 strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v2(
-    file_path: *const c_char,
-    content: *const c_char,
-    _editor_id: *const c_char,
-    _editor_kind: *const c_char,
-    _editor_version: *const c_char,
-    _capabilities_csv: *const c_char,
-) {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(path) => path,
-        Err(_) => return,
-    };
-    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
-        Ok(text) => text,
-        Err(_) => return,
-    };
-    retire_legacy_live_buffer_sidecar(path);
-    // Identity/version/capabilities are registered exactly once with the
-    // reliable-sync Open epoch. This compatibility content ABI never writes a
-    // second metadata stream and never persists `text` outside the CRDT.
-    agent_doc_debounce::document_changed(path);
-}
-
-/// Compatibility change notification with replica-churn provenance.
-///
-/// Identical to [`agent_doc_document_changed_digest_content_for_editor_v2`] but
-/// carries `no_unsaved_operator_edits`: pass `1` when the editor has proven the
+/// Carries `no_unsaved_operator_edits`: pass `1` when the editor has proven the
 /// buffer holds no unsaved *local operator* edits ahead of disk (any divergence
 /// is replica-driven — a `remoteCrdtApply`), so the binary re-merges on replica
-/// churn instead of failing the visible-write guard closed. Pass `0` (the
-/// conservative default older plugins imply via the `_v2` entrypoint) when there
-/// may be unsaved operator text, which keeps operator text authoritative by
-/// failing closed.
+/// churn instead of failing the visible-write guard closed. Pass `0` when there
+/// may be unsaved operator text, which keeps operator text authoritative.
 ///
 /// # Safety
 ///
 /// `file_path`, `content`, `editor_id`, `editor_kind`, `editor_version`, and
 /// `capabilities_csv` must be valid, NUL-terminated UTF-8 strings.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3(
+pub unsafe extern "C" fn agent_doc_lazily_current_observed_v1(
     file_path: *const c_char,
     content: *const c_char,
     _editor_id: *const c_char,
@@ -475,7 +274,6 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3
         Ok(text) => text,
         Err(_) => return,
     };
-    retire_legacy_live_buffer_sidecar(path);
     if no_unsaved_operator_edits == 0
         && agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(text, Path::new(path))
         && let Err(err) =
@@ -489,55 +287,6 @@ pub unsafe extern "C" fn agent_doc_document_changed_digest_content_for_editor_v3
             "[deferred-write] could not reconcile operator editor authority for {path}: {err}"
         );
     }
-    agent_doc_debounce::document_changed(path);
-}
-
-/// Legacy supervisor-origin synced-buffer proof hook.
-///
-/// Current editor state is proven through lazily visible-write receipts and the
-/// CRDT relay. This ABI remains for older plugins but no longer writes a
-/// file-backed live-buffer sidecar.
-///
-/// # Safety
-///
-/// `file_path`, `content`, `editor_id`, `editor_kind`, `editor_version`, and
-/// `capabilities_csv` must be valid, NUL-terminated UTF-8 strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_document_synced_digest_content_for_editor_v2(
-    file_path: *const c_char,
-    content: *const c_char,
-    editor_id: *const c_char,
-    editor_kind: *const c_char,
-    editor_version: *const c_char,
-    capabilities_csv: *const c_char,
-) {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(path) => path,
-        Err(_) => return,
-    };
-    let _text = match unsafe { CStr::from_ptr(content) }.to_str() {
-        Ok(text) => text,
-        Err(_) => return,
-    };
-    let _editor = match unsafe { CStr::from_ptr(editor_id) }.to_str() {
-        Ok(editor) => editor,
-        Err(_) => return,
-    };
-    let _kind = match unsafe { CStr::from_ptr(editor_kind) }.to_str() {
-        Ok(kind) => kind,
-        Err(_) => return,
-    };
-    let _version = match unsafe { CStr::from_ptr(editor_version) }.to_str() {
-        Ok(version) => version,
-        Err(_) => return,
-    };
-    let _capabilities_raw = match unsafe { CStr::from_ptr(capabilities_csv) }.to_str() {
-        Ok(capabilities) => capabilities,
-        Err(_) => return,
-    };
-    eprintln!(
-        "[ffi] synced live-buffer sidecar ABI ignored for {path}: current editor state is resolved through the CRDT relay"
-    );
 }
 
 /// Retire legacy buffer state and mirror a document-close hint. Durable
@@ -560,7 +309,6 @@ pub unsafe extern "C" fn agent_doc_document_closed_for_editor(
         Ok(editor) => editor,
         Err(_) => return,
     };
-    retire_legacy_live_buffer_sidecar(path);
     agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_closed(path);
     if agent_doc_reliable_sync_io::plane_editor_live_for_path(path) == Some(false) {
         let file = std::path::Path::new(path);
@@ -606,92 +354,6 @@ pub unsafe extern "C" fn agent_doc_cancel_preflight_cycle(file_path: *const c_ch
             -1
         }
     }
-}
-
-/// Check if a plugin in another process has typed recently (cross-process).
-///
-/// Reads the file-based typing indicator written by `agent_doc_document_changed`.
-/// Returns `true` if the indicator exists and was updated within `debounce_ms`.
-/// Returns `false` if no indicator file exists (plugin not active or no edits).
-///
-/// Use this from CLI/Project Controller tools that run separately from the editor plugin.
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_is_typing_via_file(
-    file_path: *const c_char,
-    debounce_ms: i64,
-) -> i32 {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 0,
-    };
-    agent_doc_debounce::is_typing_via_file(path, debounce_ms as u64) as i32
-}
-
-/// Block until the file-based typing indicator shows idle, or timeout expires.
-///
-/// Used by CLI tools to wait for an editor plugin (separate process) to stop
-/// typing before running an agent. Returns `true` if idle was reached, `false`
-/// if `timeout_ms` expired first.
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_await_idle_via_file(
-    file_path: *const c_char,
-    debounce_ms: i64,
-    timeout_ms: i64,
-) -> i32 {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 1, // Invalid path — don't block
-    };
-    agent_doc_debounce::await_idle_via_file(path, debounce_ms as u64, timeout_ms as u64) as i32
-}
-
-/// Set the response status for a file (Option B: in-process).
-///
-/// Status values: "generating", "writing", "routing", "idle"
-/// Also writes a file-based signal (Option A: cross-process).
-///
-/// # Safety
-///
-/// `file_path` and `status` must be valid, NUL-terminated UTF-8 strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_set_status(file_path: *const c_char, status: *const c_char) {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    let st = match unsafe { CStr::from_ptr(status) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    agent_doc_debounce::set_status(path, st);
-}
-
-/// Get the response status for a file (file-based).
-///
-/// Returns a NUL-terminated string: "generating", "writing", "routing", or "idle".
-/// Caller must free with `agent_doc_free_string`.
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_get_status(file_path: *const c_char) -> *mut c_char {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return CString::new("idle").unwrap().into_raw(),
-    };
-    let status = agent_doc_debounce::get_status(path);
-    CString::new(status)
-        .unwrap_or_else(|_| CString::new("idle").unwrap())
-        .into_raw()
 }
 
 /// Get the Project Controller→plugin turn-state projection for a document, as JSON.
@@ -807,23 +469,6 @@ fn document_model_actor_state(file: &Path) -> Option<agent_doc_sqlite::state_sto
         .map(|record| record.state)
 }
 
-/// Check if any operation is in progress for a file (file-based).
-///
-/// Returns `true` if status is NOT "idle". Plugins should skip route
-/// operations when this returns `true` to prevent cascading.
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_is_busy(file_path: *const c_char) -> i32 {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 0,
-    };
-    agent_doc_debounce::is_busy(path) as i32
-}
-
 /// Return the `agent:exchange` nodes of `file_path` as a JSON array
 /// (`[{"id","kind","label"}, …]`), or `[]` on any error or when the document has no
 /// exchange component. This is the Phase 4 read surface of the exchange document-tree
@@ -898,139 +543,6 @@ pub unsafe extern "C" fn agent_doc_is_session_document(file_path: *const c_char)
     ) as i32
 }
 
-/// Report the current editor buffer state for a document.
-///
-/// IDE plugins call this on every document change to provide editor-authoritative
-/// buffer stability information. When present, `wait_for_stable_content` uses
-/// this state instead of the truncation heuristic (`extract_last_added_line`).
-///
-/// Parameters:
-/// - `file_path`: canonical document path
-/// - `version`: monotonic editor document version (incremented on each edit)
-/// - `dirty`: whether the buffer has unsaved changes
-/// - `last_edit_timestamp_ms`: Unix epoch milliseconds of the last edit
-/// - `save_timestamp_ms`: Unix epoch milliseconds of last save (0 if never saved)
-/// - `content_hash`: SHA-256 hex digest of the editor-visible buffer (null if unavailable)
-/// - `content_len`: byte length of the editor-visible buffer (-1 if unavailable)
-/// - `session_id`: editor session identifier (null if unavailable)
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-/// `content_hash` and `session_id` may be null if unavailable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_report_editor_state(
-    file_path: *const c_char,
-    version: u64,
-    dirty: i32,
-    last_edit_timestamp_ms: u64,
-    save_timestamp_ms: u64,
-    content_hash: *const c_char,
-    content_len: i64,
-    session_id: *const c_char,
-) {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    let hash = if content_hash.is_null() {
-        None
-    } else {
-        unsafe { CStr::from_ptr(content_hash) }
-            .to_str()
-            .ok()
-            .map(|s| s.to_string())
-    };
-    let len = if content_len < 0 {
-        None
-    } else {
-        usize::try_from(content_len).ok()
-    };
-    let sid = if session_id.is_null() {
-        None
-    } else {
-        unsafe { CStr::from_ptr(session_id) }
-            .to_str()
-            .ok()
-            .map(|s| s.to_string())
-    };
-    let save_ts = if save_timestamp_ms == 0 {
-        None
-    } else {
-        Some(save_timestamp_ms as u128)
-    };
-    let state = agent_doc_debounce::EditorBufferState {
-        path: path.to_string(),
-        version,
-        dirty: dirty != 0,
-        last_edit_timestamp_ms: last_edit_timestamp_ms as u128,
-        save_timestamp_ms: save_ts,
-        hash,
-        content_len: len,
-        session_id: sid,
-    };
-    agent_doc_debounce::record_editor_buffer_state(&state);
-    // Feed the reactive editor open-document registry (`#live-editor-reactive`): an
-    // editor buffer report proves the document is open. Classification is computed
-    // lazily and only the first time this path is seen, so the per-keystroke hot path
-    // never re-reads frontmatter for an already-known document.
-    agent_doc_document_realtime::editor_open_docs::editor_open_docs().mark_open_with(path, || {
-        std::fs::read_to_string(path)
-            .map(|content| {
-                agent_doc_frontmatter_io::session::is_agent_doc_document_for_file(
-                    &content,
-                    std::path::Path::new(path),
-                )
-            })
-            .unwrap_or(false)
-    });
-}
-
-/// Get the current editor buffer state for a document as JSON.
-///
-/// Returns a NUL-terminated JSON string with the editor buffer state fields,
-/// or null if no editor state has been recorded. Caller must free with
-/// `agent_doc_free_string`.
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_get_editor_state(file_path: *const c_char) -> *mut c_char {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return ptr::null_mut(),
-    };
-    match agent_doc_debounce::editor_buffer_state(path) {
-        Some(state) => match serde_json::to_string(&state) {
-            Ok(json) => CString::new(json).unwrap().into_raw(),
-            Err(_) => ptr::null_mut(),
-        },
-        None => ptr::null_mut(),
-    }
-}
-
-/// Check if the editor buffer state indicates a stable (idle) document.
-///
-/// Returns `true` if the editor has reported buffer state and the buffer is
-/// stable (not dirty, or debounce elapsed). Returns `false` if still editing
-/// or no editor state exists.
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_is_editor_stable(
-    file_path: *const c_char,
-    debounce_ms: i64,
-) -> i32 {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 0,
-    };
-    agent_doc_debounce::editor_buffer_stable(path, debounce_ms as u64).is_some() as i32
-}
-
 /// Try to acquire the sync lock. Returns `true` if acquired, `false` if already held.
 ///
 /// Editors call this before triggering `agent-doc sync`. If it returns `false`,
@@ -1071,60 +583,6 @@ pub extern "C" fn agent_doc_sync_unlock() {
     // free guard never reads a stale acquisition time.
     SYNC_LOCK_ACQUIRED_AT_MS.store(0, Ordering::SeqCst);
     SYNC_LOCKED.store(false, Ordering::SeqCst);
-}
-
-/// `#8bfz` / `#fcconeowner`: elect a single live IntelliJ plugin consumer per
-/// document. Returns `1` if THIS consumer owns the document (apply the patch +
-/// `saveDocument`), `0` if a live owner already holds it (defer; leave the patch
-/// for the owner to apply).
-///
-/// Cross-process safe: the election is a `.agent-doc/plugin-owner/<hash>.json`
-/// lease claimed atomically (O_EXCL), self-healing on a stale heartbeat or a
-/// dead owner pid. Fail-open — any IO error returns `1` (apply) so a
-/// single-instance setup is never worse off than before the lease.
-///
-/// # Safety
-///
-/// `file_path` and `consumer_id` must be valid, NUL-terminated UTF-8 strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_plugin_owner_try_acquire(
-    file_path: *const c_char,
-    consumer_id: *const c_char,
-    pid: i64,
-) -> i32 {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 1, // can't resolve path — fail open (apply)
-    };
-    let consumer = match unsafe { CStr::from_ptr(consumer_id) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 1,
-    };
-    agent_doc_plugin_owner::try_acquire_plugin_owner(path, consumer, pid as u32) as i32
-}
-
-/// `#8bfz` / `#fcconeowner`: release the plugin-owner lease for `file_path`, but
-/// only if `consumer_id` still owns it (never stomps a successor). The plugin
-/// calls this when it stops watching the document (project/file close) so a
-/// live successor takes over without waiting for the TTL.
-///
-/// # Safety
-///
-/// `file_path` and `consumer_id` must be valid, NUL-terminated UTF-8 strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_plugin_owner_release(
-    file_path: *const c_char,
-    consumer_id: *const c_char,
-) {
-    let path = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    let consumer = match unsafe { CStr::from_ptr(consumer_id) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    agent_doc_plugin_owner::release_plugin_owner(path, consumer);
 }
 
 /// Bump the sync debounce generation. Returns the new generation number.
@@ -1207,7 +665,7 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
 /// - `1` → receipt `{"type":"receipt","status":"applied"}` (apply succeeded)
 /// - `2` → receipt `{"type":"receipt","status":"applied","reason":"already_applied"}`
 ///   (plugin detected the patch is already in the live buffer and chose NOT
-///   to re-apply; binary skips the file-IPC fallback so a duplicate response
+///   to re-apply; binary skips redundant CPC delivery so a duplicate response
 ///   heading cannot land).
 ///
 /// Plugins should prefer v2 when available.
@@ -1318,18 +776,20 @@ pub unsafe extern "C" fn agent_doc_write_ack_content(
 }
 
 fn record_lazily_visible_write_receipt(
+    project_root: &Path,
     file: &Path,
     patch_id_str: &str,
     content_str: &str,
     source: &str,
 ) -> anyhow::Result<()> {
     let proof =
-        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
+        agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_project_file(
+            project_root,
             file,
             patch_id_str,
             content_str,
             source,
-    )?;
+        )?;
     eprintln!(
         "[ffi] lazily visible-write receipt recorded: patch_id {} model_revision={} candidate_hash={} source={}",
         &patch_id_str[..patch_id_str.len().min(8)],
@@ -1490,7 +950,7 @@ pub unsafe extern "C" fn agent_doc_editor_content_applied_for_editor_v1(
     editor_version: *const c_char,
     capabilities_csv: *const c_char,
 ) -> i32 {
-    let _root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
+    let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
         Ok(s) => s,
         Err(_) => return 0,
     };
@@ -1527,15 +987,18 @@ pub unsafe extern "C" fn agent_doc_editor_content_applied_for_editor_v1(
         .map(str::trim)
         .filter(|capability| !capability.is_empty())
         .collect();
-    if !capabilities.contains(&agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY) {
+    if !capabilities.contains(
+        &agent_doc_document_realtime::editor_contract::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+    ) {
         eprintln!(
             "[ffi] incompatible editor plugin for {path}: agent_doc_editor_content_applied_for_editor_v1 requires {}; update/reinstall the plugin so it publishes editor_patch_applied/editor_patch_rejected lazily receipts",
-            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
+            agent_doc_document_realtime::editor_contract::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
         );
         return 0;
     }
 
     if let Err(err) = record_lazily_visible_write_receipt(
+        Path::new(root_str),
         Path::new(path),
         patch_id_str,
         text,
@@ -1583,43 +1046,6 @@ pub unsafe extern "C" fn agent_doc_write_ack_content_for_editor_v2(
     0
 }
 
-/// Check if the CLI claimed this patch by writing a local-closeout sentinel.
-/// Returns true if the sentinel `.agent-doc/claimed-patches/<patch_id>` exists.
-/// The sentinel is intentionally durable for the patch id so multiple editor
-/// watchers or repeated directory scans all skip the same locally-closed patch.
-///
-/// # Safety
-///
-/// Both pointers must be valid, NUL-terminated UTF-8 strings.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_is_claimed_by_force_disk(
-    project_root: *const c_char,
-    patch_id: *const c_char,
-) -> i32 {
-    let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 0,
-    };
-    let patch_id_str = match unsafe { CStr::from_ptr(patch_id) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 0,
-    };
-
-    let sentinel = std::path::Path::new(root_str)
-        .join(".agent-doc/claimed-patches")
-        .join(patch_id_str);
-
-    if sentinel.exists() {
-        eprintln!(
-            "[ffi] patch_id {} claimed by local closeout — skipping apply",
-            &patch_id_str[..patch_id_str.len().min(8)]
-        );
-        1
-    } else {
-        0
-    }
-}
-
 /// Return true when the current disk file still matches committed `HEAD` and
 /// that committed document already contains the incoming response patch body.
 ///
@@ -1657,34 +1083,6 @@ pub unsafe extern "C" fn agent_doc_patch_content_already_committed(
         return 0;
     }
     ffi_response_already_applied(&head, patch_content) as i32
-}
-
-/// Report whether the editor plugin's own `WatchService` file-apply path is
-/// demoted to read-only buffer reporting (`#dsqa` / `#pcp7` — 08b cut-over
-/// complete). Always returns `1`: post-cutover the plugin must NOT apply
-/// file-IPC patches it observes on disk — the controller-owned watcher + socket
-/// IPC are the sole writer to the live buffer. Emits a structured
-/// `plugin_watch_readonly` marker to that document's `ops.log` so the demotion
-/// is verifiable from the logs (the `#q6js` / `#lvbremain` proof).
-///
-/// # Safety
-///
-/// `file_path` must be a valid, NUL-terminated UTF-8 string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_plugin_watch_readonly(file_path: *const c_char) -> i32 {
-    let file = match unsafe { CStr::from_ptr(file_path) }.to_str() {
-        Ok(s) => s,
-        Err(_) => return 0,
-    };
-    if agent_doc_document_realtime::watch_authority::plugin_watch_is_readonly() {
-        agent_doc_ops_log_io::log_op(
-            std::path::Path::new(file),
-            "plugin_watch_readonly skipped file-apply (controller-owned watcher is sole writer) #dsqa",
-        );
-        1
-    } else {
-        0
-    }
 }
 
 fn ffi_show_head(file: &std::path::Path) -> Option<String> {
@@ -2027,15 +1425,7 @@ pub unsafe extern "C" fn agent_doc_document_base_hash(file_path: *const c_char) 
     };
     match agent_doc_op_capture_io::current_base_hash_with(
         std::path::Path::new(path),
-        |doc, baseline| {
-            agent_doc_snapshot_io::crdt_merge_base_state_with(
-                doc,
-                baseline,
-                agent_doc_op_capture_io::has_pending_editor_ops,
-                agent_doc_ops_log_io::log_op,
-            )
-            .map(|base| base.state)
-        },
+        |_doc, baseline| Ok(agent_doc_merge::crdt::CrdtDoc::from_text(baseline).encode_state()),
     ) {
         Ok(hash) => CString::new(hash)
             .map(|c| c.into_raw())
@@ -2609,9 +1999,7 @@ static RELIABLE_SYNC_LIVENESS_ENDPOINTS: std::sync::LazyLock<
     std::sync::Mutex<
         std::collections::HashMap<
             String,
-            agent_doc_reliable_sync_io::push::LivenessPushEndpoint<
-                agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox,
-            >,
+            agent_doc_reliable_sync_io::push::LivenessPushEndpoint<lazily::SqliteOutbox>,
         >,
     >,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -2624,9 +2012,7 @@ static RELIABLE_SYNC_DOCUMENT_ENDPOINTS: std::sync::LazyLock<
     std::sync::Mutex<
         std::collections::HashMap<
             String,
-            agent_doc_reliable_sync_io::push::FramePushEndpoint<
-                agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox,
-            >,
+            agent_doc_reliable_sync_io::push::FramePushEndpoint<lazily::SqliteOutbox>,
         >,
     >,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
@@ -2635,19 +2021,11 @@ fn reliable_sync_registry_key(project_root: &Path, document_hash: &str) -> Strin
     format!("{}\u{0}{document_hash}", project_root.display())
 }
 
-fn reliable_sync_outbox_path(project_root: &Path) -> PathBuf {
-    project_root
-        .join(".agent-doc")
-        .join("reliable_sync_outbox.db")
-}
-
 fn with_liveness_push_endpoint<T>(
     project_root: &Path,
     document_hash: &str,
     operation: impl FnOnce(
-        &mut agent_doc_reliable_sync_io::push::LivenessPushEndpoint<
-            agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox,
-        >,
+        &mut agent_doc_reliable_sync_io::push::LivenessPushEndpoint<lazily::SqliteOutbox>,
     ) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
     let key = reliable_sync_registry_key(project_root, document_hash);
@@ -2657,8 +2035,8 @@ fn with_liveness_push_endpoint<T>(
     let endpoint = match registry.entry(key) {
         std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
         std::collections::hash_map::Entry::Vacant(entry) => {
-            let outbox = agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox::open(
-                &reliable_sync_outbox_path(project_root),
+            let outbox = lazily::SqliteOutbox::open(
+                &agent_doc_sqlite::state_store::state_db_path(project_root),
                 document_hash.to_string(),
             )?;
             let acked_through = outbox.acked_through();
@@ -2679,9 +2057,6 @@ fn enqueue_liveness_ops(
     document_hash: &str,
     ops: &[agent_doc_reliable_sync_io::liveness::LivenessOp],
 ) -> anyhow::Result<()> {
-    if !agent_doc_reliable_sync_io::dual_run_enabled() {
-        return Ok(());
-    }
     with_liveness_push_endpoint(project_root, document_hash, |endpoint| {
         endpoint.enqueue(ops)?;
         Ok(())
@@ -2708,9 +2083,7 @@ fn with_document_push_endpoint<T>(
     project_root: &Path,
     file_path: &Path,
     operation: impl FnOnce(
-        &mut agent_doc_reliable_sync_io::push::FramePushEndpoint<
-            agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox,
-        >,
+        &mut agent_doc_reliable_sync_io::push::FramePushEndpoint<lazily::SqliteOutbox>,
     ) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
     let channel_hash = document_op_channel_hash(file_path);
@@ -2721,8 +2094,8 @@ fn with_document_push_endpoint<T>(
     let endpoint = match registry.entry(key) {
         std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
         std::collections::hash_map::Entry::Vacant(entry) => {
-            let outbox = agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox::open(
-                &reliable_sync_outbox_path(project_root),
+            let outbox = lazily::SqliteOutbox::open(
+                &agent_doc_sqlite::state_store::state_db_path(project_root),
                 channel_hash.clone(),
             )?;
             let acked_through = outbox.acked_through();
@@ -2827,9 +2200,6 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_document_op_push(
     delta_json: *const c_char,
 ) -> c_int {
     let result = (|| -> anyhow::Result<()> {
-        if !agent_doc_reliable_sync_io::dual_run_enabled() {
-            return Ok(());
-        }
         let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
         let file_path = unsafe { required_ffi_string(file_path, "file_path") }?;
         let delta_json = unsafe { required_ffi_string(delta_json, "delta_json") }?;
@@ -2871,9 +2241,6 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_text_adopt_push(
     text: *const c_char,
 ) -> c_int {
     let result = (|| -> anyhow::Result<()> {
-        if !agent_doc_reliable_sync_io::dual_run_enabled() {
-            return Ok(());
-        }
         let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
         let file_path = unsafe { required_ffi_string(file_path, "file_path") }?;
         let text = unsafe { required_ffi_string(text, "text") }?;
@@ -3518,20 +2885,13 @@ mod tests {
     }
 
     #[test]
-    fn turn_projection_uses_state_backbone_over_cycle_sidecar() {
+    fn turn_projection_uses_committed_state_backbone_phase() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let doc = tmp.path().join("session.md");
         let content = "---\nagent_doc_session: session-1\n---\n\nbody\n";
         std::fs::write(&doc, content).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        let sidecar_path = std::fs::read_dir(tmp.path().join(".agent-doc/state/cycles"))
-            .unwrap()
-            .next()
-            .expect("cycle state sidecar")
-            .unwrap()
-            .path();
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::mark_committed(
             &doc,
             "commit_success",
@@ -3539,10 +2899,9 @@ mod tests {
             Some(content),
         )
         .unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::Committed
         );
 
         let doc_c = CString::new(doc.to_string_lossy().as_ref()).unwrap();
@@ -4808,7 +4167,6 @@ mod ack_content_tests {
     #[test]
     fn test_editor_content_applied_for_editor_v1_records_receipt_without_live_buffer_sidecar() {
         let tmp = TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
         let doc = tmp.path().join("session.md");
         std::fs::write(&doc, "before\n").unwrap();
         let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
@@ -4820,8 +4178,8 @@ mod ack_content_tests {
         let editor_version = CString::new("test").unwrap();
         let capabilities = CString::new(format!(
             "{},{}",
-            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
+            agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_document_realtime::editor_contract::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
         ))
         .unwrap();
 
@@ -4865,28 +4223,17 @@ mod ack_content_tests {
         );
 
         assert!(
-            agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy()).is_none(),
-            "editor-applied receipt must not record a live-buffer sidecar proof"
+            !tmp.path().join(".agent-doc/live-buffer").exists(),
+            "editor-applied receipt must not create live-buffer sidecars"
         );
     }
 
     #[test]
-    fn test_document_changed_digest_content_for_editor_v3_retires_live_buffer_sidecar() {
+    fn test_lazily_current_observed_v1_does_not_touch_legacy_sidecar() {
         let tmp = TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
         let doc = tmp.path().join("session.md");
         let doc_content = "---\nagent: claude\nagent_doc_format: template\n---\n\n### Re: remote\n";
         std::fs::write(&doc, doc_content).unwrap();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities_v2(
-            &doc.to_string_lossy(),
-            doc_content,
-            "legacy-editor",
-            "jetbrains",
-            "legacy",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-            false,
-        )
-        .unwrap();
         let file_path = CString::new(doc.to_string_lossy().to_string()).unwrap();
         let content = CString::new(doc_content).unwrap();
         let editor_id = CString::new("jetbrains:test").unwrap();
@@ -4894,13 +4241,13 @@ mod ack_content_tests {
         let editor_version = CString::new("test").unwrap();
         let capabilities = CString::new(format!(
             "{},{}",
-            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
+            agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_document_realtime::editor_contract::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
         ))
         .unwrap();
 
         unsafe {
-            agent_doc_document_changed_digest_content_for_editor_v3(
+            agent_doc_lazily_current_observed_v1(
                 file_path.as_ptr(),
                 content.as_ptr(),
                 editor_id.as_ptr(),
@@ -4912,52 +4259,14 @@ mod ack_content_tests {
         };
 
         assert!(
-            agent_doc_debounce::live_buffer_snapshots(&doc.to_string_lossy()).is_empty(),
-            "v3 reports must remove, never recreate, the legacy full-buffer sidecar"
-        );
-    }
-
-    #[test]
-    fn test_document_changed_digest_content_for_editor_v2_does_not_create_live_buffer_sidecar() {
-        let tmp = TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
-        let doc = tmp.path().join("session.md");
-        let doc_content =
-            "---\nagent: claude\nagent_doc_format: template\n---\n\n### Re: fallback\n";
-        std::fs::write(&doc, doc_content).unwrap();
-        let file_path = CString::new(doc.to_string_lossy().to_string()).unwrap();
-        let content = CString::new(doc_content).unwrap();
-        let editor_id = CString::new("jetbrains:test").unwrap();
-        let editor_kind = CString::new("jetbrains").unwrap();
-        let editor_version = CString::new("test").unwrap();
-        let capabilities = CString::new(format!(
-            "{},{}",
-            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
-        ))
-        .unwrap();
-
-        unsafe {
-            agent_doc_document_changed_digest_content_for_editor_v2(
-                file_path.as_ptr(),
-                content.as_ptr(),
-                editor_id.as_ptr(),
-                editor_kind.as_ptr(),
-                editor_version.as_ptr(),
-                capabilities.as_ptr(),
-            )
-        };
-
-        assert!(
-            agent_doc_debounce::live_buffer_snapshots(&doc.to_string_lossy()).is_empty(),
-            "v2 reports are telemetry only; Lazily/CRDT owns current text"
+            !tmp.path().join(".agent-doc/live-buffer").exists(),
+            "the current edit hot path must not create legacy sidecars"
         );
     }
 
     #[test]
     fn test_editor_content_applied_for_editor_v1_requires_lazily_receipt_capability() {
         let tmp = TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
         let doc = tmp.path().join("session.md");
         std::fs::write(&doc, "before\n").unwrap();
         let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
@@ -4967,8 +4276,10 @@ mod ack_content_tests {
         let editor_id = CString::new("jetbrains:test").unwrap();
         let editor_kind = CString::new("jetbrains").unwrap();
         let editor_version = CString::new("test").unwrap();
-        let capabilities =
-            CString::new(agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY).unwrap();
+        let capabilities = CString::new(
+            agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+        )
+        .unwrap();
 
         let result = unsafe {
             agent_doc_editor_content_applied_for_editor_v1(
@@ -4993,8 +4304,8 @@ mod ack_content_tests {
             "missing-capability call must not write a projection sidecar"
         );
         assert!(
-            agent_doc_debounce::live_buffer_snapshot(&doc.to_string_lossy()).is_none(),
-            "missing-capability call must not record live-buffer proof"
+            !tmp.path().join(".agent-doc/live-buffer").exists(),
+            "missing-capability call must not create live-buffer proof"
         );
     }
 
@@ -5012,8 +4323,8 @@ mod ack_content_tests {
         let editor_version = CString::new("test").unwrap();
         let capabilities = CString::new(format!(
             "{},{}",
-            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
+            agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
+            agent_doc_document_realtime::editor_contract::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY
         ))
         .unwrap();
 
@@ -5036,53 +4347,6 @@ mod ack_content_tests {
                 .exists(),
             "legacy receipt-named v2 ABI must not write a projection sidecar"
         );
-    }
-
-    #[test]
-    fn test_is_claimed_by_force_disk_present() {
-        let tmp = TempDir::new().unwrap();
-        let claimed_dir = tmp.path().join(".agent-doc/claimed-patches");
-        std::fs::create_dir_all(&claimed_dir).unwrap();
-        std::fs::write(claimed_dir.join("test-patch-456"), "").unwrap();
-
-        let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
-        let patch_id = CString::new("test-patch-456").unwrap();
-
-        let claimed =
-            unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
-        assert_eq!(claimed, 1, "should return 1 when sentinel exists");
-        assert!(
-            claimed_dir.join("test-patch-456").exists(),
-            "sentinel should remain so repeated watcher passes skip the patch"
-        );
-        let claimed_again =
-            unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
-        assert_eq!(claimed_again, 1, "claimed sentinel should be durable");
-    }
-
-    #[test]
-    fn plugin_watch_readonly_always_demotes_post_cutover() {
-        // 08b cutover complete: the plugin WatchService file-apply path is
-        // unconditionally read-only — the controller-owned watcher + socket IPC
-        // are the sole writer (#dsqa / #pcp7).
-        let tmp = TempDir::new().unwrap();
-        let file = CString::new(tmp.path().join("plan.md").to_str().unwrap()).unwrap();
-        let readonly = unsafe { agent_doc_plugin_watch_readonly(file.as_ptr()) };
-        assert_eq!(
-            readonly, 1,
-            "post-cutover the plugin must never apply file-IPC patches"
-        );
-    }
-
-    #[test]
-    fn test_is_claimed_by_force_disk_absent() {
-        let tmp = TempDir::new().unwrap();
-        let project_root = CString::new(tmp.path().to_str().unwrap()).unwrap();
-        let patch_id = CString::new("nonexistent-patch").unwrap();
-
-        let claimed =
-            unsafe { agent_doc_is_claimed_by_force_disk(project_root.as_ptr(), patch_id.as_ptr()) };
-        assert_eq!(claimed, 0, "should return 0 when sentinel absent");
     }
 
     #[test]

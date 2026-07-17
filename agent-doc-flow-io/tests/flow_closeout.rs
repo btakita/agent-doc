@@ -218,10 +218,14 @@ mod tests {
     fn setup_git_project_with_doc(base: &str) -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
-        std::fs::write(dir.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         run_git(dir.path(), &["init"]);
         run_git(dir.path(), &["config", "user.email", "test@example.com"]);
         run_git(dir.path(), &["config", "user.name", "Test User"]);
@@ -352,7 +356,12 @@ mod tests {
             "### Re: repair closeout - gpt-5\n\nRecovered.\n<!-- agent:boundary:repair -->",
         );
         std::fs::write(&doc, &closed).unwrap();
-        agent_doc_snapshot_io::save(&doc, &closed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &closed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         complete_required_closeout(&doc)
             .expect("abandoned stale cycle must not block terminal closeout proof");
@@ -417,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn stuck_captured_cycle_detects_committed_cycle_missing_response_in_head() {
+    fn stuck_captured_cycle_reports_committed_projection_missing_response_in_head() {
         let base = "---\nsession: test\n---\n\n## User\n\nHello\n";
         let response = "### Re: hello — gpt-5\n\nCaptured but never committed.\n";
         let (_dir, doc) = setup_git_project_with_doc(base);
@@ -438,7 +447,7 @@ mod tests {
         assert_eq!(info.cycle_id, state.cycle_id);
         assert_eq!(info.capture_id, capture.capture_id);
         assert_eq!(info.response_body_len, response.len());
-        assert_eq!(info.capture_state, "captured");
+        assert_eq!(info.capture_state, "committed");
     }
 
     #[test]
@@ -458,10 +467,7 @@ mod tests {
             Some(base),
         )
         .unwrap();
-        std::fs::remove_file(
-            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
-        )
-        .unwrap();
+        assert!(!capture.capture_id.is_empty());
 
         let info =
             stuck_captured_cycle(&doc).expect("projected missing HEAD response should be detected");
@@ -504,7 +510,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
@@ -532,7 +543,12 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
-        agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &full_doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
@@ -566,7 +582,12 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_capture_io::capture_response(&doc, captured).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
-        agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &full_doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
@@ -592,7 +613,6 @@ mod tests {
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_cycle_state_io::record_turn_checkpoint(
             &doc,
-            Some("/tmp/baseline.md"),
             &[":pushpin: do [#durablerecycle]".to_string()],
             Some("#durablerecycle"),
             Some("#durablerecycle"),
@@ -622,34 +642,7 @@ mod tests {
             cmd.contains(&format!("capture_id={}", started.cycle_id)),
             "{cmd}"
         );
-        assert!(cmd.contains("--baseline-file /tmp/baseline.md"), "{cmd}");
-    }
-
-    #[test]
-    fn open_cycle_recovery_uses_projection_when_cycle_sidecar_is_missing() {
-        let base = "---\nsession: test\n---\n\nHi\n";
-        let (_dir, doc) = setup_git_project_with_doc(base);
-        let started =
-            agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle sidecar path");
-        std::fs::remove_file(&sidecar_path).unwrap();
-        assert!(agent_doc_cycle_state_io::load(&doc).unwrap().is_none());
-
-        assert_eq!(
-            classify_closeout_recovery_state_for_file(&doc),
-            CloseoutRecoveryState::OpenCycle
-        );
-        let cmd =
-            closeout_recovery_command_for_file(&doc, CloseoutRecoveryState::OpenCycle).unwrap();
-        assert!(cmd.contains("resume durable checkpoint"), "{cmd}");
-        assert!(
-            cmd.contains(&format!("cycle={}", started.cycle_id)),
-            "{cmd}"
-        );
-        assert!(cmd.contains("phase=preflight_started"), "{cmd}");
-        assert!(cmd.contains("pending_mutations=true"), "{cmd}");
+        assert!(!cmd.contains("--baseline-file"), "{cmd}");
     }
 
     #[test]
@@ -661,6 +654,7 @@ mod tests {
         let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
         let visible = format!("{base}\n{response}");
         std::fs::write(&doc, &visible).unwrap();
+        agent_doc_crdt_relay_io::seed_embedded_relay_for_file(&doc).unwrap();
         let canonical = doc.canonicalize().unwrap();
         let canonical_key = canonical.to_string_lossy();
         seed_live_reliable_sync_open(&canonical);
@@ -726,10 +720,7 @@ mod tests {
         let state =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        std::fs::remove_file(
-            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
-        )
-        .unwrap();
+        assert!(!capture.capture_id.is_empty());
 
         let evidence = gather_closeout_recovery_evidence(&doc).unwrap();
         assert_eq!(
@@ -770,10 +761,7 @@ mod tests {
             "<!-- patch:exchange -->\n### Re: first head — gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
         )
         .unwrap();
-        std::fs::remove_file(
-            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
-        )
-        .unwrap();
+        assert!(!capture.capture_id.is_empty());
         let current = base.replace(
             "- first head\n",
             "- first head\n- user typed a new queue note during closeout\n",
@@ -853,10 +841,7 @@ mod tests {
         std::fs::write(&doc, visible).unwrap();
 
         observe_closeout_recovery_evidence(&doc).unwrap();
-        std::fs::remove_file(
-            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
-        )
-        .unwrap();
+        assert!(!capture.capture_id.is_empty());
 
         let observed = load_current_observed_closeout_recovery_evidence(&doc)
             .unwrap()
@@ -894,10 +879,7 @@ mod tests {
         .unwrap();
 
         observe_closeout_recovery_evidence(&doc).unwrap();
-        std::fs::remove_file(
-            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
-        )
-        .unwrap();
+        assert!(!capture.capture_id.is_empty());
 
         assert_eq!(
             classify_closeout_recovery_state_for_file(&doc),
@@ -983,7 +965,12 @@ mod tests {
         let snapshot = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         let (_dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -1009,7 +996,12 @@ mod tests {
         let snapshot = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         let (_dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -1024,8 +1016,6 @@ mod tests {
             evidence.snapshot_head_drift,
             Some(agent_doc_turn::closeout_recovery::CloseoutRecoveryDrift::MetadataOnly)
         );
-        std::fs::remove_file(agent_doc_fs::snapshot_path_for(&doc).unwrap()).unwrap();
-
         assert_eq!(
             classify_closeout_recovery_state_for_file(&doc),
             CloseoutRecoveryState::QueueMetadataDrift
@@ -1043,7 +1033,12 @@ mod tests {
         let snapshot = head.replace("Done.\n", "Done.\n\nReal unreviewed user content.\n");
         let (_dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -1064,7 +1059,7 @@ mod tests {
         // directly into the working file outside the binary write path (snapshot
         // and HEAD are clean, the working file gained the response). Classified as
         // DirectResponsePatchback → recover with `write --commit`, NOT the generic
-        // UnsafeUserContentDrift / SidecarVisibleDrift.
+        // UnsafeUserContentDrift / RecoveryProjectionVisibleDrift.
         let base = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
             "## Exchange\n\n",
@@ -1072,7 +1067,12 @@ mod tests {
         );
         let (_dir, doc) = setup_git_project_with_doc(base);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -1157,7 +1157,12 @@ mod tests {
         // Document itself is clean: snapshot == HEAD == working.
         let doc = subwt.join("doc.md");
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -1222,7 +1227,12 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         // The snapshot AND the visible file carry the drift; only HEAD is behind.
         std::fs::write(&doc, &snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -1270,7 +1280,12 @@ mod tests {
         let snapshot = head.replace("queue_active: true", "queue_active: false");
         let (dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -1291,7 +1306,9 @@ mod tests {
         let restored = std::fs::read_to_string(&doc).unwrap();
         assert!(restored.contains("queue_active: true"), "{restored}");
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
             restored
         );
         assert_eq!(
@@ -1307,7 +1324,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_recovery_commits_sidecar_visible_drift_through_mutation() {
+    fn apply_recovery_commits_recovery_projection_visible_drift_through_mutation() {
         // `#smrecoverymutate`: reset-from-visible rebuilds snapshot/CRDT through
         // the shared mutation primitive before committing accepted metadata drift.
         let head = concat!(
@@ -1319,7 +1336,12 @@ mod tests {
         let visible = head.replace("- do [#a]\n", "- do [#a]\n- do [#b]\n");
         let (dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        agent_doc_snapshot_io::save(&doc, head, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            head,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -1331,19 +1353,21 @@ mod tests {
         std::fs::write(&doc, &visible).unwrap();
         assert_eq!(
             classify_closeout_recovery_state_for_file(&doc),
-            CloseoutRecoveryState::SidecarVisibleDrift
+            CloseoutRecoveryState::RecoveryProjectionVisibleDrift
         );
 
         match apply_closeout_recovery(&doc).unwrap() {
             RecoveryApplication::Applied { state, .. } => {
-                assert_eq!(state, CloseoutRecoveryState::SidecarVisibleDrift);
+                assert_eq!(state, CloseoutRecoveryState::RecoveryProjectionVisibleDrift);
             }
             other => panic!("expected Applied for sidecar-visible drift, got {other:?}"),
         }
 
         let working = std::fs::read_to_string(&doc).unwrap();
         assert!(working.contains("- do [#b]"), "{working}");
-        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(snapshot.contains("- do [#b]"), "{snapshot}");
         assert!(
             agent_doc_git_io::revision::show_head(&doc)
@@ -1371,7 +1395,12 @@ mod tests {
         let snapshot = head.replace("- do [#a]", "- do [#z]");
         let (_dir, doc) = setup_git_project_with_doc(head);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -1421,7 +1450,12 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &full_doc).unwrap();
-        agent_doc_snapshot_io::save(&doc, &full_doc, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &full_doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
@@ -1460,7 +1494,12 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         // Snapshot carries the un-canonicalized prompt prefix; HEAD has the bare
         // form. Artifact normalization makes them equal; transient does not.
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -1520,7 +1559,12 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, full_doc).unwrap();
-        agent_doc_snapshot_io::save(&doc, full_doc, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            full_doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "response", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
@@ -1572,7 +1616,12 @@ mod tests {
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &compacted).unwrap();
-        agent_doc_snapshot_io::save(&doc, &compacted, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &compacted,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
@@ -1628,7 +1677,12 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
         std::fs::write(&doc, &compacted).unwrap();
-        agent_doc_snapshot_io::save(&doc, &compacted, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &compacted,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         run_git(dir.path(), &["add", "doc.md"]);
         run_git(dir.path(), &["commit", "-m", "compact", "--no-verify"]);
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
@@ -1640,19 +1694,15 @@ mod tests {
         )
         .unwrap();
 
-        // Reconcile once: the capture is durably marked Discarded.
+        // Reconcile once: the terminal capture projection is retired from the
+        // state backbone rather than kept as an active compatibility record.
         assert!(
             reconcile_compacted_committed_capture(&doc).unwrap(),
             "expected reconciliation to settle the compacted committed capture"
         );
-        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         assert!(
-            matches!(
-                capture.state,
-                agent_doc_workflow::capture::CaptureState::Discarded
-            ),
-            "capture should be terminally Discarded after reconciliation, got {:?}",
-            capture.state
+            agent_doc_capture_io::load_active(&doc).unwrap().is_none(),
+            "a reconciled terminal capture must not remain active"
         );
 
         // A second pass is a no-op (already discarded).

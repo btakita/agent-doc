@@ -69,11 +69,11 @@ pub fn merge_contents(base: &str, ours: &str, theirs: &str) -> Result<String> {
 /// Same contract and return shape as [`agent_doc_merge::merge_contents_crdt`],
 /// but for the `theirs` (editor) side it prefers the editor's real captured
 /// operations over a Myers diff guess when they are available and provably
-/// aligned. Captured ops are used only when their sidecar base hash matches the
+/// aligned. Captured ops are used only when their state-ledger base hash matches the
 /// resolved base text and replaying the ops onto that base reproduces `theirs`.
 /// Otherwise this degrades to the plain CRDT merge path.
 ///
-/// The capture sidecar is consumed after the merge attempt, whether the ops
+/// The capture row is consumed after the merge attempt, whether the ops
 /// were used or stale, so stale ops cannot leak into a later epoch.
 pub fn merge_contents_crdt_with_ops(
     doc: &Path,
@@ -126,7 +126,7 @@ pub fn merge_contents_crdt_with_ops(
 
     if let Err(e) = agent_doc_op_capture_io::clear_op_capture(doc) {
         eprintln!(
-            "[op-capture] failed to clear sidecar for {} after merge ({e})",
+            "[op-capture] failed to clear state row for {} after merge ({e})",
             doc.display()
         );
     }
@@ -164,107 +164,9 @@ fn summarize_editor_ops_for_log(ops: &[agent_doc_merge::crdt::EditorOp]) -> Stri
     )
 }
 
-/// Load the durable per-node merge state for a document (`#qnodemerge2`).
-///
-/// Resolution order:
-/// 1. The `<hash>.nodes.yrs` per-node container, when present.
-/// 2. Otherwise lazily migrate the legacy whole-doc `<hash>.yrs` blob by
-///    splitting it into per-node states.
-/// 3. Otherwise rebuild fresh per-node states from `fallback_markdown`.
-pub fn multinode_crdt_state(
-    doc: &Path,
-    fallback_markdown: &str,
-) -> Result<agent_doc_merge::crdt::MultiNodeState> {
-    agent_doc_snapshot_io::with_crdt_lock(doc, || {
-        let nodes_path = agent_doc_fs::multinode_crdt_path_for(doc)?;
-        if let Some(bytes) =
-            agent_doc_snapshot_io::read_crdt_state_file(&nodes_path, "per-node CRDT state")?
-        {
-            return Ok(agent_doc_merge::crdt::MultiNodeState::decode_or_migrate(
-                &bytes,
-                fallback_markdown,
-            ));
-        }
-
-        let legacy_path = agent_doc_fs::crdt_path_for(doc)?;
-        if let Some(bytes) =
-            agent_doc_snapshot_io::read_crdt_state_file(&legacy_path, "CRDT state")?
-        {
-            return Ok(agent_doc_merge::crdt::MultiNodeState::decode_or_migrate(
-                &bytes,
-                fallback_markdown,
-            ));
-        }
-
-        agent_doc_merge::crdt::MultiNodeState::from_text(fallback_markdown)
-    })
-}
-
-/// Persist the legacy whole-document CRDT state, structured overlay state, and
-/// per-node merge sidecar for the same markdown snapshot.
-pub fn save_document_crdt(doc: &Path, legacy_state: &[u8], markdown: &str) -> Result<()> {
-    let started = std::time::Instant::now();
-    let legacy = legacy_state.to_vec();
-    let overlay = agent_doc_snapshot_io::overlay_crdt_state_from_markdown(markdown);
-    let multinode = match agent_doc_merge::crdt::MultiNodeState::from_text(markdown) {
-        Ok(multinode) => Some(multinode.encode()),
-        Err(e) => {
-            eprintln!(
-                "[crdt] projection: failed to build per-node state for {} ({e}); skipping nodes sidecar",
-                doc.display()
-            );
-            None
-        }
-    };
-
-    agent_doc_snapshot_io::with_crdt_lock_labeled(doc, "sidecar_projection", || {
-        let legacy_path = agent_doc_fs::crdt_path_for(doc)?;
-        let overlay_path = agent_doc_fs::overlay_crdt_path_for(doc)?;
-        let nodes_path = agent_doc_fs::multinode_crdt_path_for(doc)?;
-        let legacy_changed =
-            agent_doc_snapshot_io::write_crdt_state_file_if_changed(&legacy_path, &legacy)?;
-        let overlay_changed =
-            agent_doc_snapshot_io::write_crdt_state_file_if_changed(&overlay_path, &overlay)?;
-        let nodes_changed = match multinode.as_deref() {
-            Some(nodes) => {
-                agent_doc_snapshot_io::write_crdt_state_file_if_changed(&nodes_path, nodes)?
-            }
-            None => false,
-        };
-        let elapsed_ms = started.elapsed().as_millis();
-        eprintln!(
-            "[crdt] projection saved file={} elapsed_ms={} legacy_changed={} overlay_changed={} nodes_changed={} legacy_len={} overlay_len={} nodes_len={}",
-            doc.display(),
-            elapsed_ms,
-            legacy_changed,
-            overlay_changed,
-            nodes_changed,
-            legacy.len(),
-            overlay.len(),
-            multinode.as_ref().map(|nodes| nodes.len()).unwrap_or(0)
-        );
-        Ok(())
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use tempfile::TempDir;
-
-    fn setup() -> (TempDir, PathBuf) {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        std::fs::write(&doc, "# Test\n").unwrap();
-        (dir, doc)
-    }
-
-    fn template_doc(exchange: &str, queue: &str) -> String {
-        format!(
-            "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange -->\n{exchange}\n<!-- /agent:exchange -->\n\n<!-- agent:queue -->\n{queue}\n<!-- /agent:queue -->\n"
-        )
-    }
 
     #[test]
     fn merge_contents_clean() {
@@ -286,85 +188,10 @@ mod tests {
         assert!(!result.contains("<<<<<<<"));
     }
 
-    #[test]
-    fn save_document_crdt_writes_per_node_sidecar() {
-        let (_dir, doc) = setup();
-        let markdown = template_doc("Prompt.\n\n### Re: q\n\nBody.", "- do [#a1]");
-        let legacy = agent_doc_merge::crdt::CrdtDoc::from_text(&markdown).encode_state();
-
-        save_document_crdt(&doc, &legacy, &markdown).unwrap();
-
-        let bytes = agent_doc_snapshot_io::load_multinode_crdt(&doc)
-            .unwrap()
-            .expect("nodes sidecar present");
-        let state = agent_doc_merge::crdt::MultiNodeState::decode(&bytes).unwrap();
-        assert_eq!(state.to_text().unwrap(), markdown);
-    }
-
-    #[test]
-    fn multinode_crdt_state_migrates_legacy_when_no_sidecar() {
-        let (_dir, doc) = setup();
-        let markdown = template_doc("Q.", "- do [#a1]");
-        let legacy = agent_doc_merge::crdt::CrdtDoc::from_text(&markdown).encode_state();
-        agent_doc_snapshot_io::save_crdt(&doc, &legacy).unwrap();
-
-        let state = multinode_crdt_state(&doc, "fallback").unwrap();
-
-        assert_eq!(state.to_text().unwrap(), markdown);
-    }
-
-    #[test]
-    fn multinode_crdt_state_prefers_sidecar_over_legacy() {
-        let (_dir, doc) = setup();
-        let markdown = template_doc("Q.", "- do [#a1]\n- do [#b2]");
-        let legacy = agent_doc_merge::crdt::CrdtDoc::from_text(&markdown).encode_state();
-        save_document_crdt(&doc, &legacy, &markdown).unwrap();
-
-        let state = multinode_crdt_state(&doc, "fallback").unwrap();
-
-        assert_eq!(state.to_text().unwrap(), markdown);
-    }
-
-    #[test]
-    fn multinode_crdt_state_fallback_when_nothing_persisted() {
-        let (_dir, doc) = setup();
-        let fallback = template_doc("Q.", "- do [#a1]");
-
-        let state = multinode_crdt_state(&doc, &fallback).unwrap();
-
-        assert_eq!(state.to_text().unwrap(), fallback);
-    }
-
-    #[test]
-    fn save_document_crdt_rebuilds_per_node_state_on_compaction() {
-        let (_dir, doc) = setup();
-        let before = template_doc(
-            "Q.\n\n### Re: q\n\nA long answer body to be compacted away.",
-            "- do [#a1]",
-        );
-        let before_legacy = agent_doc_merge::crdt::CrdtDoc::from_text(&before).encode_state();
-        save_document_crdt(&doc, &before_legacy, &before).unwrap();
-        let before_len = agent_doc_snapshot_io::load_multinode_crdt(&doc)
-            .unwrap()
-            .unwrap()
-            .len();
-
-        let after = template_doc("Q.\n\n_[compacted]_", "- do [#a1]");
-        let after_legacy = agent_doc_merge::crdt::CrdtDoc::from_text(&after).encode_state();
-        save_document_crdt(&doc, &after_legacy, &after).unwrap();
-
-        let state = multinode_crdt_state(&doc, "").unwrap();
-        let after_bytes = agent_doc_snapshot_io::load_multinode_crdt(&doc)
-            .unwrap()
-            .unwrap();
-        assert_eq!(state.to_text().unwrap(), after);
-        assert!(after_bytes.len() < before_len);
-    }
-
     fn noop_log(_: &Path, _: &str) {}
 
     #[test]
-    fn merge_with_ops_uses_aligned_editor_ops_and_consumes_sidecar() {
+    fn merge_with_ops_uses_aligned_editor_ops_and_consumes_state_row() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
         let doc = dir.path().join("plan.md");
@@ -399,7 +226,7 @@ mod tests {
             agent_doc_op_capture_io::load_op_capture(&doc)
                 .unwrap()
                 .is_none(),
-            "sidecar must be cleared after the merge consumes its epoch"
+            "state row must be cleared after the merge consumes its epoch"
         );
     }
 

@@ -718,7 +718,7 @@ mod tests {
                 &[WorkflowProof::CaptureRecord][..],
             ),
             (
-                "degraded/file-IPC materialized response fallback",
+                "recovered CPC materialized response delivery",
                 decide_captured_response(CapturedResponseEvidence {
                     state: CapturedResponseState::WriteApplied,
                     visible_response_matches_capture: true,

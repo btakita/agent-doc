@@ -159,6 +159,10 @@ pub trait SupervisorIpcSnapshotState {
     fn actor_pane_id(&self) -> Option<String>;
     fn actor_generation(&self) -> Option<u64>;
     fn actor_file(&self) -> Option<String>;
+    /// Lazily current-authority facts supplied by the runtime layer that owns
+    /// the editor/controller dependency. Keeping this seam on the state
+    /// adapter avoids pulling editor I/O into the supervisor persistence crate.
+    fn editor_authority_snapshot(&self) -> Option<serde_json::Value>;
     fn restart_count(&self) -> u32;
     fn cwd_source(&self) -> &'static str;
     fn supervisor_pid(&self) -> u32;
@@ -170,15 +174,7 @@ pub fn supervisor_ipc_state_snapshot<S>(state: &S) -> SupervisorIpcStateSnapshot
 where
     S: SupervisorIpcSnapshotState + ?Sized,
 {
-    let editor_sync = state.actor_file().map(|file| {
-        let statuses = agent_doc_debounce::editor_sync_statuses(&file);
-        let in_flight = statuses.iter().any(|status| status.in_flight);
-        serde_json::json!({
-            "file": file,
-            "in_flight": in_flight,
-            "statuses": statuses,
-        })
-    });
+    let editor_sync = state.editor_authority_snapshot();
     SupervisorIpcStateSnapshot {
         running: state.supervisor_running(),
         state: state.supervisor_state_label(),

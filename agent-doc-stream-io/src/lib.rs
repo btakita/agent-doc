@@ -11,15 +11,15 @@
 //! - Pre-commits user changes to git before sending; final-commits after stream completes.
 //! - `stream_loop()` buffers cumulative chunks and performs exactly one
 //!   authoritative document flush after the backend marks the response final.
-//!   Non-final chunks may update recovery-only sidecars, but never the document,
+//!   Non-final chunks may update the recovery-only `state.db` ledger, but never the document,
 //!   snapshot, response capture, queue state, or commit boundary.
 //! - While streaming, the first non-empty partial response and then changed
 //!   partial responses at most once every 30 seconds are saved as durable
-//!   `.partial.json` checkpoints next to the final response capture ledger.
+//!   cycle-scoped checkpoints in the shared state ledger.
 //! - Thinking content (`chunk.thinking`) is routed to a separate component when
 //!   `thinking_target` is set, or interleaved as `<details>` when unset.
-//! - On stream completion: saves crash-recovery pending file, writes final content, saves
-//!   CRDT state + snapshot, clears pending file, and updates `resume` frontmatter field.
+//! - On stream completion: retains the response intent in `state.db`, writes final content,
+//!   checkpoints the baseline, clears the intent, and updates `resume` frontmatter.
 //! - `flush_to_document()` tries IPC to the IDE plugin first. It falls back to
 //!   flock + atomic write only when IPC is unavailable; an unproven active IPC
 //!   attempt fails closed for retry.
@@ -76,7 +76,6 @@ use std::time::Duration;
 
 use agent_doc_config::Config;
 use agent_doc_frontmatter::frontmatter;
-use agent_doc_merge::crdt;
 use agent_doc_prompt_context::StreamingAgentPromptContext;
 use agent_doc_template as template;
 use agent_doc_turn::response_text::render_interleaved_thinking_response;
@@ -183,7 +182,7 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
 
     // Compute diff
     let the_diff = match agent_doc_diff_io::compute(
-        &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
+        &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
         file,
     )? {
         Some(d) => {
@@ -301,7 +300,11 @@ pub fn run(options: StreamRunOptions<'_>, effects: Arc<dyn StreamRuntimeEffects>
         let current = effects.current_document_content(file, "stream_run_resume_update")?;
         let updated = frontmatter::set_resume_id(&current, sid)?;
         effects.atomic_write(file, &updated)?;
-        agent_doc_snapshot_io::save(file, &updated, agent_doc_ops_log_io::log_op)?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &updated,
+            agent_doc_ops_log_io::log_op,
+        )?;
     }
 
     // Lint gate: runs on the merged document AFTER the final flush /
@@ -555,10 +558,11 @@ fn stream_loop(
                     .unwrap_or_default()
             })
         };
-        agent_doc_snapshot_io::save(file, &content_ours, agent_doc_ops_log_io::log_op)?;
-        let doc = crdt::CrdtDoc::from_text(&content_ours);
-        agent_doc_merge_io::save_document_crdt(file, &doc.encode_state(), &content_ours)?;
-
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &content_ours,
+            agent_doc_ops_log_io::log_op,
+        )?;
         effects.clear_pending(file)?;
     }
 
@@ -575,8 +579,8 @@ fn stream_loop(
 /// because the stream buffer is cumulative — each flush contains the full text
 /// so far, not just the delta.
 ///
-/// When a JetBrains/VS Code plugin is active (`.agent-doc/patches/` directory
-/// exists), attempts IPC first to avoid "externally modified" dialogs. An
+/// When a JetBrains/VS Code Lazily replica is registered, attempts its
+/// PID-scoped endpoint first. An
 /// unproven active IPC attempt fails closed rather than writing behind the editor.
 pub fn flush_to_document(
     file: &Path,
@@ -597,15 +601,7 @@ pub fn flush_to_document(
 
     // Try IPC first — if plugin is active, it applies patches via Document API
     // (no "externally modified" dialog, cursor preserved, undo preserved)
-    let ipc_available = file
-        .canonicalize()
-        .ok()
-        .map(|canonical| {
-            agent_doc_project_root_io::resolve_ipc_project_root(&canonical)
-                .join(".agent-doc/patches")
-                .exists()
-        })
-        .unwrap_or(false);
+    let ipc_available = agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
     if effects.try_ipc_stream_flush(file, &patches, &unmatched)? {
         return Ok(());
     }
@@ -711,20 +707,11 @@ mod tests {
                 response,
                 &current_content,
             )?;
-            let pending_path = agent_doc_fs::pending_response_path_for(file)?;
-            if let Some(parent) = pending_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&pending_path, response)?;
             Ok(())
         }
 
         fn clear_pending(&self, file: &Path) -> Result<()> {
-            let pending_path = agent_doc_fs::pending_response_path_for(file)?;
-            if pending_path.exists() {
-                std::fs::remove_file(&pending_path)?;
-            }
-            let _ = agent_doc_snapshot_io::delete_pre_response(file);
+            let _ = agent_doc_snapshot_io::clear_undo_content(file);
             let _ = agent_doc_capture_io::mark_write_applied(file);
             Ok(())
         }
@@ -776,39 +763,6 @@ mod tests {
             !result.contains("Old content"),
             "old content should be replaced: {}",
             result
-        );
-    }
-
-    #[test]
-    fn flush_active_ipc_timeout_does_not_write_document_directly() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("locks")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        let content = "---\nagent_doc_mode: stream\n---\n\n# Test\n\n<!-- agent:output -->\nOld content\n<!-- /agent:output -->\n";
-        std::fs::write(&doc, content).unwrap();
-
-        let err = flush_to_document(
-            &doc,
-            "New streamed content",
-            "output",
-            content,
-            &TEST_EFFECTS,
-        )
-        .unwrap_err();
-
-        assert!(
-            err.to_string().contains("refusing direct document write"),
-            "active IPC timeout should fail closed, got: {err:#}"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&doc).unwrap(),
-            content,
-            "active IPC timeout must not mutate the document directly"
         );
     }
 
@@ -946,7 +900,7 @@ mod tests {
     }
 
     #[test]
-    fn stream_loop_captures_partial_checkpoints() {
+    fn stream_loop_retires_partial_checkpoint_after_final_capture() {
         let dir = tempfile::TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
@@ -958,7 +912,12 @@ mod tests {
         let doc = dir.path().join("test.md");
         let content = "---\nagent_doc_session: sid\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let chunks = mock_chunks(vec![
@@ -987,11 +946,12 @@ mod tests {
         )
         .unwrap();
 
-        let checkpoint = agent_doc_capture_io::latest_partial_checkpoint(&doc)
-            .unwrap()
-            .expect("partial checkpoint should be persisted");
-        assert_eq!(checkpoint.response_body, "Partial checkpoint");
-        assert_eq!(checkpoint.checkpoint_count, 1);
+        assert!(
+            agent_doc_capture_io::latest_partial_checkpoint(&doc)
+                .unwrap()
+                .is_none(),
+            "a final capture must retire its superseded partial checkpoint"
+        );
         let active_capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
         assert_eq!(active_capture.response_body, "Final response");
     }
@@ -1041,7 +1001,12 @@ mod tests {
         let doc = dir.path().join("test.md");
         let content = "---\nagent_doc_session: sid\nagent_doc_mode: stream\n---\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let (partial_ready_tx, partial_ready_rx) = mpsc::channel();

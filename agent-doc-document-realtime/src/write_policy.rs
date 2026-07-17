@@ -7,7 +7,9 @@
 use agent_doc_document::commit_normalization::{
     normalize_component_content_for_absorb, redact_component_contents_for_absorb,
 };
-use agent_doc_document::transient_markers::strip_boundary_markers;
+use agent_doc_document::transient_markers::{
+    strip_boundary_markers, strip_legacy_queue_active_frontmatter,
+};
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_element::element;
 use agent_doc_element_exchange::{
@@ -499,18 +501,13 @@ pub fn reconcile_visible_write<C: ?Sized, T>(
 /// delivery attempt already failed.
 ///
 /// An active editor authority means the editor buffer, not the disk replica, owns
-/// the current document text — but only while its IPC transport is answering.
+/// the current document text. Transport reachability cannot change authority:
+/// a dead listener pauses delivery while Lazily retains the editor intent.
 /// The durable reliable-sync liveness projection is the sole editor-authority
-/// signal. It still requires a live, answering listener to force a refusal: an
-/// open fact with a dead socket means the editor cannot receive or re-save the
-/// write, so refusing disk would wedge the document forever
-/// (`#staleattachdemote`, stale attached-editor demotion). Plugin-owner leases are
-/// deliberately absent from this decision; P4 retired that divergent cold path.
-pub fn should_refuse_disk_fallback(
-    editor_authority_active: bool,
-    listener_answering: bool,
-) -> bool {
-    listener_answering && editor_authority_active
+/// signal. Plugin-owner leases and socket status are deliberately absent from the
+/// authority decision; they describe transport health, not document ownership.
+pub fn editor_authority_blocks_disk_write(editor_authority_active: bool) -> bool {
+    editor_authority_active
 }
 
 /// Apply `❯ ` prefix to lines in `content` that appear in `prefix_lines`.
@@ -644,7 +641,7 @@ fn contains_contiguous_hunk(haystack: &[String], needle: &[String]) -> bool {
 
 /// Detect whether the current document already contains the response delta.
 ///
-/// On IPC sidecar ack timeout, socket/file delivery may have succeeded while
+/// On delivery-receipt timeout, CPC delivery may have succeeded while
 /// confirmation did not arrive in time. If the editor applied the patches, the
 /// exchange component in `content_current` already contains the response delta
 /// from `base -> content_ours`; applying it again would duplicate the response.
@@ -1124,26 +1121,27 @@ pub fn ipc_snapshot_would_absorb_live_prompt_drift_after_preflight(
     snapshot_candidate: &str,
     content_ours: &str,
 ) -> bool {
-    let baseline_norm = strip_boundary_markers(baseline);
-    let candidate_norm = strip_boundary_markers(snapshot_candidate);
-    let ours_norm = strip_boundary_markers(content_ours);
+    let baseline_norm = strip_legacy_queue_active_frontmatter(&strip_boundary_markers(baseline));
+    let candidate_norm =
+        strip_legacy_queue_active_frontmatter(&strip_boundary_markers(snapshot_candidate));
+    let ours_norm = strip_legacy_queue_active_frontmatter(&strip_boundary_markers(content_ours));
     if outside_component_content_changed(&baseline_norm, &candidate_norm, "exchange")
         && outside_component_content_changed(&ours_norm, &candidate_norm, "exchange")
     {
         return true;
     }
-    if candidate_has_unowned_prompt_target_line(snapshot_candidate, content_ours) {
+    if candidate_has_unowned_prompt_target_line(&candidate_norm, &ours_norm) {
         return true;
     }
-    if content_ours_drops_operator_text(baseline, snapshot_candidate, content_ours) {
+    if content_ours_drops_operator_text(&baseline_norm, &candidate_norm, &ours_norm) {
         return true;
     }
 
-    let candidate_changes = prompt_bearing_user_changes_between(baseline, snapshot_candidate);
+    let candidate_changes = prompt_bearing_user_changes_between(&baseline_norm, &candidate_norm);
     if candidate_changes.is_empty() {
         return false;
     }
-    let owned_changes = prompt_bearing_user_changes_between(baseline, content_ours);
+    let owned_changes = prompt_bearing_user_changes_between(&baseline_norm, &ours_norm);
     candidate_changes
         .iter()
         .any(|change| !prompt_bearing_change_owned_by_content_ours(change, &owned_changes))
@@ -1289,7 +1287,7 @@ pub fn dropped_prompt_lines_after_content_ours(
 /// from `content_ours` — covering both new prompts (`PromptTarget`) and edits to
 /// existing operator text (`ContentEdit`).
 ///
-/// This is the trigger for a durable recovery sidecar so concurrent operator
+/// This is the trigger for a durable cold recovery projection so concurrent operator
 /// text is never silently lost when the operator-wins merge selects the agent
 /// candidate (`#qftlossdelta`): broader than
 /// [`dropped_prompt_lines_after_content_ours`], which only enumerates single-line
@@ -2696,34 +2694,30 @@ mod tests {
     #[test]
     fn direct_disk_fallback_refusal_tracks_live_editor_authority() {
         assert!(
-            !should_refuse_disk_fallback(false, false),
+            !editor_authority_blocks_disk_write(false),
             "no reliable-sync authority + dead socket must allow the disk fallback"
         );
         assert!(
-            should_refuse_disk_fallback(true, true),
+            editor_authority_blocks_disk_write(true),
             "durably live editor + answering socket must fail closed"
         );
         assert!(
-            !should_refuse_disk_fallback(false, true),
+            !editor_authority_blocks_disk_write(false),
             "answering socket without reliable-sync authority must allow the disk fallback"
         );
     }
 
     #[test]
-    fn stale_attached_editor_on_dead_socket_demotes_instead_of_wedging() {
-        // #staleattachdemote: a retained open fact with a dead socket cannot
-        // receive or re-save the write, so refusing disk here would wedge the
-        // document forever.
+    fn attached_editor_on_dead_socket_retains_authority() {
+        // Transport loss is recoverable. Demoting here would resurrect disk-only
+        // queue entries over the operator's unsaved Lazily intent.
         assert!(
-            !should_refuse_disk_fallback(true, false),
-            "durably live editor + dead socket must demote and allow the disk fallback"
+            editor_authority_blocks_disk_write(true),
+            "durably live editor + dead socket must pause until transport recovers"
         );
-        // The same authority with a live, answering transport still protects the
-        // editor buffer — demotion is keyed off the dead transport, not off the
-        // authority signal itself.
         assert!(
-            should_refuse_disk_fallback(true, true),
-            "durably live editor + answering socket must still fail closed"
+            editor_authority_blocks_disk_write(true),
+            "durably live editor + answering socket must protect editor authority"
         );
     }
 

@@ -1,113 +1,136 @@
-//! # Module: callback
+//! Bidirectional callback requests and responses stored in the controller's
+//! single `.agent-doc/state.db` state-machine ledger.
 //!
-//! Bidirectional IPC callback request/response system.
-//!
-//! - Binary writes a callback request to `.agent-doc/callbacks/<doc_hash>/request.json`
-//! - Claude Code PostToolUse hook fires `agent-doc hook check-callbacks` to detect pending requests
-//! - Claude session processes the request and writes `response.json`
-//! - Binary polls for `response.json` with a configurable timeout
-//! - On timeout, falls back to spawning `claude --print` as a subagent
+//! The Claude hook and the CLI observe the same typed document-runtime record;
+//! no request/response filesystem transport or polling sidecar participates.
 
 use agent_doc_ipc_protocol::{
     CallbackPatch, CallbackRequest, CallbackResponse, PendingCallback, callback_request,
     callback_request_is_expired, callback_response, callback_response_matches_request,
     pending_callback_from_request,
 };
+use agent_doc_sqlite::state_store::{
+    DocumentRuntimeStateRecord, clear_document_runtime_state_in_db,
+    list_document_runtime_state_kind_from_db, load_document_runtime_state_from_db, open_state_db,
+    state_db_path, upsert_document_runtime_state_in_db,
+};
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Compute the callback directory path for a document.
-fn callback_dir_for(doc: &Path) -> Result<PathBuf> {
-    let root =
-        agent_doc_fs::find_project_root(doc).context("could not find .agent-doc directory")?;
-    let hash = agent_doc_hash::path_hash(doc)
-        .with_context(|| format!("canonicalize document path for hash: {}", doc.display()))?;
-    Ok(root.join(".agent-doc").join("callbacks").join(hash))
+const CALLBACK_STATE_KIND: &str = "callback_exchange";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CallbackState {
+    request: CallbackRequest,
+    response: Option<CallbackResponse>,
 }
 
-/// Create a callback request file for the given document.
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn canonical_doc(doc: &Path) -> PathBuf {
+    doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf())
+}
+
+fn project_root_for(doc: &Path) -> Result<PathBuf> {
+    agent_doc_fs::find_project_root(doc).context("could not find .agent-doc directory")
+}
+
+fn document_hash(doc: &Path) -> Result<String> {
+    agent_doc_hash::path_hash(doc)
+        .with_context(|| format!("canonicalize document path for hash: {}", doc.display()))
+}
+
+fn load_state(doc: &Path) -> Result<Option<(PathBuf, String, CallbackState)>> {
+    let doc = canonical_doc(doc);
+    let root = project_root_for(&doc)?;
+    if !state_db_path(&root).exists() {
+        return Ok(None);
+    }
+    let hash = document_hash(&doc)?;
+    let connection = open_state_db(&root)?;
+    let Some(record) =
+        load_document_runtime_state_from_db(&connection, &hash, CALLBACK_STATE_KIND)?
+    else {
+        return Ok(None);
+    };
+    let state = serde_json::from_str(&record.payload_json)
+        .context("failed to parse callback state from state.db")?;
+    Ok(Some((root, hash, state)))
+}
+
+fn save_state(root: &Path, doc: &Path, hash: &str, state: &CallbackState) -> Result<()> {
+    let connection = open_state_db(root)?;
+    upsert_document_runtime_state_in_db(
+        &connection,
+        &DocumentRuntimeStateRecord {
+            document_hash: hash.to_string(),
+            state_kind: CALLBACK_STATE_KIND.to_string(),
+            canonical_path: doc.to_string_lossy().into_owned(),
+            payload_json: serde_json::to_string(state)?,
+            updated_at_ms: now_millis(),
+        },
+    )
+}
+
 pub fn create_request(
     doc: &Path,
     operations: &[&str],
     context: Option<&str>,
     ttl_secs: u64,
 ) -> Result<CallbackRequest> {
-    let doc_path = doc
+    let doc = doc
         .canonicalize()
         .context("could not canonicalize document path")?;
-    let hash = agent_doc_hash::path_hash(&doc_path).with_context(|| {
-        format!(
-            "canonicalize document path for hash: {}",
-            doc_path.display()
-        )
-    })?;
-    let dir = callback_dir_for(&doc_path)?;
-
-    std::fs::create_dir_all(&dir)?;
-
-    let request_id = uuid::Uuid::new_v4().to_string();
-    let created_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
+    let root = project_root_for(&doc)?;
+    let hash = document_hash(&doc)?;
     let request = callback_request(
-        doc_path.to_string_lossy(),
-        hash,
+        doc.to_string_lossy(),
+        hash.clone(),
         operations.iter().copied(),
         context,
-        created_at,
+        now_secs(),
         ttl_secs,
-        request_id,
+        uuid::Uuid::new_v4().to_string(),
     );
-
-    let json = serde_json::to_string_pretty(&request)?;
-    std::fs::write(dir.join("request.json"), json)?;
-
+    save_state(
+        &root,
+        &doc,
+        &hash,
+        &CallbackState {
+            request: request.clone(),
+            response: None,
+        },
+    )?;
     Ok(request)
 }
 
-/// Read a callback response if one exists and matches the request.
 pub fn read_response(doc: &Path) -> Result<Option<CallbackResponse>> {
-    let doc_path = doc.canonicalize().ok().unwrap_or_else(|| doc.to_path_buf());
-    let dir = callback_dir_for(&doc_path)?;
-    let response_path = dir.join("response.json");
-
-    if !response_path.exists() {
+    let Some((_root, _hash, state)) = load_state(doc)? else {
         return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(&response_path)?;
-    let response: CallbackResponse =
-        serde_json::from_str(&content).context("failed to parse callback response JSON")?;
-
-    let request = read_request(doc)?;
-    if !callback_response_matches_request(&response, request.as_ref()) {
-        return Ok(None);
-    }
-
-    Ok(Some(response))
+    };
+    Ok(state
+        .response
+        .filter(|response| callback_response_matches_request(response, Some(&state.request))))
 }
 
-/// Read the current callback request if one exists.
 pub fn read_request(doc: &Path) -> Result<Option<CallbackRequest>> {
-    let doc_path = doc.canonicalize().ok().unwrap_or_else(|| doc.to_path_buf());
-    let dir = callback_dir_for(&doc_path)?;
-    let request_path = dir.join("request.json");
-
-    if !request_path.exists() {
-        return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(&request_path)?;
-    let request: CallbackRequest =
-        serde_json::from_str(&content).context("failed to parse callback request JSON")?;
-
-    Ok(Some(request))
+    Ok(load_state(doc)?.map(|(_, _, state)| state.request))
 }
 
-/// Write a callback response for a document.
 pub fn write_response(
     doc: &Path,
     request_id: &str,
@@ -115,131 +138,89 @@ pub fn write_response(
     summary: &str,
     patches: Option<Vec<CallbackPatch>>,
 ) -> Result<()> {
-    let doc_path = doc.canonicalize().ok().unwrap_or_else(|| doc.to_path_buf());
-    let dir = callback_dir_for(&doc_path)?;
-
-    // Verify request exists and matches
-    let request = read_request(&doc_path)?;
-    match &request {
-        Some(req) if req.request_id == request_id => {}
-        Some(_) => anyhow::bail!("request_id mismatch — stale or wrong request"),
-        None => anyhow::bail!("no pending callback request for this document"),
+    let doc = canonical_doc(doc);
+    let Some((root, hash, mut state)) = load_state(&doc)? else {
+        anyhow::bail!("no pending callback request for this document");
+    };
+    if state.request.request_id != request_id {
+        anyhow::bail!("request_id mismatch — stale or wrong request");
     }
-
-    let completed_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    let response = callback_response(
+    state.response = Some(callback_response(
         request_id,
         status,
         summary,
         None::<String>,
         patches,
-        completed_at,
-    );
-
-    let json = serde_json::to_string_pretty(&response)?;
-    std::fs::write(dir.join("response.json"), json)?;
-
-    Ok(())
+        now_secs(),
+    ));
+    save_state(&root, &doc, &hash, &state)
 }
 
-/// Delete a callback response file after it has been processed.
 pub fn delete_response(doc: &Path) -> Result<()> {
-    let doc_path = doc.canonicalize().ok().unwrap_or_else(|| doc.to_path_buf());
-    let dir = callback_dir_for(&doc_path)?;
-    let response_path = dir.join("response.json");
-
-    if response_path.exists() {
-        std::fs::remove_file(&response_path)?;
-    }
-
-    Ok(())
+    let doc = canonical_doc(doc);
+    let Some((root, hash, mut state)) = load_state(&doc)? else {
+        return Ok(());
+    };
+    state.response = None;
+    save_state(&root, &doc, &hash, &state)
 }
 
-/// Clean up expired callback directories.
 pub fn cleanup_expired(project_root: &Path, _max_age_secs: u64) -> Result<()> {
-    let callbacks_dir = project_root.join(".agent-doc/callbacks");
-    if !callbacks_dir.is_dir() {
+    if !state_db_path(project_root).exists() {
         return Ok(());
     }
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    for entry in std::fs::read_dir(&callbacks_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        let request_path = path.join("request.json");
-        if let Ok(content) = std::fs::read_to_string(&request_path)
-            && let Ok(request) = serde_json::from_str::<CallbackRequest>(&content)
-            && callback_request_is_expired(&request, now)
-        {
-            std::fs::remove_dir_all(&path)?;
-            eprintln!("[callback] removed expired request: {}", path.display());
+    let connection = open_state_db(project_root)?;
+    let now = now_secs();
+    for record in list_document_runtime_state_kind_from_db(&connection, CALLBACK_STATE_KIND)? {
+        let state: CallbackState = match serde_json::from_str(&record.payload_json) {
+            Ok(state) => state,
+            Err(error) => {
+                eprintln!(
+                    "[callback] ignored malformed state for {}: {error}",
+                    record.canonical_path
+                );
+                continue;
+            }
+        };
+        if callback_request_is_expired(&state.request, now) {
+            clear_document_runtime_state_in_db(
+                &connection,
+                &record.document_hash,
+                CALLBACK_STATE_KIND,
+            )?;
+            eprintln!(
+                "[callback] removed expired request: {}",
+                record.canonical_path
+            );
         }
     }
-
     Ok(())
 }
 
-/// Scan all callback directories for pending (valid, unresponded) requests.
 pub fn scan_pending_callbacks(project_root: Option<&str>) -> Result<Vec<PendingCallback>> {
-    let callbacks_dir = if let Some(root) = project_root {
-        PathBuf::from(root).join(".agent-doc/callbacks")
+    let root = if let Some(root) = project_root {
+        PathBuf::from(root)
     } else {
         let cwd = std::env::current_dir()?;
         let Some(root) = agent_doc_fs::find_project_root(&cwd) else {
             return Ok(Vec::new());
         };
-        root.join(".agent-doc/callbacks")
+        root
     };
-
-    if !callbacks_dir.is_dir() {
+    if !state_db_path(&root).exists() {
         return Ok(Vec::new());
     }
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
+    let connection = open_state_db(&root)?;
+    let now = now_secs();
     let mut pending = Vec::new();
-
-    for entry in std::fs::read_dir(&callbacks_dir)? {
-        let entry = entry?;
-        let dir_path = entry.path();
-        if !dir_path.is_dir() {
+    for record in list_document_runtime_state_kind_from_db(&connection, CALLBACK_STATE_KIND)? {
+        let Ok(state) = serde_json::from_str::<CallbackState>(&record.payload_json) else {
             continue;
-        }
-
-        let request_path = dir_path.join("request.json");
-        let response_path = dir_path.join("response.json");
-
-        // Skip if already responded
-        if response_path.exists() {
-            continue;
-        }
-
-        if let Ok(content) = std::fs::read_to_string(&request_path)
-            && let Ok(request) = serde_json::from_str::<CallbackRequest>(&content)
-        {
-            if callback_request_is_expired(&request, now) {
-                continue;
-            }
-
-            pending.push(pending_callback_from_request(request, now));
+        };
+        if state.response.is_none() && !callback_request_is_expired(&state.request, now) {
+            pending.push(pending_callback_from_request(state.request, now));
         }
     }
-
     Ok(pending)
 }
 
@@ -248,185 +229,57 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn setup_test_project() -> tempfile::TempDir {
+    fn setup() -> (tempfile::TempDir, PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
-        tmp
-    }
-
-    fn create_test_doc(tmp: &tempfile::TempDir, name: &str) -> PathBuf {
-        let doc = tmp.path().join(name);
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("test.md");
         fs::write(&doc, "---\nagent_doc_session: test\n---\nHello\n").unwrap();
-        doc
+        (tmp, doc)
     }
 
     #[test]
-    fn create_request_writes_valid_json() {
-        let tmp = setup_test_project();
-        let doc = create_test_doc(&tmp, "test.md");
+    fn request_and_response_round_trip_through_state_db() {
+        let (tmp, doc) = setup();
         let request = create_request(&doc, &["compact", "prune-pending"], None, 300).unwrap();
-
-        let dir = callback_dir_for(&doc).unwrap();
-        let request_json = dir.join("request.json");
-        assert!(request_json.exists());
-
-        let content = fs::read_to_string(&request_json).unwrap();
-        let parsed: CallbackRequest = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed.request_id, request.request_id);
-        assert_eq!(parsed.operations, vec!["compact", "prune-pending"]);
-        assert_eq!(parsed.doc_hash, request.doc_hash);
-        assert_eq!(parsed.ttl_secs, 300);
+        assert_eq!(
+            read_request(&doc).unwrap().unwrap().request_id,
+            request.request_id
+        );
+        assert!(!tmp.path().join(".agent-doc/callbacks").exists());
+        write_response(&doc, &request.request_id, "success", "done", None).unwrap();
+        assert_eq!(read_response(&doc).unwrap().unwrap().status, "success");
+        delete_response(&doc).unwrap();
+        assert!(read_response(&doc).unwrap().is_none());
     }
 
     #[test]
-    fn response_returns_none_when_absent() {
-        let tmp = setup_test_project();
-        let doc = create_test_doc(&tmp, "test.md");
+    fn mismatched_request_id_is_rejected() {
+        let (_tmp, doc) = setup();
         create_request(&doc, &["compact"], None, 300).unwrap();
-
-        let response = read_response(&doc).unwrap();
-        assert!(response.is_none());
+        assert!(write_response(&doc, "wrong", "success", "bad", None).is_err());
+        assert!(read_response(&doc).unwrap().is_none());
     }
 
     #[test]
-    fn response_round_trip() {
-        use std::time::SystemTime;
-
-        let tmp = setup_test_project();
-        let doc = create_test_doc(&tmp, "test.md");
+    fn cleanup_and_pending_scan_share_the_state_machine() {
+        let (tmp, doc) = setup();
         let request = create_request(&doc, &["compact"], None, 300).unwrap();
-
-        let dir = callback_dir_for(&doc).unwrap();
-        let response = CallbackResponse {
-            request_id: request.request_id.clone(),
-            status: "success".to_string(),
-            summary: "Compacted 3 exchanges.".to_string(),
-            details: None,
-            patches: None,
-            completed_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        };
-        fs::write(
-            dir.join("response.json"),
-            serde_json::to_string_pretty(&response).unwrap(),
-        )
-        .unwrap();
-
-        let result = read_response(&doc).unwrap();
-        assert!(result.is_some());
-        let resp = result.unwrap();
-        assert_eq!(resp.request_id, request.request_id);
-        assert_eq!(resp.status, "success");
-    }
-
-    #[test]
-    fn mismatched_request_id_ignored() {
-        use std::time::SystemTime;
-
-        let tmp = setup_test_project();
-        let doc = create_test_doc(&tmp, "test.md");
-        let _request = create_request(&doc, &["compact"], None, 300).unwrap();
-
-        let dir = callback_dir_for(&doc).unwrap();
-        let wrong_response = CallbackResponse {
-            request_id: "wrong-uuid".to_string(),
-            status: "success".to_string(),
-            summary: "test".to_string(),
-            details: None,
-            patches: None,
-            completed_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        };
-        fs::write(
-            dir.join("response.json"),
-            serde_json::to_string_pretty(&wrong_response).unwrap(),
-        )
-        .unwrap();
-
-        let result = read_response(&doc).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn cleanup_expired_removes_old_dirs() {
-        use std::time::SystemTime;
-
-        let tmp = setup_test_project();
-        let doc = create_test_doc(&tmp, "test.md");
-        let request = create_request(&doc, &["compact"], None, 60).unwrap();
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let mut expired = request.clone();
-        expired.created_at = now - 120;
-
-        let dir = callback_dir_for(&doc).unwrap();
-        fs::write(
-            dir.join("request.json"),
-            serde_json::to_string_pretty(&expired).unwrap(),
-        )
-        .unwrap();
-
-        cleanup_expired(tmp.path(), 60).unwrap();
-        assert!(!dir.exists());
-    }
-
-    #[test]
-    fn gc_skips_unexpired() {
-        let tmp = setup_test_project();
-        let doc = create_test_doc(&tmp, "test.md");
-        create_request(&doc, &["compact"], None, 300).unwrap();
-
-        let dir = callback_dir_for(&doc).unwrap();
-        cleanup_expired(tmp.path(), 300).unwrap();
-        assert!(dir.exists());
-        assert!(dir.join("request.json").exists());
-    }
-
-    #[test]
-    fn scan_pending_finds_unresponded() {
-        let tmp = setup_test_project();
-        let doc = create_test_doc(&tmp, "test.md");
-        create_request(&doc, &["compact"], None, 300).unwrap();
-
         let pending = scan_pending_callbacks(Some(tmp.path().to_str().unwrap())).unwrap();
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].operations, vec!["compact"]);
-    }
-
-    #[test]
-    fn scan_pending_skips_responded() {
-        use std::time::SystemTime;
-
-        let tmp = setup_test_project();
-        let doc = create_test_doc(&tmp, "test.md");
-        let request = create_request(&doc, &["compact"], None, 300).unwrap();
-
-        let dir = callback_dir_for(&doc).unwrap();
-        let response = CallbackResponse {
-            request_id: request.request_id.clone(),
-            status: "success".to_string(),
-            summary: "done".to_string(),
-            details: None,
-            patches: None,
-            completed_at: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
+        write_response(&doc, &request.request_id, "success", "done", None).unwrap();
+        assert!(
+            scan_pending_callbacks(Some(tmp.path().to_str().unwrap()))
                 .unwrap()
-                .as_secs(),
-        };
-        fs::write(
-            dir.join("response.json"),
-            serde_json::to_string_pretty(&response).unwrap(),
-        )
-        .unwrap();
+                .is_empty()
+        );
 
-        let pending = scan_pending_callbacks(Some(tmp.path().to_str().unwrap())).unwrap();
-        assert!(pending.is_empty());
+        let expired = create_request(&doc, &["compact"], None, 0).unwrap();
+        assert_eq!(
+            read_request(&doc).unwrap().unwrap().request_id,
+            expired.request_id
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1_100));
+        cleanup_expired(tmp.path(), 0).unwrap();
+        assert!(read_request(&doc).unwrap().is_none());
     }
 }

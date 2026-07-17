@@ -291,6 +291,9 @@ pub fn materialize_response_in_current_exchange(
     current: &str,
     expected_response: &str,
 ) -> Option<String> {
+    if !expected_response.trim().is_empty() && current.contains(expected_response.trim()) {
+        return Some(current.to_string());
+    }
     let response =
         agent_doc_template::response_materialization::response_materialization_probe_from_response(
             expected_response,
@@ -734,6 +737,25 @@ mod tests {
             "### Re: visible body — gpt-5 (HEAD)\n\n",
             "The document contains the applied body only.\n",
             "No follow-up. <!-- no-pending-capture -->\n",
+            "<!-- agent:boundary:test -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(response_materialized_in_content(response, content));
+    }
+
+    #[test]
+    fn patch_wrapped_response_matches_sanitized_component_example_in_document() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: queue halted — gpt-5\n\n",
+            "The frontmatter says `queue: start`, while `<!-- agent:queue go -->` is stale.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: queue halted — gpt-5 (HEAD)\n\n",
+            "The frontmatter says `queue: start`, while `&lt;!-- agent:queue go --&gt;` is stale.\n",
             "<!-- agent:boundary:test -->\n",
             "<!-- /agent:exchange -->\n",
         );

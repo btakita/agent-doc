@@ -1,12 +1,11 @@
 //! # Module: write
 //!
 //! All write paths for agent responses: inline append, template patch, stream
-//! flush, IPC-to-IDE-plugin, and recovery helpers. Each path follows the same
-//! invariant: save pending → acquire lock → compute `content_ours` (baseline +
-//! response) → merge with any concurrent user edits → atomic write → save a
-//! snapshot that is usually `final_content` (the actual post-merge disk state),
-//! but preserves `content_ours` when an explicit baseline is active and
-//! concurrent user edits must remain visible next cycle → clear pending.
+//! flush, editor delivery, and recovery helpers. Each response is one immutable
+//! intent in the state ledger. The pipeline advances monotonically through
+//! canonical apply, editor acceptance/visibility, disk projection, and commit;
+//! retries and reconnects resume that same intent. Lazily is the sole attached
+//! editor authority. Snapshot/CRDT files are detached recovery projections only.
 //!
 //! ## Write dedup (v0.28.2)
 //!
@@ -30,7 +29,7 @@
 //! - `run`: inline (User/Assistant) mode. Reads response from stdin, strips any
 //!   leading `## Assistant` / trailing `## User` headings the agent may have
 //!   echoed, then appends `## Assistant\n\n<response>\n\n## User\n\n` to the
-//!   document. Saves a pre-response snapshot for undo. If the file changed
+//!   document. Saves a undo checkpoint for undo. If the file changed
 //!   since `baseline`, performs a 3-way git merge before writing.
 //!
 //! - `run_template`: template-component mode. Parses `patch:NAME` fence blocks
@@ -41,17 +40,13 @@
 //!
 //! - `run_stream`: template stream-flush mode. Like `run_template` but resolves
 //!   concurrent changes through the document-model component/semantic merge
-//!   policy, then persists the text snapshot and compatibility state snapshot
-//!   after every flush. Supports IPC-first writes: when `.agent-doc/patches/`
-//!   exists and `--force-disk` is not set, tries `try_ipc` first; on timeout or
-//!   missing proof, retains the pending response/queued patch and fails closed
-//!   so the operator retries through the editor path instead of writing behind
-//!   the active buffer.
+//!   policy. Each flush checkpoints the intent in `state.db`, applies a canonical
+//!   CRDT operation, and delivers a typed intent to the registered editor
+//!   endpoint. A timeout retains the same intent and proof frontier; it never
+//!   elects a file transport or recaptures the response.
 //!
-//! - `run_ipc`: explicit IPC-only mode. Serialises patches as JSON to
-//!   `.agent-doc/patches/<hash>.json`, polls for the plugin to delete the file
-//!   as ACK (2 s timeout), then fails closed without direct disk fallback when
-//!   the write is unproven.
+//! - `run_ipc`: explicit editor-delivery mode. Sends one typed message to the
+//!   selected PID-scoped endpoint and records the causal receipt in Lazily state.
 //! - `run_command(options, commit_mode)`: private shared command entrypoint for
 //!   `write` and `finalize`. `finalize` is always strict. `write --commit` stays
 //!   best-effort for non-session documents and `--pending-only`, but upgrades to
@@ -62,19 +57,14 @@
 //!   instead of returning success while the cycle remains open at
 //!   `response_captured` / `write_applied`.
 //!
-//! - `try_ipc`: low-level IPC helper used by `run_stream`. Writes a JSON patch
-//!   file (component patches + optional frontmatter + `reposition_boundary`
-//!   flag) and polls for ACK. Returns `Ok(true)` on success, `Ok(false)` on
-//!   timeout. Safe to call unconditionally — returns `false` immediately when
-//!   `.agent-doc/patches/` does not exist. Synthesises a boundary-aware
-//!   exchange patch when no explicit patches exist but unmatched content and a
-//!   boundary marker are present.
+//! - `try_ipc`: low-level socket helper used by `run_stream`. Delivers component
+//!   operations plus an optional boundary reposition intent. It returns only
+//!   after a causal editor receipt, or retains the intent for later endpoint
+//!   recovery when proof is unavailable.
 //!
-//! - `try_ipc_full_content`: disabled full-document editor replacement path.
-//!   It preserves the terminal committed-cycle cleanup guard, rejects
-//!   template/component scope for diagnostics, then returns `false` before
-//!   emitting any socket/file payload. Callers fall back to the guarded
-//!   disk/snapshot repair path.
+//! - `try_ipc_full_content`: narrowly scoped canonical recovery delivery. It is
+//!   allowed only with an exact expected editor baseline and uses the same
+//!   targeted endpoint; it has no file transport or implicit disk fallback.
 //!
 //! - `try_ipc_reposition_boundary`: fire-and-forget IPC signal with the exact
 //!   committed exchange `boundary_id`. Normalizes the editor buffer back to the
@@ -130,10 +120,9 @@
 //!   the document.
 //! - Advisory file lock (`flock`) serialises concurrent writes to the same
 //!   document; the lock is dropped immediately after `atomic_write`.
-//! - `try_ipc` returns `false` immediately (no I/O wait) when
-//!   `.agent-doc/patches/` does not exist. `try_ipc_full_content` always
-//!   returns `false` after cleanup/diagnostic guards because whole-document IPC
-//!   is disabled.
+//! - `try_ipc` targets only a PID-scoped registered editor endpoint. It never
+//!   creates or polls a file patch inbox, and an attached document never falls
+//!   back to disk around Lazily current authority.
 //! - IPC writes include `reposition_boundary: true` so the plugin moves the
 //!   boundary marker to end-of-exchange in the same Document API transaction as
 //!   the patch, avoiding a second round-trip.
@@ -162,15 +151,12 @@
 //!   writes).
 //! - `snapshot_matches_disk_state`: snapshot saved as `final_content`;
 //!   snapshot always matches the actual file on disk after a write.
-//! - `try_ipc_returns_false_when_no_patches_dir`: `try_ipc` with no
-//!   `.agent-doc/patches/` → returns `false` immediately.
-//! - `try_ipc_times_out_when_no_plugin`: `.agent-doc/patches/` exists but
-//!   nothing consumes the file → returns `false` after 2 s; patch file cleaned
-//!   up.
-//! - `try_ipc_succeeds_when_plugin_consumes`: mock plugin thread deletes patch
-//!   file within 2 s → `try_ipc` returns `true`.
+//! - `try_ipc_refuses_incomplete_registration`: an attached document without a
+//!   matching PID-scoped endpoint fails closed without a disk write.
+//! - `try_ipc_succeeds_with_visible_receipt`: the matching endpoint accepts the
+//!   intent and Lazily proves the resulting visible content.
 //! - `try_ipc_full_content_returns_false`: full-content IPC is disabled and
-//!   returns `false` without emitting socket/file payloads.
+//!   returns `false` without emitting an unfenced replacement payload.
 //! - `sanitize_escapes_open_agent_tag`: `<!-- agent:exchange -->` inside patch
 //!   content is escaped to `&lt;!-- agent:exchange --&gt;`.
 //! - *(aspirational)* `run_stream_crdt_merge`: concurrent user keystroke during
@@ -230,7 +216,7 @@ use agent_doc_document_realtime::write_policy::{
     reconcile_visible_write, response_already_in_current,
 };
 pub(crate) use agent_doc_document_realtime_io::{
-    VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS, guard_visible_write_idle_current_or_target,
+    VISIBLE_WRITE_RECONCILE_MAX_ATTEMPTS, guard_visible_write_expected_current_or_target,
     guard_visible_write_reconcile_with_target,
 };
 #[cfg(test)]
@@ -396,9 +382,16 @@ impl agent_doc_repair_io::RepairFallbackWriteEffects for RuntimeRepairReplayWrit
 }
 
 impl agent_doc_repair_io::RepairRecoveredQueueHeadEffects for RuntimeRepairReplayWriteEffects {
-    fn strike_recovered_free_text_queue_head(&self, file: &Path) -> Result<()> {
-        match agent_doc_queue_io::queue_consume::consume_queue_prompt_force_disk(
+    fn strike_recovered_free_text_queue_head(
+        &self,
+        file: &Path,
+        expected_head: &str,
+    ) -> Result<()> {
+        match agent_doc_queue_io::queue_consume::consume_queue_prompt_if_head_matches_with_outcome(
             file,
+            expected_head,
+            &[],
+            true,
             &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
         ) {
             Ok(Some(outcome)) => {
@@ -523,117 +516,13 @@ fn log_splice_pending_component_warning(warning: &SplicePendingComponentWarning)
     }
 }
 
-/// Resolve the merge baseline (the common ancestor handed to the finalize merge).
-///
-/// `#mps` Rung 3 (flip): when the model-projected-baseline cutover is enabled
-/// (`AGENT_DOC_MPS=1`), source the base by projecting the model overlay pinned at
-/// preflight (`agent_doc_snapshot_io::load_baseline_model`), cross-checking against — and
-/// falling back to — the legacy `.md` baseline. The `.md` read stays the fail-safe
-/// (and, with the flag on, the derived cross-check cache; Rung 4). With the flag
-/// off this is byte-for-byte the legacy `.md` path.
-fn read_explicit_baseline(file: &Path, baseline_file: Option<&Path>) -> Result<Option<String>> {
-    // The model sidecar is a cache paired with an explicit markdown baseline,
-    // not an independently authoritative baseline. Loading it when the caller
-    // supplied no baseline can resurrect content from an older cycle (notably
-    // an already-consumed queue head) during recovery writes.
-    if baseline_file.is_none() {
-        return Ok(None);
-    }
-    let md_content = read_explicit_baseline_md(file, baseline_file)?;
-
-    if agent_doc_snapshot_io::mps_enabled() {
-        match agent_doc_snapshot_io::load_baseline_model(
-            file,
-            md_content.as_deref(),
-            agent_doc_ops_log_io::log_op,
-        ) {
-            Ok(Some(projection)) => return Ok(Some(projection)),
-            Ok(None) => {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "mps_baseline_resolve source=md_fallback reason=no_model file={}",
-                        file.display()
-                    ),
-                );
-            }
-            Err(e) => {
-                // Fail-safe: a model-baseline error must never break finalize —
-                // fall back to the legacy `.md` baseline and log loudly.
-                eprintln!("[write] #mps baseline model resolve failed, using .md baseline: {e}");
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "mps_baseline_resolve source=md_fallback reason=model_error file={}",
-                        file.display()
-                    ),
-                );
-            }
-        }
-    }
-
-    Ok(md_content)
+/// Resolve the common ancestor handed to the write state machine from the
+/// content-bearing state.db projection. There is no filesystem-baseline override.
+fn read_document_baseline(file: &Path) -> Result<Option<String>> {
+    agent_doc_snapshot_io::load_document_baseline(file)
 }
 
-/// Legacy `.md` baseline read (the pre-`#mps` behavior). See [`read_explicit_baseline`].
-fn read_explicit_baseline_md(file: &Path, baseline_file: Option<&Path>) -> Result<Option<String>> {
-    let Some(path) = baseline_file else {
-        return Ok(None);
-    };
-
-    match std::fs::read_to_string(path) {
-        Ok(content) => return Ok(Some(content)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(e)
-                .with_context(|| format!("failed to read baseline file {}", path.display()));
-        }
-    }
-
-    if let Err(e) = agent_doc_snapshot_io::try_migrate_renamed(file) {
-        eprintln!("[write] warning: rename migration before baseline fallback failed: {e}");
-    }
-
-    let migrated_path = agent_doc_fs::baseline_path_for(file).with_context(|| {
-        format!(
-            "failed to resolve migrated baseline path for {}",
-            file.display()
-        )
-    })?;
-    if migrated_path == path {
-        anyhow::bail!(
-            "failed to read baseline file {}: file not found",
-            path.display()
-        );
-    }
-
-    match std::fs::read_to_string(&migrated_path) {
-        Ok(content) => {
-            eprintln!(
-                "[write] baseline file {} was missing; using migrated baseline {}",
-                path.display(),
-                migrated_path.display()
-            );
-            Ok(Some(content))
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            anyhow::bail!(
-                "failed to read baseline file {}: file not found; migrated baseline {} was also missing",
-                path.display(),
-                migrated_path.display()
-            )
-        }
-        Err(e) => Err(e).with_context(|| {
-            format!(
-                "failed to read migrated baseline file {} after {} was missing",
-                migrated_path.display(),
-                path.display()
-            )
-        }),
-    }
-}
-
-/// Pre-write gate for an explicit-baseline finalize against an already-`committed`
+/// Pre-write gate for a baseline-backed closeout against an already-`committed`
 /// cycle (`#finalize-stale-baseline-reopen-friction`).
 ///
 /// The cycle phase is `Committed` whenever the prior finalize already closed and
@@ -643,8 +532,7 @@ fn read_explicit_baseline_md(file: &Path, baseline_file: Option<&Path>) -> Resul
 /// for a legitimately new response.
 ///
 /// Returns:
-/// - `Ok(None)` — no gate applies (open cycle, non-finalize mode, or no baseline);
-///   the caller reads the explicit baseline normally.
+/// - `Ok(None)` — no gate applies (open cycle or non-finalize mode).
 /// - `Ok(Some(fresh_baseline))` — a genuinely new response was supplied after the
 ///   commit, so the cycle is auto-reopened from `HEAD` and the caller must diff the
 ///   new response against this `HEAD` baseline (the stale explicit baseline is
@@ -652,12 +540,11 @@ fn read_explicit_baseline_md(file: &Path, baseline_file: Option<&Path>) -> Resul
 /// - `Err(..)` — fail closed. A true replay (the incoming response is already
 ///   materialized in `HEAD`) must not be re-applied (duplicate-block risk); an
 ///   empty/repair response or a non-git document cannot be safely auto-reopened.
-fn guard_no_explicit_baseline_replay_after_committed_cycle(
+fn guard_no_baseline_replay_after_committed_cycle(
     file: &Path,
     commit_mode: CommitMode,
-    baseline_file: Option<&Path>,
 ) -> Result<Option<String>> {
-    if commit_mode != CommitMode::Required || baseline_file.is_none() {
+    if commit_mode != CommitMode::Required {
         return Ok(None);
     }
 
@@ -678,13 +565,13 @@ fn guard_no_explicit_baseline_replay_after_committed_cycle(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "explicit_baseline_replay_rejected file={} cycle_id={} reason={reason}",
+                "baseline_replay_rejected file={} cycle_id={} reason={reason}",
                 file.display(),
                 cycle_id
             ),
         );
         anyhow::anyhow!(
-            "[finalize] pre-write gate: the latest agent-doc cycle `{}` for {} is already `committed`; refusing to apply an explicit-baseline response without reopening the binary-owned write/commit path. Run `agent-doc preflight {}` and retry with the new baseline_file.",
+            "[finalize] pre-write gate: the latest agent-doc cycle `{}` for {} is already `committed`; refusing to replay the response without reopening the binary-owned write/commit path. Run `agent-doc preflight {}` and retry.",
             cycle_id,
             file.display(),
             file.display()
@@ -718,7 +605,7 @@ fn guard_no_explicit_baseline_replay_after_committed_cycle(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "explicit_baseline_replay_auto_reopened file={} cycle_id={}",
+            "baseline_replay_auto_reopened file={} cycle_id={}",
             file.display(),
             cycle_id
         ),
@@ -814,9 +701,11 @@ fn guard_no_exchange_compaction_request_between(
     baseline: Option<&str>,
     current_content: &str,
 ) -> Result<()> {
-    let baseline_owned = baseline
-        .map(ToOwned::to_owned)
-        .or_else(|| agent_doc_snapshot_io::load(file).ok().flatten());
+    let baseline_owned = baseline.map(ToOwned::to_owned).or_else(|| {
+        agent_doc_snapshot_io::load_document_baseline(file)
+            .ok()
+            .flatten()
+    });
     let Some(base) = baseline_owned.as_deref() else {
         return Ok(());
     };
@@ -884,7 +773,9 @@ fn apply_pending_and_status_mutations(
             )
             .map(|resolved| resolved.content)
             .with_context(|| format!("failed to resolve current document {}", file.display()))?;
-        let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
+        let snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
+            .ok()
+            .flatten();
         guard_stale_snapshot_recovery_only(
             file,
             snapshot_doc.as_deref(),
@@ -1252,8 +1143,7 @@ fn run_command_inner(
         Ok(mode) => mode,
         Err(err) if options.is_ipc && error_requests_retry_without_disk(&err) => {
             let response = read_response_input()?;
-            let retention_baseline =
-                read_explicit_baseline(file, options.baseline_file.as_deref()).unwrap_or(None);
+            let retention_baseline = read_document_baseline(file).unwrap_or(None);
             if !response.trim().is_empty()
                 && let Err(retain_err) = retain_ipc_patch_for_editor_authority_retry(
                     file,
@@ -1378,7 +1268,6 @@ fn run_command_inner(
         rerun_command_base: finalize_rerun_command_base(FinalizeRerunCommand {
             required_commit: commit_mode == CommitMode::Required,
             file,
-            baseline_file: options.baseline_file.as_deref(),
             is_template: options.is_template,
             is_stream: options.is_stream,
             is_ipc: options.is_ipc,
@@ -1412,15 +1301,11 @@ fn run_command_inner(
         }),
     };
 
-    let baseline = match guard_no_explicit_baseline_replay_after_committed_cycle(
-        file,
-        commit_mode,
-        options.baseline_file.as_deref(),
-    )? {
+    let baseline = match guard_no_baseline_replay_after_committed_cycle(file, commit_mode)? {
         // Auto-reopened a committed cycle for a genuinely new response: diff against
-        // the fresh HEAD baseline, not the stale explicit baseline file.
+        // the fresh HEAD baseline, not a stale lifecycle projection.
         Some(fresh_head_baseline) => Some(fresh_head_baseline),
-        None => read_explicit_baseline(file, options.baseline_file.as_deref())?,
+        None => read_document_baseline(file)?,
     };
 
     let current_content = if options.force_disk {
@@ -1918,48 +1803,6 @@ fn log_closeout_guard(
     agent_doc_flow_io::closeout::log_closeout_guard_event(file, stage, outcome, reason);
 }
 
-fn ipc_response_materialized_or_fallback(
-    file: &Path,
-    source: &str,
-    response: &str,
-    content: &str,
-) -> bool {
-    agent_doc_template_io::ipc_response_materialized_or_fallback_with_recycle(
-        file,
-        source,
-        response,
-        content,
-        |_, _| {},
-    )
-}
-
-fn log_ipc_proof_failure(
-    file: &Path,
-    source: &str,
-    patch_id: Option<&str>,
-    invariant: &str,
-    recovery: &str,
-    detail: &str,
-) {
-    agent_doc_template_io::log_ipc_proof_failure_with_recycle(
-        file,
-        source,
-        patch_id,
-        invariant,
-        recovery,
-        detail,
-        |_, _| {},
-    );
-}
-
-fn log_partial_response_materialization_for_retry(
-    file: &Path,
-    source: &str,
-    response: &str,
-) -> Result<()> {
-    agent_doc_template_io::log_partial_response_materialization_for_retry(file, source, response)
-}
-
 /// Minimum byte count for exchange content before the shrink guard triggers.
 /// Below this threshold the exchange is too small to be worth protecting.
 const SHRINK_GUARD_MIN_BYTES: usize = 100;
@@ -2185,11 +2028,11 @@ fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
     Ok(file)
 }
 
-fn capture_locked_pre_response(path: &Path) -> Result<(std::fs::File, String)> {
+fn capture_locked_undo_checkpoint(path: &Path) -> Result<(std::fs::File, String)> {
     let doc_lock = acquire_doc_lock(path)?;
     let content_at_start = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
-    agent_doc_snapshot_io::save_pre_response(path, &content_at_start)?;
+    agent_doc_snapshot_io::checkpoint_undo_content(path, &content_at_start)?;
     Ok((doc_lock, content_at_start))
 }
 
@@ -2322,32 +2165,6 @@ mod tests {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn try_ipc(
-        file: &Path,
-        patches: &[agent_doc_template::PatchBlock],
-        unmatched: &str,
-        frontmatter_yaml: Option<&str>,
-        baseline: Option<&str>,
-        content_ours: Option<&str>,
-        normalize_prefix_lines: Option<&[String]>,
-        reuse_patch_id: Option<&str>,
-    ) -> Result<agent_doc_write_ipc_io::IpcResult> {
-        agent_doc_test_support::seed_live_plugin_owner_lease_for_editor(
-            file.to_str().unwrap(),
-            "visible-write-test-editor",
-        );
-        crate::ipc::try_ipc(
-            file,
-            patches,
-            unmatched,
-            frontmatter_yaml,
-            baseline,
-            content_ours,
-            normalize_prefix_lines,
-            reuse_patch_id,
-        )
-    }
-
     struct NoopRepairReplayWriteEffects;
 
     static NOOP_REPAIR_REPLAY_WRITE_EFFECTS: NoopRepairReplayWriteEffects =
@@ -2383,7 +2200,11 @@ mod tests {
     }
 
     impl agent_doc_repair_io::RepairRecoveredQueueHeadEffects for NoopRepairReplayWriteEffects {
-        fn strike_recovered_free_text_queue_head(&self, _file: &Path) -> Result<()> {
+        fn strike_recovered_free_text_queue_head(
+            &self,
+            _file: &Path,
+            _expected_head: &str,
+        ) -> Result<()> {
             Ok(())
         }
     }
@@ -2391,44 +2212,18 @@ mod tests {
     #[test]
     fn active_capture_response_body_for_write_uses_projection_without_capture_sidecar() {
         let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let doc = tmp.path().join("doc.md");
         let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
         let response = "### Re: hello — gpt-5\n\nDone.\n";
         fs::write(&doc, base).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        fs::remove_file(agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap())
-            .unwrap();
+        assert!(!capture.capture_id.is_empty());
 
         assert_eq!(
             active_capture_response_body_for_write(&doc).unwrap(),
             response
-        );
-    }
-
-    fn record_test_visible_write_receipt(file: &Path, patch_id: &str, content: &str) {
-        agent_doc_test_support::publish_editor_text_via_crdt_relay(
-            file,
-            "visible-write-test-editor",
-            content,
-        );
-        let file_key = file.to_string_lossy();
-        let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
-            file_key.as_ref(),
-            content,
-            "test-editor",
-            "test",
-            "test",
-            &[
-                agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-                agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
-            ],
-        );
-        let _ = agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
-            file,
-            patch_id,
-            content,
-            "test_visible_write_listener",
         );
     }
 
@@ -2442,15 +2237,14 @@ mod tests {
 
         let doc = tmp.path().join("prov-doc.md");
         atomic_write(&doc, "hello document").unwrap();
-        let doc_key = doc
-            .canonicalize()
-            .unwrap_or(doc.clone())
-            .to_string_lossy()
-            .to_string();
-        let prov = agent_doc_debounce::write_provenance(&doc_key)
+        let prov = agent_doc_cycle_state_io::load_document_disk_write(&doc)
+            .unwrap()
             .expect("document write should record provenance");
-        assert_eq!(prov.len, "hello document".len());
-        assert_eq!(prov.hash, agent_doc_hash::content_hash("hello document"));
+        assert_eq!(prov.content_len, "hello document".len() as u64);
+        assert_eq!(
+            prov.content_hash,
+            agent_doc_hash::content_hash("hello document")
+        );
         assert_eq!(prov.actor, "agent");
         assert!(!prov.write_id.is_empty());
 
@@ -2458,13 +2252,10 @@ mod tests {
         let sidecar = tmp.path().join(".agent-doc").join("snapshots").join("s.md");
         fs::create_dir_all(sidecar.parent().unwrap()).unwrap();
         atomic_write(&sidecar, "snapshot bytes").unwrap();
-        let sidecar_key = sidecar
-            .canonicalize()
-            .unwrap_or(sidecar.clone())
-            .to_string_lossy()
-            .to_string();
         assert!(
-            agent_doc_debounce::write_provenance(&sidecar_key).is_none(),
+            agent_doc_cycle_state_io::load_document_disk_write(&sidecar)
+                .unwrap()
+                .is_none(),
             "an .agent-doc/ sidecar write must not record document provenance"
         );
     }
@@ -2506,49 +2297,6 @@ mod tests {
     }
 
     #[test]
-    fn status_set_ignores_projection_only_live_buffer_sidecar() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/live-buffer")).unwrap();
-        let doc = dir.path().join("plan.md");
-        let source = concat!(
-            "## Status\n\n",
-            "<!-- agent:status patch=replace -->\n",
-            "old status\n",
-            "<!-- /agent:status -->\n",
-        );
-        std::fs::write(&doc, source).unwrap();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc.to_string_lossy(),
-            &format!("{source}\noperator typed text\n"),
-            "jetbrains-new",
-            "jetbrains",
-            "0.2.197",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
-
-        set_status_with_options(&doc, "new status", false).unwrap();
-
-        let on_disk = std::fs::read_to_string(&doc).unwrap();
-        assert!(
-            on_disk.contains("new status"),
-            "projection-only sidecar should not block detached status write: {on_disk}"
-        );
-        assert!(
-            !on_disk.contains("old status"),
-            "old status should be replaced: {on_disk}"
-        );
-        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains("status_set_writeback")
-                && log.contains("transport=disk_detached")
-                && log.contains("reason=no_listener"),
-            "projection-only sidecar should still use detached disk write:\n{log}"
-        );
-    }
-
-    #[test]
     fn force_disk_status_set_writes_without_listener() {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("plan.md");
@@ -2579,81 +2327,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn best_effort_session_commit_ignores_unproven_live_buffer_ahead_of_disk() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path();
-        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-        fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
-        std::process::Command::new("git")
-            .current_dir(root)
-            .args(["init"])
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .current_dir(root)
-            .args(["config", "user.email", "test@example.com"])
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .current_dir(root)
-            .args(["config", "user.name", "Test"])
-            .output()
-            .unwrap();
-
-        let doc = root.join("session.md");
-        let committed = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: previous\n\n",
-            "previous response\n",
-            "<!-- agent:boundary:head -->\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
-        std::process::Command::new("git")
-            .current_dir(root)
-            .args(["add", "session.md"])
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .current_dir(root)
-            .args(["commit", "-m", "add doc", "--no-verify"])
-            .output()
-            .unwrap();
-
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        let editor_visible = format!("{committed}\neditor-only mutation\n");
-        agent_doc_debounce::document_changed_with_content_for_editor(
-            &doc.display().to_string(),
-            &editor_visible,
-            Some("jetbrains:test"),
-        );
-        agent_doc_test_support::seed_live_plugin_owner_lease_without_reliable_sync(
-            doc.to_str().unwrap(),
-            "jetbrains:test",
-        );
-
-        finalize_commit(&doc, CommitMode::BestEffort, false)
-            .expect("an unproven legacy-only buffer must not override committed disk state");
-
-        // The legacy-only endpoint intentionally disagrees with durable reliable-sync
-        // liveness, so its buffer is not canonical. The authority invariant is that
-        // the unproven editor-only mutation never reaches disk or Git.
-        assert_eq!(fs::read_to_string(&doc).unwrap(), committed);
-        let git_content = std::process::Command::new("git")
-            .current_dir(root)
-            .args(["show", "HEAD:session.md"])
-            .output()
-            .unwrap();
-        assert!(git_content.status.success());
-        assert_eq!(String::from_utf8(git_content.stdout).unwrap(), committed);
-    }
-
-    /// `#codefence-strip`: detection-log regression — a write that drops a
-    /// triple-backtick fence opening must surface a `fence_count_dropped`
-    /// ops.log marker so the operator can grep for the incident.
     #[test]
     fn fence_count_drop_is_logged_for_visible_document_write() {
         let tmp = TempDir::new().unwrap();
@@ -2709,13 +2382,10 @@ mod tests {
         let doc = tmp.path().join("routed-doc.md");
         atomic_write(&doc, "routed content").unwrap();
         assert_eq!(fs::read_to_string(&doc).unwrap(), "routed content");
-        let key = doc
-            .canonicalize()
-            .unwrap_or(doc.clone())
-            .to_string_lossy()
-            .to_string();
         assert!(
-            agent_doc_debounce::write_provenance(&key).is_some(),
+            agent_doc_cycle_state_io::load_document_disk_write(&doc)
+                .unwrap()
+                .is_some(),
             "the routed write's inner raw path records provenance"
         );
     }
@@ -2816,21 +2486,27 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &source).unwrap();
-        agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &source,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so the
         // non-force consume fails closed (protects the buffer) rather than taking
         // an unproven editor-delivery disk fallback.
-        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         let err = consume_queue_prompts_for_done_ids_closeout(&doc, &[], false).unwrap_err();
         let err = format!("{err:?}");
         assert!(
             err.contains("editor is the current authority")
                 || err.contains("failed to resolve editor authority")
-                || err.contains("refused direct disk write"),
+                || err.contains("refused direct disk write")
+                || err.contains("no editor replica was registered"),
             "non-force queue consume must fail closed with an active listener: {err}"
         );
         assert_eq!(
@@ -2873,11 +2549,16 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &source).unwrap();
-        agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &source,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
-        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         let err = agent_doc_session_check_io::run_closeout_pending_maintenance(
             &doc,
@@ -2903,10 +2584,12 @@ mod tests {
         let err = format!("{err:?}");
         assert!(
             (err.contains("editor is the current authority")
-                || err.contains("failed to resolve editor authority"))
+                || err.contains("failed to resolve editor authority")
+                || err.contains("no editor replica was registered"))
                 && (err.contains("disk is a non-authoritative replica")
                     || err.contains("disk remained non-authoritative")
-                    || err.contains("disk is not consulted")),
+                    || err.contains("disk is not consulted")
+                    || err.contains("disk was not written")),
             "non-force closeout pending maintenance must protect the active listener: {err}"
         );
         assert_eq!(
@@ -2968,98 +2651,6 @@ mod tests {
     }
 
     #[test]
-    fn closeout_pending_maintenance_defers_before_ipc_when_live_buffer_has_operator_edit() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
-        let doc = dir.path().join("plan.md");
-        let source = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [x] [#done1] Reap me\n",
-            "- [ ] [#keep1] Keep me\n",
-            "<!-- /agent:backlog -->\n",
-        )
-        .to_string();
-        fs::write(&doc, &source).unwrap();
-        agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
-
-        let live_operator_buffer = source.replace(
-            "<!-- /agent:backlog -->",
-            "- [ ] [#operator] unsaved operator edit\n<!-- /agent:backlog -->",
-        );
-        let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            &live_operator_buffer,
-            "test-editor",
-            "test",
-            "1",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
-
-        let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
-        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
-        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
-
-        let err = agent_doc_session_check_io::run_closeout_pending_maintenance(
-            &doc,
-            true,
-            false,
-            |file, force_disk| {
-                if force_disk {
-                    agent_doc_preflight_io::run_pending_maintenance_force_disk(
-                        file,
-                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-                    )
-                    .map(|_| ())
-                } else {
-                    agent_doc_preflight_io::run_pending_maintenance(
-                        file,
-                        &agent_doc_preflight_runtime_io::PREFLIGHT_MAINTENANCE_WRITE_EFFECTS,
-                    )
-                    .map(|_| ())
-                }
-            },
-        )
-        .unwrap_err();
-        let err = format!("{err:?}");
-        assert!(
-            (err.contains("editor is the current authority")
-                || err.contains("editor authority unavailable")
-                || err.contains("failed to resolve editor authority"))
-                && (err.contains("editor_attached_model_missing")
-                    || err.contains("timed out waiting for project controller"))
-                && (err.contains("disk is a non-authoritative replica")
-                    || err.contains("disk remained non-authoritative")
-                    || err.contains("disk is not consulted")),
-            "pending maintenance should defer on editor authority before IPC: {err}"
-        );
-        assert_eq!(
-            fs::read_to_string(&doc).unwrap(),
-            source,
-            "deferred maintenance must leave the visible disk document untouched"
-        );
-        let log = fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            (log.contains("visible_write_editor_authority_unavailable")
-                && log.contains("source=pending_maintenance")
-                && log.contains("reason=missing_replica"))
-                || (log.contains("document_model_ensure_failed")
-                    && log.contains("visible_write_crdt_current_error")
-                    && log.contains("source=pending_maintenance"))
-                || (log.contains("document_model_controller_lookup_error")
-                    && log.contains("realtime_doc_resolve_crdt_error")
-                    && log.contains("controller.sock")),
-            "defer should be attributed to editor authority resolution:\n{log}"
-        );
-        assert!(
-            !log.contains("pending_maintenance_editor_convergence_attempt"),
-            "pending maintenance must not send an editor patch while operator edits are ahead of disk:\n{log}"
-        );
-    }
-
-    #[test]
     fn closeout_pending_maintenance_skips_status_only_housekeeping_with_active_listener() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
@@ -3075,13 +2666,18 @@ mod tests {
         )
         .to_string();
         fs::write(&doc, &source).unwrap();
-        agent_doc_snapshot_io::save(&doc, &source, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &source,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&source), Some(&source)).unwrap();
         agent_doc_capture_io::capture_response(&doc, "Done.").unwrap();
 
         let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
-        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         agent_doc_session_check_io::run_closeout_pending_maintenance(
             &doc,
@@ -3119,7 +2715,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_locked_pre_response_reads_live_content_after_lock_wait() {
+    fn capture_locked_undo_checkpoint_reads_live_content_after_lock_wait() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("test.md");
@@ -3136,7 +2732,7 @@ mod tests {
         held_lock.lock_exclusive().unwrap();
 
         let doc_for_thread = doc.clone();
-        let capture = std::thread::spawn(move || capture_locked_pre_response(&doc_for_thread));
+        let capture = std::thread::spawn(move || capture_locked_undo_checkpoint(&doc_for_thread));
 
         std::thread::sleep(Duration::from_millis(100));
         fs::write(&doc, "updated while waiting\n").unwrap();
@@ -3147,81 +2743,12 @@ mod tests {
 
         assert_eq!(captured_content, "updated while waiting\n");
         assert_eq!(
-            agent_doc_snapshot_io::load_pre_response(&doc)
+            agent_doc_snapshot_io::load_undo_content(&doc)
                 .unwrap()
                 .unwrap(),
             "updated while waiting\n"
         );
     }
-    #[test]
-    fn missing_explicit_baseline_reads_migrated_baseline_after_document_move() {
-        let dir = TempDir::new().unwrap();
-        for subdir in [
-            "snapshots",
-            "baselines",
-            "locks",
-            "pending",
-            "crdt",
-            "pre-response",
-        ] {
-            fs::create_dir_all(dir.path().join(".agent-doc").join(subdir)).unwrap();
-        }
-
-        let session_uuid = "moved-baseline-session";
-        let old_doc = dir.path().join("old.md");
-        let doc_content = format!(
-            "---\nagent_doc_session: {}\nagent_doc_format: template\n---\n\nBody\n",
-            session_uuid
-        );
-        fs::write(&old_doc, &doc_content).unwrap();
-
-        let old_hash = agent_doc_fs::document_state_hash(&old_doc).unwrap();
-        let old_snapshot = dir
-            .path()
-            .join(".agent-doc/snapshots")
-            .join(format!("{}.md", old_hash));
-        fs::write(&old_snapshot, &doc_content).unwrap();
-        let old_baseline = dir
-            .path()
-            .join(".agent-doc/baselines")
-            .join(format!("{}.md", old_hash));
-        fs::write(&old_baseline, "preflight baseline\n").unwrap();
-
-        let new_doc = dir.path().join("new.md");
-        fs::rename(&old_doc, &new_doc).unwrap();
-
-        assert!(agent_doc_snapshot_io::try_migrate_renamed(&new_doc).unwrap());
-        assert!(!old_baseline.exists());
-        let migrated_baseline = agent_doc_fs::baseline_path_for(&new_doc).unwrap();
-        assert!(migrated_baseline.exists());
-
-        let baseline = read_explicit_baseline(&new_doc, Some(&old_baseline))
-            .unwrap()
-            .expect("baseline should be recovered from migrated hash");
-        assert_eq!(baseline, "preflight baseline\n");
-    }
-
-    #[test]
-    fn absent_explicit_baseline_never_promotes_stale_model_sidecar() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "current document without the old queue head\n").unwrap();
-        agent_doc_snapshot_io::save_baseline_model(
-            &doc,
-            "stale baseline with /goal Implement backlog item(s): #htv4\n",
-            |_file, _message| {},
-        )
-        .unwrap();
-
-        let baseline = read_explicit_baseline(&doc, None).unwrap();
-
-        assert_eq!(
-            baseline, None,
-            "an unpaired model sidecar is cache, not authority"
-        );
-    }
-
     #[test]
     fn guard_rejects_normal_write_when_diff_requests_compact_exchange() {
         let dir = TempDir::new().unwrap();
@@ -3243,7 +2770,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let err = guard_no_exchange_compaction_request_between(&doc, Some(baseline), current)
             .expect_err("ordinary response write should be rejected");
@@ -3383,10 +2915,17 @@ mod tests {
         );
 
         // KEY: Save snapshot as final_content (the actual disk state after merge)
-        agent_doc_snapshot_io::save(&doc, &merged, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &merged,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         // Verify: snapshot matches what's on disk exactly
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         let current = fs::read_to_string(&doc).unwrap();
         assert_eq!(
             snap, current,
@@ -3401,870 +2940,7 @@ mod tests {
             "snapshot should contain merged user edit"
         );
     }
-    #[test]
-    fn try_ipc_file_fallback_does_not_use_disk_equality_as_editor_ack() {
-        // Plan: tasks/agent-doc/plan-ipc-corruption-and-duplicate-during-typing.md
-        // Disk may already contain the response while the editor buffer and
-        // controller receipt are still unresolved. Disk equality is not an ack.
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
 
-        let doc = dir.path().join("test.md");
-        let already_applied_content = concat!(
-            "---\nsession: test\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: topic — gpt-5\n\n",
-            "Implemented.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, already_applied_content).unwrap();
-        // Build a patch whose application against the current file is a no-op
-        // (replace exchange with the same content it already has).
-        let exchange_body = "### Re: topic — gpt-5\n\nImplemented.\n";
-        let patch = agent_doc_template::PatchBlock::new("exchange", exchange_body);
-
-        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
-
-        assert!(
-            !result.success,
-            "disk equality must not impersonate an editor delivery receipt"
-        );
-
-        let patches_dir = agent_doc_dir.join("patches");
-        let leftover: Vec<_> = fs::read_dir(&patches_dir)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .collect();
-        assert!(
-            !leftover.is_empty(),
-            "the response operation must remain queued for an editor/controller retry"
-        );
-
-        let live_after = fs::read_to_string(&doc).unwrap();
-        assert_eq!(
-            live_after, already_applied_content,
-            "skip path must not mutate the live file"
-        );
-
-        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            ops_log.contains("invariant=no_ack")
-                && ops_log.contains("recovery=retry_without_disk_write")
-                && !ops_log.contains("file_ipc_fallback_skip_already_applied"),
-            "missing editor delivery proof must remain pending without disk mutation:\n{ops_log}"
-        );
-    }
-    #[test]
-    fn try_ipc_returns_false_when_no_patches_dir() {
-        // Without .agent-doc/patches/, IPC should return false immediately
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "content").unwrap();
-
-        let patches: Vec<agent_doc_template::PatchBlock> = vec![];
-        let result = try_ipc(&doc, &patches, "", None, None, None, None, None).unwrap();
-        assert!(
-            !result.success,
-            "should return false when patches dir doesn't exist"
-        );
-    }
-    #[test]
-    fn try_ipc_times_out_when_no_plugin() {
-        // With .agent-doc/patches/ existing but no plugin consuming, should timeout
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
-
-        let patch = agent_doc_template::PatchBlock::new("exchange", "new content");
-
-        // This will timeout after 2s — patch file is written but never consumed
-        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
-        assert!(
-            !result.success,
-            "should return false on timeout (no plugin)"
-        );
-
-        // Patch file should remain queued for an editor-owned retry.
-        let patches_dir = agent_doc_dir.join("patches");
-        let entries: Vec<_> = fs::read_dir(&patches_dir)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .collect();
-        assert!(
-            !entries.is_empty(),
-            "patch file should remain queued after timeout"
-        );
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            log.contains("ipc_proof_insufficient")
-                && log.contains("invariant=no_ack")
-                && log.contains("recovery=retry_without_disk_write"),
-            "IPC timeout should log the failed invariant and recovery path:\n{log}"
-        );
-    }
-    #[test]
-    fn try_ipc_succeeds_when_plugin_consumes() {
-        // Simulate plugin by spawning a thread that deletes the patch file
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "---\nsession: test\n---\n\n<!-- agent:exchange -->\ncontent\n<!-- /agent:exchange -->\n").unwrap();
-
-        let patch = agent_doc_template::PatchBlock::new("exchange", "new content");
-
-        // Spawn "plugin" thread that watches for patch files, writes content, then deletes
-        let patches_dir = agent_doc_dir.join("patches");
-        let watcher_dir = patches_dir.clone();
-        let doc_for_watcher = doc.clone();
-        let _watcher = std::thread::spawn(move || {
-            for _ in 0..20 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                if let Ok(entries) = fs::read_dir(&watcher_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().is_some_and(|e| e == "json") {
-                            let patch_id = fs::read_to_string(&path)
-                                .ok()
-                                .and_then(|text| {
-                                    serde_json::from_str::<serde_json::Value>(&text).ok()
-                                })
-                                .and_then(|json| {
-                                    json.get("patch_id")
-                                        .and_then(|value| value.as_str())
-                                        .map(str::to_string)
-                                });
-                            // Simulate plugin applying the patch by modifying the doc
-                            let applied = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nnew content\n<!-- /agent:exchange -->\n";
-                            let _ = fs::write(&doc_for_watcher, applied);
-                            if let Some(patch_id) = patch_id {
-                                record_test_visible_write_receipt(
-                                    &doc_for_watcher,
-                                    &patch_id,
-                                    applied,
-                                );
-                            }
-                            let _ = fs::remove_file(path);
-                            return;
-                        }
-                    }
-                }
-            }
-        });
-
-        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
-        assert!(
-            result.success,
-            "should return true when plugin consumes patch"
-        );
-    }
-    #[test]
-    fn try_ipc_rejects_consumed_partial_response_materialization() {
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        let original = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange -->\n",
-            "content\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, original).unwrap();
-
-        let patch = agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: missed patchback - gpt-5\n\nRecovered answer.",
-        );
-        let partial = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange -->\n",
-            "content\n",
-            "### Re: missed patchback - gpt-5\n",
-            "<!-- /agent:exchange -->\n"
-        );
-
-        let patches_dir = agent_doc_dir.join("patches");
-        let watcher_dir = patches_dir.clone();
-        let doc_for_watcher = doc.clone();
-        let partial_for_watcher = partial.to_string();
-        let _watcher = std::thread::spawn(move || {
-            for _ in 0..40 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                let Ok(entries) = fs::read_dir(&watcher_dir) else {
-                    continue;
-                };
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "json") {
-                        if let Ok(text) = fs::read_to_string(&path)
-                            && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
-                            && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
-                        {
-                            let _ = fs::write(&doc_for_watcher, &partial_for_watcher);
-                            record_test_visible_write_receipt(
-                                &doc_for_watcher,
-                                pid,
-                                &partial_for_watcher,
-                            );
-                        }
-                        let _ = fs::remove_file(path);
-                        return;
-                    }
-                }
-            }
-        });
-
-        let result = try_ipc(&doc, &[patch], "", None, Some(original), None, None, None).unwrap();
-        assert!(
-            !result.success,
-            "IPC consume without the full response body must fall back instead of saving a successful snapshot"
-        );
-
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap();
-        assert!(
-            snap.as_deref()
-                .is_none_or(|content| !content.contains("Recovered answer.")),
-            "partial IPC materialization must not become the committed snapshot: {snap:?}"
-        );
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            log.contains("ipc_materialization_missing_response") && log.contains("source=file_ipc"),
-            "missing response materialization should be logged for operator repair:\n{log}"
-        );
-        assert!(
-            log.contains("ipc_proof_insufficient")
-                && log.contains("invariant=missing_response_probe")
-                && log.contains("recovery=retry_without_disk_write"),
-            "missing response materialization should name its invariant and recovery:\n{log}"
-        );
-    }
-    #[test]
-    fn file_ipc_consumed_with_live_exchange_edit_requires_visible_write_content() {
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        let baseline = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "content\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let before = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "content\n",
-            "live prompt\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, before).unwrap();
-
-        let patches_dir = agent_doc_dir.join("patches");
-        let watcher_dir = patches_dir.clone();
-        let watcher = std::thread::spawn(move || {
-            for _ in 0..40 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
-                    continue;
-                };
-                if let Some(Ok(entry)) = entries.next() {
-                    let _ = fs::remove_file(entry.path());
-                    return;
-                }
-            }
-        });
-
-        let result = try_ipc(
-            &doc,
-            &[],
-            "",
-            None,
-            Some(baseline),
-            None,
-            None,
-            Some("patch-live-edit"),
-        )
-        .unwrap();
-        watcher.join().unwrap();
-
-        assert!(
-            !result.success,
-            "file IPC consumption with live exchange edits and unchanged disk content must fall back"
-        );
-        assert!(
-            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
-            "unacknowledged live-edit IPC must not become the saved snapshot"
-        );
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            log.contains("ipc_proof_insufficient")
-                && log.contains("invariant=no_lazily_visible_write_receipt")
-                && log.contains("recovery=retry_without_disk_write")
-                && log.contains("typing_status=absent")
-                && log.contains("operator_activity_inferred=false"),
-            "unacknowledged live-edit IPC should name its invariant and recovery:\n{log}"
-        );
-    }
-    #[test]
-    fn file_ipc_accepts_visible_write_receipt_when_disk_lags_live_exchange() {
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        let baseline = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "content\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let before = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "content\n",
-            "live prompt\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let visible_write_content = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "content\n",
-            "live prompt\n",
-            "### Re: live prompt — gpt-5\n\n",
-            "Handled.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, before).unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
-        let editor_id = "jetbrains-test-editor";
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            before,
-            editor_id,
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
-
-        let patches_dir = agent_doc_dir.join("patches");
-        let watcher_dir = patches_dir.clone();
-        let visible_for_watcher = visible_write_content.to_string();
-        let doc_for_watcher = doc_str.clone();
-        let watcher = std::thread::spawn(move || {
-            for _ in 0..40 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
-                    continue;
-                };
-                if let Some(Ok(entry)) = entries.next() {
-                    if let Ok(text) = fs::read_to_string(entry.path())
-                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
-                        && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
-                    {
-                        record_test_visible_write_receipt(
-                            Path::new(&doc_for_watcher),
-                            pid,
-                            &visible_for_watcher,
-                        );
-                        let _ = agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-                            &doc_for_watcher,
-                            &visible_for_watcher,
-                            editor_id,
-                            "jetbrains",
-                            "test",
-                            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-                        );
-                    }
-                    let _ = fs::remove_file(entry.path());
-                    return;
-                }
-            }
-        });
-
-        let patch = agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: live prompt — gpt-5\n\nHandled.",
-        );
-        let result = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            Some(baseline),
-            None,
-            None,
-            Some("patch-live-edit-visible-write"),
-        )
-        .unwrap();
-        watcher.join().unwrap();
-
-        assert!(
-            result.success,
-            "visible-write receipt should let file IPC accept an applied response even when disk still shows the pre-receipt live exchange edit"
-        );
-        assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(visible_write_content),
-            "snapshot must use the authoritative visible-write receipt"
-        );
-        assert_eq!(
-            fs::read_to_string(&doc).unwrap(),
-            visible_write_content,
-            "proven relay-backed visible-write content should replace the stale disk projection"
-        );
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            !log.contains("file_ipc_live_exchange_unacknowledged"),
-            "visible-write proof must bypass the unacknowledged live-edit fallback:\n{log}"
-        );
-        assert!(
-            log.contains("visible_write_disk_write_through file=")
-                && !log.contains("visible_write_disk_write_through_blocked"),
-            "visible-write disk projection should be auditable:\n{log}"
-        );
-    }
-    #[test]
-    fn file_ipc_visible_write_content_live_prompt_drift_requires_visible_repair() {
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        let baseline = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let before = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "❯ New prompt typed during closeout\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let content_ours = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let visible_write_content = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "❯ New prompt typed during closeout\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, before).unwrap();
-
-        let patches_dir = agent_doc_dir.join("patches");
-        let watcher_dir = patches_dir.clone();
-        let doc_for_watcher = doc.clone();
-        let ack_for_watcher = visible_write_content.to_string();
-        let watcher = std::thread::spawn(move || {
-            for _ in 0..40 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
-                    continue;
-                };
-                if let Some(Ok(entry)) = entries.next() {
-                    if let Ok(text) = fs::read_to_string(entry.path())
-                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
-                        && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
-                    {
-                        let _ = fs::write(&doc_for_watcher, &ack_for_watcher);
-                        record_test_visible_write_receipt(&doc_for_watcher, pid, &ack_for_watcher);
-                    }
-                    let _ = fs::remove_file(entry.path());
-                    return;
-                }
-            }
-        });
-
-        let patch = agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: Please reply — gpt-5\n\nAnswered.",
-        );
-        let result = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            Some(baseline),
-            Some(content_ours),
-            None,
-            Some("patch-live-prompt-drift"),
-        );
-        watcher.join().unwrap();
-
-        let result = result.unwrap();
-        assert!(
-            !result.success,
-            "live prompt drift without response materialization must not close out successfully"
-        );
-        assert_ne!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(content_ours),
-            "snapshot must not silently advance to content_ours when the visible editor/worktree still holds the drift candidate"
-        );
-        assert_eq!(
-            fs::read_to_string(&doc).unwrap(),
-            visible_write_content,
-            "visible live prompt should remain in the working tree for the next cycle"
-        );
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            !log.contains("snapshot_saved_file_ipc"),
-            "unsafe snapshot adoption must not be saved after an unmaterialized response:\n{log}"
-        );
-    }
-
-    #[test]
-    fn file_ipc_visible_write_content_partial_exchange_word_requires_visible_repair() {
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        let baseline = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let before = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "operator-partial-wo\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let content_ours = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let visible_write_content = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "operator-partial-wo\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, before).unwrap();
-
-        let patches_dir = agent_doc_dir.join("patches");
-        let watcher_dir = patches_dir.clone();
-        let doc_for_watcher = doc.clone();
-        let ack_for_watcher = visible_write_content.to_string();
-        let watcher = std::thread::spawn(move || {
-            for _ in 0..40 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
-                    continue;
-                };
-                if let Some(Ok(entry)) = entries.next() {
-                    if let Ok(text) = fs::read_to_string(entry.path())
-                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
-                        && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
-                    {
-                        let _ = fs::write(&doc_for_watcher, &ack_for_watcher);
-                        record_test_visible_write_receipt(&doc_for_watcher, pid, &ack_for_watcher);
-                    }
-                    let _ = fs::remove_file(entry.path());
-                    return;
-                }
-            }
-        });
-
-        let patch = agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: Please reply — gpt-5\n\nAnswered.",
-        );
-        let result = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            Some(baseline),
-            Some(content_ours),
-            None,
-            Some("patch-partial-exchange-word"),
-        );
-        watcher.join().unwrap();
-
-        let result = result.unwrap();
-        assert!(
-            !result.success,
-            "partial operator text without response materialization must not close out successfully"
-        );
-        assert_ne!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(content_ours),
-            "snapshot must not silently advance to content_ours when the visible editor/worktree still holds a partial operator word"
-        );
-        assert_eq!(
-            fs::read_to_string(&doc).unwrap(),
-            visible_write_content,
-            "visible partial operator word should remain in the working tree for the next cycle"
-        );
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            !log.contains("snapshot_saved_file_ipc"),
-            "unsafe snapshot adoption must not be saved after an unmaterialized response:\n{log}"
-        );
-    }
-    // #exch-intermix-falsedrop: a queue item consumed (struck) this cycle is
-    // recorded as "dropped" by the drift-time candidate-vs-content_ours heuristic,
-    // but it survives struck in the adopted snapshot, so auto-recovery must STILL
-    // fire (it is a false-positive drop record, not real user-content loss). This
-    // is the exact live wedge from agent-doc-bugs2 #opsproof-falsepos closeout.
-    #[test]
-    fn file_ipc_visible_write_content_post_exchange_comment_drift_preserves_editor_snapshot() {
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        let baseline = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "<!-- /agent:exchange -->\n",
-            "###\n",
-            "<!--\n",
-            "-->\n"
-        );
-        let before = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "<!-- /agent:exchange -->\n",
-            "###\n",
-            "<!--\n",
-            "Typing a new prompt below exchange during closeout. #next-steps\n",
-            "-->\n"
-        );
-        let content_ours = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "<!-- /agent:exchange -->\n",
-            "###\n",
-            "<!--\n",
-            "-->\n"
-        );
-        let visible_write_content = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "<!-- /agent:exchange -->\n",
-            "###\n",
-            "<!--\n",
-            "Typing a new prompt below exchange during closeout. #next-steps\n",
-            "-->\n"
-        );
-        fs::write(&doc, before).unwrap();
-
-        let patches_dir = agent_doc_dir.join("patches");
-        let watcher_dir = patches_dir.clone();
-        let doc_for_watcher = doc.clone();
-        let ack_for_watcher = visible_write_content.to_string();
-        let watcher = std::thread::spawn(move || {
-            for _ in 0..40 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
-                    continue;
-                };
-                if let Some(Ok(entry)) = entries.next() {
-                    if let Ok(text) = fs::read_to_string(entry.path())
-                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&text)
-                        && let Some(pid) = json.get("patch_id").and_then(|v| v.as_str())
-                    {
-                        let _ = fs::write(&doc_for_watcher, &ack_for_watcher);
-                        record_test_visible_write_receipt(&doc_for_watcher, pid, &ack_for_watcher);
-                    }
-                    let _ = fs::remove_file(entry.path());
-                    return;
-                }
-            }
-        });
-
-        let patch = agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: Please reply — gpt-5\n\nAnswered.",
-        );
-        let result = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            Some(baseline),
-            Some(content_ours),
-            None,
-            Some("patch-post-exchange-comment-drift"),
-        )
-        .unwrap();
-        watcher.join().unwrap();
-
-        assert!(
-            result.success,
-            "IPC delivery itself should remain successful"
-        );
-        assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(visible_write_content),
-            "response-bearing visible-write snapshot must preserve post-exchange editor text"
-        );
-        assert_eq!(
-            fs::read_to_string(&doc).unwrap(),
-            visible_write_content,
-            "visible post-exchange comment text should remain in the working tree for the next cycle"
-        );
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            log.contains("flow=document_mutation")
-                && log.contains("stage=ipc_snapshot_adoption")
-                && log.contains("reason=live_prompt_drift_after_preflight")
-                && log.contains("live_prompt_drift_visible_write_authority_preserved"),
-            "post-exchange drift should be classified and preserved through editor authority:\n{log}"
-        );
-    }
-    #[test]
-    fn file_ipc_post_dedupe_unchanged_exchange_requires_visible_write_content() {
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        let baseline = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "content\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let before = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "content\n",
-            "live prompt\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let plugin_after = concat!(
-            "---\nsession: test\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "content\n",
-            "live prompt\n",
-            "live prompt\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, before).unwrap();
-
-        let patches_dir = agent_doc_dir.join("patches");
-        let watcher_dir = patches_dir.clone();
-        let doc_for_watcher = doc.clone();
-        let _watcher = std::thread::spawn(move || {
-            for _ in 0..40 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                let Ok(mut entries) = fs::read_dir(&watcher_dir) else {
-                    continue;
-                };
-                if let Some(Ok(entry)) = entries.next() {
-                    let _ = fs::write(&doc_for_watcher, plugin_after);
-                    let _ = fs::remove_file(entry.path());
-                    return;
-                }
-            }
-        });
-
-        let patch = agent_doc_template::PatchBlock::new("exchange", "live prompt\n");
-        let result = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            Some(baseline),
-            None,
-            None,
-            Some("patch-post-dedupe"),
-        )
-        .unwrap();
-
-        assert!(
-            !result.success,
-            "file IPC must fall back when final deduped exchange is unchanged without visible-write proof"
-        );
-        assert!(
-            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
-            "unacknowledged post-dedupe no-op IPC must not become the saved snapshot"
-        );
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            log.contains("ipc_proof_insufficient")
-                && log.contains("invariant=no_lazily_visible_write_receipt")
-                && log.contains("patch_id=patch-post-dedupe")
-                && log.contains("typing_status=absent")
-                && log.contains("operator_activity_inferred=false"),
-            "post-dedupe unacknowledged live-edit IPC should be logged:\n{log}"
-        );
-        assert!(
-            !log.contains("snapshot_saved_file_ipc"),
-            "post-dedupe unacknowledged live-edit IPC must not save a file-IPC snapshot:\n{log}"
-        );
-    }
     #[test]
     fn try_ipc_full_content_returns_false_when_disabled() {
         let dir = TempDir::new().unwrap();
@@ -4317,98 +2993,7 @@ mod tests {
             "escaped markers should appear in result"
         );
     }
-    #[test]
-    fn try_ipc_snapshot_saves_disk_state() {
-        // Verify that after IPC succeeds, the snapshot contains the actual post-write
-        // disk state (file read after the 200ms flush delay), NOT content_ours.
-        // Using the actual disk state prevents stale baselines from perpetuating
-        // ghost diffs cycle after cycle.
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
 
-        let doc = dir.path().join("test.md");
-        let original = "---\nsession: test\n---\n\n<!-- agent:exchange -->\noriginal content\n<!-- agent:boundary:test-boundary-123 -->\n<!-- /agent:exchange -->\n";
-        fs::write(&doc, original).unwrap();
-
-        let patch = agent_doc_template::PatchBlock::new("exchange", "agent response content");
-
-        let content_ours = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\n<!-- /agent:exchange -->\n";
-
-        // Simulate the plugin applying the patch and performing a safe boundary
-        // reposition in the same editor-visible write.
-        let after_plugin_write = "---\nsession: test\n---\n\n<!-- agent:exchange -->\nagent response content\n<!-- agent:boundary:plugin-boundary -->\n<!-- /agent:exchange -->\n";
-
-        // Spawn "plugin" thread that watches for patch files, writes content, then deletes
-        let patches_dir = agent_doc_dir.join("patches");
-        let watcher_dir = patches_dir.clone();
-        let doc_for_watcher = doc.clone();
-        let after_plugin_write_owned = after_plugin_write.to_string();
-        let _watcher = std::thread::spawn(move || {
-            for _ in 0..20 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                if let Ok(entries) = fs::read_dir(&watcher_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().is_some_and(|e| e == "json") {
-                            let patch_id = fs::read_to_string(&path)
-                                .ok()
-                                .and_then(|text| {
-                                    serde_json::from_str::<serde_json::Value>(&text).ok()
-                                })
-                                .and_then(|json| {
-                                    json.get("patch_id")
-                                        .and_then(|value| value.as_str())
-                                        .map(str::to_string)
-                                });
-                            // Simulate plugin applying patch + leaving user edits in file
-                            let _ = fs::write(&doc_for_watcher, &after_plugin_write_owned);
-                            if let Some(patch_id) = patch_id {
-                                record_test_visible_write_receipt(
-                                    &doc_for_watcher,
-                                    &patch_id,
-                                    &after_plugin_write_owned,
-                                );
-                            }
-                            let _ = fs::remove_file(path);
-                            return;
-                        }
-                    }
-                }
-            }
-        });
-
-        let result = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            Some(original),     // baseline
-            Some(content_ours), // content_ours (no longer used for snapshot)
-            None,               // normalize_prefix_lines
-            None,               // reuse_patch_id
-        )
-        .unwrap();
-        assert!(
-            result.success,
-            "IPC should succeed when plugin consumes patch"
-        );
-
-        // KEY ASSERTION: snapshot must match actual disk state (includes user edits)
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
-        assert!(
-            snap.contains("agent response content"),
-            "snapshot must contain agent response, got: {}",
-            snap
-        );
-        assert!(snap.contains("plugin-boundary"));
-        assert_eq!(
-            snap, after_plugin_write,
-            "snapshot must exactly match post-write disk state"
-        );
-    }
     #[test]
     fn ipc_json_preserves_utf8_em_dash() {
         // Verify that serde_json serialization preserves em dashes in IPC payloads
@@ -4529,238 +3114,6 @@ mod tests {
         assert!(!without.contains("agent:boundary"));
         assert!(without.contains("Hello"));
         assert!(without.contains("World"));
-    }
-    #[test]
-    fn file_ipc_synthesized_exchange_patch_omits_full_content() {
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        let prompt = "do #ipcfull. spec-test-build-install-commit-push";
-        let original = format!(
-            "---\nagent_doc_format: template\n---\n\n\
-<!-- agent:exchange patch=append -->\n{prompt}\n<!-- /agent:exchange -->\n"
-        );
-        let unmatched = "### Re: ipc full-content guard - gpt-5\n\nDone.";
-        let after_plugin_write = format!(
-            "---\nagent_doc_format: template\n---\n\n\
-<!-- agent:exchange patch=append -->\n❯ {prompt}\n{unmatched}\n<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, &original).unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
-        let editor_id = "jetbrains-test-editor";
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            &original,
-            editor_id,
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
-
-        let seen_payload = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let patches_dir = agent_doc_dir.join("patches");
-        let doc_for_watcher = doc.clone();
-        let doc_str_for_watcher = doc_str.clone();
-        let seen_for_watcher = seen_payload.clone();
-        let after_for_watcher = after_plugin_write.clone();
-        let _watcher = std::thread::spawn(move || {
-            for _ in 0..40 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                let Ok(entries) = fs::read_dir(&patches_dir) else {
-                    continue;
-                };
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "json") {
-                        if let Ok(text) = fs::read_to_string(&path)
-                            && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&text)
-                        {
-                            if let Some(pid) = payload.get("patch_id").and_then(|v| v.as_str()) {
-                                record_test_visible_write_receipt(
-                                    &doc_for_watcher,
-                                    pid,
-                                    &after_for_watcher,
-                                );
-                            }
-                            *seen_for_watcher.lock().unwrap() = Some(payload);
-                        }
-                        let _ = fs::write(&doc_for_watcher, &after_for_watcher);
-                        let _ = agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-                            &doc_str_for_watcher,
-                            &after_for_watcher,
-                            editor_id,
-                            "jetbrains",
-                            "test",
-                            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-                        );
-                        let _ = fs::remove_file(path);
-                        return;
-                    }
-                }
-            }
-        });
-
-        let prefix_lines = vec![prompt.to_string()];
-        let result = try_ipc(
-            &doc,
-            &[],
-            unmatched,
-            None,
-            Some(&original),
-            Some(&after_plugin_write),
-            Some(prefix_lines.as_slice()),
-            Some("patch-synth-no-full-content"),
-        )
-        .unwrap();
-
-        assert!(
-            result.success,
-            "file IPC should accept the synthesized exchange patch"
-        );
-        let payload = seen_payload
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("watcher should capture the IPC payload");
-        assert!(
-            payload.get("fullContent").is_none(),
-            "template response IPC with a synthesized component patch must not send fullContent: {payload}"
-        );
-        assert_eq!(
-            payload["unmatched"], "",
-            "synthesized exchange patch must consume unmatched text instead of sending it twice"
-        );
-        let patches = payload["patches"]
-            .as_array()
-            .expect("payload patches should be an array");
-        assert_eq!(patches.len(), 1);
-        assert_eq!(patches[0]["component"], "exchange");
-        assert_eq!(patches[0]["content"], unmatched);
-        assert_eq!(payload["normalize_prefix_lines"][0], prompt);
-    }
-    #[test]
-    fn template_normalization_only_file_ipc_omits_full_content() {
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-
-        let doc = dir.path().join("test.md");
-        let prompt = "do #norm-only. spec-test-build-install-commit-push";
-        let original = format!(
-            "---\nagent_doc_format: template\n---\n\n\
-<!-- agent:exchange patch=append -->\n{prompt}\n<!-- agent:boundary:test -->\n<!-- /agent:exchange -->\n"
-        );
-        let normalized = original.replace(prompt, &format!("❯ {prompt}"));
-        fs::write(&doc, &original).unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
-        let editor_id = "jetbrains-test-editor";
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            &original,
-            editor_id,
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
-
-        let seen_payload = std::sync::Arc::new(std::sync::Mutex::new(None));
-        let patches_dir = agent_doc_dir.join("patches");
-        let doc_for_watcher = doc.clone();
-        let doc_str_for_watcher = doc_str.clone();
-        let normalized_for_watcher = normalized.clone();
-        let seen_for_watcher = seen_payload.clone();
-        let watcher = std::thread::spawn(move || {
-            let start = std::time::Instant::now();
-            while start.elapsed() < std::time::Duration::from_secs(3) {
-                let Ok(entries) = fs::read_dir(&patches_dir) else {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                    continue;
-                };
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|value| value.to_str()) != Some("json") {
-                        continue;
-                    }
-                    let text = fs::read_to_string(&path).unwrap();
-                    let payload: serde_json::Value = serde_json::from_str(&text).unwrap();
-                    let patch_id = payload
-                        .get("patch_id")
-                        .and_then(|value| value.as_str())
-                        .unwrap()
-                        .to_string();
-                    fs::write(&doc_for_watcher, &normalized_for_watcher).unwrap();
-                    agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-                        &doc_str_for_watcher,
-                        &normalized_for_watcher,
-                        editor_id,
-                        "jetbrains",
-                        "test",
-                        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-                    )
-                    .unwrap();
-                    record_test_visible_write_receipt(
-                        &doc_for_watcher,
-                        &patch_id,
-                        &normalized_for_watcher,
-                    );
-                    *seen_for_watcher.lock().unwrap() = Some(payload);
-                    fs::remove_file(path).unwrap();
-                    return true;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-            false
-        });
-
-        let prefix_lines = vec![prompt.to_string()];
-        let result = try_ipc(
-            &doc,
-            &[],
-            "",
-            None,
-            Some(&original),
-            Some(&normalized),
-            Some(prefix_lines.as_slice()),
-            Some("patch-template-norm-only-no-full-content"),
-        )
-        .unwrap();
-
-        assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
-        assert!(
-            result.success,
-            "normalization-only template IPC should accept a narrow payload"
-        );
-        let payload = seen_payload
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("watcher should capture the IPC payload");
-        assert!(
-            payload.get("fullContent").is_none(),
-            "template normalization-only IPC must not send fullContent: {payload}"
-        );
-        assert_eq!(payload["patches"].as_array().unwrap().len(), 0);
-        assert_eq!(payload["unmatched"], "");
-        assert_eq!(payload["normalize_prefix_lines"][0], prompt);
-
-        let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            ops_log.contains("full_content_ipc_scope_rejected")
-                && ops_log.contains("scope=template_frontmatter"),
-            "template fullContent rejection should be logged:\n{ops_log}"
-        );
     }
     #[test]
     fn effective_unmatched_cleared_when_synthesis_consumes_content() {
@@ -5289,7 +3642,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         git(&["add", "doc.md"]);
         git(&["commit", "-m", "commit response"]);
 
@@ -5308,7 +3666,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, visible).unwrap();
-        agent_doc_snapshot_io::save(&doc, visible, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            visible,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert!(
             agent_doc_repair_runtime_io::recover_missing_committed_head_response(&doc).unwrap(),
@@ -5325,7 +3688,9 @@ mod tests {
                 && recovered.contains("Latest body."),
             "latest committed response must be merged back into the visible file:\n{recovered}"
         );
-        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snapshot, recovered);
 
         let head_after = std::process::Command::new("git")
@@ -5382,7 +3747,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         git(&["add", "doc.md"]);
         git(&["commit", "-m", "commit response"]);
 
@@ -5401,7 +3771,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, visible).unwrap();
-        agent_doc_snapshot_io::save(&doc, visible, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            visible,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(visible), Some(visible)).unwrap();
 
         assert!(

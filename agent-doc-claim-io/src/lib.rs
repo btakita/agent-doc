@@ -297,7 +297,11 @@ pub fn run(
             let session_id = uuid::Uuid::new_v4();
             let scaffold = render_empty_template_scaffold(&session_id.to_string());
             effects.atomic_write(file, &scaffold)?;
-            agent_doc_snapshot_io::save(file, &scaffold, agent_doc_ops_log_io::log_op)?;
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                file,
+                &scaffold,
+                agent_doc_ops_log_io::log_op,
+            )?;
             effects.commit(file).ok(); // best-effort commit
             scaffold
         } else {

@@ -3,7 +3,7 @@
 //! Pure replay/deduplication policy lives in `agent-doc-turn`. This crate owns
 //! the file-facing dedupe command flow: read the document, apply the focused
 //! response replay policy, write the deduped document through an injected writer,
-//! update the injected snapshot store, and remove stale patch sidecars.
+//! and update the injected cold snapshot projection.
 
 use agent_doc_turn::response_replay::dedupe_responses;
 use anyhow::Result;
@@ -36,7 +36,6 @@ pub fn run<E: DedupeEffects + ?Sized>(effects: &E, file: &Path) -> Result<()> {
     let removed = content.len() - result.len();
     effects.write_deduped_document(file, &content, &result)?;
     effects.save_snapshot(file, &result)?;
-    clean_stale_patch_file(file);
 
     eprintln!(
         "[dedupe] removed {} bytes of duplicate content from {}",
@@ -45,25 +44,6 @@ pub fn run<E: DedupeEffects + ?Sized>(effects: &E, file: &Path) -> Result<()> {
     );
 
     Ok(())
-}
-
-fn clean_stale_patch_file(file: &Path) {
-    if let Ok(hash) = agent_doc_fs::document_state_hash(file)
-        && let Some(project_root) = agent_doc_fs::find_project_root(file)
-    {
-        let patch_file = project_root
-            .join(".agent-doc/patches")
-            .join(format!("{hash}.json"));
-        if patch_file.exists() {
-            eprintln!(
-                "[dedupe] cleaning stale patch file: {}",
-                patch_file.display()
-            );
-            if let Err(e) = std::fs::remove_file(&patch_file) {
-                eprintln!("[dedupe] WARNING: failed to remove stale patch file: {}", e);
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -113,17 +93,11 @@ mod tests {
     }
 
     #[test]
-    fn run_removes_duplicate_updates_snapshot_and_cleans_patch() {
+    fn run_removes_duplicate_and_updates_snapshot() {
         let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/patches")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("session.md");
         std::fs::write(&file, duplicate_doc()).unwrap();
-        let hash = agent_doc_fs::document_state_hash(&file).unwrap();
-        let patch_file = dir
-            .path()
-            .join(".agent-doc/patches")
-            .join(format!("{hash}.json"));
-        std::fs::write(&patch_file, "{}").unwrap();
 
         let effects = TestEffects::new();
         run(&effects, &file).unwrap();
@@ -132,7 +106,6 @@ mod tests {
         assert_eq!(content.matches("### Re: topic").count(), 1);
         assert_eq!(effects.writes.get(), 1);
         assert_eq!(effects.snapshots.get(), 1);
-        assert!(!patch_file.exists());
         let snapshot = std::fs::read_to_string(agent_doc_fs::snapshot_path_for(&file).unwrap())
             .expect("snapshot should be updated");
         assert_eq!(snapshot, content);

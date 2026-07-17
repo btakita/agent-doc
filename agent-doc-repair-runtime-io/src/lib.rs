@@ -70,7 +70,11 @@ pub fn recover_missing_committed_head_response(file: &Path) -> Result<bool> {
         &current,
         "recover_committed_head_response",
     )?;
-    agent_doc_snapshot_io::save(file, &recovered, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &recovered,
+        agent_doc_ops_log_io::log_op,
+    )?;
     agent_doc_commit_io::commit(file)?;
     Ok(true)
 }
@@ -98,7 +102,11 @@ pub fn recover_dedupe_only_drift(file: &Path) -> Result<bool> {
         "[write] empty response stdin; current file matches dedupe(HEAD) for {} — committing dedupe-only working-tree drift through the binary closeout path",
         file.display()
     );
-    agent_doc_snapshot_io::save(file, &current, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &current,
+        agent_doc_ops_log_io::log_op,
+    )?;
     agent_doc_commit_io::commit(file)?;
     Ok(true)
 }

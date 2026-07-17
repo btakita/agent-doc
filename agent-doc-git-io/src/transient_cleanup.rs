@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use agent_doc_document::transient_markers::{
     normalize_post_commit_re_heading_drift, normalize_transient_agent_doc_markers,
@@ -9,34 +9,15 @@ use agent_doc_document::transient_markers::{
 pub trait TransientCleanupEffects {
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()>;
     fn save_snapshot(&self, file: &Path, content: &str) -> Result<()>;
-    fn save_document_crdt(&self, file: &Path, legacy_state: &[u8], markdown: &str) -> Result<()>;
-    fn editor_attached(&self, file: &Path) -> bool;
     fn log_op(&self, file: &Path, message: &str);
-    fn project_root_containing(&self, file: &Path) -> Option<PathBuf>;
-    fn ipc_listener_active(&self, project_root: &Path) -> bool;
-    fn send_vcs_refresh(&self, project_root: &Path) -> Result<bool>;
-    fn write_vcs_refresh_signal(&self, signal_file: &Path) -> Result<()>;
-}
-
-pub fn vcs_refresh_signal_path(
-    effects: &impl TransientCleanupEffects,
-    file: &Path,
-) -> Option<PathBuf> {
-    let canonical = file.canonicalize().ok()?;
-    let project_root = effects
-        .project_root_containing(&canonical)
-        .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    let signal_file = project_root.join(".agent-doc/patches/vcs-refresh.signal");
-    signal_file.parent().filter(|p| p.exists())?;
-    Some(signal_file)
+    fn send_vcs_refresh(&self, file: &Path) -> Result<bool>;
 }
 
 pub fn signal_vcs_refresh(effects: &impl TransientCleanupEffects, file: &Path) -> Option<bool> {
-    let signal_file = vcs_refresh_signal_path(effects, file)?;
-    match effects.write_vcs_refresh_signal(&signal_file) {
-        Ok(()) => {
-            eprintln!("[commit] VCS refresh signal written");
-            Some(true)
+    match effects.send_vcs_refresh(file) {
+        Ok(sent) => {
+            eprintln!("[commit] VCS refresh delivered through editor endpoints");
+            Some(sent)
         }
         Err(e) => {
             eprintln!("[commit] VCS refresh signal failed: {} (non-fatal)", e);
@@ -45,54 +26,16 @@ pub fn signal_vcs_refresh(effects: &impl TransientCleanupEffects, file: &Path) -
     }
 }
 
-pub fn refresh_live_closeout_sidecars(
+pub fn signal_live_closeout_refresh(
     effects: &impl TransientCleanupEffects,
     file: &Path,
-    committed_doc: &str,
     signal_editor_refresh: bool,
 ) -> Result<Option<bool>> {
-    if agent_doc_frontmatter::frontmatter::content_uses_crdt_write(committed_doc) {
-        if effects.editor_attached(file) {
-            effects.log_op(
-                file,
-                &format!(
-                    "crdt_checkpoint_skip file={} source=commit reason=editor_authority_owns_sidecar_lock len={}",
-                    file.display(),
-                    committed_doc.len()
-                ),
-            );
-        } else {
-            let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(committed_doc).encode_state();
-            effects.save_document_crdt(file, &crdt, committed_doc)?;
-        }
-    }
-
     if !signal_editor_refresh {
         return Ok(None);
     }
 
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let Some(root) = effects.project_root_containing(&canonical) else {
-        return Ok(None);
-    };
-
-    if effects.ipc_listener_active(&root) && effects.send_vcs_refresh(&root).unwrap_or(false) {
-        return Ok(Some(true));
-    }
-
-    let Some(signal_file) = vcs_refresh_signal_path(effects, file) else {
-        return Ok(None);
-    };
-    match effects.write_vcs_refresh_signal(&signal_file) {
-        Ok(()) => Ok(Some(true)),
-        Err(e) => {
-            eprintln!(
-                "[commit] VCS refresh signal failed during closeout sidecar refresh: {}",
-                e
-            );
-            Ok(Some(false))
-        }
-    }
+    effects.send_vcs_refresh(file).map(Some)
 }
 
 pub fn repair_stale_agent_response_collapse_worktree(
@@ -109,7 +52,7 @@ pub fn repair_stale_agent_response_collapse_worktree(
     if repaired == head_doc {
         effects.save_snapshot(file, head_doc)?;
     }
-    refresh_live_closeout_sidecars(effects, file, &repaired, true)?;
+    signal_live_closeout_refresh(effects, file, true)?;
     effects.log_op(
         file,
         &format!(
@@ -147,7 +90,7 @@ pub fn repair_clean_head_if_only_transient_worktree_drift(
         if repaired == head_doc {
             effects.save_snapshot(file, &head_doc)?;
         }
-        refresh_live_closeout_sidecars(effects, file, &repaired, true)?;
+        signal_live_closeout_refresh(effects, file, true)?;
         effects.log_op(
             file,
             &format!(
@@ -168,7 +111,7 @@ pub fn repair_clean_head_if_only_transient_worktree_drift(
 
     effects.atomic_write(file, &head_doc)?;
     effects.save_snapshot(file, &head_doc)?;
-    refresh_live_closeout_sidecars(effects, file, &head_doc, true)?;
+    signal_live_closeout_refresh(effects, file, true)?;
     effects.log_op(
         file,
         &format!("transient_cleanup file={} basis=head", file.display()),

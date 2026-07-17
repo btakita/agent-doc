@@ -362,16 +362,14 @@ mod tests {
     #[test]
     fn durable_capture_present_uses_projection_without_capture_sidecar() {
         let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".agent-doc")).unwrap();
         let doc = tmp.path().join("doc.md");
         let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
         let response = "### Re: hello — gpt-5\n\nDone.\n";
         std::fs::write(&doc, base).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        std::fs::remove_file(
-            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
-        )
-        .unwrap();
+        assert!(!capture.capture_id.is_empty());
         let state = agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
             .unwrap()
             .expect("cycle state");
@@ -382,7 +380,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_missing_pane_repair_phase_prefers_terminal_projection_over_stale_sidecar() {
+    fn pending_missing_pane_repair_phase_uses_terminal_projection() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
@@ -390,25 +388,20 @@ mod tests {
         let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, base).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle state path");
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(&doc, "write_applied", Some(base), Some(base))
             .unwrap();
         agent_doc_cycle_state_io::mark_committed(&doc, "commit_success", Some(base), Some(base))
             .unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::Committed
         );
 
         assert_eq!(pending_missing_pane_repair_phase(&doc), None);
     }
 
     #[test]
-    fn sync_cycle_status_helpers_prefer_terminal_projection_over_stale_sidecar() {
+    fn sync_cycle_status_helpers_use_terminal_projection() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
@@ -416,18 +409,13 @@ mod tests {
         let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, base).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle state path");
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(&doc, "write_applied", Some(base), Some(base))
             .unwrap();
         agent_doc_cycle_state_io::mark_committed(&doc, "commit_success", Some(base), Some(base))
             .unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::Committed
         );
 
         assert_eq!(cycle_phase_label(&doc).as_deref(), Some("committed"));
@@ -558,7 +546,12 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let content = "---\nagent_doc_session: session-lost-pane\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let log_dir = tmp.path().join(".agent-doc/logs");
@@ -616,7 +609,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(tmp.path(), &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -651,11 +649,7 @@ mod tests {
 
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::ResponseCaptured);
-        assert!(
-            agent_doc_fs::pending_response_path_for(&doc)
-                .unwrap()
-                .exists()
-        );
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_some());
     }
     #[test]
     fn repair_missing_registered_pane_recovers_response_captured_closeout() {
@@ -677,7 +671,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(tmp.path(), &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -723,11 +722,7 @@ mod tests {
             agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
             agent_doc_snapshot_io::SnapshotCommitStatus::Committed
         );
-        assert!(
-            !agent_doc_fs::pending_response_path_for(&doc)
-                .unwrap()
-                .exists()
-        );
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
         assert!(
             std::fs::read_to_string(&doc)
                 .unwrap()
@@ -754,7 +749,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(tmp.path(), &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -778,7 +778,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, updated).unwrap();
-        agent_doc_snapshot_io::save(&doc, updated, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            updated,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
@@ -824,11 +829,7 @@ mod tests {
             agent_doc_snapshot_io::verify_snapshot_committed(&doc).unwrap(),
             agent_doc_snapshot_io::SnapshotCommitStatus::Committed
         );
-        assert!(
-            !agent_doc_fs::pending_response_path_for(&doc)
-                .unwrap()
-                .exists()
-        );
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
     }
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
@@ -841,7 +842,12 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let content = "---\nagent_doc_session: dead-pane-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let log_dir = tmp.path().join(".agent-doc/logs");
@@ -936,7 +942,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(tmp.path(), &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -950,9 +961,6 @@ mod tests {
             "<!-- /patch:backlog -->\n"
         );
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        let pending_path = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-        std::fs::create_dir_all(pending_path.parent().unwrap()).unwrap();
-        std::fs::write(&pending_path, response).unwrap();
 
         let log_dir = tmp.path().join(".agent-doc/logs");
         std::fs::create_dir_all(&log_dir).unwrap();
@@ -1329,7 +1337,12 @@ gpt-5.4 high · ~/work/btakita/agent-loop · Context 0% used
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert_eq!(open_cycle_protected_file_state(&doc), None);
 

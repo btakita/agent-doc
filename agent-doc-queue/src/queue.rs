@@ -13,7 +13,7 @@ pub enum IdleQueueDrainDecision {
     SkipNotIdle,
     SkipTurnActive,
     SkipNoActiveHead,
-    SkipEditorTyping,
+    SkipCurrentTransition,
     SkipAlreadyDispatched,
     SkipRouteSubmitInFlight,
     SkipSelfDrivingLoopOwner,
@@ -25,7 +25,7 @@ pub enum IdleQueueContextResetDecision {
     SkipNoActiveHead,
     SkipNotIdle,
     SkipTurnActive,
-    SkipEditorTyping,
+    SkipCurrentTransition,
     SkipRouteSubmitInFlight,
     SkipAlreadyResetHead,
     SkipNoResetNeeded,
@@ -107,17 +107,17 @@ pub fn idle_queue_context_reset_decision(
     }
 }
 
-pub fn idle_queue_context_reset_decision_with_editor_typing(
+pub fn idle_queue_context_reset_decision_with_current_transition(
     prompt_visible: bool,
     turn_active: bool,
     route_submit_in_flight: bool,
-    editor_typing_active: bool,
+    current_transition_pending: bool,
     active_head: Option<&str>,
     last_context_reset_head: Option<&str>,
     reset_required: bool,
 ) -> IdleQueueContextResetDecision {
-    if active_head.is_some() && editor_typing_active {
-        return IdleQueueContextResetDecision::SkipEditorTyping;
+    if active_head.is_some() && current_transition_pending {
+        return IdleQueueContextResetDecision::SkipCurrentTransition;
     }
     idle_queue_context_reset_decision(
         prompt_visible,
@@ -161,16 +161,19 @@ pub struct IdleQueueDrainDecisionFacts<'a> {
     pub turn_active: bool,
     pub self_driving_loop_active: bool,
     pub route_submit_in_flight: bool,
-    pub editor_typing_active: bool,
+    pub current_transition_pending: bool,
     pub active_head: Option<&'a str>,
     pub last_dispatched: Option<&'a str>,
 }
 
-pub fn idle_queue_drain_decision_with_editor_typing(
+pub fn idle_queue_drain_decision_with_current_transition(
     facts: IdleQueueDrainDecisionFacts<'_>,
 ) -> IdleQueueDrainDecision {
-    if !facts.clear_cooldown_active && facts.active_head.is_some() && facts.editor_typing_active {
-        return IdleQueueDrainDecision::SkipEditorTyping;
+    if !facts.clear_cooldown_active
+        && facts.active_head.is_some()
+        && facts.current_transition_pending
+    {
+        return IdleQueueDrainDecision::SkipCurrentTransition;
     }
     idle_queue_drain_decision(
         facts.clear_cooldown_active,
@@ -382,17 +385,17 @@ mod tests {
             IdleQueueDrainDecision::SkipSelfDrivingLoopOwner
         );
         assert_eq!(
-            idle_queue_drain_decision_with_editor_typing(IdleQueueDrainDecisionFacts {
+            idle_queue_drain_decision_with_current_transition(IdleQueueDrainDecisionFacts {
                 clear_cooldown_active: false,
                 prompt_visible: true,
                 turn_active: false,
                 self_driving_loop_active: false,
                 route_submit_in_flight: false,
-                editor_typing_active: true,
+                current_transition_pending: true,
                 active_head: Some("do [#a]"),
                 last_dispatched: None,
             }),
-            IdleQueueDrainDecision::SkipEditorTyping
+            IdleQueueDrainDecision::SkipCurrentTransition
         );
     }
 
@@ -414,7 +417,7 @@ mod tests {
             IdleQueueContextResetDecision::SkipAlreadyResetHead
         );
         assert_eq!(
-            idle_queue_context_reset_decision_with_editor_typing(
+            idle_queue_context_reset_decision_with_current_transition(
                 true,
                 false,
                 false,
@@ -423,7 +426,7 @@ mod tests {
                 None,
                 true
             ),
-            IdleQueueContextResetDecision::SkipEditorTyping
+            IdleQueueContextResetDecision::SkipCurrentTransition
         );
     }
 

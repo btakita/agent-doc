@@ -308,8 +308,12 @@ fn save_snapshot(file: &Path, doc: &str, rc: &CycleContext) -> Result<()> {
         std::fs::write(&snap_abs, doc)
             .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     } else {
-        agent_doc_snapshot_io::save(file, doc, agent_doc_ops_log_io::log_op)
-            .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     }
     Ok(())
 }

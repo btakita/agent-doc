@@ -5,8 +5,8 @@
 //!
 //! ## Spec
 //! - Persists node-keyed document operations (`agent_doc_turn::op_log::DocumentOp`)
-//!   tagged with actor + causal (Lamport / session-origin) clock to a derived
-//!   sqlite database at `.agent-doc/op-log.db`.
+//!   tagged with actor + causal (Lamport / session-origin) clock to derived
+//!   tables in the controller's sole `.agent-doc/state.db`.
 //! - The durable store owns Lamport assignment: each appended op gets the next
 //!   monotonic per-document tick, so the log is totally ordered per document.
 //!   The caller's `clock.lamport` is ignored; `clock.origin_session` is honored.
@@ -35,9 +35,9 @@ use rusqlite::{Connection, params};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Path to the derived op-log database for a project root.
+/// Path to the sole controller state database containing the op-log tables.
 pub fn db_path(project_root: &Path) -> PathBuf {
-    project_root.join(".agent-doc").join("op-log.db")
+    crate::state_store::state_db_path(project_root)
 }
 
 fn ensure_schema(conn: &Connection) -> Result<()> {

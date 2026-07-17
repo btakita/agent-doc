@@ -1551,16 +1551,13 @@ fn deprecated_pending_alias_used(args: &[OsString]) -> bool {
 struct WriteArgs {
     /// Path to the session document
     file: PathBuf,
-    /// Baseline content for 3-way merge (reads from file if omitted)
-    #[arg(long)]
-    baseline_file: Option<PathBuf>,
     /// Template mode: parse <!-- patch:name --> blocks and apply to components
     #[arg(long)]
     template: bool,
     /// Stream mode: template patches with CRDT merge (conflict-free)
     #[arg(long)]
     stream: bool,
-    /// IPC mode: write patch JSON to .agent-doc/patches/ for IDE plugin consumption
+    /// IPC mode: deliver a typed intent to the registered PID-scoped editor endpoint
     #[arg(long)]
     ipc: bool,
     /// Force direct disk write, skip IPC even when plugin is installed
@@ -2007,7 +2004,7 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
         /// Owner tag for the lease (default: claude_loop)
-        #[arg(long, default_value = agent_doc_queue::drain_owner::DRAIN_OWNER_CLAUDE_LOOP)]
+        #[arg(long, default_value = agent_doc_queue_io::drain_owner::DRAIN_OWNER_CLAUDE_LOOP)]
         owner: String,
         /// Release the lease instead of claiming/refreshing it
         #[arg(long)]
@@ -2042,7 +2039,7 @@ enum Commands {
     /// Sync tmux panes to a 2D columnar layout matching the editor
     Sync {
         /// Columns of comma-separated file paths (left-to-right). Repeat for each column.
-        /// When omitted, sync falls back to the recorded `.agent-doc/last_layout.json`
+        /// When omitted, sync falls back to the layout recorded in project `state.db`
         /// for the current sync scope.
         #[arg(long = "col")]
         columns: Vec<String>,
@@ -2538,7 +2535,7 @@ enum Commands {
         #[arg(long)]
         history: bool,
     },
-    /// Undo the last agent response (restore pre-response state)
+    /// Undo the last agent response (restore state before response capture)
     Undo {
         /// Path to the session document
         file: PathBuf,
@@ -2892,13 +2889,9 @@ enum AdminAction {
         #[arg(long)]
         json: bool,
     },
-    /// Announce a freshly-installed `libagent_doc` cdylib to editor plugins by
-    /// writing the global reload-broadcast file (`#cdylib-reload-broadcast`). This
-    /// is the "recycle via API" counterpart to `admin recycle`: `lib-install`
-    /// broadcasts automatically, and this command lets an operator re-announce the
-    /// current cdylib on demand. JetBrains and VS Code plugins watch the broadcast
-    /// and force their existing native-reload path immediately instead of waiting
-    /// for the next lazy FFI call.
+    /// Send the shared `reload_library` intent to every live editor registration.
+    /// This is the editor-side counterpart to `admin recycle`; `lib-install`
+    /// performs the same typed fan-out automatically.
     #[command(name = "reload-lib")]
     ReloadLib {
         /// Emit JSON instead of a human-readable report
@@ -3039,7 +3032,7 @@ enum OpsAction {
         #[arg(long)]
         json: bool,
     },
-    /// Gather cycle/patch diagnostics from agent-doc logs and sidecars
+    /// Gather cycle/write diagnostics from agent-doc logs and state.db
     Diagnose {
         /// Project root to inspect (defaults to --file root or nearest project from CWD)
         #[arg(long)]
@@ -3792,7 +3785,7 @@ fn try_main() -> anyhow::Result<()> {
                 history::git_diff(&file, &from_ref, to_ref)
             } else {
                 agent_doc_diff_io::run(
-                    &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
+                    &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
                     &file,
                     wait,
                 )
@@ -3948,10 +3941,10 @@ fn try_main() -> anyhow::Result<()> {
         } => {
             let file_str = file.to_string_lossy();
             if release {
-                agent_doc_queue::drain_owner::clear_drain_owner_lease(&file_str);
+                agent_doc_queue_io::drain_owner::clear_drain_owner_lease(&file_str);
                 println!("released drain-owner lease for {}", file.display());
             } else {
-                agent_doc_queue::drain_owner::refresh_drain_owner_lease(&file_str, &owner)?;
+                agent_doc_queue_io::drain_owner::refresh_drain_owner_lease(&file_str, &owner)?;
                 println!(
                     "claimed drain-owner lease owner={owner} for {}",
                     file.display()
@@ -4147,7 +4140,6 @@ fn try_main() -> anyhow::Result<()> {
             agent_doc_repair_command_io::run_write_command_with_empty_response_recovery(
                 agent_doc_write_command_io::CommandOptions {
                     file: args.file,
-                    baseline_file: args.baseline_file,
                     is_template: args.template,
                     is_stream: args.stream,
                     is_ipc: args.ipc,
@@ -4206,7 +4198,6 @@ fn try_main() -> anyhow::Result<()> {
             agent_doc_repair_command_io::run_write_command_with_empty_response_recovery(
                 agent_doc_write_command_io::CommandOptions {
                     file: args.file,
-                    baseline_file: args.baseline_file,
                     is_template: args.template,
                     is_stream: args.stream,
                     is_ipc: args.ipc,
@@ -4338,7 +4329,7 @@ fn try_main() -> anyhow::Result<()> {
                             .content,
                     )
                 },
-                agent_doc_snapshot_io::load,
+                agent_doc_snapshot_io::load_document_baseline,
                 agent_doc_ops_log_io::log_op,
             )?;
             println!("{}", serde_json::to_string_pretty(&output)?);
@@ -4723,13 +4714,7 @@ fn try_main() -> anyhow::Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
-                let dark = if status.dual_run {
-                    ""
-                } else {
-                    " (plane dark — AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0)"
-                };
-                println!("reliable-sync dual-run: {}{}", status.dual_run, dark);
-                println!("authority: reliable-sync Lazily plane");
+                println!("authority: Lazily current + reliable-sync");
                 println!("plane open docs ({}):", status.plane_open_docs.len());
                 for doc in &status.plane_open_docs {
                     let pids = status
@@ -5054,26 +5039,26 @@ fn try_main() -> anyhow::Result<()> {
                     Ok(())
                 }
                 AdminAction::ReloadLib { json } => {
-                    // `#cdylib-reload-broadcast`: write the global reload-broadcast file
-                    // for the currently-installed cdylib and report how many editor
-                    // projects it could also signal. Deterministic logic lives in
-                    // `lib_install::reload_lib_now`; main.rs only renders the report.
-                    let report = lib_install::reload_lib_now()?;
+                    let report = lib_install::reload_lib()?;
                     if json {
                         println!(
                             "{}",
                             serde_json::json!({
-                                "broadcast_path": report.broadcast_path.display().to_string(),
                                 "lib_version": report.lib_version,
                                 "editor_projects": report.editor_projects,
+                                "editor_endpoints": report.editor_endpoints,
+                                "delivered": report.delivered,
+                                "failed": report.failed,
                             })
                         );
                     } else {
                         println!(
-                            "[admin] reload-lib: cdylib v{} reload announced to editor plugins ({}); {} editor project(s) could also be signaled directly",
+                            "[admin] reload-lib: cdylib v{} typed reload delivered to {}/{} editor endpoints across {} projects ({} unavailable)",
                             report.lib_version,
-                            report.broadcast_path.display(),
+                            report.delivered,
+                            report.editor_endpoints,
                             report.editor_projects,
+                            report.failed,
                         );
                     }
                     Ok(())

@@ -288,7 +288,7 @@ pub struct AgentDocPipeline {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
     /// Cycle-state run identifier (the `cycle-<millis>` capture/cycle id) for
-    /// correlating frontmatter state with `.agent-doc/captures` + cycle_state.
+    /// correlating frontmatter state with the state-backbone cycle projection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
     /// Current pipeline step — the orchestration `CyclePhase` rendered as a

@@ -372,10 +372,10 @@ kt/js lack `SyncDriver`). Deliberately **not** formalized in lazily-formal — a
 no algebraic content; the invariants are already proven over frame sequences, above the transport.
 (tsift's 5 lazily-consuming crates were also bumped 0.21.6 → 0.32.0, caret, separately.)
 
-**3C store DONE (this pass) — `SqliteOutbox`.** `agent-doc-sqlite::reliable_sync_outbox::SqliteOutbox`
-implements lazily's `DurableOutbox` against SQLite (new `reliable_sync_outbox` +
-`reliable_sync_outbox_cursor` tables, self-owned `CREATE IF NOT EXISTS` schema — no edit to the
-shared `initialize_state_db`). Per-`document_hash` channel; frames stored as serde_json of
+**3C store DONE (this pass) — `SqliteOutbox`.** Lazily's `SqliteOutbox`
+implements `DurableOutbox` in the controller's sole `state.db` (`reliable_sync_outbox` +
+`reliable_sync_outbox_cursor` tables, with an idempotent table-scoped schema and no second database).
+Per-`document_hash` channel; frames stored as serde_json of
 `IpcMessage`; append-before-send / `ack_through` prune / `replay_from(cursor)` ascending suffix /
 persisted ack cursor. The infallible trait methods log SQLite/serde failures loudly to stderr (no
 silent swallow). **6 tests** incl. the recycle-survival invariant (drop + reopen → the un-acked
@@ -476,8 +476,8 @@ push-loop wiring + dual-run cutover remain.
     `RpcLivenessPushTransport` (impls reliable-sync-io's `LivenessPushTransport` over `request_controller`;
     `ControllerReliableSyncResponse` made `pub`). `src/ffi.rs` exports the C-ABI entry points the editor
     plugins call: **`agent_doc_reliable_sync_liveness_enqueue(project_root, document_hash, ops_json)`**
-    (parses a `LivenessOp` JSON batch, gets-or-creates a per-`(root,doc)` `LivenessPushEndpoint` backed by
-    a durable `SqliteOutbox` at `.agent-doc/reliable_sync_outbox.db`, resuming the epoch counter past the
+(parses a `LivenessOp` JSON batch, gets-or-creates a per-`(root,doc)` `LivenessPushEndpoint` backed by
+the reliable-sync tables in the project controller's sole `.agent-doc/state.db`, resuming the epoch counter past the
     acked cursor via `LivenessPushEndpoint::resuming` so a recycle never re-uses an epoch) and
     **`agent_doc_reliable_sync_liveness_flush(project_root, document_hash)`** (flushes via
     `RpcLivenessPushTransport`, returns the ack cursor). Global endpoint registry (`LazyLock<Mutex<HashMap>>`,

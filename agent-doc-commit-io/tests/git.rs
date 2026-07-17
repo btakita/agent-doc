@@ -99,18 +99,6 @@ mod th {
                 };
                 if !file_path.is_empty() {
                     let file = Path::new(file_path);
-                    let file_key = file.to_string_lossy();
-                    let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
-                        file_key.as_ref(),
-                        &content,
-                        "test-editor",
-                        "test",
-                        "test",
-                        &[
-                            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-                            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
-                        ],
-                    );
                     let _ =
                         agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
                             file,
@@ -203,7 +191,12 @@ mod tests {
             - [ ] keep me\n\
             <!-- /agent:backlog -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -225,7 +218,12 @@ mod tests {
             - [ ] keep me\n\
             <!-- /agent:backlog -->\n";
         fs::write(&doc, cleaned).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let did_commit = commit(&doc).expect("escaped tail cleanup should commit");
         assert!(did_commit, "cleanup deletion should create a commit");
@@ -238,7 +236,9 @@ mod tests {
             normalize_transient_agent_doc_markers(cleaned),
             "HEAD should contain the cleanup deletion"
         );
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             normalize_transient_agent_doc_markers(&snap),
             normalize_transient_agent_doc_markers(cleaned),
@@ -291,7 +291,12 @@ mod tests {
             "<!-- /agent:icebox -->\n",
         );
         fs::write(&doc, clean).unwrap();
-        agent_doc_snapshot_io::save(&doc, clean, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            clean,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -342,7 +347,12 @@ mod tests {
             "<!-- /agent:icebox -->\n",
         );
         fs::write(&doc, compacted).unwrap();
-        agent_doc_snapshot_io::save(&doc, compacted, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            compacted,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(compacted), Some(compacted)).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
@@ -409,7 +419,12 @@ Implemented.
 ";
         let doc = root.join("session.md");
         fs::write(&doc, duplicated).unwrap();
-        agent_doc_snapshot_io::save(&doc, duplicated, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            duplicated,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let before = Command::new("git")
             .current_dir(root)
@@ -442,7 +457,9 @@ Implemented.
         let head = agent_doc_git_io::revision::show_head(&doc)
             .unwrap()
             .unwrap();
-        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         let working = fs::read_to_string(&doc).unwrap();
         assert_eq!(head.matches("### Re: #pbdupchurn — gpt-5").count(), 1);
         assert_eq!(snapshot.matches("### Re: #pbdupchurn — gpt-5").count(), 1);
@@ -500,7 +517,12 @@ Duplicate replay should stay live.
 ";
         let doc = root.join("session.md");
         fs::write(&doc, live).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(initial), Some(initial)).unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
@@ -510,7 +532,9 @@ Duplicate replay should stay live.
         let head = agent_doc_git_io::revision::show_head(&doc)
             .unwrap()
             .unwrap();
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         let working = fs::read_to_string(&doc).unwrap();
         assert!(head.contains("### Re: #snapabsorb — gpt-5"));
         assert!(!head.contains("late socket replay"));
@@ -547,8 +571,12 @@ Duplicate replay should stay live.
 
         let doc = root.join("session.md");
         fs::write(&doc, "updated session\n").unwrap();
-        agent_doc_snapshot_io::save(&doc, "updated session\n", agent_doc_ops_log_io::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            "updated session\n",
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert!(commit(&doc).expect("session document should commit"));
 
@@ -780,7 +808,7 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        // Create a document at its pre-response state and commit it.
+        // Create a document at its state before response capture and commit it.
         let doc = root.join("session.md");
         let initial_content = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n\n";
         fs::write(&doc, initial_content).unwrap();
@@ -867,7 +895,12 @@ Duplicate replay should stay live.
         fs::write(&doc, updated).unwrap();
         let snap_dir = root.join(".agent-doc/snapshots");
         fs::create_dir_all(&snap_dir).unwrap();
-        agent_doc_snapshot_io::save(&doc, updated, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            updated,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let index_lock = root.join(".git/index.lock");
         fs::write(&index_lock, "held").unwrap();
@@ -1058,7 +1091,9 @@ Duplicate replay should stay live.
             "working tree should not retain transient head markers after closeout; got:\n{working}"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("### Re: newer\n"),
             "snapshot should keep the clean heading; got:\n{snap}"
@@ -1071,7 +1106,7 @@ Duplicate replay should stay live.
     #[test]
     fn reposition_collapses_snapshot_boundaries_even_during_active_run() {
         // Regression for #boundaryaccum1: a wedged finalize leaves a
-        // pending-response file on disk, and the response lands via a direct
+        // retained response intent in the ledger, and the response lands via a direct
         // commit. The active-run guard must scope ONLY the working-tree rewrite
         // — the binary-owned snapshot collapse must still run, so the
         // staged/committed blob always carries exactly one boundary and a
@@ -1079,6 +1114,7 @@ Duplicate replay should stay live.
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
         init_repo(root);
 
         let doc = root.join("session.md");
@@ -1094,27 +1130,25 @@ Duplicate replay should stay live.
             <!-- agent:boundary:ccc333 -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, multi).unwrap();
-        let snap_path = agent_doc_fs::snapshot_path_for(&doc).unwrap();
-        let snap_abs = root.join(&snap_path);
-        fs::create_dir_all(snap_abs.parent().unwrap()).unwrap();
-        fs::write(&snap_abs, multi).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            multi,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
-        // Simulate an ACTIVE RUN: a leftover pending-response file makes the
-        // active-run guard fire (previously this early-returned, skipping the
-        // snapshot collapse entirely).
-        let canonical = doc.canonicalize().unwrap();
-        let pending = agent_doc_fs::pending_response_path_for(&canonical).unwrap();
-        if let Some(parent) = pending.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(&pending, "in-flight").unwrap();
+        // Simulate an active run through its retained response intent.
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(multi), Some(multi)).unwrap();
+        agent_doc_repair_io::pending::save_pending(&doc, "in-flight").unwrap();
 
         agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
             &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         let count = snap
             .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
             .count();
@@ -1250,7 +1284,9 @@ Duplicate replay should stay live.
             "working tree should preserve the user prompt prefix after closeout:\n{working}"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("❯ Please restart Codex and deploy the 503 fixes again.\n"),
             "snapshot should preserve the user prompt prefix after closeout:\n{snap}"
@@ -1365,7 +1401,12 @@ Duplicate replay should stay live.
             - [ ] [#a1b2] existing\n\
             <!-- /agent:pending -->\n";
         fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -1397,7 +1438,9 @@ Duplicate replay should stay live.
             message.contains("direct response patchback without agent-doc cycle"),
             "error should explain the blocked bypassed patchback:\n{message}"
         );
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snap, snapshot, "snapshot must remain unchanged on failure");
     }
     #[test]
@@ -1444,7 +1487,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:oldid -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -1479,7 +1527,9 @@ Duplicate replay should stay live.
             "user prompt should remain uncommitted:\n{committed}"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snap.contains("follow-up question"),
             "snapshot should stay at the older committed state:\n{snap}"
@@ -1539,7 +1589,12 @@ Duplicate replay should stay live.
             <!-- agent:pending -->\n\
             <!-- /agent:pending -->\n";
         fs::write(&doc, scaffold).unwrap();
-        agent_doc_snapshot_io::save(&doc, scaffold, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            scaffold,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -1578,7 +1633,9 @@ Duplicate replay should stay live.
             "tracked extreme drift must not absorb unanswered prompt:\n{committed}"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snap.contains("user question that still needs an answer"),
             "snapshot should remain selective for tracked docs:\n{snap}"
@@ -1638,7 +1695,12 @@ Duplicate replay should stay live.
             <!-- agent:pending -->\n\
             <!-- /agent:pending -->\n";
         fs::write(&doc, scaffold).unwrap();
-        agent_doc_snapshot_io::save(&doc, scaffold, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            scaffold,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let live = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n\
             ## Status\n\n\
@@ -1721,7 +1783,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:oldid -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -1752,7 +1819,9 @@ Duplicate replay should stay live.
             message.contains("direct response patchback without agent-doc cycle"),
             "error should explain the blocked bypassed patchback:\n{message}"
         );
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snap, snapshot, "snapshot must remain unchanged on failure");
     }
     #[test]
@@ -1798,7 +1867,12 @@ Duplicate replay should stay live.
             new body\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, tracked).unwrap();
-        agent_doc_snapshot_io::save(&doc, tracked, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            tracked,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -1833,11 +1907,18 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, tracked, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            tracked,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         commit(&doc).expect("commit should repair the stale snapshot");
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("### Re: historical\n"),
             "snapshot should repair to the committed historical response:\n{snap}"
@@ -1900,7 +1981,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -1920,7 +2006,12 @@ Duplicate replay should stay live.
             new body\n\
             <!-- agent:boundary:test-boundary -->\n\
             <!-- /agent:exchange -->\n";
-        agent_doc_snapshot_io::save(&doc, visible_snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            visible_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let with_user_edit = format!("{visible_snapshot}\n❯ follow-up question\n");
         fs::write(&doc, &with_user_edit).unwrap();
@@ -1988,7 +2079,12 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n"
         );
         commit_file(root, "session.md", committed, "add doc");
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let live = concat!(
             "---\nagent_doc_session: test\n---\n\n",
@@ -2040,212 +2136,6 @@ Duplicate replay should stay live.
     }
 
     #[test]
-    fn commit_ignores_live_buffer_projection_when_crdt_barrier_ready() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-        fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
-        init_repo(root);
-        commit_file(root, "README.md", "# test\n", "initial");
-
-        let doc = root.join("session.md");
-        let committed = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: previous\n\n",
-            "previous response\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        commit_file(root, "session.md", committed, "add doc");
-        fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        agent_doc_cycle_state_io::mark_response_captured(
-            &doc,
-            "response_captured",
-            Some(committed),
-            Some(committed),
-            "sha256",
-            None,
-        )
-        .unwrap();
-
-        let editor_visible =
-            format!("{committed}\noperator edit projected by editor sidecar only\n");
-        agent_doc_debounce::document_changed_with_content_for_editor(
-            &doc.display().to_string(),
-            &editor_visible,
-            Some("jetbrains:test"),
-        );
-
-        let did_commit =
-            commit(&doc).expect("live-buffer projection alone must not decide the commit barrier");
-        assert!(
-            !did_commit,
-            "HEAD-current closeout should close without a duplicate commit"
-        );
-
-        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
-        assert_eq!(
-            state.phase,
-            agent_doc_turn::CyclePhase::Committed,
-            "cycle should close when the CRDT barrier is ready"
-        );
-
-        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains("commit_crdt_barrier_ready file=")
-                && log.contains("basis=already_current"),
-            "commit should be guarded by the CRDT barrier, not a live-buffer sidecar:\n{log}"
-        );
-        assert!(
-            !log.contains("commit_blocked_crdt_relay_pending file="),
-            "live-buffer projection alone must not block closeout:\n{log}"
-        );
-    }
-
-    #[test]
-    fn commit_allows_already_current_synced_operator_buffer_while_disk_lags() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-        fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
-        init_repo(root);
-        commit_file(root, "README.md", "# test\n", "initial");
-
-        let doc = root.join("session.md");
-        let stale_disk = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: previous\n\n",
-            "previous response\n",
-            "<!-- agent:boundary:head -->\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let committed = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: previous\n\n",
-            "previous response\n",
-            "### Re: current\n\n",
-            "current response\n",
-            "<!-- agent:boundary:head -->\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        commit_file(root, "session.md", committed, "add committed response");
-        fs::write(&doc, stale_disk).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
-            &doc.display().to_string(),
-            committed,
-            "jetbrains:test",
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
-
-        let did_commit =
-            commit(&doc).expect("already-current synced editor-visible snapshot should close");
-        assert!(
-            !did_commit,
-            "HEAD-current synced snapshot should close without a duplicate commit"
-        );
-
-        let state = agent_doc_cycle_state_io::load(&doc).unwrap();
-        assert!(
-            state.is_none()
-                || state
-                    .as_ref()
-                    .is_some_and(|state| state.phase == agent_doc_turn::CyclePhase::Committed),
-            "already-current closeout should not stay blocked: {state:?}"
-        );
-
-        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains("commit_crdt_barrier_ready file=")
-                && log.contains("basis=already_current"),
-            "already-current closeout should be guarded by the CRDT barrier, not a live-buffer sidecar:\n{log}"
-        );
-        assert!(
-            !log.contains("commit_blocked_crdt_relay_pending file="),
-            "detached CRDT barrier must not block no-op closeout:\n{log}"
-        );
-    }
-
-    #[test]
-    fn commit_allows_synced_operator_buffer_that_matches_staged_snapshot_while_disk_lags() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let root = dir.path();
-        fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
-        fs::create_dir_all(root.join(".agent-doc/live-buffer")).unwrap();
-        init_repo(root);
-        commit_file(root, "README.md", "# test\n", "initial");
-
-        let doc = root.join("session.md");
-        let committed = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: previous\n\n",
-            "previous response\n",
-            "<!-- agent:boundary:head -->\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        commit_file(root, "session.md", committed, "add doc");
-        fs::write(&doc, committed).unwrap();
-
-        let staged = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: previous\n\n",
-            "previous response\n",
-            "### Re: current\n\n",
-            "current response\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        agent_doc_snapshot_io::save(&doc, staged, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
-            &doc.display().to_string(),
-            staged,
-            "jetbrains:test",
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
-        let listener = start_fake_listener(root);
-        wait_for_listener(root);
-
-        let did_commit = commit(&doc).expect("staged synced editor-visible snapshot should commit");
-        assert!(did_commit, "snapshot ahead of HEAD should create a commit");
-
-        let head = agent_doc_git_io::revision::show_head(&doc)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            normalize_transient_agent_doc_markers(&head),
-            normalize_transient_agent_doc_markers(staged),
-            "commit should stage the synced editor-visible snapshot modulo transient boundary markers, not stale disk"
-        );
-        assert!(
-            head.contains("### Re: current") && head.contains("current response"),
-            "committed HEAD should contain the synced editor-visible response, not stale disk:\n{head}"
-        );
-
-        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains("commit_crdt_barrier_ready file=") && log.contains("basis=pre_stage"),
-            "staged snapshot commit should be guarded by the CRDT barrier, not a live-buffer sidecar:\n{log}"
-        );
-        assert!(
-            !log.contains("commit_blocked_crdt_relay_pending file="),
-            "detached CRDT barrier must not block staged snapshot commit:\n{log}"
-        );
-        let _ = fs::remove_file(agent_doc_ipc_io::socket_path(root));
-        drop(listener);
-    }
-
-    #[test]
     fn commit_seam_strikes_answered_free_text_head_from_capture() {
         // `#qheadstrike` P2: the recovery commit seam must strike an answered
         // free-text queue head sourced from the durable capture — the gap that
@@ -2271,20 +2161,18 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
-        // The `#qstrikeexplain` gate only strikes heads present in the pre-turn
-        // baseline, so seed it.
-        let baseline = agent_doc_fs::baseline_path_for(&doc).unwrap();
-        fs::create_dir_all(baseline.parent().unwrap()).unwrap();
-        fs::write(&baseline, content).unwrap();
-
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         // Capture a response that answers the first free-text head (quoted in a
         // blockquote, as the strike matcher requires).
         let response =
             "### Re: parser\n> **Queue prompt:** fix the parser bug in the lexer\n\nFixed.\n";
         let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        fs::remove_file(agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap())
-            .unwrap();
+        assert!(!capture.capture_id.is_empty());
 
         queue_consume::strike_answered_free_text_heads_at_commit_seam(
             &doc,
@@ -2303,7 +2191,9 @@ Duplicate replay should stay live.
         );
         // The snapshot must converge on the struck state too, so the staged
         // commit captures it.
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("~~fix the parser bug in the lexer~~"),
             "snapshot must also carry the strike:\n{snap}"
@@ -2334,7 +2224,12 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2354,8 +2249,7 @@ Duplicate replay should stay live.
             "<!-- /patch:exchange -->\n"
         );
         let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        fs::remove_file(agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap())
-            .unwrap();
+        assert!(!capture.capture_id.is_empty());
 
         let head_before = Command::new("git")
             .current_dir(root)
@@ -2419,7 +2313,12 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2449,7 +2348,12 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, stale_prompt_only).unwrap();
-        agent_doc_snapshot_io::save(&doc, stale_prompt_only, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            stale_prompt_only,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let head_before = Command::new("git")
             .current_dir(root)
@@ -2536,7 +2440,12 @@ Duplicate replay should stay live.
             - [ ] keep me\n\
             <!-- /agent:backlog -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2559,7 +2468,12 @@ Duplicate replay should stay live.
             - [ ] keep me\n\
             <!-- /agent:backlog -->\n";
         fs::write(&doc, mixed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let did_commit = commit(&doc).expect("mixed cleanup should close as no-op");
         assert!(
@@ -2653,7 +2567,12 @@ Duplicate replay should stay live.
             ),
             prompt = prompt
         );
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         fs::write(&doc, &working).unwrap();
 
         let did_commit = commit(&doc).expect("prompt duplicate drift should repair and commit");
@@ -2675,7 +2594,9 @@ Duplicate replay should stay live.
             !working_after.contains(&format!("❯ {prompt}\n{prompt}")),
             "working tree must be repaired before closeout:\n{working_after}"
         );
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snapshot_after.contains(&format!("❯ {prompt}\n{prompt}")),
             "snapshot must be repaired before closeout:\n{snapshot_after}"
@@ -2735,7 +2656,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:old -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, stale_snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            stale_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2767,7 +2693,12 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            stale_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let working = "---\nagent_doc_session: test\n---\n\n\
             <!-- agent:exchange patch=append -->\n\
@@ -2825,7 +2756,9 @@ Duplicate replay should stay live.
             "HEAD should not absorb the user's follow-up prompt:\n{committed}"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("### Re: newer\n"),
             "snapshot should repair up to the already-committed response:\n{snap}"
@@ -2884,7 +2817,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:head -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3258,7 +3196,12 @@ Duplicate replay should stay live.
             <!-- /agent:queue -->\n";
         commit_file(root, "session.md", head_doc, "agent-doc: prior response");
         let doc = root.join("session.md");
-        agent_doc_snapshot_io::save(&doc, head_doc, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            head_doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head_doc), Some(head_doc)).unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc)
             .unwrap()
@@ -3283,7 +3226,9 @@ Duplicate replay should stay live.
             head_after.contains("- :pushpin: do [#advance-review]\n"),
             "HEAD must include the preserved queue addition:\n{head_after}"
         );
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snapshot_after.contains("- :pushpin: do [#advance-review]\n"),
             "snapshot must make the queue addition durable for session-check:\n{snapshot_after}"
@@ -3348,7 +3293,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:head-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3367,9 +3317,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:fresh-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, transient).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
-        let stale_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(transient).encode_state();
-        agent_doc_snapshot_io::save_crdt(&doc, &stale_crdt).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let did_commit = commit(&doc).expect("HEAD-current closeout should succeed");
         assert!(
@@ -3383,26 +3336,17 @@ Duplicate replay should stay live.
             "working tree should be restored to clean HEAD when only transient churn differed"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snap, committed,
             "snapshot should also be restored to clean HEAD after transient cleanup"
         );
 
-        let crdt = agent_doc_snapshot_io::load_crdt(&doc)
-            .unwrap()
-            .expect("CRDT state should be preserved for CRDT docs");
-        let crdt_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&crdt)
-            .unwrap()
-            .to_text();
-        assert_eq!(
-            crdt_text, committed,
-            "CRDT state should be refreshed to the same clean HEAD content after no-op cleanup"
-        );
-
         assert!(
-            root.join(".agent-doc/patches/vcs-refresh.signal").exists(),
-            "no-op closeout cleanup should still signal the editor/VCS refresh path"
+            !root.join(".agent-doc/patches/vcs-refresh.signal").exists(),
+            "no-op closeout must not resurrect the removed filesystem VCS-refresh sidecar"
         );
     }
     #[test]
@@ -3447,7 +3391,12 @@ Duplicate replay should stay live.
             ❯ Initial prompt\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, initial).unwrap();
-        agent_doc_snapshot_io::save(&doc, initial, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            initial,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3476,10 +3425,13 @@ Duplicate replay should stay live.
             body\n\
             <!-- agent:boundary:fresh-boundary -->\n\
             <!-- /agent:exchange -->\n";
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         fs::write(&doc, transient).unwrap();
-        let stale_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(transient).encode_state();
-        agent_doc_snapshot_io::save_crdt(&doc, &stale_crdt).unwrap();
 
         let did_commit = commit(&doc).expect("real closeout commit should succeed");
         assert!(did_commit, "snapshot should produce a real git commit");
@@ -3493,21 +3445,12 @@ Duplicate replay should stay live.
             "post-commit cleanup should restore the working tree to the committed HEAD blob"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snap, head,
             "snapshot should stay aligned with the committed HEAD blob"
-        );
-
-        let crdt = agent_doc_snapshot_io::load_crdt(&doc)
-            .unwrap()
-            .expect("CRDT state should be preserved for CRDT docs");
-        let crdt_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&crdt)
-            .unwrap()
-            .to_text();
-        assert_eq!(
-            crdt_text, head,
-            "CRDT state should refresh to the committed HEAD blob after post-commit repair"
         );
 
         let status = agent_doc_git_io::status::tracked_modified_paths(&doc).unwrap();
@@ -3566,7 +3509,12 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, stale_snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            stale_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3623,7 +3571,12 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, working).unwrap();
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            stale_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(stale_snapshot), Some(working))
             .unwrap();
         agent_doc_cycle_state_io::mark_response_captured(
@@ -3660,7 +3613,9 @@ Duplicate replay should stay live.
             "HEAD should stay on the already-committed response instead of creating a rewind commit"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snap, stale_snapshot,
             "snapshot must stay on the pre-repair baseline when the historical patchback is rejected"
@@ -3723,7 +3678,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:committed-id -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3742,7 +3702,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:stale-id -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, drifted).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let did_commit = commit(&doc).expect("heading attribution drift should self-heal");
         assert!(!did_commit, "repair should close as already committed");
@@ -3753,7 +3718,9 @@ Duplicate replay should stay live.
             "working tree should be restored to the committed response heading and boundary"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snap, committed,
             "snapshot should also return to committed HEAD"
@@ -3830,7 +3797,12 @@ Duplicate replay should stay live.
             "<!-- /agent:queue -->\n"
         );
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3875,9 +3847,12 @@ Duplicate replay should stay live.
             "<!-- /agent:queue -->\n"
         );
         fs::write(&doc, drifted).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
-        let stale_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(drifted).encode_state();
-        agent_doc_snapshot_io::save_crdt(&doc, &stale_crdt).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let did_commit = commit(&doc).expect("stale response collapse should self-heal");
         assert!(
@@ -3914,25 +3889,14 @@ Duplicate replay should stay live.
             "queue follow-up must remain visible:\n{working}"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains(
                 "- do [#submitdiag] Add diagnostics for JB Run Agent Doc submit misses?\n"
             ),
             "snapshot must include the committed queue follow-up:\n{snap}"
-        );
-
-        let crdt = agent_doc_snapshot_io::load_crdt(&doc)
-            .unwrap()
-            .expect("CRDT state should be refreshed for the repaired visible document");
-        let crdt_text = agent_doc_merge::crdt::CrdtDoc::decode_state(&crdt)
-            .unwrap()
-            .to_text();
-        assert!(
-            crdt_text.contains(
-                "- do [#submitdiag] Add diagnostics for JB Run Agent Doc submit misses?\n"
-            ),
-            "CRDT state should include the preserved queue follow-up:\n{crdt_text}"
         );
 
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
@@ -3990,7 +3954,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:head-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4010,7 +3979,12 @@ Duplicate replay should stay live.
             <!-- /agent:exchange -->\n\n\
             <!-- later local note -->\n";
         fs::write(&doc, working).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let did_commit = commit(&doc).expect("HEAD-current local edits should close as no-op");
         assert!(
@@ -4092,7 +4066,12 @@ Duplicate replay should stay live.
             "<!-- /agent:backlog -->\n"
         );
         fs::write(&doc, cleaned).unwrap();
-        agent_doc_snapshot_io::save(&doc, cleaned, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            cleaned,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4183,7 +4162,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:head-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4207,7 +4191,12 @@ Duplicate replay should stay live.
             <!-- agent:boundary:live-boundary -->\n\
             <!-- /agent:exchange -->\n";
         fs::write(&doc, bypassed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(bypassed)).unwrap();
         agent_doc_cycle_state_io::mark_response_captured(
             &doc,
@@ -4286,7 +4275,12 @@ Duplicate replay should stay live.
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4325,7 +4319,12 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(committed)).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
@@ -4409,7 +4408,12 @@ Duplicate replay should stay live.
             "<!-- /agent:backlog -->\n",
         );
         fs::write(&doc, pre_compact).unwrap();
-        agent_doc_snapshot_io::save(&doc, pre_compact, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            pre_compact,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4441,7 +4445,12 @@ Duplicate replay should stay live.
             "<!-- /agent:backlog -->\n",
         );
         fs::write(&doc, post_compact).unwrap();
-        agent_doc_snapshot_io::save(&doc, post_compact, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            post_compact,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         commit(&doc).expect("clean exchange-only compaction must not fail closed");
 
@@ -4516,7 +4525,12 @@ Duplicate replay should stay live.
         // snapshot = compacted, disk = pre-compact. This is the split that makes
         // `snapshot_matches_current_file` false and trips the historical-patchback
         // guard.
-        agent_doc_snapshot_io::save(&doc, post_compact, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            post_compact,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         fs::write(&doc, pre_compact_head).unwrap();
 
         // Plain commit must still fail closed — the guard is intact for
@@ -4592,7 +4606,12 @@ Duplicate replay should stay live.
         // resolution = pre-compact (editor-IPC-async lag or a frozen reliable-sync
         // canonical). This is the split that, without the scope guard, lets the
         // historical-snapshot repair revert the compacted snapshot to HEAD.
-        agent_doc_snapshot_io::save(&doc, post_compact, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            post_compact,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         fs::write(&doc, pre_compact_head).unwrap();
 
         commit_with_authoritative_compaction(&doc)
@@ -4632,7 +4651,12 @@ Duplicate replay should stay live.
             "<!-- /agent:queue -->\n",
         );
         commit_file(root, "session.md", stale_snapshot, "initial session");
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            stale_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
@@ -4663,7 +4687,12 @@ Duplicate replay should stay live.
             "committed response with queue mutation",
         );
 
-        agent_doc_snapshot_io::save(&doc, stale_snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            stale_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_capture_io::capture_response(&doc, response).unwrap();
         agent_doc_cycle_state_io::mark_committed(
             &doc,
@@ -4679,7 +4708,7 @@ Duplicate replay should stay live.
 
         assert_eq!(repaired, Some("committed_capture"));
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap(),
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
             Some(head.to_string())
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
@@ -4736,7 +4765,12 @@ Duplicate replay should stay live.
             "<!-- /agent:queue -->\n",
         );
         fs::write(&doc, pre_compact).unwrap();
-        agent_doc_snapshot_io::save(&doc, pre_compact, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            pre_compact,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4772,8 +4806,12 @@ Duplicate replay should stay live.
             "### Re: #compactdrift-agent - gpt-5 (HEAD)",
         );
         fs::write(&doc, &post_compact_worktree).unwrap();
-        agent_doc_snapshot_io::save(&doc, post_compact_snapshot, agent_doc_ops_log_io::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            post_compact_snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let result = commit(&doc);
         assert!(
@@ -4841,7 +4879,12 @@ Duplicate replay should stay live.
         );
         // HEAD is still the pre-compact committed state (compact's own commit failed).
         fs::write(&doc, pre_compact).unwrap();
-        agent_doc_snapshot_io::save(&doc, pre_compact, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            pre_compact,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -5057,7 +5100,7 @@ Duplicate replay should stay live.
         );
     }
     #[test]
-    fn reposition_skips_working_tree_when_ipc_listener_active() {
+    fn reposition_ignores_legacy_socket_listener_as_editor_authority() {
         use std::fs;
         use std::thread;
         use std::time::Duration;
@@ -5090,7 +5133,12 @@ Duplicate replay should stay live.
         // Create snapshot
         let snap_dir = root.join(".agent-doc/snapshots");
         fs::create_dir_all(&snap_dir).unwrap();
-        agent_doc_snapshot_io::save(&doc, doc_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            doc_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         // Initial commit
         Command::new("git")
@@ -5115,14 +5163,17 @@ Duplicate replay should stay live.
         });
         thread::sleep(Duration::from_millis(100));
 
-        // Run reposition — should skip working tree because the listener is active.
+        // A legacy control socket is not live-document authority. Lazily editor
+        // attachment is the only reason to defer the visible projection.
         let changed = agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
             &agent_doc_commit_io::BOUNDARY_REPOSITION_EFFECTS,
             &doc,
         );
 
         // Snapshot should be repositioned
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snap.contains("oldid123"),
             "snapshot boundary should be repositioned"
@@ -5137,20 +5188,20 @@ Duplicate replay should stay live.
             "snapshot should not retain transient head markers"
         );
 
-        // Working tree should NOT be modified (listener owns the update)
+        // Working tree is normalized because this test has no Lazily editor.
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
-            working.contains("oldid123"),
-            "working tree should keep old boundary when listener is active"
+            !working.contains("oldid123"),
+            "legacy socket listener must not claim editor authority"
         );
         assert!(
             working.contains("### Re: test — opus-4-6 (HEAD)\n"),
-            "working tree should stay untouched before plugin reposition"
+            "boundary reposition should preserve the response heading"
         );
         assert_eq!(
             working.matches("(HEAD)").count(),
             1,
-            "working tree should retain exactly one visible head marker"
+            "boundary reposition alone does not own head-marker normalization"
         );
 
         assert!(changed, "snapshot change should report changed=true");
@@ -5159,7 +5210,7 @@ Duplicate replay should stay live.
         drop(server);
     }
     #[test]
-    fn reposition_queues_file_ipc_when_only_patches_dir_exists() {
+    fn reposition_ignores_legacy_patches_directory_as_editor_authority() {
         use std::fs;
         let dir = tempfile::TempDir::new().unwrap();
         let root = dir.path();
@@ -5190,7 +5241,12 @@ Duplicate replay should stay live.
         // Create snapshot
         let snap_dir = root.join(".agent-doc/snapshots");
         fs::create_dir_all(&snap_dir).unwrap();
-        agent_doc_snapshot_io::save(&doc, doc_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            doc_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         // Initial commit
         Command::new("git")
@@ -5204,8 +5260,8 @@ Duplicate replay should stay live.
             .output()
             .unwrap();
 
-        // File-watch IPC is editor-owned even without a live socket listener.
-        // Queue a patch instead of rewriting the open markdown file directly.
+        // A leftover patches directory is not an authority signal and must not
+        // resurrect the retired file-watch hot path.
         fs::create_dir_all(root.join(".agent-doc/patches")).unwrap();
 
         // Run reposition
@@ -5215,7 +5271,9 @@ Duplicate replay should stay live.
         );
 
         // Snapshot is repositioned for commit staging.
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snap.contains("oldid456"),
             "snapshot boundary should be repositioned"
@@ -5230,21 +5288,21 @@ Duplicate replay should stay live.
             "snapshot should not retain transient head markers"
         );
 
-        // Working tree stays untouched; the queued file IPC patch lets the IDE
-        // apply the visible cleanup through its Document API.
+        // With no Lazily editor attached, the working tree is the detached
+        // projection and is normalized directly.
         let working = fs::read_to_string(&doc).unwrap();
         assert!(
-            working.contains("oldid456"),
-            "working tree should not be rewritten while file IPC is available"
+            !working.contains("oldid456"),
+            "legacy patches directory must not claim editor authority"
         );
         assert!(
             working.contains("### Re: test — opus-4-6 (HEAD)\n"),
-            "working tree must preserve the active editor buffer; got:\n{working}"
+            "boundary reposition should preserve the response heading; got:\n{working}"
         );
         assert_eq!(
             working.matches("(HEAD)").count(),
             1,
-            "working tree should retain exactly one (HEAD) marker; got:\n{working}"
+            "boundary reposition alone does not own head-marker normalization; got:\n{working}"
         );
 
         let patch_file = root.join(".agent-doc/patches").join(format!(
@@ -5252,21 +5310,9 @@ Duplicate replay should stay live.
             agent_doc_fs::document_state_hash(&doc).unwrap()
         ));
         assert!(
-            patch_file.exists(),
-            "reposition should be queued for file IPC"
+            !patch_file.exists(),
+            "reposition must not recreate the retired file IPC sidecar"
         );
-        let payload: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(&patch_file).unwrap()).unwrap();
-        assert_eq!(payload["reposition_boundary"], true);
-        assert_eq!(payload["preserve_head"], true);
-        let queued_boundary = payload["reposition_boundary_id"].as_str().unwrap();
-        assert_ne!(queued_boundary, "oldid456");
-        assert!(
-            snap.contains(&format!("<!-- agent:boundary:{queued_boundary} -->")),
-            "queued patch should reuse committed snapshot boundary id"
-        );
-        assert_eq!(payload["patches"].as_array().unwrap().len(), 0);
-        assert_eq!(payload["unmatched"], "");
     }
     #[test]
     fn reposition_updates_working_tree_when_no_editor_ipc_available() {
@@ -5299,7 +5345,12 @@ Duplicate replay should stay live.
 
         let snap_dir = root.join(".agent-doc/snapshots");
         fs::create_dir_all(&snap_dir).unwrap();
-        agent_doc_snapshot_io::save(&doc, doc_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            doc_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         Command::new("git")
             .current_dir(root)
@@ -5366,7 +5417,12 @@ Duplicate replay should stay live.
         fs::write(&doc, working_content).unwrap();
 
         fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         Command::new("git")
             .current_dir(root)

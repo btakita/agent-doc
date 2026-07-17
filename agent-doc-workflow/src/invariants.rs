@@ -87,7 +87,7 @@ pub enum FactSourceKind {
     CycleState,
     ActorState,
     QueueState,
-    EditorProofSidecar,
+    EditorVisibleProof,
     GitState,
     ParentGitlink,
     WorkflowStateKernel,
@@ -311,7 +311,7 @@ fn queue_continuation_invariant() -> WorkflowInvariant {
         regression_coverage: vec![
             coverage(
                 RegressionCoverageKind::SimWorld,
-                "queue continuation remains eligible after file-IPC closeout fallback",
+                "queue continuation remains eligible after proven CPC delivery recovery",
                 Some("cargo test -p agent-doc-workflow"),
             ),
             coverage(
@@ -463,10 +463,10 @@ fn closeout_commit_invariant() -> WorkflowInvariant {
         ],
         safe_remediation: vec![remediation(
             RemediationAction::FinalizeOrWriteCommit,
-            Some("agent-doc finalize <FILE> --baseline-file <BASELINE> --stream --origin skill"),
+            Some("agent-doc finalize <FILE> --stream --origin skill"),
             &[
                 "captured response body exists",
-                "baseline hash matches or replay classifier proves safe recovery",
+                "state.db baseline hash matches or replay classifier proves safe recovery",
                 "session-check can run after commit",
             ],
         )],

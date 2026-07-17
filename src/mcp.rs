@@ -148,12 +148,6 @@ fn finalize_input_schema() -> Value {
         string_property(Some("Assistant response or template patchback body.")),
     );
     properties.insert(
-        "baseline_file".to_string(),
-        string_property(Some(
-            "Optional baseline file from agent_doc_preflight for legacy flows.",
-        )),
-    );
-    properties.insert(
         "template".to_string(),
         bool_property(Some("Treat the response as a template patchback body.")),
     );
@@ -396,7 +390,7 @@ fn tool_admit(args: &Map<String, Value>) -> Result<Value> {
     let admit = agent_doc_cycle_state_io::admit_with_current_resolver(
         &file,
         |file| Ok(agent_doc_document_realtime_io::try_resolve_current_doc_from_file(file)?.content),
-        agent_doc_snapshot_io::load,
+        agent_doc_snapshot_io::load_document_baseline,
         agent_doc_ops_log_io::log_op,
     )?;
     let structured = json!({
@@ -555,7 +549,6 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
     }
     let options = agent_doc_write_command_io::CommandOptions {
         file: file.clone(),
-        baseline_file: optional_path_arg(args, "baseline_file")?,
         is_template: bool_arg(args, "template", false)?,
         is_stream: bool_arg(args, "stream", false)?,
         is_ipc: bool_arg(args, "ipc", false)?,
@@ -709,10 +702,6 @@ fn required_path_arg(args: &Map<String, Value>, key: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(required_string_arg(args, key)?))
 }
 
-fn optional_path_arg(args: &Map<String, Value>, key: &str) -> Result<Option<PathBuf>> {
-    Ok(optional_string_arg(args, key)?.map(PathBuf::from))
-}
-
 fn required_string_arg(args: &Map<String, Value>, key: &str) -> Result<String> {
     optional_string_arg(args, key)?.with_context(|| format!("missing required argument `{key}`"))
 }
@@ -851,7 +840,6 @@ mod tests {
             .unwrap();
         let props = finalize["inputSchema"]["properties"].as_object().unwrap();
         for key in [
-            "baseline_file",
             "done",
             "backlog_add",
             "backlog_add_to",

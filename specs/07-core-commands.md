@@ -103,9 +103,9 @@ Two modes:
 
 ## reset
 
-`agent-doc reset <FILE>` clears the saved session id and deletes the snapshot plus CRDT state for the document, including both `.yrs` and `.overlay.yrs` sidecars. `agent-doc reset --from-current <FILE>` clears the saved session id and rebuilds snapshot, legacy CRDT, and overlay CRDT sidecars from the current visible markdown, which is the recovery path after manually cleaning a document whose persisted snapshot/CRDT state is stale.
+`agent-doc reset <FILE>` clears the saved session id, cold snapshot, and document-keyed recovery rows in `state.db`. `agent-doc reset --from-current <FILE>` clears the saved session id and rebuilds the cold snapshot plus `state.db` CRDT recovery checkpoint from Lazily current markdown. It never imports a file-sidecar candidate into live authority.
 
-`agent-doc reset --from-current --preserve-session <FILE>` is the non-destructive recovery for baseline drift after a manual user commit: it refreshes the snapshot, legacy CRDT state, overlay CRDT state, and preflight baseline from the current visible markdown while leaving the document frontmatter, cycle state, and captured response payload/state intact. When a response capture is active, the explicit reset rebases only its replay file/snapshot hashes to the operator-approved current markdown so the retained response can be replayed instead of repeating the same baseline refusal.
+`agent-doc reset --from-current --preserve-session <FILE>` refreshes the cold snapshot and recovery checkpoint while leaving frontmatter and the active `state.db` transaction intact. The retained response intent is rebased semantically onto the operator-approved current markdown; no capture or baseline file is rewritten.
 
 ## clean
 
@@ -115,12 +115,12 @@ Two modes:
 
 `agent-doc gc [--root DIR] [--dry-run]`
 
-- Garbage-collects orphaned snapshots, captures, locks, hooks, status files, repair diagnostics, Codex blocked-stop diagnostics, sockets, and dead registry entries under `.agent-doc/`.
+- Garbage-collects orphaned cold snapshots, locks, hooks, repair diagnostics, sockets, and dead transactional rows under `.agent-doc/`.
 - The orphaned-socket cleanup keeps sockets whose supervisor PID is alive or whose socket still answers.
-- Stale `starting` actor records older than one hour are closed unless a live supervisor PID still has a fresh supervisor heartbeat proving the actor is booting; this updates the controller SQLite store and re-emits `session-actors.json` as a projection. A live PID with a stale heartbeat is treated as stuck startup state.
+- Stale `starting` actor records older than one hour are closed unless a live supervisor PID still has a fresh supervisor heartbeat proving the actor is booting; this updates the controller SQLite store transactionally. A live PID with a stale heartbeat is treated as stuck startup state.
 - A controller wedged in handoff `Preparing`/`Promoted` past the seconds-scale stuck-handoff threshold (`AGENT_DOC_STALE_PREPARING_CONTROLLER_SECS`, default 45s) is terminated (#kqr6 / #sjwm / #stuckhandoff). Unlike the stale-`starting` actor cleanup — which closes a projection record and cannot stop a live process — this kills the live wedged `controller serve` process (verified by `/proc` cmdline and never self) so it stops racing the IDE listener on `ipc.sock`, then supersedes the bootstrap with `Failed` so the next bind promotes a clean controller and the `1002 → 1004 → 1006` respawn loop cannot continue. It logs `stale_preparing_controller_reaped pid=… generation=… age_secs=… caller=…`. The same reaper runs as a self-heal step at controller bind (`connect_or_launch`) before any handoff/promote, and is exposed for operators as `agent-doc admin reap-stale-controllers [--dry-run]` (replacing the manual `pkill -f 'controller serve … --handoff-state preparing'`). `--dry-run` reports without killing.
 - Prunes accumulated pre-mutation recovery tags (`#x8aw`): keeps the newest `KEEP_RECOVERY_TAGS` (20) `agent-doc/<doc>/pre-auto-run-N` and `pre-compact-N` tags **per `<doc>/<slug>` series**, deleting older ones. One tag is created per queue auto-run / compaction, so without pruning they grow unbounded over a document's life. Best-effort: a non-git root or git failure is a no-op. `--dry-run` reports the deletions without applying them.
-- `preflight` runs the full orphan-file GC automatically at most once per day via `.agent-doc/gc.stamp`; `preflight`, `start`, and `sync` still run the lightweight stale-`starting` actor cleanup every cycle.
+- `preflight` runs the full orphan-file GC automatically at most once per day via a coordination throttle in `.agent-doc/state.db`; `preflight`, `start`, and `sync` still run the lightweight stale-`starting` actor cleanup every cycle.
 
 ## checkpoint
 
@@ -166,7 +166,7 @@ Before preflight performs document-mutating recovery, commit, pending maintenanc
 `agent-doc ops diagnose [--project-root DIR] [--file FILE] [--cycle-id ID] [--patch-id ID] [--session-id ID] [--limit N] [--json]`
 
 - Requires at least one correlation key from `--cycle-id`, `--patch-id`, `--session-id`, or `--file`.
-- Gathers a source-grouped diagnosis report from `.agent-doc/logs/ops.log`, cycle JSONL, harness session logs, editor/plugin debug logs, capture JSON, Codex hook records, hook payloads, patch files, actor/session state, and agent-doc state sidecars.
+- Gathers a source-grouped diagnosis report from `.agent-doc/logs/ops.log`, the `state.db` event/projection ledger, harness session logs, editor/plugin debug logs, Codex hook records, hook payloads, and controller actor/session state. Large recovery projections may be summarized as cold evidence, but live state is never inferred from a file transport.
 - Text log sources match by path or line content and obey the same `--limit` tail contract as `ops summary`; `--limit 0` scans full text files.
 - JSON sources are redacted before output, large payload fields are summarized instead of dumped, and `--json` emits the structured source/match report for editor plugins or reproducible bug attachments.
 

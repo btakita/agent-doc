@@ -8,9 +8,7 @@ use crate::process::{is_same_project_controller_pid, process_is_alive};
 use agent_doc_controller::dispatch::{
     ControllerDispatchProofScope, ControllerDispatchReceipt, ControllerDispatchResultStatus,
 };
-use agent_doc_controller::paths::{
-    LAYOUT_PROJECTION_FILE, launch_lock_path, layout_projection_path, socket_path, state_path,
-};
+use agent_doc_controller::paths::{launch_lock_path, socket_path};
 use agent_doc_controller::status::{
     self, ControlPlaneStoreCounts as ControllerControlPlaneStoreCounts, ControllerBinaryIdentity,
     ControllerBootstrapStatusFacts, ControllerFreshnessFacts, ControllerFreshnessStatus,
@@ -43,12 +41,13 @@ use state_store::{
     SupervisorLeaseStatus,
 };
 use state_store::{
-    Connection, ProjectionDiagnosticInsert, insert_projection_diagnostic,
-    insert_projection_diagnostic_with_metadata, insert_state_event_in_db,
-    load_actor_record_from_db, load_actor_store_from_db, load_control_plane_store_counts,
-    load_layout_state_from_db, load_session_operator_status_from_db, load_state_events_from_db,
-    load_supervisor_lease_from_db, open_state_db, store_layout_state_in_db, timestamp_secs,
+    Connection, insert_state_event_in_db, load_actor_record_from_db, load_actor_store_from_db,
+    load_control_plane_store_counts, load_layout_state_from_db,
+    load_session_operator_status_from_db, load_state_events_from_db, load_supervisor_lease_from_db,
+    open_state_db, store_layout_state_in_db, timestamp_secs,
 };
+#[cfg(test)]
+use state_store::{ProjectionDiagnosticInsert, insert_projection_diagnostic_with_metadata};
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
@@ -61,6 +60,7 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_LAYOUT_SCOPE: &str = "default";
+const CONTROLLER_BOOTSTRAP_SCOPE: &str = "project";
 const CONNECT_WAIT: Duration = Duration::from_secs(3);
 #[cfg(not(any(test, feature = "test-support")))]
 const LAUNCH_CONNECT_WAIT: Duration = Duration::from_secs(45);
@@ -665,23 +665,6 @@ fn recover_controller_after_restart(bootstrap: &ControllerBootstrap) -> Result<C
     drop(conn);
 
     let conn = open_state_db(project_root)?;
-    if state_store::layout_scope_exists(&conn, DEFAULT_LAYOUT_SCOPE)? {
-        drop(conn);
-        match emit_layout_projection(project_root) {
-            Ok(()) => stats.record_projection_emitted(),
-            Err(err) => record_projection_diagnostic_with_metadata(
-                project_root,
-                LAYOUT_PROJECTION_FILE,
-                "__layout__",
-                None,
-                None,
-                "retry_pending",
-                &format!("failed to emit layout projection during controller recovery: {err}"),
-            ),
-        }
-    }
-
-    let conn = open_state_db(project_root)?;
     state_store::upsert_crash_recovery_marker_in_db(
         &conn,
         "controller_restart_reconcile",
@@ -1192,17 +1175,13 @@ impl Drop for LaunchLock {
 }
 
 pub fn read_bootstrap(project_root: &Path) -> Result<Option<ControllerBootstrap>> {
-    let path = state_path(project_root);
-    // A truncated/0-byte or otherwise unparseable controller-state.json (e.g. an
-    // interrupted auto_install_reexec recycle killed mid-write before atomic
-    // writes landed) must not hard-error and wedge every future launch. Quarantine
-    // the corrupt file aside and re-bootstrap cleanly (#corrupt-state-quarantine):
-    // this automates the manual "move controller-state.json aside" recovery so a
-    // lingering bad file cannot keep confusing later reads/forensics. The quarantine
-    // helper warns (never silently swallows) so the recovery is visible.
-    agent_doc_fs::read_valid_or_quarantine(&path, |content| {
-        serde_json::from_str::<ControllerBootstrap>(content).ok()
-    })
+    let conn = open_state_db(project_root)?;
+    state_store::load_controller_bootstrap_json_from_db(&conn, CONTROLLER_BOOTSTRAP_SCOPE)?
+        .map(|json| {
+            serde_json::from_str::<ControllerBootstrap>(&json)
+                .context("failed to parse controller bootstrap from state.db")
+        })
+        .transpose()
 }
 
 pub fn current_binary_identity() -> Result<ControllerBinaryIdentity> {
@@ -1267,13 +1246,9 @@ fn write_bootstrap_with_options(
 }
 
 fn write_bootstrap_state(bootstrap: &ControllerBootstrap) -> Result<()> {
-    let path = state_path(&bootstrap.project_root);
-    let json = serde_json::to_string_pretty(&bootstrap)?;
-    // Atomic write (temp + rename) so an interrupted recycle/execve cannot leave
-    // a truncated 0-byte controller-state.json that wedges every future launch.
-    agent_doc_fs::write_atomic(&path, json.as_bytes())
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
+    let conn = open_state_db(&bootstrap.project_root)?;
+    let json = serde_json::to_string(bootstrap)?;
+    state_store::store_controller_bootstrap_json_in_db(&conn, CONTROLLER_BOOTSTRAP_SCOPE, &json)
 }
 
 // The SQLite connection layer (`open_state_db`, `initialize_state_db`,
@@ -1479,6 +1454,55 @@ pub fn load_state_backbone_projection(
     project_root: &Path,
 ) -> Result<agent_doc_state_backbone::StateBackboneProjection> {
     Ok(load_state_event_ledger(project_root)?.project())
+}
+
+pub fn upsert_coordination_lease(
+    project_root: &Path,
+    lease: &state_store::CoordinationLeaseRecord,
+) -> Result<()> {
+    let conn = open_state_db(project_root)?;
+    state_store::upsert_coordination_lease_in_db(&conn, lease)
+}
+
+pub fn load_coordination_lease(
+    project_root: &Path,
+    scope_kind: &str,
+    scope_id: &str,
+) -> Result<Option<state_store::CoordinationLeaseRecord>> {
+    let conn = open_state_db(project_root)?;
+    state_store::load_coordination_lease_from_db(&conn, scope_kind, scope_id)
+}
+
+pub fn clear_coordination_lease(
+    project_root: &Path,
+    scope_kind: &str,
+    scope_id: &str,
+) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    state_store::clear_coordination_lease_in_db(&conn, scope_kind, scope_id)
+}
+
+pub use agent_doc_sqlite::state_store::EditorTransportHealthRecord;
+
+pub fn upsert_editor_transport_health(
+    project_root: &Path,
+    health: &EditorTransportHealthRecord,
+) -> Result<()> {
+    let conn = open_state_db(project_root)?;
+    state_store::upsert_editor_transport_health_in_db(&conn, health)
+}
+
+pub fn load_editor_transport_health(
+    project_root: &Path,
+    document_hash: &str,
+) -> Result<Option<EditorTransportHealthRecord>> {
+    let conn = open_state_db(project_root)?;
+    state_store::load_editor_transport_health_from_db(&conn, document_hash)
+}
+
+pub fn clear_editor_transport_health(project_root: &Path, document_hash: &str) -> Result<bool> {
+    let conn = open_state_db(project_root)?;
+    state_store::clear_editor_transport_health_in_db(&conn, document_hash)
 }
 
 pub fn load_actor_store(
@@ -2304,73 +2328,14 @@ pub fn evict_cross_document_pane_bindings(
     Ok(evicted)
 }
 
-fn migrate_legacy_layout_projection(project_root: &Path, conn: &Connection) -> Result<()> {
-    if state_store::layout_scope_exists(conn, DEFAULT_LAYOUT_SCOPE)? {
-        return Ok(());
-    }
-
-    let path = layout_projection_path(project_root);
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
-        return Ok(());
-    };
-    match serde_json::from_str::<Vec<String>>(&content) {
-        Ok(columns) => store_layout_state_in_db(conn, DEFAULT_LAYOUT_SCOPE, &columns),
-        Err(err) => {
-            let _ = insert_projection_diagnostic(
-                conn,
-                LAYOUT_PROJECTION_FILE,
-                "__layout__",
-                &format!("failed to migrate legacy layout projection: {err}"),
-            );
-            Ok(())
-        }
-    }
-}
-
-fn emit_layout_projection(project_root: &Path) -> Result<()> {
-    let conn = open_state_db(project_root)?;
-    let layout_state = load_layout_state_from_db(&conn, DEFAULT_LAYOUT_SCOPE)?;
-    let path = layout_projection_path(project_root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let content = serde_json::to_string(&layout_state)?;
-    std::fs::write(&path, &content)
-        .with_context(|| format!("failed to write {}", path.display()))?;
-    let written = std::fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    let projected: Vec<String> = serde_json::from_str(&written)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
-    if projected != layout_state {
-        anyhow::bail!("last_layout.json projection drifted from sqlite state");
-    }
-    Ok(())
-}
-
 pub fn load_layout_state(project_root: &Path) -> Result<Vec<String>> {
     let conn = open_state_db(project_root)?;
-    migrate_legacy_layout_projection(project_root, &conn)?;
     load_layout_state_from_db(&conn, DEFAULT_LAYOUT_SCOPE)
 }
 
 pub fn store_layout_state(project_root: &Path, columns: &[String]) -> Result<()> {
     let conn = open_state_db(project_root)?;
-    store_layout_state_in_db(&conn, DEFAULT_LAYOUT_SCOPE, columns)?;
-    let intended_hash = serde_json::to_string(columns)
-        .ok()
-        .map(|content| agent_doc_hash::content_hash(&content));
-    if let Err(err) = emit_layout_projection(project_root) {
-        record_projection_diagnostic_with_metadata(
-            project_root,
-            LAYOUT_PROJECTION_FILE,
-            "__layout__",
-            None,
-            intended_hash.as_deref(),
-            "retry_pending",
-            &format!("failed to emit layout projection after sqlite commit: {err}"),
-        );
-    }
-    Ok(())
+    store_layout_state_in_db(&conn, DEFAULT_LAYOUT_SCOPE, columns)
 }
 
 #[cfg(test)]
@@ -2391,6 +2356,7 @@ fn record_projection_diagnostic(
     );
 }
 
+#[cfg(test)]
 fn record_projection_diagnostic_with_metadata(
     project_root: &Path,
     projection: &str,
@@ -2628,47 +2594,10 @@ mod tests {
             launch_lock_path(dir.path()),
             dir.path().join(".agent-doc/locks/controller-launch.lock")
         );
-        assert_eq!(
-            state_path(dir.path()),
-            dir.path().join(".agent-doc/controller-state.json")
-        );
-    }
-
-    #[test]
-    fn read_bootstrap_treats_empty_state_as_absent() {
-        // Regression: an interrupted auto_install_reexec recycle left a truncated
-        // 0-byte controller-state.json; read_bootstrap must self-heal to Ok(None)
-        // (re-bootstrap) instead of hard-erroring and wedging every future launch.
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = state_path(dir.path());
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, b"").unwrap();
-        assert!(read_bootstrap(dir.path()).unwrap().is_none());
-        // #corrupt-state-quarantine: the bad file is moved aside, not left to
-        // linger and confuse later reads/forensics.
-        assert!(!path.exists(), "0-byte state must be quarantined");
-        assert!(
-            std::fs::read_dir(path.parent().unwrap())
-                .unwrap()
-                .filter_map(|e| e.ok())
-                .any(|e| e.file_name().to_string_lossy().contains(".corrupt-")),
-            "a quarantine sibling must exist"
-        );
-    }
-
-    #[test]
-    fn read_bootstrap_treats_corrupt_state_as_absent() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let path = state_path(dir.path());
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, b"{ partial-write not valid json").unwrap();
-        assert!(read_bootstrap(dir.path()).unwrap().is_none());
-        assert!(!path.exists(), "corrupt state must be quarantined aside");
     }
 
     #[test]
     fn write_then_read_bootstrap_roundtrips() {
-        // The atomic write path must still produce a fully-readable state file.
         let dir = tempfile::TempDir::new().unwrap();
         let bootstrap = test_bootstrap(&dir);
         write_bootstrap_state(&bootstrap).unwrap();
@@ -2677,6 +2606,7 @@ mod tests {
             .expect("bootstrap present after write");
         assert_eq!(read.controller_generation, bootstrap.controller_generation);
         assert_eq!(read.project_root, bootstrap.project_root);
+        assert!(!dir.path().join(".agent-doc/controller-state.json").exists());
     }
 
     #[test]
@@ -3173,45 +3103,14 @@ mod tests {
         assert_eq!(diagnostics, 0);
     }
     #[test]
-    fn layout_state_migrates_legacy_projection_to_sqlite() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        std::fs::write(
-            layout_projection_path(dir.path()),
-            serde_json::to_string(&vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()])
-                .unwrap(),
-        )
-        .unwrap();
-
-        let loaded = load_layout_state(dir.path()).unwrap();
-
-        assert_eq!(loaded, vec!["tasks/a.md", "tasks/b.md"]);
-        let conn = Connection::open(state_db_path(dir.path())).unwrap();
-        let stored: String = conn
-            .query_row(
-                "SELECT columns_json FROM layout_states WHERE scope = ?1",
-                params![DEFAULT_LAYOUT_SCOPE],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(
-            serde_json::from_str::<Vec<String>>(&stored).unwrap(),
-            loaded
-        );
-    }
-    #[test]
-    fn layout_state_prefers_sqlite_over_drifted_projection() {
+    fn layout_state_roundtrips_in_sqlite_without_file_projection() {
         let dir = tempfile::TempDir::new().unwrap();
         store_layout_state(dir.path(), &["tasks/current.md".to_string()]).unwrap();
-        std::fs::write(
-            layout_projection_path(dir.path()),
-            serde_json::to_string(&vec!["tasks/stale.md".to_string()]).unwrap(),
-        )
-        .unwrap();
 
         let loaded = load_layout_state(dir.path()).unwrap();
 
         assert_eq!(loaded, vec!["tasks/current.md"]);
+        assert!(!dir.path().join(".agent-doc/last_layout.json").exists());
     }
     #[test]
     fn singleton_launch_lock_rejects_concurrent_holder() {
@@ -4963,7 +4862,12 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
         agent_doc_session_actor_io::record_session_start_direct(
@@ -5077,7 +4981,12 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
         agent_doc_session_actor_io::record_session_start_direct(
@@ -5200,7 +5109,12 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
         agent_doc_session_actor_io::record_session_start_direct(
@@ -5596,8 +5510,6 @@ agent:queue\n\
             .unwrap();
         agent_doc_cycle_state_io::record_reaped_pending_ids(&doc, &["stale-item".to_string()])
             .unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc).unwrap().unwrap();
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -5606,13 +5518,11 @@ agent:queue\n\
             Some(content),
         )
         .unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
         assert!(
-            agent_doc_cycle_state_io::load(&doc)
+            !agent_doc_cycle_state_io::load(&doc)
                 .unwrap()
                 .unwrap()
-                .is_open(),
-            "fixture should leave compatibility sidecar stale and open"
+                .is_open()
         );
 
         assert!(persist_session_actor_closeout(&doc).unwrap());
@@ -5668,7 +5578,7 @@ agent:queue\n\
         );
     }
     #[test]
-    fn controller_restart_recovery_rebuilds_memory_and_repairs_projections() {
+    fn controller_restart_recovery_rebuilds_memory_from_state_db() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/restart.md");
@@ -5724,8 +5634,6 @@ agent:queue\n\
         .unwrap();
         drop(conn);
 
-        let _ = std::fs::remove_file(layout_projection_path(dir.path()));
-
         let mut bootstrap = test_bootstrap(&dir);
         bootstrap.controller_generation = 2;
         let runtime = ControllerRuntime::new(bootstrap).unwrap();
@@ -5740,11 +5648,11 @@ agent:queue\n\
         assert_eq!(entry.window, "@8");
         assert_eq!(entry.session_id, "session-restart");
 
-        let layout_projection: Vec<String> = serde_json::from_str(
-            &std::fs::read_to_string(layout_projection_path(dir.path())).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(layout_projection, vec!["tasks/restart.md"]);
+        assert_eq!(
+            load_layout_state(dir.path()).unwrap(),
+            vec!["tasks/restart.md"]
+        );
+        assert!(!dir.path().join(".agent-doc/last_layout.json").exists());
 
         let conn = open_state_db(dir.path()).unwrap();
         let marker_count = |kind: &str, status: &str| -> i64 {

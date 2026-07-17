@@ -268,8 +268,6 @@ pub fn complete_required_closeout_with_options(
     )?;
     record_terminal_closeout_proof(file, did_commit, effects, options)?;
     timer.mark("terminal_proof");
-    cleanup_fallback_patch_files(file);
-    timer.mark("fallback_cleanup");
     timer.finish();
     Ok(did_commit)
 }
@@ -394,7 +392,9 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(false);
     };
-    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
+    let Some(capture) =
+        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+    else {
         return Ok(false);
     };
     if capture.cycle_id != state.cycle_id {
@@ -405,12 +405,7 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
     {
         return Ok(false);
     }
-    if capture.response_body.trim().is_empty()
-        || matches!(
-            capture.state,
-            agent_doc_workflow::capture::CaptureState::Discarded
-        )
-    {
+    if capture.response_body.trim().is_empty() {
         return Ok(false);
     }
     let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
@@ -442,7 +437,15 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
     {
         return Ok(false);
     }
-    agent_doc_capture_io::mark_discarded(file)?;
+    let retired = agent_doc_cycle_state_io::retire_projected_captured_response(
+        file,
+        &state.cycle_id,
+        &capture.capture_id,
+        "referenced_compact_archive",
+    )?;
+    if !retired {
+        return Ok(false);
+    }
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -453,7 +456,7 @@ pub fn reconcile_compacted_committed_capture(file: &Path) -> Result<bool> {
         ),
     );
     eprintln!(
-        "[preflight] reconciled compacted committed capture {} for {} (response archived out of HEAD; marked discarded so the stuck-capture false positive cannot resurface)",
+        "[preflight] reconciled compacted committed capture {} for {} (response archived out of HEAD; retired the ledger projection so the stuck-capture false positive cannot resurface)",
         capture.capture_id,
         file.display()
     );
@@ -482,58 +485,6 @@ fn capture_state_label(state: agent_doc_workflow::capture::CaptureState) -> &'st
         agent_doc_workflow::capture::CaptureState::Replayed => "replayed",
         agent_doc_workflow::capture::CaptureState::Committed => "committed",
         agent_doc_workflow::capture::CaptureState::Discarded => "discarded",
-    }
-}
-
-pub fn cleanup_fallback_patch_files(file: &Path) {
-    let Ok(canonical) = file.canonicalize() else {
-        return;
-    };
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    let patches_dir = project_root.join(".agent-doc/patches");
-    if !patches_dir.exists() {
-        return;
-    }
-    let Ok(hash) = agent_doc_fs::document_state_hash(file) else {
-        return;
-    };
-    let patch_file = patches_dir.join(format!("{hash}.json"));
-    if patch_file.exists() {
-        if let Ok(stale_content) = std::fs::read_to_string(&patch_file)
-            && let Ok(stale_json) = serde_json::from_str::<serde_json::Value>(&stale_content)
-            && let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str())
-        {
-            write_claimed_patch_sentinel(&project_root, patch_id);
-        }
-        match std::fs::remove_file(&patch_file) {
-            Ok(()) => eprintln!(
-                "[write] cleaned up fallback patch file after closeout: {}",
-                patch_file.display()
-            ),
-            Err(e) => eprintln!(
-                "[write] WARNING: failed to clean up fallback patch file after closeout: {e}"
-            ),
-        }
-    }
-}
-
-pub fn write_claimed_patch_sentinel(project_root: &Path, patch_id: &str) {
-    let claimed_dir = project_root.join(".agent-doc/claimed-patches");
-    match std::fs::create_dir_all(&claimed_dir) {
-        Err(e) => {
-            eprintln!("[write] WARNING: failed to create claimed-patches dir: {e}");
-        }
-        Ok(_) => {
-            let sentinel = claimed_dir.join(patch_id);
-            if let Err(e) = std::fs::write(&sentinel, "") {
-                eprintln!("[write] WARNING: failed to write patch sentinel: {e}");
-            } else {
-                eprintln!(
-                    "[write] patch_id {} claimed (sentinel written)",
-                    &patch_id[..patch_id.len().min(8)]
-                );
-            }
-        }
     }
 }
 
@@ -637,12 +588,13 @@ pub fn record_terminal_closeout_proof(
         options.force_disk,
     )?;
     let file_content = current_doc.content();
-    let snapshot_content = agent_doc_snapshot_io::load(&canonical)?.with_context(|| {
-        format!(
-            "terminal proof: missing snapshot for {}",
-            canonical.display()
-        )
-    })?;
+    let snapshot_content = agent_doc_snapshot_io::load_document_baseline(&canonical)?
+        .with_context(|| {
+            format!(
+                "terminal proof: missing snapshot for {}",
+                canonical.display()
+            )
+        })?;
     let head_content = agent_doc_git_io::revision::show_head(&canonical)?
         .with_context(|| format!("terminal proof: missing HEAD for {}", canonical.display()))?;
     let file_hash = agent_doc_hash::content_hash(file_content);
@@ -777,14 +729,14 @@ fn open_cycle_recovery_command_input(file: &Path) -> Option<OpenCycleRecoveryCom
 }
 
 enum CloseoutRecoveryCycleView {
-    Sidecar(Box<agent_doc_cycle_state_io::CycleState>),
+    Checkpoint(Box<agent_doc_cycle_state_io::CycleState>),
     Projection(Box<agent_doc_cycle_state_io::ProjectedCloseoutState>),
 }
 
 impl CloseoutRecoveryCycleView {
     fn recovery_cycle_input(&self) -> Option<CloseoutRecoveryCycleInput> {
         match self {
-            Self::Sidecar(state) => Some(CloseoutRecoveryCycleInput {
+            Self::Checkpoint(state) => Some(CloseoutRecoveryCycleInput {
                 phase: state.phase,
                 has_capture: state.capture_id.is_some(),
                 has_response_hash: state.response_sha256.is_some(),
@@ -810,7 +762,7 @@ impl CloseoutRecoveryCycleView {
 
     fn open_cycle_recovery_command_input(self) -> Option<OpenCycleRecoveryCommandInput> {
         match self {
-            Self::Sidecar(state) => {
+            Self::Checkpoint(state) => {
                 let state = *state;
                 if !state.phase.is_open() {
                     return None;
@@ -827,7 +779,6 @@ impl CloseoutRecoveryCycleView {
                 Some(OpenCycleRecoveryCommandInput {
                     cycle_id: state.cycle_id,
                     phase: state.phase,
-                    baseline_file: state.baseline_file,
                     target,
                     has_pending_mutations,
                     capture_id: state.capture_id,
@@ -841,7 +792,6 @@ impl CloseoutRecoveryCycleView {
                 Some(OpenCycleRecoveryCommandInput {
                     cycle_id: projection.cycle_id?,
                     phase,
-                    baseline_file: None,
                     target: None,
                     has_pending_mutations: matches!(
                         phase,
@@ -856,7 +806,7 @@ impl CloseoutRecoveryCycleView {
 
 fn load_closeout_recovery_cycle_view(file: &Path) -> Result<Option<CloseoutRecoveryCycleView>> {
     if let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? {
-        return Ok(Some(CloseoutRecoveryCycleView::Sidecar(Box::new(state))));
+        return Ok(Some(CloseoutRecoveryCycleView::Checkpoint(Box::new(state))));
     }
     Ok(agent_doc_cycle_state_io::load_closeout_projection(file)?
         .filter(|projection| projection.cycle_id.is_some() && projection.phase.is_some())
@@ -920,8 +870,8 @@ struct CloseoutCapturedResponse {
     response_sha256: String,
     response_body: String,
     file_hash: Option<String>,
-    snapshot_hash: Option<String>,
-    has_sidecar_hashes: bool,
+    baseline_content: Option<String>,
+    has_baseline: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -971,7 +921,7 @@ pub fn gather_closeout_recovery_evidence(
     let visible_doc = effects.resolve_current_document(file, "closeout_recovery_evidence")?;
     let visible = visible_doc.content();
     let visible_markdown_hash = agent_doc_capture_io::replay_file_hash(visible);
-    let snapshot = agent_doc_snapshot_io::load(file)?;
+    let snapshot = agent_doc_snapshot_io::load_document_baseline(file)?;
     let snapshot_hash = snapshot.as_deref().map(agent_doc_hash::content_hash);
     let head = agent_doc_git_io::revision::show_head(file)?;
     let snapshot_head_drift = match (snapshot.as_deref(), head.as_deref()) {
@@ -1001,12 +951,10 @@ pub fn gather_closeout_recovery_evidence(
     let response_body = closeout_response_body_evidence(visible, capture.as_ref());
     let queue_only_drift = closeout_queue_only_drift_evidence(
         visible,
-        snapshot.as_deref(),
         visible_markdown_hash.as_str(),
-        snapshot_hash.as_deref(),
         capture.as_ref(),
     )?;
-    let editor_ipc = closeout_editor_ipc_evidence(file, &visible_doc);
+    let editor_ipc = closeout_editor_ipc_evidence(&visible_doc);
     let binary_freshness =
         match agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
             file,
@@ -1046,7 +994,7 @@ pub fn load_current_observed_closeout_recovery_evidence(
     let visible_doc =
         effects.resolve_current_document(file, "observed_closeout_recovery_evidence")?;
     let visible_markdown_hash = agent_doc_capture_io::replay_file_hash(visible_doc.content());
-    let current_snapshot_hash = agent_doc_snapshot_io::load(file)?
+    let current_snapshot_hash = agent_doc_snapshot_io::load_document_baseline(file)?
         .as_deref()
         .map(agent_doc_hash::content_hash);
     let Some(projection) = agent_doc_cycle_state_io::load_latest_closeout_recovery_evidence(file)?
@@ -1370,87 +1318,37 @@ fn closeout_captured_response_for_state(
     let Some(capture_id) = state.capture_id.as_deref() else {
         return Ok(None);
     };
-    let projected = agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?;
-    let sidecar = closeout_matching_capture_sidecar(file, state)?;
-    if let Some(projected) = projected
-        && projected.cycle_id == state.cycle_id
-        && state
+    let Some(projection) = agent_doc_cycle_state_io::load_closeout_projection(file)? else {
+        return Ok(None);
+    };
+    if projection.captured_response_retired_reason.is_some() {
+        return Ok(None);
+    }
+    let Some(projected) = projection.captured_response else {
+        return Ok(None);
+    };
+    if projected.capture_id != capture_id {
+        return Ok(None);
+    }
+    if projected.cycle_id != state.cycle_id
+        || state
             .response_sha256
             .as_deref()
-            .is_none_or(|sha| sha == projected.response_sha256)
-    {
-        let projected_has_hashes = projected.file_hash.is_some();
-        let (capture_state, sidecar_file_hash, sidecar_snapshot_hash, has_sidecar_hashes) =
-            sidecar.as_ref().map_or(
-                (
-                    capture_state_for_cycle_phase(state.phase),
-                    None,
-                    None,
-                    false,
-                ),
-                |capture| {
-                    (
-                        capture.state,
-                        capture.file_hash.clone(),
-                        capture.snapshot_hash.clone(),
-                        true,
-                    )
-                },
-            );
-        let file_hash = projected.file_hash.or(sidecar_file_hash);
-        let snapshot_hash = if projected_has_hashes {
-            projected.snapshot_hash
-        } else {
-            sidecar_snapshot_hash
-        };
-        return Ok(Some(CloseoutCapturedResponse {
-            capture_id: projected.capture_id,
-            cycle_id: projected.cycle_id,
-            state: capture_state,
-            response_sha256: projected.response_sha256,
-            response_body: projected.response_body,
-            file_hash,
-            snapshot_hash,
-            has_sidecar_hashes: projected_has_hashes || has_sidecar_hashes,
-        }));
-    }
-    Ok(sidecar.map(closeout_captured_response_from_sidecar))
-}
-
-fn closeout_matching_capture_sidecar(
-    file: &Path,
-    state: &agent_doc_cycle_state_io::CycleState,
-) -> Result<Option<agent_doc_capture_io::CaptureRecord>> {
-    let Some(capture_id) = state.capture_id.as_deref() else {
-        return Ok(None);
-    };
-    let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)? else {
-        return Ok(None);
-    };
-    if capture.cycle_id != state.cycle_id {
-        return Ok(None);
-    }
-    if let Some(response_sha256) = state.response_sha256.as_deref()
-        && response_sha256 != capture.response_sha256
+            .is_some_and(|sha| sha != projected.response_sha256)
     {
         return Ok(None);
     }
-    Ok(Some(capture))
-}
-
-fn closeout_captured_response_from_sidecar(
-    capture: agent_doc_capture_io::CaptureRecord,
-) -> CloseoutCapturedResponse {
-    CloseoutCapturedResponse {
-        capture_id: capture.capture_id,
-        cycle_id: capture.cycle_id,
-        state: capture.state,
-        response_sha256: capture.response_sha256,
-        response_body: capture.response_body,
-        file_hash: capture.file_hash,
-        snapshot_hash: capture.snapshot_hash,
-        has_sidecar_hashes: true,
-    }
+    let has_baseline = projected.file_hash.is_some() && projected.baseline_content.is_some();
+    Ok(Some(CloseoutCapturedResponse {
+        capture_id: projected.capture_id,
+        cycle_id: projected.cycle_id,
+        state: capture_state_for_cycle_phase(state.phase),
+        response_sha256: projected.response_sha256,
+        response_body: projected.response_body,
+        file_hash: projected.file_hash,
+        baseline_content: projected.baseline_content,
+        has_baseline,
+    }))
 }
 
 fn closeout_response_body_evidence(
@@ -1491,42 +1389,37 @@ fn closeout_response_body_evidence(
 
 fn closeout_queue_only_drift_evidence(
     visible: &str,
-    snapshot: Option<&str>,
     visible_hash: &str,
-    snapshot_hash: Option<&str>,
     capture: Option<&CloseoutCapturedResponse>,
 ) -> Result<Option<CloseoutQueueOnlyDriftEvidence>> {
     let Some(capture) = capture else {
         return Ok(None);
     };
-    if !capture.has_sidecar_hashes {
+    if !capture.has_baseline {
         return Ok(None);
     }
     let file_hash_mismatch = capture.file_hash.as_deref() != Some(visible_hash);
-    let snapshot_hash_mismatch = capture.snapshot_hash.as_deref() != snapshot_hash;
-    if !file_hash_mismatch && !snapshot_hash_mismatch {
+    if !file_hash_mismatch {
         return Ok(None);
     }
     let proven_queue_only = file_hash_mismatch
-        && !snapshot_hash_mismatch
-        && agent_doc_capture_io::live_drift_is_queue_only_against_snapshot(visible, snapshot)?;
+        && agent_doc_capture_io::live_drift_is_queue_only_against_baseline(
+            visible,
+            capture.baseline_content.as_deref(),
+        )?;
     Ok(Some(CloseoutQueueOnlyDriftEvidence {
         file_hash_mismatch,
-        snapshot_hash_mismatch,
+        snapshot_hash_mismatch: false,
         proven_queue_only,
     }))
 }
 
 fn closeout_editor_ipc_evidence(
-    file: &Path,
     visible_doc: &agent_doc_document_realtime::CurrentDocument,
 ) -> CloseoutEditorIpcEvidence {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let socket_degraded = agent_doc_project_root_io::project_root_containing(&canonical)
-        .and_then(|root| {
-            agent_doc_write_converge_io::ipc_direct_disk_degraded(&root, &canonical).ok()
-        })
-        .unwrap_or(false);
+    // Transport health may trigger endpoint re-registration or one supervisor
+    // recycle, but it never changes the document authority or elects disk.
+    let socket_degraded = false;
     if visible_doc.authority() == agent_doc_document_realtime::DocAuthority::EditorBuffer {
         CloseoutEditorIpcEvidence::FreshLiveBuffer {
             live_buffer_count: 1,
@@ -1601,7 +1494,7 @@ pub enum RecoveryApplication {
 ///   prompt-prefix artifacts only; the commit path normalizes them and cannot
 ///   revert user/response content).
 ///
-/// `QueueMetadataDrift` / `SidecarVisibleDrift` are auto-applied *only when the
+/// `QueueMetadataDrift` / `RecoveryProjectionVisibleDrift` are auto-applied *only when the
 /// authoritative side is provable* (`#recovery-drift-authoritative-side`). The
 /// safe direction (commit the local side vs restore from HEAD) is decided by
 /// [`metadata_drift_authority`]: a live auto-queue continuation present in HEAD
@@ -1635,7 +1528,7 @@ pub fn apply_closeout_recovery(
                 CloseoutRecoveryMutation::RetireStaleCapture {
                     content: Some(visible_doc.content()),
                     clear_pending_response: true,
-                    delete_pre_response: true,
+                    clear_undo_content: true,
                     mark_cycle_committed_event: None,
                     mark_cycle_abandoned_event: Some("closeout_recovery_retire_stale_capture"),
                     reason: CloseoutRecoveryMutationReason::RetireSupersededCapturedOnlyOrphan,
@@ -1672,7 +1565,8 @@ pub fn apply_closeout_recovery(
                 action: "committed boundary / answered-prompt-prefix artifact drift".to_string(),
             })
         }
-        CloseoutRecoveryState::QueueMetadataDrift | CloseoutRecoveryState::SidecarVisibleDrift => {
+        CloseoutRecoveryState::QueueMetadataDrift
+        | CloseoutRecoveryState::RecoveryProjectionVisibleDrift => {
             apply_metadata_drift_recovery(file, state, effects)
         }
         other => Ok(RecoveryApplication::NotApplied {
@@ -1696,7 +1590,7 @@ pub enum CloseoutRecoveryMutation<'a> {
         current_snapshot_hash: Option<&'a str>,
         reason: CloseoutRecoveryMutationReason,
     },
-    RebuildSidecarsFromContent {
+    RefreshRecoveryProjectionFromContent {
         content: &'a str,
         write_visible_file: bool,
         reason: CloseoutRecoveryMutationReason,
@@ -1704,7 +1598,7 @@ pub enum CloseoutRecoveryMutation<'a> {
     RetireStaleCapture {
         content: Option<&'a str>,
         clear_pending_response: bool,
-        delete_pre_response: bool,
+        clear_undo_content: bool,
         mark_cycle_committed_event: Option<&'a str>,
         mark_cycle_abandoned_event: Option<&'a str>,
         reason: CloseoutRecoveryMutationReason,
@@ -1728,6 +1622,7 @@ pub fn apply_closeout_recovery_mutation(
                 capture,
                 current_file_hash,
                 current_snapshot_hash,
+                None,
                 reason.capture_refresh_event(),
                 reason.capture_refresh_message(),
             )?;
@@ -1735,7 +1630,7 @@ pub fn apply_closeout_recovery_mutation(
                 log_closeout_recovery_mutation(file, "refresh_replay_baseline", reason);
             }
         }
-        CloseoutRecoveryMutation::RebuildSidecarsFromContent {
+        CloseoutRecoveryMutation::RefreshRecoveryProjectionFromContent {
             content,
             write_visible_file,
             reason,
@@ -1749,35 +1644,28 @@ pub fn apply_closeout_recovery_mutation(
                     "closeout_recovery_restore_visible",
                 )?;
             }
-            rebuild_sidecars_from_content(file, content)?;
-            log_closeout_recovery_mutation(file, "rebuild_sidecars_from_content", reason);
+            refresh_recovery_projection_from_content(file, content)?;
+            log_closeout_recovery_mutation(
+                file,
+                "refresh_recovery_projection_from_content",
+                reason,
+            );
         }
         CloseoutRecoveryMutation::RetireStaleCapture {
             content,
             clear_pending_response,
-            delete_pre_response,
+            clear_undo_content,
             mark_cycle_committed_event,
             mark_cycle_abandoned_event,
             reason,
         } => {
-            if clear_pending_response {
-                let pending_path = agent_doc_fs::pending_response_path_for(file)?;
-                if pending_path.exists() {
-                    std::fs::remove_file(&pending_path).with_context(|| {
-                        format!(
-                            "failed to remove pending response during closeout recovery mutation {}",
-                            pending_path.display()
-                        )
-                    })?;
-                }
-            }
-            if delete_pre_response && let Err(e) = agent_doc_snapshot_io::delete_pre_response(file)
-            {
-                eprintln!("[repair] warning: failed to delete pre-response: {}", e);
+            let _ = clear_pending_response;
+            if clear_undo_content && let Err(e) = agent_doc_snapshot_io::clear_undo_content(file) {
+                eprintln!("[repair] warning: failed to clear undo checkpoint: {}", e);
             }
             agent_doc_capture_io::mark_discarded(file)?;
             if let Some(content) = content {
-                rebuild_sidecars_from_content(file, content)?;
+                refresh_recovery_projection_from_content(file, content)?;
             }
             if let Some(event) = mark_cycle_committed_event {
                 effects.mark_committed_frontmatter(file, event, content, content)?;
@@ -1820,19 +1708,22 @@ fn log_closeout_recovery_mutation(
     );
 }
 
-/// Apply the provably-safe recovery for `QueueMetadataDrift` / `SidecarVisibleDrift`.
+/// Apply the provably-safe recovery for `QueueMetadataDrift` /
+/// `RecoveryProjectionVisibleDrift`.
 fn apply_metadata_drift_recovery(
     file: &Path,
     state: CloseoutRecoveryState,
     effects: &dyn CloseoutEffects,
 ) -> Result<RecoveryApplication> {
     let head = agent_doc_git_io::revision::show_head(file)?;
-    let snapshot = agent_doc_snapshot_io::load(file).ok().flatten();
+    let snapshot = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     let visible_doc = effects
         .resolve_current_document(file, "closeout_metadata_drift_recovery")
         .ok();
     // For QueueMetadataDrift the local (commit-candidate) side is the snapshot;
-    // for SidecarVisibleDrift the snapshot already matches HEAD and the local side
+    // for RecoveryProjectionVisibleDrift the snapshot already matches HEAD and the local side
     // is the visible/working file.
     let local = match state {
         CloseoutRecoveryState::QueueMetadataDrift => snapshot.as_deref(),
@@ -1848,13 +1739,13 @@ fn apply_metadata_drift_recovery(
 
     match metadata_drift_authority(local, head) {
         MetadataDriftAuthority::Local => {
-            // Commit the local side forward. For SidecarVisibleDrift the snapshot
-            // is HEAD-equal, so rebuild the sidecars from the visible file first so
+            // Commit the local side forward. For RecoveryProjectionVisibleDrift the snapshot
+            // is HEAD-equal, so rebuild recovery projections from the visible file first so
             // the selective `git::commit` stages the accepted working metadata.
-            if state == CloseoutRecoveryState::SidecarVisibleDrift {
+            if state == CloseoutRecoveryState::RecoveryProjectionVisibleDrift {
                 apply_closeout_recovery_mutation(
                     file,
-                    CloseoutRecoveryMutation::RebuildSidecarsFromContent {
+                    CloseoutRecoveryMutation::RefreshRecoveryProjectionFromContent {
                         content: local,
                         write_visible_file: false,
                         reason: CloseoutRecoveryMutationReason::ResetFromVisible,
@@ -1878,11 +1769,11 @@ fn apply_metadata_drift_recovery(
         }
         MetadataDriftAuthority::Head => {
             // HEAD's live queue continuation is authoritative; discard the spurious
-            // local metadata drift by restoring the visible file and sidecars from
+            // local metadata drift by restoring the visible file and state projections from
             // HEAD. No new commit — HEAD already holds the authoritative content.
             apply_closeout_recovery_mutation(
                 file,
-                CloseoutRecoveryMutation::RebuildSidecarsFromContent {
+                CloseoutRecoveryMutation::RefreshRecoveryProjectionFromContent {
                     content: head,
                     write_visible_file: true,
                     reason: CloseoutRecoveryMutationReason::RestoreHeadMetadata,
@@ -1892,7 +1783,7 @@ fn apply_metadata_drift_recovery(
             Ok(RecoveryApplication::Applied {
                 state,
                 action:
-                    "restored the document and sidecars from HEAD (committed queue continuation authoritative; discarded spurious local metadata drift)"
+                    "restored the document and state projections from HEAD (committed queue continuation authoritative; discarded spurious local metadata drift)"
                         .to_string(),
             })
         }
@@ -1904,15 +1795,22 @@ fn apply_metadata_drift_recovery(
     }
 }
 
-/// Rebuild the snapshot + CRDT sidecars from an explicit content string. Mirrors
-/// the binary `reset --from-current` sidecar rebuild (snapshot + CRDT) so a
-/// metadata-drift recovery converges the sidecars on the authoritative side. The
+/// Refresh the durable baseline and cold CRDT restart projection from explicit content. Mirrors
+/// `reset --from-current` without creating per-document compatibility files. The
 /// preflight-owned baseline is intentionally left untouched (it is re-taken at the
 /// next stable post-commit point).
-fn rebuild_sidecars_from_content(file: &Path, content: &str) -> Result<()> {
-    agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)?;
+fn refresh_recovery_projection_from_content(file: &Path, content: &str) -> Result<()> {
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        content,
+        agent_doc_ops_log_io::log_op,
+    )?;
     let crdt = agent_doc_merge::crdt::CrdtDoc::from_text(content).encode_state();
-    agent_doc_merge_io::save_document_crdt(file, &crdt, content)?;
+    let lineage = format!(
+        "closeout-recovery:{}",
+        agent_doc_hash::content_hash(content)
+    );
+    agent_doc_snapshot_io::checkpoint_crdt_recovery_projection(file, &crdt, &lineage)?;
     Ok(())
 }
 
@@ -1983,7 +1881,9 @@ pub fn classify_closeout_recovery_state_for_file(
         input.snapshot_head_drift = Some(snapshot_head_drift);
         return classify_closeout_recovery_state_from_input(input);
     }
-    let snapshot = agent_doc_snapshot_io::load(file).ok().flatten();
+    let snapshot = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     let head = agent_doc_git_io::revision::show_head(file).ok().flatten();
     if let (Some(snapshot), Some(head)) = (snapshot.as_deref(), head.as_deref())
         && snapshot != head
@@ -1992,7 +1892,7 @@ pub fn classify_closeout_recovery_state_for_file(
         return classify_closeout_recovery_state_from_input(input);
     }
     // Snapshot matches HEAD but the visible/working file is stale relative to the
-    // sidecars. Metadata-only visible drift → rebuild sidecars from the file;
+    // state projections. Metadata-only visible drift → rebuild projections from the file;
     // content drift → preserve it through the normal response path.
     if let Some(snapshot_visible_drift) = observed_evidence
         .as_ref()

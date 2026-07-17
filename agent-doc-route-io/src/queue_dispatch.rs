@@ -71,13 +71,17 @@ pub fn enqueue_route_dispatch_prompt(
         if activated {
             match (effects.write_document)(file, &content, &original, "route_dispatch_queue") {
                 Ok(()) => {
-                    agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op)
-                        .with_context(|| {
-                            format!(
-                                "failed to sync snapshot after queueing dispatch for {}",
-                                file.display()
-                            )
-                        })?;
+                    agent_doc_snapshot_io::checkpoint_document_baseline(
+                        file,
+                        &content,
+                        agent_doc_ops_log_io::log_op,
+                    )
+                    .with_context(|| {
+                        format!(
+                            "failed to sync snapshot after queueing dispatch for {}",
+                            file.display()
+                        )
+                    })?;
                 }
                 Err(err)
                     if attempt < ROUTE_QUEUE_MAX_WRITE_ATTEMPTS
@@ -172,7 +176,7 @@ pub fn inactive_route_queue_head_in_content(file: &Path, content: &str) -> Resul
         file,
         &rc.ssh_context(),
     )?;
-    let committed_snapshot = match agent_doc_snapshot_io::load(file) {
+    let committed_snapshot = match agent_doc_snapshot_io::load_document_baseline(file) {
         Ok(snapshot) => snapshot,
         Err(err) => {
             agent_doc_ops_log_io::log_op(
@@ -231,13 +235,17 @@ pub fn activate_existing_route_queue_head(
         if activated {
             match (effects.write_document)(file, &content, &original, "route_queue_activation") {
                 Ok(()) => {
-                    agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op)
-                        .with_context(|| {
-                            format!(
-                                "failed to sync snapshot after activating queue for {}",
-                                file.display()
-                            )
-                        })?;
+                    agent_doc_snapshot_io::checkpoint_document_baseline(
+                        file,
+                        &content,
+                        agent_doc_ops_log_io::log_op,
+                    )
+                    .with_context(|| {
+                        format!(
+                            "failed to sync snapshot after activating queue for {}",
+                            file.display()
+                        )
+                    })?;
                 }
                 Err(err)
                     if attempt < ROUTE_QUEUE_MAX_WRITE_ATTEMPTS

@@ -1,8 +1,9 @@
-//! Startup-miss marker and supervisor session-log I/O helpers.
+//! Startup-miss state and supervisor session-log I/O helpers.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use agent_doc_state_backbone::{StateEvent, StateFact};
 use anyhow::Result;
 
 use agent_doc_supervisor::startup_miss::{
@@ -13,7 +14,6 @@ use agent_doc_supervisor::{
     OwnershipGeneration, OwnershipTransitionEvent, format_transition_event,
 };
 
-const STARTUP_MISS_DIR: &str = ".agent-doc/state/startup-miss";
 const SUPERVISOR_LOG_DIR: &str = ".agent-doc/logs";
 
 /// Registered startup owner facts supplied by a session-registry lookup.
@@ -65,27 +65,12 @@ fn current_epoch_secs() -> u64 {
         .as_secs()
 }
 
-/// Return the project root used for startup-miss sidecars for `file`.
+/// Return the project root used for startup-miss state for `file`.
 pub fn startup_miss_project_root(file: &Path) -> Option<PathBuf> {
     let canonical = std::fs::canonicalize(file)
         .ok()
         .unwrap_or_else(|| file.to_path_buf());
     agent_doc_fs::find_project_root(&canonical)
-}
-
-/// Compute `.agent-doc/state/startup-miss/<doc-hash>.json` for `file`.
-pub fn startup_miss_state_path(file: &Path) -> Result<Option<PathBuf>> {
-    let canonical = match file.canonicalize() {
-        Ok(path) => path,
-        Err(_) => return Ok(None),
-    };
-    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
-        return Ok(None);
-    };
-    let hash = agent_doc_fs::document_state_hash(&canonical)?;
-    Ok(Some(
-        root.join(STARTUP_MISS_DIR).join(format!("{hash}.json")),
-    ))
 }
 
 /// Compute `.agent-doc/logs/<session_id>.log` for `file`'s project.
@@ -205,7 +190,7 @@ pub fn record_startup_miss(
     cycle_baseline_id: Option<&str>,
 ) -> Result<StartupMiss> {
     let timestamp = current_epoch_secs();
-    let Some(path) = startup_miss_state_path(file)? else {
+    let Some(identity) = crate::state_events::document_state_identity(file)? else {
         return Ok(StartupMiss {
             file: file.display().to_string(),
             pane_id: pane_id.to_string(),
@@ -216,12 +201,8 @@ pub fn record_startup_miss(
             cycle_baseline_id: cycle_baseline_id.map(|s| s.to_string()),
         });
     };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let marker = StartupMiss {
-        file: canonical.display().to_string(),
+        file: identity.canonical_file.display().to_string(),
         pane_id: pane_id.to_string(),
         session_id: session_id.to_string(),
         harness: harness.to_string(),
@@ -229,30 +210,95 @@ pub fn record_startup_miss(
         origin,
         cycle_baseline_id: cycle_baseline_id.map(|s| s.to_string()),
     };
-    let json = serde_json::to_string_pretty(&marker)?;
-    std::fs::write(&path, json)?;
+    let ledger = crate::state_events::load_ledger(&identity.project_root)?;
+    let next_epoch = ledger
+        .document_epoch(&identity.document_hash)
+        .saturating_add(1);
+    let event = StateEvent::new(
+        format!(
+            "startup-miss-recorded:{}:epoch-{next_epoch}",
+            identity.document_hash
+        ),
+        StateFact::StartupMissRecorded {
+            document_hash: identity.document_hash,
+            file: marker.file.clone(),
+            pane_id: marker.pane_id.clone(),
+            session_id: marker.session_id.clone(),
+            harness: marker.harness.clone(),
+            timestamp: marker.timestamp,
+            origin: startup_miss_origin_token(&marker.origin).to_string(),
+            cycle_baseline_id: marker.cycle_baseline_id.clone(),
+        },
+    );
+    crate::state_events::append_event(&identity.project_root, &event)?;
     Ok(marker)
 }
 
 pub fn load_startup_miss(file: &Path) -> Result<Option<StartupMiss>> {
-    let Some(path) = startup_miss_state_path(file)? else {
+    let Some(identity) = crate::state_events::document_state_identity(file)? else {
         return Ok(None);
     };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
+    let ledger = crate::state_events::load_ledger(&identity.project_root)?;
+    let Some(miss) = ledger
+        .project_document(&identity.document_hash)
+        .and_then(|projection| projection.supervisor.startup_miss)
+    else {
         return Ok(None);
     };
-    let marker: StartupMiss = serde_json::from_str(&content)?;
-    Ok(Some(marker))
+    Ok(Some(StartupMiss {
+        file: miss.file,
+        pane_id: miss.pane_id,
+        session_id: miss.session_id,
+        harness: miss.harness,
+        timestamp: miss.timestamp,
+        origin: startup_miss_origin_from_token(&miss.origin)?,
+        cycle_baseline_id: miss.cycle_baseline_id,
+    }))
 }
 
 pub fn clear_startup_miss(file: &Path) -> Result<()> {
-    let Some(path) = startup_miss_state_path(file)? else {
+    let Some(identity) = crate::state_events::document_state_identity(file)? else {
         return Ok(());
     };
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
+    let ledger = crate::state_events::load_ledger(&identity.project_root)?;
+    let Some(miss) = ledger
+        .project_document(&identity.document_hash)
+        .and_then(|projection| projection.supervisor.startup_miss)
+    else {
+        return Ok(());
+    };
+    let next_epoch = ledger
+        .document_epoch(&identity.document_hash)
+        .saturating_add(1);
+    let event = StateEvent::new(
+        format!(
+            "startup-miss-cleared:{}:epoch-{next_epoch}",
+            identity.document_hash
+        ),
+        StateFact::StartupMissCleared {
+            document_hash: identity.document_hash,
+            pane_id: miss.pane_id,
+            session_id: miss.session_id,
+            timestamp: miss.timestamp,
+        },
+    );
+    crate::state_events::append_event(&identity.project_root, &event)?;
     Ok(())
+}
+
+fn startup_miss_origin_token(origin: &StartupMissOrigin) -> &'static str {
+    match origin {
+        StartupMissOrigin::FreshStart => "fresh_start",
+        StartupMissOrigin::RoutedTrigger => "routed_trigger",
+    }
+}
+
+fn startup_miss_origin_from_token(token: &str) -> Result<StartupMissOrigin> {
+    match token {
+        "fresh_start" => Ok(StartupMissOrigin::FreshStart),
+        "routed_trigger" => Ok(StartupMissOrigin::RoutedTrigger),
+        other => anyhow::bail!("unknown startup-miss origin in state.db: {other}"),
+    }
 }
 
 pub fn superseded_by_newer_registered_start(
@@ -454,7 +500,7 @@ mod tests {
     }
 
     fn setup_project(tmp: &Path) -> PathBuf {
-        std::fs::create_dir_all(tmp.join(".agent-doc/state/startup-miss")).unwrap();
+        std::fs::create_dir_all(tmp.join(".agent-doc")).unwrap();
         let doc = tmp.join("nested").join("test.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "# test\n").unwrap();
@@ -492,23 +538,6 @@ mod tests {
                 return false;
             }
         }
-    }
-
-    #[test]
-    fn startup_miss_state_path_uses_project_root_and_document_hash() {
-        let tmp = tempfile::tempdir().unwrap();
-        let doc = setup_project(tmp.path());
-        let canonical = doc.canonicalize().unwrap();
-        let hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
-
-        assert_eq!(
-            startup_miss_state_path(&doc).unwrap(),
-            Some(
-                tmp.path()
-                    .join(".agent-doc/state/startup-miss")
-                    .join(format!("{hash}.json"))
-            )
-        );
     }
 
     #[test]
@@ -580,7 +609,11 @@ mod tests {
         let doc = tmp.path().join("test.md");
         std::fs::write(&doc, "# test\n").unwrap();
 
-        assert!(startup_miss_state_path(&doc).unwrap().is_none());
+        assert!(
+            crate::state_events::document_state_identity(&doc)
+                .unwrap()
+                .is_none()
+        );
         assert!(
             supervisor_session_log_path(&doc, "session-123")
                 .unwrap()
@@ -702,17 +735,25 @@ mod tests {
             ),
         )
         .unwrap();
-        let marker = StartupMiss {
-            file: doc.display().to_string(),
-            pane_id: "%401".to_string(),
-            session_id: "session-123".to_string(),
-            harness: "codex".to_string(),
-            timestamp: 5,
-            origin: StartupMissOrigin::RoutedTrigger,
-            cycle_baseline_id: None,
-        };
-        let path = startup_miss_state_path(&doc).unwrap().unwrap();
-        std::fs::write(&path, serde_json::to_string_pretty(&marker).unwrap()).unwrap();
+        let marker = record_startup_miss(
+            &doc,
+            "%401",
+            "session-123",
+            "codex",
+            StartupMissOrigin::RoutedTrigger,
+            None,
+        )
+        .unwrap();
+        let newer_timestamp = marker.timestamp.saturating_add(1);
+        std::fs::write(
+            tmp.path().join(".agent-doc/logs/session-123.log"),
+            format!(
+                "[{}] session_start file=test.md pane=%401 session=session-123\n[{}] codex_start mode=fresh restart_count=0\n[{newer_timestamp}] session_start file=test.md pane=%408 session=session-123\n[{newer_timestamp}] codex_start mode=fresh restart_count=0\n",
+                marker.timestamp.saturating_sub(1),
+                marker.timestamp
+            ),
+        )
+        .unwrap();
         let registry = FakeRegistryLookup {
             owner: RefCell::new(Some(RegisteredStartupOwner {
                 pane: "%408".to_string(),

@@ -324,14 +324,24 @@ mod tests {
         fs::create_dir_all(root.join(".agent-doc")).unwrap();
         let doc = root.join("doc.md");
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         doc
     }
 
     fn mark_cycle_committed(doc: &Path, preflight: &str, committed: &str) {
         agent_doc_cycle_state_io::start_preflight(doc, Some(preflight), Some(preflight)).unwrap();
         fs::write(doc, committed).unwrap();
-        agent_doc_snapshot_io::save(doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &NoopPipelineFrontmatterEffects,
             doc,

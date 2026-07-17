@@ -200,8 +200,6 @@ pub fn diagnose_cycle(
                 name.starts_with("debug.log") || name.contains("plugin") || name.contains("jb")
             })
         });
-        let captures =
-            s.spawn(|| scan_json_tree_source("captures", &agent_doc.join("captures"), &terms));
         let codex_hooks = s.spawn(|| {
             scan_json_tree_source(
                 "codex hook sessions",
@@ -211,27 +209,15 @@ pub fn diagnose_cycle(
         });
         let hook_payloads =
             s.spawn(|| scan_json_tree_source("hook payloads", &agent_doc.join("hooks"), &terms));
-        let patches = s.spawn(|| {
-            scan_text_tree_source(
-                "patch files",
-                &agent_doc.join("patches"),
-                &terms,
-                limit,
-                |_| true,
-            )
-        });
-        let state =
-            s.spawn(|| scan_json_tree_source("agent-doc state", &agent_doc.join("state"), &terms));
+        let state = s.spawn(|| scan_state_db_source(&root, &terms));
 
         vec![
             ops_log.join().unwrap(),
             cycle_jsonl.join().unwrap(),
             session_log_source,
             editor_debug.join().unwrap(),
-            captures.join().unwrap(),
             codex_hooks.join().unwrap(),
             hook_payloads.join().unwrap(),
-            patches.join().unwrap(),
             state.join().unwrap(),
         ]
     });
@@ -506,6 +492,47 @@ fn scan_json_files_source(
     finalize_source(source)
 }
 
+fn scan_state_db_source(project_root: &Path, terms: &[String]) -> CycleDiagnosisSource {
+    let path = agent_doc_sqlite::state_store::state_db_path(project_root);
+    if !path.exists() {
+        return empty_source("state db", path, "missing");
+    }
+    let ledger =
+        match agent_doc_controller_io::project_controller::load_state_event_ledger(project_root) {
+            Ok(ledger) => ledger,
+            Err(error) => {
+                let mut source = empty_source("state db", path.clone(), "error");
+                source.matches.push(CycleDiagnosisMatch {
+                    path,
+                    line: None,
+                    kind: "error".to_string(),
+                    text: Some(error.to_string()),
+                    json: None,
+                });
+                return finalize_source(source);
+            }
+        };
+    let mut source = empty_source("state db", path.clone(), "scanned");
+    source.scanned_files = 1;
+    source.scanned_lines = ledger.events().len();
+    for event in ledger.events() {
+        let Ok(serialized) = serde_json::to_string(event) else {
+            continue;
+        };
+        if !matches_terms(&serialized, terms) {
+            continue;
+        }
+        source.matches.push(CycleDiagnosisMatch {
+            path: path.clone(),
+            line: None,
+            kind: "state_event".to_string(),
+            text: None,
+            json: Some(json_summary(&serialized)),
+        });
+    }
+    finalize_source(source)
+}
+
 fn empty_source(
     name: impl Into<String>,
     path: PathBuf,
@@ -704,7 +731,6 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
             "closeout commit boundary recovered".to_string()
         }
         "ipc_write_consumed" => "write ipc consumed".to_string(),
-        "ipc_socket_sidecar_timeout" => "write ipc socket sidecar timeout".to_string(),
         "commit_success" => "commit success".to_string(),
         "commit_noop" if field_eq(&fields, "drift_kind", "user_follow_up") => {
             "expected user follow-up noop".to_string()
@@ -986,7 +1012,6 @@ fn cluster_seed(event: &ClassifiedEvent) -> Option<ClusterSeed> {
             | "route_cycle_start_missing"
             | "route_cycle_start_missing_after_fresh_restart_optimistic"
             | "route_cycle_start_missing_optimistic"
-            | "ipc_socket_sidecar_timeout"
             | "run_preflight_timeout"
             | "route_submit_issue"
             | "route_dispatch_only_submit_unproven"
@@ -1458,7 +1483,6 @@ mod tests {
 [203] route_starting_actor_timeout_coalesced file=/repo/tasks/b.md session=s2 pane=%2 generation=4 actor_state=starting
 [204] route_cycle_start_missing file=/repo/tasks/b.md session=s2 pane=%2 harness=codex marker=run timeout_secs=10
 [205] run_preflight_timeout file=/repo/tasks/b.md session=s2 event=direct_invocation_timeout diagnostic=preflight_started
-[206] ipc_socket_sidecar_timeout file=/repo/tasks/b.md session=s2 cycle_id=cycle-b
 [207] WARN codex_core_plugins::manifest: ignoring interface.defaultPrompt: prompt must be at most 128 characters path=/home/brian/.codex/.tmp/plugins/plugins/build-ios-apps/.codex-plugin/plugin.json
 [208] sqlite_log_counts file=/repo/tasks/a.md session=s1 cycle_id=cycle-a sqlite_documents=3 sqlite_actor_transitions=9 sqlite_cycles=2
 [209] session_review_guard file=/repo/tasks/c.md session=s3 family=prompt_budget count=2
@@ -1469,7 +1493,7 @@ mod tests {
         let report =
             summarize_ops_log(log, root, 0, PathBuf::from("/repo/.agent-doc/logs/ops.log"));
 
-        assert_eq!(report.matched_events, 12);
+        assert_eq!(report.matched_events, 11);
         let closeout = report
             .bug_clusters
             .iter()
@@ -1486,7 +1510,7 @@ mod tests {
             .iter()
             .find(|cluster| cluster.family == "route/start replay gap")
             .expect("route cluster");
-        assert_eq!(route.count, 5);
+        assert_eq!(route.count, 4);
         assert_eq!(route.sessions, vec!["s2"]);
 
         let codex = report

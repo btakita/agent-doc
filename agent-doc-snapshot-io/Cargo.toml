@@ -1,8 +1,8 @@
 [package]
 name = "agent-doc-snapshot-io"
-version = "0.34.174"
+version = "0.34.175"
 edition = "2024"
-description = "Snapshot sidecar I/O for agent-doc"
+description = "Durable document baselines and cold recovery projections for agent-doc"
 license = "MIT"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
@@ -11,18 +11,22 @@ publish = false
 name = "agent_doc_snapshot_io"
 
 [dependencies]
-agent-doc-document = { path = "../agent-doc-document", version = "0.34.174" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.174" }
-agent-doc-diff-io = { path = "../agent-doc-diff-io", version = "0.34.174" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.174" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.174" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.174" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.174" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.174" }
-agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.34.174" }
-agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.174" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.34.175" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.34.175" }
+agent-doc-diff-io = { path = "../agent-doc-diff-io", version = "0.34.175" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.175" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.175" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.34.175" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.175" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.34.175" }
+agent-doc-secret-redact = { path = "../agent-doc-secret-redact", version = "0.34.175" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.175" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.175" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.175" }
 anyhow = "1"
+base64 = "0.22"
 fs2 = "0.4"
+serde_json = "1"
 tempfile = "3"
 
 [dev-dependencies]

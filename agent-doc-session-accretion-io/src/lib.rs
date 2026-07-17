@@ -1,7 +1,6 @@
 //! Session-accretion filesystem adapters.
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use agent_doc_session_accretion::{
@@ -102,43 +101,39 @@ fn session_accretion_input(file: &Path, content: &str, now: u64) -> Result<Sessi
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct RecentExchangeCompaction {
-    file: String,
-    timestamp: u64,
-}
+const RECENT_EXCHANGE_COMPACTION_SCOPE: &str = "recent_exchange_compaction";
 
 /// Record that the binary compacted this document's exchange recently.
 pub fn record_recent_exchange_compaction(file: &Path) -> Result<()> {
-    let Some(path) = recent_exchange_compaction_path(file)? else {
+    let Some((root, canonical, document_hash)) = recent_exchange_compaction_scope(file)? else {
         return Ok(());
     };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    let marker = RecentExchangeCompaction {
-        file: canonical.display().to_string(),
-        timestamp: current_epoch_secs(),
-    };
-    let json = serde_json::to_string_pretty(&marker)?;
-    std::fs::write(path, json)?;
-    Ok(())
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_sqlite::state_store::upsert_coordination_lease_in_db(
+        &conn,
+        &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+            scope_kind: RECENT_EXCHANGE_COMPACTION_SCOPE.to_string(),
+            scope_id: document_hash,
+            holder: canonical.display().to_string(),
+            holder_pid: None,
+            heartbeat_secs: current_epoch_secs(),
+        },
+    )
 }
 
-/// Return a recent exchange-compaction timestamp when the marker is still inside
+/// Return a recent exchange-compaction timestamp when the state projection is inside
 /// the post-compaction no-op grace window.
 pub fn recent_exchange_compaction_timestamp(file: &Path) -> Result<Option<u64>> {
     recent_exchange_compaction_timestamp_at(file, current_epoch_secs())
 }
 
 pub fn recent_exchange_compaction_timestamp_at(file: &Path, now: u64) -> Result<Option<u64>> {
-    Ok(load_recent_exchange_compaction(file)?
-        .map(|marker| marker.timestamp)
-        .filter(|timestamp| {
+    Ok(
+        load_recent_exchange_compaction_timestamp(file)?.filter(|timestamp| {
             now.saturating_sub(*timestamp)
                 <= agent_doc_session_accretion::POST_COMPACTION_NOOP_GRACE_SECS
-        }))
+        }),
+    )
 }
 
 pub fn cycles_log_path(file: &Path) -> Result<Option<PathBuf>> {
@@ -267,7 +262,7 @@ pub fn clear_threshold_for_doc(file: &Path) -> u8 {
     resolve_clear_threshold(frontmatter_threshold, project_threshold)
 }
 
-fn recent_exchange_compaction_path(file: &Path) -> Result<Option<PathBuf>> {
+fn recent_exchange_compaction_scope(file: &Path) -> Result<Option<(PathBuf, PathBuf, String)>> {
     let canonical = match file.canonicalize() {
         Ok(path) => path,
         Err(_) => return Ok(None),
@@ -276,21 +271,22 @@ fn recent_exchange_compaction_path(file: &Path) -> Result<Option<PathBuf>> {
         return Ok(None);
     };
     let hash = agent_doc_fs::document_state_hash(&canonical)?;
-    Ok(Some(
-        root.join(".agent-doc/state/session-accretion-compaction")
-            .join(format!("{hash}.json")),
-    ))
+    Ok(Some((root, canonical, hash)))
 }
 
-fn load_recent_exchange_compaction(file: &Path) -> Result<Option<RecentExchangeCompaction>> {
-    let Some(path) = recent_exchange_compaction_path(file)? else {
+fn load_recent_exchange_compaction_timestamp(file: &Path) -> Result<Option<u64>> {
+    let Some((root, _, document_hash)) = recent_exchange_compaction_scope(file)? else {
         return Ok(None);
     };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
-        return Ok(None);
-    };
-    let marker: RecentExchangeCompaction = serde_json::from_str(&content)?;
-    Ok(Some(marker))
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    Ok(
+        agent_doc_sqlite::state_store::load_coordination_lease_from_db(
+            &conn,
+            RECENT_EXCHANGE_COMPACTION_SCOPE,
+            &document_hash,
+        )?
+        .map(|lease| lease.heartbeat_secs),
+    )
 }
 
 fn current_epoch_secs() -> u64 {
@@ -315,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn recent_exchange_compaction_marker_roundtrips() {
+    fn recent_exchange_compaction_state_roundtrips_without_sidecar() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
@@ -332,10 +328,15 @@ mod tests {
                 .unwrap()
                 .is_some()
         );
+        assert!(
+            !dir.path()
+                .join(".agent-doc/state/session-accretion-compaction")
+                .exists()
+        );
     }
 
     #[test]
-    fn recent_exchange_compaction_marker_expires() {
+    fn recent_exchange_compaction_state_expires() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
@@ -343,7 +344,7 @@ mod tests {
         record_recent_exchange_compaction(&doc).unwrap();
         let timestamp = recent_exchange_compaction_timestamp(&doc)
             .unwrap()
-            .expect("marker should be recent");
+            .expect("compaction state should be recent");
 
         let expired_at =
             timestamp + agent_doc_session_accretion::POST_COMPACTION_NOOP_GRACE_SECS + 1;

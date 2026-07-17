@@ -559,7 +559,7 @@ pub fn run_once(
         if !did_commit
             && !queue_synthetic_diff
             && agent_doc_diff_io::compute(
-                &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
+                &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
                 file,
             )?
             .is_none()
@@ -722,7 +722,7 @@ pub fn apply_append_response_with_authority(
     force_disk: bool,
 ) -> Result<()> {
     let doc_lock = acquire_doc_lock(file)?;
-    agent_doc_snapshot_io::save_pre_response(file, baseline)?;
+    agent_doc_snapshot_io::checkpoint_undo_content(file, baseline)?;
 
     let mut content_ours = baseline.to_string();
     if !content_ours.ends_with('\n') {
@@ -745,9 +745,16 @@ pub fn apply_append_response_with_authority(
     };
 
     if !force_disk {
-        agent_doc_document_realtime_io::guard_visible_write_idle(file, "direct_run_append")?;
+        agent_doc_document_realtime_io::guard_visible_write_current_transition(
+            file,
+            "direct_run_append",
+        )?;
     }
-    agent_doc_snapshot_io::save(file, &final_content, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &final_content,
+        agent_doc_ops_log_io::log_op,
+    )?;
     direct_run_atomic_write_with_authority(effects, file, &final_content, force_disk)?;
     drop(doc_lock);
     Ok(())
@@ -791,7 +798,7 @@ pub fn apply_template_response_with_authority(
     )?;
 
     let doc_lock = acquire_doc_lock(file)?;
-    agent_doc_snapshot_io::save_pre_response(file, baseline)?;
+    agent_doc_snapshot_io::checkpoint_undo_content(file, baseline)?;
 
     let content_ours = agent_doc_template_io::apply_patches_with_project_config(
         baseline,
@@ -801,7 +808,9 @@ pub fn apply_template_response_with_authority(
         Some(rc.project_config()),
     )
     .context("failed to apply template patches")?;
-    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     let content_ours = normalize_direct_run_template_content(
         effects,
         file,
@@ -824,23 +833,7 @@ pub fn apply_template_response_with_authority(
         }
     } else if use_crdt {
         eprintln!("File was modified during run. CRDT merging changes...");
-        let base_state = match agent_doc_snapshot_io::crdt_merge_base_state_with(
-            file,
-            baseline,
-            agent_doc_op_capture_io::has_pending_editor_ops,
-            agent_doc_ops_log_io::log_op,
-        ) {
-            Ok(base) => base.state,
-            Err(e) => {
-                // A corrupt/unreadable overlay CRDT sidecar must not abort the run and
-                // lose the response. Fall back to a merge base derived from the baseline
-                // text (mirrors the write-runtime IPC path).
-                eprintln!(
-                    "[crdt] WARNING: failed to load overlay CRDT merge base, falling back to baseline text: {e}"
-                );
-                agent_doc_merge::crdt::CrdtDoc::from_text(baseline).encode_state()
-            }
-        };
+        let base_state = agent_doc_merge::crdt::CrdtDoc::from_text(baseline).encode_state();
         if let Err(e) = agent_doc_controller_io::project_controller::
             reconcile_disk_projection_via_controller_model_for_doc(file, &base_state)
         {
@@ -863,22 +856,17 @@ pub fn apply_template_response_with_authority(
         snapshot_doc.as_deref(),
         &final_content,
     )?;
-    // The merge result can contain two independently minted checkpoint
-    // boundaries (one from response placement and one from concurrent
-    // preflight/editor state). Normalization collapses that to the canonical
-    // visible singleton. Persist CRDT state from the normalized text, never
-    // from the pre-normalization merge frontier, or the next authoritative
-    // write can resurrect the discarded marker.
-    let crdt_state =
-        use_crdt.then(|| agent_doc_merge::crdt::CrdtDoc::from_text(&final_content).encode_state());
-
     if !force_disk {
-        agent_doc_document_realtime_io::guard_visible_write_idle(file, "direct_run_template")?;
+        agent_doc_document_realtime_io::guard_visible_write_current_transition(
+            file,
+            "direct_run_template",
+        )?;
     }
-    agent_doc_snapshot_io::save(file, &final_content, agent_doc_ops_log_io::log_op)?;
-    if let Some(state) = crdt_state {
-        agent_doc_merge_io::save_document_crdt(file, &state, &final_content)?;
-    }
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &final_content,
+        agent_doc_ops_log_io::log_op,
+    )?;
     direct_run_atomic_write_with_authority(effects, file, &final_content, force_disk)?;
     drop(doc_lock);
     Ok(())
@@ -903,7 +891,10 @@ pub fn normalize_direct_run_prompt_prefixes(
         return Ok(content.to_string());
     }
 
-    let Some(snapshot_doc) = agent_doc_snapshot_io::load(file).ok().flatten() else {
+    let Some(snapshot_doc) = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten()
+    else {
         return Ok(content.to_string());
     };
     let boundary_normalized = template::reposition_boundary_to_end_clean(content);
@@ -914,7 +905,7 @@ pub fn normalize_direct_run_prompt_prefixes(
         file,
     );
     if normalized != content {
-        agent_doc_document_realtime_io::guard_visible_write_idle(
+        agent_doc_document_realtime_io::guard_visible_write_current_transition(
             file,
             "direct_run_prefix_normalize",
         )?;
@@ -955,9 +946,16 @@ pub fn update_resume_id(
         "direct_run_update_resume_id",
     )?;
     let updated = frontmatter::set_resume_id(&current, session_id)?;
-    agent_doc_document_realtime_io::guard_visible_write_idle(file, "direct_run_update_resume_id")?;
+    agent_doc_document_realtime_io::guard_visible_write_current_transition(
+        file,
+        "direct_run_update_resume_id",
+    )?;
     direct_run_atomic_write(effects, file, &updated)?;
-    agent_doc_snapshot_io::save(file, &updated, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &updated,
+        agent_doc_ops_log_io::log_op,
+    )?;
     Ok(())
 }
 
@@ -1350,7 +1348,7 @@ pub fn mark_run_write_applied(file: &Path, event: &str) -> Result<()> {
         file,
         "mark_run_write_applied",
     )?;
-    let snapshot_content = agent_doc_snapshot_io::load(file)?;
+    let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     agent_doc_cycle_state_io::mark_write_applied(
         file,
         event,
@@ -1370,7 +1368,7 @@ pub fn start_run_cycle(file: &Path) -> Result<()> {
             )
             .map(|resolved| resolved.content)
         },
-        agent_doc_snapshot_io::load,
+        agent_doc_snapshot_io::load_document_baseline,
         agent_doc_ops_log_io::log_op,
     )?;
     Ok(())
@@ -1400,7 +1398,7 @@ pub fn abandon_run_recursive_cycle(
 ) -> Result<()> {
     let compact = diagnostic.split_whitespace().collect::<Vec<_>>().join(" ");
     let event = format!("{event} {}", compact.chars().take(700).collect::<String>());
-    let snapshot_content = agent_doc_snapshot_io::load(file)?;
+    let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let file_content = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "abandon_run_recursive_cycle",
@@ -1556,7 +1554,10 @@ pub fn owner_pane_queue_edit_should_defer_until_closeout(
     if prompt_bearing_changes.is_empty() {
         return false;
     }
-    let Some(previous) = agent_doc_snapshot_io::load(file).ok().flatten() else {
+    let Some(previous) = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten()
+    else {
         return false;
     };
     let Some(summary) = agent_doc_diff::semantic::semantic_diff_summary(
@@ -1683,7 +1684,7 @@ fn actor_record_for_file(
 
 pub fn compute_run_diff(file: &Path) -> Result<Option<(String, bool)>> {
     if let Some(d) = agent_doc_diff_io::compute(
-        &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
+        &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
         file,
     )? {
         eprintln!("[run] diff computed ({} bytes)", d.len());

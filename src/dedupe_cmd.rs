@@ -21,7 +21,11 @@ impl agent_doc_response_replay_io::DedupeEffects for CliDedupeEffects {
     }
 
     fn save_snapshot(&self, file: &Path, deduped: &str) -> Result<()> {
-        agent_doc_snapshot_io::save(file, deduped, agent_doc_ops_log_io::log_op)
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            deduped,
+            agent_doc_ops_log_io::log_op,
+        )
     }
 }
 

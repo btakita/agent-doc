@@ -190,8 +190,12 @@ pub fn run(
             .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     } else {
         // Fallback to CWD-relative (original behavior)
-        agent_doc_snapshot_io::save(file, &new_doc, agent_doc_ops_log_io::log_op)
-            .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &new_doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .with_context(|| format!("failed to update snapshot for {}", file.display()))?;
     }
 
     // Run post_patch hook (fire-and-forget)

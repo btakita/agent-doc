@@ -598,16 +598,21 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
     use tempfile::TempDir;
+
+    fn isolated_temp_dir() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        dir
+    }
     #[test]
     fn sequential_orchestration_injects_prompt_and_finalizes() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         let baseline = dir.path().join("baseline.md");
         fs::write(&doc, template_doc()).unwrap();
         fs::write(&baseline, template_doc()).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -664,14 +669,13 @@ mod tests {
     }
     #[test]
     fn sequential_orchestration_attaches_tsift_graph_context_to_agent_prompt() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         let baseline = dir.path().join("baseline.md");
         fs::write(&doc, template_doc()).unwrap();
         fs::write(&baseline, template_doc()).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -737,14 +741,13 @@ mod tests {
     }
     #[test]
     fn sequential_orchestration_admits_after_injection_without_preflight() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         let baseline = dir.path().join("baseline.md");
         fs::write(&doc, template_doc()).unwrap();
         fs::write(&baseline, template_doc()).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -801,7 +804,7 @@ mod tests {
     }
     #[test]
     fn sequential_orchestration_expands_prompt_presets_into_task_prompt() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         let baseline = dir.path().join("baseline.md");
         let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nprompt_presets:\n  \"#1\": |\n    Today is 2026-04-25.\n    Keep the work tree clean.\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\npreset #1\n- do #prep\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
@@ -809,7 +812,6 @@ mod tests {
         fs::write(&baseline, content).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -857,7 +859,7 @@ mod tests {
     }
     #[test]
     fn sequential_orchestration_stops_when_exchange_task_list_changes() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         let baseline = dir.path().join("baseline.md");
         let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsync orchestra\npreset #spec\n- do #first\n- do #second\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
@@ -865,7 +867,6 @@ mod tests {
         fs::write(&baseline, content).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -925,7 +926,7 @@ mod tests {
     }
     #[test]
     fn sequential_orchestration_uses_streaming_backend_for_crdt_docs() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         let baseline = dir.path().join("baseline.md");
         fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
@@ -933,7 +934,6 @@ mod tests {
         fs::write(&baseline, template_doc()).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -990,14 +990,13 @@ mod tests {
     }
     #[test]
     fn dag_orchestration_runs_topological_order() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         let baseline = dir.path().join("baseline.md");
         fs::write(&doc, template_doc()).unwrap();
         fs::write(&baseline, template_doc()).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -1066,12 +1065,11 @@ mod tests {
     }
     #[test]
     fn parallel_mode_uses_shared_parallel_runner() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         fs::write(&doc, template_doc()).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -1134,7 +1132,7 @@ mod tests {
     fn parallel_mode_continues_without_graph_evidence_when_tsift_is_stale() {
         use std::os::unix::fs::PermissionsExt;
 
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         std::fs::create_dir_all(dir.path().join(".tsift")).unwrap();
         std::fs::write(dir.path().join(".tsift/graph.db"), "fake").unwrap();
         let doc = dir.path().join("session.md");
@@ -1161,7 +1159,6 @@ exit 2
         let _env = EnvGuard::set("AGENT_DOC_TSIFT_BIN", script.to_str().unwrap());
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -1210,7 +1207,7 @@ exit 2
     }
     #[test]
     fn parallel_mode_expands_prompt_presets_into_task_prompt_only() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         fs::write(
         &doc,
@@ -1219,7 +1216,6 @@ exit 2
     .unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -1269,12 +1265,11 @@ exit 2
     }
     #[test]
     fn legacy_parallel_compat_allows_empty_task_list() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         fs::write(&doc, template_doc()).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -1321,12 +1316,11 @@ exit 2
     }
     #[test]
     fn plan_flag_sequential_prints_expanded_prompts_without_executing() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         fs::write(&doc, template_doc()).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -1371,13 +1365,12 @@ exit 2
     }
     #[test]
     fn plan_flag_sequential_expands_preset_in_output() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         let preset_doc = "---\nagent_doc_format: template\nagent_doc_write: crdt\nagent: claude\nprompt_presets:\n  \"#1\": \"Today is 2026-04-25.\\nKeep the work tree clean.\"\n---\n<!-- agent:exchange -->\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n<!-- agent:pending -->\n<!-- /agent:pending -->\n";
         fs::write(&doc, preset_doc).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -1422,12 +1415,11 @@ exit 2
     }
     #[test]
     fn plan_flag_parallel_exits_without_calling_runner() {
-        let dir = TempDir::new().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         fs::write(&doc, template_doc()).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: "unused".to_string(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),
@@ -1472,7 +1464,7 @@ exit 2
     }
     #[test]
     fn sequential_orchestration_adds_codex_network_override_to_child_env() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = isolated_temp_dir();
         let doc = dir.path().join("session.md");
         let baseline = dir.path().join("baseline.md");
         let content = "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\ncodex_args: \"-s danger-full-access\"\ncodex_network_access: enabled\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nsynchronous orchestra\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n";
@@ -1480,7 +1472,6 @@ exit 2
         fs::write(&baseline, content).unwrap();
 
         let lifecycle = FakeLifecycleOps {
-            baseline_file: baseline.to_string_lossy().into_owned(),
             preflight_calls: RefCell::new(0),
             admit_calls: RefCell::new(0),
             finalize_calls: RefCell::new(Vec::new()),

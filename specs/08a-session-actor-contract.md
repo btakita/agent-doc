@@ -79,16 +79,12 @@ Later phases may refine caller values without changing the field names.
   actor records. The `documents` table carries the authoritative generation,
   pane/window binding, harness, state, and last transition id, while
   `actor_transitions` records each monotonic ownership or lifecycle transition.
-- `.agent-doc/session-actors.json` is now a projection emitted from committed
-  SQLite state for compatibility. Route/start/sync must ask the project
-  controller for the actor binding before consulting legacy compatibility
-  evidence; the JSON projection must not become an independent write authority
-  again.
+- `.agent-doc/state.db` is the only actor and registry authority. Route, start,
+  and sync ask the project controller for the actor binding; no actor JSON
+  projection or compatibility reader participates in normal or recovery paths.
 - Editor layout memory is controller state too. Sync reads and writes the
-  remembered column layout through `.agent-doc/state.db` `layout_states` rows;
-  `.agent-doc/last_layout.json` may be imported once as legacy state and then
-  emitted only as a compatibility projection. If the JSON projection drifts
-  from SQLite, sync must prefer the SQLite row.
+remembered column layout through `.agent-doc/state.db` `layout_states` rows.
+No legacy layout file is imported or emitted.
 - Actor-record `harness` values use canonical ids rather than raw binary names:
   `claude` normalizes to `claude-code`, `codex` stays `codex`, and empty values
   collapse to `default`. Normal-path route/start/sync checks must compare
@@ -200,7 +196,7 @@ can authorize the bounded bare-`Enter` recovery described above.
 - The phase-5 sync/focus path also consumes that authoritative actor binding
   through the controller when the actor pane is still alive: sync
   rescues/reconciles layout around the actor-owned pane and focus selects it
-  before falling back to supervisor-backed registry compatibility evidence.
+and fails closed when that binding cannot be proven.
 - The phase-6 operator surface is actor-backed as well: `session status`,
   `history`, `attach`, `restart`, `clear`, and `doctor` read or mutate the same
   authoritative record and supervisor IPC path instead of inventing separate
@@ -208,8 +204,7 @@ can authorize the bounded bare-`Enter` recovery described above.
 - Operator commands must use the project controller as their actor boundary:
   status/history read controller-owned SQLite rows for the actor, transitions,
   supervisor lease, recent command attempts, and projection diagnostics; attach
-  creates the manual handoff generation through controller IPC before refreshing
-  `sessions.json` as a projection; restart and clear record an
+creates the manual handoff generation through controller IPC; restart and clear record an
   `operator_<state>` acceptance or stage-specific rejection before touching the
   supervisor socket or tmux input.
 - Operator clear/restart must add a second startup-window guard after
@@ -229,8 +224,7 @@ can authorize the bounded bare-`Enter` recovery described above.
   may close a stale `starting` actor after one hour unless a live supervisor PID
   still has a fresh heartbeat for the same document generation. A live PID with
   a stale heartbeat is stuck startup state, not proof that boot is still making
-  progress. The controller remains authoritative for that transition and
-  `session-actors.json` is re-emitted as a projection, not edited directly.
+progress. The controller transaction remains authoritative for that transition.
 - The phase-7 repair boundary is now explicit: normal `sync` may capture
   diagnostics and fail closed on stash/window or closeout drift, but it does
   not run hidden layout rescue or closeout replay anymore. Those mutations live
@@ -249,13 +243,9 @@ can authorize the bounded bare-`Enter` recovery described above.
   plugin operator surfaces that display exact session status, route
   `session clear` through the actor-backed command path, and preserve
   stage-specific dispatch failures in a durable diagnostics surface.
-- `sessions.json` remains a projection/binding helper during migration, not the
-  final actor store. Controller-backed actor writes emit registry entries from
-  the SQLite actor rows, preserving legacy PID/cwd/supervisor metadata when a
-  prior entry exists and synthesizing compatibility fields when it does not. If
-  either `session-actors.json` or `sessions.json` cannot be emitted or drifts
-  from SQLite, the actor state stays authoritative and the controller records
-  projection diagnostics with generation/hash/retry metadata.
+- Pane bindings and actor lifecycle state share the controller transaction.
+  No compatibility JSON is emitted or read; state-store failures fail closed
+  with durable diagnostics instead of creating a second mutable source.
 - Session logs and `ops.log` are transition provenance outputs. The controller
   persists actor state first, then emits projection/log diagnostics from that
   committed state.

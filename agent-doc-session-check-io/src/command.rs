@@ -1,13 +1,11 @@
 //! # Module: session_check
 //!
 //! ## Spec
-//! - `run(file)` inspects the state-backbone closeout projection first, then the
-//!   persisted per-document cycle-state compatibility JSON in
-//!   `.agent-doc/state/cycles/<hash>.json`, and exits nonzero when the most
-//!   recent cycle is still open (`preflight_started`, `response_captured`, or
-//!   `write_applied`).
-//! - Falls back to the JSON sidecar and then the last `ops.log` event when no
-//!   closeout projection exists yet, preserving compatibility for older repos.
+//! - `run(file)` reduces the `state.db` closeout projection and exits nonzero
+//!   when the most recent cycle is still open (`preflight_started`,
+//!   `response_captured`, or `write_applied`).
+//! - Missing or corrupt ledger state fails closed. It does not elect an ops log
+//!   or filesystem cycle record as phase authority.
 //! - Distinguishes "cycle started but no write/commit followed" from
 //!   "response write landed but no commit followed" in both cycle-state and
 //!   ops-log fallback paths.
@@ -220,7 +218,11 @@ fn ensure_terminal_authority_disk_convergence(
             agent_doc_hash::content_hash(&settled_authority),
             agent_doc_hash::content_hash(&settled_disk),
         );
-        agent_doc_snapshot_io::save(file, &settled_authority, agent_doc_ops_log_io::log_op)?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &settled_authority,
+            agent_doc_ops_log_io::log_op,
+        )?;
         return Ok(());
     }
     if non_capture_cycle
@@ -238,7 +240,11 @@ fn ensure_terminal_authority_disk_convergence(
             "session_check_terminal_live_editor_projection_settled",
         )?;
         if settled_authority == authority_content && settled_disk == authority_content {
-            agent_doc_snapshot_io::save(file, &settled_authority, agent_doc_ops_log_io::log_op)?;
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                file,
+                &settled_authority,
+                agent_doc_ops_log_io::log_op,
+            )?;
             return Ok(());
         }
     }
@@ -261,7 +267,11 @@ fn ensure_terminal_authority_disk_convergence(
             agent_doc_hash::content_hash(&settled_authority),
             agent_doc_hash::content_hash(&settled_disk),
         );
-        agent_doc_snapshot_io::save(file, authority_content, agent_doc_ops_log_io::log_op)?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            authority_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
         return Ok(());
     }
     let recycle_status =
@@ -334,7 +344,11 @@ fn self_heal_transiently_stale_committed_projection(
         agent_doc_hash::content_hash(&settled_authority),
         agent_doc_hash::content_hash(&settled_disk),
     );
-    agent_doc_snapshot_io::save(file, &committed_content, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &committed_content,
+        agent_doc_ops_log_io::log_op,
+    )?;
     Ok(true)
 }
 
@@ -961,7 +975,7 @@ fn self_heal_late_ipc_overapplication(
         file.display()
     );
     effects.atomic_write(file, &overapplication.remediated_content)?;
-    agent_doc_snapshot_io::save(
+    agent_doc_snapshot_io::checkpoint_document_baseline(
         file,
         &overapplication.remediated_content,
         agent_doc_ops_log_io::log_op,
@@ -1218,11 +1232,25 @@ fn inspect_core(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessi
     inspect_core_with_captured_resume(file, effects, true)
 }
 
+fn log_slow_session_check_phase(file: &Path, phase: &str, started: &mut std::time::Instant) {
+    let elapsed = started.elapsed();
+    if elapsed >= std::time::Duration::from_millis(250) {
+        eprintln!(
+            "[perf] session_check.{} file={} elapsed_ms={}",
+            phase,
+            file.display(),
+            elapsed.as_millis()
+        );
+    }
+    *started = std::time::Instant::now();
+}
+
 fn inspect_core_with_captured_resume(
     file: &Path,
     effects: &impl SessionCheckEffects,
     allow_captured_resume: bool,
 ) -> Result<SessionCheckStatus> {
+    let mut phase_started = std::time::Instant::now();
     let initial_last_ops_event = agent_doc_ops_log_io::last_ops_event(file)?;
 
     if let Some(replay) = detect_jb_cache_conflict_accept_duplicate_replay(file)? {
@@ -1260,9 +1288,11 @@ fn inspect_core_with_captured_resume(
             file.display()
         )));
     }
+    log_slow_session_check_phase(file, "initial_integrity_detection", &mut phase_started);
 
     let closeout_projection = agent_doc_cycle_state_io::load_closeout_projection(file)?;
     let cycle_state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
+    log_slow_session_check_phase(file, "cycle_state_projection", &mut phase_started);
     let closeout_committed = cycle_state
         .as_ref()
         .is_some_and(|state| state.phase == CyclePhase::Committed);
@@ -1308,6 +1338,7 @@ fn inspect_core_with_captured_resume(
             }
         }
     }
+    log_slow_session_check_phase(file, "retained_projection_settlement", &mut phase_started);
     if let Some(pending) = agent_doc_document_realtime_io::pending_document_write(file)
         && !closeout_committed
     {
@@ -1340,9 +1371,14 @@ fn inspect_core_with_captured_resume(
                     file, &state, blocked,
                 )));
             }
-            if let Some(reason) = effects
-                .recover_missing_commit_boundary(file, "session_check_commit_boundary_recovered")?
-            {
+            let recovered_boundary = effects
+                .recover_missing_commit_boundary(file, "session_check_commit_boundary_recovered")?;
+            log_slow_session_check_phase(
+                file,
+                "recover_missing_commit_boundary",
+                &mut phase_started,
+            );
+            if let Some(reason) = recovered_boundary {
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                     return Ok(SessionCheckStatus::Interrupted(format!(
                         "[session-check] INTERRUPTED: cycle `{}` was `{}` ({}), recovered the missing commit boundary from {}, but the document still has unresolved prompt-bearing user changes with no new agent-doc cycle started: {}",
@@ -1762,7 +1798,7 @@ fn blocked_closeout_editor_authority_note(
         registration
             .capabilities
             .iter()
-            .any(|capability| capability == agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
+            .any(|capability| capability == agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY)
     }) {
         return String::new();
     }
@@ -1772,7 +1808,7 @@ fn blocked_closeout_editor_authority_note(
         .unwrap_or("unknown");
     format!(
         " Live editor `{editor_id}` lacks required capability `{}`; reload or restart the editor plugin before retrying so delivery can preserve operator text.",
-        agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY
+        agent_doc_document_realtime::editor_contract::OPERATOR_TEXT_AUTHORITY_CAPABILITY
     )
 }
 
@@ -2018,7 +2054,9 @@ mod terminal_convergence_tests {
         assert!(healed);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), committed);
         assert_eq!(
-            agent_doc_snapshot_io::load(&file).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&file)
+                .unwrap()
+                .as_deref(),
             Some(committed),
         );
     }

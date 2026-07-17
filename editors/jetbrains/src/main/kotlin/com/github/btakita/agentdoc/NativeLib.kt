@@ -267,42 +267,6 @@ interface AgentDocLib : Library {
     /** Collect editor-facing visual token ranges as JSON. Caller must free result. */
     fun agent_doc_visual_tokens_json(doc: String): Pointer?
 
-    /** Record a document change event for debounce tracking. */
-    fun agent_doc_document_changed(file_path: String)
-
-    /** Record a document change event plus the editor-visible buffer digest. */
-    fun agent_doc_document_changed_digest(file_path: String, content_len: Long, content_hash: String)
-
-    /**
-     * Record a document change plus the editor's FULL visible buffer content (#pcp6).
-     * Lets the CLI confirm the editor buffer equals on-disk content (no unsaved edit
-     * ahead of disk). Text stays local to the project `.agent-doc/` state dir.
-     */
-    fun agent_doc_document_changed_digest_content(file_path: String, content: String)
-
-    /** Legacy-shaped content report; registration travels with reliable-sync Open. */
-    fun agent_doc_document_changed_digest_for_editor(
-        file_path: String,
-        content_len: Long,
-        content_hash: String,
-        editor_id: String,
-    )
-
-    /** Legacy-shaped content report; content authority remains the Lazily CRDT. */
-    fun agent_doc_document_changed_digest_content_for_editor(
-        file_path: String,
-        content: String,
-        editor_id: String,
-    )
-    fun agent_doc_document_changed_digest_content_for_editor_v2(
-        file_path: String,
-        content: String,
-        editor_id: String,
-        editor_kind: String,
-        editor_version: String,
-        capabilities_csv: String,
-    )
-
     /**
      * #falsetyping-guard: per-editor full-content report carrying replica-churn
      * provenance. `no_unsaved_operator_edits` is 1 when the buffer holds no
@@ -310,7 +274,7 @@ interface AgentDocLib : Library {
      * `remoteCrdtApply`), letting the CLI re-merge on replica churn instead of
      * failing the visible-write guard closed. 0 keeps operator text authoritative.
      */
-    fun agent_doc_document_changed_digest_content_for_editor_v3(
+    fun agent_doc_lazily_current_observed_v1(
         file_path: String,
         content: String,
         editor_id: String,
@@ -319,15 +283,6 @@ interface AgentDocLib : Library {
         capabilities_csv: String,
         no_unsaved_operator_edits: Int,
     )
-    fun agent_doc_document_synced_digest_content_for_editor_v2(
-        file_path: String,
-        content: String,
-        editor_id: String,
-        editor_kind: String,
-        editor_version: String,
-        capabilities_csv: String,
-    )
-
     /** Publish this editor instance's reliable-sync close for a document. */
     fun agent_doc_document_closed_for_editor(file_path: String, editor_id: String)
 
@@ -339,24 +294,6 @@ interface AgentDocLib : Library {
      * the binary: a cycle with real work is left intact.
      */
     fun agent_doc_cancel_preflight_cycle(file_path: String): Int
-
-    /**
-     * #8bfz / #fcconeowner: elect a single live plugin consumer per document.
-     * Returns true if THIS consumer (consumer_id, pid) owns the document and
-     * should apply/record the patch receipt; false if a live owner already holds
-     * it and this instance must defer. Cross-process safe + self-healing; fails
-     * open (returns true) on any IO error so single-instance setups are never
-     * worse off than before the lease.
-     */
-    fun agent_doc_plugin_owner_try_acquire(file_path: String, consumer_id: String, pid: Long): Boolean
-
-    /**
-     * #8bfz / #fcconeowner: release the plugin-owner lease for file_path, but
-     * only if consumer_id still owns it. Call when the instance stops watching
-     * the document (project/file close) so a live successor takes over without
-     * waiting for the TTL.
-     */
-    fun agent_doc_plugin_owner_release(file_path: String, consumer_id: String)
 
     /** Try to acquire the sync lock. Returns true if acquired. */
     fun agent_doc_sync_try_lock(): Boolean
@@ -414,35 +351,11 @@ interface AgentDocLib : Library {
     ): Boolean
 
     /**
-     * Check if --force-disk claimed this patch by writing a sentinel file.
-     * Checks `.agent-doc/claimed-patches/<patch_id>`. Sentinels are durable for
-     * the patch id so repeated watcher passes all skip locally closed patches.
-     *
-     * @param project_root  path to the project root containing `.agent-doc/`
-     * @param patch_id      UUID from the patch payload
-     * @return true if sentinel exists (patch already applied by CLI disk write), false otherwise
-     */
-    fun agent_doc_is_claimed_by_force_disk(project_root: String, patch_id: String): Boolean
-
-    /**
      * True when the current disk file matches committed HEAD and HEAD already
      * contains the incoming response patch content. Used to no-op stale editor
      * replays after a JetBrains File Cache Conflict accept.
      */
     fun agent_doc_patch_content_already_committed(file_path: String, content: String): Boolean
-
-    /**
-     * True when the plugin's own `WatchService` file-apply path must be demoted
-     * to read-only buffer reporting (#dsqa / #pcp7 — 08b cut-over residual phase
-     * 2). When true the plugin must NOT apply file-IPC patches it observes on
-     * disk under `.agent-doc/patches/`; the controller-owned watcher + socket
-     * IPC are the sole writer to the live buffer. Reads `AGENT_DOC_PLUGIN_WATCH`
-     * fresh in the binary (default `active` => false), so the operator opts in
-     * once on the `agent-doc` session and every plugin instance honors it via
-     * FFI instead of depending on the IDE's inherited environment. Emits a
-     * structured `plugin_watch_readonly` ops.log marker when it returns true.
-     */
-    fun agent_doc_plugin_watch_readonly(file_path: String): Boolean
 
     /** Callback interface for socket IPC messages. */
     interface IpcMessageCallback : Callback {
@@ -856,31 +769,8 @@ interface AgentDocLib : Library {
         }
 
         /**
-         * `#cdylib-reload-broadcast`: filename of the global reload-broadcast file,
-         * a sibling of the installed cdylib. `agent-doc lib-install` /
-         * `agent-doc admin reload-lib` write it; the plugin watches it to force a
-         * reload immediately after an upgrade instead of lazily on the next FFI call.
-         */
-        const val RELOAD_BROADCAST_FILENAME = "agent-doc-reload-broadcast.json"
-
-        /**
-         * Resolve the global reload-broadcast file: a sibling of the resolved
-         * cdylib path. Uses the already-loaded path when available so it works
-         * before the first `agent-doc lib-path` call is needed.
-         */
-        fun reloadBroadcastFile(): File? {
-            val path = loadedPath ?: resolveLibPath() ?: return null
-            val dir = File(path).absoluteFile.parentFile ?: return null
-            return File(dir, RELOAD_BROADCAST_FILENAME)
-        }
-
-        /**
-         * `#cdylib-reload-broadcast`: force a fresh `Native.load` of the current
-         * cdylib path, bypassing the lazy mtime-equality guard in [get] / [reload].
-         * Used by the broadcast watcher and the `reload_lib` socket message so a
-         * freshly-installed (or re-announced) cdylib goes live immediately. Keeps
-         * the previous instance on failure (never swallows the reason — it is
-         * logged).
+         * Force a fresh `Native.load` for the typed `reload_library` intent,
+         * bypassing the lazy mtime-equality guard in [get] / [reload].
          */
         @Synchronized
         fun forceReload(): AgentDocLib? {

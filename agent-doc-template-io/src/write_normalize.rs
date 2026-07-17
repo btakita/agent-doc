@@ -8,7 +8,7 @@ use agent_doc_document::write_normalization::lift_pending_from_exchange;
 #[cfg(test)]
 use agent_doc_element_exchange::normalize_user_prompts_in_exchange;
 #[cfg(test)]
-use agent_doc_element_exchange::{extract_normalization_targets, verify_sidecar_normalization};
+use agent_doc_element_exchange::{extract_normalization_targets, verify_visible_normalization};
 
 pub fn enforce_imperative_response_contract(
     file: &Path,
@@ -16,9 +16,11 @@ pub fn enforce_imperative_response_contract(
     current_content: &str,
     response: &str,
 ) -> Result<()> {
-    let baseline_owned = baseline
-        .map(ToOwned::to_owned)
-        .or_else(|| agent_doc_snapshot_io::load(file).ok().flatten());
+    let baseline_owned = baseline.map(ToOwned::to_owned).or_else(|| {
+        agent_doc_snapshot_io::load_document_baseline(file)
+            .ok()
+            .flatten()
+    });
     let Some(base) = baseline_owned.as_deref() else {
         return Ok(());
     };
@@ -64,9 +66,11 @@ pub fn template_mode_overrides_for_current_doc(
     current_content: &str,
 ) -> std::collections::HashMap<String, String> {
     let mut overrides = std::collections::HashMap::new();
-    let baseline_owned = baseline
-        .map(ToOwned::to_owned)
-        .or_else(|| agent_doc_snapshot_io::load(file).ok().flatten());
+    let baseline_owned = baseline.map(ToOwned::to_owned).or_else(|| {
+        agent_doc_snapshot_io::load_document_baseline(file)
+            .ok()
+            .flatten()
+    });
     let Some(base) = baseline_owned.as_deref() else {
         return overrides;
     };
@@ -244,55 +248,55 @@ response here
 }
 
 #[cfg(test)]
-mod verify_sidecar_normalization_tests {
-    use super::verify_sidecar_normalization;
+mod verify_visible_normalization_tests {
+    use super::verify_visible_normalization;
     use agent_doc_template::patchback::enforce_orchestrate_patchback_contract;
 
     #[test]
     fn empty_targets_always_passes() {
-        assert!(verify_sidecar_normalization("anything", &[]));
+        assert!(verify_visible_normalization("anything", &[]));
     }
 
     #[test]
     fn all_targets_prefixed() {
         let sidecar = "some line\n❯ do #task1\n❯ do #task2\nother line";
         let targets = vec!["do #task1".to_string(), "do #task2".to_string()];
-        assert!(verify_sidecar_normalization(sidecar, &targets));
+        assert!(verify_visible_normalization(sidecar, &targets));
     }
 
     #[test]
     fn missing_prefix_detected() {
         let sidecar = "some line\n❯ do #task1\ndo #task2\nother line";
         let targets = vec!["do #task1".to_string(), "do #task2".to_string()];
-        assert!(!verify_sidecar_normalization(sidecar, &targets));
+        assert!(!verify_visible_normalization(sidecar, &targets));
     }
 
     #[test]
     fn trailing_whitespace_mismatch_tolerated() {
         let sidecar = "❯ do #task1\n❯ do #task2  \n";
         let targets = vec!["do #task1  ".to_string(), "do #task2".to_string()];
-        assert!(verify_sidecar_normalization(sidecar, &targets));
+        assert!(verify_visible_normalization(sidecar, &targets));
     }
 
     #[test]
     fn blank_targets_skipped() {
         let sidecar = "❯ do #task1\nother";
         let targets = vec!["do #task1".to_string(), "".to_string(), "   ".to_string()];
-        assert!(verify_sidecar_normalization(sidecar, &targets));
+        assert!(verify_visible_normalization(sidecar, &targets));
     }
 
     #[test]
     fn target_at_start_of_sidecar() {
         let sidecar = "❯ first line\nrest";
         let targets = vec!["first line".to_string()];
-        assert!(verify_sidecar_normalization(sidecar, &targets));
+        assert!(verify_visible_normalization(sidecar, &targets));
     }
 
     #[test]
     fn target_not_in_sidecar_at_all() {
         let sidecar = "line one\nline two\n";
         let targets = vec!["nonexistent line".to_string()];
-        assert!(!verify_sidecar_normalization(sidecar, &targets));
+        assert!(!verify_visible_normalization(sidecar, &targets));
     }
 
     #[test]
@@ -300,11 +304,11 @@ mod verify_sidecar_normalization_tests {
         // Simulates the IntelliJ trailing-space bug: binary sent "do the thing "
         // (trailing space), IntelliJ stripped to "do the thing" in the buffer,
         // plugin's original exact-match failed silently, sidecar has no prefix.
-        // verify_sidecar_normalization must detect this.
+        // verify_visible_normalization must detect this.
         let sidecar = "some other line\ndo the thing\nmore content";
         let targets = vec!["do the thing ".to_string()];
         assert!(
-            !verify_sidecar_normalization(sidecar, &targets),
+            !verify_visible_normalization(sidecar, &targets),
             "missing prefix must be detected even when target has trailing whitespace"
         );
     }

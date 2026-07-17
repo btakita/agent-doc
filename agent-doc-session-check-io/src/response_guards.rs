@@ -246,7 +246,7 @@ fn latest_head_response_visible_in_operator_live_buffer(file: &Path) -> Result<b
     let Some(head) = agent_doc_git_io::revision::show_head(file)? else {
         return Ok(false);
     };
-    let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
+    let Some(snapshot) = agent_doc_snapshot_io::load_document_baseline(file)? else {
         return Ok(false);
     };
     let Some(heading) =

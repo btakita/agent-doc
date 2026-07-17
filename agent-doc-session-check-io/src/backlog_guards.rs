@@ -22,9 +22,7 @@ pub fn check_backlog_replay_guard(file: &Path, rc: &CycleContext) -> Result<Guar
     // Phase 6 (#lr-content-6): cached document content.
     let current_content = rc.doc_content();
 
-    let baseline_content = agent_doc_fs::baseline_path_for(file)
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p).ok());
+    let baseline_content = agent_doc_snapshot_io::load_document_baseline(file)?;
 
     let baseline = match baseline_content {
         Some(content) => content,

@@ -82,7 +82,7 @@ fn current_text_via_preflight_authority(
     source: &str,
 ) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
     #[cfg(test)]
-    if test_local_crdt_relay_enabled(file) {
+    if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
         return Ok(Some(
             agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file)?,
         ));
@@ -90,18 +90,6 @@ fn current_text_via_preflight_authority(
     agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
         file, source,
     )
-}
-
-#[cfg(test)]
-fn test_local_crdt_relay_enabled(file: &Path) -> bool {
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
-        .or_else(|| file.parent().map(Path::to_path_buf))
-    else {
-        return false;
-    };
-    project_root
-        .join(".agent-doc/test-local-crdt-relay")
-        .is_file()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -223,10 +211,9 @@ pub fn check_linked_docs(file: &Path) -> Vec<RelatedDocChange> {
         return vec![];
     }
 
-    let our_snapshot_mtime = agent_doc_fs::snapshot_path_for(file)
+    let our_baseline_mtime = agent_doc_git_io::revision::last_commit_mtime(file)
         .ok()
-        .and_then(|p| std::fs::metadata(&p).ok())
-        .and_then(|m| m.modified().ok());
+        .flatten();
 
     let doc_dir = match file.parent() {
         Some(d) => d,
@@ -267,7 +254,7 @@ pub fn check_linked_docs(file: &Path) -> Vec<RelatedDocChange> {
             _ => continue,
         };
 
-        let is_newer = match our_snapshot_mtime {
+        let is_newer = match our_baseline_mtime {
             Some(snap_time) => related_mtime > snap_time,
             None => true,
         };
@@ -276,7 +263,7 @@ pub fn check_linked_docs(file: &Path) -> Vec<RelatedDocChange> {
             continue;
         }
 
-        let summary = recent_commit_summary(&resolved, our_snapshot_mtime);
+        let summary = recent_commit_summary(&resolved, our_baseline_mtime);
         changes.push(RelatedDocChange {
             path: link.clone(),
             summary,
@@ -348,35 +335,19 @@ pub fn read_and_truncate_claims(file: &Path) -> Vec<String> {
     claims
 }
 
-pub fn save_baseline_content(file: &Path, content: &str) -> Option<String> {
-    let baseline_path = match agent_doc_fs::baseline_path_for(file) {
-        Ok(path) => path,
-        Err(e) => {
-            eprintln!("[preflight] failed to resolve baseline path: {}", e);
-            return None;
-        }
-    };
-    if let Some(parent) = baseline_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    match std::fs::write(&baseline_path, content) {
+pub fn checkpoint_baseline_content(file: &Path, content: &str) -> bool {
+    match agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        content,
+        agent_doc_ops_log_io::log_op,
+    ) {
         Ok(()) => {
-            eprintln!("[preflight] baseline saved: {}", baseline_path.display());
-            if agent_doc_snapshot_io::mps_enabled() {
-                match agent_doc_snapshot_io::save_baseline_model(
-                    file,
-                    content,
-                    agent_doc_ops_log_io::log_op,
-                ) {
-                    Ok(()) => {}
-                    Err(e) => eprintln!("[preflight] #mps baseline model pin failed: {}", e),
-                }
-            }
-            Some(baseline_path.to_string_lossy().to_string())
+            eprintln!("[preflight] document baseline checkpointed in state.db");
+            true
         }
         Err(e) => {
-            eprintln!("[preflight] failed to save baseline: {}", e);
-            None
+            eprintln!("[preflight] failed to checkpoint document baseline: {}", e);
+            false
         }
     }
 }
@@ -452,10 +423,6 @@ pub struct PreflightOutput {
     /// Changes detected in linked documents since last cycle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_changes: Vec<RelatedDocChange>,
-    /// Path to the baseline file saved after commit (for `--baseline-file` in write).
-    /// Saved after step 2 (commit + boundary reposition) so it matches the snapshot.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub baseline_file: Option<String>,
     /// Classification of the diff for skill routing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff_type: Option<String>,
@@ -594,7 +561,7 @@ fn is_zero_usize(n: &usize) -> bool {
 pub trait PreflightMaintenanceWriteEffects {
     fn record_document_write_provenance(&self, file: &Path, content: &str);
 
-    fn guard_visible_write_idle_and_current(
+    fn guard_visible_write_expected_current(
         &self,
         file: &Path,
         source: &str,
@@ -988,7 +955,7 @@ fn run_pending_maintenance_with_options(
         .unwrap_or_else(|_| file.display().to_string());
 
     let mut current_content = content.clone();
-    let mut snapshot_content = agent_doc_snapshot_io::load(file)?;
+    let mut snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     // Reorder detection (step 4) compares the file's backlog order against the
     // snapshot as it was at cycle start. Capture it before the loop re-syncs the
     // snapshot to the file (#pending-gate-snapshot-desync), otherwise the synced
@@ -1396,8 +1363,11 @@ fn run_pending_maintenance_with_options(
     }
     if (mutated || snapshot_mutated)
         && let Some(snap_content) = &snapshot_content
-        && let Err(e) =
-            agent_doc_snapshot_io::save(file, snap_content, agent_doc_ops_log_io::log_op)
+        && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            snap_content,
+            agent_doc_ops_log_io::log_op,
+        )
     {
         eprintln!("[preflight] pending: snapshot sync warning: {}", e);
     }
@@ -1411,7 +1381,7 @@ fn run_pending_maintenance_with_options(
         };
         ensure_no_completed_tracked_items(&persisted_content, "working tree")?;
 
-        match agent_doc_snapshot_io::load(file) {
+        match agent_doc_snapshot_io::load_document_baseline(file) {
             Ok(Some(snapshot_content)) => {
                 if let Err(err) = ensure_no_completed_tracked_items(&snapshot_content, "snapshot") {
                     log_snapshot_recovery_warning(
@@ -1523,7 +1493,7 @@ fn collect_agent_done_ids_with_root(
 }
 
 fn snapshot_proves_queue_was_active(file: &Path) -> bool {
-    let Ok(Some(snapshot_content)) = agent_doc_snapshot_io::load(file) else {
+    let Ok(Some(snapshot_content)) = agent_doc_snapshot_io::load_document_baseline(file) else {
         return false;
     };
     let Ok((fm, _)) = frontmatter::parse(&snapshot_content) else {
@@ -1547,17 +1517,6 @@ fn snapshot_proves_queue_was_active(file: &Path) -> bool {
     };
     let has_auto = agent_doc_queue::document_queue::has_auto_attr(&queue_component.attrs);
     agent_doc_queue::document_queue::resolve_activation(&entries, has_auto, false, false).active
-}
-
-fn preflight_debounce_ms(file: &Path) -> u64 {
-    std::fs::read_to_string(file)
-        .ok()
-        .and_then(|content| {
-            frontmatter::parse(&content)
-                .ok()
-                .and_then(|(fm, _)| fm.debounce_ms)
-        })
-        .unwrap_or(2000)
 }
 
 fn persist_pending_maintenance_doc(
@@ -1584,7 +1543,7 @@ fn persist_pending_maintenance_doc(
         return Ok(());
     }
 
-    write_effects.guard_visible_write_idle_and_current(file, source, current)?;
+    write_effects.guard_visible_write_expected_current(file, source, current)?;
     write_effects.converge_or_disk_write(file, current, target, source)
 }
 
@@ -1756,14 +1715,14 @@ fn run_gate_verify_with_options(
         )?;
         // Keep the snapshot in lockstep when possible; it is recovery state, so a
         // missing/malformed sidecar must not veto the document mutation.
-        match agent_doc_snapshot_io::load(file) {
+        match agent_doc_snapshot_io::load_document_baseline(file) {
             Ok(Some(snap)) => {
                 if let Ok(snap_comps) = agent_doc_element::element::parse(&snap) {
                     if let Some(snap_review) =
                         snap_comps.iter().find(|c| is_review_component(&c.name))
                     {
                         let snap_new = snap_review.replace_content(&snap, &new_body);
-                        if let Err(err) = agent_doc_snapshot_io::save(
+                        if let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
                             file,
                             &snap_new,
                             agent_doc_ops_log_io::log_op,
@@ -2102,7 +2061,9 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         Ok(content) => content,
         Err(_) => return Ok(QueueState::default()),
     };
-    let snapshot_content = agent_doc_snapshot_io::load(file).ok().flatten();
+    let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     let (content, _) =
         converge_queue_control_binding_content(&content, snapshot_content.as_deref())?;
     let components = match agent_doc_element::element::parse(&content) {
@@ -2290,7 +2251,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     // a stall: the direct edit completes in well under a TTL and the next preflight
     // performs maintenance normally on the settled queue.
     if let Some(holder_pid) =
-        agent_doc_queue::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
+        agent_doc_queue_io::queue_edit_owner::foreign_queue_edit_in_flight(&file.to_string_lossy())
     {
         agent_doc_ops_log_io::log_op(
             file,
@@ -2343,6 +2304,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     // disk or run a second queue-only merge here: that used to compare the live
     // frontier with itself, making the supposed deletion-adoption branch dead
     // while obscuring which authority maintenance actually mutated.
+    let authority_baseline = content.clone();
     let mut current_content = content.clone();
     let mut mutated = false;
     let mut components = match agent_doc_element::element::parse(&current_content) {
@@ -2412,7 +2374,9 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         .ok()
         .and_then(|(fm, _)| fm.queue_active)
         .unwrap_or(false);
-    let control_snapshot_content = agent_doc_snapshot_io::load(file).ok().flatten();
+    let control_snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     if let (projected, true) = converge_queue_control_binding_content(
         &current_content,
         control_snapshot_content.as_deref(),
@@ -2435,7 +2399,9 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     });
     let queue_active_for_free_text =
         queue_currently_active_for_free_text_admission(&current_content, &comp.attrs);
-    let snapshot_content = agent_doc_snapshot_io::load(file).ok().flatten();
+    let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     let queue_free_text_scope = queue_free_text_admission_scope(
         &current_content,
         &comp.attrs,
@@ -2514,7 +2480,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         // keeps *completed* ids out — but for *operator-deleted* uncompleted ids.
         let tombstones = {
             let snapshot_active_ids: std::collections::HashSet<String> =
-                agent_doc_snapshot_io::load(file)
+                agent_doc_snapshot_io::load_document_baseline(file)
                     .ok()
                     .flatten()
                     .and_then(|snap| {
@@ -2655,10 +2621,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                 &content,
             );
             if exec_ctxs.values().any(|c| c.is_deferred()) {
-                let live_ipc = project_root
-                    .as_deref()
-                    .map(agent_doc_ipc_io::is_listener_active)
-                    .unwrap_or(false);
+                let live_ipc = agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
                 let (_drainable, skipped) =
                     agent_doc_queue::queue_continuation::partition_drainable_backlog_ids(
                         &backlog_ids,
@@ -2757,7 +2720,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             agent_doc_queue::backlog_sync::collect_backlog_priority_ranks(&components, &content);
         let mut operator_authored_identities: std::collections::HashSet<String> =
             std::collections::HashSet::new();
-        if let Ok(Some(snap_content)) = agent_doc_snapshot_io::load(file)
+        if let Ok(Some(snap_content)) = agent_doc_snapshot_io::load_document_baseline(file)
             && let Ok(snap_components) = agent_doc_element::element::parse(&snap_content)
             && let Some(snap_queue) = snap_components.iter().find(|c| c.name == "queue")
         {
@@ -2963,7 +2926,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     // (#queue-operator-pin-position-lock) is preserved: convergence is purely
     // subtractive at each identity's earliest slot.
     let snapshot_queue_entries: Vec<agent_doc_queue::document_queue::QueueEntry> =
-        match agent_doc_snapshot_io::load(file) {
+        match agent_doc_snapshot_io::load_document_baseline(file) {
             Ok(Some(snap)) => agent_doc_element::element::parse(&snap)
                 .ok()
                 .and_then(|comps| {
@@ -3381,10 +3344,11 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             persist_queue_maintenance_doc(
                 file,
                 &current_content,
+                &authority_baseline,
                 project_root.as_deref(),
                 "queue_halt",
             )?;
-            if let Ok(Some(snap)) = agent_doc_snapshot_io::load(file) {
+            if let Ok(Some(snap)) = agent_doc_snapshot_io::load_document_baseline(file) {
                 let mut new_snap = snap.clone();
                 if let Ok(sc) = agent_doc_element::element::parse(&new_snap)
                     && let Some(sq) = sc.iter().find(|c| c.name == "queue")
@@ -3397,7 +3361,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                         new_snap = m;
                     }
                     if new_snap != snap
-                        && let Err(e) = agent_doc_snapshot_io::save(
+                        && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
                             file,
                             &new_snap,
                             agent_doc_ops_log_io::log_op,
@@ -3466,7 +3430,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         // activated queue is operator-authored input for this cycle, not an
         // in-flight queue item edit.
         if snapshot_was_active
-            && let Ok(Some(snap_content)) = agent_doc_snapshot_io::load(file)
+            && let Ok(Some(snap_content)) = agent_doc_snapshot_io::load_document_baseline(file)
             && let Ok(snap_comps) = agent_doc_element::element::parse(&snap_content)
             && let Some(snap_q) = snap_comps.iter().find(|c| c.name == "queue")
         {
@@ -3502,90 +3466,14 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                     )
                 }
             {
-                // #queue-no-stall-on-head-edit: a head prompt edit between
-                // cycles only pauses the loop while the operator is actively
-                // mid-edit. Once the buffer settles, adopt the edited head as
-                // the new prompt and keep the queue armed instead of stripping
-                // `auto` + forcing queue_active:false (the old behavior stalled
-                // the loop on every settled head edit). The pause is retained
-                // only while a live typing indicator proves the buffer is still
-                // being edited, so we never grab a half-typed head.
-                let head_edit_mid_typing = agent_doc_debounce::is_typing_via_file(
-                    &file.to_string_lossy(),
-                    preflight_debounce_ms(file),
+                // Lazily current is the coherent editor cut. Adopt the edited
+                // head directly; the eventual mutation is still protected by
+                // expected-current CAS, so a later keystroke rebases instead of
+                // resurrecting a stale queue snapshot.
+                eprintln!(
+                    "[preflight] queue: head prompt modified in Lazily current — adopting edited head and continuing loop (#queue-no-stall-on-head-edit)"
                 );
-                if !head_edit_mid_typing {
-                    eprintln!(
-                        "[preflight] queue: head prompt modified but buffer settled — adopting edited head, continuing loop (#queue-no-stall-on-head-edit)"
-                    );
-                    adopt_edited_queue_head_into_snapshot(file, &current_content);
-                    // Fall through to normal active-queue handling below; the
-                    // queue stays active with the edited head as the new prompt.
-                } else {
-                    eprintln!(
-                        "[preflight] queue: pause — head prompt modified mid-edit (buffer not settled); not grabbing a half-typed head"
-                    );
-                    // Strip ephemeral activation controls and clear queue state.
-                    current_content = strip_queue_activation_tokens_in_content(&current_content)?;
-                    if persisted_active {
-                        current_content = frontmatter::merge_queue_state(&current_content, false)?;
-                    }
-                    persist_queue_maintenance_doc(
-                        file,
-                        &current_content,
-                        project_root.as_deref(),
-                        "queue_pause",
-                    )?;
-                    // Update snapshot
-                    if let Ok(Some(snap2)) = agent_doc_snapshot_io::load(file) {
-                        let mut ns = snap2.clone();
-                        ns = strip_queue_activation_tokens_in_content(&ns)?;
-                        if persisted_active
-                            && let Ok(m) = frontmatter::merge_queue_state(&ns, false)
-                        {
-                            ns = m;
-                        }
-                        if ns != snap2
-                            && let Err(e) =
-                                agent_doc_snapshot_io::save(file, &ns, agent_doc_ops_log_io::log_op)
-                        {
-                            eprintln!("[preflight] queue halt: snapshot sync warning: {}", e);
-                        }
-                    }
-                    record_queue_worklist_state(
-                        file,
-                        &current_content,
-                        &activation.entries_after,
-                        false,
-                    )?;
-                    if let Some(head) =
-                        agent_doc_queue::document_queue::first_prompt(&activation.entries_after)
-                    {
-                        let head_text = strip_in_progress_marker(&head.text);
-                        record_deferred_queue_head_state(
-                            file,
-                            &current_content,
-                            &head_text,
-                            "item_modified",
-                        )?;
-                    }
-                    return Ok(QueueState {
-                        queue_prompts: vec![],
-                        selected_queue_prompts: vec![],
-                        queue_active: Some(false),
-                        queue_deferred: false,
-                        queue_start_at: None,
-                        queue_trigger: activation.trigger,
-                        queue_halted: Some("item_modified".into()),
-                        queue_paused: false,
-                        queue_pause_reason: None,
-                        queue_drainable_head_count: 0,
-                        queue_continuation_required: false,
-                        queue_supervisor_drainable: false,
-                        synced_queue_ids,
-                        warnings: Vec::new(),
-                    });
-                }
+                adopt_edited_queue_head_into_snapshot(file, &current_content);
             }
         }
     }
@@ -3627,7 +3515,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         // leaves behind, where re-warning on every preflight with no user edit
         // drives the #adoc-queue-ipc-drift loop. Only warn when the inactive
         // queue body actually changed since the snapshot this cycle.
-        let inactive_queue_changed = match agent_doc_snapshot_io::load(file) {
+        let inactive_queue_changed = match agent_doc_snapshot_io::load_document_baseline(file) {
             Ok(Some(snapshot_content)) => {
                 inactive_queue_changed_vs_snapshot(&snapshot_content, &activation.entries_after)
             }
@@ -3690,8 +3578,8 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     // prior cycle's resolved/gated set) yet is still a live head is confirmed
     // stalled — skip it so the queue advances to a non-dependent drainable head
     // instead of re-dispatching a dead ref. Carried skips persist until their id
-    // is consumed or no longer a live head. Computed from the PRIOR cycle sidecar,
-    // which is still on disk here (`start_preflight` overwrites it later this run).
+    // is consumed or no longer a live head. Computed from the prior cycle's
+    // state-ledger projection before `start_preflight` advances this run.
     let skipped_queue_head_ids: std::collections::HashSet<String> = if activation.active {
         let current_live_ids: std::collections::HashSet<String> = activation
             .entries_after
@@ -3845,7 +3733,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         in_progress_markers_changed = true;
     }
     let need_sync_active_queue_future_state_snapshot = if activation.active && snapshot_was_active {
-        match agent_doc_snapshot_io::load(file) {
+        match agent_doc_snapshot_io::load_document_baseline(file) {
             Ok(Some(snapshot_content)) => {
                 selected_queue_head_unchanged_in_snapshot(
                     &snapshot_content,
@@ -3863,6 +3751,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         persist_queue_maintenance_doc(
             file,
             &current_content,
+            &authority_baseline,
             project_root.as_deref(),
             "queue_maintenance",
         )?;
@@ -3874,7 +3763,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     if (mutated
         || need_sync_newly_activated_queue_snapshot
         || need_sync_active_queue_future_state_snapshot)
-        && let Ok(Some(snap_content)) = agent_doc_snapshot_io::load(file)
+        && let Ok(Some(snap_content)) = agent_doc_snapshot_io::load_document_baseline(file)
     {
         let mut new_snap = snap_content.clone();
 
@@ -3967,8 +3856,11 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         }
 
         if new_snap != snap_content
-            && let Err(e) =
-                agent_doc_snapshot_io::save(file, &new_snap, agent_doc_ops_log_io::log_op)
+            && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                file,
+                &new_snap,
+                agent_doc_ops_log_io::log_op,
+            )
         {
             eprintln!("[preflight] queue: snapshot sync warning: {}", e);
         }
@@ -4231,6 +4123,7 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<Vec<Str
     persist_queue_maintenance_doc(
         file,
         &current_content,
+        &content,
         project_root.as_deref(),
         "pending_add_sync",
     )?;
@@ -4279,142 +4172,64 @@ fn resolve_free_text_execution(
     Ok((execution, warnings))
 }
 
-/// `#fccqueue`: persist a queue-maintenance document mutation without provoking
-/// an IntelliJ `File Cache Conflict`.
-///
-/// When a live JB editor listener owns the document, the queue shape is converged
-/// through the editor IPC (`converge_live_buffer_queue_shape` → plugin Document
-/// API `setText` + `saveDocument`, no external-modification dialog) and the raw
-/// disk write is **skipped**. The prior unconditional `std::fs::write(file, …)`
-/// at these queue-maintenance sites bypassed the 08b write-authority routing
-/// (`write::atomic_write` → ordered write queue / editor convergence) that the
-/// finalize/response path already uses, so every preflight queue-maintenance
-/// cycle touched disk behind the open editor buffer and fired the conflict
-/// dialog. The pending/review maintenance sites already route through the
-/// `#fcc0` converge-or-disk gate; this brings the queue path to the same
-/// discipline. With no live listener it writes to disk exactly as before, so
-/// non-IDE behavior is byte-identical.
-///
-/// The caller still owns the private snapshot write (a `.agent-doc/` file, never
-/// open in the IDE, so it cannot conflict). Like the convergence it wraps this is
-/// best-effort: an active-listener send failure leaves the correct content in the
-/// snapshot and the next preflight re-converges — it never falls back to a disk
-/// write behind the editor.
+/// Apply queue maintenance as one compare-and-swap against the Lazily head from
+/// which the maintenance plan was derived. A concurrent operator edit makes the
+/// transition stale and retryable; it is never overwritten from a disk/snapshot
+/// projection, which makes editor queue deletions monotonic.
 pub(crate) fn persist_queue_maintenance_doc(
     file: &Path,
     content: &str,
+    expected_current: &str,
     project_root: Option<&Path>,
     source: &str,
 ) -> Result<()> {
-    let listener_active = project_root
-        .map(agent_doc_ipc_io::is_listener_active)
-        .unwrap_or(false);
-    if listener_active {
-        converge_live_buffer_queue_shape(file, content, project_root);
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "write_authority action=routed reason=plugin_listener_active \
-                 surface=queue_maintenance source={source} len={}",
-                content.len()
-            ),
-        );
-    } else {
-        std::fs::write(file, content)
-            .with_context(|| format!("{source}: failed to write {}", file.display()))?;
+    let _ = project_root;
+    match agent_doc_crdt_relay_io::current_text_for_file(file)? {
+        agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
+            anyhow::ensure!(
+                text == expected_current,
+                "{source}: Lazily head advanced during queue maintenance"
+            );
+            let write = agent_doc_crdt_relay_io::apply_cpc_write_for_file(
+                file,
+                expected_current,
+                content,
+                source,
+            )?;
+            anyhow::ensure!(
+                write.is_some(),
+                "{source}: attached Lazily write was not applied"
+            );
+        }
+        agent_doc_crdt_relay_io::CurrentText::Detached => {
+            let disk = std::fs::read_to_string(file)?;
+            anyhow::ensure!(
+                disk == expected_current || disk == content,
+                "{source}: disk head advanced during detached queue maintenance"
+            );
+            if disk != content {
+                std::fs::write(file, content)
+                    .with_context(|| format!("{source}: failed to write {}", file.display()))?;
+            }
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+            anyhow::bail!("{source}: Lazily editor head is not ready for queue maintenance")
+        }
     }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "write_authority action=compare_and_swap authority=lazily surface=queue_maintenance source={source} len={}",
+            content.len()
+        ),
+    );
     Ok(())
 }
 
-/// Converge a live route-owned editor buffer to the queue shape just written to
-/// `file` by queue maintenance.
-///
-/// Queue maintenance writes the corrected queue body, opening-tag `auto`
-/// attribute, and `queue:` frontmatter to disk + snapshot. When a live
-/// IPC listener owns the document it keeps its own working buffer; without this
-/// push it overwrites the disk write on its next flush — re-adding stale queue
-/// body lines, `auto`, and `queue_active: true` — and the snapshot/HEAD drift
-/// regenerates on every preflight (`#adoc-queue-ipc-buffer-divergence`). A
-/// content-only IPC patch cannot converge an opening-tag attribute or
-/// frontmatter, so we send a dedicated convergence message carrying the queue
-/// body, desired `auto` state, and canonical queue frontmatter. Best-effort: a
-/// missing listener or send failure is logged, never fatal — the disk/snapshot
-/// write remains the source of truth.
-pub(crate) fn converge_live_buffer_queue_shape(
-    file: &Path,
-    content: &str,
-    project_root: Option<&Path>,
-) {
-    let Some(root) = project_root else {
-        return;
-    };
-    if !agent_doc_ipc_io::is_listener_active(root) {
-        return;
-    }
-    let (want_auto, queue_body) = match agent_doc_element::element::parse(content) {
-        Ok(comps) => comps
-            .iter()
-            .find(|c| c.name == "queue")
-            .map(|q| {
-                (
-                    agent_doc_queue::document_queue::has_auto_attr(&q.attrs),
-                    Some(q.content(content).to_string()),
-                )
-            })
-            .unwrap_or((false, None)),
-        Err(e) => {
-            eprintln!("[preflight] queue: live convergence skipped — component parse failed: {e}");
-            return;
-        }
-    };
-    let queue_active = frontmatter::parse(content)
-        .ok()
-        .and_then(|(fm, _)| fm.queue_active)
-        .unwrap_or(false);
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    // #queue-active-deprecated-line-stuck: converge with the CANONICAL `queue:`
-    // control, never the deprecated `queue_active:` line. Emitting the legacy form
-    // here re-introduced `queue_active: true` into the live route-owned buffer on
-    // every preflight (the buffer then flushed it back to disk, undoing the
-    // repair-step migration that drops it). The canonical key is the sole queue
-    // control; readers still fold it onto `queue_active` in memory.
-    let fm_yaml = format!("queue: {}", if queue_active { "start" } else { "stop" });
-    match agent_doc_ipc_io::send_queue_convergence(
-        root,
-        &canonical.to_string_lossy(),
-        want_auto,
-        Some(&fm_yaml),
-        queue_body.as_deref(),
-    ) {
-        Ok(_) => eprintln!(
-            "[preflight] queue: converged live editor buffer (auto={want_auto}, queue_active={queue_active})"
-        ),
-        Err(e) => {
-            // A connected route that accepts the message but cannot produce a
-            // terminal receipt is stale evidence discovered *during* preflight,
-            // after the entry-stage stale probe has already run. Schedule the
-            // same safe-boundary supervisor/editor recycle used by the other
-            // turn stages so the next stage never inherits this wedged route.
-            let recycle_status = agent_doc_controller_io::project_controller::
-                schedule_stale_editor_replica_pcp_recycle(
-                    file,
-                    "preflight_queue_convergence_failure",
-                );
-            eprintln!(
-                "[preflight] queue: live buffer convergence send failed (non-fatal): {e}; automatic recycle: {recycle_status}"
-            )
-        }
-    }
-}
-
-/// Absorb an operator's edited queue head into the snapshot when the loop adopts
-/// it instead of halting (#queue-no-stall-on-head-edit). Copying the live file's
-/// queue region into the snapshot makes the adopted head prove the same prompt at
-/// closeout queue-consume and keeps the next cycle from re-detecting a spurious
-/// `item_modified` edit. Best-effort: a parse/load/save failure is logged, never
-/// fatal — the loop still continues with the edited head from the live file.
+/// Update the recovery baseline after the Lazily compare-and-swap succeeds.
 pub(crate) fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content: &str) {
-    let snap_now = match agent_doc_snapshot_io::load(file) {
+    let snap_now = match agent_doc_snapshot_io::load_document_baseline(file) {
         Ok(Some(s)) => s,
         Ok(None) => return,
         Err(e) => {
@@ -4440,7 +4255,11 @@ pub(crate) fn adopt_edited_queue_head_into_snapshot(file: &Path, current_content
     rebuilt.push_str(queue_region);
     rebuilt.push_str(&snap_now[snap_q.close_end..]);
     if rebuilt != snap_now
-        && let Err(e) = agent_doc_snapshot_io::save(file, &rebuilt, agent_doc_ops_log_io::log_op)
+        && let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &rebuilt,
+            agent_doc_ops_log_io::log_op,
+        )
     {
         eprintln!("[preflight] queue: adopt-head snapshot sync warning (non-fatal): {e}");
     }
@@ -4464,7 +4283,7 @@ mod tests {
     impl PreflightMaintenanceWriteEffects for TestPreflightMaintenanceWriteEffects {
         fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
 
-        fn guard_visible_write_idle_and_current(
+        fn guard_visible_write_expected_current(
             &self,
             _file: &Path,
             _source: &str,
@@ -4514,7 +4333,7 @@ mod tests {
     impl PreflightMaintenanceWriteEffects for GuardFailingPreflightMaintenanceWriteEffects {
         fn record_document_write_provenance(&self, _file: &Path, _content: &str) {}
 
-        fn guard_visible_write_idle_and_current(
+        fn guard_visible_write_expected_current(
             &self,
             _file: &Path,
             _source: &str,
@@ -4592,9 +4411,7 @@ mod tests {
     fn setup_project() -> TempDir {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
-        std::fs::write(dir.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
 
         Command::new("git")
             .current_dir(dir.path())
@@ -4667,7 +4484,12 @@ mod tests {
             predicate_annotation
         );
         std::fs::write(&doc, &file_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &file_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &file_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         doc
     }
 
@@ -4701,57 +4523,6 @@ mod tests {
         assert!(ids.contains("archived2"));
         let ids_no_root = collect_agent_done_ids_with_root(&content, None);
         assert!(ids_no_root.is_empty());
-    }
-
-    fn start_receipt_without_content_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
-        let root = project_root.to_path_buf();
-        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-        std::thread::spawn(move || {
-            let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                let patch_id = v
-                    .get("patch_id")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("unknown");
-                Some(
-                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
-                        .to_string(),
-                )
-            });
-        })
-    }
-
-    fn wait_for_live_prompt_drift_listener(project_root: &Path) {
-        for _ in 0..100 {
-            if agent_doc_ipc_io::is_listener_active(project_root) {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        panic!("fake socket listener did not start within 1s");
-    }
-
-    fn test_preflight_debounce_ms(file: &Path) -> u64 {
-        std::fs::read_to_string(file)
-            .ok()
-            .and_then(|content| {
-                frontmatter::parse(&content)
-                    .ok()
-                    .and_then(|(fm, _)| fm.debounce_ms)
-            })
-            .unwrap_or(2000)
-    }
-
-    fn wait_for_typing_indicator(file: &std::path::Path) {
-        let file_str = file.to_string_lossy();
-        let debounce_ms = test_preflight_debounce_ms(file);
-        for _ in 0..50 {
-            if agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms) {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        panic!("typing indicator was not written for {}", file.display());
     }
 
     fn component_body(content: &str, name: &str) -> String {
@@ -4791,8 +4562,13 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
-        let snapshot_before = agent_doc_snapshot_io::load(&doc).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let snapshot_before = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
 
         let state = inspect_queue_state(&doc, None).unwrap();
 
@@ -4802,7 +4578,10 @@ mod tests {
         assert!(state.queue_continuation_required);
         assert!(state.queue_supervisor_drainable);
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
-        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap(), snapshot_before);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            snapshot_before
+        );
     }
 
     #[test]
@@ -4832,7 +4611,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         // Simulate the PRIOR cycle: it dispatched #sy71 (first head) and committed
         // WITHOUT consuming it (no reap/done recorded).
@@ -4901,7 +4685,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -4945,7 +4734,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -4989,7 +4783,12 @@ mod tests {
             "- do [#existing]\n- Implement active queue addition\n",
         );
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5039,7 +4838,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5073,7 +4877,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5106,7 +4915,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5141,7 +4955,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5185,7 +5004,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5235,7 +5059,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5280,7 +5109,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5310,7 +5144,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5353,12 +5192,17 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         // pid 1 (init) is always live on Unix and is never this test process →
         // a genuine foreign in-flight queue edit.
         let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_queue::queue_edit_owner::refresh_queue_edit_owner_lease(&doc_str, 1).unwrap();
+        agent_doc_queue_io::queue_edit_owner::refresh_queue_edit_owner_lease(&doc_str, 1).unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -5379,7 +5223,7 @@ mod tests {
 
         // Once the lease clears, the next pass syncs normally (the defer is a
         // yield, not a permanent skip).
-        agent_doc_queue::queue_edit_owner::clear_queue_edit_owner_lease(&doc_str);
+        agent_doc_queue_io::queue_edit_owner::clear_queue_edit_owner_lease(&doc_str);
         let resumed = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(resumed.synced_queue_ids, vec!["alpha".to_string()]);
         assert!(
@@ -5416,7 +5260,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let live_content = content.replacen(
             "- :pushpin: do [#dup]\n- :pushpin: do [#dup]\n",
@@ -5424,6 +5273,7 @@ mod tests {
             1,
         );
         let canonical = doc.canonicalize().unwrap();
+        agent_doc_crdt_relay_io::register_embedded_relay_route_for_file(&canonical).unwrap();
         let canonical_key = canonical.to_string_lossy().to_string();
         let editor_id = "preflight-queue-maintenance-test";
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
@@ -5454,17 +5304,31 @@ mod tests {
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
-        let updated = std::fs::read_to_string(&doc).unwrap();
+        let updated =
+            match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&doc).unwrap() {
+                agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+                other => panic!("expected embedded Lazily authority, got {other:?}"),
+            };
         assert_eq!(
             updated.matches("do [#dup]").count(),
             1,
-            "the operator-deleted duplicate must not be re-pushed from stale disk:\n{updated}"
+            "the operator-deleted duplicate must not be re-pushed into Lazily:\n{updated}"
         );
         assert!(
             updated.contains("do [#keep]"),
             "unrelated queue rows must survive:\n{updated}"
         );
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&doc)
+                .unwrap()
+                .matches("do [#dup]")
+                .count(),
+            2,
+            "preflight must not overwrite disk behind the editor authority"
+        );
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snap.matches("do [#dup]").count(),
             1,
@@ -5500,7 +5364,12 @@ mod tests {
             "- :pushpin: do [#qeditdup] [#qftloss#qftloss]",
         );
         std::fs::write(&doc, live_stale_reemit).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
@@ -5565,7 +5434,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5617,7 +5491,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert!(
@@ -5657,7 +5536,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert!(
@@ -5697,7 +5581,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5748,7 +5637,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5794,7 +5688,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5843,7 +5742,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         // Baseline: an active go-mode queue with a live head requires continuation.
         let state = run_queue_maintenance(&doc, None).unwrap();
@@ -5944,7 +5848,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let updated_state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -5989,7 +5898,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let updated_state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -6002,66 +5916,6 @@ mod tests {
             updated_state.synced_queue_ids.is_empty(),
             "non-go queue must not report newly synced ids: {:?}",
             updated_state.synced_queue_ids
-        );
-    }
-    #[test]
-    fn run_queue_maintenance_routes_through_ipc_without_disk_write_when_listener_active() {
-        // #fccqueue: with a live JB editor listener owning the document, queue
-        // maintenance must NOT raw-write the session doc to disk (the every-cycle
-        // source of the IntelliJ `File Cache Conflict`). It routes the queue shape
-        // through the editor IPC convergence instead and records the routed
-        // write-authority decision in ops.log.
-        let dir = setup_project();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
-        let doc = dir.path().join("session.md");
-        let content = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "agent_doc_write: crdt\n",
-            "queue: go\n",
-            "queue_active: true\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: prior — gpt-5\n\nDone.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue go -->\n",
-            "- do [#alpha]\n",
-            "<!-- /agent:queue -->\n\n",
-            "<!-- agent:backlog queue=append -->\n",
-            "- [ ] [#alpha] already running\n",
-            "- [ ] [#beta] freshly added mid-loop\n",
-            "<!-- /agent:backlog -->\n",
-        );
-        std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
-
-        // Fake editor listener that acks patches but never writes the file, so any
-        // change to the on-disk doc could only have come from the binary itself.
-        let _listener = start_receipt_without_content_listener(dir.path());
-        wait_for_live_prompt_drift_listener(dir.path());
-
-        let state = run_queue_maintenance(&doc, None).unwrap();
-
-        // The mutation still happened logically (beta synced into the queue) ...
-        assert!(
-            state.synced_queue_ids.contains(&"beta".to_string()),
-            "beta must still be synced under go-mode with a listener active: {:?}",
-            state.synced_queue_ids
-        );
-        // ... but the binary must NOT have raw-written the doc to disk behind the
-        // editor: the fake listener never writes the file, so disk stays as-is.
-        assert_eq!(
-            std::fs::read_to_string(&doc).unwrap(),
-            content,
-            "queue maintenance must not raw-write the session doc while a JB listener is active"
-        );
-        let log =
-            std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
-        assert!(
-            log.contains("write_authority action=routed")
-                && log.contains("surface=queue_maintenance"),
-            "active-listener queue maintenance must record the routed write-authority decision:\n{log}"
         );
     }
     #[test]
@@ -6091,7 +5945,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -6136,7 +5995,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
 
@@ -6150,7 +6014,9 @@ mod tests {
             head < fresh,
             "same-cycle add must append behind the current queue head:\n{updated}"
         );
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("- do [#fresh]"),
             "snapshot queue region must include the appended closeout head:\n{snap}"
@@ -6180,7 +6046,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
 
@@ -6219,7 +6090,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -6257,7 +6133,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -6288,7 +6169,12 @@ mod tests {
                 token
             );
             std::fs::write(&doc, &content).unwrap();
-            agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                &content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
 
             let state = run_queue_maintenance(&doc, None).unwrap();
             assert_eq!(
@@ -6326,7 +6212,12 @@ mod tests {
             "<!-- agent:queue stop -->\n- please do the thing\n<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(
@@ -6359,7 +6250,12 @@ mod tests {
         let current_content =
             snapshot_content.replace("<!-- agent:queue go -->", "<!-- agent:queue -->");
         std::fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -6384,7 +6280,12 @@ mod tests {
         );
         let current_content = snapshot_content.replace("queue: stop", "queue: go");
         std::fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -6407,7 +6308,12 @@ mod tests {
         );
         let current_content = snapshot_content.replace("queue: go", "queue: stop");
         std::fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -6430,7 +6336,12 @@ mod tests {
             "<!-- agent:queue go -->\n--- stop\n- do [#alpha]\n<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -6521,7 +6432,12 @@ mod tests {
             "<!-- /agent:done -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -6575,7 +6491,12 @@ mod tests {
             "<!-- /agent:done -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run_queue_maintenance(&doc, None).unwrap();
 
@@ -6612,7 +6533,12 @@ mod tests {
             "<!-- /agent:done -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run_queue_maintenance(&doc, None).unwrap();
 
@@ -6644,7 +6570,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -6682,7 +6613,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -6728,7 +6664,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -6764,7 +6705,12 @@ mod tests {
             "<!-- /agent:icebox -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -6845,7 +6791,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -6914,7 +6865,12 @@ mod tests {
             "- 🚧 do [#ops]\n- do [#ship]",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let diff = concat!(
             "@@ queue @@\n",
@@ -6996,7 +6952,12 @@ mod tests {
             "<!-- /agent:icebox -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -7050,7 +7011,12 @@ mod tests {
             "- do [#slow]\n- do [#fast]\n- do [#medium]",
         );
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -7085,7 +7051,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -7131,7 +7102,12 @@ mod tests {
             .replace("<!-- agent:queue -->", "<!-- agent:queue auto -->")
             .replace("- do [#oldhead]", "- do [#newhead]\n- do [#nexthead]");
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -7148,7 +7124,9 @@ mod tests {
         assert!(updated.contains("- 🚧 do [#newhead]"));
         assert!(!updated.contains("- do [#oldhead]"));
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("queue: start")
                 && snap.contains("<!-- agent:queue auto start -->")
@@ -7209,7 +7187,12 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -7233,7 +7216,9 @@ mod tests {
 
         // Snapshot matches the drained file so the closeout commit boundary
         // does not strand the maintenance mutation.
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(snap.contains("queue: stop"));
         assert!(!snap.contains("agent:queue auto"));
         assert!(!snap.contains("- do [#alpha]"));
@@ -7269,7 +7254,12 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -7290,180 +7280,10 @@ mod tests {
         assert!(updated.contains("queue: start"));
     }
     #[test]
-    fn queue_maintenance_converges_live_ipc_buffer_on_item_modified_halt() {
-        // SimWorld repro for #adoc-queue-ipc-buffer-divergence (root cause #2):
-        // a live route-owned IPC listener owns the document. When an
-        // already-active auto-queue's head prompt changes between cycles, queue
-        // maintenance halts (item_modified), strips `auto`, and clears
-        // `queue_active` on disk + snapshot. Without convergence the live editor
-        // buffer would re-add `auto`/`queue_active: true` on its next flush and
-        // the snapshot/HEAD drift loop regenerates every preflight. This test
-        // proves maintenance pushes a queue-tag + frontmatter convergence message
-        // to the listener, and that a follow-up maintenance pass is idempotent
-        // (no second divergence, no second convergence send).
-        use std::sync::{Arc, Mutex};
-
-        let dir = setup_project();
-        let root = dir.path().canonicalize().unwrap();
-        let doc = root.join("session.md");
-
-        let received: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
-        let received_clone = received.clone();
-        let listener_root = root.clone();
-        let server = std::thread::spawn(move || {
-            agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(msg) {
-                    // #fccqueue: under the editor-safe contract the binary no longer
-                    // raw-writes the converged queue shape to disk while a listener is
-                    // active — it routes the convergence through us. Mirror the real JB
-                    // plugin (`setText` + `saveDocument`) so disk catches up to the
-                    // converged shape synchronously (before this ack), which is what
-                    // makes the next preflight idempotent. A content-only patch cannot
-                    // change the opening-tag `auto` token or frontmatter, so we apply
-                    // the queue body + `queue_auto` strip + `frontmatter` here just like
-                    // the plugin's convergence handler does.
-                    if v.get("queue_auto").is_some()
-                        && let Some(file_str) = v.get("file").and_then(|x| x.as_str())
-                        && let Ok(mut doc) = std::fs::read_to_string(file_str)
-                    {
-                        if let Some(body) = v
-                            .get("patches")
-                            .and_then(|p| p.get(0))
-                            .and_then(|p| p.get("content"))
-                            .and_then(|c| c.as_str())
-                            && let Ok(comps) = agent_doc_element::element::parse(&doc)
-                            && let Some(q) = comps.iter().find(|c| c.name == "queue")
-                        {
-                            doc = q.replace_content(&doc, body);
-                        }
-                        if v["queue_auto"] == serde_json::json!(false)
-                            && let Ok(comps) = agent_doc_element::element::parse(&doc)
-                            && let Some(q) = comps.iter().find(|c| c.name == "queue")
-                        {
-                            let raw = doc[q.open_start..q.open_end].to_string();
-                            let new_tag =
-                                agent_doc_queue::document_queue::strip_auto_from_tag(&raw);
-                            if new_tag != raw {
-                                let mut rebuilt = String::with_capacity(doc.len());
-                                rebuilt.push_str(&doc[..q.open_start]);
-                                rebuilt.push_str(&new_tag);
-                                rebuilt.push_str(&doc[q.open_end..]);
-                                doc = rebuilt;
-                            }
-                        }
-                        if v.get("frontmatter") == Some(&serde_json::json!("queue: stop"))
-                            && let Ok(merged) = frontmatter::merge_queue_state(&doc, false)
-                        {
-                            doc = merged;
-                        }
-                        let _ = std::fs::write(file_str, &doc);
-                    }
-                    received_clone.lock().unwrap().push(v);
-                }
-                Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
-            })
-            .ok();
-        });
-        std::thread::sleep(std::time::Duration::from_millis(150));
-
-        let snapshot_content = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "agent_doc_write: crdt\n",
-            "queue_active: true\n",
-            "---\n\n",
-            "## Exchange\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: prior — gpt-5\n\n",
-            "Done.\n",
-            "<!-- /agent:exchange -->\n\n",
-            "<!-- agent:queue auto -->\n",
-            "- do [#oldhead]\n",
-            "- do [#nexthead]\n",
-            "<!-- /agent:queue -->\n"
-        );
-        let current_content = snapshot_content.replace("- do [#oldhead]", "- do [#newhead]");
-        std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
-
-        // A live editor is actively mid-edit on the head prompt, so the loop
-        // must still pause/halt rather than adopt a half-typed head
-        // (#queue-no-stall-on-head-edit gates adopt on a settled buffer).
-        agent_doc_debounce::document_changed(&doc.to_string_lossy());
-        wait_for_typing_indicator(&doc);
-
-        let state = run_queue_maintenance(&doc, None).unwrap();
-        assert_eq!(state.queue_halted, Some("item_modified".into()));
-        assert_eq!(state.queue_active, Some(false));
-
-        // Disk converged to the inactive shape.
-        let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("<!-- agent:queue -->"));
-        assert!(!updated.contains("agent:queue auto"));
-        assert!(updated.contains("queue: stop"));
-
-        // Listener received exactly one queue convergence message carrying the
-        // queue body plus the tag + frontmatter shape that a content-only patch
-        // cannot deliver.
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        {
-            let msgs = received.lock().unwrap();
-            let convergences: Vec<&serde_json::Value> = msgs
-                .iter()
-                .filter(|m| m.get("queue_auto").is_some())
-                .collect();
-            assert_eq!(
-                convergences.len(),
-                1,
-                "expected exactly one queue convergence message, got: {msgs:?}"
-            );
-            let conv = convergences[0];
-            assert_eq!(conv["queue_auto"], serde_json::json!(false));
-            // #queue-active-deprecated-line-stuck: convergence carries the
-            // canonical `queue:` control, never the deprecated `queue_active:`.
-            assert_eq!(conv["frontmatter"], serde_json::json!("queue: stop"));
-            assert_eq!(conv["patches"][0]["component"], serde_json::json!("queue"));
-            assert_eq!(
-                conv["patches"][0]["content"],
-                serde_json::json!(
-                    agent_doc_element::element::parse(&updated)
-                        .unwrap()
-                        .iter()
-                        .find(|c| c.name == "queue")
-                        .unwrap()
-                        .content(&updated)
-                )
-            );
-        }
-
-        // Idempotency: a follow-up maintenance pass on the converged document
-        // mutates nothing and sends no further convergence.
-        let state2 = run_queue_maintenance(&doc, None).unwrap();
-        assert_eq!(state2.queue_halted, None);
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        {
-            let msgs = received.lock().unwrap();
-            let convergences = msgs
-                .iter()
-                .filter(|m| m.get("queue_auto").is_some())
-                .count();
-            assert_eq!(
-                convergences, 1,
-                "follow-up maintenance must not re-diverge / re-send convergence"
-            );
-        }
-
-        let _ = std::fs::remove_file(agent_doc_ipc_io::socket_path(&root));
-        drop(server);
-    }
-    #[test]
-    fn preflight_pauses_when_active_queue_head_changes_mid_edit() {
-        // #queue-no-stall-on-head-edit (pause case): while a live editor is
-        // actively mid-edit on the head prompt, the loop must still pause/halt
-        // rather than grab a half-typed head. The settled-buffer adopt path is
-        // covered separately by
-        // `preflight_adopts_edited_queue_head_when_buffer_settled`.
+    fn preflight_rebases_active_queue_head_change_without_mid_edit_evidence() {
+        // A snapshot/version mismatch alone is not evidence of active typing.
+        // The current document is authoritative, so maintenance adopts the
+        // edited head and keeps monotonic queue progress.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let snapshot_content = concat!(
@@ -7485,37 +7305,25 @@ mod tests {
         );
         let current_content = snapshot_content.replace("- do [#oldhead]", "- do [#newhead]");
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
-
-        // Mark the document as actively being typed so the head edit reads as
-        // a half-typed buffer.
-        agent_doc_debounce::document_changed(&doc.to_string_lossy());
-        wait_for_typing_indicator(&doc);
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
-        assert_eq!(state.queue_active, Some(false));
-        assert_eq!(state.queue_halted.as_deref(), Some("item_modified"));
-        assert!(state.queue_prompts.is_empty());
+        assert_eq!(state.queue_active, Some(true));
+        assert_eq!(state.queue_halted, None);
+        assert_eq!(
+            state.queue_prompts,
+            vec!["do [#newhead]".to_string(), "do [#nexthead]".to_string()]
+        );
 
         let updated = std::fs::read_to_string(&doc).unwrap();
-        assert!(updated.contains("queue: stop"));
-        assert!(updated.contains("<!-- agent:queue -->"));
-        assert!(!updated.contains("agent:queue auto"));
-        assert!(updated.contains("- do [#newhead]"));
-
-        let missing =
-            agent_doc_queue_io::queue_journal::replay_missing(&doc, snapshot_content, None);
-        assert!(
-            missing.is_empty(),
-            "early-return queue maintenance must not create replay authority beside CPC: {:?}",
-            missing
-        );
-        assert!(
-            agent_doc_queue_io::queue_journal::queue_journal_path(&doc)
-                .is_none_or(|path| !path.exists()),
-            "legacy queue journal must remain retired"
-        );
+        assert!(updated.contains("queue: start"));
+        assert!(updated.contains("do [#newhead]"));
     }
     #[test]
     fn preflight_adopts_edited_queue_head_when_buffer_settled() {
@@ -7547,7 +7355,12 @@ mod tests {
         );
         let current_content = snapshot_content.replace("- do [#oldhead]", "- do [#newhead]");
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         // No typing indicator written → buffer is settled.
 
         let state = run_queue_maintenance(&doc, None).unwrap();
@@ -7577,7 +7390,9 @@ mod tests {
 
         // Snapshot absorbed the edited head so a follow-up pass is idempotent
         // (no spurious item_modified on the now-converged head).
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("do [#newhead]"),
             "snapshot must absorb the adopted head: {snap}"
@@ -7620,7 +7435,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -7669,7 +7489,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         assert_eq!(
@@ -7713,7 +7538,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -7753,7 +7583,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
             .unwrap();
@@ -7769,7 +7604,9 @@ mod tests {
             "other status content must be preserved: {file_after}"
         );
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snapshot_after
                 .contains(agent_doc_document::status_projection::STALE_SUPERVISOR_STATUS_MARKER),
@@ -7794,7 +7631,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let effects = GuardFailingPreflightMaintenanceWriteEffects::default();
 
         run_pending_maintenance(&doc, &effects).unwrap();
@@ -7810,7 +7652,9 @@ mod tests {
             file_after, content,
             "optional stale-supervisor status clear must be deferred without touching the file"
         );
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snapshot_after, content,
             "deferred status clear must not desync the snapshot from the file"
@@ -7841,7 +7685,12 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let effects = GuardFailingPreflightMaintenanceWriteEffects::with_error(
             "visible document write for session.md deferred: document changed after the response merge was computed; retry after typing stops",
         );
@@ -7862,7 +7711,9 @@ mod tests {
             file_after, content,
             "deferred mirror reap must leave the working-tree file untouched"
         );
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snapshot_after, content,
             "deferred mirror reap must not desync the snapshot from the file"
@@ -7882,7 +7733,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let report =
             run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
@@ -7904,7 +7760,9 @@ mod tests {
         assert!(file_after.contains("<!-- agent:done -->"));
         assert!(file_after.contains("[#reap1] Reap me"));
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         let snapshot_backlog_after = agent_doc_element::element::parse(&snapshot_after)
             .unwrap()
             .into_iter()
@@ -7939,7 +7797,12 @@ mod tests {
             "<!-- /agent:review -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let report =
             run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
@@ -7974,7 +7837,9 @@ mod tests {
         assert!(file_after.contains("[#doneci] #agent-doc-bug DONE 7b60fcdc"));
         assert!(file_after.contains("[#reviewdone] SHIPPED abcdef1"));
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(!snapshot_after.contains("- [ ] [#doneci]"));
         assert!(!snapshot_after.contains("- [/] [#reviewdone]"));
         assert!(snapshot_after.contains("[#partial]"));
@@ -8002,7 +7867,12 @@ mod tests {
         // The snapshot already contains the item — this models the finalize path
         // where the same invocation's --review-add re-synced the snapshot, so the
         // snapshot-only guard cannot tell this is a brand-new add.
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         // cycle_state records #freshgate as added this cycle.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["freshgate".to_string()])
@@ -8037,7 +7907,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
             .unwrap();
@@ -8073,7 +7948,12 @@ mod tests {
             "<!-- /agent:review -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
             .unwrap();
@@ -8115,7 +7995,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, file_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
             .unwrap();
@@ -8160,7 +8045,12 @@ mod tests {
             "<!-- /agent:done -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let report =
             run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
@@ -8190,7 +8080,9 @@ mod tests {
         assert_eq!(file_after.matches("[#done1]").count(), 1);
         assert_eq!(file_after.matches("[#done2]").count(), 1);
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         let snapshot_components = agent_doc_element::element::parse(&snapshot_after).unwrap();
         let snapshot_backlog = snapshot_components
             .iter()
@@ -8235,7 +8127,12 @@ mod tests {
             "<!-- /agent:done -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let report =
             run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
@@ -8266,7 +8163,9 @@ mod tests {
             archive_content
         );
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(!snapshot_after.contains("stale backlog mirror"));
         assert!(!snapshot_after.contains("stale review mirror"));
         assert!(snapshot_after.contains("[#fresh1] fresh backlog"));
@@ -8285,7 +8184,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(dir.path())
             .args(["add", "session.md"])
@@ -8334,7 +8238,12 @@ mod tests {
             "<!-- /agent:icebox -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let report =
             run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
@@ -8355,7 +8264,9 @@ mod tests {
         assert!(file_after.contains("## Completed / Reaped"));
         assert!(file_after.contains("[#ice01] Reap me from icebox"));
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         let snapshot_icebox_after = agent_doc_element::element::parse(&snapshot_after)
             .unwrap()
             .into_iter()
@@ -8403,12 +8314,19 @@ mod tests {
             "<!-- /agent:review -->\n"
         );
         std::fs::write(&doc, file_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
             .unwrap();
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         let comps = agent_doc_element::element::parse(&snapshot_after).unwrap();
         let snap_backlog = comps
             .iter()
@@ -8486,7 +8404,9 @@ mod tests {
             "gate must be flipped: {after}"
         );
         // Snapshot kept in lockstep for the upcoming commit.
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("[x] [#saev]"),
             "snapshot must flip too: {snap}"
@@ -8629,7 +8549,12 @@ mod tests {
         let snapshot_content =
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\nNo backlog here.\n";
         std::fs::write(&doc, file_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run_pending_maintenance(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap();
 
@@ -8667,7 +8592,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
             .unwrap();
@@ -8702,7 +8632,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run_queue_maintenance(&doc, None).unwrap();
 
@@ -8773,18 +8708,19 @@ mod tests {
     }
 
     #[test]
-    fn enforce_cycle_completion_prefers_lazily_projection_over_stale_open_sidecar() {
+    fn enforce_cycle_completion_uses_committed_ledger_projection() {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle state path");
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_applied",
@@ -8799,10 +8735,9 @@ mod tests {
             Some(content),
         )
         .unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::Committed
         );
 
         let effects = TestPreflightCycleCompletionEffects::default();
@@ -8811,7 +8746,7 @@ mod tests {
         assert_eq!(
             effects.repair_calls.get(),
             0,
-            "stale open JSON must not force repair when lazily says committed"
+            "the terminal projection must not force repair"
         );
         assert_eq!(
             effects.commit_calls.get(),
@@ -8833,7 +8768,12 @@ mod tests {
         let doc = dir.path().join("session.md");
         let content = "# Doc\n\n<!-- agent:exchange -->\nprompt\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_cycle_state_io::mark_response_captured(
@@ -8907,7 +8847,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
@@ -8980,7 +8925,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
@@ -9039,7 +8989,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
@@ -9106,7 +9061,12 @@ mod tests {
             "<!-- /agent:done -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
@@ -9176,7 +9136,12 @@ mod tests {
             "<!-- /agent:done -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
@@ -9250,7 +9215,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
@@ -9303,7 +9273,12 @@ mod tests {
             "<!-- /agent:done -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 
@@ -9356,7 +9331,12 @@ mod tests {
             "<!-- /agent:done -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _ = run_queue_maintenance(&doc, None).unwrap();
 

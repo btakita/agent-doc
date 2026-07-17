@@ -23,25 +23,22 @@ Hard invariants:
   turn to `InterruptedBlocked` instead of running surprise repair;
 - commit is optional when the selected turn policy is no-commit;
 - interrupted closeout must resume from durable lifecycle state or fail closed;
-- snapshots and CRDT sidecars are backup/audit or merge inputs, never lifecycle
-  authority that can drop operator-visible text.
+- file snapshots are cold recovery/audit projections, never lifecycle or merge
+authority; CRDT recovery checkpoints live in `state.db` and likewise cannot
+override Lazily current text.
 
-The persisted `CyclePhase` sidecar is a durable recovery projection of this
-larger state machine. Today it records `preflight_started`,
+The persisted `CyclePhase` row in `state.db` is the durable projection of this
+larger state machine. It records `preflight_started`,
 `response_captured`, `write_applied`, `committed`, and `abandoned`. Those phases
-must stay below the lifecycle boundary: they aid restart/replay, but they do not
-replace realtime source authority.
+aid restart/replay but do not replace realtime source authority.
 
 During the lazily state-backbone migration, each accepted cycle-state
 transition also appends the matching closeout fact to the durable backbone:
 `PreflightStarted`, `ResponseCaptured`, `WriteApplied`, `CommitObserved`, or
 `CycleAbandoned`. Stable event ids make retry re-entry idempotent, and transition
 success requires the fact append to succeed. `session-check` and preflight now
-prefer the closeout projection for open/terminal phase authority, overriding a
-stale JSON cycle sidecar for the same cycle and failing closed on projection-only
-or mismatched-stale open projections. The JSON sidecar remains compatibility
-recovery evidence for guard/recovery payloads that have not moved into the
-backbone yet. Git closeout
+use the closeout projection for open/terminal phase authority and fail closed on
+mismatched state transitions. There is no JSON cycle compatibility source. Git closeout
 appends a later `CommitObserved` carrying the exact `HEAD` SHA for real and
 already-current closeouts, so the closeout projection's commit identity comes
 from git proof when available.
@@ -155,11 +152,11 @@ Forbidden transitions:
   operator-visible text;
 - `InterruptedBlocked -> Committed` without revalidating the durable capture and
   current source-of-truth document;
-- any lifecycle state adopting a snapshot, CRDT sidecar, legacy editor-content sidecar, or
-  `content_ours` image as the committed document without first merging against
-  realtime authority.
-- a response-visible lazily receipt turning legacy editor-content sidecar data
-  into snapshot authority when the candidate also carries user-owned drift absent
+- any lifecycle state adopting a snapshot, recovery checkpoint, or
+`content_ours` image as the committed document without first rebasing against
+realtime authority.
+- a response-visible Lazily receipt turning recovery-projection data into live
+authority when the candidate also carries user-owned drift absent
   from the agent-owned response image. Such receipts prove delivery only; durable
   closeout authority comes from the lazily transport projection or a proven merge.
 
@@ -244,7 +241,8 @@ Reaping names must distinguish what is being reaped:
 - supervisor process and stale-socket reaping are supervisor-process effects;
 - stale project-controller process reaping belongs to `agent-doc-controller`,
   not `agent-doc-supervisor`;
-- editor/plugin sidecar reaping belongs to editor/plugin IO boundaries.
+- editor/plugin transport cleanup may reap obsolete transport artifacts, but
+plugins must not create or consume live-text sidecars.
 
 This separation keeps supervisor realtime state available to editor, tmux,
 diagnostic, and turn-executor code without making those consumers depend on the

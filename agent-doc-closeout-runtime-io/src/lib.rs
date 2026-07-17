@@ -228,32 +228,22 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         if false_stale_reactivation_cycle
             && let (Some(capture_id), Some(response_sha256)) =
                 (state.capture_id.as_deref(), state.response_sha256.as_deref())
-            && let Some(capture) = agent_doc_capture_io::load_by_id(file, capture_id)?
+            && let Some(capture) = agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
             && capture.cycle_id == state.cycle_id
             && capture.response_sha256 == response_sha256
-            && matches!(
-                (capture.state, capture.discarded_at),
-                (agent_doc_capture_io::CaptureState::Discarded, Some(_))
-                    | (agent_doc_capture_io::CaptureState::Captured, None)
-            )
-                && agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
+            && agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
                         file,
                         &capture.response_body,
                         "session_check_false_stale_capture_retirement_settlement",
                     )?
             {
-            let capture_reactivated = agent_doc_capture_io::reactivate_false_stale_retirement(
+                let cycle_reactivated =
+                    agent_doc_cycle_state_io::reactivate_false_stale_capture_retirement(
                 file,
                 capture_id,
                 response_sha256,
             )?;
-            let cycle_reactivated =
-                agent_doc_cycle_state_io::reactivate_false_stale_capture_retirement(
-                file,
-                capture_id,
-                response_sha256,
-            )?;
-            if !capture_reactivated || !cycle_reactivated {
+                if !cycle_reactivated {
                 return Ok(Outcome::Retained {
                     reason: "false-stale capture reactivation remains partially applied"
                         .to_string(),
@@ -422,8 +412,11 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
                     .to_string(),
             });
         }
-        if let Err(err) = agent_doc_snapshot_io::save(file, &current, agent_doc_ops_log_io::log_op)
-        {
+        if let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &current,
+            agent_doc_ops_log_io::log_op,
+        ) {
             return Ok(Outcome::Retained {
                 reason: format!("failed to refresh the settled response snapshot: {err:#}"),
             });
@@ -621,7 +614,12 @@ mod tests {
         );
 
         std::fs::write(&file, base).unwrap();
-        agent_doc_snapshot_io::save(&file, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let capture = agent_doc_capture_io::capture_response(&file, response).unwrap();
         agent_doc_capture_io::mark_discarded(&file).unwrap();
         agent_doc_cycle_state_io::mark_abandoned(
@@ -703,14 +701,11 @@ mod tests {
             ),
             "the false-stale cycle must be reactivated and advanced: {state:?}"
         );
-        let capture = agent_doc_capture_io::load_by_id(&file, &capture.capture_id)
-            .unwrap()
-            .unwrap();
-        assert_ne!(
-            capture.state,
-            agent_doc_capture_io::CaptureState::Discarded,
-            "the exact same capture must no longer remain falsely retired"
-        );
+        let capture =
+            agent_doc_cycle_state_io::load_projected_captured_response(&file, &capture.capture_id)
+                .unwrap()
+                .expect("the exact same capture remains in the durable ledger");
+        assert_eq!(capture.cycle_id, state.cycle_id);
     }
 
     #[test]
@@ -743,16 +738,27 @@ mod tests {
         );
 
         std::fs::write(&file, base).unwrap();
-        agent_doc_snapshot_io::save(&file, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let capture = agent_doc_capture_io::capture_response(&file, response).unwrap();
         std::fs::write(&file, target).unwrap();
-        agent_doc_snapshot_io::save(&file, target, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            target,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_capture_io::mark_write_applied(&file).unwrap();
+        assert!(!agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(&file));
 
         let before = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
             .unwrap()
             .unwrap();
-        assert_eq!(before.phase, CyclePhase::ResponseCaptured);
+        assert_eq!(before.phase, CyclePhase::WriteApplied);
         assert_eq!(
             before.capture_id.as_deref(),
             Some(capture.capture_id.as_str())

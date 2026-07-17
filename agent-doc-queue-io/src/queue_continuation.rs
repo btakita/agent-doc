@@ -64,7 +64,7 @@ pub fn detect(file: &Path) -> Result<Option<queue_policy::QueueContinuation>> {
     // (not this), so it is unaffected and resumes the drain after recycling.
     crate::continuation_detect::detect_required_continuation_with(
         file,
-        agent_doc_snapshot_io::load,
+        agent_doc_snapshot_io::load_document_baseline,
         agent_doc_controller_io::project_controller::supervisor_recycle_yield_pending_for_file,
     )
 }
@@ -80,7 +80,7 @@ pub fn detect_for_content(
     crate::continuation_detect::detect_required_continuation_for_content_with(
         file,
         current_content,
-        agent_doc_snapshot_io::load,
+        agent_doc_snapshot_io::load_document_baseline,
         agent_doc_controller_io::project_controller::supervisor_recycle_yield_pending_for_file,
     )
 }
@@ -202,7 +202,7 @@ where
 mod tests {
     use super::*;
     use crate::continuation_marker::{
-        continuation_marker_path, load_continuation_marker, record_continuation_requested_head,
+        load_continuation_marker, record_continuation_requested_head,
     };
     use agent_doc_queue::queue_continuation::{
         DrainScope, deferred_backlog_ids, deferred_head_count, drainable_head_count,
@@ -303,7 +303,12 @@ mod tests {
 ## Queue\n\n<!-- agent:queue{queue_attrs} -->\n{queue_body}<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         doc
     }
 
@@ -526,7 +531,12 @@ mod tests {
             ],
         );
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         // No socket → not live IPC. operator-verify (#b) is deferred regardless,
         // so continuation must land on the drainable #c head.
         let continuation = detect(&doc).unwrap().expect("drainable head remains");
@@ -548,7 +558,12 @@ mod tests {
             ],
         );
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         assert!(
             detect(&doc).unwrap().is_none(),
             "all-deferred heads must not require continuation"
@@ -742,7 +757,12 @@ mod tests {
 ## Backlog\n\n<!-- agent:backlog priority queue -->\n- [ ] [#ov] [operator-verify] live drive\n<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert_eq!(
             detect(&doc)
@@ -817,7 +837,7 @@ mod tests {
 
         let continuation = crate::continuation_detect::detect_required_continuation_with(
             &doc,
-            agent_doc_snapshot_io::load,
+            agent_doc_snapshot_io::load_document_baseline,
             |_| true,
         )
         .unwrap();
@@ -895,7 +915,12 @@ mod tests {
             .unwrap()
             .replace("- -- stop placeholder\n", "--- stop\n- do [#x]\n");
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         // A stop fence at the head must not force continuation.
         assert!(detect(&doc).unwrap().is_none());
     }
@@ -1140,10 +1165,12 @@ mod tests {
         assert_eq!(found.0, doc);
         assert_eq!(found.1.head_prompt, "do [#seopdp]");
 
-        // Drain the queue but leave the marker file on disk (stale).
+        // Drain the queue but leave the continuation row present (stale).
         let _ = write_doc(&root, &["do [#seopdp]"], false, true);
-        let path = continuation_marker_path(&doc).unwrap().unwrap();
-        assert!(path.exists(), "stale marker still on disk before scan");
+        assert!(
+            load_continuation_marker(&doc).unwrap().is_some(),
+            "stale continuation remains before scan"
+        );
         // Scan re-confirms against the document, finds it no longer owes
         // continuation, returns None, and prunes the stale marker.
         assert!(
@@ -1155,7 +1182,10 @@ mod tests {
             .unwrap()
             .is_none()
         );
-        assert!(!path.exists(), "stale marker pruned during scan");
+        assert!(
+            load_continuation_marker(&doc).unwrap().is_none(),
+            "stale continuation pruned during scan"
+        );
     }
 
     // `#codex-stop-cross-doc-queue-continuation`: a marker for a document owned
@@ -1190,10 +1220,7 @@ mod tests {
         );
         // The foreign marker must NOT be pruned — it belongs to its own owner.
         assert!(
-            continuation_marker_path(&foreign)
-                .unwrap()
-                .unwrap()
-                .exists(),
+            load_continuation_marker(&foreign).unwrap().is_some(),
             "foreign marker must survive the skip (not stale)"
         );
 
@@ -1264,10 +1291,7 @@ mod tests {
 
         // The skipped foreign marker must survive for its own owner.
         assert!(
-            continuation_marker_path(&foreign)
-                .unwrap()
-                .unwrap()
-                .exists(),
+            load_continuation_marker(&foreign).unwrap().is_some(),
             "foreign marker must survive the skip (belongs to its own owner)"
         );
     }

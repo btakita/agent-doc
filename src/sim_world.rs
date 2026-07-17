@@ -3019,15 +3019,15 @@ struct Coverage {
     starting_timeout_coalesces: usize,
     prompt_duplicate_repairs: usize,
     normalization_repair_patches: usize,
-    sidecar_normalization_divergences: usize,
+    recovery_projection_normalization_divergences: usize,
     stale_source_buffer_skips: usize,
     reconnect_reread_decisions: usize,
     editorless_disk_fallbacks: usize,
     ipc_snapshot_live_prompt_blocks: usize,
     live_prompt_forward_merges: usize,
     already_applied_response_recoveries: usize,
-    ack_sidecar_only_repairs: usize,
-    ack_sidecar_only_blocks: usize,
+    ack_projection_only_repairs: usize,
+    ack_projection_only_blocks: usize,
     visible_duplicate_repairs: usize,
     post_commit_follow_up_handoffs: usize,
     starting_prompt_promotions: usize,
@@ -3304,13 +3304,14 @@ impl Coverage {
         self.starting_timeout_coalesces += other.starting_timeout_coalesces;
         self.prompt_duplicate_repairs += other.prompt_duplicate_repairs;
         self.normalization_repair_patches += other.normalization_repair_patches;
-        self.sidecar_normalization_divergences += other.sidecar_normalization_divergences;
+        self.recovery_projection_normalization_divergences +=
+            other.recovery_projection_normalization_divergences;
         self.stale_source_buffer_skips += other.stale_source_buffer_skips;
         self.reconnect_reread_decisions += other.reconnect_reread_decisions;
         self.editorless_disk_fallbacks += other.editorless_disk_fallbacks;
         self.already_applied_response_recoveries += other.already_applied_response_recoveries;
-        self.ack_sidecar_only_repairs += other.ack_sidecar_only_repairs;
-        self.ack_sidecar_only_blocks += other.ack_sidecar_only_blocks;
+        self.ack_projection_only_repairs += other.ack_projection_only_repairs;
+        self.ack_projection_only_blocks += other.ack_projection_only_blocks;
         self.visible_duplicate_repairs += other.visible_duplicate_repairs;
         self.post_commit_follow_up_handoffs += other.post_commit_follow_up_handoffs;
         self.starting_prompt_promotions += other.starting_prompt_promotions;
@@ -3672,7 +3673,12 @@ fn setup_baseline_drift_capture(
     let mut world = SimWorld::new(seed);
     world.apply(SimCommand::EditPrompt).unwrap();
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        &world.doc,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
     let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
     (dir, doc, capture, world)
 }
@@ -3682,7 +3688,11 @@ fn apply_response_and_save_current(doc: &Path, world: &mut SimWorld, response: &
     world.apply_captured_response()?;
     world.apply(SimCommand::Commit)?;
     std::fs::write(doc, &world.doc)?;
-    agent_doc_snapshot_io::save(doc, &world.doc, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        doc,
+        &world.doc,
+        agent_doc_ops_log_io::log_op,
+    )?;
     Ok(())
 }
 
@@ -7674,23 +7684,30 @@ fn already_applied_diverged_sim_recovers_dropped_response_without_loss() {
 }
 
 #[test]
-fn sidecar_normalization_divergence_sim_uses_normalized_content_ours() {
+fn recovery_projection_normalization_divergence_sim_uses_normalized_content_ours() {
     let mut world = SimWorld::new(2_015);
-    let sidecar = template_doc(
+    let recovery_projection = template_doc(
         "do #sidecardiv. spec-test-build-install-commit-push\n### Re: #sidecardiv — gpt-5\n\nDone.\n",
     );
-    let content_ours = sidecar.clone();
+    let content_ours = recovery_projection.clone();
     let normalize_prefix_lines =
         vec!["do #sidecardiv. spec-test-build-install-commit-push".to_string()];
 
-    world.apply_sidecar_normalization_fallback(&sidecar, &content_ours, &normalize_prefix_lines);
+    world.apply_canonical_normalization_recovery(
+        &recovery_projection,
+        &content_ours,
+        &normalize_prefix_lines,
+    );
 
-    assert_eq!(world.coverage.sidecar_normalization_divergences, 1);
+    assert_eq!(
+        world.coverage.recovery_projection_normalization_divergences,
+        1
+    );
     assert!(
         world
             .snapshot
             .contains("❯ do #sidecardiv. spec-test-build-install-commit-push"),
-        "rejected sidecar snapshot should fall back to normalized content_ours"
+        "rejected recovery projection should fall back to normalized content_ours"
     );
     assert_eq!(
         world
@@ -7703,7 +7720,7 @@ fn sidecar_normalization_divergence_sim_uses_normalized_content_ours() {
 }
 
 #[test]
-fn ack_sidecar_only_drift_sim_blocks_without_visible_proof() {
+fn ack_projection_only_drift_sim_blocks_without_visible_proof() {
     let mut world = SimWorld::new(2_012);
     world.doc = template_doc(
         "❯ do #acksidecar. spec-test-build-install-commit-push\n<!-- agent:boundary:live -->\n",
@@ -7714,22 +7731,22 @@ fn ack_sidecar_only_drift_sim_blocks_without_visible_proof() {
         "❯ do #acksidecar. spec-test-build-install-commit-push\n### Re: #acksidecar — gpt-5\n\nDone.\n<!-- agent:boundary:ack -->\n",
     );
 
-    world.handle_ack_sidecar_only_evidence(&ack_content);
+    world.handle_ack_projection_only_evidence(&ack_content);
 
-    assert_eq!(world.coverage.ack_sidecar_only_repairs, 0);
-    assert_eq!(world.coverage.ack_sidecar_only_blocks, 1);
+    assert_eq!(world.coverage.ack_projection_only_repairs, 0);
+    assert_eq!(world.coverage.ack_projection_only_blocks, 1);
     assert_eq!(
         world.snapshot, original_snapshot,
-        "sidecar-only ACK evidence must not become the committed snapshot when the visible file still lags"
+        "projection-only ACK evidence must not become the committed snapshot when the visible file still lags"
     );
     assert!(
         !world.doc.contains("### Re: #acksidecar — gpt-5"),
-        "the sim must keep the sidecar-only distinction from ordinary disk repair"
+        "the sim must keep projection-only evidence distinct from ordinary disk repair"
     );
 }
 
 #[test]
-fn ack_sidecar_only_matching_visible_sim_can_refresh_snapshot() {
+fn ack_projection_only_matching_visible_sim_can_refresh_snapshot() {
     let mut world = SimWorld::new(2_014);
     let ack_content = template_doc(
         "❯ do #ackvisible. spec-test-build-install-commit-push\n### Re: #ackvisible — gpt-5\n\nDone.\n<!-- agent:boundary:ack -->\n",
@@ -7737,10 +7754,10 @@ fn ack_sidecar_only_matching_visible_sim_can_refresh_snapshot() {
     world.doc = ack_content.clone();
     world.snapshot = template_doc("<!-- agent:boundary:base -->\n");
 
-    world.handle_ack_sidecar_only_evidence(&ack_content);
+    world.handle_ack_projection_only_evidence(&ack_content);
 
-    assert_eq!(world.coverage.ack_sidecar_only_repairs, 1);
-    assert_eq!(world.coverage.ack_sidecar_only_blocks, 0);
+    assert_eq!(world.coverage.ack_projection_only_repairs, 1);
+    assert_eq!(world.coverage.ack_projection_only_blocks, 0);
     assert_eq!(
         world.snapshot, ack_content,
         "ACK-content can refresh durable state only when it matches the operator-visible document"
@@ -8322,7 +8339,7 @@ fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
         }
     );
 
-    // Stale/sidecar-only ACK evidence is kept distinct from visible-file repair,
+    // Stale/projection-only ACK evidence is kept distinct from visible-file repair,
     // and superseded captures retire only with proof.
     let mut ack_world = SimWorld::new(2_262);
     ack_world.doc = template_doc(
@@ -8332,9 +8349,9 @@ fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
     let ack_content = template_doc(
         "❯ do #transitionack. spec-test-build-install-commit-push\n### Re: #transitionack — gpt-5\n\nDone.\n<!-- agent:boundary:ack -->\n",
     );
-    ack_world.handle_ack_sidecar_only_evidence(&ack_content);
-    assert_eq!(ack_world.coverage.ack_sidecar_only_repairs, 0);
-    assert_eq!(ack_world.coverage.ack_sidecar_only_blocks, 1);
+    ack_world.handle_ack_projection_only_evidence(&ack_content);
+    assert_eq!(ack_world.coverage.ack_projection_only_repairs, 0);
+    assert_eq!(ack_world.coverage.ack_projection_only_blocks, 1);
     assert!(
         !ack_world
             .snapshot
@@ -8342,12 +8359,12 @@ fn closeout_recovery_transition_scenarios_cover_simworld_inputs() {
     );
     assert_eq!(
         closeout_recovery_decision_from_state(
-            CloseoutRecoveryState::SidecarVisibleDrift,
+            CloseoutRecoveryState::RecoveryProjectionVisibleDrift,
             CloseoutRecoveryDecisionInput::default(),
             recovery_command,
         )
         .as_str(),
-        "reset_sidecars_from_visible"
+        "refresh_recovery_projections_from_visible"
     );
     assert_eq!(
         closeout_recovery_decision_from_state(
@@ -8426,7 +8443,12 @@ fn halt_response_does_not_strike_queue_head_but_done_flag_does() {
         "<!-- /agent:queue -->\n",
     );
     std::fs::write(&doc, content).unwrap();
-    agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        content,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
 
     // A halt response that names the head with a trailing modifier must NOT
     // register as targeting the head (exact-topic match only).
@@ -8491,7 +8513,12 @@ fn baseline_drift_benign_user_commit_outside_response_auto_refreshes() {
         )
         .unwrap();
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        &world.doc,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
 
     agent_doc_capture_io::validate_replay(&doc, &capture)
         .expect("benign user commit outside response must auto-refresh");
@@ -8505,7 +8532,7 @@ fn baseline_drift_benign_user_commit_outside_response_auto_refreshes() {
     assert_eq!(
         refreshed.snapshot_hash.as_deref(),
         Some(agent_doc_hash::content_hash(&world.doc).as_str()),
-        "snapshot hash should refresh to the user-committed baseline"
+        "the ledger may identify the logical baseline without making its cold projection live authority"
     );
     let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
     assert!(
@@ -8525,7 +8552,12 @@ fn baseline_drift_user_edit_inside_committed_response_fails_closed() {
         "User rewrote the committed response.",
     );
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        &world.doc,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
 
     let err = agent_doc_capture_io::validate_replay(&doc, &capture)
         .expect_err("editing the committed response body must fail closed");
@@ -8546,7 +8578,12 @@ fn baseline_drift_user_edit_matches_normalized_response_adopts() {
         .doc
         .replace("❯ Submodule pointer updated.", "Submodule pointer updated.");
     std::fs::write(&doc, &world.doc).unwrap();
-    agent_doc_snapshot_io::save(&doc, &world.doc, agent_doc_ops_log_io::log_op).unwrap();
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
+        &world.doc,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
 
     agent_doc_capture_io::validate_replay(&doc, &capture)
         .expect("user-normalized response body should be adopted");
@@ -8560,7 +8597,7 @@ fn baseline_drift_user_edit_matches_normalized_response_adopts() {
     assert_eq!(
         refreshed.snapshot_hash.as_deref(),
         Some(agent_doc_hash::content_hash(&world.doc).as_str()),
-        "snapshot hash should reflect the normalized user-cleaned response"
+        "the ledger may identify the logical baseline without making its cold projection live authority"
     );
 }
 
@@ -8597,7 +8634,7 @@ fn apply_jb_cache_conflict_accept(world: &mut SimWorld) {
 /// before showing the dialog), but the binary's IPC callback returns failure
 /// and the cycle never reaches `Committed`. The world stops at `WriteApplied`
 /// with the response visible in `self.doc` and the snapshot still pointing at
-/// the pre-response state.
+/// the state before response capture.
 ///
 /// This is the root-cause hypothesis 1/2 from
 /// `tasks/agent-doc/plan-jb-cache-cancel-stuck-cycle.md`.
@@ -8894,10 +8931,7 @@ enum CacheConflict {
 /// production read-authority reconcile without a live IDE.
 struct SimEditor {
     kind: EditorKind,
-    editor_id: String,
     path: PathBuf,
-    /// Canonical path string used by plugin-owner lease keys.
-    key: String,
     liveness_tag: String,
     replica_identity: String,
     replica: agent_doc_merge::crdt_sync::ReplicaState,
@@ -8917,8 +8951,6 @@ impl SimEditor {
         let buffer = std::fs::read_to_string(path)
             .map_err(|err| anyhow!("SimEditor attach read {}: {err}", path.display()))?;
         let key = editor_buffer_key(path);
-        let _ =
-            agent_doc_plugin_owner::try_acquire_plugin_owner(&key, editor_id, std::process::id());
         let document_hash = agent_doc_hash::document_id_for_path(path);
         let liveness_tag = format!("sim-editor:{editor_id}:{key}");
         agent_doc_reliable_sync_io::global_liveness_plane()
@@ -8937,9 +8969,7 @@ impl SimEditor {
             agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)?;
         Ok(Self {
             kind,
-            editor_id: editor_id.to_string(),
             path: path.to_path_buf(),
-            key,
             liveness_tag,
             replica_identity,
             replica,
@@ -8998,7 +9028,6 @@ impl SimEditor {
                 pid: std::process::id().into(),
                 observed_tags: vec![self.liveness_tag.clone()],
             }]);
-        agent_doc_plugin_owner::release_plugin_owner(&self.key, &self.editor_id);
         Ok(())
     }
 
@@ -9070,8 +9099,8 @@ impl SimEditor {
     }
 }
 
-/// Canonical live-buffer sidecar key for a document path. Matches
-/// `realtime_model::indicator_path`: canonicalize, falling back to the raw path.
+/// Canonical Lazily editor-replica key for a document path: canonicalize,
+/// falling back to the raw path.
 fn editor_buffer_key(path: &Path) -> String {
     std::fs::canonicalize(path)
         .unwrap_or_else(|_| path.to_path_buf())
@@ -9101,11 +9130,11 @@ fn editor_project(disk: &str) -> (tempfile::TempDir, PathBuf) {
     std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
     // SimEditor is an in-process deterministic editor fixture. The production
-    // path observes CPC-owned relay state; this marker keeps SimWorld tests on
-    // their local relay without spawning a real project controller.
-    std::fs::write(dir.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
+    // path observes CPC-owned relay state; seed the in-process Lazily model
+    // directly so there is no filesystem state to drift.
     let doc = dir.path().join("doc.md");
     std::fs::write(&doc, disk).unwrap();
+    agent_doc_crdt_relay_io::seed_embedded_relay_for_file(&doc).unwrap();
     (dir, doc)
 }
 
@@ -9216,7 +9245,7 @@ fn simeditor_save_then_close_falls_back_to_disk_authority() {
     assert_eq!(closed.authority, DocAuthority::Disk);
     assert_eq!(
         closed.reason, "editor_absent",
-        "closing the document must clear the live-buffer sidecar"
+        "closing the document must deregister the Lazily editor replica"
     );
     drop(dir);
 }
@@ -9333,15 +9362,15 @@ fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_ba
 
     // 3. Drain-owner gate (#kp5z): a self-driving loop owns the drain (fresh
     //    lease), so the supervisor must NOT double-inject (SkipSelfDrivingLoopOwner).
-    agent_doc_queue::drain_owner::refresh_drain_owner_lease(
+    agent_doc_queue_io::drain_owner::refresh_drain_owner_lease(
         &doc_key,
-        agent_doc_queue::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
+        agent_doc_queue_io::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
     )
     .unwrap();
-    let lease = agent_doc_queue::drain_owner::read_drain_owner_lease(&doc_key)
+    let lease = agent_doc_queue_io::drain_owner::read_drain_owner_lease(&doc_key)
         .expect("drain-owner lease present after refresh");
     assert!(
-        agent_doc_queue::drain_owner::fresh_drain_owner_lease(&doc_key, lease.heartbeat_secs)
+        agent_doc_queue_io::drain_owner::fresh_drain_owner_lease(&doc_key, lease.heartbeat_secs)
             .is_some(),
         "a fresh drain-owner lease must gate the supervisor drain to the loop owner"
     );
@@ -9390,9 +9419,9 @@ fn integrated_editor_edit_routes_drains_under_drain_owner_gate_and_broadcasts_ba
     );
 
     // The loop terminates: release the drain-owner lease back to the supervisor.
-    agent_doc_queue::drain_owner::clear_drain_owner_lease(&doc_key);
+    agent_doc_queue_io::drain_owner::clear_drain_owner_lease(&doc_key);
     assert!(
-        agent_doc_queue::drain_owner::read_drain_owner_lease(&doc_key).is_none(),
+        agent_doc_queue_io::drain_owner::read_drain_owner_lease(&doc_key).is_none(),
         "clearing the lease hands the drain back to the supervisor"
     );
     drop(dir);
@@ -10437,7 +10466,7 @@ mod crdt_relay_sim {
 /// keyed per-document through a real tracked path, no live editor / tmux / socket.
 mod crdt_relay_host_sim {
     use agent_doc_crdt_relay_io::{
-        commit_barrier_for_file_with_authority, recover_hub_from_disk, with_hub,
+        commit_barrier_for_file_with_authority, recover_hub_from_projection, with_hub,
     };
     use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
     use agent_doc_document_realtime::crdt_relay::{RelayHub, mint_client_id};
@@ -10528,9 +10557,9 @@ mod crdt_relay_host_sim {
     }
 
     #[test]
-    fn live_supervisor_restart_recovers_canonical_from_disk_projection() {
+    fn live_supervisor_restart_recovers_canonical_from_ledger_projection() {
         // Supervisor restart: the live recovery path rebuilds the per-document
-        // canonical replica from the last disk recovery projection.
+        // canonical replica from the last durable recovery projection.
         let (_dir, doc) = temp_doc("live-recover.md");
         let mut prior = RelayHub::new(1);
         let ed = mint_client_id("intellij:prior-restart");
@@ -10538,7 +10567,7 @@ mod crdt_relay_host_sim {
         prior.apply_local(ed, 0, 0, "survives-restart").unwrap();
         let projection = prior.projection_bytes();
 
-        recover_hub_from_disk(&doc, &projection).unwrap();
+        recover_hub_from_projection(&doc, &projection, None).unwrap();
         with_hub(&doc, |hub| {
             assert_eq!(hub.canonical_text(), "survives-restart");
         })

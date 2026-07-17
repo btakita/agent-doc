@@ -76,7 +76,7 @@ fn log_snapshot_recovery_warning(file: &Path, context: &str, detail: impl Displa
 }
 
 fn load_snapshot_recovery_only(file: &Path, context: &str) -> Option<String> {
-    match agent_doc_snapshot_io::load(file) {
+    match agent_doc_snapshot_io::load_document_baseline(file) {
         Ok(snapshot) => snapshot,
         Err(err) => {
             log_snapshot_recovery_warning(file, context, err);
@@ -86,7 +86,11 @@ fn load_snapshot_recovery_only(file: &Path, context: &str) -> Option<String> {
 }
 
 fn save_snapshot_recovery_only(file: &Path, content: &str, context: &str) {
-    if let Err(err) = agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op) {
+    if let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        content,
+        agent_doc_ops_log_io::log_op,
+    ) {
         log_snapshot_recovery_warning(file, context, err);
     }
 }
@@ -119,7 +123,7 @@ pub fn consume_queue_prompt_with_outcome(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, &[], 1, false, effects)
+    consume_queue_prompts_with_options(file, &[], 1, false, None, effects)
 }
 
 /// Consume up to `count` leading free-text prompts in one revision-pinned
@@ -133,7 +137,7 @@ pub fn consume_free_text_queue_prompts_with_outcome(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, &[], count.max(1), skip_visible_guard, effects)
+    consume_queue_prompts_with_options(file, &[], count.max(1), skip_visible_guard, None, effects)
 }
 
 pub fn consume_queue_prompts_for_done_ids_with_outcome(
@@ -141,7 +145,7 @@ pub fn consume_queue_prompts_for_done_ids_with_outcome(
     done_ids: &[String],
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, done_ids, 1, false, effects)
+    consume_queue_prompts_with_options(file, done_ids, 1, false, None, effects)
 }
 
 pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
@@ -149,7 +153,7 @@ pub fn consume_queue_prompts_for_done_ids_force_disk_with_outcome(
     done_ids: &[String],
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, done_ids, 1, true, effects)
+    consume_queue_prompts_with_options(file, done_ids, 1, true, None, effects)
 }
 
 /// Strike the active queue head, **skipping the visible-write idle guard**, for
@@ -163,7 +167,7 @@ pub fn consume_queue_prompt_force_disk(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, &[], 1, true, effects)
+    consume_queue_prompts_with_options(file, &[], 1, true, None, effects)
 }
 
 pub fn consume_queue_prompts_with_outcome(
@@ -172,7 +176,27 @@ pub fn consume_queue_prompts_with_outcome(
     skip_visible_guard: bool,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    consume_queue_prompts_with_options(file, done_ids, 1, skip_visible_guard, effects)
+    consume_queue_prompts_with_options(file, done_ids, 1, skip_visible_guard, None, effects)
+}
+
+/// Consume exactly the head observed by the caller. If another write already
+/// advanced the queue, the stale consume becomes a no-op instead of consuming
+/// the next operator intent.
+pub fn consume_queue_prompt_if_head_matches_with_outcome(
+    file: &Path,
+    expected_head: &str,
+    done_ids: &[String],
+    skip_visible_guard: bool,
+    effects: &dyn QueueConsumeWriteEffects,
+) -> Result<Option<QueueConsumptionOutcome>> {
+    consume_queue_prompts_with_options(
+        file,
+        done_ids,
+        1,
+        skip_visible_guard,
+        Some(expected_head),
+        effects,
+    )
 }
 
 fn consume_queue_prompts_with_options(
@@ -180,6 +204,7 @@ fn consume_queue_prompts_with_options(
     done_ids: &[String],
     free_text_count: usize,
     skip_visible_guard: bool,
+    expected_head: Option<&str>,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
     // Hold the document lock for the entire read-parse-write cycle to prevent
@@ -201,6 +226,17 @@ fn consume_queue_prompts_with_options(
     else {
         return Ok(None);
     };
+    if expected_head.is_some_and(|expected| plan.consumed_text.trim() != expected.trim()) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_consume_stale_head_noop expected_hash={} observed_hash={} recovery=monotonic_noop",
+                agent_doc_hash::content_hash(expected_head.unwrap_or_default().trim()),
+                agent_doc_hash::content_hash(plan.consumed_text.trim())
+            ),
+        );
+        return Ok(None);
+    }
 
     record_queue_consumption_proofs(file, &plan, QueueConsumptionProofStage::BeforeMutation)?;
 
@@ -366,10 +402,9 @@ pub fn strike_answered_free_text_queue_heads(
     // be struck — a head absent from it is an in-flight operator edit and must not
     // be struck this cycle. A missing baseline (rare; preflight writes it each
     // cycle) skips the gate so legacy strike behavior is preserved.
-    let baseline = match agent_doc_fs::baseline_path_for(file) {
-        Ok(path) => std::fs::read_to_string(&path).ok(),
-        Err(_) => None,
-    };
+    let baseline = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     let keys = answered_free_text_head_node_keys(&content, response_body, baseline.as_deref())?;
     if keys.is_empty() {
         return Ok(0);
@@ -507,10 +542,7 @@ fn capture_response_body_for_commit(file: &Path) -> Option<String> {
     {
         return Some(projected.response_body);
     }
-    agent_doc_capture_io::load_by_id(file, capture_id)
-        .ok()
-        .flatten()
-        .map(|record| record.response_body)
+    None
 }
 
 /// Strike every active queue head that is non-drainable **noise**, at ANY position
@@ -1444,6 +1476,34 @@ mod core_tests {
         super::consume_queue_prompt_force_disk(file, &TEST_EFFECTS)
     }
 
+    #[test]
+    fn expected_head_fence_never_consumes_a_newer_operator_intent() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:queue auto -->\n",
+            "- second operator intent\n",
+            "<!-- /agent:queue -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+
+        let outcome = super::consume_queue_prompt_if_head_matches_with_outcome(
+            &doc,
+            "first operator intent",
+            &[],
+            true,
+            &TEST_EFFECTS,
+        )
+        .unwrap();
+
+        assert!(outcome.is_none());
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content);
+    }
+
     fn mark_completed_queue_prompts_for_done_ids(
         file: &Path,
         done_ids: &[String],
@@ -1628,7 +1688,12 @@ mod core_tests {
             prompt = prompt
         );
         fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = plan_queue_prompt_consumption(&doc, &content, &[])
             .unwrap()
@@ -1702,7 +1767,12 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let marked =
             mark_completed_queue_prompts_for_done_ids(&doc, &["opportunistic".to_string()], true)
@@ -1713,7 +1783,9 @@ mod core_tests {
         assert!(updated.contains("- do [#head]\n"), "{updated}");
         assert!(updated.contains("- ~~do [#opportunistic]~~\n"), "{updated}");
         assert!(updated.contains("- do [#tail]\n"), "{updated}");
-        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snapshot.contains("- ~~do [#opportunistic]~~\n"),
             "{snapshot}"
@@ -1740,7 +1812,12 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let marked =
             mark_completed_queue_prompts_for_done_ids(&doc, &["duplicate".to_string()], true)
@@ -1748,7 +1825,9 @@ mod core_tests {
         assert_eq!(marked, 2);
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(updated.matches("~~").count(), 4, "{updated}");
-        let updated_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let updated_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             updated_snapshot.contains("- ~~do first copy [#duplicate]~~\n"),
             "the independently matching snapshot item must still be synchronized: {updated_snapshot}"
@@ -1940,7 +2019,12 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = consume_queue_prompt_with_outcome(&doc).unwrap();
         assert!(
@@ -2013,7 +2097,12 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .unwrap()
@@ -2147,7 +2236,12 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .unwrap()
@@ -2219,7 +2313,12 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .unwrap()
@@ -2288,7 +2387,12 @@ mod core_tests {
             "- do the thing\n",
             "<!-- /agent:queue -->\n",
         );
-        agent_doc_snapshot_io::save(&doc, snap, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snap,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .expect("consume must not bail on a reconcilable divergence");
@@ -2302,7 +2406,9 @@ mod core_tests {
             result.contains("- user added later"),
             "the concurrently-added item must be preserved (document wins):\n{result}"
         );
-        let snap_result = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap_result = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap_result.contains("- user added later"),
             "snapshot must adopt the reconciled document queue:\n{snap_result}"
@@ -2336,7 +2442,12 @@ mod core_tests {
             "- handle the old request\n",
             "<!-- /agent:queue -->\n",
         );
-        agent_doc_snapshot_io::save(&doc, snap, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snap,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         // Record the live-buffer drift evidence for the document head.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snap), Some(content)).unwrap();
@@ -2355,7 +2466,9 @@ mod core_tests {
             !result.contains("- handle the new live-buffer request"),
             "the document queue head must be consumed:\n{result}"
         );
-        let snap_result = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap_result = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snap_result.contains("- handle the old request")
                 && snap_result.contains("handle the new live-buffer request"),
@@ -2397,7 +2510,12 @@ mod core_tests {
             "- handle the old request\n",
             "<!-- /agent:queue -->\n",
         );
-        agent_doc_snapshot_io::save(&doc, snap, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snap,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snap), Some(content)).unwrap();
         agent_doc_cycle_state_io::record_dropped_queue_prompts(&doc, &["test".to_string()])
@@ -2417,7 +2535,9 @@ mod core_tests {
             result.contains("- handle the old request"),
             "following document queue item must stay live:\n{result}"
         );
-        let snap_result = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap_result = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap_result.contains("- handle the old request") && !snap_result.contains("- test"),
             "diverged recovery snapshot must not retarget the hot path:\n{snap_result}"
@@ -2451,7 +2571,12 @@ mod core_tests {
             "- handle the old request\n",
             "<!-- /agent:queue -->\n",
         );
-        agent_doc_snapshot_io::save(&doc, snap, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snap,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         // No cycle_state dropped-queue evidence recorded.
 
         let outcome = consume_queue_prompt_force_disk(&doc)
@@ -2490,7 +2615,12 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let keys = id_backed_head_node_keys(content, "orphangone").unwrap();
         assert_eq!(keys.len(), 1, "the orphaned head must be targetable");
@@ -2504,7 +2634,9 @@ mod core_tests {
             result.contains("- do [#liveone]\n"),
             "drainable open id head must remain queued:\n{result}"
         );
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snap, result, "detached disk strike must update snapshot");
     }
     #[test]
@@ -2523,7 +2655,12 @@ mod core_tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let err = strike_orphan_id_backed_queue_head(&doc, "stillopen").unwrap_err();
         assert!(
@@ -2552,7 +2689,12 @@ mod core_tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = consume_queue_prompt_force_disk(&doc)
             .expect("node-keyed queue consume should handle duplicates")
@@ -2881,7 +3023,12 @@ mod core_tests {
             FTSTRIKE_RESPONSE,
         );
         std::fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let struck = strike_answered_free_text_queue_heads(&doc, FTSTRIKE_RESPONSE, true).unwrap();
         assert_eq!(struck, 2, "both answered free-text heads must be struck");
@@ -3180,7 +3327,12 @@ Old.
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(
@@ -3225,7 +3377,9 @@ Old.
         assert_eq!(prune_noise_queue_heads(&doc).unwrap(), 3);
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result, planned, "detached disk prune should apply plan");
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snap, planned, "detached disk prune should update snapshot");
     }
 
@@ -3253,7 +3407,12 @@ Old.
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(struck, 1, "only the orphan #kcb5 head must be struck");
@@ -3274,7 +3433,9 @@ Old.
         assert_eq!(prune_noise_queue_heads(&doc).unwrap(), 1);
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result, planned, "detached disk prune should apply plan");
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snap, planned, "detached disk prune should update snapshot");
     }
 
@@ -3294,7 +3455,12 @@ Old.
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let keys = id_backed_head_node_keys(content, "freshqueueauth").unwrap();
         assert_eq!(
@@ -3309,7 +3475,7 @@ Old.
             result, content,
             "detached disk ack must mutate the queue head"
         );
-        let snap = agent_doc_snapshot_io::load(&doc)
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
             .expect("snapshot saved");
         assert_ne!(snap, content, "detached disk ack must mutate snapshot");
@@ -3339,7 +3505,12 @@ Old.
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let err = acknowledge_open_id_backed_queue_head(&doc, "freshqueueauth")
             .expect_err("prose correction heads stay on the free-text consume path");
@@ -3370,7 +3541,12 @@ Old.
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert_eq!(
             prune_noise_queue_heads(&doc).unwrap(),
@@ -3417,7 +3593,12 @@ Old.
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let (planned, struck) = strike_all_noise_queue_heads(content).unwrap();
         assert_eq!(struck, 1, "only the all-log pasted block must be excised");
@@ -3439,7 +3620,9 @@ Old.
         assert_eq!(prune_noise_queue_heads(&doc).unwrap(), 1);
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result, planned, "detached disk prune should apply plan");
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snap, planned, "detached disk prune should update snapshot");
     }
 }

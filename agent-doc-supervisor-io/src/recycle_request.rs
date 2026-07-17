@@ -1,16 +1,16 @@
-//! Cross-supervisor recycle-REQUEST marker storage.
+//! Cross-supervisor recycle-request state.
 //!
-//! Install fan-out writes one per served route-owned document; the owning
-//! supervisor's idle loop reads it and recycles onto the freshly-installed binary
-//! at its next idle boundary, then clears it once fresh.
+//! Install fan-out records one typed fact per served route-owned document in the
+//! project `state.db`; the owning supervisor consumes it at its next idle boundary.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use agent_doc_state_backbone::{StateEvent, StateFact, SupervisorRecyclePhase};
 use agent_doc_supervisor::recycle_request::{
-    RECYCLE_REQUEST_DIR, RecycleRequest, recycle_request, recycle_request_is_fresh,
+    RecycleRequest, recycle_request, recycle_request_is_fresh,
 };
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -19,46 +19,29 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-/// Compute the recycle-request path for a document. Mirrors the recycle-yield
-/// layout: hash the document path and land the sidecar in the nearest ancestor
-/// `.agent-doc/` directory, so the request is keyed per served document.
-fn recycle_request_path(file: &str) -> PathBuf {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    file.hash(&mut hasher);
-    let hash = hasher.finish();
-    let mut dir = PathBuf::from(file);
-    dir.pop();
-    loop {
-        if dir.join(".agent-doc").is_dir() {
-            return dir
-                .join(RECYCLE_REQUEST_DIR)
-                .join(format!("{hash:016x}.json"));
-        }
-        if !dir.pop() {
-            let parent = PathBuf::from(file)
-                .parent()
-                .unwrap_or(Path::new("."))
-                .to_path_buf();
-            return parent
-                .join(RECYCLE_REQUEST_DIR)
-                .join(format!("{hash:016x}.json"));
-        }
-    }
-}
-
 /// Write (or refresh) a recycle-request for `file` with the current heartbeat.
 pub fn request_recycle(file: &str, reason: &str) -> Result<()> {
-    let path = recycle_request_path(file);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| {
-            format!("failed to create recycle-request dir {}", parent.display())
-        })?;
-    }
-    let request = recycle_request(reason, now_secs());
-    let body = serde_json::to_string(&request).context("failed to serialize recycle-request")?;
-    std::fs::write(&path, body)
-        .with_context(|| format!("failed to write recycle-request {}", path.display()))?;
+    let Some(identity) = crate::state_events::document_state_identity(Path::new(file))? else {
+        return Ok(());
+    };
+    let ledger = crate::state_events::load_ledger(&identity.project_root)?;
+    let recycle_epoch = ledger
+        .document_epoch(&identity.document_hash)
+        .saturating_add(1);
+    let marked_secs = now_secs();
+    let event = StateEvent::new(
+        format!(
+            "supervisor-recycle-requested:{}:epoch-{recycle_epoch}",
+            identity.document_hash
+        ),
+        StateFact::SupervisorRecycleRequested {
+            document_hash: identity.document_hash,
+            reason: reason.to_string(),
+            recycle_epoch,
+            marked_secs,
+        },
+    );
+    crate::state_events::append_event(&identity.project_root, &event)?;
     Ok(())
 }
 
@@ -69,9 +52,18 @@ pub fn request_recycle_for_doc(file: &Path, reason: &str) -> Result<()> {
 
 /// Read the raw recycle-request for `file` regardless of freshness.
 pub fn read_recycle_request(file: &str) -> Option<RecycleRequest> {
-    let path = recycle_request_path(file);
-    let content = std::fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&content).ok()
+    let identity = crate::state_events::document_state_identity(Path::new(file)).ok()??;
+    let ledger = crate::state_events::load_ledger(&identity.project_root).ok()?;
+    let recycle = ledger
+        .project_document(&identity.document_hash)?
+        .supervisor
+        .recycle;
+    (recycle.phase == SupervisorRecyclePhase::Requested).then(|| {
+        recycle_request(
+            recycle.reason.as_deref().unwrap_or("unspecified"),
+            recycle.marked_secs,
+        )
+    })
 }
 
 /// Return the recycle-request iff it exists and is fresh against `now`.
@@ -87,15 +79,42 @@ pub fn recycle_request_pending(file: &Path) -> bool {
 
 /// Best-effort clear of the recycle-request.
 pub fn clear_recycle_request(file: &str) {
-    let path = recycle_request_path(file);
-    if let Err(err) = std::fs::remove_file(&path)
-        && err.kind() != std::io::ErrorKind::NotFound
-    {
-        eprintln!(
-            "[agent-doc] warning: failed to clear recycle-request {}: {err}",
-            path.display()
-        );
+    if let Err(err) = clear_recycle_request_inner(file) {
+        eprintln!("[agent-doc] warning: failed to clear recycle-request state: {err}");
     }
+}
+
+fn clear_recycle_request_inner(file: &str) -> Result<()> {
+    let Some(identity) = crate::state_events::document_state_identity(Path::new(file))? else {
+        return Ok(());
+    };
+    let ledger = crate::state_events::load_ledger(&identity.project_root)?;
+    let Some(recycle) = ledger
+        .project_document(&identity.document_hash)
+        .map(|projection| projection.supervisor.recycle)
+        .filter(|recycle| recycle.phase == SupervisorRecyclePhase::Requested)
+    else {
+        return Ok(());
+    };
+    let recycle_epoch = ledger
+        .document_epoch(&identity.document_hash)
+        .saturating_add(1);
+    let event = StateEvent::new(
+        format!(
+            "supervisor-recycle-settled:{}:epoch-{recycle_epoch}",
+            identity.document_hash
+        ),
+        StateFact::SupervisorRecycleSettled {
+            document_hash: identity.document_hash,
+            reason: recycle
+                .reason
+                .unwrap_or_else(|| "request_consumed".to_string()),
+            recycle_epoch,
+            marked_secs: now_secs(),
+        },
+    );
+    crate::state_events::append_event(&identity.project_root, &event)?;
+    Ok(())
 }
 
 #[cfg(test)]

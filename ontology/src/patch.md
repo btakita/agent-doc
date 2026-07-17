@@ -12,7 +12,7 @@ content here
 <!-- /patch:component-name -->
 ```
 
-In IPC mode, patches are written as JSON files to `.agent-doc/patches/<hash>.json` for the IDE plugin to apply via the Document API.
+In editor mode, the binary sends a named, generation-fenced intent to the owning editor's PID-scoped socket. The editor applies it through the Document API and publishes accepted/visible receipts through Lazily.
 
 ## [Axiology](../../../existence-lang/ontology/src/axiology.md)
 

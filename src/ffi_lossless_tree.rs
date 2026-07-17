@@ -1,7 +1,7 @@
 //! `#lzlosstree` Phase 4 FFI surface: lossless-tree frame exchange for editor plugins.
 //!
 //! Editor plugins that advertise `lossless_tree_crdt_v1` (see
-//! [`agent_doc_debounce::LOSSLESS_TREE_CRDT_CAPABILITY`]) call these to move between a
+//! [`agent_doc_document_realtime::editor_contract::LOSSLESS_TREE_CRDT_CAPABILITY`]) call these to move between a
 //! session document's text and its durable lossless-tree projection (a full op-stream
 //! plus a rendered-text hash). A plugin renders an incoming projection back to buffer
 //! text, and projects its own buffer to a frame it can ship back.
@@ -20,11 +20,11 @@ use std::ffi::{CStr, CString, c_char};
 
 /// The capability token a plugin advertises to speak lossless-tree frames. Returns a
 /// borrowed static C string — do **not** free. Mirrors
-/// `agent_doc_debounce::LOSSLESS_TREE_CRDT_CAPABILITY`.
+/// `agent_doc_document_realtime::editor_contract::LOSSLESS_TREE_CRDT_CAPABILITY`.
 #[unsafe(no_mangle)]
 pub extern "C" fn agent_doc_lossless_tree_capability() -> *const c_char {
     debug_assert_eq!(
-        agent_doc_debounce::LOSSLESS_TREE_CRDT_CAPABILITY,
+        agent_doc_document_realtime::editor_contract::LOSSLESS_TREE_CRDT_CAPABILITY,
         "lossless_tree_crdt_v1"
     );
     c"lossless_tree_crdt_v1".as_ptr()
@@ -167,7 +167,10 @@ mod tests {
         let token = unsafe { CStr::from_ptr(agent_doc_lossless_tree_capability()) }
             .to_str()
             .unwrap();
-        assert_eq!(token, agent_doc_debounce::LOSSLESS_TREE_CRDT_CAPABILITY);
+        assert_eq!(
+            token,
+            agent_doc_document_realtime::editor_contract::LOSSLESS_TREE_CRDT_CAPABILITY
+        );
     }
 
     #[test]

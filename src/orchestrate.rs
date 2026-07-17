@@ -146,13 +146,7 @@ pub(crate) trait LifecycleOps {
     }
 
     fn preflight(&self, file: &Path) -> Result<PreflightOutput>;
-    fn finalize(
-        &self,
-        file: &Path,
-        baseline_file: Option<&str>,
-        response: &str,
-        mode: ResolvedMode,
-    ) -> Result<()>;
+    fn finalize(&self, file: &Path, response: &str, mode: ResolvedMode) -> Result<()>;
     fn session_check(&self, file: &Path) -> Result<()>;
 }
 
@@ -231,13 +225,7 @@ impl LifecycleOps for CliLifecycleOps {
         self.run_output_json(&["preflight", &file_arg])
     }
 
-    fn finalize(
-        &self,
-        file: &Path,
-        baseline_file: Option<&str>,
-        response: &str,
-        mode: ResolvedMode,
-    ) -> Result<()> {
+    fn finalize(&self, file: &Path, response: &str, mode: ResolvedMode) -> Result<()> {
         let exe = current_agent_doc_binary()?;
         let file_arg = file.to_string_lossy().into_owned();
 
@@ -246,9 +234,6 @@ impl LifecycleOps for CliLifecycleOps {
             .arg(&file_arg)
             .arg("--origin")
             .arg("orchestrate");
-        if let Some(path) = baseline_file {
-            cmd.arg("--baseline-file").arg(path);
-        }
         if mode.is_crdt() {
             cmd.arg("--stream");
         } else if mode.is_template() {
@@ -679,7 +664,7 @@ fn exchange_task_source_changed(
 /// picked by `extract_tasks_from_text` when the user's directive is a bare
 /// line (not a list) at the exchange tail.
 fn scope_exchange_for_tasks(exchange: &str, file: &Path) -> String {
-    let snap_content = match agent_doc_snapshot_io::load(file) {
+    let snap_content = match agent_doc_snapshot_io::load_document_baseline(file) {
         Ok(Some(s)) => s,
         _ => return exchange.to_string(),
     };
@@ -840,7 +825,7 @@ Stopped sequential orchestration after {completed_steps} of {total_steps} step(s
 <!-- /patch:exchange -->\n"
     );
     lifecycle
-        .finalize(file, None, &response, fm.resolve_mode())
+        .finalize(file, &response, fm.resolve_mode())
         .with_context(|| {
             format!(
                 "failed parent orchestration batch-change closeout after {completed_steps}/{total_steps} step(s)"
@@ -897,7 +882,6 @@ mod th {
         }
     }
     pub(crate) struct FakeLifecycleOps {
-        pub(crate) baseline_file: String,
         pub(crate) admit_calls: RefCell<usize>,
         pub(crate) preflight_calls: RefCell<usize>,
         pub(crate) finalize_calls: RefCell<Vec<String>>,
@@ -919,23 +903,15 @@ mod th {
                     doc.lines().last().unwrap_or("")
                 )),
                 no_changes: false,
-                baseline_file: Some(self.baseline_file.clone()),
                 ..PreflightOutput::default()
             })
         }
 
-        fn finalize(
-            &self,
-            file: &Path,
-            _baseline_file: Option<&str>,
-            response: &str,
-            mode: ResolvedMode,
-        ) -> Result<()> {
+        fn finalize(&self, file: &Path, response: &str, mode: ResolvedMode) -> Result<()> {
             self.finalize_calls.borrow_mut().push(response.to_string());
             agent_doc_write_runtime_io::run_command_with_response(
                 agent_doc_write_command_io::CommandOptions {
                     file: file.to_path_buf(),
-                    baseline_file: None,
                     is_template: mode.is_template(),
                     is_stream: mode.is_crdt(),
                     is_ipc: false,
@@ -1916,7 +1892,12 @@ mod tests {
         );
 
         fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let batch = resolve_task_batch(
             &doc,
@@ -1977,7 +1958,12 @@ mod tests {
         );
 
         fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let batch = resolve_task_batch(
             &doc,
@@ -2083,7 +2069,12 @@ mod tests {
         );
 
         fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let batch = resolve_task_batch(
             &doc,

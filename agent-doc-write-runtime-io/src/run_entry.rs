@@ -21,7 +21,6 @@ use agent_doc_template_io::{
     normalize_template_structure_or_fail_preserving, normalize_user_prompts_in_exchange_safe,
     template_mode_overrides_for_current_doc,
 };
-use agent_doc_write_ipc_io::build_ipc_patches_json;
 
 // Deeper root cause A superseded the interim `#qftlossdelta` recovery-sidecar
 // safety net (`preserve_dropped_operator_buffer_if_needed`): the committed
@@ -95,19 +94,6 @@ fn encode_no_pending_capture_intent(file: &Path, response: &mut String, enabled:
             file.display()
         ),
     );
-}
-
-fn projected_cycle_id_for_ipc_payload(file: &Path) -> Option<String> {
-    agent_doc_cycle_state_io::load_with_closeout_projection(file)
-        .ok()
-        .flatten()
-        .map(|state| state.cycle_id)
-        .or_else(|| {
-            agent_doc_cycle_state_io::load_closeout_projection(file)
-                .ok()
-                .flatten()
-                .and_then(|projection| projection.cycle_id)
-        })
 }
 
 fn response_cell_from_patchback(
@@ -259,7 +245,11 @@ fn try_add_response_cell_via_realtime_backbone(
         write.cell_id,
         file.display(),
     );
-    agent_doc_snapshot_io::save(file, &materialized, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &materialized,
+        agent_doc_ops_log_io::log_op,
+    )?;
     agent_doc_repair_io::pending::clear_pending(file)?;
     agent_doc_ops_log_io::log_cycle(
         file,
@@ -342,7 +332,7 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
     // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
-    let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
+    let (doc_lock, content_at_start) = capture_locked_undo_checkpoint(file)?;
 
     let base = baseline.unwrap_or(&content_at_start);
 
@@ -437,14 +427,18 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
         "",
     );
     if !force_disk_editor_attached {
-        guard_visible_write_idle_current_or_target(
+        guard_visible_write_expected_current_or_target(
             file,
             "write_inline",
             &content_current,
             Some(&final_content),
         )?;
     }
-    agent_doc_snapshot_io::save(file, &snapshot_content, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &snapshot_content,
+        agent_doc_ops_log_io::log_op,
+    )?;
 
     atomic_write_for_write_mode(file, &final_content, flags.force_disk)?;
 
@@ -520,7 +514,9 @@ pub(crate) fn run_template(
         "write_template_force_disk_current_content",
     )
     .with_context(|| format!("failed to read {}", file.display()))?;
-    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     guard_stale_snapshot_recovery_only(
         file,
         snapshot_doc.as_deref(),
@@ -608,7 +604,7 @@ pub(crate) fn run_template(
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
     // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
-    let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
+    let (doc_lock, content_at_start) = capture_locked_undo_checkpoint(file)?;
 
     let base_cow = template_patch_application_base(TemplatePatchApplicationBase {
         file,
@@ -621,7 +617,9 @@ pub(crate) fn run_template(
         strict_closeout: flags.strict_closeout,
     })?;
     let base = base_cow.as_ref();
-    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
 
     // Apply patches to baseline
     let content_ours = template_io::apply_patches_with_overrides_with_project_config(
@@ -683,8 +681,15 @@ pub(crate) fn run_template(
             &final_content,
             Some(&response),
         )?;
-        let cleaned_resolved_backlog_prompts =
-            cleanup_resolved_backlog_prompts_after_response(base, content_current, &final_content)?;
+        // Prompt cleanup is scoped to the operator cut observed before this
+        // turn started mutating the document. Granular agent-authored backlog
+        // changes may already be visible in `content_current`; treating those
+        // as operator prompts resurrects/deletes the wrong queue intent.
+        let cleaned_resolved_backlog_prompts = cleanup_resolved_backlog_prompts_after_response(
+            base,
+            &current_content,
+            &final_content,
+        )?;
         let cleaned_applied = cleaned_resolved_backlog_prompts.is_some();
         if let Some(cleaned) = cleaned_resolved_backlog_prompts {
             log_resolved_backlog_prompt_cleanup(file, cleaned.removed);
@@ -723,7 +728,7 @@ pub(crate) fn run_template(
                 },
                 recompute_final,
                 |f, current, payload| {
-                    guard_visible_write_idle_current_or_target(
+                    guard_visible_write_expected_current_or_target(
                         f,
                         "run_template",
                         current,
@@ -792,7 +797,11 @@ pub(crate) fn run_template(
         &unmatched,
     );
     // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
-    agent_doc_snapshot_io::save(file, &snapshot_content, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &snapshot_content,
+        agent_doc_ops_log_io::log_op,
+    )?;
 
     // `#fcc0`: template (non-CRDT) mode must converge through the editor path;
     // if editor convergence is unavailable or unproven, fail closed instead of
@@ -863,61 +872,8 @@ pub(crate) fn run_template(
 /// Like `run_template`, but uses CRDT merge instead of git merge-file.
 /// `baseline` is the document content at the time the response was generated.
 ///
-/// When `force_disk` is false and `.agent-doc/patches/` exists (plugin installed),
-/// tries legacy editor IPC first for compatibility. On timeout or missing proof,
-/// cancels the queued file-IPC patch and continues through the CPC CRDT relay so
-/// there is no separate editor-authoritative write path. When `force_disk` is
-/// true, uses the explicit disk override path.
-fn cancel_queued_ipc_patch_for_document_authority_recovery(
-    file: &Path,
-    patch_id: &str,
-    reason: &str,
-) -> bool {
-    let Ok(canonical) = file.canonicalize() else {
-        return false;
-    };
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    let Ok(hash) = agent_doc_fs::document_state_hash(file) else {
-        return false;
-    };
-    let patch_file = project_root
-        .join(".agent-doc/patches")
-        .join(format!("{hash}.json"));
-    if !patch_file.exists() {
-        return false;
-    }
-    agent_doc_flow_io::closeout::write_claimed_patch_sentinel(&project_root, patch_id);
-    match std::fs::remove_file(&patch_file) {
-        Ok(()) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "ipc_patch_cancelled_for_document_authority file={} patch_id={} cause={} patch_file={}",
-                    file.display(),
-                    patch_id,
-                    reason,
-                    patch_file.display(),
-                ),
-            );
-            true
-        }
-        Err(err) => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "ipc_patch_cancel_for_document_authority_failed file={} patch_id={} cause={} patch_file={} error={}",
-                    file.display(),
-                    patch_id,
-                    reason,
-                    patch_file.display(),
-                    err,
-                ),
-            );
-            false
-        }
-    }
-}
-
+/// When `force_disk` is false, writes target the registered Lazily replica over
+/// its PID-scoped endpoint. There is no filesystem transport fallback.
 pub(crate) fn run_stream(
     file: &Path,
     baseline: Option<&str>,
@@ -952,14 +908,18 @@ pub(crate) fn run_stream(
         "write_stream_force_disk_current_content",
     )
     .with_context(|| format!("failed to read {}", file.display()))?;
-    let mut snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
+    let mut snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     if guard_stale_snapshot_recovery_only(
         file,
         snapshot_doc.as_deref(),
         &current_content,
         "stream write",
     ) {
-        snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
+        snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
+            .ok()
+            .flatten();
     }
     sanitize_template_patchback_response(&mut response)?;
     enforce_imperative_response_contract(file, baseline, &current_content, &response)?;
@@ -1111,24 +1071,13 @@ pub(crate) fn run_stream(
         }
     }
 
-    let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
+    let (doc_lock, content_at_start) = capture_locked_undo_checkpoint(file)?;
 
     // Try IPC when plugin is installed and --force-disk is not set
     if !force_disk {
-        let canonical = file.canonicalize()?;
-        let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-        let patches_dir = project_root.join(".agent-doc/patches");
-
-        // `#ipc-degraded-prefers-file-ipc`: always route through `try_ipc` when
-        // the plugin is installed, even if the socket is latched degraded.
-        // `try_ipc` skips the wedged socket internally and prefers the file-IPC
-        // patch queue (plugin applies via Document API) so a degraded stream
-        // write never manufactures a raw-disk File Cache Conflict; the disk
-        // unproven IPC attempt below fails closed instead of writing behind the editor.
-        //
         // `#docop-plane` P4: relay membership is transport state, not editor
         // liveness. Only an authoritative reliable-sync Close permits the disk
-        // path to skip the socket→file-IPC cascade.
+        // path to skip redundant CPC delivery attempts.
         let editor_absent = write_path_editor_absent(file);
         if editor_absent {
             eprintln!(
@@ -1142,7 +1091,7 @@ pub(crate) fn run_stream(
                 ),
             );
         }
-        if patches_dir.exists() && !editor_absent {
+        if !editor_absent {
             // Compute content_ours (baseline + patches) for snapshot saving.
             // The IPC path sends patches to the plugin but we need a clean snapshot
             // that represents baseline+response WITHOUT user's concurrent edits.
@@ -1179,7 +1128,7 @@ pub(crate) fn run_stream(
             // A baseline with EXTRA content beyond the snapshot is normal (user edits).
             //
             // IMPORTANT: Skip this check when an explicit baseline was provided via
-            // --baseline-file. Streaming checkpoints intentionally use the original
+            // the state.db baseline. Streaming checkpoints intentionally use the original
             // document (before any response) as baseline so cumulative patch blocks
             // apply cleanly on each checkpoint. The snapshot will have content from
             // earlier checkpoints, causing is_stale_baseline to incorrectly fire and
@@ -1190,7 +1139,7 @@ pub(crate) fn run_stream(
             // that the baseline's corresponding component contains the snapshot content.
             // This handles user edits anywhere in the document (not just appended at end).
             if baseline.is_none()
-                && let Ok(Some(current_snap)) = agent_doc_snapshot_io::load(file)
+                && let Ok(Some(current_snap)) = agent_doc_snapshot_io::load_document_baseline(file)
                 && is_stale_baseline(base, &current_snap)
             {
                 eprintln!(
@@ -1321,27 +1270,6 @@ pub(crate) fn run_stream(
             } else {
                 "detached_disk_authority"
             };
-            let cancelled_queued_patch = cancel_queued_ipc_patch_for_document_authority_recovery(
-                file,
-                &ipc_result.patch_id,
-                recovery,
-            );
-            if !cancelled_queued_patch {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "run_stream_ipc_retry_required_no_disk_write file={} patch_id={} patches={} recovery=retry_without_disk_write detail=ipc_consumed_without_valid_proof",
-                        file.display(),
-                        ipc_result.patch_id,
-                        patches.len()
-                    ),
-                );
-                drop(doc_lock);
-                anyhow::bail!(
-                    "editor IPC did not prove the write for {}; pending response retained for retry; refusing direct document write",
-                    file.display()
-                );
-            }
             eprintln!(
                 "[write] editor IPC did not prove the write — recovering through document authority ({recovery})"
             );
@@ -1358,31 +1286,7 @@ pub(crate) fn run_stream(
         }
     }
 
-    // No plugin installed or --force-disk — direct disk write
-    // When --force-disk is set, clean up any pending IPC patch files to prevent
-    // the plugin from applying them later (which would cause double-write).
-    if force_disk && let Ok(canonical) = file.canonicalize() {
-        let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-        let patches_dir = project_root.join(".agent-doc/patches");
-        if let Ok(hash) = agent_doc_fs::document_state_hash(file) {
-            let patch_file = patches_dir.join(format!("{}.json", hash));
-            if patch_file.exists() {
-                eprintln!("[write] cleaning stale IPC patch file to prevent double-write");
-                // Read patch_id from stale patch before deleting — write sentinel so plugin skips apply
-                if let Ok(stale_content) = std::fs::read_to_string(&patch_file)
-                    && let Ok(stale_json) =
-                        serde_json::from_str::<serde_json::Value>(&stale_content)
-                    && let Some(patch_id) = stale_json.get("patch_id").and_then(|v| v.as_str())
-                {
-                    agent_doc_flow_io::closeout::write_claimed_patch_sentinel(
-                        &project_root,
-                        patch_id,
-                    );
-                }
-                let _ = std::fs::remove_file(&patch_file);
-            }
-        }
-    }
+    // No live editor or explicit --force-disk: disk is the only authority.
     let t_disk = std::time::Instant::now();
     let force_disk_editor_attached = force_disk && editor_crdt_authority_attached(file);
     if force_disk_editor_attached {
@@ -1540,11 +1444,19 @@ pub(crate) fn run_stream(
             )
         } else {
             eprintln!(
-                "[write] Current document changed since response baseline. Document-model merging..."
+                "[write] Current document changed since response baseline. Rebasing the captured intent onto current authority..."
             );
-            let merged = merge_template_document_model(file, base, &content_ours, content_current)?;
-            let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&merged);
-            (merged, doc.encode_state(), false)
+            let rebased = match apply_simple_exchange_patch_to_current(
+                file,
+                content_current,
+                &patches,
+                &unmatched,
+            ) {
+                Some(result) => result?,
+                None => merge_template_document_model(file, base, &content_ours, content_current)?,
+            };
+            let doc = agent_doc_merge::crdt::CrdtDoc::from_text(&rebased);
+            (rebased, doc.encode_state(), false)
         };
         let mut final_content = if skip_final_normalize {
             final_content
@@ -1561,7 +1473,7 @@ pub(crate) fn run_stream(
         let cleaned_resolved_backlog_prompts = if skip_final_normalize {
             None
         } else {
-            cleanup_resolved_backlog_prompts_after_response(base, content_current, &final_content)?
+            cleanup_resolved_backlog_prompts_after_response(base, &current_content, &final_content)?
         };
         let cleaned_applied = cleaned_resolved_backlog_prompts.is_some();
         if let Some(cleaned) = cleaned_resolved_backlog_prompts {
@@ -1601,7 +1513,7 @@ pub(crate) fn run_stream(
                 },
                 recompute_final,
                 |f, current, payload| {
-                    guard_visible_write_idle_current_or_target(
+                    guard_visible_write_expected_current_or_target(
                         f,
                         "run_stream",
                         current,
@@ -1673,9 +1585,6 @@ pub(crate) fn run_stream(
         final_content = plan.new_document.clone();
         snapshot_content = plan.new_snapshot.clone();
     }
-    let snapshot_crdt_state =
-        agent_doc_merge::crdt::CrdtDoc::from_text(&snapshot_content).encode_state();
-
     // Save snapshot BEFORE document write (#wcf5): external watchers (IDE
     // file-change listeners, git hooks) trigger on the document rename and may
     // compute diffs immediately. Writing the snapshot first guarantees they
@@ -1714,20 +1623,11 @@ pub(crate) fn run_stream(
             ),
         );
     }
-    agent_doc_snapshot_io::save(file, &snapshot_content, agent_doc_ops_log_io::log_op)?;
-    if force_disk_editor_attached {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "crdt_checkpoint_skip file={} source=run_stream reason=force_disk_skip_sidecar_lock len={}",
-                file.display(),
-                snapshot_content.len()
-            ),
-        );
-    } else {
-        agent_doc_merge_io::save_document_crdt(file, &snapshot_crdt_state, &snapshot_content)?;
-    }
-
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &snapshot_content,
+        agent_doc_ops_log_io::log_op,
+    )?;
     atomic_write_for_write_mode(file, &final_content, force_disk)?;
     if force_disk && snapshot_content != final_content {
         match
@@ -1829,18 +1729,12 @@ pub(crate) fn run_stream(
     Ok(())
 }
 
-/// IPC mode: write a JSON patch file for IDE plugin consumption.
-///
-/// Instead of modifying the document directly, writes a JSON file to
-/// `.agent-doc/patches/<hash>.json`. The IDE plugin picks it up, applies
-/// patches via Document API (no external file change dialog), and deletes
-/// the file as ACK. Fails closed on timeout or missing proof.
+/// Explicit editor mode: deliver through the registered Lazily replica.
+/// Fails closed when no PID-scoped endpoint accepts the retained intent.
 pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Result<()> {
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
-    let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
-
     let mut response = read_response_input()?;
 
     if response.trim().is_empty() {
@@ -1877,7 +1771,9 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
             return Err(resolve_err);
         }
     };
-    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     guard_stale_snapshot_recovery_only(
         file,
         snapshot_doc.as_deref(),
@@ -1960,276 +1856,15 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
         return Ok(());
     }
 
-    let (doc_lock, content_at_start) = capture_locked_pre_response(file)?;
-
-    // Build IPC patch file
-    let canonical = file.canonicalize()?;
-    let hash = agent_doc_fs::document_state_hash(file)?;
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    let patches_dir = project_root.join(".agent-doc/patches");
-    std::fs::create_dir_all(&patches_dir)?;
-    let patch_file = patches_dir.join(format!("{}.json", hash));
-    let patch_id = uuid::Uuid::new_v4().to_string();
-
-    // Use shared helper for boundary-aware synthesis (matches try_ipc socket + file paths).
-    // Seed the boundary from patch_id for deterministic, dedup-friendly rebuilds
-    // (#finalize-visible-buffer-ipc-timeout-race).
-    let ipc_patches = build_ipc_patches_json(file, &patches, &unmatched, None, Some(&patch_id))?;
-
-    // Same dedup guard: don't send unmatched when it was synthesized into a patch.
-    let effective_unmatched = if patches.is_empty() && !ipc_patches.is_empty() {
-        ""
-    } else {
-        unmatched.trim()
-    };
-
-    // Separate frontmatter patch
-    let frontmatter_yaml: Option<String> = patches
-        .iter()
-        .find(|p| p.name == "frontmatter")
-        .map(|p| p.content.trim().to_string());
-    let mode_overrides = template_mode_overrides_for_current_doc(file, baseline, &content_at_start);
-    let base_cow = template_patch_application_base(TemplatePatchApplicationBase {
-        file,
-        baseline,
-        content_at_start: &content_at_start,
-        patches: &patches,
-        unmatched: &unmatched,
-        mode_overrides: &mode_overrides,
-        source: "run_ipc",
-        strict_closeout: flags.strict_closeout,
-    })?;
-    let base = base_cow.as_ref();
-    let ipc_baseline = baseline.map(|_| base);
-    let content_ours = template_io::apply_patches_with_overrides_with_project_config(
-        base,
-        &patches,
-        &unmatched,
-        file,
-        &mode_overrides,
-        Some(rc.project_config()),
-    )
-    .context("failed to apply template patches for IPC node patch metadata")?;
-    let content_ours =
-        normalize_template_structure_or_fail_preserving(&content_ours, file, Some(base))?;
-    let ipc_node_patches =
-        agent_doc_ipc_protocol::build_ipc_node_patches_json(Some(base), Some(&content_ours));
-
-    let mut ipc_payload = serde_json::json!({
-        "file": canonical.to_string_lossy(),
-        "patches": ipc_patches,
-        "node_patches": ipc_node_patches,
-        "unmatched": effective_unmatched,
-        "baseline": ipc_baseline.unwrap_or(""),
-    });
-    ipc_payload["baseline_hash"] =
-        serde_json::Value::String(agent_doc_hash::content_hash(&content_at_start));
-    ipc_payload["baseline_normalized_hash"] =
-        serde_json::Value::String(agent_doc_hash::content_hash(
-            &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-                &content_at_start,
-            ),
-        ));
-    ipc_payload["patch_id"] = serde_json::Value::String(patch_id.clone());
-    if let Some(cycle_id) = projected_cycle_id_for_ipc_payload(file) {
-        ipc_payload["cycle_id"] = serde_json::Value::String(cycle_id);
-    }
-
-    if let Some(ref yaml) = frontmatter_yaml {
-        ipc_payload["frontmatter"] = serde_json::Value::String(yaml.clone());
-    }
-
-    // Atomic write of patch file
-    atomic_write(&patch_file, &serde_json::to_string_pretty(&ipc_payload)?)?;
-
-    eprintln!(
-        "[write] IPC patch written to {} ({} components)",
-        patch_file.display(),
-        ipc_patches.len()
-    );
-
-    // Poll for ACK (plugin deletes file after applying)
-    let timeout = std::time::Duration::from_secs(2);
-    let poll_interval = std::time::Duration::from_millis(100);
-    let start = std::time::Instant::now();
-    let mut consumed_without_materialization = false;
-
-    while start.elapsed() < timeout {
-        if !patch_file.exists() {
-            // Plugin consumed the patch — update snapshot from current file
-            let content =
-                resolve_current_document_content(file, "write_explicit_file_ipc_consumed")
-                    .with_context(|| format!("failed to read {} after IPC", file.display()))?;
-            let expected_response =
-                agent_doc_template::response_materialization::response_materialization_probe(
-                    &patches, &unmatched,
-                );
-            if !ipc_response_materialized_or_fallback(
-                file,
-                "explicit_file_ipc",
-                &expected_response,
-                &content,
-            ) {
-                log_partial_response_materialization_for_retry(
-                    file,
-                    "explicit_file_ipc",
-                    &expected_response,
-                )?;
-                consumed_without_materialization = true;
-                break;
-            }
-            if agent_doc_element_exchange_io::file_ipc_consumed_without_live_exchange_visible_write_with_log(
-                file,
-                "explicit_file_ipc",
-                Some(&patch_id),
-                baseline,
-                Some(&content_at_start),
-                &content,
-                false,
-                agent_doc_ops_log_io::log_op,
-                log_ipc_proof_failure,
-            ) {
-                consumed_without_materialization = true;
-                break;
-            }
-            agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op)?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "snapshot_saved_file_ipc file={} snap_len={}",
-                    file.display(),
-                    content.len()
-                ),
-            );
-            log_exchange_write_diagnostic(
-                file,
-                "run_ipc",
-                "ipc_file",
-                Some(&patch_id),
-                baseline,
-                &content_at_start,
-                &content,
-                &patches,
-                &unmatched,
-            );
-            let crdt_doc = agent_doc_merge::crdt::CrdtDoc::from_text(&content);
-            agent_doc_merge_io::save_document_crdt(file, &crdt_doc.encode_state(), &content)?;
-            drop(doc_lock);
-            agent_doc_repair_io::pending::clear_pending(file)?;
-            eprintln!("[write] IPC patch consumed by plugin — snapshot updated");
-            return Ok(());
-        }
-        std::thread::sleep(poll_interval);
-    }
-
-    if consumed_without_materialization {
-        eprintln!(
-            "[write] IPC patch was consumed without materializing the response — refusing direct document write; retry required"
-        );
-        retain_consumed_ipc_patch_for_retry(file, &patch_file, &ipc_payload, &patch_id)?;
-    } else {
-        eprintln!(
-            "[write] IPC timeout ({}s) — leaving patch for editor retry; refusing direct document write",
-            timeout.as_secs()
-        );
-        log_ipc_proof_failure(
-            file,
-            "explicit_file_ipc",
-            Some(&patch_id),
-            "no_ack",
-            "retry_without_disk_write",
-            &format!(
-                "timeout_secs={} patch_file={}",
-                timeout.as_secs(),
-                patch_file.display()
-            ),
-        );
-    }
-
-    // Guard: if the cycle was already committed by a concurrent closeout,
-    // clean stale IPC files to prevent re-dirtying the document.
-    if let Some(ref committed_id) = agent_doc_flow_io::closeout::cycle_already_committed(file) {
-        eprintln!(
-            "[write] run_ipc timeout retry: cycle {} already committed — cleaning stale patch",
-            committed_id
-        );
-        log_closeout_guard(
-            file,
-            agent_doc_flow::types::FlowStage::TerminalGuard,
-            agent_doc_flow::types::FlowOutcome::Blocked,
-            agent_doc_turn::closeout_guard::CloseoutGuardReason::AlreadyCommitted,
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "run_ipc_timeout_fallback_skip file={} cycle_id={} reason=already_committed",
-                file.display(),
-                committed_id
-            ),
-        );
-        agent_doc_flow_io::closeout::cleanup_fallback_patch_files(file);
-        drop(doc_lock);
-        agent_doc_repair_io::pending::clear_pending(file)?;
-        return Ok(());
-    }
-
-    if !patch_file.exists()
-        && let Err(retain_err) =
-            retain_ipc_patch_for_editor_authority_retry(file, baseline, &response)
-    {
-        eprintln!(
-            "[write] warning: failed to recreate IPC retry patch for {}: {}",
-            file.display(),
-            retain_err
-        );
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "run_ipc_retry_patch_recreate_failed file={} error={} recovery=retry_without_disk_write",
-                file.display(),
-                retain_err
-            ),
-        );
-    }
-
-    drop(doc_lock);
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "run_ipc_retry_required_no_disk_write file={} patch_id={} consumed_without_materialization={} recovery=retry_without_disk_write",
-            file.display(),
-            patch_id,
-            consumed_without_materialization
-        ),
-    );
     anyhow::bail!(
-        "editor IPC did not prove the write for {}; pending response retained for retry; refusing direct document write",
+        "no registered Lazily editor endpoint accepted the write for {}; response intent remains retained in state.db",
         file.display()
     );
 }
 
-fn retain_consumed_ipc_patch_for_retry(
-    file: &Path,
-    patch_file: &Path,
-    payload: &serde_json::Value,
-    patch_id: &str,
-) -> Result<()> {
-    atomic_write(patch_file, &serde_json::to_string_pretty(payload)?)?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "run_ipc_consumed_without_materialization_patch_retained file={} patch_id={} patch_file={} recovery=retry_without_disk_write",
-            file.display(),
-            patch_id,
-            patch_file.display()
-        ),
-    );
-    Ok(())
-}
-
 fn retain_ipc_patch_for_retry_error(
     file: &Path,
-    baseline: Option<&str>,
+    _baseline: Option<&str>,
     response: &str,
     err: &anyhow::Error,
     source: &str,
@@ -2238,7 +1873,7 @@ fn retain_ipc_patch_for_retry_error(
     if !retry_without_disk {
         return Ok(());
     }
-    retain_ipc_patch_for_editor_authority_retry(file, baseline, response).with_context(|| {
+    retain_ipc_patch_for_editor_authority_retry(file, None, response).with_context(|| {
         format!(
             "failed to retain IPC retry patch after {source} authority failure for {}",
             file.display()
@@ -2258,7 +1893,7 @@ pub(crate) fn error_requests_retry_without_disk(err: &anyhow::Error) -> bool {
 
 pub(crate) fn retain_ipc_patch_for_editor_authority_retry(
     file: &Path,
-    baseline: Option<&str>,
+    _baseline: Option<&str>,
     response: &str,
 ) -> Result<()> {
     let mut retained_response = response.to_string();
@@ -2291,53 +1926,11 @@ pub(crate) fn retain_ipc_patch_for_editor_authority_retry(
         );
     }
 
-    let canonical = file.canonicalize()?;
-    let hash = agent_doc_fs::document_state_hash(file)?;
-    let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-    let patches_dir = project_root.join(".agent-doc/patches");
-    std::fs::create_dir_all(&patches_dir)?;
-    let patch_file = patches_dir.join(format!("{}.json", hash));
-    let patch_id = uuid::Uuid::new_v4().to_string();
-    let ipc_patches = build_ipc_patches_json(file, &patches, &unmatched, None, Some(&patch_id))?;
-    let effective_unmatched = if patches.is_empty() && !ipc_patches.is_empty() {
-        ""
-    } else {
-        unmatched.trim()
-    };
-    let disk_reference =
-        resolve_disk_document_content(file, "write_file_ipc_payload_disk_reference")
-            .unwrap_or_default();
-    let mut payload = serde_json::json!({
-        "file": canonical.to_string_lossy(),
-        "patches": ipc_patches,
-        "node_patches": [],
-        "unmatched": effective_unmatched,
-        "baseline": baseline.unwrap_or(""),
-    });
-    payload["baseline_hash"] =
-        serde_json::Value::String(agent_doc_hash::content_hash(&disk_reference));
-    payload["baseline_normalized_hash"] = serde_json::Value::String(agent_doc_hash::content_hash(
-        &agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(
-            &disk_reference,
-        ),
-    ));
-    payload["patch_id"] = serde_json::Value::String(patch_id.clone());
-    payload["recovery"] = serde_json::Value::String("retry_without_disk_write".to_string());
-    if let Some(cycle_id) = projected_cycle_id_for_ipc_payload(file) {
-        payload["cycle_id"] = serde_json::Value::String(cycle_id);
-    }
-
-    atomic_write(&patch_file, &serde_json::to_string_pretty(&payload)?)?;
-    eprintln!(
-        "[write] IPC patch retained for editor-authority retry at {}",
-        patch_file.display()
-    );
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "run_ipc_authority_retry_patch_retained file={} patch_id={} patches={} recovery=retry_without_disk_write",
+            "run_ipc_authority_retry_intent_retained file={} patches={} authority=state_db recovery=retry_registered_lazily_endpoint",
             file.display(),
-            patch_id,
             patches.len()
         ),
     );
@@ -2457,12 +2050,12 @@ fn merge_recovery_content(
     }
 }
 
-fn save_recovery_snapshot(file: &Path, content: &str, use_crdt: bool) -> Result<()> {
-    agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)?;
-    if use_crdt {
-        let doc = agent_doc_merge::crdt::CrdtDoc::from_text(content);
-        agent_doc_merge_io::save_document_crdt(file, &doc.encode_state(), content)?;
-    }
+fn save_recovery_snapshot(file: &Path, content: &str, _use_crdt: bool) -> Result<()> {
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        content,
+        agent_doc_ops_log_io::log_op,
+    )?;
     Ok(())
 }
 
@@ -2608,7 +2201,7 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
         false,
     )?;
 
-    guard_visible_write_idle_current_or_target(
+    guard_visible_write_expected_current_or_target(
         file,
         "apply_append_from_string",
         &content_current,
@@ -2670,7 +2263,9 @@ pub fn apply_template_from_string_with_options(
     enforce_no_destructive_todo_patch(&content, &patches)?;
 
     let mode_overrides = template_mode_overrides_for_current_doc(file, None, &content);
-    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     let content_ours = template_io::apply_patches_with_overrides_with_project_config(
         &content,
         &patches,
@@ -2738,7 +2333,7 @@ pub fn apply_template_from_string_with_options(
             ),
         );
     } else {
-        guard_visible_write_idle_current_or_target(
+        guard_visible_write_expected_current_or_target(
             file,
             "apply_template_from_string",
             &content_current,
@@ -2881,33 +2476,6 @@ mod tests {
     }
 
     #[test]
-    fn ipc_payload_cycle_id_uses_lazily_projection_when_cycle_sidecar_missing() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
-        let doc = dir.path().join("test.md");
-        fs::write(&doc, "body").unwrap();
-
-        let opened = agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body"))
-            .expect("start preflight");
-        agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some("body"), Some("body"))
-            .expect("mark write applied");
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle sidecar path");
-        fs::remove_file(&sidecar_path).unwrap();
-
-        assert!(
-            agent_doc_cycle_state_io::load(&doc).unwrap().is_none(),
-            "raw cycle sidecar should be absent for this regression"
-        );
-        assert_eq!(
-            projected_cycle_id_for_ipc_payload(&doc).as_deref(),
-            Some(opened.cycle_id.as_str()),
-            "IPC payload identity should come from the lazily closeout projection"
-        );
-    }
-
-    #[test]
     fn stream_model_merge_preserves_response_and_operator_components() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -3004,7 +2572,12 @@ mod tests {
             "<!-- /agent:pending -->\n",
         );
         fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let response = "<!-- patch:exchange -->\nCompacted summary.\n<!-- /patch:exchange -->\n";
         apply_template_from_string_with_options(
@@ -3040,7 +2613,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
@@ -3123,7 +2701,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let response = concat!(
             "I am checking the write path and existing replay guard before editing.\n",
@@ -3189,7 +2772,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         // Operator pipes the raw template form (component markers) instead of
         // `<!-- patch:exchange -->` blocks — this is the shape that previously

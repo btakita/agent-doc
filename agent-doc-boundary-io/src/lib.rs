@@ -31,15 +31,18 @@ pub fn run(file: &Path, component: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Signal the IDE plugin to refresh the file from disk.
-/// Uses the file-based signal because this CLI path does not own orchestration
-/// socket IPC.
+/// Signal every registered Lazily editor replica to refresh VCS state.
 fn signal_editor_refresh(file: &Path) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     if let Some(root) = agent_doc_fs::find_project_root(&canonical) {
-        let signal = root.join(".agent-doc/patches/vcs-refresh.signal");
-        if signal.parent().is_some_and(|p| p.exists()) {
-            let _ = std::fs::write(&signal, "boundary-refresh");
+        for registration in
+            agent_doc_crdt_relay_io::reliable_sync_editor_registrations_for_file(&canonical)
+        {
+            let _ = agent_doc_ipc_io::send_vcs_refresh_to_editor(
+                &root,
+                registration.pid,
+                &registration.editor_id,
+            );
         }
     }
 }

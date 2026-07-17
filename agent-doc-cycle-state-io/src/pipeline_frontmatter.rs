@@ -17,7 +17,7 @@ pub trait PipelineFrontmatterEffects {
 
 /// #22a8 (Phase 5b write-side): mirror the live cycle phase into the session
 /// document's `agent_doc_pipeline:` frontmatter block so any later invocation or
-/// editor can read where the pipeline is without parsing the sidecar JSON.
+/// editor can read where the pipeline is without replaying the state ledger.
 ///
 /// Best-effort and non-fatal. The write is byte-precise and goes through the
 /// editor-aware convergence path so a live IDE buffer does not raise a file

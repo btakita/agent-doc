@@ -431,7 +431,7 @@ mod tests {
     }
 
     #[test]
-    fn log_op_turn_tracking_prefers_latest_projection_over_stale_cycle_sidecar() {
+    fn log_op_turn_tracking_uses_latest_projection() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let doc = tmp.path().join("session.md");
@@ -447,14 +447,6 @@ mod tests {
             Some(content),
         )
         .unwrap();
-        let sidecar_path = std::fs::read_dir(tmp.path().join(".agent-doc/state/cycles"))
-            .unwrap()
-            .next()
-            .expect("cycle state sidecar")
-            .unwrap()
-            .path();
-        let stale_first_sidecar = std::fs::read(&sidecar_path).unwrap();
-
         std::thread::sleep(std::time::Duration::from_millis(2));
         let second =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -466,15 +458,6 @@ mod tests {
             Some(content),
         )
         .unwrap();
-        std::fs::write(&sidecar_path, stale_first_sidecar).unwrap();
-        assert_eq!(
-            agent_doc_cycle_state_io::load(&doc)
-                .unwrap()
-                .unwrap()
-                .cycle_id,
-            first.cycle_id
-        );
-
         log_op(&doc, "projection_turn_event");
 
         let content = std::fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
@@ -604,7 +587,7 @@ mod tests {
         let doc = make_project(tmp.path());
         std::fs::write(
             tmp.path().join(".agent-doc/logs/ops.log"),
-            "[100] snapshot_saved_file_ipc file=x snap_len=10\n",
+            "[100] ipc_write_consumed file=x patches=1\n",
         )
         .unwrap();
 
@@ -612,7 +595,7 @@ mod tests {
             detect_write_completed_commit_missing(&doc)
                 .unwrap()
                 .unwrap(),
-            "snapshot_saved_file_ipc file=x snap_len=10"
+            "ipc_write_consumed file=x patches=1"
         );
     }
 

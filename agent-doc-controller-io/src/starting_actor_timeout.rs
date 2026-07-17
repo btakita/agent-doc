@@ -1,18 +1,18 @@
-//! Route starting-actor timeout sidecar I/O.
+//! Route starting-actor timeout state-backbone I/O.
 //!
 //! The controller dispatch crate owns the actor-ready facts and log-line
 //! policy. This module owns the durable per-document timeout record used to
-//! coalesce repeated route timeout logs.
+//! coalesce repeated route timeout logs. The record is a typed route fact in
+//! the project controller's `state.db`; it never creates a document hot-path
+//! file or lock.
 
-use anyhow::Result;
-use fs2::FileExt;
-use serde::{Deserialize, Serialize};
-use std::fs::OpenOptions;
+use anyhow::{Context, Result};
 use std::path::PathBuf;
 
 use agent_doc_controller::dispatch::{ActorDispatchState, AuthoritativeActorReadyFacts};
+use agent_doc_state_backbone::{StateEvent, StateFact};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartingActorTimeoutRecord {
     pub pane_id: String,
     pub generation: u64,
@@ -25,16 +25,14 @@ pub enum StartingActorTimeoutLogDecision {
     DuplicateTimeout,
 }
 
-pub fn starting_actor_timeout_paths(file_path: &str) -> Option<(PathBuf, PathBuf)> {
+fn state_identity(file_path: &str) -> Result<(PathBuf, String)> {
     let requested = PathBuf::from(file_path);
-    let root = agent_doc_fs::find_project_root(&requested)?;
-    let hash = agent_doc_fs::document_state_hash_from_str(file_path);
-    let state_dir = root.join(".agent-doc/state/route-starting-timeouts");
-    let lock_dir = root.join(".agent-doc/locks");
-    Some((
-        state_dir.join(format!("{hash}.json")),
-        lock_dir.join(format!("route-starting-timeout-{hash}.lock")),
-    ))
+    let canonical = requested
+        .canonicalize()
+        .with_context(|| format!("canonicalize route target {}", requested.display()))?;
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    let document_hash = agent_doc_fs::document_state_hash(&canonical)?;
+    Ok((project_root, document_hash))
 }
 
 pub fn record_starting_actor_timeout(
@@ -42,49 +40,54 @@ pub fn record_starting_actor_timeout(
     facts: &AuthoritativeActorReadyFacts,
     log_line: &str,
 ) -> Result<StartingActorTimeoutLogDecision> {
-    let Some((state_path, lock_path)) = starting_actor_timeout_paths(file_path) else {
-        return Ok(StartingActorTimeoutLogDecision::NewTimeout);
-    };
-
-    if let Some(parent) = state_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let lock = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .truncate(false)
-        .write(true)
-        .open(&lock_path)?;
-    lock.lock_exclusive()?;
-
-    let existing = std::fs::read_to_string(&state_path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<StartingActorTimeoutRecord>(&content).ok());
+    let (project_root, document_hash) = state_identity(file_path)?;
+    let ledger = crate::project_controller::load_state_event_ledger(&project_root)?;
+    let existing = ledger
+        .project_document(&document_hash)
+        .and_then(|projection| projection.route.starting_actor_timeout)
+        .map(|projection| StartingActorTimeoutRecord {
+            pane_id: projection.pane_id,
+            generation: projection.generation,
+            log_line: projection.log_line,
+        });
     if existing.as_ref().is_some_and(|record| {
         record.pane_id == facts.pane_id && record.generation == facts.generation
     }) {
-        let _ = lock.unlock();
         return Ok(StartingActorTimeoutLogDecision::DuplicateTimeout);
     }
 
-    let record = StartingActorTimeoutRecord {
-        pane_id: facts.pane_id.clone(),
-        generation: facts.generation,
-        log_line: log_line.to_string(),
-    };
-    std::fs::write(&state_path, serde_json::to_string_pretty(&record)?)?;
-    let _ = lock.unlock();
-    Ok(StartingActorTimeoutLogDecision::NewTimeout)
+    let next_epoch = ledger.document_epoch(&document_hash).saturating_add(1);
+    let event = StateEvent::new(
+        format!(
+            "starting-actor-timeout:{document_hash}:{}:{}:epoch-{next_epoch}",
+            facts.pane_id, facts.generation
+        ),
+        StateFact::StartingActorTimeoutRecorded {
+            document_hash,
+            pane_id: facts.pane_id.clone(),
+            generation: facts.generation,
+            log_line: log_line.to_string(),
+        },
+    );
+    if crate::project_controller::append_state_event(&project_root, &event)? {
+        Ok(StartingActorTimeoutLogDecision::NewTimeout)
+    } else {
+        Ok(StartingActorTimeoutLogDecision::DuplicateTimeout)
+    }
 }
 
 pub fn load_starting_actor_timeout_record(file_path: &str) -> Option<StartingActorTimeoutRecord> {
-    let (state_path, _) = starting_actor_timeout_paths(file_path)?;
-    std::fs::read_to_string(&state_path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<StartingActorTimeoutRecord>(&content).ok())
+    let (project_root, document_hash) = state_identity(file_path).ok()?;
+    let ledger = crate::project_controller::load_state_event_ledger(&project_root).ok()?;
+    ledger
+        .project_document(&document_hash)?
+        .route
+        .starting_actor_timeout
+        .map(|projection| StartingActorTimeoutRecord {
+            pane_id: projection.pane_id,
+            generation: projection.generation,
+            log_line: projection.log_line,
+        })
 }
 
 pub fn starting_actor_timeout_record_matches(
@@ -106,11 +109,35 @@ pub fn starting_actor_timeout_record_identity_matches(
     })
 }
 
-pub fn clear_starting_actor_timeout_record(file_path: &str) {
-    let Some((state_path, _)) = starting_actor_timeout_paths(file_path) else {
-        return;
-    };
-    let _ = std::fs::remove_file(state_path);
+pub fn clear_starting_actor_timeout_record(file_path: &str, facts: &AuthoritativeActorReadyFacts) {
+    if let Err(error) = clear_starting_actor_timeout_record_inner(file_path, facts) {
+        tracing::warn!(file = %file_path, %error, "failed to clear starting-actor timeout state");
+    }
+}
+
+fn clear_starting_actor_timeout_record_inner(
+    file_path: &str,
+    facts: &AuthoritativeActorReadyFacts,
+) -> Result<()> {
+    let (project_root, document_hash) = state_identity(file_path)?;
+    let ledger = crate::project_controller::load_state_event_ledger(&project_root)?;
+    let has_record = ledger
+        .project_document(&document_hash)
+        .is_some_and(|projection| projection.route.starting_actor_timeout.is_some());
+    if !has_record {
+        return Ok(());
+    }
+    let next_epoch = ledger.document_epoch(&document_hash).saturating_add(1);
+    let event = StateEvent::new(
+        format!("starting-actor-timeout-cleared:{document_hash}:epoch-{next_epoch}"),
+        StateFact::StartingActorTimeoutCleared {
+            document_hash,
+            pane_id: facts.pane_id.clone(),
+            generation: facts.generation,
+        },
+    );
+    crate::project_controller::append_state_event(&project_root, &event)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -190,7 +217,7 @@ mod tests {
             record_starting_actor_timeout(&file_path, &facts, "first timeout").unwrap(),
             StartingActorTimeoutLogDecision::NewTimeout
         );
-        clear_starting_actor_timeout_record(&file_path);
+        clear_starting_actor_timeout_record(&file_path, &facts);
         assert_eq!(
             record_starting_actor_timeout(&file_path, &facts, "after clear").unwrap(),
             StartingActorTimeoutLogDecision::NewTimeout

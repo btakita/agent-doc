@@ -4,6 +4,16 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.175
+
+- **BREAKING CHANGE: Lazily current state and the transactional state ledger are the only hot-path authorities.** Filesystem live-buffer, patch inbox, queue journal, queue tombstone, queue continuation, editor-op capture, transport-health, turn-scope, owner-pane counter, Codex hook-session, and controller-cooldown state paths are removed rather than imported or replayed. Snapshot/CRDT files remain recovery projections only.
+- **Operator queue deletion is monotonic.** Queue consumption uses an exact authority-shape compare-and-swap, and the journal code that unioned missing historical prompts back into the queue has been deleted. Queue continuation and delete intent now share the project ledger, so reconnect cannot resurrect an unsaved Lazily deletion from a stale sibling.
+- **The write pipeline is an executable state machine.** `IntentCaptured -> CanonicalApplied -> ReplicaAccepted -> ReplicaVisible -> DiskProjected -> Committed` is enforced as monotonic, no-skip transitions in the real closeout projection and exercised by exhaustive transition, crash/retry, endpoint-churn, and 10,000-run simulation tests.
+- **Editor intent has one cross-language vocabulary.** Rust, JetBrains, and VS Code use the same intent names for canonical apply, reposition, save, refresh, Lazily observation, CRDT delivery, VCS refresh, and library reload; ABI parity tests prevent plugins and the binary from independently reinterpreting an operation.
+- **Corrupt `state.db` fails closed.** Normal execution no longer quarantines the ledger and creates an empty replacement, because recovery projections cannot safely recreate captured intent. Explicit repair is required, preserving the corrupt authority for forensic recovery.
+- **Editor delivery is PID-scoped.** A controller socket can no longer impersonate an editor endpoint; delivery requires the matching live Lazily registration and PID endpoint, eliminating false ACK waits and unrelated focus/transport interference.
+- **The hot path has one database, not a family of hidden sidecars.** Reliable-sync inbox/outbox rows, document operations, and callback exchanges now share `.agent-doc/state.db`; the separate `reliable_sync_outbox.db`, `op-log.db`, and callback request/response files and their compatibility readers are removed. Explicit snapshots and diagnostics remain cold recovery projections only.
+
 ## 0.34.174
 
 - **Closeout progress is monotonic across lagging replicas.** A stale closeout projection can no longer regress a newer lifecycle phase, and conflicting terminal facts remain explicit instead of being resolved by read order.
@@ -1057,7 +1067,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
   Session-check keeps only file/context adapters and guard message formatting.
 
 - **Closeout metadata-drift authority moved to `agent-doc-turn`.** The
-  `QueueMetadataDrift` / `SidecarVisibleDrift` authoritative-side classifier now
+  `QueueMetadataDrift` / `RecoveryProjectionVisibleDrift` authoritative-side classifier now
   lives in `agent_doc_turn::closeout_recovery`. Orchestration keeps only HEAD,
   snapshot, visible-file loading, git/sidecar mutations, and calls the focused
   recovery policy directly.

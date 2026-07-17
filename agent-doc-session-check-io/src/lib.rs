@@ -129,15 +129,7 @@ pub(crate) fn captured_response_guard_evidence(
         }));
     }
 
-    Ok(
-        agent_doc_capture_io::load_by_id(file, capture_id)?.map(|capture| {
-            CapturedResponseGuardEvidence {
-                response_body: capture.response_body,
-                capture_committed: capture.state
-                    == agent_doc_workflow::capture::CaptureState::Committed,
-            }
-        }),
-    )
+    Ok(None)
 }
 
 pub(crate) fn operator_live_buffer_contains_heading(file: &Path, heading: &str) -> bool {

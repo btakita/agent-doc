@@ -54,7 +54,7 @@ pub type FrontmatterSlot<Schema> = TypedSlotHandle<Schema, Arc<Frontmatter>>;
 pub type ComponentsSlot<Schema> = TypedSlotHandle<Schema, Arc<Vec<Component>>>;
 pub type DocHashSlot<Schema> = TypedSlotHandle<Schema, String>;
 /// Phase 7 (#lr-cycle-7): cached per-document cycle state, loaded at most once
-/// per context lifetime. `None` when no cycle-state sidecar exists yet.
+/// per context lifetime. `None` when no durable closeout state exists yet.
 pub type CycleStateSlot<Schema> = TypedSlotHandle<Schema, Option<Arc<CycleState>>>;
 /// Phase 7 (#lr-cycle-7): cached snapshot content, loaded (with flock) at most
 /// once per context lifetime. `None` when no snapshot exists yet.
@@ -268,7 +268,7 @@ where
     // Phase 7 (#lr-cycle-7): load the snapshot content (with flock) once.
     ctx.memoized_slot::<SnapshotContentKey, _, _>(|ctx| {
         let path: PathBuf = ctx.get(file_path_cell(ctx));
-        match agent_doc_snapshot_io::load(&path) {
+        match agent_doc_snapshot_io::load_document_baseline(&path) {
             Ok(content) => content.map(Arc::new),
             Err(e) => {
                 eprintln!("[graph] snapshot load failed for {}: {}", path.display(), e);
@@ -446,8 +446,6 @@ pub trait AgentDocContextExt {
     fn invalidate_doc_content(&self);
     fn snapshot_path_for(&self) -> Option<PathBuf>;
     fn lock_path_for(&self) -> Option<PathBuf>;
-    fn baseline_path_for(&self) -> Option<PathBuf>;
-    fn pending_path_for(&self) -> Option<PathBuf>;
     fn on_file_change(&self, new_path: PathBuf);
     fn on_config_change(&self);
     fn on_session_registry_change(&self);
@@ -658,16 +656,6 @@ impl<Schema: 'static> AgentDocContextExt for TypedContext<Schema> {
         agent_doc_fs::state_lock_path_for(&self.canonical_path()).ok()
     }
 
-    fn baseline_path_for(&self) -> Option<PathBuf> {
-        self.project_root()?;
-        agent_doc_fs::baseline_path_for(&self.canonical_path()).ok()
-    }
-
-    fn pending_path_for(&self) -> Option<PathBuf> {
-        self.project_root()?;
-        agent_doc_fs::pending_response_path_for(&self.canonical_path()).ok()
-    }
-
     fn on_file_change(&self, new_path: PathBuf) {
         self.set_file_path(new_path);
     }
@@ -806,6 +794,7 @@ mod tests {
     #[test]
     fn run_context_no_project_root_finds_ancestor() {
         let dir = TempDir::new().unwrap();
+        setup_project(dir.path());
         std::fs::create_dir_all(dir.path().join("nested")).unwrap();
         let doc = dir.path().join("nested/file.md");
         std::fs::write(&doc, "").unwrap();
@@ -1171,36 +1160,6 @@ mod tests {
     }
 
     #[test]
-    fn baseline_path_for_matches_agent_doc_fs() {
-        let dir = TempDir::new().unwrap();
-        setup_project(dir.path());
-        let doc = dir.path().join("file.md");
-        std::fs::write(&doc, "").unwrap();
-
-        let rc = cycle_context(doc.clone());
-
-        assert_eq!(
-            rc.baseline_path_for(),
-            agent_doc_fs::baseline_path_for(&doc).ok()
-        );
-    }
-
-    #[test]
-    fn pending_path_for_matches_agent_doc_fs() {
-        let dir = TempDir::new().unwrap();
-        setup_project(dir.path());
-        let doc = dir.path().join("file.md");
-        std::fs::write(&doc, "").unwrap();
-
-        let rc = cycle_context(doc.clone());
-
-        assert_eq!(
-            rc.pending_path_for(),
-            agent_doc_fs::pending_response_path_for(&doc).ok()
-        );
-    }
-
-    #[test]
     fn invalidate_doc_content_clears_frontmatter_and_components() {
         let dir = TempDir::new().unwrap();
         setup_project(dir.path());
@@ -1250,7 +1209,12 @@ mod tests {
         setup_project(dir.path());
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "hello").unwrap();
-        agent_doc_snapshot_io::save(&doc, "snapshot body", agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            "snapshot body",
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let rc = cycle_context(doc);
         assert!(!rc.is_snapshot_content_cached());
@@ -1282,11 +1246,11 @@ mod tests {
         std::fs::write(&doc, "hello").unwrap();
 
         let rc = cycle_context(doc.clone());
-        // No sidecar yet → None, and the None is cached.
+        // No ledger row yet → None, and the None is cached.
         assert!(rc.cycle_state().is_none());
         assert!(rc.is_cycle_state_cached());
 
-        // Create a cycle-state sidecar, then prove invalidation reloads it.
+        // Create a ledger cycle, then prove invalidation reloads it.
         agent_doc_cycle_state_io::start_preflight(&doc, Some("hello"), Some("hello")).unwrap();
         assert!(
             rc.cycle_state().is_none(),
@@ -1299,17 +1263,13 @@ mod tests {
         assert!(!state.cycle_id.is_empty());
         assert!(rc.is_cycle_state_cached());
 
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc).unwrap().unwrap();
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("hello"), Some("hello"))
             .unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
         assert!(
-            agent_doc_cycle_state_io::load(&doc)
+            !agent_doc_cycle_state_io::load(&doc)
                 .unwrap()
                 .unwrap()
-                .is_open(),
-            "fixture should leave compatibility sidecar stale and open"
+                .is_open()
         );
         rc.invalidate_cycle_state();
         let projected = rc
@@ -1317,7 +1277,7 @@ mod tests {
             .expect("projection-aware cycle state should still load");
         assert!(
             !projected.is_open(),
-            "cycle-state slot should honor terminal closeout projections before sidecars"
+            "cycle-state slot should honor the terminal closeout projection"
         );
     }
 
@@ -1365,7 +1325,12 @@ mod tests {
         init_git_repo(dir.path());
         let doc = dir.path().join("file.md");
         std::fs::write(&doc, "committed\n").unwrap();
-        agent_doc_snapshot_io::save(&doc, "committed\n", agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            "committed\n",
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         commit_path(dir.path(), "file.md", "add doc");
 
         let rc = cycle_context(doc.clone());
@@ -1376,8 +1341,12 @@ mod tests {
         );
         assert!(rc.is_snapshot_commit_status_cached());
 
-        agent_doc_snapshot_io::save(&doc, "snapshot drift\n", agent_doc_ops_log_io::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            "snapshot drift\n",
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         assert_eq!(
             rc.snapshot_commit_status(),
             agent_doc_snapshot_io::SnapshotCommitStatus::Committed,

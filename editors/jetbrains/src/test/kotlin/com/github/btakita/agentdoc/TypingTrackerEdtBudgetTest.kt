@@ -16,10 +16,10 @@ class TypingTrackerEdtBudgetTest {
         ).first { Files.exists(it) }
         val source = Files.readString(trackerPath)
         val listenerBody = source.substringAfter("override fun documentChanged")
-            .substringBefore("private fun requestNativeDocumentChanged")
+            .substringBefore("private fun recordPendingEditorOp")
 
-        assertTrue(
-            "documentChanged should enqueue the lightweight native change marker off the listener path",
+        assertFalse(
+            "the removed file-backed change marker must not be scheduled",
             listenerBody.contains("requestNativeDocumentChanged(filePath)"),
         )
         assertTrue(
@@ -74,7 +74,7 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "JetBrains current-document reports should advertise operator-text and lazily receipt capabilities",
-            source.contains("agent_doc_document_changed_digest_content_for_editor_v2") &&
+            source.contains("agent_doc_lazily_current_observed_v1") &&
                 source.contains("operator_text_authority_v1") &&
                 source.contains("lazily_transport_receipts_v1"),
         )
@@ -127,7 +127,7 @@ class TypingTrackerEdtBudgetTest {
                 lifecycle.contains("TypingTracker.clearOpenDocumentReport(file)"),
         )
         val clearBody = tracker.substringAfter("fun clearOpenDocumentReport")
-            .substringBefore("fun publishCurrentDocumentNow")
+            .substringBefore("fun observeLazilyCurrentNow")
         assertTrue(
             "file-close cleanup must queue native release/close work off the file listener path",
             clearBody.contains("contentReportExecutor.execute"),
@@ -137,23 +137,24 @@ class TypingTrackerEdtBudgetTest {
             clearBody.substringBefore("contentReportExecutor.execute").contains("AgentDocLib.get()"),
         )
         assertTrue(
-            "file-close cleanup must publish the exact closing Lazily cut before releasing authority",
+            "file-close cleanup must publish the exact closing Lazily cut before closing authority",
             clearBody.contains("CrdtReplicaManager.publishClosingDocumentCut(filePath, closingDocument)") &&
                 clearBody.indexOf("publishClosingDocumentCut") <
-                clearBody.indexOf("agent_doc_plugin_owner_release"),
+                clearBody.indexOf("agent_doc_document_closed_for_editor"),
         )
+        assertFalse("file-close cleanup must not use plugin-owner compatibility", clearBody.contains("plugin_owner"))
         assertTrue(
             "a failed final publish must retain editor authority instead of emitting a lossy close",
             clearBody.contains("retaining editor authority instead of emitting a lossy close") &&
                 clearBody.contains("return@execute"),
         )
         assertTrue(
-            "open-document reporting should reuse the coalesced v2 full-content reporter",
+            "open-document reporting should reuse the current coalesced full-content reporter",
             tracker.contains("fun reportOpenMarkdownDocuments(project: Project)") &&
                 tracker.contains("FileEditorManager.getInstance(project).openFiles") &&
                 tracker.contains("fun scheduleOpenDocumentReport(file: VirtualFile)") &&
                 tracker.contains("scheduleFullContentReport(file.path, document)") &&
-                tracker.contains("agent_doc_document_changed_digest_content_for_editor_v2"),
+                tracker.contains("agent_doc_lazily_current_observed_v1"),
         )
     }
 
@@ -171,20 +172,21 @@ class TypingTrackerEdtBudgetTest {
         val watcher = Files.readString(watcherPath)
 
         assertTrue(
-            "the compatibility socket command should refresh the Lazily current document",
-            watcher.contains("\"publish_live_buffer\" -> {") &&
-                watcher.contains("TypingTracker.publishCurrentDocumentNow(file)"),
+            "the shared socket intent should refresh the Lazily current document",
+            watcher.contains("EditorIntent.ObserveLazilyCurrent.token -> {") &&
+                watcher.contains("TypingTracker.observeLazilyCurrentNow(file)"),
         )
-        val broadcastReloadBody = watcher
-            .substringAfter("private fun handleLibReloadBroadcastChanged()")
-            .substringBefore("private fun repositionBoundaryToEnd")
+        val reloadIntentBody = watcher
+            .substringAfter("EditorIntent.ReloadLibrary.token -> {")
+            .substringBefore("EditorIntent.SaveDocument.token -> {")
         assertTrue(
-            "a native reload broadcast must re-register every open markdown replica",
-            broadcastReloadBody.contains("AgentDocLib.forceReload()") &&
-                broadcastReloadBody.contains("CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project"),
+            "the typed reload intent must reload native code and re-register every open replica",
+            reloadIntentBody.contains("AgentDocLib.forceReload()") &&
+                reloadIntentBody.contains("CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project"),
         )
+        assertTrue("reload must have no filesystem watcher", !watcher.contains("newWatchService()"))
 
-        val publishBody = tracker.substringAfter("fun publishCurrentDocumentNow")
+        val publishBody = tracker.substringAfter("fun observeLazilyCurrentNow")
             .substringBefore("private fun scheduleFullContentReport")
         assertTrue(
             "socket-triggered publication should resolve the live editor document and publish without queued-op side effects",
@@ -196,11 +198,11 @@ class TypingTrackerEdtBudgetTest {
         )
 
         val reporterBody = tracker.substringAfter("private fun reportFullContentNow")
-            .substringBefore("private fun reportCompatibilityContentV1")
+            .substringBefore("private fun reportEditorOp")
         assertTrue(
-            "authority refresh must require the v2 capability-bearing ABI and keep legacy fallback only for non-authority reports",
-            reporterBody.contains("agent_doc_document_changed_digest_content_for_editor_v2") &&
-                reporterBody.contains("if (requireAuthority) false else") &&
+            "authority refresh must require the current capability-bearing ABI without legacy fallback",
+            reporterBody.contains("agent_doc_lazily_current_observed_v1") &&
+                !reporterBody.contains("reportCompatibilityContent") &&
                 reporterBody.contains("CrdtReplicaManager.ensureReplicaForOpenDocument") &&
                 reporterBody.contains("await = true") &&
                 reporterBody.contains("await = false") &&

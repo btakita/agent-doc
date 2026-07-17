@@ -76,10 +76,12 @@ pub fn observe_document_event(
 ) -> WatchObservation {
     let (gate, _new) = registry().register(doc_id, file);
     let content_hash = agent_doc_hash::content_hash(current_content);
-    let provenance = agent_doc_debounce::write_provenance(file);
+    let provenance = agent_doc_cycle_state_io::load_document_disk_write(Path::new(file))
+        .ok()
+        .flatten();
     let write_provenance = provenance
         .as_ref()
-        .map(|prov| WatchWriteProvenance::new(prov.actor.as_str(), prov.hash.as_str()));
+        .map(|prov| WatchWriteProvenance::new(prov.actor.as_str(), prov.content_hash.as_str()));
     let delivery = {
         let mut g = gate.lock().unwrap_or_else(|p| p.into_inner());
         g.observe(raw, &content_hash, write_provenance)

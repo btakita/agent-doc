@@ -48,11 +48,11 @@ use agent_doc_merge::crdt_sync::{ReplicaState, commit_barrier_ready, flush_to_co
 
 use crate::crdt_authority::CrdtAuthority;
 
-/// **Disk-demotion contract (plan phase 6).** The persisted
-/// `.agent-doc/crdt/<hash>` state is a write-through **durable recovery projection
-/// only** — never the coordination medium and never the source of truth while a
-/// session is live. The in-memory canonical replica is authoritative; disk is
-/// recovered-from on restart (losing at most one flush). This constant is the
+/// **Persistence-demotion contract (plan phase 6).** The CRDT bytes checkpointed
+/// in `state.db` are a **durable recovery projection only** — never the coordination
+/// medium and never the source of truth while a session is live. The Lazily-owned
+/// canonical replica is authoritative; the ledger is recovered from on restart.
+/// This constant is the
 /// single in-code statement of that contract, asserted by tests and consulted by
 /// callers that must not treat a persisted projection as authority.
 pub const DISK_IS_RECOVERY_PROJECTION_ONLY: bool = true;

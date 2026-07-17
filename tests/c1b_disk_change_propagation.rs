@@ -5,11 +5,9 @@
 //! reliable-sync OR-set, so `authority_for_file` resolves to `MultiReplica` and a
 //! canonical `RelayHub` is allocated with a registered editor replica — exactly
 //! the state a live JetBrains/VS Code plugin establishes. It then drives the
-//! shipped producer/consumer:
+//! shipped controller transition:
 //!
-//!   route_disk_change_signal (watch-daemon side, uses decide_watch_action)
-//!     -> `.agent-doc/disk-change-requests/<hash>.json` marker
-//!     -> consume_disk_change_reconcile (supervisor idle-loop side)
+//!   route_disk_change_signal (watch-daemon/controller, uses decide_watch_action)
 //!     -> apply_disk_change_for_file -> RelayHub::apply_disk_change
 //!
 //! Demonstrates goals 4/5: an out-of-band disk change reconciles into the CPC
@@ -17,7 +15,7 @@
 //! (out-of-band deletion → rebuild + editors flagged for re-bootstrap).
 
 use agent_doc_crdt_relay_io as relay;
-use agent_doc_document_realtime::crdt_relay::DiskChangeOutcome;
+use agent_doc_crdt_relay_io::CurrentText;
 use agent_doc_document_realtime::watch_authority::{WatchAction, WatchDelivery};
 use std::fs;
 use std::path::PathBuf;
@@ -58,27 +56,13 @@ fn attached_doc(name: &str, body: &str) -> (TempDir, PathBuf) {
 fn additive_change_reconciles_as_idempotent_noop() {
     let (_dir, file) = attached_doc("plan.md", "# Plan\n\nbody\n");
 
-    // Producer: a settled change on an editor-attached doc is routed to canonical
-    // and drops a reconcile marker.
+    // A settled change on an editor-attached doc is reconciled in the same
+    // controller transition.
     let action = relay::route_disk_change_signal(&file, &WatchDelivery::Change { generation: 1 })
         .expect("route_disk_change_signal ok");
     assert_eq!(action, WatchAction::ReconcileIntoCanonical);
-    assert!(
-        relay::disk_change_request_pending(&file),
-        "an editor-attached change drops a reconcile marker"
-    );
-
-    // Consumer: canonical was seeded from the same text, so disk == canonical →
-    // the "editor already has it" reconcile is an idempotent no-op.
-    let outcome = relay::consume_disk_change_reconcile(&file).expect("consume ok");
-    assert_eq!(outcome, Some(DiskChangeOutcome::AlreadyReconciled));
-    assert!(
-        !relay::disk_change_request_pending(&file),
-        "the marker is consumed exactly once"
-    );
-
-    // Consuming again with no marker is a no-op.
-    assert_eq!(relay::consume_disk_change_reconcile(&file).unwrap(), None);
+    let current = relay::current_text_for_file(&file).expect("current Lazily text");
+    assert!(matches!(current, CurrentText::Current { ref text, .. } if text == "# Plan\n\nbody\n"));
 }
 
 #[test]
@@ -89,22 +73,15 @@ fn out_of_band_deletion_rebuilds_canonical_and_flags_editors() {
     // a deletion the additive CRDT delta cannot express.
     fs::write(&file, "# Plan\n\nGOOD\n").unwrap();
 
-    relay::route_disk_change_signal(&file, &WatchDelivery::Change { generation: 1 })
+    let action = relay::route_disk_change_signal(&file, &WatchDelivery::Change { generation: 1 })
         .expect("route ok");
-    let outcome = relay::consume_disk_change_reconcile(&file).expect("consume ok");
-
-    match outcome {
-        Some(DiskChangeOutcome::RebuiltFromDisk { live_members }) => assert!(
-            live_members >= 1,
-            "the attached editor is flagged for a replace-capable re-bootstrap (D2)"
-        ),
-        other => panic!("expected RebuiltFromDisk, got {other:?}"),
-    }
-    assert!(!relay::disk_change_request_pending(&file));
+    assert_eq!(action, WatchAction::ReconcileIntoCanonical);
+    let current = relay::current_text_for_file(&file).expect("current Lazily text");
+    assert!(matches!(current, CurrentText::Current { ref text, .. } if text == "# Plan\n\nGOOD\n"));
 }
 
 #[test]
-fn headless_document_gets_no_marker() {
+fn headless_document_keeps_disk_authority() {
     // No reliable-sync Open fact → not editor-attached → the disk-authority load path
     // owns the change and no marker is dropped for a supervisor to consume.
     let dir = tempfile::tempdir().unwrap();
@@ -115,5 +92,4 @@ fn headless_document_gets_no_marker() {
     let action = relay::route_disk_change_signal(&file, &WatchDelivery::Change { generation: 1 })
         .expect("route ok");
     assert_eq!(action, WatchAction::ApplyAsDiskAuthority);
-    assert!(!relay::disk_change_request_pending(&file));
 }

@@ -26,7 +26,6 @@ pub struct FinalizePendingMutation<'a> {
 pub struct FinalizeRerunCommand<'a> {
     pub required_commit: bool,
     pub file: &'a Path,
-    pub baseline_file: Option<&'a Path>,
     pub is_template: bool,
     pub is_stream: bool,
     pub is_ipc: bool,
@@ -226,10 +225,7 @@ pub fn finalize_command(
     mode: agent_doc_frontmatter::frontmatter::ResolvedMode,
     pending_mutations: &[FinalizePendingMutation<'_>],
 ) -> String {
-    let mut finalize = format!(
-        "agent-doc finalize {} --baseline-file <preflight.baseline_file> --origin skill",
-        file.display()
-    );
+    let mut finalize = format!("agent-doc finalize {} --origin skill", file.display());
     for mutation in pending_mutations
         .iter()
         .filter(|mutation| mutation.kind == FinalizePendingMutationKind::ResolveExisting)
@@ -275,9 +271,6 @@ pub fn finalize_rerun_command_base(command: FinalizeRerunCommand<'_>) -> Option<
 
     let mut args = vec!["agent-doc".to_string(), "finalize".to_string()];
     args.push(command.file.display().to_string());
-    if let Some(path) = command.baseline_file {
-        push_owned_arg(&mut args, "--baseline-file", path.display().to_string());
-    }
     if command.is_template {
         args.push("--template".to_string());
     }
@@ -431,11 +424,6 @@ fn push_assignment_id(ids: &mut Vec<String>, pair: &str) {
 fn push_arg(args: &mut Vec<String>, flag: &str, value: &str) {
     args.push(flag.to_string());
     args.push(value.to_string());
-}
-
-fn push_owned_arg(args: &mut Vec<String>, flag: &str, value: String) {
-    args.push(flag.to_string());
-    args.push(value);
 }
 
 fn push_repeated_args(args: &mut Vec<String>, flag: &str, values: &[String]) {
@@ -883,7 +871,6 @@ mod tests {
         let command = FinalizeRerunCommand {
             required_commit: false,
             file: Path::new("tasks/doc.md"),
-            baseline_file: None,
             is_template: false,
             is_stream: false,
             is_ipc: false,
@@ -943,7 +930,6 @@ mod tests {
         let command = FinalizeRerunCommand {
             required_commit: true,
             file: Path::new("tasks/doc.md"),
-            baseline_file: Some(Path::new(".agent-doc/baseline.md")),
             is_template: true,
             is_stream: true,
             is_ipc: true,
@@ -979,7 +965,7 @@ mod tests {
         let rendered = finalize_rerun_command_base(command).unwrap();
 
         assert!(rendered.starts_with("agent-doc finalize tasks/doc.md"));
-        assert!(rendered.contains("--baseline-file .agent-doc/baseline.md"));
+        assert!(!rendered.contains("--baseline-file"));
         assert!(rendered.contains("--template --stream --ipc --force-disk"));
         assert!(rendered.contains("--origin skill"));
         assert!(rendered.contains("--no-followups"));

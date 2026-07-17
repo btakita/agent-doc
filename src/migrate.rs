@@ -77,7 +77,11 @@ pub fn run(files: &[PathBuf], all: bool, dry_run: bool) -> Result<()> {
         }
 
         agent_doc_document_realtime_io::atomic_write_through_authority(file, &result)?;
-        agent_doc_snapshot_io::save(file, &result, agent_doc_ops_log_io::log_op)?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &result,
+            agent_doc_ops_log_io::log_op,
+        )?;
         eprintln!("[migrate] migrated: {}", file.display());
         migrated += 1;
     }

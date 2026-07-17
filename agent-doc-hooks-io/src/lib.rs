@@ -12,52 +12,39 @@ pub struct PostResponseCapture {
     pub response_body: String,
 }
 
-/// Counts from best-effort stale editor-consumer cleanup after a post-commit hook.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct StaleConsumerReapCounts {
-    pub consumer_patches: usize,
-    pub live_buffers: usize,
-}
-
 /// Effect boundary for post-response hook metadata and closeout side effects.
 pub trait PostResponseHookEffects {
     fn load_active_capture(&self, file: &Path) -> Result<Option<PostResponseCapture>, String>;
     fn capture_tsift_memory_closeout(&self, file: &Path, response_body: &str);
     fn reap_local_model_leases(&self, file: &Path);
-    fn reap_stale_editor_consumers(&self, file: &Path) -> StaleConsumerReapCounts;
 }
 
 /// Function-backed post-response effect adapter for command crates.
-pub struct PostResponseHookEffectFns<Load, Memory, Lease, Stale> {
+pub struct PostResponseHookEffectFns<Load, Memory, Lease> {
     load_active_capture: Load,
     capture_tsift_memory_closeout: Memory,
     reap_local_model_leases: Lease,
-    reap_stale_editor_consumers: Stale,
 }
 
-impl<Load, Memory, Lease, Stale> PostResponseHookEffectFns<Load, Memory, Lease, Stale> {
+impl<Load, Memory, Lease> PostResponseHookEffectFns<Load, Memory, Lease> {
     pub fn new(
         load_active_capture: Load,
         capture_tsift_memory_closeout: Memory,
         reap_local_model_leases: Lease,
-        reap_stale_editor_consumers: Stale,
     ) -> Self {
         Self {
             load_active_capture,
             capture_tsift_memory_closeout,
             reap_local_model_leases,
-            reap_stale_editor_consumers,
         }
     }
 }
 
-impl<Load, Memory, Lease, Stale> PostResponseHookEffects
-    for PostResponseHookEffectFns<Load, Memory, Lease, Stale>
+impl<Load, Memory, Lease> PostResponseHookEffects for PostResponseHookEffectFns<Load, Memory, Lease>
 where
     Load: Fn(&Path) -> Result<Option<PostResponseCapture>, String>,
     Memory: Fn(&Path, &str),
     Lease: Fn(&Path),
-    Stale: Fn(&Path) -> StaleConsumerReapCounts,
 {
     fn load_active_capture(&self, file: &Path) -> Result<Option<PostResponseCapture>, String> {
         (self.load_active_capture)(file)
@@ -70,23 +57,17 @@ where
     fn reap_local_model_leases(&self, file: &Path) {
         (self.reap_local_model_leases)(file);
     }
-
-    fn reap_stale_editor_consumers(&self, file: &Path) -> StaleConsumerReapCounts {
-        (self.reap_stale_editor_consumers)(file)
-    }
 }
 
-pub fn post_response_hook_effects<Load, Memory, Lease, Stale>(
+pub fn post_response_hook_effects<Load, Memory, Lease>(
     load_active_capture: Load,
     capture_tsift_memory_closeout: Memory,
     reap_local_model_leases: Lease,
-    reap_stale_editor_consumers: Stale,
-) -> PostResponseHookEffectFns<Load, Memory, Lease, Stale> {
+) -> PostResponseHookEffectFns<Load, Memory, Lease> {
     PostResponseHookEffectFns::new(
         load_active_capture,
         capture_tsift_memory_closeout,
         reap_local_model_leases,
-        reap_stale_editor_consumers,
     )
 }
 
@@ -145,20 +126,11 @@ fn reap_local_model_leases_for_hooks(file: &Path) {
     let _ = agent_doc_lease_io::local_model::reap_local_model_leases(file);
 }
 
-fn reap_stale_editor_consumers_for_hooks(file: &Path) -> StaleConsumerReapCounts {
-    let counts = agent_doc_plugin_owner_io::stale_cleanup::reap_stale_jetbrains_for_file(file);
-    StaleConsumerReapCounts {
-        consumer_patches: counts.consumer_patches,
-        live_buffers: counts.live_buffers,
-    }
-}
-
 pub fn default_post_response_hook_effects() -> impl PostResponseHookEffects {
     post_response_hook_effects(
         load_active_capture_for_hooks,
         capture_tsift_memory_closeout_for_hooks,
         reap_local_model_leases_for_hooks,
-        reap_stale_editor_consumers_for_hooks,
     )
 }
 
@@ -324,19 +296,6 @@ pub fn fire_post_commit_with_effects(
         Err(err) => eprintln!("[hooks] tsift-memory closeout capture skipped: {err}"),
     }
     effects.reap_local_model_leases(file);
-    let counts = effects.reap_stale_editor_consumers(file);
-    if counts.consumer_patches > 0 {
-        eprintln!(
-            "[hooks] reaped {} stale jetbrains consumer patch file(s)",
-            counts.consumer_patches
-        );
-    }
-    if counts.live_buffers > 0 {
-        eprintln!(
-            "[hooks] reaped {} stale jetbrains live-buffer sidecar(s)",
-            counts.live_buffers
-        );
-    }
 }
 
 /// Fire a post_commit hook event.
@@ -430,7 +389,6 @@ mod tests {
         capture: RefCell<Result<Option<PostResponseCapture>, String>>,
         memory_closeouts: Cell<usize>,
         lease_reaps: Cell<usize>,
-        stale_reaps: Cell<usize>,
     }
 
     impl Default for FakePostResponseEffects {
@@ -439,7 +397,6 @@ mod tests {
                 capture: RefCell::new(Ok(None)),
                 memory_closeouts: Cell::new(0),
                 lease_reaps: Cell::new(0),
-                stale_reaps: Cell::new(0),
             }
         }
     }
@@ -455,14 +412,6 @@ mod tests {
 
         fn reap_local_model_leases(&self, _file: &Path) {
             self.lease_reaps.set(self.lease_reaps.get() + 1);
-        }
-
-        fn reap_stale_editor_consumers(&self, _file: &Path) -> StaleConsumerReapCounts {
-            self.stale_reaps.set(self.stale_reaps.get() + 1);
-            StaleConsumerReapCounts {
-                consumer_patches: 1,
-                live_buffers: 2,
-            }
         }
     }
 
@@ -522,6 +471,7 @@ mod tests {
     #[test]
     fn post_write_with_effects_includes_capture_metadata_when_available() {
         let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "---\nsession: sid\n---\n\n## User\n\nHello\n").unwrap();
         let effects = FakePostResponseEffects {
@@ -545,16 +495,14 @@ mod tests {
     #[test]
     fn load_active_capture_for_hooks_uses_projection_without_capture_sidecar() {
         let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("doc.md");
         let base = "---\nsession: sid\n---\n\n## User\n\nHello\n";
         let response = "### Re: hello — gpt-5\n\nDone.\n";
         std::fs::write(&doc, base).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
-        std::fs::remove_file(
-            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap(),
-        )
-        .unwrap();
+        assert!(!capture.capture_id.is_empty());
 
         let projected = load_active_capture_for_hooks(&doc)
             .unwrap()
@@ -567,6 +515,7 @@ mod tests {
     #[test]
     fn post_commit_with_effects_fires_event_and_runs_closeouts() {
         let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "---\nsession: sid\n---\n\n## User\n\nHello\n").unwrap();
         let effects = FakePostResponseEffects {
@@ -589,6 +538,5 @@ mod tests {
         assert_eq!(data["response_sha256"].as_str(), Some("sha-2"));
         assert_eq!(effects.memory_closeouts.get(), 1);
         assert_eq!(effects.lease_reaps.get(), 1);
-        assert_eq!(effects.stale_reaps.get(), 1);
     }
 }

@@ -545,7 +545,12 @@ mod tests {
             "❯ /clear\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None)
             .unwrap()
@@ -580,7 +585,9 @@ mod tests {
             Some("/clear"),
             "queued exchange slash command should be the active literal drain head"
         );
-        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snapshot, updated,
             "route queueing must sync the snapshot so the command head is not treated as edited drift"
@@ -608,7 +615,12 @@ mod tests {
             "/clear\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let ctx = pending_prompt_bearing_context_for_route(&doc, None)
             .unwrap()
@@ -1013,7 +1025,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _force_disk_guard =
             agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
@@ -1044,21 +1061,22 @@ mod tests {
             queue_pos < backlog_pos,
             "created queue component should be visible before tracked work components:\n{updated}"
         );
-        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snapshot, updated,
             "route queueing must sync the snapshot so queue continuation is not treated as a modified head prompt"
         );
     }
     #[test]
-    fn route_enqueue_dispatch_prompt_converges_via_editor_ipc_with_listener() {
+    fn route_enqueue_dispatch_prompt_converges_via_cpc_editor_replica() {
         // JB Run Agent Doc can queue a pending dispatch while the editor plugin
         // owns the live buffer. That write must use the shared editor-converger,
         // not a direct disk write that manufactures a File Cache Conflict.
         let dir = tempfile::TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        std::fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
         let doc = dir.path().join("session.md");
         let content = concat!(
             "---\n",
@@ -1088,13 +1106,18 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
-        let _listener = agent_doc_test_support::start_live_prompt_drift_receipt_listener(
-            dir.path(),
-            expected.into(),
+        agent_doc_test_support::publish_editor_text_via_crdt_relay(
+            &doc,
+            "route-queue-test-editor",
+            content,
         );
-        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
 
         let outcome = enqueue_route_dispatch_prompt(
             &doc,
@@ -1109,15 +1132,18 @@ mod tests {
         assert!(outcome.activated);
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), expected);
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
             expected
         );
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("route_dispatch_queue_editor_convergence_attempt")
+            ops_log.contains("visible_write_current_transition_ready")
                 && ops_log.contains("route_dispatch_queue_writeback")
-                && ops_log.contains("transport=editor_ipc"),
-            "route queue write must be observable as editor IPC convergence:\n{ops_log}"
+                && ops_log.contains("transport=crdt_relay")
+                && ops_log.contains("secondary_transport=none"),
+            "route queue write must be observable as CPC editor convergence:\n{ops_log}"
         );
         assert!(
             !ops_log.contains("transport=disk_fallback"),
@@ -1149,7 +1175,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         ROUTE_QUEUE_RETRY_WRITE_CALLS.store(0, Ordering::SeqCst);
 
         let outcome = enqueue_route_dispatch_prompt(
@@ -1174,7 +1205,9 @@ mod tests {
             "retry must preserve concurrent editor queue edits while inserting manual dispatch:\n{updated}"
         );
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
             updated,
             "snapshot must match the retried queue write"
         );
@@ -1210,7 +1243,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         // The polluted free-text line is preserved as a non-actionable Freeform
         // entry (tolerant parse) rather than failing the consume/dispatch guards.
@@ -1279,7 +1317,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _force_disk_guard =
             agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
@@ -1329,7 +1372,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap().as_deref(),
@@ -1368,7 +1416,9 @@ mod tests {
             Some("shipstationaudit"),
             "activated go queue should become drainable by the idle-queue watch"
         );
-        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snapshot, updated, "route activation must sync the snapshot");
     }
     #[test]
@@ -1388,7 +1438,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert_eq!(inactive_route_queue_head(&doc).unwrap(), None);
         assert_eq!(
@@ -1397,7 +1452,12 @@ mod tests {
             "plain inactive queues should stay inert without auto/start activation"
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
-        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap().unwrap(), content);
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
+            content
+        );
     }
     #[test]
     fn route_defers_uncommitted_queue_head_not_in_committed_snapshot() {
@@ -1436,7 +1496,12 @@ mod tests {
         );
         std::fs::write(&doc, on_disk).unwrap();
         // Committed snapshot only knows about `#committed`.
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert!(
             !agent_doc_queue::route_dispatch::committed_snapshot_backs_queue_head(
@@ -1475,7 +1540,9 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), on_disk);
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
             committed
         );
     }
@@ -1498,7 +1565,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap().as_deref(),
@@ -1532,7 +1604,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         assert!(
             !agent_doc_queue::route_dispatch::committed_snapshot_backs_queue_head(
                 Some(committed),
@@ -1576,7 +1653,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         // No INACTIVE head — the queue is already active, so the activate path no-ops.
         assert_eq!(
@@ -1620,7 +1702,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap().as_deref(),
@@ -1671,7 +1758,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert_eq!(
             inactive_route_queue_head(&doc).unwrap(),
@@ -1711,7 +1803,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _force_disk_guard =
             agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
@@ -1754,7 +1851,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _force_disk_guard =
             agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
@@ -1783,7 +1885,9 @@ mod tests {
             updated.contains("- Run Agent Doc queued the edited prompt."),
             "edited prompt should become the single queued rerun:\n{updated}"
         );
-        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snapshot, updated,
             "queue prompt supersession must sync the route snapshot"
@@ -1809,7 +1913,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _force_disk_guard =
             agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
@@ -1857,7 +1966,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _force_disk_guard =
             agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
@@ -1882,7 +1996,9 @@ mod tests {
             ),
             "priority dispatch must head-insert ahead of pending auto items with operator pin:\n{updated}"
         );
-        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snapshot, updated, "priority preempt must sync the snapshot");
     }
     #[test]
@@ -1907,7 +2023,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _force_disk_guard =
             agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
@@ -1952,7 +2073,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _force_disk_guard =
             agent_doc_route_io::invocation::ForceDiskRouteWritesGuard::set(true);
@@ -2220,7 +2346,12 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         // Open cycle so the drain actually runs (is_open()).
         agent_doc_cycle_state_io::start_preflight(&doc, None, Some(content)).unwrap();
 
@@ -2348,6 +2479,7 @@ mod tests {
     }
 
     fn write_open_cycle_route_doc(doc: &std::path::Path, content: &str) {
+        std::fs::create_dir_all(doc.parent().unwrap().join(".agent-doc")).unwrap();
         std::fs::write(doc, content).unwrap();
         agent_doc_cycle_state_io::start_preflight(doc, Some(content), Some(content)).unwrap();
         agent_doc_cycle_state_io::mark_pending_mutations(doc).unwrap();
@@ -3480,7 +3612,7 @@ mod tests {
             record_starting_actor_timeout(&file_path, &facts, "first timeout").unwrap(),
             StartingActorTimeoutLogDecision::NewTimeout
         );
-        clear_starting_actor_timeout_record(&file_path);
+        clear_starting_actor_timeout_record(&file_path, &facts);
         assert_eq!(
             record_starting_actor_timeout(&file_path, &facts, "after clear").unwrap(),
             StartingActorTimeoutLogDecision::NewTimeout

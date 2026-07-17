@@ -137,6 +137,17 @@ pub fn strip_queue_active_frontmatter(content: &str) -> String {
         .join("\n")
 }
 
+/// Drop only the deprecated `queue_active:` mirror while preserving the
+/// canonical operator-owned `queue:` control. Drift guards use this narrower
+/// normalization so a real go/stop edit remains visible.
+pub fn strip_legacy_queue_active_frontmatter(content: &str) -> String {
+    content
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("queue_active:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Normalization used for response-replay / stale-cycle hash matching.
 pub fn normalize_for_replay_hash(content: &str) -> String {
     normalize_transient_agent_doc_markers(&strip_queue_active_frontmatter(

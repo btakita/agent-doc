@@ -284,7 +284,6 @@ mod tests {
         facts.actor.generation = Some(7);
         facts.actor.controller_fresh = Some(true);
         facts.actor.supervisor_fresh = Some(true);
-        facts.editor.patches_dir_present = true;
         facts
     }
 

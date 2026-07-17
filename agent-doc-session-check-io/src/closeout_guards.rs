@@ -208,7 +208,7 @@ pub fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<Str
     let Some(session) = agent_doc_codex_hook_io::load_active_session_for_current_file(file)? else {
         return Ok(None);
     };
-    let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
+    let Some(snapshot) = agent_doc_snapshot_io::load_document_baseline(file)? else {
         return Ok(None);
     };
     let current =
@@ -254,7 +254,7 @@ pub fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<Str
 }
 
 pub fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<String>> {
-    let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
+    let Some(snapshot) = agent_doc_snapshot_io::load_document_baseline(file)? else {
         return Ok(None);
     };
     let current = crate::resolve_current_document_content(file, "uncommitted_exchange_drift")?;
@@ -342,7 +342,7 @@ pub fn open_cycle_manual_patchback_message(
 }
 
 pub fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
-    let Some(snapshot) = agent_doc_snapshot_io::load(file)? else {
+    let Some(snapshot) = agent_doc_snapshot_io::load_document_baseline(file)? else {
         return Ok(None);
     };
     let current = crate::resolve_current_document_content(file, "bypassed_response_write")?;
@@ -381,7 +381,7 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn queue_audit_guard_prefers_lazily_projection_over_stale_open_sidecar() {
+    fn queue_audit_guard_uses_committed_ledger_projection() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
         fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
@@ -389,13 +389,14 @@ mod tests {
         let doc = root.join("doc.md");
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n\n";
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle state path");
-        let stale_open_sidecar = fs::read(&sidecar_path).unwrap();
         let response = "### Re: which queue items are complete?\n\nNone of the six queue items are complete. Same-day QA is complete and the URL validate-only check was clean, but each row still has at least one remaining action.";
         let capture = agent_doc_capture_io::capture_response(&doc, response).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
@@ -413,18 +414,16 @@ mod tests {
         )
         .unwrap();
         agent_doc_capture_io::mark_committed_with_current_content(&doc, content).unwrap();
-        fs::remove_file(agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap())
-            .unwrap();
-        fs::write(&sidecar_path, stale_open_sidecar).unwrap();
+        assert!(!capture.capture_id.is_empty());
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::Committed
         );
 
         let result = check_queue_audit_partial_completion_guard(&doc).unwrap();
         assert!(
             matches!(result, GuardResult::Warn(_)),
-            "lazily committed projection should make the guard evaluate despite stale open JSON and missing capture JSON: {result:?}"
+            "the committed projection should make the guard evaluate despite a missing cold capture file: {result:?}"
         );
     }
 }

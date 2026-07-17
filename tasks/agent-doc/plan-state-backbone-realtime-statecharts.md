@@ -182,7 +182,7 @@ commit, recycle, or closeout correctness.
   classify `editor_attached_model_missing` / `editor_sync_pending` as a
   recoverable bounded startup/reconciliation attempt before surfacing an
   agent-facing failure. The current relay hook asks the editor for a read-only
-  `publish_live_buffer` and re-observes the relay; the remaining consolidation
+  `observe_lazily_current` and re-observes the relay; the remaining consolidation
   work is to fold ensure start/outcome and relay model usability into durable
   document backbone facts.
 - Closeout lifecycle state: cycle-state transitions now append
@@ -191,7 +191,7 @@ commit, recycle, or closeout correctness.
   git closeout path also appends exact `HEAD` SHA `CommitObserved` facts after
   real commits and already-current no-op closeouts. `session-check` and
   preflight now read the closeout projection before the legacy
-  `.agent-doc/state/cycles` recovery projection for open/terminal phase
+  `state.db` closeout projection for open/terminal phase
   authority, and preflight fails closed when an open closeout projection is
   hidden behind missing or mismatched-stale JSON recovery state. The JSON
   projection still supplies detailed compatibility guard/recovery payloads. The

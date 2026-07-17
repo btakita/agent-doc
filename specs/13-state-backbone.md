@@ -101,7 +101,7 @@ document components. Required projections include:
 | Document projection | current component bodies, boundaries, snapshot relation, prompt-bearing tail, editor attachment, CRDT relay model/replica status, document-model ensure outcome |
 | Queue projection | active head, struck/completed heads, drainability, backlog-to-queue sync, context-clear phase |
 | Closeout projection | latest cycle phase, captured response materialization, pending write boundary |
-| Transport projection | socket/file IPC patch state, binary write intent, expected response hash, editor patch-received/applied/rejected facts, visible-buffer hash, retry/no-disk fallback state |
+| Transport projection | PID-scoped endpoint, named binary intent, expected generation/hash, editor accepted/visible/rejected facts, retry/backoff state |
 | Supervisor projection | actor state, child pid, harness, capability proof, restart/recycle epoch |
 | Route projection | authoritative pane, readiness, dispatch authorization, route-submit phase, dispatch proof |
 | Proof projection | ops-log markers, typed verify/disproof predicates, semantic completion advisories |
@@ -122,24 +122,17 @@ The closeout projection delegates phase advancement to the existing
 `CyclePhaseMachine`; the other projections use their own small state machines
 for closed subdomains.
 
-During the sidecar-retirement migration, `agent-doc-cycle-state-io` bridges the
-legacy cycle-state writer into the closeout projection by appending
-`PreflightStarted`, `ResponseCaptured`, `WriteApplied`, `CommitObserved`, and
-`CycleAbandoned` facts with stable event ids after accepted lifecycle
-transitions. A transition must not be reported as successful if the matching
-closeout fact cannot be recorded. The `.agent-doc/state/cycles` JSON file is a
-compatibility recovery projection while readers are cut over to the closeout
-projection. `session-check` and preflight have the first reader cutovers: they
-use the closeout projection for open/terminal phase authority, override stale
-same-cycle JSON, and treat projection-only or mismatched-stale open projections
-as interrupted closeouts while retaining JSON guard/recovery payloads as
-compatibility evidence.
+`agent-doc-cycle-state-io` appends `PreflightStarted`, `ResponseCaptured`,
+`WriteApplied`, `CommitObserved`, and `CycleAbandoned` facts with stable event
+ids after accepted lifecycle transitions. A transition must not be reported as
+successful if the matching `state.db` fact cannot be recorded. Preflight,
+session-check, routing, repair, and closeout all reduce the same closeout
+projection for open/terminal authority; no filesystem cycle record is read or
+replayed.
 
 The git closeout layer also appends `CommitObserved` with the exact `HEAD` SHA
-after a successful real commit or an already-current no-op closeout. That
-git-owned fact is the authoritative commit identity when available; the
-cycle-state bridge's content-hash observation is a compatibility signal for
-older readers and crash recovery during migration.
+after a successful real commit or an already-current no-op closeout. That fact
+is the authoritative commit identity.
 
 ## Editor Projection Bridge
 
@@ -150,9 +143,9 @@ JetBrains, VS Code, and later editors should:
   native library exposes them;
 - compute the canonical document hash with the same canonical-path SHA-256 key
   used by snapshots;
-- report editor transport observations as typed events such as
-  `OwnerGenerationChanged`, `EditorPatchQueued`, `EditorPatchApplied`,
-  `EditorPatchRejected`, and `EditorPatchRetryRequested`;
+- report editor transport observations using the shared `EditorIntent` and
+  lifecycle vocabulary (`IntentCaptured`, `CanonicalApplied`,
+  `ReplicaAccepted`, `ReplicaVisible`, `DiskProjected`, `Committed`);
 - report route dispatch observations as route-owner generation plus
   readiness/proof events instead of relying only on plugin-local booleans; and
 - render route, transport, and proof status from `DocumentStateProjection`
@@ -178,9 +171,9 @@ Package-level bridge parity is explicit:
   package helpers so this duplicate adapter cannot silently drift.
 - Rust owns the authoritative `ProjectionSummary` compact string. Editor
   compact-summary helpers must keep matching `route=<readiness> pane=<pane>
-  transport=<patch>:<phase> proof_markers=<count>`, and Rust coverage must drive
-  JB socket IPC, JB file IPC, and VS Code file IPC through live queued/retry/applied
-  transport plus route started/proven/blocked events.
+  transport=<intent>:<phase> proof_markers=<count>`, and cross-language coverage
+  must drive both plugins through queued/retry/accepted/visible transitions plus
+  route started/proven/blocked events.
 
 ## State Wire (lazily-spec snapshot/delta)
 

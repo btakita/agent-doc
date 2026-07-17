@@ -1197,6 +1197,8 @@ mod tests {
                     document_hash: doc.to_string(),
                     cycle_id: cycle.to_string(),
                     commit: "deadbeef".to_string(),
+                    file_hash: None,
+                    snapshot_hash: None,
                 },
             ));
             ledger.append(StateEvent::new(

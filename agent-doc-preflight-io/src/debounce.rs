@@ -1,104 +1,113 @@
-//! Preflight debounce and editor-typing wait adapters.
-
 use anyhow::Result;
 use std::path::Path;
 
-pub fn preflight_debounce_ms(file: &Path) -> u64 {
+/// Poll cadence inherited from the document's configured debounce budget.
+/// Debounce is no longer an editor-authority signal; Lazily current state is.
+pub fn authority_settle_ms(file: &Path) -> u64 {
     std::fs::read_to_string(file)
         .ok()
         .and_then(|content| {
-            agent_doc_frontmatter::frontmatter::parse(&content)
+            agent_doc_frontmatter::parse(&content)
                 .ok()
                 .and_then(|(fm, _)| fm.debounce_ms)
         })
         .unwrap_or(2000)
 }
 
-pub fn wait_for_typing_idle_before_mutation(file: &Path) -> Result<()> {
-    let debounce_ms = preflight_debounce_ms(file);
-    let max_wait = agent_doc_debounce::preflight_debounce_max_wait(debounce_ms);
+fn lazily_current_ready(file: &Path, source: &str) -> Result<(bool, &'static str)> {
+    use agent_doc_crdt_relay_io::CurrentText;
+
+    Ok(match agent_doc_controller_io::project_controller::current_text_via_controller_model_for_doc(
+        file, source,
+    )? {
+        None | Some(CurrentText::Detached) => (true, "detached"),
+        Some(CurrentText::Current {
+            delivery_converged: true,
+            ..
+        }) => (true, "lazily_current"),
+        Some(CurrentText::Current { .. }) => (false, "delivery_pending"),
+        Some(CurrentText::EditorAttachedMissingReplica) => (false, "missing_replica"),
+        Some(CurrentText::EditorSyncPending) => (false, "current_pending"),
+    })
+}
+
+/// Serialize a visible mutation behind Lazily's current-authority transition.
+///
+/// This deliberately does not infer operator activity from a filesystem typing
+/// marker or disk mtime. The coherent current document is the authority, and the
+/// eventual mutation remains guarded by its expected-current CAS.
+pub fn wait_for_lazily_current_before_mutation(file: &Path) -> Result<()> {
+    let settle_ms = authority_settle_ms(file);
+    let max_wait = agent_doc_debounce::authority_settle_max_wait(settle_ms);
     let poll = std::time::Duration::from_millis(100);
     let start = std::time::Instant::now();
-    let file_str = file.to_string_lossy();
-
     loop {
-        let typing_active = agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms);
-        if !typing_active {
-            return Ok(());
-        }
+        let (last_state, last_error) =
+            match lazily_current_ready(file, "preflight_visible_mutation") {
+                Ok((true, _)) => return Ok(()),
+                Ok((false, state)) => (state, None),
+                Err(error) => ("authority_unavailable", Some(error.to_string())),
+            };
         if start.elapsed() >= max_wait {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "preflight_visible_mutation_deferred_active_typing file={} debounce_ms={} timeout_ms={}",
+                    "preflight_visible_mutation_deferred_lazily_current file={} state={} timeout_ms={} error={}",
                     file.display(),
-                    debounce_ms,
-                    max_wait.as_millis()
+                    last_state,
+                    max_wait.as_millis(),
+                    last_error.as_deref().unwrap_or("none")
                 ),
             );
             anyhow::bail!(
-                "preflight deferred for {}: editor typing did not settle within {}ms; retry after typing stops",
+                "preflight deferred for {}: Lazily current authority remained {} for {}ms; retry after the current transition settles{}",
                 file.display(),
-                max_wait.as_millis()
+                last_state,
+                max_wait.as_millis(),
+                last_error
+                    .as_deref()
+                    .map(|error| format!(" ({error})"))
+                    .unwrap_or_default()
             );
         }
         std::thread::sleep(poll);
     }
 }
 
-pub fn wait_for_preflight_debounce(file: &Path) {
-    let debounce_ms = preflight_debounce_ms(file);
-    let debounce = std::time::Duration::from_millis(debounce_ms);
-    let max_wait = agent_doc_debounce::preflight_debounce_max_wait(debounce_ms);
+/// Observe a coherent Lazily current cut before preflight reads the document.
+/// Mutation sites use [`wait_for_lazily_current_before_mutation`] and fail closed;
+/// this read-only observation remains bounded and lets later CAS checks decide.
+pub fn wait_for_lazily_current_observation(file: &Path) {
+    let settle_ms = authority_settle_ms(file);
+    let max_wait = agent_doc_debounce::authority_settle_max_wait(settle_ms);
     let poll = std::time::Duration::from_millis(100);
     let start = std::time::Instant::now();
-    let file_str = file.to_string_lossy();
-    tracing::debug!(debounce_ms, file = %file.display(), "preflight debounce starting");
 
     loop {
-        let idle_for = std::fs::metadata(file)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-            .unwrap_or(debounce);
-
-        let typing_active = agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms);
-        tracing::trace!(
-            idle_ms = idle_for.as_millis() as u64,
-            typing_active,
-            elapsed_ms = start.elapsed().as_millis() as u64,
-            "preflight debounce poll"
-        );
-
-        if idle_for >= debounce && !typing_active {
-            tracing::debug!(
-                idle_ms = idle_for.as_millis() as u64,
-                waited_ms = start.elapsed().as_millis() as u64,
-                "preflight debounce settled"
-            );
-            break;
-        }
-        if start.elapsed() >= max_wait {
-            if typing_active {
-                tracing::warn!(
+        match lazily_current_ready(file, "preflight_observation") {
+            Ok((true, state)) => {
+                tracing::debug!(
                     waited_ms = start.elapsed().as_millis() as u64,
-                    "preflight debounce timeout (typing still active)"
+                    authority_state = state,
+                    file = %file.display(),
+                    "preflight Lazily current observed"
                 );
-                eprintln!(
-                    "[preflight] typing indicator active but timeout after {:.1}s — proceeding",
-                    start.elapsed().as_secs_f64()
-                );
-            } else {
-                tracing::warn!(
-                    waited_ms = start.elapsed().as_millis() as u64,
-                    "preflight debounce timeout (mtime not settled)"
-                );
-                eprintln!(
-                    "[preflight] mtime debounce timeout after {:.1}s — proceeding",
-                    start.elapsed().as_secs_f64()
-                );
+                return;
             }
-            break;
+            Ok((false, state)) if start.elapsed() < max_wait => {
+                tracing::trace!(authority_state = state, "preflight Lazily current pending");
+            }
+            Err(error) if start.elapsed() < max_wait => {
+                tracing::trace!(%error, "preflight Lazily current unavailable");
+            }
+            outcome => {
+                tracing::warn!(
+                    waited_ms = start.elapsed().as_millis() as u64,
+                    outcome = ?outcome,
+                    "preflight Lazily current observation timeout; later expected-current CAS remains authoritative"
+                );
+                return;
+            }
         }
         std::thread::sleep(poll);
     }

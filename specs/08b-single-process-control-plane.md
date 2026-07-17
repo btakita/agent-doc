@@ -59,9 +59,9 @@ store actor. Each row is keyed by `operation_id` plus `content_hash` and covers
 queue heads, response captures, patch writes, actor generations, and terminal
 proofs. Consumed, deferred, retried, and superseded operations append new rows;
 existing rows are never rewritten.
-- `session-actors.json`, `sessions.json`, layout JSON, session logs, and
-`ops.log` are compatibility or diagnostic projections. Normal route, start,
-sync, clear, restart, and queue-dispatch paths must not treat them as write
+- Actor bindings, layout memory, per-command markers, and transport state live
+in `.agent-doc/state.db`; session logs and `ops.log` are append-only diagnostics.
+Normal route, start, sync, clear, restart, and queue-dispatch paths must not treat logs as write
 authorities once the controller record exists.
 - The in-memory actor map is a write-through cache of SQLite state. A successful
   mutation updates memory and commits one SQLite transaction before reporting an
@@ -72,27 +72,23 @@ authorities once the controller record exists.
   write-through contract: accepted mutations update the live memory authority
   only after the SQLite transaction commits, and failed commits must leave the
   memory snapshot unchanged.
-- JSON projection failures are recorded as projection diagnostics with source
-  generation, intended projection hash, error, and retry status. They must not
-  roll back or weaken the authoritative actor state.
-- `sessions.json` projection emission is controller-backed once an actor row
-  exists: the projection worker derives the binding from SQLite, preserves
-  existing compatibility metadata when available, can recreate a missing
-  registry entry from the actor row, and removes stale same-pane legacy entries
+- Cold recovery-projection failures are recorded as projection diagnostics with
+  source generation, intended projection hash, error, and retry status. They
+  must not roll back or weaken authoritative actor state.
+- Registry binding updates are controller-backed once an actor row exists: the
+  same transaction derives the binding from SQLite and can recreate a missing
+registry entry from the actor row, and removes stale same-pane entries
   that conflict with a live controller actor.
 - Session actor closeout persists the selected queue head, response/cycle
 terminal state, and tracked-work mutations as one controller transaction
 after strict closeout checks pass. Failed closeout must leave those controller
 rows unadvanced.
-- Cycle-state authority is split into an accepted transition and a durable
-snapshot. `cycle_state_machine::CyclePhaseMachine` is the pure transition
-authority for `CycleEvent` phase changes (`StartPreflight`,
-`ResponseCaptured`, `WriteApplied`, `Committed`, `Abandoned`, and recovery
-rewinds). The compatibility `cycle_state` sidecar path applies that transition
-table before it writes `.agent-doc/state/cycles/<hash>.json`; later controller
-cutover must submit the same events through the session actor and emit the
-sidecar from the serialized owner job. The sidecar remains the crash-recovery
-journal and startup replay source; it is not deleted by controller cutover.
+- `cycle_state_machine::CyclePhaseMachine` is the pure transition authority for
+  `CycleEvent` phase changes (`StartPreflight`, `ResponseCaptured`,
+  `WriteApplied`, `Committed`, `Abandoned`, and recovery rewinds). The session
+  actor records every accepted transition transactionally in `state.db` before
+  reporting success. Startup recovery reduces that ledger; it does not replay a
+  second filesystem cycle journal.
 
 ## Workflow state kernel
 
@@ -255,19 +251,12 @@ start` host in favor of the in-process adapter `supervisor::in_process`, and the
 WatchService read-only demotion) is likewise complete; see the filesystem-watch
 authority note below.
 
-The editor-plugin filesystem-watch demotion (`#dsqa`/`#pcp7`) is **complete**.
-It shipped through the `AGENT_DOC_PLUGIN_WATCH` rollback flag (`active →
-read-only`); at the removal rung the flag and the `active` (plugin-applies) path
-were removed, so the plugin's autonomous NIO `WatchService` file-apply path is
-**unconditionally** read-only. The plugin no longer applies file-IPC patches it
-observes under `.agent-doc/patches/`; the single controller-owned watcher plus
-the socket IPC command channel (the controller's writer arm into the editor) are
-the sole writer to the live buffer, removing the second-watcher race that
-mutated the live buffer between an agent finalize's preflight and commit. The
-plugin reads this end state through the `agent_doc_plugin_watch_readonly` FFI
-export (`watch_authority::plugin_watch_is_readonly`, always true), which emits a
-structured `plugin_watch_readonly` `ops.log` marker so the demotion is
-log-verifiable. The plugin's socket IPC apply path stays active.
+The editor-plugin filesystem delivery watcher (`#dsqa`/`#pcp7`) is removed.
+Plugins receive typed `EditorIntent` values only through the PID-scoped
+controller socket and publish accepted/visible receipts through Lazily. There
+is no read-only compatibility watcher, startup scan, or second delivery owner.
+This removes the race in which an asynchronous file consumer could mutate the
+buffer between closeout observation and commit.
 
 Routing a write through the queue re-enters `atomic_write` on the session-actor
 owner thread; the thread-local owner-scope re-entrancy guard
@@ -542,9 +531,8 @@ the dispatch actor and produce receipts.
   accepting new requests: it reloads actor memory from SQLite, reconciles fresh
   supervisor leases as reattached or stale, records retryable/blocked dispatch
   receipt recovery markers based on side-effect proof scope, emits
-  `session-actors.json`, `sessions.json`, and layout projections from committed
-  rows, and records open closeout cycles as preserved without advancing queue or
-  backlog rows.
+  cold recovery projections only when explicitly requested, and records open
+  closeout cycles as preserved without advancing queue or backlog rows.
 
 ## Backpressure
 

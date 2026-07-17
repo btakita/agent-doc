@@ -119,7 +119,12 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -203,7 +208,12 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -288,7 +298,12 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let stale_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -426,7 +441,12 @@ mod tests {
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -590,7 +610,12 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -655,7 +680,12 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -711,7 +741,12 @@ mod tests {
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -812,7 +847,7 @@ mod tests {
             "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n",
         )
         .unwrap();
-        agent_doc_snapshot_io::save(
+        agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
             "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
             agent_doc_ops_log_io::log_op,
@@ -906,7 +941,12 @@ mod tests {
         )
         .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1007,7 +1047,12 @@ mod tests {
             "busy mock session should be in reverse-i-search: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1110,7 +1155,12 @@ mod tests {
             "busy OpenCode mock should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1213,7 +1263,12 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1323,7 +1378,12 @@ mod tests {
         )
         .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1416,7 +1476,12 @@ mod tests {
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1466,7 +1531,12 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1558,7 +1628,12 @@ mod tests {
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1655,7 +1730,12 @@ mod tests {
         std::fs::write(&doc, current).unwrap();
         let mock_agent = write_mock_registered_agent_doc_extra_line_detector(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1849,7 +1929,12 @@ mod tests {
         let snapshot = "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1938,7 +2023,12 @@ mod tests {
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -2079,7 +2169,12 @@ mod tests {
         let doc = dir.path().join("stale-starting-ready-prompt.md");
         let current = "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, current, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            current,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(current), Some(current)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,

@@ -1,16 +1,11 @@
-//! Durable per-document sidecar I/O for the current turn's [`TurnScope`] manifest
+//! Durable per-document state-ledger I/O for the current turn's [`TurnScope`] manifest
 //! (`#nm1x`, `tasks/agent-doc/plan-operation-scoped-drift.md`).
 //!
 //! ## Spec
-//! - `agent_doc_fs::turn_scope_path_for(doc)`: compute
-//!   `<project_root>/.agent-doc/turn-scope/<hash>.json`, keyed by the same
-//!   per-document state hash as every other per-doc state file so the scope
-//!   colocates with the document's snapshot/baseline tree.
-//! - `save(doc, scope)`: atomically persist the JSON-encoded scope (tempfile +
-//!   rename), creating the parent directory on demand.
-//! - `load(doc)`: return the persisted scope, or `None` when absent / unreadable
-//!   / malformed.
-//! - `delete(doc)`: idempotently remove the sidecar.
+//! - `save(doc, scope)`: transactionally persist the JSON-encoded scope in the
+//!   project `state.db`, keyed by canonical document hash.
+//! - `load(doc)`: return the ledger scope, or `None` when absent/unavailable.
+//! - `delete(doc)`: idempotently remove the ledger row.
 //!
 //! ## Agentic Contracts
 //! - Preflight derives the [`TurnScope`] at turn start and persists it here so the
@@ -18,45 +13,86 @@
 //!   incoming document ops against the same scope instead of treating every
 //!   non-exchange component change as turn-affecting.
 //! - Persistence is best-effort: a write failure must never block a preflight
-//!   cycle, and a missing sidecar makes the gate fall back to its coarse,
+//!   cycle, and missing state makes the gate fall back to its coarse,
 //!   conservative behavior (block on any non-exchange drift).
 
 use agent_doc_turn::turn_scope::TurnScope;
 use anyhow::{Context, Result};
 use std::path::Path;
 
-/// Persist the current turn's scope manifest. Atomic (tempfile + rename).
+const TURN_SCOPE_STATE_KIND: &str = "turn_scope";
+
+fn state_identity(doc: &Path) -> Result<(std::path::PathBuf, String, String)> {
+    let canonical = std::fs::canonicalize(doc)
+        .with_context(|| format!("failed to canonicalize {}", doc.display()))?;
+    let root = agent_doc_fs::find_project_root(&canonical)
+        .or_else(|| canonical.parent().map(Path::to_path_buf))
+        .context("turn scope document has no project root")?;
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
+    Ok((root, hash, canonical.to_string_lossy().into_owned()))
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Persist the current turn's scope manifest in the authoritative ledger.
 pub fn save(doc: &Path, scope: &TurnScope) -> Result<()> {
-    let path = agent_doc_fs::turn_scope_path_for(doc)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let encoded = serde_json::to_string(scope).context("failed to encode turn scope")?;
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    std::io::Write::write_all(&mut tmp, encoded.as_bytes())
-        .with_context(|| "failed to write turn scope temp file")?;
-    tmp.persist(&path)
-        .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
-    Ok(())
+    let (root, document_hash, canonical_path) = state_identity(doc)?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
+        &conn,
+        &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
+            document_hash,
+            state_kind: TURN_SCOPE_STATE_KIND.to_string(),
+            canonical_path,
+            payload_json: encoded,
+            updated_at_ms: now_ms(),
+        },
+    )
 }
 
-/// Load the persisted turn scope for a document, or `None` when the sidecar is
-/// absent, unreadable, or malformed. A malformed sidecar is treated as absent so
-/// the gate falls back to its conservative coarse behavior rather than failing.
+/// Load the persisted turn scope, conservatively returning `None` if ledger
+/// access or decoding fails.
 pub fn load(doc: &Path) -> Option<TurnScope> {
-    let path = agent_doc_fs::turn_scope_path_for(doc).ok()?;
-    let content = std::fs::read_to_string(&path).ok()?;
-    serde_json::from_str(&content).ok()
+    let result = (|| -> Result<Option<TurnScope>> {
+        let (root, document_hash, _) = state_identity(doc)?;
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+        let Some(record) = agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
+            &conn,
+            &document_hash,
+            TURN_SCOPE_STATE_KIND,
+        )?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(serde_json::from_str(&record.payload_json)?))
+    })();
+    match result {
+        Ok(scope) => scope,
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] turn scope ledger read failed for {}: {err:#}",
+                doc.display()
+            );
+            None
+        }
+    }
 }
 
-/// Remove the turn-scope sidecar for a document. Idempotent.
+/// Remove the turn-scope ledger row. Idempotent.
 pub fn delete(doc: &Path) -> Result<()> {
-    let path = agent_doc_fs::turn_scope_path_for(doc)?;
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
+    let (root, document_hash, _) = state_identity(doc)?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_sqlite::state_store::clear_document_runtime_state_in_db(
+        &conn,
+        &document_hash,
+        TURN_SCOPE_STATE_KIND,
+    )?;
     Ok(())
 }
 
@@ -92,13 +128,11 @@ mod tests {
     }
 
     #[test]
-    fn malformed_sidecar_loads_as_none() {
+    fn save_never_emits_a_turn_scope_sidecar() {
         let dir = TempDir::new().unwrap();
         let doc = doc_in(&dir);
-        let path = agent_doc_fs::turn_scope_path_for(&doc).unwrap();
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "{not valid json").unwrap();
-        assert_eq!(load(&doc), None);
+        save(&doc, &TurnScope::for_driver(None)).unwrap();
+        assert!(!dir.path().join(".agent-doc/turn-scope").exists());
     }
 
     #[test]

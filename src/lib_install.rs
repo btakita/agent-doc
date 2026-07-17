@@ -1,86 +1,8 @@
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Well-known filename of the global cdylib reload-broadcast file. It lives as a
-/// sibling of the installed `libagent_doc` cdylib (in the running binary's
-/// directory), so it is a single project-independent path that every editor
-/// plugin can derive from the library path it already resolves via
-/// `agent-doc lib-path`.
-pub const RELOAD_BROADCAST_FILENAME: &str = "agent-doc-reload-broadcast.json";
-
 static BINARY_INSTALL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-
-/// Payload of the global cdylib reload-broadcast file. An install (or
-/// `agent-doc admin reload-lib`) writes this so editor plugins force the existing
-/// native-reload path immediately instead of waiting for their next lazy
-/// mtime-checked FFI call.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReloadBroadcast {
-    /// The `CARGO_PKG_VERSION` of the freshly-installed cdylib.
-    pub lib_version: String,
-    /// The installed cdylib's mtime, in epoch milliseconds (0 if unavailable).
-    pub mtime_ms: i64,
-    /// Caller-supplied wall-clock stamp (epoch milliseconds) of when the
-    /// broadcast was written. Supplied by the call site so pure writers never
-    /// read the clock.
-    pub installed_at_epoch_ms: u128,
-}
-
-/// The global reload-broadcast file path: a sibling of the installed cdylib in
-/// the running binary's directory. Project-independent.
-pub fn reload_broadcast_path() -> Result<PathBuf> {
-    let exe = std::env::current_exe().context("cannot determine current executable path")?;
-    let dir = exe
-        .parent()
-        .context("cannot determine binary directory for reload broadcast")?;
-    Ok(reload_broadcast_path_in(dir))
-}
-
-/// Pure path helper: the reload-broadcast file inside `dir`.
-pub fn reload_broadcast_path_in(dir: &Path) -> PathBuf {
-    dir.join(RELOAD_BROADCAST_FILENAME)
-}
-
-/// Pure writer: serialize `broadcast` to `dir/agent-doc-reload-broadcast.json`
-/// atomically (temp + rename). Does not read the clock — the caller stamps
-/// `installed_at_epoch_ms`. Returns the written path.
-pub fn write_reload_broadcast(dir: &Path, broadcast: &ReloadBroadcast) -> Result<PathBuf> {
-    let path = reload_broadcast_path_in(dir);
-    let json =
-        serde_json::to_vec_pretty(broadcast).context("serialize reload broadcast payload")?;
-    agent_doc_fs::write_atomic(&path, &json)
-        .with_context(|| format!("write reload broadcast {}", path.display()))?;
-    Ok(path)
-}
-
-/// Reader counterpart to [`write_reload_broadcast`]. Part of the reload-broadcast
-/// contract; currently exercised by the round-trip unit tests and available to
-/// external callers that parse the broadcast payload.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn read_reload_broadcast(path: &Path) -> Result<ReloadBroadcast> {
-    let bytes =
-        std::fs::read(path).with_context(|| format!("read reload broadcast {}", path.display()))?;
-    serde_json::from_slice(&bytes)
-        .with_context(|| format!("parse reload broadcast {}", path.display()))
-}
-
-/// Epoch-milliseconds mtime of `path`, if resolvable.
-fn mtime_epoch_ms(path: &Path) -> Option<i64> {
-    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
-    let dur = modified.duration_since(std::time::UNIX_EPOCH).ok()?;
-    Some(dur.as_millis() as i64)
-}
-
-/// Current wall-clock stamp in epoch milliseconds (0 if the clock is before the
-/// epoch, which should never happen in practice).
-fn now_epoch_ms() -> u128 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0)
-}
 
 pub(crate) fn platform_lib_name() -> &'static str {
     #[cfg(target_os = "linux")]
@@ -306,80 +228,44 @@ pub(crate) fn run_paths(
     // `lib-install` is safe. Opt out with a falsey AGENT_DOC_RECYCLE_ON_INSTALL.
     auto_recycle_after_install();
 
-    // `#cdylib-reload-broadcast`: running controllers/supervisors recycle onto the
-    // fresh binary above, but editor plugins only hot-reload the cdylib LAZILY on
-    // their next FFI call. Proactively announce the reload by writing the global
-    // broadcast file next to the installed cdylib; the JetBrains/VS Code plugins
-    // watch it and force their existing native-reload path immediately. Best-effort:
-    // a broadcast failure is logged (never swallowed) but must NOT fail the install.
-    broadcast_reload_after_install(&target, version, &installed);
+    // Proactively send the shared `reload_library` intent to every editor process
+    // registered on the reliable-sync plane. This is best-effort: an editor that
+    // is currently disconnected reloads lazily on its next native call.
+    signal_reload_after_install(version);
 
     Ok(())
 }
 
-/// `#cdylib-reload-broadcast`: write the global reload-broadcast file after a
-/// successful cdylib install. Best-effort — logs on failure, never returns an
-/// error to the install path.
-fn broadcast_reload_after_install(target_dir: &Path, version: &str, installed: &Path) {
-    let broadcast = ReloadBroadcast {
-        lib_version: version.to_string(),
-        mtime_ms: mtime_epoch_ms(installed).unwrap_or(0),
-        installed_at_epoch_ms: now_epoch_ms(),
-    };
-    match write_reload_broadcast(target_dir, &broadcast) {
-        Ok(path) => eprintln!(
-            "[lib-install] broadcast: cdylib reload announced to editor plugins ({})",
-            path.display()
-        ),
-        Err(e) => eprintln!(
-            "[lib-install] warning: cdylib reload broadcast failed ({e:#}) — editor plugins will still lazily reload on their next FFI call"
-        ),
-    }
+fn signal_reload_after_install(version: &str) {
+    let report = agent_doc_controller_io::project_controller::reload_library_all_projects(version);
+    eprintln!(
+        "[lib-install] reload_library intent: delivered {}/{} editor endpoints across {} projects ({} unavailable)",
+        report.delivered, report.endpoints, report.projects, report.failed
+    );
 }
 
 /// Deterministic report from [`reload_lib`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReloadLibReport {
-    /// Path of the reload-broadcast file that was written.
-    pub broadcast_path: PathBuf,
-    /// The cdylib version announced in the broadcast.
+    /// The cdylib version announced in the typed intent.
     pub lib_version: String,
-    /// Best-effort count of discoverable editor-connected project roots the
-    /// broadcast could ALSO signal directly (controller-serving roots that carry
-    /// an `.agent-doc/patches/` directory). The global broadcast remains the
-    /// authoritative fan-out because IDE-hosted listeners are not enumerable.
     pub editor_projects: usize,
+    pub editor_endpoints: usize,
+    pub delivered: usize,
+    pub failed: usize,
 }
 
-/// `agent-doc admin reload-lib` core: write the global reload-broadcast file for
-/// the currently-installed cdylib and report how many editor-connected projects it
-/// could also signal. `now_epoch_ms` is supplied by the caller so this stays
-/// testable and clock-free at the seam.
-pub fn reload_lib(now_epoch_ms: u128) -> Result<ReloadLibReport> {
+/// Send a typed `reload_library` intent to every reliable-sync editor member.
+pub fn reload_lib() -> Result<ReloadLibReport> {
     let version = env!("CARGO_PKG_VERSION");
-    let broadcast_target = reload_broadcast_path()?;
-    let dir = broadcast_target
-        .parent()
-        .context("cannot determine binary directory for reload broadcast")?;
-    let installed = dir.join(platform_lib_name());
-    let broadcast = ReloadBroadcast {
-        lib_version: version.to_string(),
-        mtime_ms: mtime_epoch_ms(&installed).unwrap_or(0),
-        installed_at_epoch_ms: now_epoch_ms,
-    };
-    let broadcast_path = write_reload_broadcast(dir, &broadcast)?;
-    let editor_projects =
-        agent_doc_controller_io::project_controller::editor_broadcast_project_root_count();
+    let fanout = agent_doc_controller_io::project_controller::reload_library_all_projects(version);
     Ok(ReloadLibReport {
-        broadcast_path,
         lib_version: version.to_string(),
-        editor_projects,
+        editor_projects: fanout.projects,
+        editor_endpoints: fanout.endpoints,
+        delivered: fanout.delivered,
+        failed: fanout.failed,
     })
-}
-
-/// Wall-clock convenience wrapper over [`reload_lib`] for the CLI call site.
-pub fn reload_lib_now() -> Result<ReloadLibReport> {
-    reload_lib(now_epoch_ms())
 }
 
 fn normalized_profile(profile: &str) -> &str {
@@ -403,9 +289,7 @@ pub(crate) fn profile_lib_path(
 }
 
 const REQUIRED_EDITOR_ABI_SYMBOLS: &[&str] = &[
-    "agent_doc_document_changed_digest_content_for_editor_v2",
-    "agent_doc_document_changed_digest_content_for_editor_v3",
-    "agent_doc_document_synced_digest_content_for_editor_v2",
+    "agent_doc_lazily_current_observed_v1",
     "agent_doc_editor_content_applied_for_editor_v1",
     "agent_doc_editor_patch_applied",
     "agent_doc_editor_patch_rejected",
@@ -535,47 +419,6 @@ mod tests {
     }
 
     #[test]
-    fn reload_broadcast_round_trips_through_writer_and_reader() {
-        let tmp = tempfile::tempdir().unwrap();
-        let broadcast = ReloadBroadcast {
-            lib_version: "0.34.68".to_string(),
-            mtime_ms: 1_700_000_000_123,
-            installed_at_epoch_ms: 1_700_000_000_456,
-        };
-
-        let written = write_reload_broadcast(tmp.path(), &broadcast).unwrap();
-        assert_eq!(written, reload_broadcast_path_in(tmp.path()));
-        assert_eq!(
-            written.file_name().unwrap().to_str().unwrap(),
-            RELOAD_BROADCAST_FILENAME
-        );
-
-        let read_back = read_reload_broadcast(&written).unwrap();
-        assert_eq!(read_back, broadcast);
-        assert_eq!(read_back.lib_version, "0.34.68");
-        assert_eq!(read_back.mtime_ms, 1_700_000_000_123);
-        assert_eq!(read_back.installed_at_epoch_ms, 1_700_000_000_456);
-    }
-
-    #[test]
-    fn reload_broadcast_write_overwrites_prior_payload() {
-        let tmp = tempfile::tempdir().unwrap();
-        let first = ReloadBroadcast {
-            lib_version: "0.34.67".to_string(),
-            mtime_ms: 1,
-            installed_at_epoch_ms: 2,
-        };
-        let second = ReloadBroadcast {
-            lib_version: "0.34.68".to_string(),
-            mtime_ms: 3,
-            installed_at_epoch_ms: 4,
-        };
-        let path = write_reload_broadcast(tmp.path(), &first).unwrap();
-        write_reload_broadcast(tmp.path(), &second).unwrap();
-        assert_eq!(read_reload_broadcast(&path).unwrap(), second);
-    }
-
-    #[test]
     fn recycle_on_install_default_on_and_opt_out_is_falsey() {
         // #autorecycle-on-install: default-on, falsey env opts out. Serialize env
         // mutation to avoid cross-test interference.
@@ -651,7 +494,7 @@ mod tests {
         let err = validate_required_editor_abi_symbols(&source).unwrap_err();
         let message = err.to_string();
         assert!(message.contains("missing required editor authority ABI"));
-        assert!(message.contains("agent_doc_document_changed_digest_content_for_editor_v2"));
+        assert!(message.contains("agent_doc_lazily_current_observed_v1"));
     }
 
     #[test]

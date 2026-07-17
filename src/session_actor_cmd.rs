@@ -4792,7 +4792,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     }
 
     #[test]
-    fn document_dirty_after_committed_cycle_prefers_terminal_projection_over_stale_sidecar() {
+    fn document_dirty_after_committed_cycle_uses_terminal_projection() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("tasks/doc.md");
@@ -4800,10 +4800,6 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let committed = "---\nagent_doc_session: session-1\n---\n\nDone.\n";
         std::fs::write(&doc, committed).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(committed), Some(committed)).unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle state path");
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::mark_committed(
             &doc,
             "commit_success",
@@ -4811,10 +4807,9 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             Some(committed),
         )
         .unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::Committed
         );
 
         assert!(!document_dirty_after_committed_cycle(&doc).unwrap());

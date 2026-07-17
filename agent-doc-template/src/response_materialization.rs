@@ -251,8 +251,16 @@ pub fn response_materialization_probe(patches: &[PatchBlock], unmatched: &str) -
 
 pub fn response_materialization_probe_from_response(response: &str) -> String {
     let probe = match crate::parse_patches(response) {
-        Ok((patches, unmatched)) => response_materialization_probe(&patches, &unmatched),
-        Err(_) => response.to_string(),
+        Ok((mut patches, mut unmatched)) => {
+            // Materialization must compare against the exact representation the
+            // writer places in the document. Agent component examples are
+            // escaped before patch application; probing the unsanitized response
+            // makes an already-visible response look absent and can replay it.
+            crate::sanitize::sanitize_patches(&mut patches);
+            crate::sanitize::sanitize_unmatched(&mut unmatched);
+            response_materialization_probe(&patches, &unmatched)
+        }
+        Err(_) => crate::sanitize::sanitize_component_tags(response),
     };
     agent_doc_document::transient_markers::strip_guard_markers(&probe)
 }
@@ -562,6 +570,21 @@ mod tests {
         assert!(probe.contains("Done."));
         assert!(!probe.contains("no-pending-capture"));
         assert!(!probe.contains("<!-- patch:exchange -->"));
+    }
+
+    #[test]
+    fn materialization_probe_matches_writer_sanitization_of_component_examples() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: queue halted - gpt-5\n\n",
+            "The frontmatter says `queue: start`, while `<!-- agent:queue go -->` is stale.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let probe = response_materialization_probe_from_response(response);
+
+        assert!(probe.contains("&lt;!-- agent:queue go --&gt;"));
+        assert!(!probe.contains("`<!-- agent:queue go -->`"));
     }
 
     #[test]

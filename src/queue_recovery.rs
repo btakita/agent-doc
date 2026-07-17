@@ -104,7 +104,6 @@ pub(crate) fn build_report(file: &Path, max_git_versions: usize) -> Result<LostQ
 
     let mut sources = Vec::new();
     collect_snapshot_sources(&canonical, &mut sources);
-    collect_patch_sources(&canonical, &mut sources);
     collect_git_sources(&canonical, max_git_versions, &mut sources);
 
     let mut historical: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -245,74 +244,11 @@ fn print_human_report(report: &LostQueueReport) {
 }
 
 fn collect_snapshot_sources(file: &Path, sources: &mut Vec<QueueSource>) {
-    if let Ok(Some(content)) = agent_doc_snapshot_io::load(file) {
+    if let Ok(Some(content)) = agent_doc_snapshot_io::load_document_baseline(file) {
         sources.push(QueueSource {
-            name: "snapshot".to_string(),
+            name: "document_baseline".to_string(),
             content,
         });
-    }
-    if let Ok(path) = agent_doc_fs::baseline_path_for(file)
-        && let Ok(content) = fs::read_to_string(&path)
-    {
-        sources.push(QueueSource {
-            name: format!("baseline:{}", path.display()),
-            content,
-        });
-    }
-}
-
-fn collect_patch_sources(file: &Path, sources: &mut Vec<QueueSource>) {
-    let Ok(hash) = agent_doc_fs::document_state_hash(file) else {
-        return;
-    };
-    let Some(project_root) = agent_doc_fs::find_project_root(file) else {
-        return;
-    };
-    let patches_dir = project_root.join(".agent-doc/patches");
-    let Ok(entries) = fs::read_dir(&patches_dir) else {
-        return;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        if !name.starts_with(&hash) || path.extension().and_then(|ext| ext.to_str()) != Some("json")
-        {
-            continue;
-        }
-        let Ok(raw) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
-            continue;
-        };
-        collect_json_queue_strings(&value, &format!("patch:{name}"), sources);
-    }
-}
-
-fn collect_json_queue_strings(value: &Value, label: &str, sources: &mut Vec<QueueSource>) {
-    match value {
-        Value::String(content) => {
-            if content.contains("agent:queue") {
-                sources.push(QueueSource {
-                    name: label.to_string(),
-                    content: content.clone(),
-                });
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_json_queue_strings(item, label, sources);
-            }
-        }
-        Value::Object(map) => {
-            for item in map.values() {
-                collect_json_queue_strings(item, label, sources);
-            }
-        }
-        _ => {}
     }
 }
 
@@ -548,55 +484,6 @@ mod tests {
         format!(
             "---\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\n{extra}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue_body}<!-- /agent:queue -->\n\n## Backlog\n\n<!-- agent:backlog -->\n<!-- /agent:backlog -->\n\n## Completed\n\n<!-- agent:done archive=done.md -->\n<!-- /agent:done -->\n"
         )
-    }
-
-    #[test]
-    fn recover_lost_queue_reports_patch_candidate() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc/patches")).unwrap();
-        let file = dir.path().join("session.md");
-        fs::write(&file, doc_with_queue("", "")).unwrap();
-        let hash = agent_doc_fs::document_state_hash(&file).unwrap();
-        let patch = serde_json::json!({
-            "baseline": doc_with_queue("- do [#lost]\n", "")
-        });
-        fs::write(
-            dir.path()
-                .join(".agent-doc/patches")
-                .join(format!("{hash}.jetbrains-test.json")),
-            serde_json::to_string(&patch).unwrap(),
-        )
-        .unwrap();
-
-        let report = build_report(&file, 0).unwrap();
-        assert_eq!(report.restore_candidates.len(), 1);
-        assert_eq!(report.restore_candidates[0].text, "do [#lost]");
-        assert_eq!(report.restore_candidates[0].id.as_deref(), Some("lost"));
-        assert_eq!(report.proof.status, "restore_candidates_found");
-    }
-
-    #[test]
-    fn recover_lost_queue_emits_proof_when_id_is_accounted() {
-        let dir = TempDir::new().unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc/patches")).unwrap();
-        let file = dir.path().join("session.md");
-        fs::write(&file, doc_with_queue("", "### Re: #lost\n\nDone.")).unwrap();
-        let hash = agent_doc_fs::document_state_hash(&file).unwrap();
-        let patch = serde_json::json!({
-            "baseline": doc_with_queue("- do [#lost]\n", "")
-        });
-        fs::write(
-            dir.path()
-                .join(".agent-doc/patches")
-                .join(format!("{hash}.jetbrains-test.json")),
-            serde_json::to_string(&patch).unwrap(),
-        )
-        .unwrap();
-
-        let report = build_report(&file, 0).unwrap();
-        assert!(report.restore_candidates.is_empty());
-        assert_eq!(report.covered_ids, vec!["lost".to_string()]);
-        assert_eq!(report.proof.status, "user_removal_or_completion_proof");
     }
 
     #[test]

@@ -4,18 +4,9 @@ use std::path::{Component, Path, PathBuf};
 pub mod install_freshness;
 
 const SNAPSHOT_DIR: &str = ".agent-doc/snapshots";
-const BASELINE_DIR: &str = ".agent-doc/baselines";
 const LOCK_DIR: &str = ".agent-doc/locks";
-const PENDING_DIR: &str = ".agent-doc/pending";
-const TURN_SCOPE_DIR: &str = ".agent-doc/turn-scope";
-const CRDT_DIR: &str = ".agent-doc/crdt";
-const CRDT_REPLICA_EVENT_DIR: &str = ".agent-doc/crdt-replica-events";
-const PRE_RESPONSE_DIR: &str = ".agent-doc/pre-response";
-const CYCLE_STATE_DIR: &str = ".agent-doc/state/cycles";
-const DISK_CHANGE_REQUEST_DIR: &str = ".agent-doc/disk-change-requests";
 const RECOVERY_DIR: &str = ".agent-doc/recovery";
 const STARTING_DIR: &str = ".agent-doc/starting";
-const BASELINE_OVERLAY_EXT: &str = "overlay.yrs";
 
 /// Walk up the directory tree from `path` to find the directory containing
 /// `.agent-doc` (the project root). Returns `None` if no such ancestor exists.
@@ -73,51 +64,6 @@ pub fn state_lock_path_for(doc: &Path) -> Result<PathBuf> {
     hashed_state_path(doc, LOCK_DIR, "lock")
 }
 
-/// Compute `<project_root>/.agent-doc/pending/<hash>.md` for a document.
-pub fn pending_response_path_for(doc: &Path) -> Result<PathBuf> {
-    hashed_state_path(doc, PENDING_DIR, "md")
-}
-
-/// Compute `<project_root>/.agent-doc/turn-scope/<hash>.json` for a document.
-pub fn turn_scope_path_for(doc: &Path) -> Result<PathBuf> {
-    hashed_state_path(doc, TURN_SCOPE_DIR, "json")
-}
-
-/// Compute `<project_root>/.agent-doc/disk-change-requests/<hash>.json` for a
-/// document. The controller watch daemon drops this marker when the file changed
-/// on disk out of band; the CPC/controller consumer reads it, reconciles the
-/// change into the canonical replica, and clears it (the marker + idle-poll
-/// cross-process signal, mirroring recycle-request).
-pub fn disk_change_request_path_for(doc: &Path) -> Result<PathBuf> {
-    hashed_state_path(doc, DISK_CHANGE_REQUEST_DIR, "json")
-}
-
-/// Compute `<project_root>/.agent-doc/crdt-replica-events/<hash>.json` for a
-/// document. The controller writes this as an editor-facing event signal after
-/// CRDT fan-out or replace rebootstrap work is queued, and editor plugins watch
-/// the directory to drain pending replica deliveries without polling.
-pub fn crdt_replica_event_path_for(doc: &Path) -> Result<PathBuf> {
-    hashed_state_path(doc, CRDT_REPLICA_EVENT_DIR, "json")
-}
-
-/// Compute `<project_root>/.agent-doc/state/cycles/<hash>.json` for a document.
-///
-/// Returns `Ok(None)` when `doc` cannot be canonicalized or no `.agent-doc`
-/// project root exists.
-pub fn cycle_state_path_for(doc: &Path) -> Result<Option<PathBuf>> {
-    let canonical = match doc.canonicalize() {
-        Ok(path) => path,
-        Err(_) => return Ok(None),
-    };
-    let Some(root) = find_project_root(&canonical) else {
-        return Ok(None);
-    };
-    let hash = document_state_hash(&canonical)?;
-    Ok(Some(
-        root.join(CYCLE_STATE_DIR).join(format!("{hash}.json")),
-    ))
-}
-
 /// Compute `<project_root>/.agent-doc/starting` for a document.
 ///
 /// Returns `None` when `doc` cannot be canonicalized or a root/fallback parent
@@ -152,54 +98,9 @@ pub fn startup_session_lock_path_for(doc: &Path, session_name: &str) -> Option<P
     Some(startup_starting_dir_for(doc)?.join(startup_session_lock_name(session_name)))
 }
 
-/// Compute `<project_root>/.agent-doc/baselines/<hash>.md` for a document.
-pub fn baseline_path_for(doc: &Path) -> Result<PathBuf> {
-    hashed_state_path(doc, BASELINE_DIR, "md")
-}
-
-/// Compute `<project_root>/.agent-doc/baselines/<hash>.overlay.yrs`.
-pub fn baseline_overlay_path_for(doc: &Path) -> Result<PathBuf> {
-    let (root, hash) = state_root_and_hash(doc)?;
-    Ok(root
-        .join(BASELINE_DIR)
-        .join(format!("{}.{}", hash, BASELINE_OVERLAY_EXT)))
-}
-
-/// Compute `<project_root>/.agent-doc/pre-response/<hash>.md`.
-pub fn pre_response_path_for(doc: &Path) -> Result<PathBuf> {
-    hashed_state_path(doc, PRE_RESPONSE_DIR, "md")
-}
-
-/// Compute `<project_root>/.agent-doc/crdt/<hash>.yrs`.
-pub fn crdt_path_for(doc: &Path) -> Result<PathBuf> {
-    hashed_state_path(doc, CRDT_DIR, "yrs")
-}
-
-/// Metadata paired with the `.yrs` recovery projection. It records the opaque
-/// CRDT lineage plus the projection hash so durable document-op frames can be
-/// replayed after a controller restart only onto the history that produced them.
-pub fn crdt_lineage_path_for(doc: &Path) -> Result<PathBuf> {
-    hashed_state_path(doc, CRDT_DIR, "lineage.json")
-}
-
-/// Compute `<project_root>/.agent-doc/crdt/<hash>.overlay.yrs`.
-pub fn overlay_crdt_path_for(doc: &Path) -> Result<PathBuf> {
-    hashed_state_path_with_suffix(doc, CRDT_DIR, "overlay.yrs")
-}
-
-/// Compute `<project_root>/.agent-doc/crdt/<hash>.nodes.yrs`.
-pub fn multinode_crdt_path_for(doc: &Path) -> Result<PathBuf> {
-    hashed_state_path_with_suffix(doc, CRDT_DIR, "nodes.yrs")
-}
-
 /// Compute the snapshot flock path adjacent to the snapshot sidecar.
 pub fn snapshot_flock_path_for(doc: &Path) -> Result<PathBuf> {
     Ok(snapshot_path_for(doc)?.with_extension("md.lock"))
-}
-
-/// Compute the CRDT flock path adjacent to the legacy CRDT sidecar.
-pub fn crdt_flock_path_for(doc: &Path) -> Result<PathBuf> {
-    Ok(crdt_path_for(doc)?.with_extension("yrs.lock"))
 }
 
 /// Rewrite `file_path` to be relative to `cwd` so a spawned command resolves
@@ -570,15 +471,12 @@ fn project_roots_for(path: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        baseline_overlay_path_for, baseline_path_for, crdt_flock_path_for, crdt_path_for,
-        cycle_state_path_for, document_state_hash, document_state_hash_from_str, inode_of_path,
-        multinode_crdt_path_for, overlay_crdt_path_for, pending_response_path_for,
-        pre_response_path_for, preserve_dropped_operator_buffer, quarantine_corrupt_file,
-        read_optional, read_valid_or_quarantine, referenced_markdown_path,
-        referenced_markdown_path_checked, rewrite_start_path, running_exe_inode_for_pid,
-        same_document_path, snapshot_flock_path_for, snapshot_path_for,
-        startup_document_lock_path_for, startup_session_lock_name, startup_session_lock_path_for,
-        startup_starting_dir_for, state_lock_path_for, turn_scope_path_for, write_atomic,
+        document_state_hash, document_state_hash_from_str, inode_of_path,
+        preserve_dropped_operator_buffer, quarantine_corrupt_file, read_optional,
+        read_valid_or_quarantine, referenced_markdown_path, referenced_markdown_path_checked,
+        rewrite_start_path, running_exe_inode_for_pid, same_document_path, snapshot_flock_path_for,
+        snapshot_path_for, startup_document_lock_path_for, startup_session_lock_name,
+        startup_session_lock_path_for, startup_starting_dir_for, state_lock_path_for, write_atomic,
     };
     use std::path::Path;
 
@@ -829,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn document_state_sidecar_paths_share_hash_and_project_root() {
+    fn document_state_paths_share_hash_and_project_root() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let doc = tmp.path().join("doc.md");
@@ -841,90 +739,6 @@ mod tests {
             state_lock_path_for(&doc).unwrap(),
             agent_doc.join("locks").join(format!("{hash}.lock"))
         );
-        assert_eq!(
-            pending_response_path_for(&doc).unwrap(),
-            agent_doc.join("pending").join(format!("{hash}.md"))
-        );
-        assert_eq!(
-            turn_scope_path_for(&doc).unwrap(),
-            agent_doc.join("turn-scope").join(format!("{hash}.json"))
-        );
-        assert_eq!(
-            baseline_path_for(&doc).unwrap(),
-            agent_doc.join("baselines").join(format!("{hash}.md"))
-        );
-        assert_eq!(
-            baseline_overlay_path_for(&doc).unwrap(),
-            agent_doc
-                .join("baselines")
-                .join(format!("{hash}.overlay.yrs"))
-        );
-        assert_eq!(
-            pre_response_path_for(&doc).unwrap(),
-            agent_doc.join("pre-response").join(format!("{hash}.md"))
-        );
-        assert_eq!(
-            crdt_path_for(&doc).unwrap(),
-            agent_doc.join("crdt").join(format!("{hash}.yrs"))
-        );
-        assert_eq!(
-            overlay_crdt_path_for(&doc).unwrap(),
-            agent_doc.join("crdt").join(format!("{hash}.overlay.yrs"))
-        );
-        assert_eq!(
-            multinode_crdt_path_for(&doc).unwrap(),
-            agent_doc.join("crdt").join(format!("{hash}.nodes.yrs"))
-        );
-    }
-
-    #[test]
-    fn turn_scope_path_uses_project_root_and_document_hash() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let doc = tmp.path().join("nested").join("doc.md");
-        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "# doc\n").unwrap();
-        let hash = document_state_hash(&doc).unwrap();
-
-        assert_eq!(
-            turn_scope_path_for(&doc).unwrap(),
-            tmp.path()
-                .join(".agent-doc")
-                .join("turn-scope")
-                .join(format!("{hash}.json"))
-        );
-    }
-
-    #[test]
-    fn cycle_state_path_uses_project_root_and_document_hash() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let doc = tmp.path().join("nested").join("doc.md");
-        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
-        std::fs::write(&doc, "# doc\n").unwrap();
-        let hash = document_state_hash(&doc).unwrap();
-
-        assert_eq!(
-            cycle_state_path_for(&doc).unwrap(),
-            Some(
-                tmp.path()
-                    .join(".agent-doc")
-                    .join("state")
-                    .join("cycles")
-                    .join(format!("{hash}.json"))
-            )
-        );
-    }
-
-    #[test]
-    fn cycle_state_path_returns_none_without_project_root() {
-        let Some(tmp) = temp_dir_without_agent_doc_ancestor() else {
-            return;
-        };
-        let doc = tmp.path().join("doc.md");
-        std::fs::write(&doc, "# doc\n").unwrap();
-
-        assert_eq!(cycle_state_path_for(&doc).unwrap(), None);
     }
 
     #[test]
@@ -949,34 +763,7 @@ mod tests {
     }
 
     #[test]
-    fn cycle_state_path_returns_none_when_canonicalize_fails() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let missing = tmp.path().join("missing.md");
-
-        assert_eq!(cycle_state_path_for(&missing).unwrap(), None);
-    }
-
-    #[test]
-    fn turn_scope_path_falls_back_to_document_parent_without_project_root() {
-        let Some(tmp) = temp_dir_without_agent_doc_ancestor() else {
-            return;
-        };
-        let doc = tmp.path().join("doc.md");
-        std::fs::write(&doc, "# doc\n").unwrap();
-        let hash = document_state_hash(&doc).unwrap();
-
-        assert_eq!(
-            turn_scope_path_for(&doc).unwrap(),
-            tmp.path()
-                .join(".agent-doc")
-                .join("turn-scope")
-                .join(format!("{hash}.json"))
-        );
-    }
-
-    #[test]
-    fn flock_paths_are_adjacent_to_snapshot_and_crdt_sidecars() {
+    fn snapshot_flock_path_is_adjacent_to_cold_projection() {
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
         let doc = tmp.path().join("doc.md");
@@ -985,10 +772,6 @@ mod tests {
         assert_eq!(
             snapshot_flock_path_for(&doc).unwrap(),
             snapshot_path_for(&doc).unwrap().with_extension("md.lock")
-        );
-        assert_eq!(
-            crdt_flock_path_for(&doc).unwrap(),
-            crdt_path_for(&doc).unwrap().with_extension("yrs.lock")
         );
     }
 

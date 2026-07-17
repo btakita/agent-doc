@@ -48,7 +48,7 @@ Any match whose surrounding ±16-byte window contains the substring `passage ` i
 
 ### Call sites
 
-- `src/capture.rs::capture_response` and `checkpoint_partial_response_for_cycle` — redact `response_body` before it is serialized into `.agent-doc/captures/<doc-hash>/<cycle-id>.json` and the corresponding `.partial.json`. The `response_sha256` retains the original in-memory hash so cycle-state correlation stays consistent.
+- `src/capture.rs::capture_response` and `checkpoint_partial_response_for_cycle` — redact `response_body` before it is appended to the cycle-scoped `state.db` capture/recovery ledger. The `response_sha256` retains the original in-memory hash so cycle-state correlation stays consistent.
 - `src/snapshot.rs::save_unlocked` and `save_pre_response` — redact the snapshot / pre-response body before atomic write to `.agent-doc/snapshots/<hash>.md` and `.agent-doc/pre-response/<hash>.md`.
 - `src/stream.rs` — redact flush-error and thinking-flush-error messages before they hit stderr so a failed write that interpolates a streamed chunk cannot leak a token to the terminal.
 
@@ -56,4 +56,4 @@ The streaming-safe variant `redact_streamed(carry, chunk)` holds the last ~128 c
 
 ### Threat model boundary
 
-This is **best-effort hygiene**, not a security boundary against a determined adversary. It addresses accidental leakage of common token shapes (e.g., a user running `npx convex env list` while a session document is open and the dump landing in capture sidecars or terminal scrollback). Defense-in-depth still relies on (a) keeping secrets in `passage` and (b) never running tools that dump env to stdout.
+This is **best-effort hygiene**, not a security boundary against a determined adversary. It addresses accidental leakage of common token shapes (e.g., a user running `npx convex env list` while a session document is open and the dump landing in the recovery ledger or terminal scrollback). Defense-in-depth still relies on (a) keeping secrets in `passage` and (b) never running tools that dump env to stdout.

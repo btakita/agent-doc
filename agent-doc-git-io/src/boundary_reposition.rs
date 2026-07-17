@@ -4,8 +4,7 @@ use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoundaryRepositionDelivery {
-    Queued,
-    DeferredExistingPatch,
+    Delivered,
     Unavailable,
 }
 
@@ -15,7 +14,7 @@ pub trait BoundaryRepositionEffects {
     fn save_snapshot(&self, file: &Path, content: &str) -> Result<()>;
     fn ipc_listener_active(&self, file: &Path) -> bool;
     fn read_to_string(&self, file: &Path) -> Result<String>;
-    fn queue_file_ipc_reposition_boundary(
+    fn request_editor_boundary_reposition(
         &self,
         file: &Path,
         committed_boundary_id: Option<&str>,
@@ -63,9 +62,7 @@ pub fn reposition_boundary_in_snapshot(
         return changed;
     }
 
-    if effects.ipc_listener_active(file) {
-        eprintln!("[commit] skipping working-tree boundary reposition — IPC listener active");
-    } else if let Ok(working) = effects.read_to_string(file) {
+    if let Ok(working) = effects.read_to_string(file) {
         let snapshot_after_reposition = effects.load_snapshot(file).ok().flatten();
         let prompt_canonicalized = canonicalize_answered_prompt_prefixes(&working);
         let normalize_prefix_lines = snapshot_after_reposition
@@ -91,37 +88,36 @@ pub fn reposition_boundary_in_snapshot(
             let committed_boundary_id = snapshot_after_reposition.as_deref().and_then(|snapshot| {
                 agent_doc_element_boundary::boundary::find_boundary_id(snapshot, "exchange")
             });
-            let file_ipc = effects.queue_file_ipc_reposition_boundary(
-                file,
-                committed_boundary_id.as_deref(),
-                &normalize_prefix_lines,
-            );
-            match file_ipc {
-                Ok(BoundaryRepositionDelivery::Queued) => {
-                    eprintln!("[commit] queued working-tree boundary reposition through file IPC");
-                    changed = true;
+            if effects.ipc_listener_active(file) {
+                let delivery = effects.request_editor_boundary_reposition(
+                    file,
+                    committed_boundary_id.as_deref(),
+                    &normalize_prefix_lines,
+                );
+                match delivery {
+                    Ok(BoundaryRepositionDelivery::Delivered) => {
+                        eprintln!(
+                            "[commit] delivered boundary reposition to the Lazily editor head"
+                        );
+                        changed = true;
+                    }
+                    Ok(BoundaryRepositionDelivery::Unavailable) => {
+                        eprintln!("[commit] editor boundary reposition retained for retry");
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[commit] failed to deliver editor boundary reposition: {}",
+                            e
+                        );
+                    }
                 }
-                Ok(BoundaryRepositionDelivery::DeferredExistingPatch) => {
-                    eprintln!(
-                        "[commit] deferred working-tree boundary reposition to existing file IPC patch"
-                    );
-                    changed = true;
-                }
-                Ok(BoundaryRepositionDelivery::Unavailable) => {
-                    changed |= atomic_write_repositioned(
-                        effects,
-                        file,
-                        &repositioned,
-                        normalize_prefix_lines.len(),
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[commit] failed to queue file IPC boundary reposition: {}",
-                        e
-                    );
-                    changed |= atomic_write_repositioned(effects, file, &repositioned, 0);
-                }
+            } else {
+                changed |= atomic_write_repositioned(
+                    effects,
+                    file,
+                    &repositioned,
+                    normalize_prefix_lines.len(),
+                );
             }
         }
     }

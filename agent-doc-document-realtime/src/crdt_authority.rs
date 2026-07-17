@@ -61,13 +61,13 @@ impl CrdtAuthority {
         matches!(self, CrdtAuthority::GitAuthoritative)
     }
 
-    /// Whether disk (`.agent-doc/crdt/<hash>.yrs`) is a **durable projection
+    /// Whether persisted CRDT bytes in `state.db` are a **durable projection
     /// checkpointed at boundaries** rather than the live coordination medium.
     /// True only under [`CrdtAuthority::MultiReplica`].
     ///
     /// This is the inverse of [`Self::crdt_is_ephemeral`]: a durable-projection
     /// authority keeps disk as a checkpoint; an ephemeral authority does not treat
-    /// any persisted `.yrs` as a source of truth.
+    /// any persisted recovery bytes as a source of truth.
     pub fn disk_is_durable_projection(self) -> bool {
         matches!(self, CrdtAuthority::MultiReplica)
     }

@@ -167,16 +167,10 @@ function resetBindings(): void {
     _admin_handoff_json = null;
     _admin_repair_projection_json = null;
     _visual_tokens_json = null;
-    _document_changed = null;
-    _document_changed_digest_for_editor = null;
-    _document_changed_digest_content_for_editor = null;
-    _document_changed_digest_content_for_editor_v2 = null;
-    _document_changed_digest_content_for_editor_v3 = null;
+    _lazily_current_observed_v1 = null;
     _document_closed_for_editor = null;
     _deferred_write_reconnect_content = null;
     _deferred_write_reconnect_propagated = null;
-    _plugin_owner_try_acquire = null;
-    _plugin_owner_release = null;
     _resolve_project_path = null;
     _document_id_for_path = null;
     _is_session_document = null;
@@ -297,30 +291,9 @@ function ensureLoaded(projectRoot?: string): boolean {
 }
 
 /**
- * #cdylib-reload-broadcast: filename of the global reload-broadcast file, a
- * sibling of the installed cdylib. `agent-doc lib-install` /
- * `agent-doc admin reload-lib` write it; the extension watches it to force a
- * reload immediately after an upgrade instead of lazily on the next FFI call.
- */
-export const RELOAD_BROADCAST_FILENAME = 'agent-doc-reload-broadcast.json';
-
-/**
- * Resolve the global reload-broadcast file path: a sibling of the resolved
- * cdylib. Uses the already-loaded path when available. Returns null when no
- * library path can be resolved.
- */
-export function reloadBroadcastFile(projectRoot?: string): string | null {
-    const libPath = loadedPath ?? findLibrary(projectRoot);
-    if (!libPath) return null;
-    return path.join(path.dirname(libPath), RELOAD_BROADCAST_FILENAME);
-}
-
-/**
- * #cdylib-reload-broadcast: force a fresh `koffi.load` of the current cdylib
- * path, bypassing the lazy mtime-equality guard in [ensureLoaded]. Used by the
- * broadcast watcher and the `reload_lib` signal so a freshly-installed (or
- * re-announced) cdylib goes live immediately. Keeps the previous bindings on
- * failure (the reason is logged, never swallowed silently).
+ * Force a fresh `koffi.load` for the typed `reload_library` intent, bypassing
+ * the lazy mtime-equality guard in [ensureLoaded]. Keeps the previous bindings
+ * on failure (the reason is logged, never swallowed silently).
  */
 export function forceReloadLib(projectRoot?: string): boolean {
     if (!ensureLoaded(projectRoot)) return false;
@@ -358,18 +331,10 @@ let _admin_reap_json: any = null;
 let _admin_handoff_json: any = null;
 let _admin_repair_projection_json: any = null;
 let _visual_tokens_json: any = null;
-let _document_changed: any = null;
-let _document_changed_digest: any = null;
-let _document_changed_digest_content: any = null;
-let _document_changed_digest_for_editor: any = null;
-let _document_changed_digest_content_for_editor: any = null;
-let _document_changed_digest_content_for_editor_v2: any = null;
-let _document_changed_digest_content_for_editor_v3: any = null;
+let _lazily_current_observed_v1: any = null;
 let _document_closed_for_editor: any = null;
 let _deferred_write_reconnect_content: any = null;
 let _deferred_write_reconnect_propagated: any = null;
-let _plugin_owner_try_acquire: any = null;
-let _plugin_owner_release: any = null;
 let _resolve_project_path: any = null;
 let _document_id_for_path: any = null;
 let _is_session_document: any = null;
@@ -528,20 +493,7 @@ function bindFunctions(): void {
         _reliable_sync_text_adopt_push = null;
         _reliable_sync_document_op_flush = null;
     }
-    _document_changed = lib.func('agent_doc_document_changed', 'void', ['str']);
-    _document_changed_digest = lib.func('agent_doc_document_changed_digest', 'void', ['str', 'int64', 'str']);
-    _document_changed_digest_content = lib.func('agent_doc_document_changed_digest_content', 'void', ['str', 'str']);
     try {
-        _document_changed_digest_for_editor = lib.func(
-            'agent_doc_document_changed_digest_for_editor',
-            'void',
-            ['str', 'int64', 'str', 'str'],
-        );
-        _document_changed_digest_content_for_editor = lib.func(
-            'agent_doc_document_changed_digest_content_for_editor',
-            'void',
-            ['str', 'str', 'str'],
-        );
         _document_closed_for_editor = lib.func(
             'agent_doc_document_closed_for_editor',
             'void',
@@ -549,31 +501,19 @@ function bindFunctions(): void {
         );
     } catch (e: any) {
         console.log(`[agent-doc/native] per-editor live-buffer ABI unavailable: ${e.message}`);
-        _document_changed_digest_for_editor = null;
-        _document_changed_digest_content_for_editor = null;
         _document_closed_for_editor = null;
-    }
-    try {
-        _document_changed_digest_content_for_editor_v2 = lib.func(
-            'agent_doc_document_changed_digest_content_for_editor_v2',
-            'void',
-            ['str', 'str', 'str', 'str', 'str', 'str'],
-        );
-    } catch (e: any) {
-        console.log(`[agent-doc/native] live-buffer capability ABI unavailable: ${e.message}`);
-        _document_changed_digest_content_for_editor_v2 = null;
     }
     try {
         // #falsetyping-guard: v3 adds the replica-churn provenance flag
         // (no_unsaved_operator_edits) as a trailing int.
-        _document_changed_digest_content_for_editor_v3 = lib.func(
-            'agent_doc_document_changed_digest_content_for_editor_v3',
+        _lazily_current_observed_v1 = lib.func(
+            'agent_doc_lazily_current_observed_v1',
             'void',
             ['str', 'str', 'str', 'str', 'str', 'str', 'int'],
         );
     } catch (e: any) {
         console.log(`[agent-doc/native] live-buffer provenance ABI unavailable: ${e.message}`);
-        _document_changed_digest_content_for_editor_v3 = null;
+        _lazily_current_observed_v1 = null;
     }
     try {
         _deferred_write_reconnect_content = lib.func(
@@ -590,22 +530,6 @@ function bindFunctions(): void {
         console.log(`[agent-doc/native] deferred reconnect ABI unavailable: ${e.message}`);
         _deferred_write_reconnect_content = null;
         _deferred_write_reconnect_propagated = null;
-    }
-    try {
-        _plugin_owner_try_acquire = lib.func(
-            'agent_doc_plugin_owner_try_acquire',
-            'int32',
-            ['str', 'str', 'int64'],
-        );
-        _plugin_owner_release = lib.func(
-            'agent_doc_plugin_owner_release',
-            'void',
-            ['str', 'str'],
-        );
-    } catch (e: any) {
-        console.log(`[agent-doc/native] plugin-owner ABI unavailable: ${e.message}`);
-        _plugin_owner_try_acquire = null;
-        _plugin_owner_release = null;
     }
     _resolve_project_path = lib.func('agent_doc_resolve_project_path', FfiProjectPathType, ['str']);
     _free_state = lib.func('agent_doc_free_state', 'void', ['void*', 'size_t']);
@@ -1860,41 +1784,13 @@ export function reliableSyncDocumentOpFlush(projectRoot: string, filePath: strin
 }
 
 /**
- * Record a document change event for debounce tracking.
- */
-export function documentChanged(filePath: string, projectRoot?: string): void {
-    if (!ensureLoaded(projectRoot)) return;
-    bindFunctions();
-    _document_changed(filePath);
-}
-
-/**
- * Record a document change event plus the editor-visible buffer digest.
- */
-export function documentChangedDigest(
-    filePath: string,
-    contentLen: number,
-    contentHash: string,
-    projectRoot?: string,
-    editorId?: string,
-): void {
-    if (!ensureLoaded(projectRoot)) return;
-    bindFunctions();
-    if (editorId && _document_changed_digest_for_editor) {
-        _document_changed_digest_for_editor(filePath, contentLen, contentHash, editorId);
-    } else {
-        _document_changed_digest(filePath, contentLen, contentHash);
-    }
-}
-
-/**
  * Record a document change plus the editor's FULL visible buffer content (#pcp6).
  * Mirrors the JetBrains plugin: lets the CLI visible-write reconcile guard
  * positively confirm the editor buffer equals on-disk content (no unsaved edit
-* ahead of disk) instead of inferring from a len/hash digest. The compatibility
-* ABI does not persist this text; current content stays in the Lazily CRDT.
+ * ahead of disk) instead of inferring from a len/hash digest. Current content
+ * stays in the Lazily CRDT.
  */
-export function documentChangedDigestContent(
+export function lazilyCurrentObserved(
     filePath: string,
     content: string,
     projectRoot?: string,
@@ -1903,34 +1799,16 @@ export function documentChangedDigestContent(
 ): void {
     if (!ensureLoaded(projectRoot)) return;
     bindFunctions();
-    // #falsetyping-guard: prefer the v3 entrypoint carrying replica-churn
-    // provenance so the CLI re-merges on replica churn instead of failing the
-    // visible-write guard closed. Fall back to v2/v1 against older cdylibs, which
-    // omit the flag and keep the conservative fail-closed default.
-    if (editorId && _document_changed_digest_content_for_editor_v3) {
-        _document_changed_digest_content_for_editor_v3(
-            filePath,
-            content,
-            editorId,
-            EDITOR_PLUGIN_KIND,
-            EDITOR_PLUGIN_VERSION,
-            EDITOR_CAPABILITIES,
-            noUnsavedOperatorEdits ? 1 : 0,
-        );
-    } else if (editorId && _document_changed_digest_content_for_editor_v2) {
-        _document_changed_digest_content_for_editor_v2(
-            filePath,
-            content,
-            editorId,
-            EDITOR_PLUGIN_KIND,
-            EDITOR_PLUGIN_VERSION,
-            EDITOR_CAPABILITIES,
-        );
-    } else if (editorId && _document_changed_digest_content_for_editor) {
-        _document_changed_digest_content_for_editor(filePath, content, editorId);
-    } else {
-        _document_changed_digest_content(filePath, content);
-    }
+    if (!editorId || !_lazily_current_observed_v1) return;
+    _lazily_current_observed_v1(
+        filePath,
+        content,
+        editorId,
+        EDITOR_PLUGIN_KIND,
+        EDITOR_PLUGIN_VERSION,
+        EDITOR_CAPABILITIES,
+        noUnsavedOperatorEdits ? 1 : 0,
+    );
 }
 
 /**
@@ -1976,38 +1854,6 @@ export function deferredWriteReconnectPropagated(
     bindFunctions();
     if (!_deferred_write_reconnect_propagated) return false;
     return _deferred_write_reconnect_propagated(filePath, editorContent) === 1;
-}
-
-export function pluginOwnerTryAcquire(
-    filePath: string,
-    consumerId: string,
-    pid: number,
-    projectRoot?: string,
-): boolean {
-    if (!ensureLoaded(projectRoot)) return true;
-    bindFunctions();
-    if (!_plugin_owner_try_acquire) return true;
-    try {
-        return _plugin_owner_try_acquire(filePath, consumerId, pid) === 1;
-    } catch (e: any) {
-        console.warn(`[agent-doc/native] pluginOwnerTryAcquire error: ${e.message}`);
-        return true;
-    }
-}
-
-export function pluginOwnerRelease(
-    filePath: string,
-    consumerId: string,
-    projectRoot?: string,
-): void {
-    if (!ensureLoaded(projectRoot)) return;
-    bindFunctions();
-    if (!_plugin_owner_release) return;
-    try {
-        _plugin_owner_release(filePath, consumerId);
-    } catch (e: any) {
-        console.warn(`[agent-doc/native] pluginOwnerRelease error: ${e.message}`);
-    }
 }
 
 /**

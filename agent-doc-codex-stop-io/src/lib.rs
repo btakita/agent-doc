@@ -464,18 +464,14 @@ fn wrap_repeated_queue_response_patch(prompt: &str, response: &str) -> String {
 
 fn consume_recovered_queue_head(
     file: &Path,
+    expected_head: &str,
     queue_completion_ids: &[String],
 ) -> Result<Option<queue_consume::QueueConsumptionOutcome>> {
-    let force_disk_without_listener = file
-        .canonicalize()
-        .ok()
-        .map(|canonical| {
-            let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
-            !agent_doc_ipc_io::is_listener_active(&project_root)
-        })
-        .unwrap_or(false);
-    queue_consume::consume_queue_prompts_with_outcome(
+    let force_disk_without_listener =
+        !agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
+    queue_consume::consume_queue_prompt_if_head_matches_with_outcome(
         file,
+        expected_head,
         queue_completion_ids,
         force_disk_without_listener,
         &agent_doc_document_realtime_io::RUNTIME_QUEUE_CONSUME_WRITEBACK_EFFECTS,
@@ -585,7 +581,7 @@ fn try_recover_repeated_queue_head_response(
     }
 
     if active_auto_queue_prompt(file)?.as_deref() == Some(prompt) {
-        match consume_recovered_queue_head(file, &queue_completion_ids) {
+        match consume_recovered_queue_head(file, prompt, &queue_completion_ids) {
             Ok(Some(outcome)) => {
                 note.push_str(&format!(
                     " The hook consumed the completed queue head {:?} before commit.",
@@ -981,11 +977,25 @@ fn marker_fallback_continuation_response(
     }))
 }
 
+fn log_slow_stop_closeout_phase(file: &Path, phase: &str, started: &mut std::time::Instant) {
+    let elapsed = started.elapsed();
+    if elapsed >= std::time::Duration::from_millis(250) {
+        eprintln!(
+            "[perf] codex_stop.{} file={} elapsed_ms={}",
+            phase,
+            file.display(),
+            elapsed.as_millis()
+        );
+    }
+    *started = std::time::Instant::now();
+}
+
 fn attempt_stop_closeout(
     file: &Path,
     state: &SessionState,
     input: &StopInput,
 ) -> Result<StopCloseAttempt> {
+    let mut phase_started = std::time::Instant::now();
     let payload =
         agent_doc_template::replay_guard::classify_replay_payload(&input.last_assistant_message);
     let has_response = matches!(
@@ -1017,8 +1027,9 @@ fn attempt_stop_closeout(
         });
     }
 
+    let active_queue_prompt = active_auto_queue_prompt(file)?;
     let queue_synthetic_cycle =
-        active_auto_queue_prompt(file)?.is_some() && open_cycle_started_from_unchanged_file(file)?;
+        active_queue_prompt.is_some() && open_cycle_started_from_unchanged_file(file)?;
     let captured_response_targets_queue_head = if queue_synthetic_cycle {
         match &payload {
             agent_doc_template::replay_guard::ReplayPayloadClassification::Replayable(response) => {
@@ -1053,6 +1064,7 @@ fn attempt_stop_closeout(
     } else {
         Vec::new()
     };
+    log_slow_stop_closeout_phase(file, "intent_classification", &mut phase_started);
 
     let mut note = String::new();
     match payload {
@@ -1073,6 +1085,7 @@ fn attempt_stop_closeout(
         }
         agent_doc_template::replay_guard::ReplayPayloadClassification::Empty => {}
     }
+    log_slow_stop_closeout_phase(file, "intent_capture", &mut phase_started);
 
     let repair_outcome = agent_doc_repair_io::run_with_queue_completion_ids(
         agent_doc_repair_runtime_io::repair_coordinator_effects(
@@ -1081,6 +1094,7 @@ fn attempt_stop_closeout(
         file,
         &queue_completion_ids,
     )?;
+    log_slow_stop_closeout_phase(file, "intent_repair", &mut phase_started);
     if repair_outcome.replayed_response() {
         note.push_str(" The hook replayed the response through the normal write path.");
     } else if repair_outcome.repaired() {
@@ -1090,7 +1104,11 @@ fn attempt_stop_closeout(
         && repair_outcome.replayed_response()
         && captured_response_targets_queue_head;
     if queue_repair_explicitly_closes_head {
-        match consume_recovered_queue_head(file, &queue_completion_ids) {
+        match consume_recovered_queue_head(
+            file,
+            active_queue_prompt.as_deref().unwrap_or_default(),
+            &queue_completion_ids,
+        ) {
             Ok(Some(outcome)) => {
                 note.push_str(&format!(
                     " The hook consumed the completed queue head {:?} before commit.",
@@ -1332,7 +1350,6 @@ mod tests {
     fn setup_project() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
-        fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
         dir
     }
@@ -1409,7 +1426,12 @@ mod tests {
         let doc = dir.path().join("task.md");
         let content = "---\nsession: sid\n---\n\n## User\n\nHello\n";
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         doc
     }
 
@@ -1423,7 +1445,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         doc
     }
 
@@ -1450,7 +1477,12 @@ Done.\n\
 <!-- /agent:queue -->\n"
         );
         fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         doc
     }
 
@@ -1477,7 +1509,12 @@ Done.\n\
 <!-- no-free-text-queue-head-guard -->\n"
         );
         fs::write(&doc, &content).unwrap();
-        agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         doc
     }
 
@@ -1493,7 +1530,12 @@ Done.\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         doc
     }
 
@@ -1528,9 +1570,8 @@ Done.\n\
 
         assert_eq!(response, StopResponse::Continue { continue_: true });
 
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(
-            !pending.exists(),
+            agent_doc_capture_io::load_active(&doc).unwrap().is_none(),
             "pending capture should be cleared after recovery"
         );
         let content = fs::read_to_string(&doc).unwrap();
@@ -1646,11 +1687,11 @@ Done.\n\
             !content.contains("counting characters"),
             "chat-only answer must not be treated as document closeout"
         );
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
+        let pending = agent_doc_repair_io::pending::load_active_pending_response(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
-            fs::read_to_string(&pending)
-                .unwrap()
-                .contains("counting characters"),
+            pending.contains("counting characters"),
             "the hook should capture the replayable answer for recovery"
         );
     }
@@ -1713,8 +1754,9 @@ Done.\n\
             }
             other => panic!("expected second direct-chat writeback block, got {other:?}"),
         }
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-        let pending_body = fs::read_to_string(&pending).unwrap();
+        let pending_body = agent_doc_repair_io::pending::load_active_pending_response(&doc)
+            .unwrap()
+            .unwrap();
         assert!(pending_body.contains("Second direct-chat answer."));
         assert!(!pending_body.contains("First direct-chat answer."));
     }
@@ -1762,7 +1804,12 @@ Done.\n\
             "<!-- /agent:exchange -->\n",
         );
         fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         git(&submodule_root, &["add", "session.md"]);
         git(&submodule_root, &["commit", "-m", "add doc", "--no-verify"]);
         git(&parent, &["add", "src/submodule"]);
@@ -1846,7 +1893,12 @@ Done.\n\
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
 
         let current = concat!(
@@ -1901,7 +1953,12 @@ Done.\n\
             "<!-- /agent:backlog -->\n"
         );
         fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
@@ -1931,7 +1988,10 @@ Done.\n\
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("### Re: #next-steps — gpt-5"));
-        assert!(content.contains("[#bpcontract] Write the contract first."));
+        assert!(
+            content.contains("[#bpcontract] Write the contract first."),
+            "structured backlog patch was lost:\n{content}"
+        );
         assert!(
             !content.contains("Reviewing the current plan and repo conventions"),
             "leading commentary should be stripped from the replayed closeout"
@@ -1961,7 +2021,12 @@ Done.\n\
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
@@ -2026,7 +2091,12 @@ Done.\n\
             "<!-- /agent:backlog -->\n"
         );
         fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(original), Some(original)).unwrap();
         track_doc(&dir, &doc, "turn-1");
@@ -2056,7 +2126,10 @@ Done.\n\
         assert_eq!(response, StopResponse::Continue { continue_: true });
         let content = fs::read_to_string(&doc).unwrap();
         assert!(content.contains("### Re: #next-steps — gpt-5"));
-        assert!(content.contains("[#bpcontract] Write the contract first."));
+        assert!(
+            content.contains("[#bpcontract] Write the contract first."),
+            "structured backlog patch was lost:\n{content}"
+        );
         assert!(content.contains("### 2. Later"));
         let capture = agent_doc_capture_io::latest_committed(&doc)
             .unwrap()
@@ -2362,9 +2435,8 @@ Done.\n\
             other => panic!("expected block response, got {other:?}"),
         }
 
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(
-            !pending.exists(),
+            agent_doc_capture_io::load_active(&doc).unwrap().is_none(),
             "transcript-shaped payload should not be stored as replayable pending content"
         );
         let content = fs::read_to_string(&doc).unwrap();
@@ -2407,8 +2479,7 @@ Done.\n\
         .unwrap();
 
         assert_eq!(response, StopResponse::Continue { continue_: true });
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-        assert!(!pending.exists());
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
     }
 
     #[test]
@@ -2493,7 +2564,12 @@ Done.\n\
             "<!-- /agent:queue -->\n",
         );
         fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
         track_doc(&dir, &doc, "turn-1");
 

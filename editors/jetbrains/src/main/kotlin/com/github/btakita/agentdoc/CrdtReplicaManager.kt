@@ -45,7 +45,6 @@ private const val CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS = 30_000L
 // fact. Refresh from the same serialized executor that pulls/applies/ACKs CRDT
 // deliveries: if that worker stalls, this heartbeat stalls too and Rust stops
 // targeting it while continuing to protect its possibly-unsaved buffer.
-private const val CRDT_PLUGIN_OWNER_HEARTBEAT_MS = 5_000L
 
 private data class PendingRemoteAck(
     val forwarder: CrdtReplicaForwarder,
@@ -219,7 +218,7 @@ private val REMOTE_EDITOR_APPLY_MERGE = MergePolicy(
 class CrdtReplicaManager(private val project: Project) : Disposable, DocumentListener {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CrdtReplicaManager::class.java)
     private val executor = Executors.newSingleThreadScheduledExecutor { r ->
-        Thread(r, "agent-doc-crdt-replica-events").apply { isDaemon = true }
+        Thread(r, "agent-doc-crdt-replica-delivery").apply { isDaemon = true }
     }
     private val forwarders = ConcurrentHashMap<String, CrdtReplicaForwarder>()
     private val shadows = ConcurrentHashMap<String, String>()
@@ -251,42 +250,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
     fun start() {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(this, this)
-        schedulePluginOwnerHeartbeat(0L)
-    }
-
-    private fun schedulePluginOwnerHeartbeat(delayMs: Long = CRDT_PLUGIN_OWNER_HEARTBEAT_MS) {
-        if (disposed.get()) return
-        try {
-            executor.schedule({
-                try {
-                    refreshPluginOwnerHeartbeats()
-                } catch (t: Throwable) {
-                    // ScheduledExecutorService cancels future executions when a
-                    // task escapes. Keep this self-healing across JNA reload and
-                    // transient filesystem/controller failures.
-                    log.warn("[crdt-replica] plugin-owner heartbeat failed: ${t.message}")
-                } finally {
-                    schedulePluginOwnerHeartbeat()
-                }
-            }, delayMs, TimeUnit.MILLISECONDS)
-        } catch (_: RejectedExecutionException) {
-            // Normal during project disposal.
-        }
-    }
-
-    private fun refreshPluginOwnerHeartbeats() {
-        if (disposed.get() || forwarders.isEmpty()) return
-        // get() also polls the installed cdylib mtime, providing a fallback when
-        // an IDE VFS reload-broadcast event was missed.
-        val lib = AgentDocLib.get() ?: return
-        val pid = ProcessHandle.current().pid()
-        for (filePath in forwarders.keys) {
-            try {
-                lib.agent_doc_plugin_owner_try_acquire(filePath, EditorIdentity.id, pid)
-            } catch (t: Throwable) {
-                log.warn("[crdt-replica] plugin-owner heartbeat failed for ${File(filePath).name}: ${t.message}")
-            }
-        }
     }
 
     override fun dispose() {
@@ -1748,15 +1711,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val epoch = nonOperatorMutationEpochs
                 .computeIfAbsent(filePath) { AtomicLong(0L) }
                 .incrementAndGet()
-            try {
-                AgentDocLib.get()?.agent_doc_clear_editor_op_epoch(filePath)
-            } catch (_: UnsatisfiedLinkError) {
-                // An older hot-loaded cdylib cannot clear the sidecar. The
-                // generation fence still suppresses the event; the new symbol
-                // becomes available on the normal mtime reload.
-            } catch (_: NoSuchMethodError) {
-                // Same compatibility path for an older JNA proxy.
-            }
+        AgentDocLib.get()?.agent_doc_clear_editor_op_epoch(filePath)
             return epoch
         }
     }

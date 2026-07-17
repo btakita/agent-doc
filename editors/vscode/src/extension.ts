@@ -7,10 +7,10 @@ import * as net from 'net';
 import { execFile } from 'child_process';
 import * as native from './native';
 import * as stateMirror from './stateMirror';
-import { createEditorApplyProof, consumeClaimedPatch, isEditorApplyProofCurrent, isPatchAlreadyApplied } from './patchGuard';
-import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement, isPureRepositionSignal } from './patchPlan';
+import { createEditorApplyProof, isEditorApplyProofCurrent } from './patchGuard';
+import { EditorIntent } from './editorIntent';
+import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement } from './patchPlan';
 import { parseCrossSessionReject, CrossSessionReject } from './crossSession';
-import { parseSaveDocumentSignal } from './saveSignal';
 import { buildEditorRoutePayload, buildEditorRouteCommandMessage, resolveEditorRouteTerminal } from './commandPlane';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
 import {
@@ -69,9 +69,7 @@ const AUTOMATIC_SYNC_CLI_TIMEOUT_MS = 5_000;
 const ROUTE_CANCEL_WAIT_MS = 5_000;
 const ROUTE_WAIT_FOR_READY_SECONDS = '120';
 const EDITOR_ID = `vscode-${process.pid}-${crypto.randomUUID()}`;
-const PLUGIN_OWNER_HEARTBEAT_MS = 5_000;
-const LIVE_BUFFER_REPORT_DELAY_MS = 75;
-const PUBLISH_LIVE_BUFFER_SIGNAL_MAX_AGE_MS = 30_000;
+const LAZILY_CURRENT_OBSERVATION_DELAY_MS = 75;
 
 function monotonicMillis(): number {
     return Number(process.hrtime.bigint() / 1_000_000n);
@@ -90,7 +88,7 @@ interface PendingEditorOpReport {
     projectRoot?: string;
 }
 
-interface LiveBufferReportState {
+interface LazilyCurrentObservationState {
     debounce: DebounceCore<string>;
     timer: ReturnType<typeof setTimeout> | undefined;
 }
@@ -2154,21 +2152,13 @@ async function popupMenuAction(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// IPC Patch Watcher
+// Lazily editor endpoint
 // ---------------------------------------------------------------------------
 
 /**
- * Watches `.agent-doc/patches/` for JSON patch files written by `agent-doc write --ipc`
- * and applies them via VS Code's WorkspaceEdit API. This avoids "externally modified"
- * dialogs and preserves cursor position / undo stack.
- *
- * Flow:
- * 1. `agent-doc write --ipc` writes `<hash>.json` to `.agent-doc/patches/`
- * 2. FileSystemWatcher detects the new file
- * 3. Reads JSON, finds/opens the target document, applies patches
- * 4. Writes the content projection, records lazily receipt state, and deletes
- *    the JSON file
- * 5. agent-doc observes the receipt/deletion and updates the snapshot
+ * Hosts the PID-scoped endpoint for the registered Lazily replica. Document
+ * mutations arrive as typed messages and publish typed receipts; the filesystem
+ * is never used as a live-buffer or patch transport.
  */
 
 interface IpcComponentPatch {
@@ -2211,28 +2201,17 @@ interface IpcPatch {
 }
 
 class PatchWatcher implements vscode.Disposable {
-    private watcher: vscode.FileSystemWatcher | undefined;
-    private signalWatcher: vscode.FileSystemWatcher | undefined;
-    private saveSignalWatcher: vscode.FileSystemWatcher | undefined;
-    private liveBufferSignalWatcher: vscode.FileSystemWatcher | undefined;
-    private crdtReplicaEventWatcher: vscode.FileSystemWatcher | undefined;
-    private readonly processedCrdtEventMs = new Map<string, number>();
-    private libReloadBroadcastWatcher: vscode.FileSystemWatcher | undefined;
+    private socketServer: net.Server | undefined;
+    private socketPath: string | undefined;
     private typingListener: vscode.Disposable | undefined;
     private openListener: vscode.Disposable | undefined;
     private saveListener: vscode.Disposable | undefined;
     private closeListener: vscode.Disposable | undefined;
     private crdtReplicas: CrdtReplicaManager | undefined;
-    private patchesDir: string | undefined;
+    private projectRootPath: string | undefined;
     private outputChannel: vscode.OutputChannel;
     /** Track last typing time per file for debounce */
     private lastTypingTime = new Map<string, number>();
-    /** Patch files delayed because the target document is still being edited. */
-    private pendingPatchRetries = new Set<string>();
-    /** Documents for which this VS Code instance has published plugin-owner proof. */
-    private ownedDocs = new Set<string>();
-    /** Recursive timeout (never a fixed-interval poll) proving the delivery event loop is alive. */
-    private pluginOwnerHeartbeatTimer: ReturnType<typeof setTimeout> | undefined;
     private disposed = false;
     /**
      * #falsetyping-guard: paths with an unsaved *local operator* edit ahead of
@@ -2244,9 +2223,7 @@ class PatchWatcher implements vscode.Disposable {
      */
     private unsyncedLocalEditDocs = new Set<string>();
     /** Lazily KeepLatest debounce state; full-buffer reads stay off the change listener. */
-    private liveBufferReports = new Map<string, LiveBufferReportState>();
-    /** Native typing markers are queued off the text-change listener path. */
-    private nativeChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    private lazilyCurrentObservations = new Map<string, LazilyCurrentObservationState>();
     /** Clean external-reload reconciliation is also deferred off the UI listener. */
     private deferredReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
     /** CRDT local forwards are queued off the text-change listener path. */
@@ -2254,62 +2231,20 @@ class PatchWatcher implements vscode.Disposable {
     /** Native editor-op writes are queued off the text-change listener path. */
     private pendingEditorOpReports: PendingEditorOpReport[] = [];
     private editorOpReportTimer: ReturnType<typeof setTimeout> | undefined;
-    /** Last observed global cdylib reload-broadcast mtime. */
-    private lastLibReloadBroadcastMtime = 0;
-
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('Agent Doc Patches');
     }
 
     start(): void {
         this.disposed = false;
-        const patchesDir = this.findPatchesDir();
-        if (!patchesDir) {
-            this.outputChannel.appendLine('PatchWatcher: no .agent-doc/patches/ directory found');
+        const projectRoot = this.findProjectRoot();
+        if (!projectRoot) {
+            this.outputChannel.appendLine('PatchWatcher: no agent-doc project root found');
             return;
         }
 
-        this.patchesDir = patchesDir;
-
-        // Ensure the directory exists
-        try {
-            fs.mkdirSync(patchesDir, { recursive: true });
-        } catch {
-            // already exists or can't create — either way, continue
-        }
-
-        // Watch for new .json files in the patches directory
-        const pattern = new vscode.RelativePattern(patchesDir, '*.json');
-        this.watcher = vscode.workspace.createFileSystemWatcher(pattern, false, true, true);
-        this.watcher.onDidCreate((uri) => this.onPatchFileCreated(uri));
-
-        // Watch for VCS refresh signal (created by agent-doc commit)
-        const signalPattern = new vscode.RelativePattern(patchesDir, 'vcs-refresh.signal');
-        this.signalWatcher = vscode.workspace.createFileSystemWatcher(signalPattern, false, false, true);
-        this.signalWatcher.onDidCreate(() => this.onVcsRefreshSignal(patchesDir));
-        this.signalWatcher.onDidChange(() => this.onVcsRefreshSignal(patchesDir));
-
-        // Watch for save-document signal (#jbeditorsavedrift-vscode): the binary
-        // detected the editor buffer is ahead of disk (carry-forward drift) and
-        // asks us to flush it. VS Code parity for the JB plugin's socket
-        // `save_document` handler — delivered as a file signal because the
-        // extension watches `.agent-doc/patches/` instead of the socket.
-        const saveSignalPattern = new vscode.RelativePattern(patchesDir, 'save-document.signal');
-        this.saveSignalWatcher = vscode.workspace.createFileSystemWatcher(saveSignalPattern, false, false, true);
-        this.saveSignalWatcher.onDidCreate(() => this.onSaveDocumentSignal(patchesDir));
-        this.saveSignalWatcher.onDidChange(() => this.onSaveDocumentSignal(patchesDir));
-
-        // Watch for read-only live-buffer publication requests. This mirrors the
-        // JB plugin's socket `publish_live_buffer` path, but stays on VS Code's
-        // existing file-signal transport.
-        const liveBufferSignalPattern = new vscode.RelativePattern(patchesDir, 'publish-live-buffer.signal');
-        this.liveBufferSignalWatcher = vscode.workspace.createFileSystemWatcher(liveBufferSignalPattern, false, false, true);
-        this.liveBufferSignalWatcher.onDidCreate(() => this.onPublishLiveBufferSignal(patchesDir));
-        this.liveBufferSignalWatcher.onDidChange(() => this.onPublishLiveBufferSignal(patchesDir));
-
-        const projectRoot = path.dirname(path.dirname(patchesDir));
-        this.startCrdtReplicaEventWatcher(projectRoot);
-        this.startLibReloadBroadcastWatcher(projectRoot);
+        this.projectRootPath = projectRoot;
+        this.startSocketListener(projectRoot);
         this.crdtReplicas = new CrdtReplicaManager({
             projectRoot,
             identity: EDITOR_ID,
@@ -2328,14 +2263,12 @@ class PatchWatcher implements vscode.Disposable {
             },
         });
         this.crdtReplicas.start();
-        this.schedulePluginOwnerHeartbeat(projectRoot, 0);
         this.openListener = vscode.workspace.onDidOpenTextDocument((document) => {
             if (!this.targetsProjectMarkdown(document, projectRoot)) return;
             const text = document.getText();
-            this.ownsDocument(document.uri.fsPath, projectRoot);
             seedEditorOpShadow(document.uri.fsPath, text);
             void this.crdtReplicas?.attachDocument(document.uri.fsPath, text);
-            this.scheduleLiveBufferReport(document, projectRoot);
+            this.scheduleLazilyCurrentObservation(document, projectRoot);
         });
 
         // Track typing events for debounce (TS fallback + FFI)
@@ -2355,11 +2288,8 @@ class PatchWatcher implements vscode.Disposable {
                     // churn, not operator text, and must NOT set this.
                     this.unsyncedLocalEditDocs.add(fsPath);
                 }
-                const eventProjectRoot = this.patchesDir
-                    ? path.dirname(path.dirname(this.patchesDir))
-                    : undefined;
-                if (operatorEdit) this.scheduleNativeDocumentChanged(fsPath, eventProjectRoot);
-            this.scheduleLiveBufferReport(e.document, eventProjectRoot);
+                const eventProjectRoot = this.projectRootPath;
+                this.scheduleLazilyCurrentObservation(e.document, eventProjectRoot);
             if (!operatorEdit && !remoteCrdtApply) {
                 // A clean cache reload may be the operator accepting a pending
                 // external-disk candidate. The shared resolver returns content
@@ -2391,18 +2321,12 @@ class PatchWatcher implements vscode.Disposable {
             this.unsyncedLocalEditDocs.delete(document.uri.fsPath);
         });
 
-        this.outputChannel.appendLine(`PatchWatcher: watching ${patchesDir}`);
-
-        // Process any existing patch files and signals on startup
-        this.processVcsRefreshSignal(patchesDir);
-        void this.processSaveDocumentSignal(patchesDir);
-        void this.processPublishLiveBufferSignal(patchesDir);
-        this.processPendingPatches(patchesDir);
+        this.outputChannel.appendLine(`PatchWatcher: Lazily endpoint active for ${projectRoot}`);
 
     }
 
-    private findPatchesDir(): string | undefined {
-        // Walk up from workspace root to find .agent-doc/patches/
+    private findProjectRoot(): string | undefined {
+        // Walk up from workspace root to find the agent-doc project root.
         const roots = vscode.workspace.workspaceFolders;
         if (!roots || roots.length === 0) return undefined;
 
@@ -2410,173 +2334,201 @@ class PatchWatcher implements vscode.Disposable {
         const root = path.parse(dir).root;
 
         while (dir !== root) {
-            const candidate = path.join(dir, '.agent-doc', 'patches');
             if (fs.existsSync(path.join(dir, '.agent-doc'))) {
-                return candidate;
+                return dir;
             }
             dir = path.dirname(dir);
         }
 
-        // Fallback: use workspace root
-        return path.join(roots[0].uri.fsPath, '.agent-doc', 'patches');
+        return roots[0].uri.fsPath;
     }
 
-    private onVcsRefreshSignal(patchesDir: string): void {
-        this.processVcsRefreshSignal(patchesDir);
+    private startSocketListener(projectRoot: string): void {
+        if (this.socketServer) return;
+        const socketPath = path.join(projectRoot, '.agent-doc', `ipc-${process.pid}.sock`);
+        fs.mkdirSync(path.dirname(socketPath), { recursive: true });
+        try { fs.unlinkSync(socketPath); } catch { /* no stale endpoint */ }
+
+        this.socketPath = socketPath;
+        this.socketServer = net.createServer((socket) => {
+            let buffered = '';
+            let handled = false;
+            socket.setEncoding('utf8');
+            socket.on('data', (chunk: string) => {
+                if (handled) return;
+                buffered += chunk;
+                const newline = buffered.indexOf('\n');
+                if (newline < 0) return;
+                handled = true;
+                socket.pause();
+                let message: Record<string, unknown>;
+                try {
+                    message = JSON.parse(buffered.slice(0, newline));
+                } catch {
+                    socket.end('{"type":"receipt","status":"rejected","reason":"invalid_json"}\n');
+                    return;
+                }
+                if (message.early_receipt === true) {
+                    socket.write('{"type":"receipt","status":"accepted"}\n');
+                }
+                void this.handleSocketMessage(message, projectRoot).then(
+                    (outcome) => {
+                        const reason = outcome === 2 ? ',"reason":"already_applied"' : '';
+                        const status = outcome === 0 ? 'rejected' : 'applied';
+                        socket.end(`{"type":"receipt","status":"${status}"${reason}}\n`);
+                    },
+                    (error: any) => {
+                        this.outputChannel.appendLine(`[socket] apply failed: ${error?.message ?? error}`);
+                        socket.end('{"type":"receipt","status":"rejected","reason":"apply_failed"}\n');
+                    },
+                );
+            });
+        });
+        this.socketServer.on('error', (error) => {
+            this.outputChannel.appendLine(`[socket] listener error: ${error.message}`);
+        });
+        this.socketServer.listen(socketPath);
     }
 
-    private processVcsRefreshSignal(patchesDir: string): void {
-        const signalFile = path.join(patchesDir, 'vcs-refresh.signal');
-        try {
-            if (fs.existsSync(signalFile)) {
-                fs.unlinkSync(signalFile);
-                // Trigger VS Code's git extension to refresh
-                vscode.commands.executeCommand('git.refresh');
-                this.outputChannel.appendLine('VCS refresh triggered after external commit');
+    private targetsSocketMessage(message: Record<string, unknown>): boolean {
+        return message.editor_id === EDITOR_ID
+            && (message.editor_pid === undefined || message.editor_pid === process.pid);
+    }
+
+    private async handleSocketMessage(
+        message: Record<string, unknown>,
+        projectRoot: string,
+    ): Promise<number> {
+        const type = typeof message.type === 'string' ? message.type : '';
+        if (!this.targetsSocketMessage(message)) {
+            return 0;
+        }
+        const filePath = typeof message.file === 'string' ? message.file : undefined;
+        switch (type) {
+            case EditorIntent.ApplyCanonical: {
+                if (!filePath || (typeof message.fullContent === 'string' && message.fullContent.length > 0)) return 0;
+                const patch = {
+                    ...message,
+                    file: filePath,
+                    patches: Array.isArray(message.patches) ? message.patches : [],
+                    node_patches: Array.isArray(message.node_patches) ? message.node_patches : [],
+                    unmatched: typeof message.unmatched === 'string' ? message.unmatched : '',
+                } as unknown as IpcPatch;
+                const generation = native.recordEditorPatchQueued(filePath, patch.patch_id, projectRoot);
+                const before = this.currentOpenDocumentText(filePath);
+                const applied = await this.applyPatch(patch);
+                if (!applied) {
+                    native.recordEditorPatchRejected(filePath, patch.patch_id, generation, 'socket_apply_failed', projectRoot);
+                    native.recordEditorRetryRequested(filePath, patch.patch_id, generation, 'socket_apply_failed', projectRoot);
+                    return 0;
+                }
+                native.recordEditorPatchApplied(filePath, patch.patch_id, generation, projectRoot);
+                return before === this.currentOpenDocumentText(filePath) ? 2 : 1;
             }
-        } catch {
-            // signal file may have been consumed by another process
+            case EditorIntent.Reposition:
+                return filePath && await this.repositionBoundaryFromSocket(
+                    filePath,
+                    typeof message.boundary_id === 'string' ? message.boundary_id : undefined,
+                    message.preserve_head === true,
+                    projectRoot,
+                ) ? 1 : 0;
+            case EditorIntent.RefreshContent:
+                return filePath && typeof message.content === 'string'
+                    && await this.refreshContentFromSocket(
+                        filePath,
+                        message.content,
+                        typeof message.expected_content_hash === 'string' ? message.expected_content_hash : undefined,
+                        typeof message.expected_content_len === 'number' ? message.expected_content_len : undefined,
+                        projectRoot,
+                    ) ? 1 : 0;
+            case EditorIntent.ObserveLazilyCurrent: {
+                const document = filePath
+                    ? vscode.workspace.textDocuments.find((candidate) => candidate.uri.fsPath === filePath)
+                    : undefined;
+                if (!document) return 0;
+                this.observeLazilyCurrentNow(document, projectRoot);
+                return 1;
+            }
+            case EditorIntent.DeliverCrdtRemote:
+                if (!filePath) return 0;
+                if (message.reason === 'request_full_state' || message.reason === 'ack_recovery_force_refresh') {
+                    await this.crdtReplicas?.handleReattachRequest(
+                        filePath,
+                        this.unsyncedLocalEditDocs.has(filePath),
+                    );
+                }
+                this.crdtReplicas?.requestRemoteDrain(filePath);
+                return 1;
+            case EditorIntent.SaveDocument: {
+                const document = filePath
+                    ? vscode.workspace.textDocuments.find((candidate) => candidate.uri.fsPath === filePath)
+                    : undefined;
+                if (!document || !await document.save()) return 0;
+                const patchId = typeof message.patch_id === 'string' ? message.patch_id : undefined;
+                if (!this.writeEditorContentProjection(patchId, filePath!, document.getText(), projectRoot)) return 0;
+                this.observeLazilyCurrentNow(document, projectRoot);
+                return 1;
+            }
+            case EditorIntent.RefreshVcs:
+                await vscode.commands.executeCommand('git.refresh');
+                return 1;
+            case EditorIntent.ReloadLibrary:
+                native.forceReloadLib(projectRoot);
+                for (const snapshot of this.currentProjectMarkdownSnapshots(projectRoot)) {
+                    await this.crdtReplicas?.attachDocument(snapshot.filePath, snapshot.text, true);
+                }
+                return 1;
+            default:
+                return 0;
         }
     }
 
-    private onSaveDocumentSignal(patchesDir: string): void {
-        void this.processSaveDocumentSignal(patchesDir);
-    }
-
-    private onPublishLiveBufferSignal(patchesDir: string): void {
-        void this.processPublishLiveBufferSignal(patchesDir);
-    }
-
-    /**
-     * Handle `save-document.signal` from the binary. This is the VS Code file
-     * signal equivalent of the JetBrains socket `save_document` message: flush
-     * the already-open editor buffer through VS Code's save API, then publish the
-     * saved text as an editor-owned content projection for the binary to verify.
-     */
-    private async processSaveDocumentSignal(patchesDir: string): Promise<void> {
-        const signalFile = path.join(patchesDir, 'save-document.signal');
-        let raw: string;
-        try {
-            raw = fs.readFileSync(signalFile, 'utf8');
-        } catch {
-            // Signal absent or already consumed by another watcher pass.
-            return;
-        }
-        // Consume the signal immediately so a re-fire does not re-process it.
-        try {
-            fs.unlinkSync(signalFile);
-        } catch {
-            // Already consumed by a concurrent process.
-        }
-
-        const signal = parseSaveDocumentSignal(raw);
-        if (!signal) {
-            this.outputChannel.appendLine('save_document: malformed or empty signal payload, ignoring');
-            return;
-        }
-        const projectRoot = path.dirname(path.dirname(patchesDir));
-        const document = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === signal.file);
-        if (!document || !this.targetsProjectMarkdown(document, projectRoot)) {
-            this.outputChannel.appendLine(`save_document: no open markdown document for ${signal.file}`);
-            return;
-        }
-        const saved = await document.save();
-        if (!saved) {
-            this.outputChannel.appendLine(`save_document: save failed for ${signal.file}`);
-            return;
-        }
+    private async repositionBoundaryFromSocket(
+        filePath: string,
+        boundaryId: string | undefined,
+        preserveHead: boolean,
+        projectRoot: string,
+    ): Promise<boolean> {
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
         const content = document.getText();
-        if (!this.writeEditorContentProjection(signal.patchId, signal.file, content, patchesDir)) {
-            return;
-        }
-        this.publishCurrentDocumentNow(document, projectRoot);
-        this.outputChannel.appendLine(`save_document: flushed ${content.length} chars for ${signal.file}`);
+        const target = preserveHead
+            ? (native.repositionBoundaryToEndPreserveHead(content, projectRoot, boundaryId)
+                ?? this.repositionBoundaryToEndPreserveHeadTs(content, 'exchange', boundaryId))
+            : (native.repositionBoundaryToEnd(content, projectRoot, boundaryId)
+                ?? this.repositionBoundaryToEndTs(content, 'exchange', boundaryId));
+        return target == null || target === content || this.applyMinimalTextEdit(document, target);
     }
 
-    /**
-     * Handle a read-only live-buffer publication request from the binary. The
-     * signal asks VS Code to republish its current visible-buffer proof; it must
-     * not mutate or save the document.
-     */
-    private async processPublishLiveBufferSignal(patchesDir: string): Promise<void> {
-        const signalFile = path.join(patchesDir, 'publish-live-buffer.signal');
-        let raw: string;
-        let signalMtimeMs: number | undefined;
-        try {
-            signalMtimeMs = fs.statSync(signalFile).mtimeMs;
-            raw = fs.readFileSync(signalFile, 'utf8');
-        } catch {
-            return;
-        }
-        try {
-            fs.unlinkSync(signalFile);
-        } catch {
-            // Already consumed by a concurrent watcher pass.
-        }
-
-        let parsed: any;
-        try {
-            parsed = JSON.parse(raw);
-        } catch {
-            this.outputChannel.appendLine('publish_live_buffer: malformed signal payload, ignoring');
-            return;
-        }
-        const issuedAtMs = typeof parsed?.issued_at_ms === 'number' && Number.isFinite(parsed.issued_at_ms)
-            ? parsed.issued_at_ms
-            : signalMtimeMs;
-        if (issuedAtMs !== undefined) {
-            const ageMs = Date.now() - issuedAtMs;
-            if (ageMs > PUBLISH_LIVE_BUFFER_SIGNAL_MAX_AGE_MS) {
-                this.outputChannel.appendLine(`publish_live_buffer: stale signal ignored age_ms=${Math.round(ageMs)}`);
-                return;
-            }
-        }
-        const file = typeof parsed?.file === 'string' ? parsed.file : undefined;
-        if (!file) {
-            this.outputChannel.appendLine('publish_live_buffer: missing file field, ignoring');
-            return;
-        }
-
-        const projectRoot = path.dirname(path.dirname(patchesDir));
-        const document = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === file);
-        if (!document || !this.targetsProjectMarkdown(document, projectRoot)) {
-            this.outputChannel.appendLine(`publish_live_buffer: no open markdown document for ${file}`);
-            return;
-        }
-        this.publishCurrentDocumentNow(document, projectRoot);
+    private async refreshContentFromSocket(
+        filePath: string,
+        content: string,
+        expectedHash: string | undefined,
+        expectedLen: number | undefined,
+        projectRoot: string,
+    ): Promise<boolean> {
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+        const current = document.getText();
+        if (expectedLen !== undefined && current.length !== expectedLen) return false;
+        if (expectedHash !== undefined
+            && crypto.createHash('sha256').update(current, 'utf8').digest('hex') !== expectedHash) return false;
+        const normalized = native.normalizeTemplateStructure(content, projectRoot);
+        return normalized === content && this.applyMinimalTextEdit(document, content);
     }
 
-    /**
-     * Record proven editor-apply content through the native lazily receipt bridge.
-     * No-op without a patch_id.
-     */
     private writeEditorContentProjection(
         patchId: string | undefined,
         filePath: string,
         content: string,
-        patchesDir: string,
+        projectRoot: string,
     ): boolean {
         if (!patchId) {
             return true;
         }
-        const projectRoot = path.dirname(path.dirname(patchesDir));
         if (!native.recordEditorContentApplied(projectRoot, patchId, filePath, content, EDITOR_ID)) {
             this.outputChannel.appendLine(`PatchWatcher: lazily content receipt failed for ${patchId}`);
             return false;
         }
         return true;
-    }
-
-    private processPendingPatches(dir: string): void {
-        try {
-            const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
-            for (const file of files) {
-                const uri = vscode.Uri.file(path.join(dir, file));
-                this.onPatchFileCreated(uri);
-            }
-        } catch {
-            // directory might not exist yet
-        }
     }
 
     private scheduleCrdtLocalChangeDelta(
@@ -2601,165 +2553,8 @@ class PatchWatcher implements vscode.Disposable {
         timers.add(timer);
     }
 
-    private targetsThisEditor(patch: IpcPatch): boolean {
-        if (patch.editor_id && patch.editor_id !== EDITOR_ID) {
-            return false;
-        }
-        if (!patch.editor_id && patch.origin_editor_id === EDITOR_ID) {
-            return false;
-        }
-        return true;
-    }
-
     private projectRoot(): string | undefined {
-        return this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
-    }
-
-    private ownsDocument(filePath: string, projectRoot?: string): boolean {
-        const owns = native.pluginOwnerTryAcquire(filePath, EDITOR_ID, process.pid, projectRoot);
-        if (owns) {
-            this.ownedDocs.add(filePath);
-        } else {
-            this.ownedDocs.delete(filePath);
-        }
-        return owns;
-    }
-
-    private schedulePluginOwnerHeartbeat(projectRoot: string, delayMs = PLUGIN_OWNER_HEARTBEAT_MS): void {
-        if (this.disposed || this.pluginOwnerHeartbeatTimer) return;
-        this.pluginOwnerHeartbeatTimer = setTimeout(() => {
-            this.pluginOwnerHeartbeatTimer = undefined;
-            if (this.disposed) return;
-            // Running on the same extension event loop as CRDT apply/ACK makes
-            // lease freshness a delivery-component proof. A hung extension
-            // keeps its PID-based disk fence but naturally stops being routed.
-            for (const { filePath } of this.currentProjectMarkdownSnapshots(projectRoot)) {
-                this.ownsDocument(filePath, projectRoot);
-            }
-            this.schedulePluginOwnerHeartbeat(projectRoot);
-        }, delayMs);
-    }
-
-    private async onPatchFileCreated(uri: vscode.Uri): Promise<void> {
-        try {
-            const raw = fs.readFileSync(uri.fsPath, 'utf-8');
-            const patch = JSON.parse(raw) as IpcPatch;
-
-            if (!patch.file) {
-                this.outputChannel.appendLine(`PatchWatcher: invalid patch (no file field): ${uri.fsPath}`);
-                return;
-            }
-
-            if (!this.targetsThisEditor(patch)) {
-                this.outputChannel.appendLine(`PatchWatcher: ignoring patch for editor_id ${patch.editor_id ?? '-'}: ${path.basename(uri.fsPath)}`);
-                return;
-            }
-
-            if (consumeClaimedPatch(patch.patch_id, patch.file)) {
-                this.outputChannel.appendLine(`PatchWatcher: claimed patch_id ${patch.patch_id} already closed out locally, deleting ${path.basename(uri.fsPath)}`);
-                try { fs.unlinkSync(uri.fsPath); } catch { /* already consumed */ }
-                return;
-            }
-
-            if (isPatchAlreadyApplied(patch.file, uri.fsPath)) {
-                this.outputChannel.appendLine(`PatchWatcher: snapshot newer than patch file, deleting stale ${path.basename(uri.fsPath)}`);
-                try { fs.unlinkSync(uri.fsPath); } catch { /* already consumed */ }
-                return;
-            }
-
-            if ((patch.fullContent ?? '') !== '') {
-                this.outputChannel.appendLine(`PatchWatcher: full content IPC is disabled, deleting stale/foreign ${path.basename(uri.fsPath)}`);
-                try { fs.unlinkSync(uri.fsPath); } catch { /* already consumed */ }
-                return;
-            }
-            // Handle reposition-only signals immediately; Project Controller/binary owns debounce.
-            if (isPureRepositionSignal(patch)) {
-                this.repositionBoundaryNow(
-                    patch.file,
-                    uri.fsPath,
-                    patch.reposition_boundary_id,
-                    patch.preserve_head ?? false,
-                );
-                return;
-            }
-
-            const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
-            if (!this.ownsDocument(patch.file, projectRoot)) {
-                this.outputChannel.appendLine(`PatchWatcher: not the live owner of ${patch.file}, leaving patch for owner instance: ${uri.fsPath}`);
-                return;
-            }
-            const stateGeneration = native.recordEditorPatchQueued(patch.file, patch.patch_id, projectRoot);
-            const applied = await this.applyPatch(patch, uri.fsPath);
-
-            if (applied) {
-                native.recordEditorPatchApplied(patch.file, patch.patch_id, stateGeneration, projectRoot);
-                // Applied: delete the patch file
-                try {
-                    fs.unlinkSync(uri.fsPath);
-                } catch (e: any) {
-                    this.outputChannel.appendLine(`PatchWatcher: failed to delete patch file: ${e.message}`);
-                }
-            } else {
-                native.recordEditorPatchRejected(
-                    patch.file,
-                    patch.patch_id,
-                    stateGeneration,
-                    'file_apply_failed',
-                    projectRoot,
-                );
-                native.recordEditorRetryRequested(
-                    patch.file,
-                    patch.patch_id,
-                    stateGeneration,
-                    'file_apply_failed',
-                    projectRoot,
-                );
-                this.outputChannel.appendLine(`PatchWatcher: patch not applied, recorded lazily rejection + left for retry: ${uri.fsPath}`);
-            }
-        } catch (e: any) {
-            this.outputChannel.appendLine(`PatchWatcher: failed to process ${uri.fsPath}: ${e.message}`);
-        }
-    }
-
-    /**
-     * Reposition boundary marker immediately. Deletes the patch file after applying.
-     *
-     * Uses FFI `agent_doc_reposition_boundary_to_end` when available,
-     * falls back to TS implementation.
-     */
-    private repositionBoundaryNow(
-        filePath: string,
-        patchFilePath: string,
-        boundaryId?: string,
-        preserveHead = false,
-    ): void {
-        const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
-
-        // Apply reposition via WorkspaceEdit (cursor-safe)
-        const fileUri = vscode.Uri.file(filePath);
-        vscode.workspace.openTextDocument(fileUri).then(async (document) => {
-            const content = document.getText();
-            // Prefer FFI reposition, fall back to TS
-            const repositioned = preserveHead
-                ? (native.repositionBoundaryToEndPreserveHead(content, projectRoot, boundaryId)
-                    ?? this.repositionBoundaryToEndPreserveHeadTs(content, 'exchange', boundaryId))
-                : (native.repositionBoundaryToEnd(content, projectRoot, boundaryId)
-                    ?? this.repositionBoundaryToEndTs(content, 'exchange', boundaryId));
-            const proof = createEditorApplyProof(content, document.version);
-            if (repositioned && repositioned !== content) {
-                if (!isEditorApplyProofCurrent(proof, document.getText(), document.version)) {
-                    this.outputChannel.appendLine(`PatchWatcher: stale editor generation before reposition for ${filePath}; retrying`);
-                    this.schedulePatchRetry(patchFilePath);
-                    return;
-                }
-                await this.applyMinimalTextEdit(document, repositioned);
-            }
-            // Delete the reposition patch file after the editor mutation succeeds.
-            try { fs.unlinkSync(patchFilePath); } catch { /* already consumed */ }
-        }).then(undefined, (err: any) => {
-            this.outputChannel.appendLine(`PatchWatcher: reposition failed: ${err.message}`);
-            try { fs.unlinkSync(patchFilePath); } catch { /* best effort cleanup */ }
-        });
+        return this.projectRootPath;
     }
 
     private repositionBoundaryToEndTs(doc: string, component: string, boundaryId?: string): string | null {
@@ -2768,17 +2563,6 @@ class PatchWatcher implements vscode.Disposable {
 
     private repositionBoundaryToEndPreserveHeadTs(doc: string, component: string, boundaryId?: string): string | null {
         return repositionBoundaryToEndPreserveHead(doc, component, boundaryId);
-    }
-
-    private schedulePatchRetry(patchFilePath: string): void {
-        if (this.pendingPatchRetries.has(patchFilePath)) return;
-        this.pendingPatchRetries.add(patchFilePath);
-        setTimeout(() => {
-            this.pendingPatchRetries.delete(patchFilePath);
-            if (fs.existsSync(patchFilePath)) {
-                this.onPatchFileCreated(vscode.Uri.file(patchFilePath));
-            }
-        }, 500);
     }
 
     private async applyPatch(patch: IpcPatch, patchFilePath?: string): Promise<boolean> {
@@ -2803,7 +2587,7 @@ class PatchWatcher implements vscode.Disposable {
 
         // Component-based patching (template/stream-mode documents)
         let content = baselineContent;
-        const projectRoot = this.patchesDir ? path.dirname(path.dirname(this.patchesDir)) : undefined;
+        const projectRoot = this.projectRoot();
 
         // Apply frontmatter patch first
         if (patch.frontmatter) {
@@ -2872,12 +2656,11 @@ class PatchWatcher implements vscode.Disposable {
             }
         }
 
-        const patchesDir = patchFilePath ? path.dirname(patchFilePath) : this.patchesDir;
-        if (!patchesDir) {
-            this.outputChannel.appendLine(`PatchWatcher: no patches dir for content projection ${patch.file}`);
+        if (!projectRoot) {
+            this.outputChannel.appendLine(`PatchWatcher: no project root for content projection ${patch.file}`);
             return false;
         }
-        return this.writeEditorContentProjection(patch.patch_id, patch.file, document.getText(), patchesDir);
+        return this.writeEditorContentProjection(patch.patch_id, patch.file, document.getText(), projectRoot);
     }
 
     private async applyMinimalTextEdit(document: vscode.TextDocument, targetContent: string): Promise<boolean> {
@@ -2911,9 +2694,7 @@ class PatchWatcher implements vscode.Disposable {
             this.outputChannel.appendLine(`PatchWatcher: stale CRDT remote update for ${filePath}; editor text advanced before apply`);
             return false;
         }
-        const projectRoot = this.patchesDir
-            ? path.dirname(path.dirname(this.patchesDir))
-            : undefined;
+        const projectRoot = this.projectRootPath;
         const normalized = native.normalizeTemplateStructure(targetContent, projectRoot);
         if (normalized == null) {
             this.outputChannel.appendLine(`PatchWatcher: CRDT remote update rejected by template-structure guard for ${filePath}`);
@@ -2940,15 +2721,6 @@ class PatchWatcher implements vscode.Disposable {
             });
     }
 
-    private scheduleNativeDocumentChanged(fsPath: string, projectRoot: string | undefined): void {
-        if (this.nativeChangeTimers.has(fsPath)) return;
-        const timer = setTimeout(() => {
-            this.nativeChangeTimers.delete(fsPath);
-            native.documentChanged(fsPath, projectRoot);
-        }, 0);
-        this.nativeChangeTimers.set(fsPath, timer);
-    }
-
     private scheduleDeferredReconnectRefresh(document: vscode.TextDocument): void {
         const fsPath = document.uri.fsPath;
         const prior = this.deferredReconnectTimers.get(fsPath);
@@ -2962,50 +2734,50 @@ class PatchWatcher implements vscode.Disposable {
         this.deferredReconnectTimers.set(fsPath, timer);
     }
 
-    private scheduleLiveBufferReport(document: vscode.TextDocument, projectRoot: string | undefined): void {
+    private scheduleLazilyCurrentObservation(document: vscode.TextDocument, projectRoot: string | undefined): void {
         const fsPath = document.uri.fsPath;
-        const state = this.liveBufferReports.get(fsPath) ?? {
-            debounce: new DebounceCore<string>(LIVE_BUFFER_REPORT_DELAY_MS),
+        const state = this.lazilyCurrentObservations.get(fsPath) ?? {
+            debounce: new DebounceCore<string>(LAZILY_CURRENT_OBSERVATION_DELAY_MS),
             timer: undefined,
         };
-        this.liveBufferReports.set(fsPath, state);
+        this.lazilyCurrentObservations.set(fsPath, state);
         state.debounce.input(monotonicMillis(), fsPath);
         if (state.timer) clearTimeout(state.timer);
         state.timer = setTimeout(
             () => this.drainLiveBufferReport(fsPath, state, projectRoot),
-            LIVE_BUFFER_REPORT_DELAY_MS,
+            LAZILY_CURRENT_OBSERVATION_DELAY_MS,
         );
     }
 
     private drainLiveBufferReport(
         fsPath: string,
-        state: LiveBufferReportState,
+        state: LazilyCurrentObservationState,
         projectRoot: string | undefined,
     ): void {
-        if (this.liveBufferReports.get(fsPath) !== state) return;
+        if (this.lazilyCurrentObservations.get(fsPath) !== state) return;
         const emittedPath = state.debounce.tick(monotonicMillis());
         if (emittedPath === null) {
             // A timer may wake just before the monotone quiet boundary. Preserve
             // one driver for the current generation instead of dropping work.
             state.timer = setTimeout(
                 () => this.drainLiveBufferReport(fsPath, state, projectRoot),
-                LIVE_BUFFER_REPORT_DELAY_MS,
+                LAZILY_CURRENT_OBSERVATION_DELAY_MS,
             );
             return;
         }
         state.timer = undefined;
-        this.liveBufferReports.delete(fsPath);
+        this.lazilyCurrentObservations.delete(fsPath);
         const latest = vscode.workspace.textDocuments.find((doc) => doc.uri.fsPath === emittedPath);
         if (!latest || latest.languageId !== 'markdown' || latest.uri.scheme !== 'file') return;
-        this.publishCurrentDocumentNow(latest, projectRoot);
+        this.observeLazilyCurrentNow(latest, projectRoot);
     }
 
-    private publishCurrentDocumentNow(document: vscode.TextDocument, projectRoot: string | undefined): void {
+    private observeLazilyCurrentNow(document: vscode.TextDocument, projectRoot: string | undefined): void {
         const fsPath = document.uri.fsPath;
-        const state = this.liveBufferReports.get(fsPath);
+        const state = this.lazilyCurrentObservations.get(fsPath);
         if (state) {
             if (state.timer) clearTimeout(state.timer);
-            this.liveBufferReports.delete(fsPath);
+            this.lazilyCurrentObservations.delete(fsPath);
         }
         const text = document.getText();
         seedEditorOpShadow(fsPath, text);
@@ -3017,7 +2789,7 @@ class PatchWatcher implements vscode.Disposable {
             this.unsyncedLocalEditDocs.delete(fsPath);
         }
         const noUnsavedOperatorEdits = !document.isDirty || !this.unsyncedLocalEditDocs.has(fsPath);
-        native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID, noUnsavedOperatorEdits);
+        native.lazilyCurrentObserved(fsPath, text, projectRoot, EDITOR_ID, noUnsavedOperatorEdits);
         void this.crdtReplicas?.attachDocument(fsPath, text, true);
     }
 
@@ -3048,14 +2820,9 @@ class PatchWatcher implements vscode.Disposable {
     }
 
     handleDocumentClosed(filePath: string): void {
-        native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot());
-        this.ownedDocs.delete(filePath);
-        const state = this.liveBufferReports.get(filePath);
+        const state = this.lazilyCurrentObservations.get(filePath);
         if (state?.timer) clearTimeout(state.timer);
-        this.liveBufferReports.delete(filePath);
-        const nativeTimer = this.nativeChangeTimers.get(filePath);
-        if (nativeTimer) clearTimeout(nativeTimer);
-        this.nativeChangeTimers.delete(filePath);
+        this.lazilyCurrentObservations.delete(filePath);
         const reconnectTimer = this.deferredReconnectTimers.get(filePath);
         if (reconnectTimer) clearTimeout(reconnectTimer);
         this.deferredReconnectTimers.delete(filePath);
@@ -3365,125 +3132,22 @@ class PatchWatcher implements vscode.Disposable {
         return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
-    private startCrdtReplicaEventWatcher(projectRoot: string): void {
-        if (this.crdtReplicaEventWatcher) return;
-        const eventsDir = path.join(projectRoot, '.agent-doc', 'crdt-replica-events');
-        try {
-            fs.mkdirSync(eventsDir, { recursive: true });
-        } catch {
-            // Watcher creation below is still best-effort.
-        }
-        const pattern = new vscode.RelativePattern(eventsDir, '*.json');
-        this.crdtReplicaEventWatcher = vscode.workspace.createFileSystemWatcher(pattern, false, false, true);
-        this.crdtReplicaEventWatcher.onDidCreate((uri) => this.onCrdtReplicaEvent(uri));
-        this.crdtReplicaEventWatcher.onDidChange((uri) => this.onCrdtReplicaEvent(uri));
-    }
-
-    private onCrdtReplicaEvent(uri: vscode.Uri): void {
-        try {
-            const raw = fs.readFileSync(uri.fsPath, 'utf-8');
-            const event = JSON.parse(raw) as { file?: unknown; reason?: unknown; signaled_at_ms?: unknown };
-            if (typeof event.file === 'string' && event.file.length > 0) {
-                const signaledAtMs = typeof event.signaled_at_ms === 'number' ? event.signaled_at_ms : 0;
-                const previous = this.processedCrdtEventMs.get(event.file) ?? -1;
-                if (signaledAtMs > 0 && signaledAtMs <= previous) return;
-                if (signaledAtMs > 0) this.processedCrdtEventMs.set(event.file, signaledAtMs);
-            if (event.reason === 'request_full_state' || event.reason === 'ack_recovery_force_refresh') {
-                void this.crdtReplicas?.handleReattachRequest(
-                    event.file,
-                    this.unsyncedLocalEditDocs.has(event.file),
-                    );
-                }
-                this.crdtReplicas?.requestRemoteDrain(event.file);
-            } else {
-                this.crdtReplicas?.requestRemoteDrain();
-            }
-        } catch (e: any) {
-            this.outputChannel.appendLine(`[crdt-replica] event drain failed: ${e?.message ?? e}`);
-            this.crdtReplicas?.requestRemoteDrain();
-        }
-    }
-
-    /**
-     * #cdylib-reload-broadcast: watch the global reload-broadcast file (a sibling
-     * of the installed cdylib). When its mtime advances, force the native reload
-     * immediately instead of using a fixed polling interval.
-     */
-    private startLibReloadBroadcastWatcher(projectRoot: string): void {
-        if (this.libReloadBroadcastWatcher) return;
-        const file = native.reloadBroadcastFile(projectRoot);
-        if (!file) return;
-        const parent = path.dirname(file);
-        const name = path.basename(file);
-        try {
-            this.lastLibReloadBroadcastMtime = fs.statSync(file).mtimeMs;
-        } catch {
-            this.lastLibReloadBroadcastMtime = 0;
-        }
-        this.libReloadBroadcastWatcher = vscode.workspace.createFileSystemWatcher(
-            new vscode.RelativePattern(parent, name),
-            false,
-            false,
-            true,
-        );
-        this.libReloadBroadcastWatcher.onDidCreate(() => this.onLibReloadBroadcastEvent(projectRoot));
-        this.libReloadBroadcastWatcher.onDidChange(() => this.onLibReloadBroadcastEvent(projectRoot));
-    }
-
-    private onLibReloadBroadcastEvent(projectRoot: string): void {
-        const file = native.reloadBroadcastFile(projectRoot);
-        if (!file) return;
-        let mtime = 0;
-        try {
-            mtime = fs.statSync(file).mtimeMs;
-        } catch {
-            return; // not written yet
-        }
-        if (mtime <= 0) return;
-        // First observation records the baseline without forcing a reload, so a
-        // stale broadcast from a prior install does not reload on every startup.
-        if (this.lastLibReloadBroadcastMtime === 0) {
-            this.lastLibReloadBroadcastMtime = mtime;
-            return;
-        }
-        if (mtime !== this.lastLibReloadBroadcastMtime) {
-            this.lastLibReloadBroadcastMtime = mtime;
-            this.outputChannel.appendLine(`[lib-reload] broadcast changed (mtime=${mtime}); forcing cdylib reload`);
-            native.forceReloadLib(projectRoot);
-            for (const { filePath, text } of this.currentProjectMarkdownSnapshots(projectRoot)) {
-                void this.crdtReplicas?.attachDocument(filePath, text, true);
-            }
-        }
-    }
-
     dispose(): void {
         this.disposed = true;
-        this.watcher?.dispose();
-        this.signalWatcher?.dispose();
-        this.saveSignalWatcher?.dispose();
-        this.liveBufferSignalWatcher?.dispose();
-        this.crdtReplicaEventWatcher?.dispose();
-        this.libReloadBroadcastWatcher?.dispose();
-        this.crdtReplicaEventWatcher = undefined;
-        this.libReloadBroadcastWatcher = undefined;
+        this.socketServer?.close();
+        this.socketServer = undefined;
+        if (this.socketPath) {
+            try { fs.unlinkSync(this.socketPath); } catch { /* already closed */ }
+            this.socketPath = undefined;
+        }
         this.typingListener?.dispose();
         this.openListener?.dispose();
         this.saveListener?.dispose();
         this.closeListener?.dispose();
-        if (this.pluginOwnerHeartbeatTimer) clearTimeout(this.pluginOwnerHeartbeatTimer);
-        this.pluginOwnerHeartbeatTimer = undefined;
-        for (const filePath of this.ownedDocs) {
-            native.pluginOwnerRelease(filePath, EDITOR_ID, this.projectRoot());
-        }
-        this.ownedDocs.clear();
-        for (const state of this.liveBufferReports.values()) {
+        for (const state of this.lazilyCurrentObservations.values()) {
             if (state.timer) clearTimeout(state.timer);
         }
-        this.liveBufferReports.clear();
-        for (const timer of this.nativeChangeTimers.values()) {
-            clearTimeout(timer);
-        }
-        this.nativeChangeTimers.clear();
+        this.lazilyCurrentObservations.clear();
         for (const timer of this.deferredReconnectTimers.values()) {
             clearTimeout(timer);
         }

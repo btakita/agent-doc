@@ -23,22 +23,21 @@ Snapshots live in `.agent-doc/snapshots/` relative to CWD. Path: `sha256(canonic
 
 ## Auto-Migration on Rename
 
-When a document is renamed/moved, its path hash changes, orphaning all `.agent-doc/` state
-files, including both CRDT sidecars (`<hash>.yrs` and `<hash>.overlay.yrs`). `ensure_initialized` (called from `start`, `preflight`, `claim`, and `sync`) detects
+When a document is renamed/moved, its path hash changes, orphaning the cold snapshot path and
+document-keyed `state.db` rows. `ensure_initialized` (called from `start`, `preflight`, `claim`, and `sync`) detects
 this automatically:
 
 1. Document has a `agent_doc_session` UUID in frontmatter
 2. No snapshot exists for the current path hash
 3. Scan `.agent-doc/snapshots/*.md` for a snapshot whose frontmatter has the same session UUID
 
-If an orphaned snapshot is found, all state files are migrated from the old hash to the new
-hash: snapshots, baselines, locks, pending, legacy CRDT, overlay CRDT, and pre-response. The sessions registry is also updated.
+If an orphaned snapshot is found, the snapshot is moved and the document-keyed state rows are
+rekeyed transactionally. The sessions registry is also updated. No live buffer, CRDT, pending,
+capture, or baseline file sidecar participates.
 
-Explicit preflight baseline paths are part of the active closeout contract. If a document
-is moved after preflight and rename migration moves `.agent-doc/baselines/<old-hash>.md`
-to the new path hash, `finalize` / `write --commit` must recover by reading the migrated
-current-hash baseline instead of falling back to `content_ours` or failing on the missing
-old path.
+Explicit preflight baseline ids are part of the active closeout contract. If a document is
+moved after preflight, `finalize` / `respond` / `write --commit` resolve the rekeyed baseline
+from `state.db` instead of falling back to `content_ours` or failing on the old path.
 
 **Fallback:** `agent-doc rename <old> <new>` performs the same migration explicitly when
 the old path is known.

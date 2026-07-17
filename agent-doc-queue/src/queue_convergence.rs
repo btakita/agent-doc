@@ -16,20 +16,20 @@ use crate::document_queue;
 ///
 /// Returns `None` when the queue component is unchanged or either document lacks
 /// a parseable queue component.
-pub fn realign_baseline_to_converged_queue(current: &str, converged: &str) -> Option<String> {
-    let cur_comps = element::parse(current).ok()?;
+pub fn realign_baseline_to_converged_queue(baseline: &str, converged: &str) -> Option<String> {
+    let cur_comps = element::parse(baseline).ok()?;
     let conv_comps = element::parse(converged).ok()?;
     let cur_q = cur_comps.iter().find(|c| c.name == "queue")?;
     let conv_q = conv_comps.iter().find(|c| c.name == "queue")?;
-    let cur_q_text = &current[cur_q.open_start..cur_q.close_end];
+    let cur_q_text = &baseline[cur_q.open_start..cur_q.close_end];
     let conv_q_text = &converged[conv_q.open_start..conv_q.close_end];
     if cur_q_text == conv_q_text {
         return None;
     }
-    let mut spliced = String::with_capacity(current.len() + conv_q_text.len());
-    spliced.push_str(&current[..cur_q.open_start]);
+    let mut spliced = String::with_capacity(baseline.len() + conv_q_text.len());
+    spliced.push_str(&baseline[..cur_q.open_start]);
     spliced.push_str(conv_q_text);
-    spliced.push_str(&current[cur_q.close_end..]);
+    spliced.push_str(&baseline[cur_q.close_end..]);
     for component_name in ["backlog", "pending", "icebox"] {
         if let Some(next) = realign_component_when_only_in_progress_marker_changed(
             &spliced,
@@ -38,6 +38,13 @@ pub fn realign_baseline_to_converged_queue(current: &str, converged: &str) -> Op
         ) {
             spliced = next;
         }
+    }
+    if let Ok((frontmatter, _)) = agent_doc_frontmatter::frontmatter::parse(converged)
+        && let Some(control) = frontmatter.queue.as_deref()
+        && let Ok(with_control) =
+            agent_doc_frontmatter::frontmatter::merge_queue_control(&spliced, control)
+    {
+        spliced = with_control;
     }
     Some(spliced)
 }

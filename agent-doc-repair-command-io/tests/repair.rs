@@ -2,14 +2,13 @@
 //!
 //! ## Spec
 //! - Guards against response loss caused by context compaction interrupting the write-back phase (between agent respond and `agent-doc write`).
-//! - Pending responses are stored in `.agent-doc/pending/<hash>.md` before the write attempt, and
-//!   the same response is also captured in `.agent-doc/captures/<doc-hash>/<cycle-id>.json`.
-//! - `run(file)` — canonicalizes the path, checks for a pending file or a recoverable durable
-//!   capture, and applies it if found. Terminal captures (`committed`, `discarded`) are ignored for
+//! - Pending responses and streamed checkpoints are retained as typed facts in `state.db`.
+//! - `run(file)` — canonicalizes the path, checks for a recoverable durable capture,
+//!   and applies it if found. Terminal captures (`committed`, `discarded`) are ignored for
 //!   replay so later preflights do not repeatedly enter the dedup path after a successful closeout.
 //!   Before applying, reads the current document and checks if the response is already present
 //!   (dedup guard). If already present, template docs still run binary-owned transcript/tail
-//!   normalization before pending cleanup, then `run(file)` returns `RepairOutcome::AlreadyApplied`.
+//!   normalization before intent cleanup, then `run(file)` returns `RepairOutcome::AlreadyApplied`.
 //!   When replaying from a durable capture, requires the current document and snapshot hashes to
 //!   still match the captured baseline; otherwise fails closed.
 //!   Template/CRDT patchback responses replay through the normal strict stream
@@ -22,8 +21,7 @@
 //!   payloads are captured under `.agent-doc/repair-blocked`, and sanitized replayable
 //!   payloads such as patch bodies extracted from leading commentary are what get written.
 //!   Non-template documents use plain append (`write::apply_append_from_string`).
-//!   Removes the pending file on successful write.
-//! - Empty pending files are cleaned up without triggering a write; `run` returns `RepairOutcome::Noop`.
+//!   Clears the retained response intent on successful write.
 //! - `repair(file)` — runs the same recovery logic as `run(file)` and, when recovery work happened
 //!   inside a git repo, immediately attempts `git::commit(file)` so the repaired response crosses
 //!   the normal commit boundary instead of waiting for a later `preflight`.
@@ -39,26 +37,25 @@
 //!   template drift such as a stale `agent:boundary` marker left before an already-answered
 //!   exchange turn; the repair repositions the boundary to the true end of the completed turn
 //!   and advances the snapshot through the same binary-owned path.
-//! - Pending response sidecar storage is owned by `agent-doc-repair-io`; this module consumes it
-//!   when replaying or cleaning up interrupted writes.
+//! - Retained response intent is owned by the state backbone and consumed by
+//!   `agent-doc-repair-io` when replaying or cleaning up interrupted writes.
 //! - Response replay/application matching is owned by `agent-doc-turn::response_replay`; this module supplies file-backed repair adapters.
 //!
 //! ## Agentic Contracts
 //! - `run(file)` — returns a `RepairOutcome` describing whether nothing happened, the response was replayed, the response was already present, manual tail cleanup was respected, or a stale `preflight_started` lock was repaired. Returns `Err` on I/O failure or if the write-back itself fails.
 //! - `repair(file)` — preserves `run(file)` behavior and additionally attempts `git::commit(file)` when the document lives in git and the outcome was not `Noop`.
-//! - Pending file is removed only after a fully successful write (or dedup detection); a failed write leaves the pending file intact for retry.
-//! - `save_pending` and `clear_pending` are idempotent with respect to directory creation and missing files respectively.
+//! - Retained intent is cleared only after a fully successful write (or dedup detection);
+//!   a failed write leaves it available for retry.
 //! - Callers (e.g., `preflight`) invoke `run` at session start to surface any orphaned responses before proceeding.
 //!
 //! ## Evals
-//! - no_pending_returns_false: document with no pending file or capture → run returns Ok(false)
-//! - save_and_clear_pending: save then clear → pending file created then removed
-//! - recover_append_response: pending plain text response → applied as Assistant section, file updated, pending file removed, run returns Ok(true)
-//! - empty_pending_cleaned_up: pending file with only whitespace → run returns Ok(false), pending file removed
-//! - recover_skips_duplicate_apply: pending response already present in document → run returns Ok(false), pending file removed, document unchanged
+//! - no_pending_returns_false: document with no retained capture → run returns Ok(false)
+//! - save_and_clear_pending: save then clear → retained intent advances monotonically
+//! - recover_append_response: retained plain text response → applied as Assistant section and committed
+//! - recover_skips_duplicate_apply: retained response already present → no duplicate write
 //! - recover_already_applied_template_canonicalizes_prompt_prefixes: template dedup still restores missing `❯ ` transcript prefixes before cleanup
 //! - repair_repositions_stale_boundary_after_answered_turn: no pending response, stale boundary left before an answered turn → boundary moved to tail, snapshot advanced
-//! - recover_replays_capture_without_pending: durable capture with no pending file → run returns Ok(true)
+//! - recover_replays_capture: durable capture → run returns Ok(true)
 //! - recover_fails_closed_on_capture_hash_mismatch: durable capture baseline mismatch → run returns Err
 
 use agent_doc_turn::repair::RepairOutcome;
@@ -99,7 +96,6 @@ mod tests {
     fn setup_project() -> TempDir {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/pending")).unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/locks")).unwrap();
         dir
     }
@@ -133,17 +129,7 @@ mod tests {
     }
 
     fn age_cycle_state(file: &Path, age_secs: u64) {
-        let canonical = file.canonicalize().unwrap();
-        let root = agent_doc_project_root_io::project_root_containing(&canonical).unwrap();
-        let hash = agent_doc_fs::document_state_hash(&canonical).unwrap();
-        let path = root
-            .join(".agent-doc/state/cycles")
-            .join(format!("{hash}.json"));
-        let mut state: agent_doc_cycle_state_io::CycleState =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        state.started_at = state.started_at.saturating_sub(age_secs);
-        state.updated_at = state.updated_at.saturating_sub(age_secs);
-        std::fs::write(path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+        agent_doc_cycle_state_io::age_current_cycle_for_tests(file, age_secs).unwrap();
     }
 
     #[test]
@@ -297,7 +283,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = run(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::TemplateNormalized);
@@ -311,7 +302,9 @@ mod tests {
             "boundary should move to the true end of the answered turn:\n{repaired}"
         );
 
-        let repaired_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let repaired_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(repaired_snapshot, repaired);
     }
 
@@ -343,7 +336,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = run(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::TemplateNormalized);
@@ -404,7 +402,12 @@ mod tests {
         let stale_disk_projection =
             live_content.replacen("How would CAS wo?", "How would CAS w?", 1);
         std::fs::write(&doc, stale_disk_projection).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let editor_identity = "intellij:repair-live-authority";
         agent_doc_test_support::publish_editor_text_via_crdt_relay(
             &doc,
@@ -431,7 +434,9 @@ mod tests {
         .unwrap();
         assert_eq!(authoritative, repaired);
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
             repaired
         );
         assert_eq!(
@@ -478,7 +483,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
         let outcome = run(&doc).unwrap();
@@ -516,7 +526,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = run(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::Noop);
@@ -530,11 +545,18 @@ mod tests {
         std::fs::write(&doc, "content").unwrap();
 
         agent_doc_repair_io::pending::save_pending(&doc, "response text").unwrap();
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-        assert!(pending.exists());
+        assert!(
+            agent_doc_repair_io::load_active_pending_response(&doc)
+                .unwrap()
+                .is_some()
+        );
 
         agent_doc_repair_io::pending::clear_pending(&doc).unwrap();
-        assert!(!pending.exists());
+        assert!(
+            agent_doc_repair_io::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -553,7 +575,12 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = run(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::CompletedBacklogReaped);
@@ -563,7 +590,9 @@ mod tests {
         assert!(!repaired.contains("- [x] [#bbbb] drop"));
         assert!(repaired.contains("[#bbbb] drop"));
 
-        let repaired_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let repaired_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(repaired_snapshot.contains("- [ ] [#aaaa] keep"));
         assert!(!repaired_snapshot.contains("- [x] [#bbbb] drop"));
         assert!(repaired_snapshot.contains("[#bbbb] drop"));
@@ -585,7 +614,12 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = run(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::CompletedBacklogReaped);
@@ -604,7 +638,9 @@ mod tests {
         assert!(!pending_body.contains("legacy drop"));
         assert!(repaired.contains("legacy drop"));
 
-        let repaired_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let repaired_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         let snapshot_pending_body = repaired_snapshot
             .split("<!-- agent:pending -->\n")
             .nth(1)
@@ -632,7 +668,12 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
 
         let outcome = repair(&doc).unwrap();
@@ -691,7 +732,12 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, live_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = run(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::CompletedBacklogReaped);
@@ -700,7 +746,9 @@ mod tests {
         assert!(repaired.contains("do #statusws. spec-test-build-install-commit-push"));
         assert!(!repaired.contains("- [x] [#bbbb] drop"));
 
-        let repaired_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let repaired_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !repaired_snapshot.contains("do #statusws. spec-test-build-install-commit-push"),
             "snapshot must not absorb the live prompt"
@@ -708,7 +756,7 @@ mod tests {
         assert!(!repaired_snapshot.contains("- [x] [#bbbb] drop"));
 
         let diff = agent_doc_diff_io::compute(
-            &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
+            &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
             &doc,
         )
         .unwrap()
@@ -736,9 +784,11 @@ mod tests {
         assert!(result.contains("This is the recovered response."));
         assert!(result.contains("## Assistant"));
 
-        // Pending file should be cleaned up
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-        assert!(!pending.exists());
+        assert!(
+            agent_doc_repair_io::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -759,7 +809,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_repair_io::pending::save_pending(
             &doc,
@@ -796,7 +851,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_repair_io::pending::save_pending(
             &doc,
@@ -843,7 +903,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_repair_io::pending::save_pending(
             &doc,
@@ -875,7 +940,12 @@ mod tests {
             "<!-- /agent:pending -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_repair_io::pending::save_pending(
             &doc,
@@ -913,7 +983,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
 
         let response = "### Re: captured response — gpt-5\n\nRecovered through strict write.\n";
@@ -951,7 +1026,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
@@ -987,7 +1067,12 @@ mod tests {
                 ),
             );
         std::fs::write(&doc, &partial).unwrap();
-        agent_doc_snapshot_io::save(&doc, &partial, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &partial,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert_eq!(run(&doc).unwrap(), RepairOutcome::ReplayedResponse);
         let result = std::fs::read_to_string(&doc).unwrap();
@@ -1027,7 +1112,12 @@ mod tests {
             "<!-- /agent:pending -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
@@ -1061,8 +1151,11 @@ mod tests {
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::Noop);
 
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-        assert!(!pending.exists());
+        assert!(
+            agent_doc_repair_io::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -1088,9 +1181,11 @@ mod tests {
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(result, content);
 
-        // Pending file should be cleaned up
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-        assert!(!pending.exists());
+        assert!(
+            agent_doc_repair_io::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -1099,13 +1194,21 @@ mod tests {
         let doc = dir.path().join("test.md");
         let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
 
         agent_doc_repair_io::pending::save_pending(&doc, "Recovered from capture.").unwrap();
         agent_doc_repair_io::pending::clear_pending(&doc).unwrap();
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-        assert!(!pending.exists());
+        assert!(
+            agent_doc_repair_io::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none()
+        );
         // Re-arm capture as if the write never happened.
         agent_doc_capture_io::capture_response(&doc, "Recovered from capture.").unwrap();
 
@@ -1121,7 +1224,12 @@ mod tests {
         let doc = dir.path().join("test.md");
         let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_capture_io::capture_response(&doc, "Binary-owned closeout.").unwrap();
@@ -1173,7 +1281,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
@@ -1190,7 +1303,9 @@ mod tests {
             "bare prompt target should not remain after repair:\n{repaired}"
         );
 
-        let saved_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let saved_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             saved_snapshot, repaired,
             "snapshot should advance to the canonicalized repaired document"
@@ -1229,7 +1344,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
 
         let recovered = run(&doc).unwrap();
@@ -1245,7 +1365,9 @@ mod tests {
             "already-applied response body lines must not be prompt-prefixed:\n{repaired}"
         );
 
-        let saved_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let saved_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(saved_snapshot, repaired);
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("repair_response_body_prompt_prefix_stripped"));
@@ -1277,7 +1399,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::TemplateNormalized);
@@ -1291,7 +1418,9 @@ mod tests {
             "no-pending response tails must not remain prompt-prefixed:\n{repaired}"
         );
 
-        let saved_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let saved_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(saved_snapshot, repaired);
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(log.contains("repair_response_body_prompt_prefix_stripped"));
@@ -1321,7 +1450,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::TemplateNormalized);
@@ -1336,7 +1470,9 @@ mod tests {
             "bare prompt target should not remain after repair:\n{repaired}"
         );
 
-        let saved_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let saved_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             saved_snapshot, repaired,
             "snapshot should advance to the canonicalized repaired document"
@@ -1349,11 +1485,14 @@ mod tests {
         let doc = dir.path().join("test.md");
         let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_repair_io::pending::save_pending(&doc, "Recovered from capture.").unwrap();
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-        std::fs::remove_file(&pending).unwrap();
         std::fs::write(&doc, "---\nsession: test\n---\n\n## User\n\nHello again\n").unwrap();
 
         let err = run(&doc).unwrap_err();
@@ -1384,7 +1523,8 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, v1).unwrap();
-        agent_doc_snapshot_io::save(&doc, v1, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, v1, agent_doc_ops_log_io::log_op)
+            .unwrap();
         init_git_repo(dir.path(), &doc);
 
         // A response that was captured + write-applied but never landed
@@ -1396,7 +1536,7 @@ mod tests {
             "The new answer that got lost.\n",
             "<!-- /patch:exchange -->",
         );
-        agent_doc_capture_io::capture_response(&doc, lost_response).unwrap();
+        let captured = agent_doc_capture_io::capture_response(&doc, lost_response).unwrap();
         agent_doc_capture_io::mark_write_applied(&doc).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(&doc, "write_applied", Some(v1), Some(v1))
             .unwrap();
@@ -1427,12 +1567,17 @@ mod tests {
         );
         assert_eq!(result.matches("The new answer that got lost").count(), 1);
 
-        // Sidecars follow the replayed cut and the capture remains durable.
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        // State projections follow the replayed cut and the capture remains durable.
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snap, result, "snapshot must follow the replayed document");
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
-        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        let capture = agent_doc_capture_io::load_by_id(&doc, &captured.capture_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             capture.state,
             agent_doc_workflow::capture::CaptureState::Committed
@@ -1462,7 +1607,8 @@ mod tests {
         let doc = dir.path().join("test.md");
         let v1 = "---\nagent_doc_format: template\nsession: test\n---\n\n<!-- agent:exchange patch=append -->\n### Re: prior — opus-4-8\n\nPrior.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, v1).unwrap();
-        agent_doc_snapshot_io::save(&doc, v1, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, v1, agent_doc_ops_log_io::log_op)
+            .unwrap();
 
         let lost =
             "<!-- patch:exchange -->\n### Re: new — opus-4-8\n\nLost.\n<!-- /patch:exchange -->";
@@ -1489,7 +1635,12 @@ mod tests {
         let doc = dir.path().join("test.md");
         let live = "---\nagent_doc_format: template\nsession: test\n---\n\n<!-- agent:exchange patch=append -->\n### Re: prior — opus-4-8\n\nPrior.\n### Re: new — opus-4-8\n\nThe real landed answer.\n<!-- agent:boundary:def -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, live).unwrap();
-        agent_doc_snapshot_io::save(&doc, live, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            live,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let stale_duplicate = "<!-- patch:exchange -->\n### Re: new — opus-4-8\n\nLost duplicate.\n<!-- /patch:exchange -->";
         let capture = agent_doc_capture_io::capture_response(&doc, stale_duplicate).unwrap();
@@ -1513,7 +1664,10 @@ mod tests {
             !result.contains("Lost duplicate."),
             "stale captured body must not be replayed:\n{result}"
         );
-        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        let capture = agent_doc_capture_io::load_by_id(&doc, &capture.capture_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             capture.state,
             agent_doc_workflow::capture::CaptureState::Discarded
@@ -1542,7 +1696,8 @@ mod tests {
         // State when the orphan was captured: the prompt is NOT yet answered.
         let v1 = "---\nagent_doc_format: template\nsession: test\n---\n\n<!-- agent:exchange patch=append -->\n### Re: prior — opus-4-8\n\nPrior.\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, v1).unwrap();
-        agent_doc_snapshot_io::save(&doc, v1, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, v1, agent_doc_ops_log_io::log_op)
+            .unwrap();
 
         // Capture a response (never written) answering `### Re: new`.
         let lost = "<!-- patch:exchange -->\n### Re: new — opus-4-8\n\nLost duplicate.\n<!-- /patch:exchange -->";
@@ -1570,8 +1725,11 @@ mod tests {
             !result.contains("Lost duplicate."),
             "stale captured body must not be replayed:\n{result}"
         );
-        // Orphan retired (Discarded); body preserved on disk for forensics.
-        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
+        // Orphan retired (Discarded); body preserved in the state ledger for forensics.
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        let capture = agent_doc_capture_io::load_by_id(&doc, &capture.capture_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             capture.state,
             agent_doc_workflow::capture::CaptureState::Discarded
@@ -1621,9 +1779,15 @@ mod tests {
             "Escaped answer.\n"
         );
         std::fs::write(&doc, malformed).unwrap();
-        agent_doc_snapshot_io::save(&doc, malformed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            malformed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_repair_io::pending::save_pending(&doc, "Escaped answer.").unwrap();
+        let captured = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
 
         let repaired = concat!(
             "---\nagent_doc_format: template\n---\n\n",
@@ -1652,8 +1816,12 @@ mod tests {
             "stale assistant tail must not be re-added:\n{result}"
         );
 
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-        assert!(!pending.exists(), "pending file should be cleared");
+        assert!(
+            agent_doc_repair_io::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none(),
+            "pending response intent should be cleared"
+        );
 
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
@@ -1662,10 +1830,15 @@ mod tests {
             "repair_respect_manual_exchange_tail_removal"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snap, repaired, "snapshot should follow the user repair");
 
-        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        let capture = agent_doc_capture_io::load_by_id(&doc, &captured.capture_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             capture.state,
             agent_doc_workflow::capture::CaptureState::Discarded
@@ -1701,7 +1874,12 @@ mod tests {
         let doc = dir.path().join("test.md");
         let content = "---\nsession: test\n---\n\nbody\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let repaired = run(&doc).unwrap();
@@ -1731,7 +1909,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let repaired = run(&doc).unwrap();
@@ -1765,7 +1948,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(root, &doc);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
 
@@ -1783,7 +1971,9 @@ mod tests {
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "repair_preflight_stale_empty_cycle");
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
             Some(base)
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), live);
@@ -1803,7 +1993,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(root, &doc);
         let state =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
@@ -1826,7 +2021,9 @@ mod tests {
             "repair_preflight_stale_prompt_cycle_abandoned"
         );
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
             Some(base)
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), live);
@@ -1852,7 +2049,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(root, &doc);
         let state =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
@@ -1910,7 +2112,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
 
         let live = base.replace(
@@ -1942,7 +2149,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
 
         let live = base.replace(
@@ -1971,7 +2183,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(root, &doc);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
@@ -2001,9 +2218,11 @@ mod tests {
 
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
-        assert_eq!(state.last_event, "repair_preflight_committed_historical");
+        assert_eq!(state.last_event, "capture_committed");
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
             Some(updated)
         );
     }
@@ -2030,7 +2249,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(root, &doc);
         let state =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
@@ -2049,7 +2273,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, churned).unwrap();
-        agent_doc_snapshot_io::save(&doc, churned, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            churned,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         ProcessCommand::new("git")
             .current_dir(root)
             .args(["add", "test.md"])
@@ -2086,7 +2315,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(root, &doc);
 
         let updated = concat!(
@@ -2110,7 +2344,12 @@ mod tests {
             .status()
             .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(updated)).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
@@ -2125,9 +2364,11 @@ mod tests {
 
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
-        assert_eq!(state.last_event, "repair_commit_boundary_recovered");
+        assert_eq!(state.last_event, "capture_committed");
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
             Some(updated)
         );
     }
@@ -2145,7 +2386,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(root, &doc);
 
         let response = concat!(
@@ -2177,7 +2423,12 @@ mod tests {
             .status()
             .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let repaired = run(&doc).unwrap();
         assert_eq!(repaired, RepairOutcome::AlreadyApplied);
@@ -2188,7 +2439,9 @@ mod tests {
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(state.last_event, "commit_already_current");
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
             Some(updated)
         );
     }
@@ -2205,7 +2458,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         let updated = concat!(
@@ -2231,7 +2489,12 @@ mod tests {
         let doc = dir.path().join("test.md");
         let content = "---\nsession: test\n---\n\nbody\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_capture_io::capture_response(&doc, "Recovered answer.").unwrap();
         agent_doc_capture_io::mark_committed(&doc).unwrap();
@@ -2256,7 +2519,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
 
         let response = concat!(
@@ -2349,7 +2617,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
@@ -2383,7 +2656,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
@@ -2400,9 +2678,7 @@ mod tests {
             Some(content),
         )
         .unwrap();
-        let capture_path =
-            agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap();
-        std::fs::remove_file(capture_path).unwrap();
+        assert!(!capture.capture_id.is_empty());
 
         let recovered = run(&doc).unwrap();
         assert_eq!(recovered, RepairOutcome::ReplayedResponse);
@@ -2430,7 +2706,12 @@ mod tests {
             "Recovered answer.\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_repair_io::pending::save_pending(&doc, "Recovered answer.").unwrap();
         let recovered = run(&doc).unwrap();
@@ -2461,7 +2742,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let transcript_dump = concat!(
             "<!-- agent:exchange patch=append -->\n",
@@ -2508,7 +2794,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let response = concat!(
             "<!-- no-pending-capture -->\n",
@@ -2537,11 +2828,17 @@ mod tests {
         let doc = dir.path().join("test.md");
         let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
 
         agent_doc_repair_io::pending::save_pending(&doc, "This is the recovered response.")
             .unwrap();
+        let captured = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
 
         let outcome = repair(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::ReplayedResponse);
@@ -2557,7 +2854,10 @@ mod tests {
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
 
-        let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
+        assert!(agent_doc_capture_io::load_active(&doc).unwrap().is_none());
+        let capture = agent_doc_capture_io::load_by_id(&doc, &captured.capture_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             capture.state,
             agent_doc_workflow::capture::CaptureState::Committed
@@ -2589,7 +2889,12 @@ mod tests {
             "Recovered answer.\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
 
         agent_doc_repair_io::pending::save_pending(&doc, "Recovered answer.").unwrap();
@@ -2611,7 +2916,9 @@ mod tests {
             "HEAD should keep the repaired assistant content inside exchange:\n{head}"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("Recovered answer."),
             "snapshot should be advanced to the recovered response:\n{snap}"
@@ -2634,7 +2941,12 @@ mod tests {
             "<!-- /agent:pending -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
 
         let current = concat!(
@@ -2659,7 +2971,9 @@ mod tests {
             head.contains("Recovered from the visible exchange tail."),
             "HEAD should contain the adopted response:\n{head}"
         );
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("Recovered from the visible exchange tail."),
             "snapshot should advance to the visible response:\n{snap}"
@@ -2682,7 +2996,12 @@ mod tests {
             "<!-- /agent:pending -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(root, &doc);
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
 
@@ -2704,7 +3023,12 @@ mod tests {
             Some(current),
         )
         .unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = repair(&doc).unwrap();
         assert_eq!(outcome, RepairOutcome::AlreadyApplied);
@@ -2716,7 +3040,9 @@ mod tests {
             head.contains("Recovered from an agent-doc-owned visible response."),
             "HEAD should contain the adopted partial patchback:\n{head}"
         );
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("Recovered from an agent-doc-owned visible response."),
             "snapshot should advance to the adopted response:\n{snap}"
@@ -2739,7 +3065,12 @@ mod tests {
             "<!-- /agent:pending -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(dir.path(), &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
@@ -2784,7 +3115,9 @@ mod tests {
             "HEAD should own the already-present response after repair:\n{head}"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("Recovered through direct patch."),
             "snapshot should advance to the already-present response:\n{snap}"
@@ -2807,7 +3140,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(root, &doc);
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
@@ -2850,7 +3188,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(root, &doc);
 
         let committed_patchback = concat!(
@@ -2873,7 +3216,12 @@ mod tests {
             .status()
             .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(base), Some(base)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -2897,7 +3245,9 @@ mod tests {
         assert!(message.contains("unresolved prompt-bearing user changes"));
         assert!(message.contains("do [#followup]. spec-test-build-install-commit-push"));
 
-        let repaired_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let repaired_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             repaired_snapshot.contains("Recovered through a direct patchback."),
             "snapshot should advance to the committed patchback:\n{repaired_snapshot}"

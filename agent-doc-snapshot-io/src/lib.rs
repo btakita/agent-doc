@@ -1,18 +1,12 @@
-//! Snapshot sidecar I/O.
+//! Durable document-baseline authority plus cold snapshot recovery projections.
 
 use anyhow::{Context, Result};
+use base64::Engine as _;
 use fs2::FileExt;
 use std::fs::{File, OpenOptions};
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
 
-use agent_doc_document::model_projection::{
-    ModelBaselineSource, overlay_state_from_markdown, project_overlay_roundtrip,
-    project_overlay_state, resolve_model_baseline_projection,
-};
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
-use agent_doc_document_realtime::crdt_merge_base::{CrdtMergeBase, resolve_crdt_merge_base};
 use agent_doc_frontmatter::frontmatter::session_id_from_content;
 use agent_doc_git_io::revision::HeadWorktreeFallback;
 
@@ -97,26 +91,190 @@ impl Drop for SnapshotLock {
     }
 }
 
-/// Load markdown snapshot content under the snapshot lock.
-pub fn load(doc: &Path) -> Result<Option<String>> {
-    let snap = agent_doc_fs::snapshot_path_for(doc)?;
-    if !snap.exists() {
-        return Ok(None);
-    }
-    let _lock = SnapshotLock::acquire(doc)?;
-    load_unlocked(doc)
+/// Load the content-bearing merge baseline from the durable state ledger.
+pub fn load_document_baseline(doc: &Path) -> Result<Option<String>> {
+    Ok(load_document_state_projection(doc)?
+        .and_then(|projection| projection.document.merge_baseline)
+        .map(|baseline| baseline.content))
 }
 
-/// Save markdown snapshot content under the snapshot lock.
-pub fn save(doc: &Path, content: &str, mut logger: impl FnMut(&Path, &str)) -> Result<()> {
-    let _lock = SnapshotLock::acquire(doc)?;
-    save_unlocked(doc, content)?;
+/// Checkpoint the content-bearing merge baseline in the durable state ledger.
+pub fn checkpoint_document_baseline(
+    doc: &Path,
+    content: &str,
+    mut logger: impl FnMut(&Path, &str),
+) -> Result<()> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
+    let generation = load_document_state_projection(doc)?
+        .map(|projection| projection.document.merge_baseline_generation)
+        .unwrap_or(0)
+        .saturating_add(1);
+    let content_hash = agent_doc_hash::content_hash(content);
+    let fact = agent_doc_state_backbone::StateFact::DocumentBaselineCheckpointed {
+        document_hash: document_hash.clone(),
+        generation,
+        content_hash: content_hash.clone(),
+        content: content.to_string(),
+    };
+    append_document_fact(
+        doc,
+        format!("document-baseline:{document_hash}:{generation}:{content_hash}"),
+        fact,
+    )?;
     logger(
         doc,
-        &format!("snapshot_save file={} len={}", doc.display(), content.len()),
+        &format!(
+            "document_baseline_checkpoint file={} generation={} len={}",
+            doc.display(),
+            generation,
+            content.len()
+        ),
     );
-    probe_overlay_projection(doc, content, logger);
     Ok(())
+}
+
+fn load_document_state_projection(
+    doc: &Path,
+) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    if !agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
+        return Ok(None);
+    }
+    let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let events = agent_doc_sqlite::state_store::load_state_events_for_cycle_projection_from_db(
+        &conn,
+        &document_hash,
+    )?;
+    let mut projection = agent_doc_state_backbone::DocumentStateProjection::new(&document_hash);
+    for status in events {
+        let event: agent_doc_state_backbone::StateEvent =
+            serde_json::from_str(&status.payload_json)
+                .with_context(|| format!("parse state event {}", status.event_id))?;
+        projection.apply_fact(&event.fact);
+    }
+    Ok(Some(projection))
+}
+
+fn append_document_fact(
+    doc: &Path,
+    event_id: String,
+    fact: agent_doc_state_backbone::StateFact,
+) -> Result<()> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    let event = agent_doc_state_backbone::StateEvent::new(event_id, fact);
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+    let payload_json = serde_json::to_string(&event).context("serialize document state event")?;
+    agent_doc_sqlite::state_store::insert_state_event_in_db(
+        &conn,
+        &agent_doc_sqlite::state_store::StateEventInsert {
+            event_id: &event.event_id,
+            document_hash: event.document_hash(),
+            domain: event.domain().label(),
+            fact_type: event.fact.label(),
+            payload_json: &payload_json,
+        },
+    )?;
+    Ok(())
+}
+
+/// Clear the normal merge baseline while retaining an auditable ledger fact.
+pub fn clear_document_baseline(doc: &Path) -> Result<()> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
+    let generation = load_document_state_projection(doc)?
+        .map(|projection| projection.document.merge_baseline_generation)
+        .unwrap_or(0)
+        .saturating_add(1);
+    append_document_fact(
+        doc,
+        format!("document-baseline-clear:{document_hash}:{generation}"),
+        agent_doc_state_backbone::StateFact::DocumentBaselineCleared {
+            document_hash,
+            generation,
+        },
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrdtRecoveryProjection {
+    pub projection: Vec<u8>,
+    pub lineage: String,
+}
+
+/// Load the cold CRDT restart projection from the durable state ledger.
+pub fn load_crdt_recovery_projection(doc: &Path) -> Result<Option<CrdtRecoveryProjection>> {
+    let Some(projected) = load_document_state_projection(doc)?
+        .and_then(|projection| projection.document.crdt_recovery_projection)
+    else {
+        return Ok(None);
+    };
+    let projection = base64::engine::general_purpose::STANDARD
+        .decode(&projected.projection_base64)
+        .context("decode CRDT recovery projection")?;
+    anyhow::ensure!(
+        agent_doc_hash::bytes_hash(&projection) == projected.projection_sha256,
+        "CRDT recovery projection hash mismatch"
+    );
+    Ok(Some(CrdtRecoveryProjection {
+        projection,
+        lineage: projected.lineage,
+    }))
+}
+
+/// Checkpoint a cold CRDT restart projection without creating a sidecar file.
+pub fn checkpoint_crdt_recovery_projection(
+    doc: &Path,
+    projection: &[u8],
+    lineage: &str,
+) -> Result<bool> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
+    let document_projection = load_document_state_projection(doc)?
+        .map(|projection| projection.document)
+        .unwrap_or_default();
+    let prior_generation = document_projection.crdt_recovery_projection_generation;
+    let prior = document_projection.crdt_recovery_projection;
+    let projection_sha256 = agent_doc_hash::bytes_hash(projection);
+    if prior.as_ref().is_some_and(|prior| {
+        prior.projection_sha256 == projection_sha256 && prior.lineage == lineage
+    }) {
+        return Ok(false);
+    }
+    let generation = prior_generation.saturating_add(1);
+    append_document_fact(
+        doc,
+        format!("crdt-recovery:{document_hash}:{generation}:{projection_sha256}"),
+        agent_doc_state_backbone::StateFact::CrdtRecoveryProjectionCheckpointed {
+            document_hash,
+            generation,
+            projection_sha256,
+            projection_base64: base64::engine::general_purpose::STANDARD.encode(projection),
+            lineage: lineage.to_string(),
+        },
+    )?;
+    Ok(true)
+}
+
+/// Clear the cold CRDT restart projection without deleting ledger history.
+pub fn clear_crdt_recovery_projection(doc: &Path) -> Result<()> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
+    let generation = load_document_state_projection(doc)?
+        .map(|projection| projection.document.crdt_recovery_projection_generation)
+        .unwrap_or(0)
+        .saturating_add(1);
+    append_document_fact(
+        doc,
+        format!("crdt-recovery-clear:{document_hash}:{generation}"),
+        agent_doc_state_backbone::StateFact::CrdtRecoveryProjectionCleared {
+            document_hash,
+            generation,
+        },
+    )
 }
 
 /// Resolve the best markdown snapshot content for diff computation.
@@ -125,9 +283,8 @@ pub fn save(doc: &Path, content: &str, mut logger: impl FnMut(&Path, &str)) -> R
 /// recovery fallback when no snapshot exists and HEAD differs from the current
 /// worktree file.
 pub fn resolve(doc: &Path) -> Result<Option<String>> {
-    let snap_path = agent_doc_fs::snapshot_path_for(doc)?;
-    if snap_path.exists() {
-        return load(doc);
+    if let Some(baseline) = load_document_baseline(doc)? {
+        return Ok(Some(baseline));
     }
 
     match agent_doc_git_io::revision::head_fallback_when_differs_from_worktree(doc)? {
@@ -146,37 +303,37 @@ pub fn resolve(doc: &Path) -> Result<Option<String>> {
 }
 
 /// Diff-IO snapshot adapter backed by markdown snapshot sidecars.
-pub struct DiffSnapshotStore {
+pub struct DiffBaselineStore {
     logger: fn(&Path, &str),
 }
 
-impl DiffSnapshotStore {
+impl DiffBaselineStore {
     pub const fn new(logger: fn(&Path, &str)) -> Self {
         Self { logger }
     }
 }
 
-impl agent_doc_diff_io::SnapshotStore for DiffSnapshotStore {
+impl agent_doc_diff_io::DocumentBaselineStore for DiffBaselineStore {
     fn resolve(&self, doc: &Path) -> Result<Option<String>> {
         resolve(doc)
     }
 
-    fn save(&self, doc: &Path, content: &str) -> Result<()> {
-        save(doc, content, self.logger)
+    fn checkpoint(&self, doc: &Path, content: &str) -> Result<()> {
+        checkpoint_document_baseline(doc, content, self.logger)
     }
 }
 
-/// Delete a markdown snapshot under the snapshot lock.
-pub fn delete(doc: &Path) -> Result<()> {
+/// Delete a cold markdown recovery projection and clear the ledger baseline.
+pub fn delete_recovery_projection_and_clear_baseline(doc: &Path) -> Result<()> {
     let snap = agent_doc_fs::snapshot_path_for(doc)?;
     if !snap.exists() {
-        return Ok(());
+        return clear_document_baseline(doc);
     }
     let _lock = SnapshotLock::acquire(doc)?;
     if snap.exists() {
         std::fs::remove_file(&snap)?;
     }
-    Ok(())
+    clear_document_baseline(doc)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,7 +381,7 @@ pub fn verify_snapshot_committed(file: &Path) -> Result<SnapshotCommitStatus> {
     if !agent_doc_git_io::status::is_in_git_repo(file) {
         return Ok(SnapshotCommitStatus::NotInGitRepo);
     }
-    let snapshot = load(file)?;
+    let snapshot = load_document_baseline(file)?;
     let head_doc = agent_doc_git_io::revision::show_head(file)?;
     Ok(snapshot_commit_status_from_contents(
         snapshot.as_deref(),
@@ -257,7 +414,7 @@ pub fn verify_snapshot_head_content_hash(file: &Path) -> Result<SnapshotHeadCont
     if !agent_doc_git_io::status::is_in_git_repo(file) {
         return Ok(SnapshotHeadContentHashStatus::NotInGitRepo);
     }
-    let Some(snapshot) = load(file)? else {
+    let Some(snapshot) = load_document_baseline(file)? else {
         return Ok(SnapshotHeadContentHashStatus::NoSnapshot);
     };
     let Some(head_doc) = agent_doc_git_io::revision::show_head(file)? else {
@@ -279,27 +436,26 @@ pub fn verify_snapshot_head_content_hash(file: &Path) -> Result<SnapshotHeadCont
     }
 }
 
-/// Create the initial markdown snapshot if no snapshot exists yet.
+/// Create the initial durable merge baseline if no baseline exists yet.
 ///
 /// The caller supplies the content projection so domain-specific stripping or
 /// normalization stays outside snapshot IO. This helper owns the file/path
-/// existence check, document read, and atomic snapshot save.
+/// existence check, document read, and ledger checkpoint.
 pub fn ensure_initial_snapshot(
     doc: &Path,
     project_content: impl FnOnce(&str) -> String,
     logger: impl FnMut(&Path, &str),
 ) -> Result<bool> {
-    let snap = agent_doc_fs::snapshot_path_for(doc)?;
-    if snap.exists() {
+    if load_document_baseline(doc)?.is_some() {
         return Ok(false);
     }
     eprintln!(
-        "[init] creating snapshot for {} (none found)",
+        "[init] creating document baseline for {} (none found)",
         doc.display()
     );
     if let Ok(content) = std::fs::read_to_string(doc) {
         let snapshot_content = project_content(&content);
-        save(doc, &snapshot_content, logger)?;
+        checkpoint_document_baseline(doc, &snapshot_content, logger)?;
     }
     Ok(true)
 }
@@ -378,17 +534,8 @@ pub fn migrate_state_files_for_hash(
     old_hash: &str,
     new_hash: &str,
 ) -> Result<SnapshotStateMigrationReport> {
-    const MIGRATE_DIRS: &[(&str, &str)] = &[
-        ("snapshots", "md"),
-        ("baselines", "md"),
-        ("baselines", "overlay.yrs"),
-        ("locks", "lock"),
-        ("pending", "md"),
-        ("crdt", "yrs"),
-        ("crdt", "overlay.yrs"),
-        ("crdt", "nodes.yrs"),
-        ("pre-response", "md"),
-    ];
+    const MIGRATE_DIRS: &[(&str, &str)] =
+        &[("snapshots", "md"), ("locks", "lock"), ("pending", "md")];
 
     let mut report = SnapshotStateMigrationReport {
         migrated: 0,
@@ -422,19 +569,14 @@ pub fn migrate_state_files_for_hash(
         report.migrated += 1;
     }
 
-    // Migrate lock files with compound extensions.
-    for (subdir, old_ext) in &[
-        ("locks", format!("{}.md.lock", old_hash)),
-        ("crdt", format!("{}.yrs.lock", old_hash)),
-    ] {
-        let dir = project_root.join(".agent-doc").join(subdir);
-        let old_file = dir.join(old_ext);
-        let new_ext = old_ext.replace(old_hash, new_hash);
-        let new_file = dir.join(&new_ext);
-        if old_file.exists() && !new_file.exists() {
-            std::fs::rename(&old_file, &new_file)?;
-            report.migrated += 1;
-        }
+    // Migrate the cold snapshot lock with its projection.
+    let lock_dir = project_root.join(".agent-doc").join("locks");
+    let old_lock_name = format!("{}.md.lock", old_hash);
+    let old_lock = lock_dir.join(&old_lock_name);
+    let new_lock = lock_dir.join(old_lock_name.replace(old_hash, new_hash));
+    if old_lock.exists() && !new_lock.exists() {
+        std::fs::rename(&old_lock, &new_lock)?;
+        report.migrated += 1;
     }
 
     Ok(report)
@@ -475,480 +617,51 @@ fn hash_prefix(hash: &str) -> String {
     hash[..8.min(hash.len())].to_string()
 }
 
-/// Save the pre-response snapshot for undo/extract flows.
-pub fn save_pre_response(doc: &Path, content: &str) -> Result<()> {
-    let path = agent_doc_fs::pre_response_path_for(doc)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+/// Checkpoint the pre-write content used by undo/extract in the durable ledger.
+pub fn checkpoint_undo_content(doc: &Path, content: &str) -> Result<()> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
+    let generation = load_document_state_projection(doc)?
+        .map(|projection| projection.document.undo_checkpoint_generation)
+        .unwrap_or(0)
+        .saturating_add(1);
     let redacted = agent_doc_secret_redact::redact(content);
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    std::io::Write::write_all(&mut tmp, redacted.as_bytes())
-        .with_context(|| "failed to write pre-response temp file")?;
-    tmp.persist(&path)
-        .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
-    eprintln!(
-        "[snapshot] saved pre-response snapshot for {}",
-        doc.display()
-    );
-    Ok(())
-}
-
-/// Load the pre-response snapshot for a document.
-pub fn load_pre_response(doc: &Path) -> Result<Option<String>> {
-    let path = agent_doc_fs::pre_response_path_for(doc)?;
-    agent_doc_fs::read_optional_text(&path)
-}
-
-/// Delete the pre-response snapshot for a document.
-pub fn delete_pre_response(doc: &Path) -> Result<()> {
-    let path = agent_doc_fs::pre_response_path_for(doc)?;
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
-    Ok(())
-}
-
-/// Run `action` while holding the document's CRDT advisory lock.
-pub fn with_crdt_lock<T>(doc: &Path, action: impl FnOnce() -> Result<T>) -> Result<T> {
-    with_crdt_lock_labeled(doc, "crdt", action)
-}
-
-/// Run `action` while holding the document's CRDT advisory lock, reporting
-/// visible wait diagnostics when another writer holds the lock.
-pub fn with_crdt_lock_labeled<T>(
-    doc: &Path,
-    label: &str,
-    action: impl FnOnce() -> Result<T>,
-) -> Result<T> {
-    let _lock = acquire_crdt_lock(doc, label)?;
-    action()
-}
-
-/// Build the CRDT merge base for a write cycle from persisted sidecar state.
-///
-/// The caller supplies the live editor-op evidence and log sink so snapshot IO
-/// owns sidecar resolution without depending on orchestration runtime state.
-pub fn crdt_merge_base_state_with(
-    doc: &Path,
-    fallback_markdown: &str,
-    has_pending_editor_ops: impl FnOnce(&Path) -> bool,
-    mut logger: impl FnMut(&Path, &str),
-) -> Result<CrdtMergeBase> {
-    let path = agent_doc_fs::overlay_crdt_path_for(doc)?;
-    with_crdt_lock(doc, || {
-        let overlay_bytes = read_crdt_state_file(&path, "overlay CRDT state")?;
-
-        let resolution = resolve_crdt_merge_base(
-            overlay_bytes.as_deref(),
-            fallback_markdown,
-            has_pending_editor_ops(doc),
-        );
-
-        for event in &resolution.events {
-            logger(doc, &event.log_message(doc.display()));
-        }
-        if resolution.rebuild_overlay_to_baseline {
-            rebuild_overlay_to_baseline(doc, &path, fallback_markdown, &mut logger);
-        }
-
-        Ok(resolution.base)
-    })
-}
-
-fn rebuild_overlay_to_baseline(
-    doc: &Path,
-    path: &Path,
-    baseline: &str,
-    logger: &mut impl FnMut(&Path, &str),
-) {
-    match write_overlay_crdt_state_file_from_markdown(path, baseline) {
-        Ok(overlay_bytes) => logger(
-            doc,
-            &format!(
-                "crdt_merge_base_overlay_rebuilt file={} fallback_len={} overlay_bytes={}",
-                doc.display(),
-                baseline.len(),
-                overlay_bytes
-            ),
-        ),
-        Err(err) => logger(
-            doc,
-            &format!(
-                "crdt_merge_base_overlay_rebuild_failed file={} error={}",
-                doc.display(),
-                err
-            ),
-        ),
-    }
-}
-
-/// Load legacy text CRDT state bytes for a document, if present.
-pub fn load_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
-    with_crdt_lock(doc, || {
-        let path = agent_doc_fs::crdt_path_for(doc)?;
-        read_crdt_state_file(&path, "CRDT state")
-    })
-}
-
-/// Load structured markdown-overlay CRDT state bytes for a document, if present.
-pub fn load_overlay_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
-    with_crdt_lock(doc, || {
-        let path = agent_doc_fs::overlay_crdt_path_for(doc)?;
-        read_crdt_state_file(&path, "overlay CRDT state")
-    })
-}
-
-/// Save legacy text CRDT state bytes for a document.
-pub fn save_crdt(doc: &Path, state: &[u8]) -> Result<()> {
-    with_crdt_lock(doc, || {
-        let path = agent_doc_fs::crdt_path_for(doc)?;
-        write_crdt_state_file(&path, state)
-    })
-}
-
-/// Save structured markdown-overlay CRDT state bytes for a document.
-pub fn save_overlay_crdt(doc: &Path, state: &[u8]) -> Result<()> {
-    with_crdt_lock(doc, || {
-        let path = agent_doc_fs::overlay_crdt_path_for(doc)?;
-        write_crdt_state_file(&path, state)
-    })
-}
-
-/// Encode markdown and save it as structured markdown-overlay CRDT state.
-pub fn save_overlay_crdt_from_markdown(doc: &Path, markdown: &str) -> Result<usize> {
-    with_crdt_lock(doc, || {
-        let path = agent_doc_fs::overlay_crdt_path_for(doc)?;
-        write_overlay_crdt_state_file_from_markdown(&path, markdown)
-    })
-}
-
-/// Load raw per-node CRDT container bytes for a document, if present.
-pub fn load_multinode_crdt(doc: &Path) -> Result<Option<Vec<u8>>> {
-    with_crdt_lock(doc, || {
-        let path = agent_doc_fs::multinode_crdt_path_for(doc)?;
-        read_crdt_state_file(&path, "per-node CRDT state")
-    })
-}
-
-/// Save per-node CRDT container bytes for a document.
-pub fn save_multinode_crdt(doc: &Path, state: &[u8]) -> Result<()> {
-    with_crdt_lock(doc, || {
-        let path = agent_doc_fs::multinode_crdt_path_for(doc)?;
-        write_crdt_state_file(&path, state)
-    })
-}
-
-/// Delete all CRDT state sidecars for a document. Idempotent.
-pub fn delete_crdt(doc: &Path) -> Result<()> {
-    let path = agent_doc_fs::crdt_path_for(doc)?;
-    let lineage_path = agent_doc_fs::crdt_lineage_path_for(doc)?;
-    let overlay_path = agent_doc_fs::overlay_crdt_path_for(doc)?;
-    let nodes_path = agent_doc_fs::multinode_crdt_path_for(doc)?;
-    if path.exists() || lineage_path.exists() || overlay_path.exists() || nodes_path.exists() {
-        with_crdt_lock(doc, || {
-            if path.exists() {
-                std::fs::remove_file(&path)?;
-            }
-            if lineage_path.exists() {
-                std::fs::remove_file(&lineage_path)?;
-            }
-            if overlay_path.exists() {
-                std::fs::remove_file(&overlay_path)?;
-            }
-            if nodes_path.exists() {
-                std::fs::remove_file(&nodes_path)?;
-            }
-            Ok(())
-        })?;
-    }
-    Ok(())
-}
-
-/// Read CRDT state bytes from an already-resolved sidecar path.
-pub fn read_crdt_state_file(path: &Path, label: &str) -> Result<Option<Vec<u8>>> {
-    agent_doc_fs::read_optional_bytes(path)
-        .with_context(|| format!("failed to read {label} {}", path.display()))
-}
-
-/// Atomically write CRDT state bytes to an already-resolved sidecar path.
-pub fn write_crdt_state_file(path: &Path, state: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    std::io::Write::write_all(&mut tmp, state)
-        .with_context(|| "failed to write CRDT state temp file")?;
-    tmp.persist(path)
-        .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
-    Ok(())
-}
-
-/// Atomically write CRDT state bytes only when the target content changes.
-pub fn write_crdt_state_file_if_changed(path: &Path, state: &[u8]) -> Result<bool> {
-    if path.exists() {
-        let current = std::fs::read(path)
-            .with_context(|| format!("failed to read CRDT state {}", path.display()))?;
-        if current == state {
-            return Ok(false);
-        }
-    }
-    write_crdt_state_file(path, state)?;
-    Ok(true)
-}
-
-/// Encode markdown as structured markdown-overlay CRDT bytes without writing.
-pub fn overlay_crdt_state_from_markdown(markdown: &str) -> Vec<u8> {
-    overlay_state_from_markdown(markdown)
-}
-
-/// Encode markdown and write it to an already-resolved overlay CRDT sidecar.
-pub fn write_overlay_crdt_state_file_from_markdown(path: &Path, markdown: &str) -> Result<usize> {
-    let overlay_state = overlay_state_from_markdown(markdown);
-    write_crdt_state_file(path, &overlay_state)?;
-    Ok(overlay_state.len())
-}
-
-fn load_unlocked(doc: &Path) -> Result<Option<String>> {
-    let snap = agent_doc_fs::snapshot_path_for(doc)?;
-    if snap.exists() {
-        Ok(Some(std::fs::read_to_string(&snap)?))
-    } else {
-        Ok(None)
-    }
-}
-
-fn save_unlocked(doc: &Path, content: &str) -> Result<()> {
-    let snap = agent_doc_fs::snapshot_path_for(doc)?;
-    if let Some(parent) = snap.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let redacted = agent_doc_secret_redact::redact(content);
-    let parent = snap.parent().unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    std::io::Write::write_all(&mut tmp, redacted.as_bytes())
-        .with_context(|| "failed to write snapshot temp file")?;
-    tmp.persist(&snap)
-        .with_context(|| format!("failed to rename temp file to {}", snap.display()))?;
-    Ok(())
-}
-
-fn acquire_crdt_lock(doc: &Path, label: &str) -> Result<File> {
-    let lock_path = agent_doc_fs::crdt_flock_path_for(doc)?;
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    if let Ok(meta) = std::fs::metadata(&lock_path)
-        && let Some(age) = meta.modified().ok().and_then(|t| t.elapsed().ok())
-        && age > std::time::Duration::from_secs(3600)
-    {
-        let _ = std::fs::remove_file(&lock_path);
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open CRDT lock {}", lock_path.display()))?;
-    let started = Instant::now();
-    let mut next_log = Duration::from_secs(1);
-    loop {
-        match file.try_lock_exclusive() {
-            Ok(()) => {
-                let waited = started.elapsed();
-                if waited >= Duration::from_millis(250) {
-                    eprintln!(
-                        "[crdt] lock acquired label={} file={} wait_ms={} lock={}",
-                        label,
-                        doc.display(),
-                        waited.as_millis(),
-                        lock_path.display()
-                    );
-                }
-                break;
-            }
-            Err(err) if err.kind() == ErrorKind::WouldBlock => {
-                let waited = started.elapsed();
-                if waited >= next_log {
-                    eprintln!(
-                        "[crdt] waiting for sidecar lock label={} file={} wait_ms={} lock={}",
-                        label,
-                        doc.display(),
-                        waited.as_millis(),
-                        lock_path.display()
-                    );
-                    next_log += Duration::from_secs(5);
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(err) => {
-                return Err(err).with_context(|| {
-                    format!(
-                        "failed to acquire CRDT lock on {} for {label}",
-                        lock_path.display()
-                    )
-                });
-            }
-        }
-    }
-    Ok(file)
-}
-
-/// Whether the model-projected-baseline cutover is enabled.
-///
-/// Default is on. Opt out with `AGENT_DOC_MPS` set to `0`, `false`, `no`, or
-/// `off`.
-pub fn mps_enabled() -> bool {
-    match std::env::var("AGENT_DOC_MPS") {
-        Ok(v) => !matches!(
-            v.trim().to_ascii_lowercase().as_str(),
-            "0" | "false" | "no" | "off"
-        ),
-        Err(_) => true,
-    }
-}
-
-/// Shadow-probe model projection equivalence for a snapshot save.
-///
-/// The probe is off unless `AGENT_DOC_MPS_PROJECTION_PROBE` is set and reports
-/// through the injected logger. It never fails the caller.
-pub fn probe_overlay_projection(doc: &Path, content: &str, mut logger: impl FnMut(&Path, &str)) {
-    if std::env::var_os("AGENT_DOC_MPS_PROJECTION_PROBE").is_none() {
-        return;
-    }
-    match project_overlay_roundtrip(content) {
-        Ok(projected) if projected == content => {
-            logger(
-                doc,
-                &format!(
-                    "mps_projection_equiv ok len={} file={}",
-                    content.len(),
-                    doc.display()
-                ),
-            );
-        }
-        Ok(projected) => {
-            logger(
-                doc,
-                &format!(
-                    "mps_projection_equiv drift kind=mismatch len={} projected_len={} file={}",
-                    content.len(),
-                    projected.len(),
-                    doc.display()
-                ),
-            );
-        }
-        Err(err) => {
-            eprintln!("[mps] overlay projection failed: {err:#}");
-            logger(
-                doc,
-                &format!(
-                    "mps_projection_equiv drift kind=decode_error len={} file={}",
-                    content.len(),
-                    doc.display()
-                ),
-            );
-        }
-    }
-}
-
-/// Persist `content` as this cycle's model-projected baseline overlay.
-pub fn save_baseline_model(
-    doc: &Path,
-    content: &str,
-    mut logger: impl FnMut(&Path, &str),
-) -> Result<()> {
-    let path = agent_doc_fs::baseline_overlay_path_for(doc)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let state = overlay_state_from_markdown(content);
-    let parent = path.parent().unwrap_or(Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)
-        .with_context(|| format!("failed to create temp file in {}", parent.display()))?;
-    std::io::Write::write_all(&mut tmp, &state)
-        .with_context(|| "failed to write baseline overlay temp file")?;
-    tmp.persist(&path)
-        .with_context(|| format!("failed to rename temp file to {}", path.display()))?;
-    logger(
+    let content_hash = agent_doc_hash::content_hash(&redacted);
+    append_document_fact(
         doc,
-        &format!(
-            "mps_baseline_pin file={} content_len={} overlay_bytes={}",
-            doc.display(),
-            content.len(),
-            state.len()
-        ),
-    );
-    Ok(())
+        format!("undo-checkpoint:{document_hash}:{generation}:{content_hash}"),
+        agent_doc_state_backbone::StateFact::UndoCheckpointed {
+            document_hash,
+            generation,
+            content_hash,
+            content: redacted,
+        },
+    )
 }
 
-/// Project a model baseline overlay back to markdown and choose the merge base.
-pub fn load_baseline_model(
-    doc: &Path,
-    md_baseline: Option<&str>,
-    mut logger: impl FnMut(&Path, &str),
-) -> Result<Option<String>> {
-    let path = agent_doc_fs::baseline_overlay_path_for(doc)?;
-    let bytes = match agent_doc_fs::read_optional_bytes(&path)
-        .with_context(|| format!("failed to read baseline overlay {}", path.display()))?
-    {
-        Some(b) => b,
-        None => return Ok(None),
-    };
-    let projection = project_overlay_state(&bytes, md_baseline)
-        .with_context(|| format!("failed to project baseline overlay {}", path.display()))?;
-    let resolution = resolve_model_baseline_projection(projection, md_baseline);
-
-    match resolution.source {
-        ModelBaselineSource::MdBackstop => {
-            logger(
-                doc,
-                &format!(
-                    "mps_baseline_resolve source=md_backstop file={} projected_len={} md_len={} diverged=true",
-                    doc.display(),
-                    resolution.projected_len,
-                    resolution.md_len,
-                ),
-            );
-            logger(
-                doc,
-                &format!(
-                    "mps_baseline_divergence file={} projected_len={} md_len={} first_diff_byte={:?}",
-                    doc.display(),
-                    resolution.projected_len,
-                    resolution.md_len,
-                    resolution.first_diff_byte
-                ),
-            );
-            Ok(Some(resolution.content))
-        }
-        ModelBaselineSource::Model => {
-            logger(
-                doc,
-                &format!(
-                    "mps_baseline_resolve source=model file={} projected_len={} md_len={} diverged=false",
-                    doc.display(),
-                    resolution.projected_len,
-                    resolution.md_len,
-                ),
-            );
-            Ok(Some(resolution.content))
-        }
-    }
+/// Load the active pre-write undo checkpoint from the durable ledger.
+pub fn load_undo_content(doc: &Path) -> Result<Option<String>> {
+    Ok(load_document_state_projection(doc)?
+        .and_then(|projection| projection.document.undo_checkpoint)
+        .map(|checkpoint| checkpoint.content))
 }
 
-/// Delete the model baseline sidecar for a document, if present. Idempotent.
-pub fn delete_baseline_model(doc: &Path) -> Result<()> {
-    let path = agent_doc_fs::baseline_overlay_path_for(doc)?;
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
-    Ok(())
+/// Clear the active undo checkpoint without deleting durable history.
+pub fn clear_undo_content(doc: &Path) -> Result<()> {
+    let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
+    let document_hash = agent_doc_hash::content_hash(&canonical.display().to_string());
+    let generation = load_document_state_projection(doc)?
+        .map(|projection| projection.document.undo_checkpoint_generation)
+        .unwrap_or(0)
+        .saturating_add(1);
+    append_document_fact(
+        doc,
+        format!("undo-checkpoint-clear:{document_hash}:{generation}"),
+        agent_doc_state_backbone::StateFact::UndoCheckpointCleared {
+            document_hash,
+            generation,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -989,17 +702,23 @@ mod tests {
         let (_dir, doc) = setup();
         let mut logs = Vec::new();
 
-        assert!(load(&doc).unwrap().is_none());
-        save(&doc, "snapshot body", |_, message| {
+        assert!(load_document_baseline(&doc).unwrap().is_none());
+        checkpoint_document_baseline(&doc, "snapshot body", |_, message| {
             logs.push(message.to_string())
         })
         .unwrap();
-        assert_eq!(load(&doc).unwrap().as_deref(), Some("snapshot body"));
-        assert!(logs.iter().any(|message| message.contains("snapshot_save")));
+        assert_eq!(
+            load_document_baseline(&doc).unwrap().as_deref(),
+            Some("snapshot body")
+        );
+        assert!(
+            logs.iter()
+                .any(|message| message.contains("document_baseline_checkpoint"))
+        );
 
-        delete(&doc).unwrap();
-        assert!(load(&doc).unwrap().is_none());
-        delete(&doc).unwrap();
+        delete_recovery_projection_and_clear_baseline(&doc).unwrap();
+        assert!(load_document_baseline(&doc).unwrap().is_none());
+        delete_recovery_projection_and_clear_baseline(&doc).unwrap();
     }
 
     #[test]
@@ -1011,7 +730,7 @@ mod tests {
         let doc = root.join("doc.md");
         let content = "# Hello\n\nbody\n";
         std::fs::write(&doc, content).unwrap();
-        save(&doc, content, |_, _| {}).unwrap();
+        checkpoint_document_baseline(&doc, content, |_, _| {}).unwrap();
         git(root, &["add", "doc.md"]);
         git(root, &["commit", "-m", "add doc", "--no-verify"]);
 
@@ -1034,7 +753,7 @@ mod tests {
         git(root, &["commit", "-m", "add doc", "--no-verify"]);
 
         let new_content = "# Hello\n\nnew response body\n";
-        save(&doc, new_content, |_, _| {}).unwrap();
+        checkpoint_document_baseline(&doc, new_content, |_, _| {}).unwrap();
 
         match verify_snapshot_committed(&doc).unwrap() {
             SnapshotCommitStatus::SnapshotDiffersFromHead { .. } => {}
@@ -1067,7 +786,7 @@ mod tests {
 
         let doc = root.join("doc.md");
         std::fs::write(&doc, "body\n").unwrap();
-        save(&doc, "body\n", |_, _| {}).unwrap();
+        checkpoint_document_baseline(&doc, "body\n", |_, _| {}).unwrap();
 
         assert_eq!(
             verify_snapshot_committed(&doc).unwrap(),
@@ -1080,7 +799,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "body\n").unwrap();
-        save(&doc, "body\n", |_, _| {}).unwrap();
+        checkpoint_document_baseline(&doc, "body\n", |_, _| {}).unwrap();
 
         assert_eq!(
             verify_snapshot_committed(&doc).unwrap(),
@@ -1101,18 +820,18 @@ mod tests {
     }
 
     #[test]
-    fn pre_response_snapshot_save_load_and_delete_roundtrips() {
+    fn undo_checkpoint_roundtrips_through_state_ledger() {
         let (_dir, doc) = setup();
 
-        assert!(load_pre_response(&doc).unwrap().is_none());
-        save_pre_response(&doc, "pre response").unwrap();
+        assert!(load_undo_content(&doc).unwrap().is_none());
+        checkpoint_undo_content(&doc, "pre response").unwrap();
         assert_eq!(
-            load_pre_response(&doc).unwrap().as_deref(),
+            load_undo_content(&doc).unwrap().as_deref(),
             Some("pre response")
         );
-        delete_pre_response(&doc).unwrap();
-        assert!(load_pre_response(&doc).unwrap().is_none());
-        delete_pre_response(&doc).unwrap();
+        clear_undo_content(&doc).unwrap();
+        assert!(load_undo_content(&doc).unwrap().is_none());
+        clear_undo_content(&doc).unwrap();
     }
 
     #[test]
@@ -1132,22 +851,23 @@ mod tests {
 
         assert!(created);
         assert!(!created_again);
-        assert_eq!(load(&doc).unwrap().as_deref(), Some("before\nafter\n"));
-        assert!(logs.iter().any(|message| message.contains("snapshot_save")));
+        assert_eq!(
+            load_document_baseline(&doc).unwrap().as_deref(),
+            Some("before\nafter\n")
+        );
+        assert!(
+            logs.iter()
+                .any(|message| message.contains("document_baseline_checkpoint"))
+        );
     }
 
     #[test]
-    fn migrate_state_files_for_hash_moves_known_sidecars_and_reports_events() {
+    fn migrate_state_files_for_hash_moves_cold_snapshot_and_lock() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let old_hash = "oldhash123456";
         let new_hash = "newhashabcdef";
-        for (subdir, ext, bytes) in [
-            ("snapshots", "md", b"snapshot".as_slice()),
-            ("baselines", "overlay.yrs", b"overlay"),
-            ("crdt", "nodes.yrs", b"nodes"),
-            ("pre-response", "md", b"pre"),
-        ] {
+        for (subdir, ext, bytes) in [("snapshots", "md", b"snapshot".as_slice())] {
             let state_dir = root.join(".agent-doc").join(subdir);
             std::fs::create_dir_all(&state_dir).unwrap();
             std::fs::write(state_dir.join(format!("{old_hash}.{ext}")), bytes).unwrap();
@@ -1162,22 +882,10 @@ mod tests {
 
         let report = migrate_state_files_for_hash(root, old_hash, new_hash).unwrap();
 
-        assert_eq!(report.migrated, 5);
+        assert_eq!(report.migrated, 2);
         assert!(root.join(".agent-doc/snapshots/newhashabcdef.md").exists());
-        assert!(
-            root.join(".agent-doc/baselines/newhashabcdef.overlay.yrs")
-                .exists()
-        );
-        assert!(
-            root.join(".agent-doc/crdt/newhashabcdef.nodes.yrs")
-                .exists()
-        );
-        assert!(
-            root.join(".agent-doc/pre-response/newhashabcdef.md")
-                .exists()
-        );
         assert!(root.join(".agent-doc/locks/newhashabcdef.md.lock").exists());
-        assert_eq!(report.events.len(), 4);
+        assert_eq!(report.events.len(), 1);
         assert_eq!(
             report.events[0].log_message(),
             "[init] migrated snapshots/oldhash1.md → newhasha.md"
@@ -1255,132 +963,5 @@ mod tests {
 
         assert!(found.is_none());
         assert!(missing_dir.is_none());
-    }
-
-    #[test]
-    fn crdt_state_save_load_and_delete_roundtrips_all_sidecars() {
-        let (_dir, doc) = setup();
-
-        assert!(load_crdt(&doc).unwrap().is_none());
-        assert!(load_overlay_crdt(&doc).unwrap().is_none());
-        assert!(load_multinode_crdt(&doc).unwrap().is_none());
-
-        save_crdt(&doc, b"legacy").unwrap();
-        save_overlay_crdt(&doc, b"overlay").unwrap();
-        save_multinode_crdt(&doc, b"nodes").unwrap();
-
-        assert_eq!(load_crdt(&doc).unwrap().as_deref(), Some(&b"legacy"[..]));
-        assert_eq!(
-            load_overlay_crdt(&doc).unwrap().as_deref(),
-            Some(&b"overlay"[..])
-        );
-        assert_eq!(
-            load_multinode_crdt(&doc).unwrap().as_deref(),
-            Some(&b"nodes"[..])
-        );
-
-        delete_crdt(&doc).unwrap();
-        assert!(load_crdt(&doc).unwrap().is_none());
-        assert!(load_overlay_crdt(&doc).unwrap().is_none());
-        assert!(load_multinode_crdt(&doc).unwrap().is_none());
-        delete_crdt(&doc).unwrap();
-    }
-
-    #[test]
-    fn overlay_crdt_from_markdown_writes_projectable_state() {
-        let (_dir, doc) = setup();
-        let markdown = concat!(
-            "---\nagent_doc_format: template\n---\n\n",
-            "## Queue\n\n<!-- agent:queue -->\n- do [#a]\n<!-- /agent:queue -->\n"
-        );
-
-        let overlay_bytes = save_overlay_crdt_from_markdown(&doc, markdown).unwrap();
-        let state = load_overlay_crdt(&doc).unwrap().unwrap();
-        assert_eq!(state.len(), overlay_bytes);
-        let projected =
-            agent_doc_document::model_projection::project_overlay_state(&state, Some(markdown))
-                .unwrap();
-        assert_eq!(projected, markdown);
-    }
-
-    #[test]
-    fn baseline_model_roundtrips_byte_identical() {
-        let (_dir, doc) = setup();
-        let baseline = concat!(
-            "---\nagent_doc_format: template\n---\n\n",
-            "## Queue\n\n<!-- agent:queue -->\n- do [#a]\n- do [#b]\n<!-- /agent:queue -->\n"
-        );
-
-        save_baseline_model(&doc, baseline, |_, _| {}).unwrap();
-        let projected = load_baseline_model(&doc, Some(baseline), |_, _| {}).unwrap();
-
-        assert_eq!(projected.as_deref(), Some(baseline));
-    }
-
-    #[test]
-    fn baseline_model_none_when_absent() {
-        let (_dir, doc) = setup();
-
-        assert!(
-            load_baseline_model(&doc, Some("anything"), |_, _| {})
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn baseline_model_prefers_md_backstop_on_divergence_and_logs() {
-        let (_dir, doc) = setup();
-        let pinned = "## Queue\n<!-- agent:queue -->\n- do [#real]\n<!-- /agent:queue -->\n";
-        let stale_md = "## Queue\n<!-- agent:queue -->\n- do [#stale]\n<!-- /agent:queue -->\n";
-        let mut logs = Vec::new();
-
-        save_baseline_model(&doc, pinned, |_, _| {}).unwrap();
-        let resolved = load_baseline_model(&doc, Some(stale_md), |_, message| {
-            logs.push(message.to_string())
-        })
-        .unwrap();
-
-        assert_eq!(resolved.as_deref(), Some(stale_md));
-        assert!(
-            logs.iter()
-                .any(|message| { message.contains("mps_baseline_resolve source=md_backstop") })
-        );
-        assert!(
-            logs.iter()
-                .any(|message| { message.contains("mps_baseline_divergence") })
-        );
-    }
-
-    #[test]
-    fn baseline_model_uses_projection_when_no_md() {
-        let (_dir, doc) = setup();
-        let pinned = "## Queue\n<!-- agent:queue -->\n- do [#only]\n<!-- /agent:queue -->\n";
-
-        save_baseline_model(&doc, pinned, |_, _| {}).unwrap();
-        let resolved = load_baseline_model(&doc, None, |_, _| {}).unwrap();
-
-        assert_eq!(resolved.as_deref(), Some(pinned));
-    }
-
-    #[test]
-    fn delete_baseline_model_is_idempotent() {
-        let (_dir, doc) = setup();
-
-        delete_baseline_model(&doc).unwrap();
-        save_baseline_model(&doc, "x\n", |_, _| {}).unwrap();
-        assert!(
-            agent_doc_fs::baseline_overlay_path_for(&doc)
-                .unwrap()
-                .exists()
-        );
-
-        delete_baseline_model(&doc).unwrap();
-        assert!(
-            !agent_doc_fs::baseline_overlay_path_for(&doc)
-                .unwrap()
-                .exists()
-        );
-        delete_baseline_model(&doc).unwrap();
     }
 }

@@ -250,7 +250,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let node_key = first_queue_node_key(content);
         append_typed_selected_queue_head(dir.path(), &doc, &node_key, "  /clear  ", true);
 
@@ -281,7 +286,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         assert_eq!(
             active_queue_prompt_state(&doc).unwrap(),
@@ -317,7 +327,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
             .unwrap()
             .into_iter()
@@ -366,7 +381,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let outcome = RunCycleOutcome {
             dispatched: true,
             queue_synthetic_diff: true,
@@ -407,7 +427,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         append_typed_selected_queue_head(
             dir.path(),
             &doc,
@@ -450,7 +475,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
             .unwrap()
             .into_iter()
@@ -500,7 +530,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let node_key = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
             .unwrap()
             .into_iter()
@@ -1073,7 +1108,12 @@ old status\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let response = concat!(
             "<!-- patch:exchange -->\n",
@@ -1136,7 +1176,12 @@ old status\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let diff_text = agent_doc_diff::unified_diff_from_contents(snapshot, baseline)
             .expect("snapshot and baseline differ");
@@ -1177,7 +1222,12 @@ old status\n\
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let err = agent_doc_run_io::run(
             &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
@@ -1260,15 +1310,14 @@ old status\n\
             "direct run body",
         )
         .unwrap();
-        let key = path
-            .canonicalize()
-            .unwrap_or_else(|_| path.clone())
-            .to_string_lossy()
-            .to_string();
-        let prov = agent_doc_debounce::write_provenance(&key)
+        let prov = agent_doc_cycle_state_io::load_document_disk_write(&path)
+            .unwrap()
             .expect("direct-run document write should record provenance");
-        assert_eq!(prov.len, "direct run body".len());
-        assert_eq!(prov.hash, agent_doc_hash::content_hash("direct run body"));
+        assert_eq!(prov.content_len, "direct run body".len() as u64);
+        assert_eq!(
+            prov.content_hash,
+            agent_doc_hash::content_hash("direct run body")
+        );
         assert_eq!(prov.actor, "agent");
         assert!(!prov.write_id.is_empty());
     }

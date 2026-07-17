@@ -749,7 +749,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         let stale_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -912,7 +917,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let doc = dir.path().join("route-dispatch-only-startup-miss.md");
         let content = "---\nagent_doc_session: route-dispatch-only-startup-miss\nagent: codex\n---\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(
+        agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
             "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
             agent_doc_ops_log_io::log_op,
@@ -1009,7 +1014,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1179,7 +1189,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let stale_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &pane, &stale_agent, &doc);
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1338,7 +1353,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "busy mock session should be active in pane: {content}"
         );
 
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1490,7 +1510,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         std::fs::write(&doc, &current).unwrap();
         let mock_agent = write_mock_registered_agent_doc(dir.path());
         launch_mock_registered_agent_doc(&iso, &live_pane, &mock_agent, &doc);
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1591,7 +1616,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1670,7 +1700,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -1799,7 +1834,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let doc = dir.path().join("dispatch-only.md");
         let content = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n❯ follow-up question\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(
+        agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
             "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n",
             agent_doc_ops_log_io::log_op,
@@ -1930,7 +1965,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -2077,7 +2117,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "---\nagent_doc_session: route-dispatch-only-authoritative-unproven\nagent: codex\ncodex_network_access: enabled\n---\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -2182,7 +2227,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
             let current = format!("{snapshot}❯ follow-up question\n");
             std::fs::write(&doc, &current).unwrap();
-            agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                snapshot,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
             agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot))
                 .unwrap();
             agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
@@ -2294,7 +2344,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "---\nagent: claude\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -2429,7 +2484,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -2561,7 +2621,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -2674,7 +2739,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
@@ -2788,7 +2858,12 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let snapshot = "<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         let current = format!("{snapshot}❯ follow-up question\n");
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,

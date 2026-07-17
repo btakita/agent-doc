@@ -55,9 +55,27 @@ pub fn enforce_no_replace_pending(patches: &[template::PatchBlock], allow: bool)
 pub fn normalize_backlog_patch_response(
     file: &Path,
     current_content: &str,
+    patches: Vec<template::PatchBlock>,
+    unmatched: String,
+    allow_replace: bool,
+) -> Result<NormalizedTemplateResponse> {
+    normalize_backlog_patch_response_with_application(
+        file,
+        current_content,
+        patches,
+        unmatched,
+        allow_replace,
+        true,
+    )
+}
+
+fn normalize_backlog_patch_response_with_application(
+    file: &Path,
+    current_content: &str,
     mut patches: Vec<template::PatchBlock>,
     unmatched: String,
     allow_replace: bool,
+    apply_visible_mutation: bool,
 ) -> Result<NormalizedTemplateResponse> {
     if allow_replace {
         return Ok(NormalizedTemplateResponse {
@@ -146,7 +164,7 @@ pub fn normalize_backlog_patch_response(
         );
     }
 
-    if !same_ignoring_trailing_newlines(current_body, &target_body) {
+    if apply_visible_mutation && !same_ignoring_trailing_newlines(current_body, &target_body) {
         let normalized_body = target_body.clone();
         let mut saw_pending_add = false;
         let mut pending_done_ids = Vec::new();
@@ -170,7 +188,10 @@ pub fn normalize_backlog_patch_response(
         }
 
         let rewritten_doc = backlog_component.replace_content(current_content, &normalized_body);
-        agent_doc_document_realtime_io::guard_visible_write_idle(file, "normalize_pending_patch")?;
+        agent_doc_document_realtime_io::guard_visible_write_current_transition(
+            file,
+            "normalize_pending_patch",
+        )?;
         agent_doc_document_realtime_io::atomic_write_through_authority(file, &rewritten_doc)
             .with_context(|| {
                 format!(
@@ -244,8 +265,17 @@ pub fn canonicalize_response_for_capture_with_current_content(
 
     template::sanitize::sanitize_patches(&mut patches);
     template::sanitize::sanitize_unmatched(&mut unmatched);
-    let normalized =
-        normalize_backlog_patch_response(file, current_content, patches, unmatched, false)?;
+    // Capture canonicalization is proof construction, not intent application.
+    // The complete patch set remains in the state-backed turn intent and is
+    // applied once by the document-write state machine.
+    let normalized = normalize_backlog_patch_response_with_application(
+        file,
+        current_content,
+        patches,
+        unmatched,
+        false,
+        false,
+    )?;
     Ok(normalized
         .response_for_capture
         .unwrap_or_else(|| response.to_string()))
@@ -253,7 +283,10 @@ pub fn canonicalize_response_for_capture_with_current_content(
 
 #[cfg(test)]
 mod pending_patch_normalization_tests {
-    use super::{enforce_no_replace_pending, normalize_backlog_patch_response};
+    use super::{
+        canonicalize_response_for_capture_with_current_content, enforce_no_replace_pending,
+        normalize_backlog_patch_response,
+    };
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -398,6 +431,33 @@ mod pending_patch_normalization_tests {
         let rewritten = fs::read_to_string(&doc).unwrap();
         assert!(rewritten.contains("[#new1] new top item"));
         assert!(rewritten.contains("### Later\n- [ ] [#keep2] later item\n"));
+    }
+
+    #[test]
+    fn capture_canonicalization_is_pure_and_retains_full_intent_for_later_application() {
+        let tmp = TempDir::new().unwrap();
+        let (doc, content) = doc_with_backlog(&tmp, "- [ ] [#keep1] existing item\n");
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: prompt — gpt-5\n\nDone.\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- patch:backlog -->\n",
+            "- [ ] [#keep1] existing item\n",
+            "- [ ] [#new1] new item\n",
+            "<!-- /patch:backlog -->\n"
+        );
+
+        let canonical =
+            canonicalize_response_for_capture_with_current_content(&doc, response, &content)
+                .expect("capture proof should canonicalize");
+
+        assert!(canonical.contains("patch:exchange"));
+        assert!(!canonical.contains("patch:backlog"));
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            content,
+            "proof construction must not apply any part of the turn intent"
+        );
     }
 
     #[test]

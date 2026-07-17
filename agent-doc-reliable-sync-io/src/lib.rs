@@ -1,9 +1,7 @@
-//! Unix-domain-socket carrier for lazily's reliable-sync plane (`#lzsync`,
-//! sidecar-retirement Phase 3A).
+//! Unix-domain-socket carrier for Lazily's reliable-sync plane (`#lzsync`).
 //!
-//! The plan (`tasks/agent-doc/plan-sidecar-retirement-lazily-sync.md` § Phase
-//! 3A) is explicit: carry lazily's reliable-sync `IpcMessage` frames over the
-//! **existing** `agent-doc-ipc-io` controller Unix socket — *no new socket*.
+//! Lazily reliable-sync `IpcMessage` frames travel over the existing PID-scoped
+//! `agent-doc-ipc-io` controller Unix socket — no second transport.
 //! This crate is the byte transport the design table assigns to the app:
 //!
 //! | Byte transport (which socket) | **app** (UDS `IpcSink`/`IpcSource`) | deployment choice |
@@ -37,7 +35,6 @@ pub mod liveness;
 pub mod plane;
 pub mod push;
 
-use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 use anyhow::{Context, Result, anyhow};
@@ -49,30 +46,8 @@ use serde::{Deserialize, Serialize};
 /// NDJSON `type` tag for a reliable-sync control frame on the shared socket.
 pub const RELIABLE_SYNC_MESSAGE_TYPE: &str = "reliable_sync";
 
-/// Legacy-named environment gate for the reliable-sync plane.
-pub const DUAL_RUN_ENV: &str = "AGENT_DOC_RELIABLE_SYNC_DUAL_RUN";
-
-/// Env var promoting the reliable-sync plane to the hot-path CRDT authority
-/// (sidecar-retirement step 3, the "authority flip").
-pub const AUTHORITY_ENV: &str = "AGENT_DOC_RELIABLE_SYNC_AUTHORITY";
-
-/// Whether the reliable-sync plane is the **hot-path CRDT authority**. **Default ON.**
-///
-/// When on, `authority_for_file` (and the editor-attached gate) derives from the
-/// plane's `LivenessProjection`. A cold process rebuilds that projection from the
-/// controller's commit-before-ACK receiver journal plus any sender suffix still
-/// retained in the durable outbox; plugin-owner leases and live-buffer sidecars
-/// are not authority inputs. Explicitly disable with a falsey value
-/// (`AGENT_DOC_RELIABLE_SYNC_AUTHORITY=0|false|no|off`) for the legacy rollback.
-pub fn authority_enabled() -> bool {
-    !matches!(
-        std::env::var(AUTHORITY_ENV).ok().as_deref(),
-        Some("0" | "false" | "FALSE" | "no" | "off" | "OFF")
-    )
-}
-
-/// Process-global reliable-sync liveness plane — the hot-path authority source
-/// (sidecar-retirement step 3). The controller feeds it (`ingest`); authority reads
+/// Process-global reliable-sync liveness plane — the hot-path authority source.
+/// The controller feeds it (`ingest`); authority reads
 /// through `agent-doc-crdt-relay-io` derive from its projection. It is
 /// in-memory **per process**: warm in the controller (fed by editor pushes over the
 /// reliable-sync RPC) and hydrated by controller-io from durable reliable-sync state
@@ -87,15 +62,12 @@ pub fn global_liveness_plane() -> &'static std::sync::Mutex<plane::ControllerLiv
 /// Plane-primary "is a live editor attached to `file`?" — the shared hot-path authority
 /// read for the step-3 flip. Returns `Some(true/false)` when the plane has ever
 /// received an open/close fact for this document (including a durably known closed
-/// document); returns `None` only on a true cold miss (authority disabled, a
-/// poisoned lock, or a never-hydrated document). Both
+/// document); returns `None` only on a true cold miss (a poisoned lock or a
+/// never-hydrated document). Both
 /// `controller-io::crdt_authority_for_file` and the
 /// `document-realtime-io` `#6b5h` disk-write guard route through this so every hot-path
 /// reader agrees. Controller-io owns durable hydration when this returns `None`.
 pub fn plane_editor_live_for_path(file: &str) -> Option<bool> {
-    if !authority_enabled() {
-        return None;
-    }
     let plane = global_liveness_plane().lock().ok()?;
     let projection = plane.projection();
     let document_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(file));
@@ -105,12 +77,9 @@ pub fn plane_editor_live_for_path(file: &str) -> Option<bool> {
     Some(projection.live_docs().contains(&document_hash))
 }
 
-/// Plane-primary sync-in-flight read for one document. This is the filesystem-
-/// free replacement for comparing live-buffer sidecar edit/sync epochs.
+/// Plane-primary sync-in-flight read for one document. This compares Lazily
+/// editor edit/sync epochs without filesystem state.
 pub fn plane_document_in_flight_for_path(file: &str) -> Option<bool> {
-    if !authority_enabled() {
-        return None;
-    }
     let plane = global_liveness_plane().lock().ok()?;
     let projection = plane.projection();
     let document_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(file));
@@ -120,18 +89,17 @@ pub fn plane_document_in_flight_for_path(file: &str) -> Option<bool> {
     Some(projection.document_in_flight(&document_hash))
 }
 
-/// Whether the controller should run the reliable-sync liveness plane.
-///
-/// **Default ON.** Both the controller process and plugin-loaded native library
-/// call this gate, so one setting covers sender and receiver. The historical
-/// name remains for rollout compatibility; the plane is now authoritative and
-/// there is no live-buffer sidecar fallback. Explicitly disable with
-/// a falsey value (`AGENT_DOC_RELIABLE_SYNC_DUAL_RUN=0|false|no|off`).
-pub fn dual_run_enabled() -> bool {
-    !matches!(
-        std::env::var(DUAL_RUN_ENV).ok().as_deref(),
-        Some("0" | "false" | "FALSE" | "no" | "off" | "OFF")
-    )
+/// Process liveness used by reliable-sync registration pruning. This is process
+/// identity support for Lazily's liveness facts, not a second authority model.
+#[cfg(unix)]
+pub fn process_pid_is_live(pid: u32) -> bool {
+    let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+pub fn process_pid_is_live(_pid: u32) -> bool {
+    true
 }
 
 /// Codec token carried in the envelope (`IpcCodec::MessagePack.name()`).
@@ -215,35 +183,6 @@ pub trait EnvelopeTransport {
     /// the frame was **not** durably handed to the peer; the driver keeps it in
     /// the outbox for replay-on-reconnect (at-least-once).
     fn send_envelope(&self, envelope: &serde_json::Value) -> Result<()>;
-}
-
-/// [`EnvelopeTransport`] over the existing `agent-doc-ipc-io` controller socket.
-///
-/// One connect-send-receipt per frame, exactly like every other message on that
-/// socket. A missing/failed receipt propagates as an `Err`, which is the
-/// SyncDriver's "sink failure → retain and stall" signal.
-pub struct SocketEnvelopeTransport {
-    project_root: PathBuf,
-}
-
-impl SocketEnvelopeTransport {
-    pub fn new(project_root: impl Into<PathBuf>) -> Self {
-        Self {
-            project_root: project_root.into(),
-        }
-    }
-
-    pub fn project_root(&self) -> &Path {
-        &self.project_root
-    }
-}
-
-impl EnvelopeTransport for SocketEnvelopeTransport {
-    fn send_envelope(&self, envelope: &serde_json::Value) -> Result<()> {
-        agent_doc_ipc_io::send_message(&self.project_root, envelope)
-            .context("reliable-sync socket send failed")?;
-        Ok(())
-    }
 }
 
 /// lazily [`IpcSink`] over an [`EnvelopeTransport`] for one document channel.
@@ -398,7 +337,7 @@ mod tests {
 
     #[test]
     fn decode_ignores_non_reliable_sync_messages() {
-        let patch = serde_json::json!({ "type": "patch", "id": "x" });
+        let patch = serde_json::json!({ "type": "apply_canonical", "id": "x" });
         assert!(decode_envelope(&patch).is_none());
         let untyped = serde_json::json!({ "document_hash": "d" });
         assert!(decode_envelope(&untyped).is_none());

@@ -348,27 +348,16 @@ pub fn open_state_db(project_root: &Path) -> Result<Connection> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    match open_and_init_state_db(&path) {
-        Ok(conn) => Ok(conn),
-        Err(e) if is_corrupt_state_db_error(&e) => {
-            // #statedbgc: a corrupt / non-SQLite state.db (truncated, or grown into a
-            // non-database blob — observed live at 4.3GB with no SQLite header) must
-            // self-heal instead of hard-erroring every caller (preflight actor-gc,
-            // closeout projection, session status, ...). Quarantine it aside with its
-            // -wal/-shm siblings and rebuild a fresh DB; the JSON sidecars remain the
-            // authoritative fallback the state backbone rebuilds from, so this loses no
-            // durable authority — only the derived projection cache.
-            eprintln!("[state-db] state.db is corrupt ({e:#}); quarantining and rebuilding fresh");
-            quarantine_corrupt_state_db(&path);
-            open_and_init_state_db(&path).with_context(|| {
-                format!(
-                    "failed to reopen a fresh state db after quarantining corrupt {}",
-                    path.display()
-                )
-            })
-        }
-        Err(e) => Err(e),
-    }
+    // state.db is the authoritative state-machine ledger. Never replace it on
+    // the normal execution path: doing so would silently discard captured
+    // intent and make recovery projections look authoritative. Corruption must
+    // fail closed until an explicit repair reconstructs a proven ledger.
+    open_and_init_state_db(&path).with_context(|| {
+        format!(
+            "authoritative state db {} is unavailable; refusing automatic replacement",
+            path.display()
+        )
+    })
 }
 
 fn open_and_init_state_db(path: &Path) -> Result<Connection> {
@@ -377,57 +366,6 @@ fn open_and_init_state_db(path: &Path) -> Result<Connection> {
     conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
     initialize_state_db(&conn)?;
     Ok(conn)
-}
-
-/// True when a state.db open/init failure means the file is not a usable SQLite
-/// database (corrupt, truncated, or a non-database blob) and should be
-/// quarantined + rebuilt rather than propagated.
-fn is_corrupt_state_db_error(e: &anyhow::Error) -> bool {
-    let msg = format!("{e:#}").to_ascii_lowercase();
-    msg.contains("file is not a database")
-        || msg.contains("not a database")
-        || msg.contains("database disk image is malformed")
-        || msg.contains("file is encrypted")
-}
-
-/// Rename a corrupt `state.db` (and its `-wal`/`-shm` siblings) aside so a fresh
-/// database is created on the next open, while preserving the corrupt image for
-/// forensics. Best-effort: a rename failure is logged, not fatal.
-fn quarantine_corrupt_state_db(path: &Path) {
-    let suffix = format!(
-        "corrupt-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0),
-    );
-    let siblings = [
-        path.to_path_buf(),
-        path.with_extension("db-wal"),
-        path.with_extension("db-shm"),
-    ];
-    for candidate in siblings {
-        if !candidate.exists() {
-            continue;
-        }
-        let name = candidate
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("state.db");
-        let aside = candidate.with_file_name(format!("{name}.{suffix}"));
-        match std::fs::rename(&candidate, &aside) {
-            Ok(()) => eprintln!(
-                "[state-db] quarantined corrupt {} -> {}",
-                candidate.display(),
-                aside.display()
-            ),
-            Err(err) => eprintln!(
-                "[state-db] WARNING: failed to quarantine corrupt {}: {err}",
-                candidate.display()
-            ),
-        }
-    }
 }
 
 pub fn initialize_state_db(conn: &Connection) -> Result<()> {
@@ -465,7 +403,7 @@ PRAGMA busy_timeout = 30000;
             timestamp INTEGER NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS supervisor_leases (
+CREATE TABLE IF NOT EXISTS supervisor_leases (
             document_id TEXT NOT NULL,
             generation INTEGER NOT NULL,
             supervisor_pid INTEGER,
@@ -473,7 +411,50 @@ PRAGMA busy_timeout = 30000;
             last_heartbeat INTEGER,
             runtime_state TEXT,
             PRIMARY KEY (document_id, generation)
-        );
+);
+
+CREATE TABLE IF NOT EXISTS coordination_leases (
+scope_kind TEXT NOT NULL,
+scope_id TEXT NOT NULL,
+holder TEXT NOT NULL,
+holder_pid INTEGER,
+heartbeat_secs INTEGER NOT NULL,
+PRIMARY KEY (scope_kind, scope_id)
+);
+
+CREATE TABLE IF NOT EXISTS project_runtime_state (
+state_key TEXT PRIMARY KEY,
+payload TEXT NOT NULL,
+updated_at_ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS document_runtime_state (
+document_hash TEXT NOT NULL,
+state_kind TEXT NOT NULL,
+canonical_path TEXT NOT NULL,
+payload_json TEXT NOT NULL,
+updated_at_ms INTEGER NOT NULL,
+PRIMARY KEY (document_hash, state_kind)
+);
+
+CREATE TABLE IF NOT EXISTS editor_transport_health (
+document_hash TEXT PRIMARY KEY,
+session_id TEXT NOT NULL,
+consecutive_timeouts INTEGER NOT NULL,
+degraded INTEGER NOT NULL,
+recycle_attempted INTEGER NOT NULL,
+last_delivery_id TEXT,
+last_transport TEXT NOT NULL,
+updated_at_secs INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS editor_op_captures (
+    document_hash TEXT PRIMARY KEY,
+    canonical_path TEXT NOT NULL,
+    base_hash TEXT NOT NULL,
+    ops_json TEXT NOT NULL,
+    updated_at_ms INTEGER NOT NULL
+);
 
         CREATE TABLE IF NOT EXISTS state_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -547,7 +528,7 @@ WHERE fact_type <> 'document_authority_observed';
             UNIQUE(scope_kind, scope_id)
         );
 
-        CREATE TABLE IF NOT EXISTS queue_backpressure (
+CREATE TABLE IF NOT EXISTS queue_backpressure (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             document_id TEXT NOT NULL,
             generation INTEGER,
@@ -556,7 +537,19 @@ WHERE fact_type <> 'document_authority_observed';
             reason TEXT NOT NULL,
             dispatch_receipt_id INTEGER,
             timestamp INTEGER NOT NULL
-        );
+);
+
+CREATE TABLE IF NOT EXISTS queue_document_state (
+    document_hash TEXT NOT NULL,
+    state_kind TEXT NOT NULL,
+    canonical_path TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    updated_at_secs INTEGER NOT NULL,
+    PRIMARY KEY (document_hash, state_kind)
+);
+
+CREATE INDEX IF NOT EXISTS queue_document_state_kind
+ON queue_document_state(state_kind);
 
         CREATE TABLE IF NOT EXISTS document_cycles (
             document_id TEXT NOT NULL,
@@ -604,6 +597,12 @@ WHERE fact_type <> 'document_authority_observed';
             columns_json TEXT NOT NULL,
             updated_at INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS controller_bootstrap (
+            scope TEXT PRIMARY KEY,
+            bootstrap_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
         "#,
     )?;
     ensure_dispatch_attempt_receipt_columns(conn)?;
@@ -611,6 +610,471 @@ WHERE fact_type <> 'document_authority_observed';
     ensure_queue_head_columns(conn)?;
     ensure_crash_recovery_marker_columns(conn)?;
     Ok(())
+}
+
+/// Durable, project-scoped coordination lease stored in `state.db`.
+///
+/// These leases coordinate processes; they are not document content and must
+/// never be projected through a live-buffer filesystem sidecar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CoordinationLeaseRecord {
+    pub scope_kind: String,
+    pub scope_id: String,
+    pub holder: String,
+    pub holder_pid: Option<u32>,
+    pub heartbeat_secs: u64,
+}
+
+pub fn upsert_coordination_lease_in_db(
+    conn: &Connection,
+    lease: &CoordinationLeaseRecord,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO coordination_leases \
+         (scope_kind, scope_id, holder, holder_pid, heartbeat_secs) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(scope_kind, scope_id) DO UPDATE SET \
+           holder = excluded.holder, \
+           holder_pid = excluded.holder_pid, \
+           heartbeat_secs = excluded.heartbeat_secs",
+        params![
+            lease.scope_kind,
+            lease.scope_id,
+            lease.holder,
+            lease.holder_pid.map(i64::from),
+            lease.heartbeat_secs as i64,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn load_coordination_lease_from_db(
+    conn: &Connection,
+    scope_kind: &str,
+    scope_id: &str,
+) -> Result<Option<CoordinationLeaseRecord>> {
+    conn.query_row(
+        "SELECT scope_kind, scope_id, holder, holder_pid, heartbeat_secs \
+         FROM coordination_leases WHERE scope_kind = ?1 AND scope_id = ?2",
+        params![scope_kind, scope_id],
+        |row| {
+            let holder_pid: Option<i64> = row.get(3)?;
+            let heartbeat_secs: i64 = row.get(4)?;
+            Ok(CoordinationLeaseRecord {
+                scope_kind: row.get(0)?,
+                scope_id: row.get(1)?,
+                holder: row.get(2)?,
+                holder_pid: holder_pid.and_then(|pid| u32::try_from(pid).ok()),
+                heartbeat_secs: u64::try_from(heartbeat_secs).unwrap_or_default(),
+            })
+        },
+    )
+    .optional()
+    .context("load coordination lease")
+}
+
+pub fn clear_coordination_lease_in_db(
+    conn: &Connection,
+    scope_kind: &str,
+    scope_id: &str,
+) -> Result<bool> {
+    Ok(conn.execute(
+        "DELETE FROM coordination_leases WHERE scope_kind = ?1 AND scope_id = ?2",
+        params![scope_kind, scope_id],
+    )? > 0)
+}
+
+/// Durable health of the PID-scoped editor transport for one document.
+/// This is control-plane state, not a live-document replica or fallback route.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorTransportHealthRecord {
+    pub document_hash: String,
+    pub session_id: String,
+    pub consecutive_timeouts: u64,
+    pub degraded: bool,
+    pub recycle_attempted: bool,
+    pub last_delivery_id: Option<String>,
+    pub last_transport: String,
+    pub updated_at_secs: u64,
+}
+
+pub fn upsert_editor_transport_health_in_db(
+    conn: &Connection,
+    health: &EditorTransportHealthRecord,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO editor_transport_health \
+         (document_hash, session_id, consecutive_timeouts, degraded, recycle_attempted, \
+          last_delivery_id, last_transport, updated_at_secs) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+         ON CONFLICT(document_hash) DO UPDATE SET \
+          session_id = excluded.session_id, \
+          consecutive_timeouts = excluded.consecutive_timeouts, \
+          degraded = excluded.degraded, \
+          recycle_attempted = excluded.recycle_attempted, \
+          last_delivery_id = excluded.last_delivery_id, \
+          last_transport = excluded.last_transport, \
+          updated_at_secs = excluded.updated_at_secs",
+        params![
+            health.document_hash,
+            health.session_id,
+            health.consecutive_timeouts as i64,
+            i64::from(health.degraded),
+            i64::from(health.recycle_attempted),
+            health.last_delivery_id,
+            health.last_transport,
+            health.updated_at_secs as i64,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn load_editor_transport_health_from_db(
+    conn: &Connection,
+    document_hash: &str,
+) -> Result<Option<EditorTransportHealthRecord>> {
+    conn.query_row(
+        "SELECT document_hash, session_id, consecutive_timeouts, degraded, recycle_attempted, \
+                last_delivery_id, last_transport, updated_at_secs \
+         FROM editor_transport_health WHERE document_hash = ?1",
+        params![document_hash],
+        |row| {
+            let timeouts: i64 = row.get(2)?;
+            let degraded: i64 = row.get(3)?;
+            let recycle_attempted: i64 = row.get(4)?;
+            let updated_at_secs: i64 = row.get(7)?;
+            Ok(EditorTransportHealthRecord {
+                document_hash: row.get(0)?,
+                session_id: row.get(1)?,
+                consecutive_timeouts: u64::try_from(timeouts).unwrap_or_default(),
+                degraded: degraded != 0,
+                recycle_attempted: recycle_attempted != 0,
+                last_delivery_id: row.get(5)?,
+                last_transport: row.get(6)?,
+                updated_at_secs: u64::try_from(updated_at_secs).unwrap_or_default(),
+            })
+        },
+    )
+    .optional()
+    .context("load editor transport health")
+}
+
+pub fn clear_editor_transport_health_in_db(conn: &Connection, document_hash: &str) -> Result<bool> {
+    Ok(conn.execute(
+        "DELETE FROM editor_transport_health WHERE document_hash = ?1",
+        params![document_hash],
+    )? > 0)
+}
+
+/// Ordered editor operations captured against one exact Lazily base.
+///
+/// This is state-machine input in the single project ledger. It must never be
+/// projected to a per-document file because a stale file can replay deleted
+/// operator text after reconnect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorOpCaptureRecord {
+    pub document_hash: String,
+    pub canonical_path: String,
+    pub base_hash: String,
+    pub ops_json: String,
+    pub updated_at_ms: u64,
+}
+
+pub fn upsert_editor_op_capture_in_db(
+    conn: &Connection,
+    capture: &EditorOpCaptureRecord,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO editor_op_captures \
+         (document_hash, canonical_path, base_hash, ops_json, updated_at_ms) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(document_hash) DO UPDATE SET \
+           canonical_path = excluded.canonical_path, \
+           base_hash = excluded.base_hash, \
+           ops_json = excluded.ops_json, \
+           updated_at_ms = excluded.updated_at_ms",
+        params![
+            capture.document_hash,
+            capture.canonical_path,
+            capture.base_hash,
+            capture.ops_json,
+            capture.updated_at_ms as i64,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn load_editor_op_capture_from_db(
+    conn: &Connection,
+    document_hash: &str,
+) -> Result<Option<EditorOpCaptureRecord>> {
+    conn.query_row(
+        "SELECT document_hash, canonical_path, base_hash, ops_json, updated_at_ms \
+         FROM editor_op_captures WHERE document_hash = ?1",
+        params![document_hash],
+        |row| {
+            let updated_at_ms: i64 = row.get(4)?;
+            Ok(EditorOpCaptureRecord {
+                document_hash: row.get(0)?,
+                canonical_path: row.get(1)?,
+                base_hash: row.get(2)?,
+                ops_json: row.get(3)?,
+                updated_at_ms: u64::try_from(updated_at_ms).unwrap_or_default(),
+            })
+        },
+    )
+    .optional()
+    .context("load editor op capture")
+}
+
+pub fn clear_editor_op_capture_in_db(conn: &Connection, document_hash: &str) -> Result<bool> {
+    Ok(conn.execute(
+        "DELETE FROM editor_op_captures WHERE document_hash = ?1",
+        params![document_hash],
+    )? > 0)
+}
+
+pub fn gc_editor_op_captures_in_db(conn: &Connection, cutoff_ms: u64) -> Result<usize> {
+    Ok(conn.execute(
+        "DELETE FROM editor_op_captures WHERE updated_at_ms = 0 OR updated_at_ms < ?1",
+        params![cutoff_ms as i64],
+    )?)
+}
+
+pub fn upsert_project_runtime_state_in_db(
+    conn: &Connection,
+    state_key: &str,
+    payload: &str,
+    updated_at_ms: u64,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO project_runtime_state (state_key, payload, updated_at_ms) \
+         VALUES (?1, ?2, ?3) \
+         ON CONFLICT(state_key) DO UPDATE SET \
+           payload = excluded.payload, updated_at_ms = excluded.updated_at_ms",
+        params![state_key, payload, updated_at_ms as i64],
+    )?;
+    Ok(())
+}
+
+pub fn load_project_runtime_state_from_db(
+    conn: &Connection,
+    state_key: &str,
+) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT payload FROM project_runtime_state WHERE state_key = ?1",
+        params![state_key],
+        |row| row.get(0),
+    )
+    .optional()
+    .context("load project runtime state")
+}
+
+pub fn list_project_runtime_state_from_db(
+    conn: &Connection,
+    state_key_prefix: &str,
+) -> Result<Vec<(String, String, u64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT state_key, payload, updated_at_ms FROM project_runtime_state \
+         WHERE state_key LIKE ?1 ORDER BY updated_at_ms DESC",
+    )?;
+    let pattern = format!("{state_key_prefix}%");
+    let rows = stmt.query_map(params![pattern], |row| {
+        let updated_at_ms: i64 = row.get(2)?;
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            u64::try_from(updated_at_ms).unwrap_or_default(),
+        ))
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .context("list project runtime state")
+}
+
+pub fn clear_project_runtime_state_in_db(conn: &Connection, state_key: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM project_runtime_state WHERE state_key = ?1",
+        params![state_key],
+    )?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentRuntimeStateRecord {
+    pub document_hash: String,
+    pub state_kind: String,
+    pub canonical_path: String,
+    pub payload_json: String,
+    pub updated_at_ms: u64,
+}
+
+pub fn upsert_document_runtime_state_in_db(
+    conn: &Connection,
+    state: &DocumentRuntimeStateRecord,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO document_runtime_state \
+         (document_hash, state_kind, canonical_path, payload_json, updated_at_ms) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(document_hash, state_kind) DO UPDATE SET \
+           canonical_path = excluded.canonical_path, \
+           payload_json = excluded.payload_json, \
+           updated_at_ms = excluded.updated_at_ms",
+        params![
+            state.document_hash,
+            state.state_kind,
+            state.canonical_path,
+            state.payload_json,
+            state.updated_at_ms as i64,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn load_document_runtime_state_from_db(
+    conn: &Connection,
+    document_hash: &str,
+    state_kind: &str,
+) -> Result<Option<DocumentRuntimeStateRecord>> {
+    conn.query_row(
+        "SELECT document_hash, state_kind, canonical_path, payload_json, updated_at_ms \
+         FROM document_runtime_state WHERE document_hash = ?1 AND state_kind = ?2",
+        params![document_hash, state_kind],
+        |row| {
+            let updated_at_ms: i64 = row.get(4)?;
+            Ok(DocumentRuntimeStateRecord {
+                document_hash: row.get(0)?,
+                state_kind: row.get(1)?,
+                canonical_path: row.get(2)?,
+                payload_json: row.get(3)?,
+                updated_at_ms: u64::try_from(updated_at_ms).unwrap_or_default(),
+            })
+        },
+    )
+    .optional()
+    .context("load document runtime state")
+}
+
+pub fn list_document_runtime_state_kind_from_db(
+    conn: &Connection,
+    state_kind: &str,
+) -> Result<Vec<DocumentRuntimeStateRecord>> {
+    let mut statement = conn.prepare(
+        "SELECT document_hash, state_kind, canonical_path, payload_json, updated_at_ms \
+         FROM document_runtime_state WHERE state_kind = ?1 ORDER BY document_hash",
+    )?;
+    let rows = statement.query_map(params![state_kind], |row| {
+        let updated_at_ms: i64 = row.get(4)?;
+        Ok(DocumentRuntimeStateRecord {
+            document_hash: row.get(0)?,
+            state_kind: row.get(1)?,
+            canonical_path: row.get(2)?,
+            payload_json: row.get(3)?,
+            updated_at_ms: u64::try_from(updated_at_ms).unwrap_or_default(),
+        })
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .context("list document runtime state by kind")
+}
+
+pub fn clear_document_runtime_state_in_db(
+    conn: &Connection,
+    document_hash: &str,
+    state_kind: &str,
+) -> Result<bool> {
+    Ok(conn.execute(
+        "DELETE FROM document_runtime_state WHERE document_hash = ?1 AND state_kind = ?2",
+        params![document_hash, state_kind],
+    )? > 0)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueDocumentStateRecord {
+    pub document_hash: String,
+    pub state_kind: String,
+    pub canonical_path: String,
+    pub payload_json: String,
+    pub updated_at_secs: u64,
+}
+
+pub fn upsert_queue_document_state_in_db(
+    conn: &Connection,
+    state: &QueueDocumentStateRecord,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO queue_document_state \
+         (document_hash, state_kind, canonical_path, payload_json, updated_at_secs) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(document_hash, state_kind) DO UPDATE SET \
+           canonical_path = excluded.canonical_path, \
+           payload_json = excluded.payload_json, \
+           updated_at_secs = excluded.updated_at_secs",
+        params![
+            state.document_hash,
+            state.state_kind,
+            state.canonical_path,
+            state.payload_json,
+            state.updated_at_secs as i64,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn load_queue_document_state_from_db(
+    conn: &Connection,
+    document_hash: &str,
+    state_kind: &str,
+) -> Result<Option<QueueDocumentStateRecord>> {
+    conn.query_row(
+        "SELECT document_hash, state_kind, canonical_path, payload_json, updated_at_secs \
+         FROM queue_document_state WHERE document_hash = ?1 AND state_kind = ?2",
+        params![document_hash, state_kind],
+        |row| {
+            let updated_at_secs: i64 = row.get(4)?;
+            Ok(QueueDocumentStateRecord {
+                document_hash: row.get(0)?,
+                state_kind: row.get(1)?,
+                canonical_path: row.get(2)?,
+                payload_json: row.get(3)?,
+                updated_at_secs: u64::try_from(updated_at_secs).unwrap_or_default(),
+            })
+        },
+    )
+    .optional()
+    .context("load queue document state")
+}
+
+pub fn list_queue_document_state_from_db(
+    conn: &Connection,
+    state_kind: &str,
+) -> Result<Vec<QueueDocumentStateRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT document_hash, state_kind, canonical_path, payload_json, updated_at_secs \
+         FROM queue_document_state WHERE state_kind = ?1 ORDER BY document_hash",
+    )?;
+    let rows = stmt.query_map(params![state_kind], |row| {
+        let updated_at_secs: i64 = row.get(4)?;
+        Ok(QueueDocumentStateRecord {
+            document_hash: row.get(0)?,
+            state_kind: row.get(1)?,
+            canonical_path: row.get(2)?,
+            payload_json: row.get(3)?,
+            updated_at_secs: u64::try_from(updated_at_secs).unwrap_or_default(),
+        })
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .context("list queue document state")
+}
+
+pub fn clear_queue_document_state_in_db(
+    conn: &Connection,
+    document_hash: &str,
+    state_kind: &str,
+) -> Result<bool> {
+    Ok(conn.execute(
+        "DELETE FROM queue_document_state WHERE document_hash = ?1 AND state_kind = ?2",
+        params![document_hash, state_kind],
+    )? > 0)
 }
 
 fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
@@ -2340,6 +2804,45 @@ pub fn upsert_crash_recovery_marker_in_db(
 }
 
 // ---------------------------------------------------------------------------
+// Controller bootstrap state.
+// ---------------------------------------------------------------------------
+
+pub fn load_controller_bootstrap_json_from_db(
+    conn: &Connection,
+    scope: &str,
+) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT bootstrap_json FROM controller_bootstrap WHERE scope = ?1",
+        params![scope],
+        |row| row.get(0),
+    )
+    .optional()
+    .context("failed to load controller bootstrap from sqlite")
+}
+
+pub fn store_controller_bootstrap_json_in_db(
+    conn: &Connection,
+    scope: &str,
+    bootstrap_json: &str,
+) -> Result<()> {
+    conn.execute(
+        r#"
+        INSERT INTO controller_bootstrap (scope, bootstrap_json, updated_at)
+        VALUES (?1, ?2, ?3)
+        ON CONFLICT(scope) DO UPDATE SET
+            bootstrap_json = excluded.bootstrap_json,
+            updated_at = excluded.updated_at
+        "#,
+        params![
+            scope,
+            bootstrap_json,
+            sqlite_i64(timestamp_secs(), "controller bootstrap timestamp")?
+        ],
+    )?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Layout state.
 // ---------------------------------------------------------------------------
 
@@ -2436,37 +2939,24 @@ mod tests {
     }
 
     #[test]
-    fn open_state_db_quarantines_and_rebuilds_a_corrupt_non_sqlite_file() -> Result<()> {
-        // #statedbgc: a state.db that is not a valid SQLite database (truncated, or
-        // grown into a non-database blob — observed live at 4.3GB) must self-heal on
-        // open — quarantine the corrupt image aside and rebuild a fresh DB — instead
-        // of hard-erroring every caller (preflight actor-gc, closeout projection, ...).
+    fn open_state_db_fails_closed_without_replacing_a_corrupt_authority() -> Result<()> {
+        // state.db owns the state-machine ledger. A corrupt image must remain in
+        // place for explicit recovery; normal opens cannot erase captured intent
+        // by manufacturing an empty authority.
         let dir = tempfile::TempDir::new()?;
         let root = dir.path();
         std::fs::create_dir_all(root.join(".agent-doc"))?;
         let path = state_db_path(root);
-        std::fs::write(&path, b"this is not a sqlite database at all\n")?;
-        std::fs::write(path.with_extension("db-wal"), b"garbage-wal")?;
+        let corrupt = b"this is not a sqlite database at all\n";
+        std::fs::write(&path, corrupt)?;
 
-        // Open must succeed by quarantining the corrupt file and rebuilding fresh.
-        let conn = open_state_db(root)?;
-        let count: i64 = conn.query_row("SELECT count(*) FROM documents", [], |r| r.get(0))?;
+        let err = open_state_db(root).unwrap_err().to_string();
+        assert!(err.contains("refusing automatic replacement"), "{err}");
+        assert_eq!(std::fs::read(&path)?, corrupt);
         assert_eq!(
-            count, 0,
-            "rebuilt state.db should have an empty documents table"
-        );
-
-        // The corrupt image was moved aside (a *.corrupt-* sibling), not deleted.
-        let quarantined = std::fs::read_dir(root.join(".agent-doc"))?
-            .filter_map(|e| e.ok())
-            .any(|e| e.file_name().to_string_lossy().contains(".corrupt-"));
-        assert!(
-            quarantined,
-            "corrupt state.db must be quarantined aside for forensics"
-        );
-        assert!(
-            path.exists(),
-            "a fresh state.db must exist at the canonical path after rebuild"
+            std::fs::read_dir(root.join(".agent-doc"))?.count(),
+            1,
+            "normal open must not create a replacement or quarantine sidecar"
         );
         Ok(())
     }

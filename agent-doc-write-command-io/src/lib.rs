@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug)]
 pub struct CommandOptions {
     pub file: PathBuf,
-    pub baseline_file: Option<PathBuf>,
     pub is_template: bool,
     pub is_stream: bool,
     pub is_ipc: bool,
@@ -78,7 +77,6 @@ impl CommandOptions {
     ) -> Self {
         Self {
             file: file.to_path_buf(),
-            baseline_file: None,
             is_template,
             is_stream,
             is_ipc: false,

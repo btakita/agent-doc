@@ -1,24 +1,24 @@
 //! # Module: undo
 //!
 //! ## Spec
-//! - `run(file)` reverts the document to the pre-response snapshot saved by the
+//! - `run(file)` reverts the document to the undo checkpoint saved by the
 //!   last `agent-doc write` (or `agent-doc run`) call.
 //! - Bails with an error if the file does not exist.
-//! - When a pre-response snapshot is present:
+//! - When a undo checkpoint is present:
 //!   1. Atomically writes the snapshot content back to the document.
 //!   2. Updates the main snapshot to match the restored state.
-//!   3. Deletes the pre-response snapshot (consumed; subsequent undo is a no-op).
-//! - When no pre-response snapshot exists, logs a message and returns `Ok(())` — undo
+//!   3. Deletes the undo checkpoint (consumed; subsequent undo is a no-op).
+//! - When no undo checkpoint exists, logs a message and returns `Ok(())` — undo
 //!   is idempotent and safe to call when there is nothing to undo.
 //!
 //! ## Agentic Contracts
 //! - `run()` is the sole public entry point.
-//! - The pre-response snapshot is single-use: calling `run()` twice reverts to
+//! - The undo checkpoint is single-use: calling `run()` twice reverts to
 //!   the same state as calling it once (no stacking of undos).
 //! - All writes go through `agent_doc_document_realtime_io::atomic_write_through_authority` to guarantee crash-safety.
 //!
 //! ## Evals
-//! - undo_restores_pre_response: pre-response snapshot present → document reverted, snapshot deleted
+//! - undo_restores_pre_response: undo checkpoint present → document reverted, checkpoint cleared
 //! - undo_noop_when_no_snapshot: no snapshot present → `Ok(())`, document unchanged
 //! - undo_file_not_found: non-existent file path → `Err` returned
 
@@ -30,26 +30,30 @@ pub fn run(file: &Path) -> Result<()> {
         anyhow::bail!("file not found: {}", file.display());
     }
 
-    let pre_response = agent_doc_snapshot_io::load_pre_response(file)?;
+    let pre_response = agent_doc_snapshot_io::load_undo_content(file)?;
     match pre_response {
         Some(content) => {
             // Restore the pre-response content
             agent_doc_document_realtime_io::atomic_write_through_authority(file, &content)?;
 
             // Update the main snapshot to match the restored state
-            agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op)?;
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                file,
+                &content,
+                agent_doc_ops_log_io::log_op,
+            )?;
 
-            // Delete the pre-response snapshot (consumed)
-            agent_doc_snapshot_io::delete_pre_response(file)?;
+            // Delete the undo checkpoint (consumed)
+            agent_doc_snapshot_io::clear_undo_content(file)?;
 
-            eprintln!("[undo] Restored {} to pre-response state", file.display());
+            eprintln!(
+                "[undo] Restored {} to state before response capture",
+                file.display()
+            );
             Ok(())
         }
         None => {
-            eprintln!(
-                "[undo] No pre-response snapshot found for {}",
-                file.display()
-            );
+            eprintln!("[undo] No undo checkpoint found for {}", file.display());
             eprintln!(
                 "[undo] Nothing to undo — no agent response has been written since the last undo."
             );

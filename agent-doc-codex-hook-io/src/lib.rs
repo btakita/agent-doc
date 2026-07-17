@@ -1,4 +1,4 @@
-//! Codex hook sidecar persistence.
+//! Codex hook state-ledger persistence.
 
 use agent_doc_model_tier::context_transcript_io::{
     latest_codex_transcript, transcript_context_pct,
@@ -94,6 +94,15 @@ pub struct ActiveSessionState {
     pub last_turn_id: String,
     pub last_prompt: String,
     pub updated_at: u64,
+}
+
+const CODEX_HOOK_SESSION_PREFIX: &str = "codex_hook_session:";
+
+fn session_state_key(session_id: &str) -> String {
+    format!(
+        "{CODEX_HOOK_SESSION_PREFIX}{}",
+        agent_doc_hash::content_hash(session_id)
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -213,15 +222,13 @@ pub fn save_state_across_roots(
 }
 
 pub fn load_state(root: &Path, session_id: &str) -> Result<Option<SessionState>> {
-    let path = state_path(root, session_id);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let content =
-        std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let state =
-        serde_json::from_str(&content).with_context(|| format!("parse {}", path.display()))?;
-    Ok(Some(state))
+    let conn = agent_doc_sqlite::state_store::open_state_db(root)?;
+    agent_doc_sqlite::state_store::load_project_runtime_state_from_db(
+        &conn,
+        &session_state_key(session_id),
+    )?
+    .map(|content| serde_json::from_str(&content).context("parse Codex hook session state"))
+    .transpose()
 }
 
 pub fn load_prompt_for_current_session(file: &Path) -> Result<Option<String>> {
@@ -413,29 +420,21 @@ pub fn load_active_session_for_current_file(file: &Path) -> Result<Option<Active
 }
 
 pub fn save_state(root: &Path, state: &SessionState) -> Result<()> {
-    let path = state_path(root, &state.session_id);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let json = serde_json::to_string_pretty(state)?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
+    let conn = agent_doc_sqlite::state_store::open_state_db(root)?;
+    agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+        &conn,
+        &session_state_key(&state.session_id),
+        &serde_json::to_string(state)?,
+        state.updated_at.saturating_mul(1000),
+    )
 }
 
 pub fn clear_state(root: &Path, session_id: &str) -> Result<()> {
-    let path = state_path(root, session_id);
-    match std::fs::remove_file(&path) {
-        Ok(()) => {}
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => return Err(err).with_context(|| format!("remove {}", path.display())),
-    }
-    Ok(())
-}
-
-pub fn state_path(root: &Path, session_id: &str) -> PathBuf {
-    let hash = agent_doc_hash::content_hash(session_id);
-    root.join(".agent-doc/codex-hooks/sessions")
-        .join(format!("{hash}.json"))
+    let conn = agent_doc_sqlite::state_store::open_state_db(root)?;
+    agent_doc_sqlite::state_store::clear_project_runtime_state_in_db(
+        &conn,
+        &session_state_key(session_id),
+    )
 }
 
 fn read_stdin_payload() -> Result<String> {
@@ -464,22 +463,11 @@ fn load_latest_state_for_file(file: &Path) -> Result<Option<ActiveSessionState>>
     let mut latest: Option<SessionState> = None;
 
     for root in project_roots_for(file) {
-        let dir = root.join(".agent-doc/codex-hooks/sessions");
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-        for entry in entries {
-            let Ok(entry) = entry else {
-                continue;
-            };
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
-            }
-            let Ok(content) = std::fs::read_to_string(&path) else {
-                continue;
-            };
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+        for (_, content, _) in agent_doc_sqlite::state_store::list_project_runtime_state_from_db(
+            &conn,
+            CODEX_HOOK_SESSION_PREFIX,
+        )? {
             let Ok(state) = serde_json::from_str::<SessionState>(&content) else {
                 continue;
             };
@@ -869,13 +857,18 @@ agent-doc {}\n",
     }
 
     #[test]
-    fn load_latest_prompt_for_file_skips_malformed_state_entries() {
+    fn load_latest_prompt_for_file_skips_malformed_ledger_rows() {
         let dir = setup_project();
         let doc = write_doc(&dir);
         let root = project_root_for(dir.path()).unwrap();
-        let state_dir = root.join(".agent-doc/codex-hooks/sessions");
-        fs::create_dir_all(&state_dir).unwrap();
-        fs::write(state_dir.join("bad.json"), "{").unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+            &conn,
+            &format!("{CODEX_HOOK_SESSION_PREFIX}bad"),
+            "{",
+            1,
+        )
+        .unwrap();
 
         save_state(
             &root,

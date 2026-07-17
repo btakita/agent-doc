@@ -88,7 +88,7 @@ fn vscode_run_agent_doc_uses_jetbrains_route_contract() {
 #[test]
 fn vscode_manifest_exposes_jetbrains_parity_commands() {
     let package_json = "editors/vscode/package.json";
-    assert_source_contains(package_json, "\"version\": \"0.2.53\"");
+    assert_source_contains(package_json, "\"version\": \"0.2.54\"");
     assert_source_contains(package_json, "\"command\": \"agentDoc.fixDocument\"");
     assert_source_contains(package_json, "\"command\": \"agentDoc.loadTmuxWindow\"");
     assert_source_contains(
@@ -145,6 +145,7 @@ fn production_receivers_only_allow_parser_or_diagnostic_full_content_refs() {
             "fullContent?: string;",
             "if ((patch.fullContent ?? '') !== '')",
             "if (patch.fullContent != null && patch.fullContent !== '')",
+            "typeof message.fullContent === 'string'",
         ],
     );
     assert_only_allowlisted_full_content_refs(
@@ -206,12 +207,6 @@ fn receiver_full_content_rejections_precede_visible_write_sinks() {
     );
     assert_guard_before_sink(
         jetbrains,
-        "private fun processPatchFile",
-        "if (!patch.fullContent.isNullOrEmpty())",
-        "applyPatch(patch)",
-    );
-    assert_guard_before_sink(
-        jetbrains,
         "private fun applyPatch(patch: IpcPatch): Boolean",
         "if (!patch.fullContent.isNullOrEmpty())",
         "applyMinimalDocumentEditUtil(document, content, result)",
@@ -226,9 +221,9 @@ fn receiver_full_content_rejections_precede_visible_write_sinks() {
     let vscode = "editors/vscode/src/extension.ts";
     assert_guard_before_sink(
         vscode,
-        "private async onPatchFileCreated",
-        "if ((patch.fullContent ?? '') !== '')",
-        "const applied = await this.applyPatch(patch, uri.fsPath)",
+        "case EditorIntent.ApplyCanonical:",
+        "typeof message.fullContent === 'string'",
+        "const applied = await this.applyPatch(patch)",
     );
     assert_guard_before_sink(
         vscode,

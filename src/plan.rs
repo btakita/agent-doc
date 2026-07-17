@@ -29,7 +29,7 @@
 //!   report/planning turn such as `#agent-doc-bug`, so repo work must wait
 //!   for a later explicit implementation directive.
 //! - `required_commands` may include placeholder arguments such as
-//!   `<preflight.baseline_file>` because the planning phase does not own the
+//!   state.db document baseline because the planning phase does not own the
 //!   preflight baseline path.
 //!
 //! ## Evals
@@ -163,7 +163,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
         .with_context(|| format!("failed to parse frontmatter in {}", file.display()))?;
 
     let doc_diff = agent_doc_diff_io::compute(
-        &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
+        &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
         file,
     )?;
     let harness_diff = if doc_diff.is_none() {
@@ -967,7 +967,12 @@ synchronous orcestra
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1021,14 +1026,19 @@ What changed?
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
         assert!(
             plan.required_commands.iter().any(|cmd| {
                 cmd.contains("agent-doc finalize")
-                    && cmd.contains("--baseline-file <preflight.baseline_file>")
+                    && !cmd.contains("--baseline-file")
                     && cmd.contains("--stream")
             }),
             "expected finalize placeholder command, got: {:?}",
@@ -1067,7 +1077,12 @@ Done.
 <!-- /agent:backlog -->
 "#;
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1112,7 +1127,12 @@ Done.
 <!-- /agent:queue -->
 "#;
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1159,7 +1179,12 @@ queue_active: true
 <!-- /agent:done -->
 "#;
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
         assert_eq!(plan.prompt_targets, vec!["Repair cache duplication"]);
@@ -1204,7 +1229,12 @@ Done.
             "<!-- agent:queue -->\n- do [#gdbpropscan]\n<!-- /agent:queue -->",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1258,7 +1288,12 @@ agent_doc_write: crdt
             "do [#jobslock]. spec-test-build-install-commit-push\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let script = dir.path().join("fake-tsift-lock.sh");
         std::fs::write(
@@ -1322,7 +1357,12 @@ agent_doc_write: crdt
             "do [#staleg]. spec-test-build-install-commit-push\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let script = dir.path().join("fake-tsift-stale.sh");
         std::fs::write(
@@ -1402,7 +1442,12 @@ do [#dodone]. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1454,7 +1499,12 @@ agent_doc_write: crdt
         );
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1505,7 +1555,12 @@ agent_doc_dispatch: auto
         );
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1583,7 +1638,12 @@ do #ice01. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1633,7 +1693,12 @@ compact exchange
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1705,7 +1770,12 @@ add to backlog: what tasks remain?
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -1758,7 +1828,12 @@ prompt_presets:
             "#agent-doc-bug\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
         let expect_add = plan
@@ -1827,7 +1902,12 @@ prompt_presets:
             "#agent-doc-bug\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
         let expect_add = plan
@@ -1891,7 +1971,12 @@ prompt_presets:
             "#agent-doc-bug\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
         let expect_add = plan
@@ -1944,7 +2029,12 @@ prompt_presets:
             "First captured bug. #agent-doc-bug\n---\nSecond captured bug. #agent-doc-bug\n<!-- /agent:exchange -->",
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
         let expect_adds = plan
@@ -2007,7 +2097,12 @@ What should we do next? Any recommendations?
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2076,7 +2171,12 @@ Done.
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2125,7 +2225,12 @@ Done.
             &format!("{prompt}\n<!-- /agent:exchange -->"),
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2197,7 +2302,12 @@ How does the CRDT merge work?
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2241,7 +2351,12 @@ Done.
 "#;
 
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _prompt = EnvGuard::set(
             "AGENT_DOC_HARNESS_PROMPT",
@@ -2315,7 +2430,12 @@ do #spec2. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
         assert_eq!(plan.pending_mutations.len(), 1);
@@ -2378,7 +2498,12 @@ do #spec2. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
         assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
@@ -2413,7 +2538,12 @@ Done.
 "#;
 
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _prompt = EnvGuard::set(
             "AGENT_DOC_HARNESS_PROMPT",
@@ -2470,7 +2600,12 @@ Done.
         );
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2521,7 +2656,12 @@ Waiting.
         );
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2571,7 +2711,12 @@ Waiting.
         );
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2641,7 +2786,12 @@ Done.
 "#;
 
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _prompt = EnvGuard::set("AGENT_DOC_HARNESS_PROMPT", "#agent-doc-bug");
         let plan = build(&doc).unwrap();
@@ -2710,7 +2860,12 @@ do #pbct. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2772,7 +2927,12 @@ do #tmuxreprocmd. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2820,7 +2980,12 @@ Done.
         );
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let plan = build(&doc).unwrap();
 
@@ -2873,7 +3038,12 @@ do #nooploop. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         write_cycles_log(
             &doc,
             &[
@@ -2962,7 +3132,12 @@ do #cmpclr. spec-test-build-install-commit-push
 "#;
 
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         write_cycles_log(
             &doc,
             &[
@@ -3105,7 +3280,12 @@ do #aftercmp. spec-test-build-install-commit-push
 
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_session_accretion_io::record_recent_exchange_compaction(&doc).unwrap();
         write_cycles_log(
             &doc,

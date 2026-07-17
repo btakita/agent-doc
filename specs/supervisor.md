@@ -229,7 +229,7 @@ generation:
 Those updates must fail closed when the supervising pane/session no longer owns
 the authoritative generation.
 
-Both `route` and `resync` also use the supervisor socket as part of the registered-document ownership proof. The primary top-down check now requires the canonical document-path entry in `sessions.json` to agree with the live pane, the recorded supervisor PID, and the reported `supervisor_instance_id`. When tmux argv/path inspection no longer proves ownership, the socket's `Pid` method remains a secondary fallback that maps the live supervisor PID back to the tmux pane before treating the registration as stale.
+Both `route` and `resync` also use the supervisor socket as part of registered-document ownership proof. The primary top-down check requires the controller's canonical document binding to agree with the live pane, recorded supervisor PID, and reported `supervisor_instance_id`. When tmux argv/path inspection no longer proves ownership, the socket's `Pid` method remains a secondary diagnostic that maps the live supervisor PID back to the tmux pane before treating the transactional binding as stale.
 
 ## Crash Recovery Policy
 
@@ -326,7 +326,7 @@ From the previous exchange:
 
 4. **External control** — per-session Unix socket, length-prefixed JSON, four methods (restart, inject, state, stop). Reuses frame format from `ipc_socket.rs`.
 
-5. **IPC lifecycle** — supervisor owns the socket for its lifetime. Socket file is cleaned up on normal exit and on `stop`. Stale sockets are detected by connecting during `register()` — if connect fails with ECONNREFUSED and the pid in `sessions.json` is dead, delete the stale socket.
+5. **IPC lifecycle** — supervisor owns the socket for its lifetime. Socket file is cleaned up on normal exit and on `stop`. Stale sockets are detected by connecting during `register()` — if connect fails with ECONNREFUSED and the supervisor PID in controller state is dead, delete the stale socket.
 
 ## Resize Handling
 
@@ -388,7 +388,7 @@ Document closeout phases share the same per-session log:
 - `document_cycle phase=write_applied ...`
 - `document_cycle phase=committed ...`
 
-Those entries are not supervisor lifecycle events, but they must land in the same `.agent-doc/logs/<session>.log` timeline so crash forensics can line up child exit / pane-loss provenance with the exact document closeout boundary instead of inferring that boundary from `.agent-doc/state/cycles/...` after the fact.
+Those entries are not supervisor lifecycle events, but they must land in the same `.agent-doc/logs/<session>.log` timeline so crash forensics can line up child exit / pane-loss provenance with the exact `state.db` closeout transition.
 
 At minimum, harness exit lines must preserve:
 - exit code

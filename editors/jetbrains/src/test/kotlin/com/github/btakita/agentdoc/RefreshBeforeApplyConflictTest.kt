@@ -180,13 +180,14 @@ class RefreshBeforeApplyConflictTest {
         assertFalse("typing debounce report must not probe turn-state just for logging", typingTracker.contains("TurnStateBridge.presentationForFile"))
         assertFalse("CRDT replica manager must not schedule fixed-delay pulls", crdtReplica.contains("scheduleWithFixedDelay"))
         assertFalse("CRDT replica manager must not keep a poller thread", crdtReplica.contains("crdt-replica-poller"))
-        assertTrue("delivery worker must publish a bounded owner heartbeat", crdtReplica.contains("CRDT_PLUGIN_OWNER_HEARTBEAT_MS = 5_000L"))
-        assertTrue("owner heartbeat must run on the CRDT delivery executor", crdtReplica.contains("executor.schedule({") && crdtReplica.contains("refreshPluginOwnerHeartbeats()"))
-        assertTrue("owner heartbeat must refresh through the hot-reload-aware native accessor", crdtReplica.contains("AgentDocLib.get()") && crdtReplica.contains("agent_doc_plugin_owner_try_acquire"))
+        assertFalse("Lazily liveness must not be shadowed by a plugin-owner heartbeat", crdtReplica.contains("PLUGIN_OWNER") || crdtReplica.contains("plugin_owner"))
         assertFalse("PatchWatcher must block on WatchService events", patchWatcher.contains("watchService.poll("))
         assertFalse("reload broadcast must not use a polling interval", patchWatcher.contains("LIB_RELOAD_BROADCAST_POLL_MS"))
-        assertTrue("PatchWatcher must watch Project Controller CRDT event signals", patchWatcher.contains(".agent-doc/crdt-replica-events"))
-        assertTrue("PatchWatcher must wake CRDT drains from event signals", patchWatcher.contains("processCrdtReplicaEventFile"))
+        assertFalse("PatchWatcher must not use CRDT event sidecars", patchWatcher.contains(".agent-doc/crdt-replica-events"))
+        assertTrue(
+            "PatchWatcher must wake CRDT drains from the shared typed editor intent",
+            patchWatcher.contains("EditorIntent.DeliverCrdtRemote.token"),
+        )
         assertTrue(
             "CRDT event protocol states must be parsed into an enum instead of compared as free text",
             patchWatcher.contains("enum class CrdtReplicaEventReason") &&

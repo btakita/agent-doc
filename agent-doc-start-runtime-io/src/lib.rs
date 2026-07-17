@@ -2110,7 +2110,6 @@ mod th {
             required_backlog_targets: Vec::new(),
             required_explicit_backlog_item_count: 0,
             required_plan_reference_count: 0,
-            baseline_file: None,
             prompt_targets: Vec::new(),
             queue_task_id: None,
             turn_id: None,
@@ -2710,8 +2709,8 @@ mod tests {
     }
 
     #[test]
-    fn idle_queue_drain_defers_to_real_lease_file_then_resumes_on_expiry() {
-        // End-to-end over the actual lease sidecar the supervisor reads: a fresh
+    fn idle_queue_drain_defers_to_state_db_lease_then_resumes_on_expiry() {
+        // End-to-end over the state-db coordination lease the supervisor reads: a fresh
         // `/loop` lease makes the supervisor defer; an expired heartbeat hands the
         // drain back so the supervisor resumes (#kp5z / #qflood).
         let dir = tempfile::TempDir::new().unwrap();
@@ -2720,15 +2719,15 @@ mod tests {
         std::fs::write(&doc, "body").unwrap();
         let file = doc.to_string_lossy().to_string();
 
-        agent_doc_queue::drain_owner::refresh_drain_owner_lease(
+        agent_doc_queue_io::drain_owner::refresh_drain_owner_lease(
             &file,
-            agent_doc_queue::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
+            agent_doc_queue_io::drain_owner::DRAIN_OWNER_CLAUDE_LOOP,
         )
         .unwrap();
 
         // Fresh lease: the supervisor (idle, fresh head) must defer.
         let now = current_epoch_secs();
-        let fresh = agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(&file, now);
+        let fresh = agent_doc_queue_io::drain_owner::fresh_loop_drain_owner_lease(&file, now);
         assert!(fresh.is_some(), "just-claimed lease must read fresh");
         assert_eq!(
             idle_queue_drain_decision(
@@ -2745,7 +2744,7 @@ mod tests {
 
         // Expired heartbeat (far past the TTL): ownership returns to the supervisor.
         let expired =
-            agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(&file, now + 100_000);
+            agent_doc_queue_io::drain_owner::fresh_loop_drain_owner_lease(&file, now + 100_000);
         assert!(
             expired.is_none(),
             "an expired heartbeat must not read fresh"
@@ -2850,7 +2849,12 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         for args in [
             vec!["init"],
             vec!["config", "user.email", "test@example.com"],

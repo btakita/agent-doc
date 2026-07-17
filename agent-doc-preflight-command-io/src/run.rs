@@ -5,10 +5,11 @@ use agent_doc_diff as diff;
 use agent_doc_diff::semantic::semantic_diff_summary;
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_preflight_io::{
-    PendingMaintenanceReport, QueueState, check_linked_docs, enforce_no_dropped_backlog,
-    enforce_no_shadow_open_backlog, explicit_backlog_target_requirements, inspect_queue_state,
-    read_and_truncate_claims, read_claims, resolve_pipeline_state, run_gate_verify,
-    run_pending_maintenance, run_queue_maintenance, save_baseline_content,
+    PendingMaintenanceReport, QueueState, check_linked_docs, checkpoint_baseline_content,
+    enforce_no_dropped_backlog, enforce_no_shadow_open_backlog,
+    explicit_backlog_target_requirements, inspect_queue_state, read_and_truncate_claims,
+    read_claims, resolve_pipeline_state, run_gate_verify, run_pending_maintenance,
+    run_queue_maintenance,
     sweep::{current_sweep_owner, log_and_skip_foreign_owned_sweep_if_needed, sweep_owner_for_doc},
 };
 use agent_doc_preflight_runtime_io::{
@@ -178,18 +179,17 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         warnings.push(warning);
     }
 
-    // Step 0a: Auto-GC (at most once per day).
-    // Checks .agent-doc/gc.stamp — if missing or >24 hours old, runs lightweight GC.
+    // Step 0a: Auto-GC (at most once per day, tracked in state.db).
     if !options.probe {
         agent_doc_preflight_io::gc::run_preflight_auto_gc(file);
     }
 
     // Pre-mutation debounce: recovery, pending maintenance, commit, and
-    // duplicate-residue cleanup all write the visible document or its sidecars.
+    // duplicate-residue cleanup all mutate authoritative or recovery state.
     // Do not let those paths race an editor buffer that is still publishing a
     // prompt.
     if !options.probe {
-        agent_doc_preflight_io::debounce::wait_for_typing_idle_before_mutation(file)?;
+        agent_doc_preflight_io::debounce::wait_for_lazily_current_before_mutation(file)?;
         if agent_doc_document_realtime::write_policy::coalesce_exact_document_replay(&content)
             .is_some()
         {
@@ -228,7 +228,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
 
     // Step 0b (#a014): Session drift auto-resync — when drift is detected on
     // consecutive preflights, auto-run `resync --fix` to clean the registry.
-    // State lives in `.agent-doc/state/drift.count` so we only auto-fix after
+    // State lives in the project `state.db` so we only auto-fix after
     // the second consecutive detection (one false positive is tolerated).
     if !options.probe {
         maybe_auto_resync_on_drift(file, &layout_issues);
@@ -277,9 +277,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         if migrated != content {
             match agent_doc_document_realtime_io::atomic_write_through_authority(file, &migrated) {
                 Ok(()) => {
-                    if let Err(err) =
-                        agent_doc_snapshot_io::save(file, &migrated, agent_doc_ops_log_io::log_op)
-                    {
+                    if let Err(err) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                        file,
+                        &migrated,
+                        agent_doc_ops_log_io::log_op,
+                    ) {
                         eprintln!(
                             "[preflight] warning: dropped deprecated queue_active line but failed to update snapshot for {}: {err}",
                             file.display()
@@ -527,20 +529,10 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 if !doc_path.exists() {
                     continue;
                 }
-                // snapshot mtime > last commit? Call commit (idempotent — git skips if clean).
-                let snap_rel = match agent_doc_fs::snapshot_path_for(&doc_path) {
-                    Ok(rel) => rel,
-                    Err(_) => continue,
-                };
-                let snap_abs = root.join(&snap_rel);
-                let snap_is_newer = (|| {
-                    let snap_mtime = std::fs::metadata(&snap_abs).ok()?.modified().ok()?;
-                    let doc_mtime = std::fs::metadata(&doc_path).ok()?.modified().ok()?;
-                    // Proxy: snap newer than doc means an agent write landed without commit
-                    Some(snap_mtime > doc_mtime)
-                })()
-                .unwrap_or(true); // if uncertain, try commit anyway
-                if snap_is_newer {
+                // State.db is the only lifecycle/baseline authority. Commit is
+                // idempotent, so inspect every live sibling document instead of
+                // consulting a snapshot-sidecar mtime as a hidden phase signal.
+                {
                     let sibling_owner = sweep_owner_for_doc(file, &root, &registry, &doc_path);
                     if log_and_skip_foreign_owned_sweep_if_needed(
                         file,
@@ -554,14 +546,14 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                     // that the agent hasn't responded to yet. For inline mode this
                     // checks ## User / ## Assistant blocks; for template mode it
                     // falls through to a content-equality check.
-                    if let (Ok(snap_content), Ok(doc_content)) = (
-                        std::fs::read_to_string(&snap_abs),
+                    if let (Ok(Some(baseline_content)), Ok(doc_content)) = (
+                        agent_doc_snapshot_io::load_document_baseline(&doc_path),
                         std::fs::read_to_string(&doc_path),
-                    ) && !agent_doc_diff::is_stale_snapshot(&snap_content, &doc_content)
+                    ) && !agent_doc_diff::is_stale_snapshot(&baseline_content, &doc_content)
                     {
                         // Not a stale inline snapshot — check content equality
                         // (covers template mode where is_stale_snapshot always returns false)
-                        let snap_stripped = agent_doc_diff::strip_comments(&snap_content);
+                        let snap_stripped = agent_doc_diff::strip_comments(&baseline_content);
                         let doc_stripped = agent_doc_diff::strip_comments(&doc_content);
                         if snap_stripped.trim() != doc_stripped.trim() {
                             eprintln!(
@@ -640,7 +632,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // (buffer-level) to avoid picking up mid-typing edits.
     // Default: 2000ms (configurable via `agent_doc_debounce` frontmatter field).
     if !options.probe {
-        agent_doc_preflight_io::debounce::wait_for_preflight_debounce(file);
+        agent_doc_preflight_io::debounce::wait_for_lazily_current_observation(file);
     }
 
     // Step 3c: Check related documents for changes.
@@ -668,19 +660,15 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // document model — not a disk read race — own concurrent typing.
     let live_current_source = ReactiveLiveCurrentSource;
     let diff_result_with_current = agent_doc_diff_io::compute_with_current(
-        &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
+        &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
         file,
         Some(&live_current_source),
     )?;
-    // Save the response baseline from the exact stable document projection used
-    // for the diff. This keeps the merge baseline, visible file, and prompt
-    // contract in one transaction even if an editor replay lands during the
-    // earlier debounce window.
-    let baseline_file = if options.probe {
-        None
-    } else {
-        save_baseline_content(file, &diff_result_with_current.current)
-    };
+    // Do not advance the durable merge baseline here. `current` can contain the
+    // operator prompt that opened this cycle; checkpointing it before closeout
+    // makes an interrupted cycle forget that prompt. Cycle state records the
+    // exact diff/current cut, while the durable baseline advances only after a
+    // canonical write or a narrowly scoped maintenance convergence below.
     let raw_diff = diff_result_with_current.diff;
     let harness_diff = agent_doc_harness::prompt_source::synthetic_diff_for_file(
         file,
@@ -752,13 +740,13 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // nothing converged the snapshot equals the pre-maintenance content so this is
     // a no-op.
     if !options.probe
-        && let Ok(Some(converged_snapshot)) = agent_doc_snapshot_io::load(file)
+        && let Ok(Some(converged_snapshot)) = agent_doc_snapshot_io::load_document_baseline(file)
         && let Some(realigned) = realign_baseline_to_converged_queue(
-            &diff_result_with_current.current,
+            &diff_result_with_current.previous,
             &converged_snapshot,
         )
     {
-        let _ = save_baseline_content(file, &realigned);
+        let _ = checkpoint_baseline_content(file, &realigned);
         eprintln!("[preflight] baseline re-aligned to converged queue shape (#qconvbaseline)");
     }
     if diff_result.is_some()
@@ -884,7 +872,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             // churn from the recursive owner-pane diagnostic path).
             eprintln!("[preflight] probe: skipping preflight_started cycle (inspection only)");
         } else {
-            let snap = agent_doc_snapshot_io::load(file).unwrap_or(None);
+            let snap = agent_doc_snapshot_io::load_document_baseline(file).unwrap_or(None);
             let file_content = resolve_current_preflight_document(file, "start_preflight")?;
             let snap_len = snap.as_ref().map(|s| s.len()).unwrap_or(0);
             let file_len = file_content.len();
@@ -945,7 +933,6 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if !options.probe {
         agent_doc_cycle_state_io::record_turn_checkpoint(
             file,
-            baseline_file.as_deref(),
             &prompt_targets,
             checkpoint_queue_task_id,
             checkpoint_queue_task_id,
@@ -1414,7 +1401,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                 user_prompt_preempts: !user_intent_prompt_changes.is_empty(),
                 queue_stopped: queue_state.queue_active != Some(true)
                     || queue_state.queue_halted.is_some(),
-                loop_is_continuing: agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(
+                loop_is_continuing: agent_doc_queue_io::drain_owner::fresh_loop_drain_owner_lease(
                     &file_str, now,
                 )
                 .is_some(),
@@ -1449,7 +1436,6 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         diff: diff_result,
         no_changes,
         linked_changes,
-        baseline_file,
         diff_type: diff_type_str.clone(),
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
@@ -1581,7 +1567,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn closeout_cycle_is_open_prefers_terminal_projection_over_stale_open_sidecar() {
+    fn closeout_cycle_is_open_uses_terminal_projection() {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
@@ -1590,10 +1576,6 @@ mod tests {
 
         let opened =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle state path");
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::mark_committed(
             &doc,
             "commit_success",
@@ -1601,12 +1583,9 @@ mod tests {
             Some(content),
         )
         .unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
-
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted,
-            "raw compatibility sidecar should remain stale-open for this regression"
+            agent_doc_turn::CyclePhase::Committed
         );
         assert_eq!(
             agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
@@ -1617,7 +1596,7 @@ mod tests {
         );
         assert!(
             !closeout_cycle_is_open(&doc).unwrap(),
-            "preflight should trust the terminal closeout projection before stale-open JSON"
+            "preflight should trust the terminal closeout projection"
         );
     }
 
@@ -1628,7 +1607,7 @@ mod tests {
         std::fs::write(&doc, "---\nsession: test\n---\n\n## User\n\nHello\n").unwrap();
 
         // Snapshot matches document → no_changes = true.
-        agent_doc_snapshot_io::save(
+        agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
             &std::fs::read_to_string(&doc).unwrap(),
             agent_doc_ops_log_io::log_op,
@@ -1697,7 +1676,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, base).unwrap();
-        agent_doc_snapshot_io::save(&doc, base, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(dir.path())
             .args(["add", "session.md"])
@@ -1713,7 +1697,7 @@ mod tests {
             "<!-- agent:boundary:abc -->\n",
             "do [#durablerecycle]\n<!-- agent:boundary:abc -->\n",
         );
-        std::fs::write(&doc, live).unwrap();
+        std::fs::write(&doc, &live).unwrap();
 
         run(&doc).unwrap();
 
@@ -1729,13 +1713,17 @@ mod tests {
             "prompt targets should persist the active prompt: {:?}",
             state.prompt_targets
         );
-        let baseline_file = state
-            .baseline_file
-            .as_deref()
-            .expect("preflight should persist baseline_file in cycle state");
-        assert!(
-            Path::new(baseline_file).exists(),
-            "baseline path should be durable: {baseline_file}"
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
+            Some(base),
+            "preflight must not advance the merge baseline across an unclosed prompt"
+        );
+        assert_eq!(
+            state.file_hash.as_deref(),
+            Some(agent_doc_hash::content_hash(&live).as_str()),
+            "cycle state should checkpoint the exact current projection"
         );
     }
 
@@ -1767,7 +1755,12 @@ mod tests {
         std::fs::write(&doc, old_doc).unwrap();
         std::fs::write(&news_index, "old news index\n").unwrap();
         std::fs::write(&news_day, "old news day\n").unwrap();
-        agent_doc_snapshot_io::save(&doc, old_doc, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            old_doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args([
@@ -1786,7 +1779,12 @@ mod tests {
 
         let new_doc = "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n## Exchange\n\n<!-- agent:exchange patch=append -->\nold body\n### Re: create today's news — codex\nresponse\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, new_doc).unwrap();
-        agent_doc_snapshot_io::save(&doc, new_doc, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            new_doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         std::fs::write(&news_index, "new news index\n").unwrap();
         std::fs::write(&news_day, "new news day\n").unwrap();
 
@@ -1815,7 +1813,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "sampleorders.md"])
@@ -1856,13 +1859,25 @@ mod tests {
         assert!(err.to_string().contains("file not found"));
     }
     #[test]
-    fn preflight_closes_stale_starting_actors_even_when_daily_gc_stamp_is_fresh() {
+    fn preflight_closes_stale_starting_actors_even_when_daily_gc_state_is_fresh() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = "---\nagent_doc_session: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
-        std::fs::write(dir.path().join(".agent-doc/gc.stamp"), "").unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_preflight_io::gc::record_auto_gc_run(
+            dir.path(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        )
+        .unwrap();
 
         let stale_doc = dir.path().join("tasks/stale-starting.md");
         std::fs::create_dir_all(stale_doc.parent().unwrap()).unwrap();
@@ -1928,7 +1943,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let _prompt = EnvGuard::set(
             "AGENT_DOC_HARNESS_PROMPT",
@@ -1969,7 +1989,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -2012,7 +2037,12 @@ mod tests {
         );
         let current_content = snapshot_content.replace("do [#future-old]", "do [#future-new]");
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -2026,7 +2056,9 @@ mod tests {
             "future queue edit must not retarget the active turn: {:?}",
             state.prompt_targets
         );
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains("do [#future-new]"),
             "snapshot must adopt the future queue edit for later turns:\n{snap}"
@@ -2064,7 +2096,12 @@ mod tests {
         );
         let current_content = snapshot_content.replace("do [#old]", "do [#blocker]");
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -2114,7 +2151,12 @@ mod tests {
                 "Done.\n\nOperator follow-up.\n<!-- /agent:exchange -->",
             );
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -2165,7 +2207,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -2206,7 +2253,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -2256,22 +2308,24 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
-        let snapshot_before = agent_doc_snapshot_io::load(&doc).unwrap();
-        let baseline_path = agent_doc_fs::baseline_path_for(&doc).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let snapshot_before = agent_doc_snapshot_io::load_document_baseline(&doc).unwrap();
         let claims_log = dir.path().join(".agent-doc/claims.log");
         std::fs::write(&claims_log, "claim-one\n").unwrap();
 
         run_with_options(&doc, PreflightOptions { probe: true }).unwrap();
 
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
-        assert_eq!(agent_doc_snapshot_io::load(&doc).unwrap(), snapshot_before);
-        assert_eq!(std::fs::read_to_string(&claims_log).unwrap(), "claim-one\n");
-        assert!(
-            !baseline_path.exists(),
-            "probe must not save a turn baseline at {}",
-            baseline_path.display()
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc).unwrap(),
+            snapshot_before
         );
+        assert_eq!(std::fs::read_to_string(&claims_log).unwrap(), "claim-one\n");
         assert!(
             agent_doc_cycle_state_io::load(&doc).unwrap().is_none(),
             "probe must not create or advance cycle state"
@@ -2305,15 +2359,22 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, pre).unwrap();
-        agent_doc_snapshot_io::save(&doc, pre, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            pre,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         // Simulate run.rs:570 — baseline captured from pre-maintenance content.
-        save_baseline_content(&doc, pre);
+        checkpoint_baseline_content(&doc, pre);
 
         // Queue maintenance mirrors the backlog `queue`-attr id into the queue and
         // updates the snapshot to that converged shape.
         let _ = run_queue_maintenance(&doc, None).unwrap();
-        let converged = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let converged = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_ne!(
             converged, pre,
             "precondition: queue maintenance must have converged the queue shape"
@@ -2343,9 +2404,10 @@ mod tests {
         // pre-maintenance content (preserving exchange/boundary).
         let realigned = realign_baseline_to_converged_queue(pre, &converged)
             .expect("queue convergence delta must produce a re-aligned baseline");
-        save_baseline_content(&doc, &realigned);
-        let baseline_after =
-            std::fs::read_to_string(agent_doc_fs::baseline_path_for(&doc).unwrap()).unwrap();
+        checkpoint_baseline_content(&doc, &realigned);
+        let baseline_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .expect("re-aligned state.db baseline");
         assert!(
             baseline_after.contains("[#alpha]"),
             "re-aligned baseline must carry the converged queue shape"
@@ -2402,7 +2464,12 @@ mod tests {
             "<!-- /agent:icebox -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -2438,7 +2505,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
@@ -2455,7 +2527,9 @@ mod tests {
             "malformed attrs repaired:\n{updated}"
         );
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snap.contains(
                 "<!-- agent:queue priority preset=\"#spec-test-build-install-commit-push\" go -->"
@@ -2494,7 +2568,12 @@ mod tests {
             "<!-- agent:queue -->\n- do [#freshly-added]\n<!-- /agent:queue -->",
         );
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let state = run_queue_maintenance(&doc, None).unwrap();
 
@@ -2530,7 +2609,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -2542,7 +2626,9 @@ mod tests {
         assert!(!updated.contains("[#spfxnorm]"));
         assert!(updated.contains("queue: stop"));
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(snap.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"));
         assert!(!snap.contains("agent:queue auto"));
         assert!(!snap.contains("[#crossdocpend]"));
@@ -2570,7 +2656,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -2605,7 +2696,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -2638,7 +2734,12 @@ mod tests {
         );
         let current_content = snapshot_content.replace("queue_active: true", "queue_active: false");
         std::fs::write(&doc, &current_content).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot_content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -2651,7 +2752,9 @@ mod tests {
         assert!(!updated.contains("[#cspe]"));
         assert!(updated.contains("queue: stop"));
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(snap.contains("<!-- agent:queue -->\n<!-- /agent:queue -->"));
         assert!(!snap.contains("dispatch #spec-test-build-install-commit-push"));
         assert!(!snap.contains("[#cspe]"));
@@ -2689,7 +2792,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, current).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
 
@@ -2702,7 +2810,12 @@ mod tests {
         let doc = dir.path().join("session.md");
         let content = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nAnswer\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
@@ -2733,7 +2846,12 @@ mod tests {
 
         let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2749,7 +2867,12 @@ mod tests {
         // contain the response, HEAD does not, cycle is marked Committed.
         let patched = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n";
         std::fs::write(&doc, patched).unwrap();
-        agent_doc_snapshot_io::save(&doc, patched, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            patched,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
@@ -2805,7 +2928,12 @@ mod tests {
 
         let original = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2819,7 +2947,12 @@ mod tests {
 
         let patched = "---\nsession: test\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n";
         std::fs::write(&doc, patched).unwrap();
-        agent_doc_snapshot_io::save(&doc, patched, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            patched,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_template",
@@ -2877,7 +3010,12 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -2897,10 +3035,11 @@ mod tests {
         );
         agent_doc_repair_io::pending::save_pending(&doc, response).unwrap();
         let capture = agent_doc_capture_io::load_active(&doc).unwrap().unwrap();
-        let pending_path = agent_doc_fs::pending_response_path_for(&doc).unwrap();
         assert!(
-            pending_path.exists(),
-            "precondition: orphaned pending response"
+            agent_doc_repair_io::load_active_pending_response(&doc)
+                .unwrap()
+                .is_some(),
+            "precondition: retained response intent"
         );
 
         let materialized = original.replace(
@@ -2912,7 +3051,12 @@ mod tests {
             ),
         );
         std::fs::write(&doc, &materialized).unwrap();
-        agent_doc_snapshot_io::save(&doc, &materialized, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &materialized,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -2936,8 +3080,10 @@ mod tests {
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&count.stdout).trim(), "2");
         assert!(
-            !pending_path.exists(),
-            "orphaned pending response should be retired"
+            agent_doc_repair_io::load_active_pending_response(&doc)
+                .unwrap()
+                .is_none(),
+            "orphaned response intent should be retired"
         );
 
         let content = std::fs::read_to_string(&doc).unwrap();
@@ -2963,7 +3109,9 @@ mod tests {
         let refreshed = agent_doc_capture_io::load_by_id(&doc, &capture.capture_id)
             .unwrap()
             .unwrap();
-        let snapshot_content = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_content = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             refreshed.state,
             agent_doc_workflow::capture::CaptureState::Committed
@@ -2971,7 +3119,7 @@ mod tests {
         assert_eq!(
             refreshed.file_hash.as_deref(),
             Some(agent_doc_hash::content_hash(&content).as_str()),
-            "capture file hash should refresh to the recovered visible file"
+            "capture file hash should refresh to the recovered visible file:\n{content}"
         );
         assert_eq!(
             refreshed.snapshot_hash.as_deref(),
@@ -2995,7 +3143,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3032,7 +3185,9 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), committed);
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
             committed
         );
         let diff = Command::new("git")
@@ -3064,7 +3219,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3112,7 +3272,9 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), committed);
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
             committed
         );
         let diff = Command::new("git")
@@ -3148,7 +3310,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, committed).unwrap();
-        agent_doc_snapshot_io::save(&doc, committed, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            committed,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3193,7 +3360,9 @@ mod tests {
 
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), committed);
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
             committed
         );
         let diff = Command::new("git")
@@ -3226,7 +3395,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3265,7 +3439,12 @@ mod tests {
                 ),
             );
         std::fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &current, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &current,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3300,7 +3479,7 @@ mod tests {
     }
 
     #[test]
-    fn stuck_capture_detection_prefers_lazily_committed_projection_over_stale_sidecar() {
+    fn stuck_capture_detection_uses_committed_ledger_projection() {
         let dir = setup_project();
         let root = dir.path();
         let doc = root.join("session.md");
@@ -3316,7 +3495,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3354,13 +3538,9 @@ mod tests {
         )
         .unwrap();
 
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle sidecar path");
-        std::fs::write(sidecar_path, serde_json::to_string_pretty(&opened).unwrap()).unwrap();
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::Committed
         );
 
         let stuck = agent_doc_flow_io::closeout::stuck_captured_cycle(&doc)
@@ -3384,7 +3564,12 @@ mod tests {
             "-->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let err = run(&doc).unwrap_err();
         assert!(
@@ -3408,7 +3593,12 @@ mod tests {
             "-->\n"
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         run(&doc).unwrap();
     }
@@ -3419,7 +3609,12 @@ mod tests {
         let doc = dir.path().join("session.md");
         let content = "---\nsession: test\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_commit_io::commit(&doc).unwrap();
         let prior =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
@@ -3453,7 +3648,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3514,7 +3714,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3552,7 +3757,7 @@ mod tests {
             "the inline #next-steps prompt should still require backlog capture"
         );
         let diff = agent_doc_diff_io::compute(
-            &agent_doc_snapshot_io::DiffSnapshotStore::new(agent_doc_ops_log_io::log_op),
+            &agent_doc_snapshot_io::DiffBaselineStore::new(agent_doc_ops_log_io::log_op),
             &doc,
         )
         .unwrap()
@@ -3604,7 +3809,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3634,7 +3844,9 @@ mod tests {
             state.requires_backlog_capture,
             "compact follow-up #next-steps should carry the backlog-capture contract"
         );
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snapshot_after.matches("#next-steps").count() == 1,
             "preflight must not absorb the compact follow-up prompt into the snapshot"
@@ -3689,7 +3901,12 @@ mod tests {
         let live = queued.replacen(original_prompt, edited_prompt, 1);
 
         std::fs::write(&doc, head).unwrap();
-        agent_doc_snapshot_io::save(&doc, head, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            head,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3701,7 +3918,12 @@ mod tests {
             .output()
             .unwrap();
 
-        agent_doc_snapshot_io::save(&doc, &queued, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &queued,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         std::fs::write(&doc, &live).unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(head), Some(head)).unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
@@ -3738,7 +3960,9 @@ mod tests {
             working.contains(edited_prompt),
             "later live prompt edit should remain visible for the fresh preflight cycle:\n{working}"
         );
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             snapshot_after.contains(original_prompt),
             "snapshot should stay on the route queued prompt:\n{snapshot_after}"
@@ -3766,7 +3990,12 @@ mod tests {
         let doc = root.join("session.md");
         let snapshot = "---\nsession: test\n---\n\n<!-- agent:exchange patch=append -->\n### Re: older\nold body\n<!-- /agent:exchange -->\n";
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3826,7 +4055,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(snapshot), Some(snapshot)).unwrap();
 
         let live = concat!(
@@ -3867,7 +4101,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3924,7 +4163,12 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -3965,7 +4209,9 @@ mod tests {
         assert!(file_after.contains("do #statusws. spec-test-build-install-commit-push"));
         assert!(!file_after.contains("- [x] [#scopeid] completed item"));
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snapshot_after.contains("do #statusws. spec-test-build-install-commit-push"),
             "snapshot must not absorb the live prompt during backlog reap"
@@ -4002,7 +4248,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4059,7 +4310,9 @@ mod tests {
             "out-of-exchange prompt should not remain in the gap:\n{file_after}"
         );
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snapshot_after.contains("oobprompt"),
             "snapshot must not absorb the live prompt during preflight relocation:\n{snapshot_after}"
@@ -4083,7 +4336,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4197,7 +4455,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4246,7 +4509,9 @@ mod tests {
             file_after.contains("Keep this unrelated scratch note hidden."),
             "unrelated scratch comments must remain outside exchange:\n{file_after}"
         );
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snapshot_after.contains(prompt),
             "snapshot must not absorb the live prompt during preflight:\n{snapshot_after}"
@@ -4272,7 +4537,12 @@ mod tests {
             "<!-- /agent:backlog -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4329,7 +4599,9 @@ mod tests {
         )),
         "preflight must keep the full mixed ordinary comment body:\n{file_after}"
     );
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snapshot_after.contains(exchange_prompt),
             "snapshot must not absorb the live prompt during preflight:\n{snapshot_after}"
@@ -4362,7 +4634,12 @@ mod tests {
             prompt = prompt
         );
         std::fs::write(&doc, &snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4398,85 +4675,14 @@ mod tests {
             file_after.contains("Keep this scratch note."),
             "preflight cleanup must preserve unrelated scratch comments:\n{file_after}"
         );
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !snapshot_after.contains(&format!(
                 "head -->\n❯ {prompt}\n❯ #spec-test-build-install-commit-push"
             )),
             "snapshot must not absorb the duplicate tail cleanup prompt"
-        );
-    }
-    #[test]
-    fn preflight_preserves_duplicate_prompt_comment_after_typing_settles() {
-        let dir = setup_project();
-        let root = dir.path();
-        let doc = root.join("session.md");
-        let prompt = "The duplicate content corrupting document and duplicate prompt issues happened yet again. Very tired of playing whack-a-mole. Reproduce bugs with tests first that fail and fix the implementation. #spec-test-build-install-commit-push";
-        let snapshot = concat!(
-            "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_debounce: 3000\n---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "### Re: prior — gpt-5\n",
-            "Done.\n",
-            "<!-- agent:boundary:head -->\n",
-            "<!-- /agent:exchange -->\n\n",
-            "###\n\n",
-            "<!-- agent:backlog -->\n",
-            "- [ ] [#keepme] keep me\n",
-            "<!-- /agent:backlog -->\n"
-        );
-        std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["add", "session.md"])
-            .output()
-            .unwrap();
-        Command::new("git")
-            .current_dir(root)
-            .args(["commit", "-m", "add doc", "--no-verify"])
-            .output()
-            .unwrap();
-
-        let live = format!(
-            concat!(
-                "---\nagent_doc_session: test\nagent_doc_format: template\nagent_doc_debounce: 3000\n---\n\n",
-                "<!-- agent:exchange patch=append -->\n",
-                "### Re: prior — gpt-5\n",
-                "Done.\n",
-                "<!-- agent:boundary:head -->\n",
-                "❯ {prompt}\n",
-                "<!-- /agent:exchange -->\n\n",
-                "###\n\n",
-                "<!--\n",
-                "{prompt}\n",
-                "-->\n\n",
-                "<!-- agent:backlog -->\n",
-                "- [ ] [#keepme] keep me\n",
-                "<!-- /agent:backlog -->\n"
-            ),
-            prompt = prompt
-        );
-        std::fs::write(&doc, &live).unwrap();
-
-        let doc_for_thread = doc.clone();
-        let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_debounce::document_changed(&doc_str);
-        let handle = std::thread::spawn(move || run(&doc_for_thread));
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        let during_debounce = std::fs::read_to_string(&doc).unwrap();
-        let result = handle.join().unwrap();
-        result.unwrap();
-
-        let duplicate_comment = format!("<!--\n{prompt}\n-->");
-        assert!(
-            during_debounce.contains(&duplicate_comment),
-            "preflight must not mutate duplicate prompt comments while the editor typing indicator is active:\n{during_debounce}"
-        );
-
-        let file_after = std::fs::read_to_string(&doc).unwrap();
-        assert!(
-            file_after.contains(&duplicate_comment),
-            "preflight must preserve visible scratch comments after typing settles:\n{file_after}"
         );
     }
     #[test]
@@ -4494,7 +4700,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4557,7 +4768,9 @@ mod tests {
         assert!(file_after.contains("### Re: first topic — gpt-5"));
         assert!(file_after.contains("do #autocmp. spec-test-build-install-commit-push"));
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(snapshot_after, snapshot);
     }
     #[test]
@@ -4583,7 +4796,12 @@ mod tests {
             "<!-- /agent:done -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4629,7 +4847,9 @@ mod tests {
         assert!(!backlog_after.contains("Commands:"));
         assert!(!backlog_after.contains("@@ -1 +1 @@"));
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         let snapshot_backlog = agent_doc_element::element::parse(&snapshot_after).unwrap();
         let snapshot_backlog = snapshot_backlog
             .iter()
@@ -4667,7 +4887,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4708,7 +4933,9 @@ mod tests {
             "preflight should still open a response cycle for the prompt-preset status edit"
         );
 
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snapshot_after, snapshot,
             "snapshot must not absorb prompt-bearing status drift"
@@ -4741,7 +4968,12 @@ mod tests {
             <!-- agent:boundary:head -->\n\
             <!-- /agent:exchange -->\n";
         std::fs::write(&doc, tracked).unwrap();
-        agent_doc_snapshot_io::save(&doc, tracked, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            tracked,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "session.md"])
@@ -4791,48 +5023,24 @@ mod tests {
         }
     }
     #[test]
-    fn preflight_recovers_response_captured_cycle_without_pending_file() {
+    fn preflight_recovers_response_captured_cycle_from_ledger() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = "---\nsession: test\nagent_doc_format: append\nagent_doc_write: merge\n---\n\n## User\n\nHello\n";
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_repair_io::pending::save_pending(&doc, "Recovered answer.").unwrap();
-        let pending = agent_doc_fs::pending_response_path_for(&doc).unwrap();
-        std::fs::remove_file(&pending).unwrap();
-
         run(&doc).unwrap();
 
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_eq!(state.phase, agent_doc_turn::CyclePhase::Committed);
         let result = std::fs::read_to_string(&doc).unwrap();
         assert!(result.contains("Recovered answer."));
-    }
-    #[test]
-    fn maybe_auto_repair_base_index_removes_stale_counter_without_tmux() {
-        let dir = tempfile::tempdir().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        std::fs::create_dir_all(agent_doc_dir.join("state")).unwrap();
-        let counter_path = agent_doc_dir.join("state/base-index-repair.count");
-        std::fs::write(&counter_path, "1").unwrap();
-        let file = dir.path().join("session.md");
-        std::fs::write(&file, "---\n---\n").unwrap();
-        let issues =
-            vec!["window index 0 missing in session '0' (base-index compliance)".to_string()];
-
-        let _env_guard = agent_doc_test_support::env_lock();
-        let saved_tmux = std::env::var("TMUX").ok();
-        // SAFETY: this test restores the process env before returning.
-        unsafe { std::env::remove_var("TMUX") };
-        let repaired = maybe_auto_repair_base_index(&file, &issues);
-        if let Some(val) = saved_tmux {
-            unsafe { std::env::set_var("TMUX", val) };
-        }
-        assert!(!repaired, "outside tmux no repair should run");
-        assert!(
-            !counter_path.exists(),
-            "stale deferred-repair counter should be removed"
-        );
     }
     #[test]
     fn preflight_sweep_commits_other_tracked_docs() {
@@ -4858,8 +5066,12 @@ mod tests {
         let primary = root.join("primary.md");
         let primary_content = "---\nagent_doc_session: primary\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n\n## User\n\n";
         fs::write(&primary, primary_content).unwrap();
-        agent_doc_snapshot_io::save(&primary, primary_content, agent_doc_ops_log_io::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &primary,
+            primary_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "primary.md"])
@@ -4875,8 +5087,12 @@ mod tests {
         let secondary = root.join("secondary.md");
         let secondary_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\n";
         fs::write(&secondary, secondary_content).unwrap();
-        agent_doc_snapshot_io::save(&secondary, secondary_content, agent_doc_ops_log_io::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &secondary,
+            secondary_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "secondary.md"])
@@ -4892,10 +5108,13 @@ mod tests {
             .unwrap();
 
         // Touch snapshot to make it newer than the file (simulates agent write without commit)
-        let snap_rel = agent_doc_fs::snapshot_path_for(&secondary).unwrap();
-        let snap_abs = root.join(&snap_rel);
         let new_snap = format!("{}\n<!-- agent updated -->", secondary_content);
-        fs::write(&snap_abs, &new_snap).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &secondary,
+            &new_snap,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         write_session_registry(
             root,
@@ -4941,8 +5160,12 @@ mod tests {
         let primary = root.join("primary.md");
         let primary_content = "---\nagent_doc_session: primary\n---\n\n## User\n\nHello\n\n## Assistant\n\nReply\n\n## User\n\n";
         fs::write(&primary, primary_content).unwrap();
-        agent_doc_snapshot_io::save(&primary, primary_content, agent_doc_ops_log_io::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &primary,
+            primary_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "primary.md"])
@@ -4960,8 +5183,12 @@ mod tests {
         // Document has user additions not in the snapshot
         let doc_content = "---\nagent_doc_session: secondary\n---\n\n## User\n\nHi\n\n## Assistant\n\nResponse\n\n## User\n\nNew question from user\n";
         fs::write(&secondary, doc_content).unwrap();
-        agent_doc_snapshot_io::save(&secondary, snap_content, agent_doc_ops_log_io::log_op)
-            .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &secondary,
+            snap_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(root)
             .args(["add", "secondary.md"])
@@ -4976,10 +5203,13 @@ mod tests {
             .unwrap();
 
         // Touch snapshot to make it newer than the file
-        let snap_rel = agent_doc_fs::snapshot_path_for(&secondary).unwrap();
-        let snap_abs = root.join(&snap_rel);
         std::thread::sleep(std::time::Duration::from_millis(50));
-        fs::write(&snap_abs, snap_content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &secondary,
+            snap_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         write_session_registry(
             root,
@@ -5035,12 +5265,11 @@ mod tests {
             Some("2026-01-01T00:00:00Z"),
         );
 
-        let snap_rel = agent_doc_fs::snapshot_path_for(&secondary).unwrap();
-        let snap_abs = root.join(&snap_rel);
         std::thread::sleep(std::time::Duration::from_millis(50));
-        fs::write(
-            &snap_abs,
-            format!("{}\n<!-- agent updated -->", secondary_content),
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &secondary,
+            &format!("{}\n<!-- agent updated -->", secondary_content),
+            agent_doc_ops_log_io::log_op,
         )
         .unwrap();
 
@@ -5103,12 +5332,11 @@ mod tests {
             Some("2026-01-01T00:00:00Z"),
         );
 
-        let snap_rel = agent_doc_fs::snapshot_path_for(&secondary).unwrap();
-        let snap_abs = root.join(&snap_rel);
         std::thread::sleep(std::time::Duration::from_millis(50));
-        fs::write(
-            &snap_abs,
-            format!("{}\n<!-- agent updated -->", secondary_content),
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &secondary,
+            &format!("{}\n<!-- agent updated -->", secondary_content),
+            agent_doc_ops_log_io::log_op,
         )
         .unwrap();
 
@@ -5200,7 +5428,12 @@ mod tests {
             ),
         );
         std::fs::write(&doc, clean).unwrap();
-        agent_doc_snapshot_io::save(&doc, clean, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            clean,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_test_support::publish_editor_text_via_crdt_relay(
             &doc,
             "preflight-boundary-dedup",

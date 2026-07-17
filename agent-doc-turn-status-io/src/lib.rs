@@ -15,11 +15,15 @@
 //! `pane-border-status` is enabled. The command is best-effort — it never fails
 //! the turn: outside tmux, or on any tmux error, it succeeds quietly.
 
-use agent_doc_turn::turn_status::{
-    STALE_SUPERVISOR_MARKER, TURN_ACTIVE_MARKER, TurnActiveMarker, pane_title_for_status,
-    turn_active_marker_is_fresh, turn_active_marker_matches_pane,
+use agent_doc_sqlite::state_store::{
+    CoordinationLeaseRecord, clear_coordination_lease_in_db, load_coordination_lease_from_db,
+    open_state_db, upsert_coordination_lease_in_db,
 };
-use anyhow::{Context, Result};
+use agent_doc_turn::turn_status::{
+    TurnActiveMarker, pane_title_for_status, turn_active_marker_is_fresh,
+    turn_active_marker_matches_pane,
+};
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -30,46 +34,46 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn marker_path(base: &Path) -> PathBuf {
-    base.join(TURN_ACTIVE_MARKER)
-}
+const TURN_ACTIVE_SCOPE: &str = "turn_active";
+const SUPERVISOR_STALE_SCOPE: &str = "supervisor_stale";
+const PROJECT_SCOPE_ID: &str = "project";
 
-/// Write the readable turn-active marker under `base/.agent-doc/`.
+/// Record the current turn owner in the project state database.
 pub fn write_turn_active_marker(base: &Path, pane: &str) -> Result<()> {
     write_turn_active_marker_at(base, pane, now_secs())
 }
 
 fn write_turn_active_marker_at(base: &Path, pane: &str, written_at: u64) -> Result<()> {
-    let path = marker_path(base);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
-    let marker = TurnActiveMarker {
-        pane: pane.to_string(),
-        written_at,
-    };
-    let json = serde_json::to_string_pretty(&marker).context("serialize turn-active marker")?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
+    let conn = open_state_db(base)?;
+    upsert_coordination_lease_in_db(
+        &conn,
+        &CoordinationLeaseRecord {
+            scope_kind: TURN_ACTIVE_SCOPE.to_string(),
+            scope_id: PROJECT_SCOPE_ID.to_string(),
+            holder: pane.to_string(),
+            holder_pid: Some(std::process::id()),
+            heartbeat_secs: written_at,
+        },
+    )
 }
 
-/// Remove the readable turn-active marker (turn idle / superseded). Absent is OK.
+/// Clear the current turn owner (turn idle / superseded). Absent is OK.
 pub fn clear_turn_active_marker(base: &Path) -> Result<()> {
-    let path = marker_path(base);
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err).with_context(|| format!("remove {}", path.display())),
-    }
+    let conn = open_state_db(base)?;
+    clear_coordination_lease_in_db(&conn, TURN_ACTIVE_SCOPE, PROJECT_SCOPE_ID).map(|_| ())
 }
 
 /// Read the turn-active marker if it exists and is not expired. An expired
 /// marker is treated as absent so a missed `idle` hook self-heals instead of
 /// wedging the session busy.
 pub fn read_turn_active_marker_at(base: &Path, now: u64) -> Option<TurnActiveMarker> {
-    let path = marker_path(base);
-    let content = std::fs::read_to_string(&path).ok()?;
-    let marker: TurnActiveMarker = serde_json::from_str(&content).ok()?;
+    let conn = open_state_db(base).ok()?;
+    let lease =
+        load_coordination_lease_from_db(&conn, TURN_ACTIVE_SCOPE, PROJECT_SCOPE_ID).ok()??;
+    let marker = TurnActiveMarker {
+        pane: lease.holder,
+        written_at: lease.heartbeat_secs,
+    };
     if !turn_active_marker_is_fresh(&marker, now) {
         return None;
     }
@@ -98,35 +102,36 @@ pub fn turn_active_for_pane(base: &Path, pane: &str) -> bool {
         .is_some_and(|marker| turn_active_marker_matches_pane(&marker, pane))
 }
 
-fn stale_marker_path(base: &Path) -> PathBuf {
-    base.join(STALE_SUPERVISOR_MARKER)
-}
-
-/// Publish the stale-supervisor flag as an on-disk marker under `base/.agent-doc/`
-/// (`#suptmuxstale`). `stale = true` writes the marker; `stale = false` removes it.
-/// Best-effort cross-process channel for the supervisor → turn-status hook. Idempotent.
+/// Publish the stale-supervisor flag in the project state database.
+/// Best-effort cross-process channel for the supervisor → turn-status hook.
 pub fn set_supervisor_stale_marker(base: &Path, stale: bool) -> Result<()> {
-    let path = stale_marker_path(base);
+    let conn = open_state_db(base)?;
     if stale {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("create {}", parent.display()))?;
-        }
-        std::fs::write(&path, "").with_context(|| format!("write {}", path.display()))?;
-        Ok(())
+        upsert_coordination_lease_in_db(
+            &conn,
+            &CoordinationLeaseRecord {
+                scope_kind: SUPERVISOR_STALE_SCOPE.to_string(),
+                scope_id: PROJECT_SCOPE_ID.to_string(),
+                holder: "stale".to_string(),
+                holder_pid: Some(std::process::id()),
+                heartbeat_secs: now_secs(),
+            },
+        )
     } else {
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(err).with_context(|| format!("remove {}", path.display())),
-        }
+        clear_coordination_lease_in_db(&conn, SUPERVISOR_STALE_SCOPE, PROJECT_SCOPE_ID).map(|_| ())
     }
 }
 
 /// True when the stale-supervisor marker is present under `base` (`#suptmuxstale`).
 /// Read-only display probe — absent / unreadable reads as fresh (not stale).
 pub fn supervisor_stale(base: &Path) -> bool {
-    stale_marker_path(base).exists()
+    let Ok(conn) = open_state_db(base) else {
+        return false;
+    };
+    load_coordination_lease_from_db(&conn, SUPERVISOR_STALE_SCOPE, PROJECT_SCOPE_ID)
+        .ok()
+        .flatten()
+        .is_some()
 }
 
 fn set_pane_title(pane: &str, title: &str) {

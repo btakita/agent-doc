@@ -1,7 +1,6 @@
 use agent_doc_hash::content_hash;
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
-use serde_json::Value;
 use std::fs;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
@@ -81,10 +80,13 @@ fn init_git_repo(root: &Path, tracked: &Path) {
         .unwrap();
 }
 
-fn write_baseline(root: &Path, content: &str) -> PathBuf {
-    let baseline = root.join("baseline.md");
-    fs::write(&baseline, content).unwrap();
-    baseline
+fn checkpoint_baseline(root: &Path, content: &str) {
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &root.join("session.md"),
+        content,
+        agent_doc_ops_log_io::log_op,
+    )
+    .unwrap();
 }
 
 fn crdt_path(root: &Path, doc: &Path) -> PathBuf {
@@ -116,9 +118,7 @@ fn seed_reliable_sync_open(doc: &Path, tag: &str) {
         tag: tag.to_string(),
     }];
     agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
-        &project_root
-            .join(".agent-doc")
-            .join("reliable_sync_outbox.db"),
+        &agent_doc_sqlite::state_store::state_db_path(&project_root),
         &document_hash,
         1,
         Some(&serde_json::to_string(&ops).unwrap()),
@@ -158,22 +158,16 @@ fn place_uncommitted_visible_response(
     fs::write(&snap, committed).unwrap();
 }
 
-fn cycle_state_path(root: &Path, doc: &Path) -> PathBuf {
-    root.join(".agent-doc/state/cycles")
-        .join(format!("{}.json", doc_hash(doc)))
-}
-
 fn doc_hash(doc: &Path) -> String {
     let canonical = doc.canonicalize().unwrap();
     content_hash(canonical.to_string_lossy().as_ref())
 }
 
-fn read_cycle_phase(root: &Path, doc: &Path) -> Option<String> {
-    let content = fs::read_to_string(cycle_state_path(root, doc)).ok()?;
-    let json: Value = serde_json::from_str(&content).ok()?;
-    json.get("phase")
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
+fn read_cycle_phase(_root: &Path, doc: &Path) -> Option<String> {
+    agent_doc_cycle_state_io::load_with_closeout_projection(doc)
+        .ok()
+        .flatten()
+        .map(|state| state.phase.as_str().to_string())
 }
 
 fn head_blob(root: &Path) -> String {
@@ -327,7 +321,7 @@ fn finalize_stale_snapshot_does_not_block_response_or_pending_flags() {
         &format!("{stale_exchange}❯ Please reply\n<!-- agent:boundary:1234abcd -->"),
     );
     fs::write(snapshot_path(tmp.path(), &doc), stale_snapshot).unwrap();
-    let baseline = write_baseline(tmp.path(), &current);
+    checkpoint_baseline(tmp.path(), &current);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -335,8 +329,6 @@ fn finalize_stale_snapshot_does_not_block_response_or_pending_flags() {
             "finalize",
             doc.to_str().unwrap(),
             "--stream",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--backlog-add-back",
             "id=partial Pending item that must land with the response",
         ])
@@ -429,7 +421,7 @@ fn finalize_stream_editor_absent_skips_ipc_and_writes_directly() {
     fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
     init_git_repo(tmp.path(), &doc);
     let initial_head = head_blob(tmp.path());
-    let baseline = write_baseline(tmp.path(), &session_stream_doc_content());
+    checkpoint_baseline(tmp.path(), &session_stream_doc_content());
 
     agent_doc()
         .current_dir(tmp.path())
@@ -437,8 +429,6 @@ fn finalize_stream_editor_absent_skips_ipc_and_writes_directly() {
             "finalize",
             doc.to_str().unwrap(),
             "--stream",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: ipc timeout — gpt-5\nbody\n<!-- /patch:exchange -->\n",
@@ -514,16 +504,16 @@ fn finalize_editor_absent_skips_ipc_and_applies_done_directly() {
 }
 
 #[test]
+#[ignore = "removed legacy authority rollback path"]
 fn write_commit_force_disk_with_editor_owner_recovers_without_waiting_for_crdt() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/crdt")).unwrap();
     init_git_repo(tmp.path(), &doc);
     let initial_head = head_blob(tmp.path());
-    agent_doc_plugin_owner::try_acquire_plugin_owner(
+    agent_doc_test_support::seed_lazily_editor_registration(
         doc.to_str().unwrap(),
         "jetbrains-test-owner",
-        std::process::id(),
     );
     let current_content = fs::read_to_string(&doc).unwrap();
     agent_doc_repair_io::pending::save_pending_with_current_content(
@@ -550,7 +540,6 @@ fn write_commit_force_disk_with_editor_owner_recovers_without_waiting_for_crdt()
     let started = Instant::now();
     let assertion = agent_doc()
         .current_dir(tmp.path())
-        .env("AGENT_DOC_RELIABLE_SYNC_AUTHORITY", "0")
         .args(["write", "--commit", "--force-disk", doc.to_str().unwrap()])
         .write_stdin("")
         .assert()
@@ -583,18 +572,18 @@ fn write_commit_force_disk_with_editor_owner_recovers_without_waiting_for_crdt()
 }
 
 #[test]
+#[ignore = "removed legacy authority rollback path"]
 fn finalize_force_disk_with_editor_owner_recovers_and_preserves_disk_drift() {
     let (tmp, doc) = setup_session_stream_doc();
     fs::create_dir_all(tmp.path().join(".agent-doc/crdt")).unwrap();
     init_git_repo(tmp.path(), &doc);
     let initial_head = head_blob(tmp.path());
-    agent_doc_plugin_owner::try_acquire_plugin_owner(
+    agent_doc_test_support::seed_lazily_editor_registration(
         doc.to_str().unwrap(),
         "jetbrains-test-owner-merge",
-        std::process::id(),
     );
     let baseline_content = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
     let current = baseline_content.replace(
         "<!-- agent:boundary:1234abcd -->",
         "❯ live editor drift\n<!-- agent:boundary:1234abcd -->",
@@ -618,12 +607,9 @@ fn finalize_force_disk_with_editor_owner_recovers_and_preserves_disk_drift() {
     let started = Instant::now();
     let assertion = agent_doc()
         .current_dir(tmp.path())
-        .env("AGENT_DOC_RELIABLE_SYNC_AUTHORITY", "0")
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--force-disk",
         ])
         .write_stdin(
@@ -663,20 +649,11 @@ fn finalize_force_disk_with_editor_owner_recovers_and_preserves_disk_drift() {
 }
 
 #[test]
-fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
+fn attached_model_missing_does_not_merge_from_stale_recovery_projection() {
     let tmp = TempDir::new().unwrap();
-    for subdir in [
-        "patches",
-        "snapshots",
-        "crdt",
-        "locks",
-        "logs",
-        "pending",
-        "pre-response",
-    ] {
+    for subdir in ["snapshots", "crdt", "locks", "logs", "pending"] {
         fs::create_dir_all(tmp.path().join(".agent-doc").join(subdir)).unwrap();
     }
-    fs::write(tmp.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
     let doc = tmp.path().join("session.md");
     let base = concat!(
         "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\n",
@@ -702,19 +679,17 @@ fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
         "<!-- /agent:exchange -->\n",
     );
     fs::write(&doc, base).unwrap();
+    agent_doc_crdt_relay_io::seed_embedded_relay_for_file(&doc).unwrap();
     init_git_repo(tmp.path(), &doc);
     let initial_head = head_blob(tmp.path());
     fs::write(&doc, &current).unwrap();
-    let baseline = write_baseline(tmp.path(), base);
+    checkpoint_baseline(tmp.path(), base);
     let stale_doc = agent_doc_merge::crdt::CrdtDoc::from_text(stale);
     fs::write(crdt_path(tmp.path(), &doc), stale_doc.encode_state()).unwrap();
 
-    // `#6b5hprimary`/`#g9d7`: this scenario models a LIVE editor — the "while
-    // typing note" is unsaved editor typing that must survive for retry. Seed a
-    // durable reliable-sync Open fact so run_ipc classifies it as editor-attached and
-    // keeps the fail-closed retry instead of taking the editor-less disk fallback
-    // (the editor-less fallback is exercised separately, gated on the absence of
-    // exactly this Open fact).
+    // This scenario models an attached editor whose registration exists but whose
+    // Lazily document model is unavailable. Disk and recovery projections are not
+    // eligible substitutes for the missing current authority.
     seed_reliable_sync_open(&doc, "jetbrains-test-owner-ipc");
 
     agent_doc()
@@ -724,17 +699,13 @@ fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
             doc.to_str().unwrap(),
             "--ipc",
             "--commit",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: ipc stale crdt — gpt-5\nbody\n<!-- /patch:exchange -->\n",
         )
         .assert()
         .failure()
-        .stderr(predicates::str::contains(
-            "recovery=retry_without_disk_write",
-        ));
+        .stderr(predicates::str::contains("editor_attached_model_missing"));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(
@@ -755,33 +726,18 @@ fn ipc_timeout_retry_does_not_merge_from_stale_crdt_state() {
         head_blob(tmp.path()),
         "IPC timeout retry must fail before committing"
     );
-    let patch_jsons = fs::read_dir(tmp.path().join(".agent-doc/patches"))
-        .unwrap()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
-        .collect::<Vec<_>>();
     assert!(
-        !patch_jsons.is_empty(),
-        "IPC timeout should retain the queued patch for a retry"
+        !tmp.path().join(".agent-doc/patches").exists(),
+        "fail-closed recovery must not create a filesystem delivery inbox"
     );
 }
 
 #[test]
-fn ipc_timeout_editorless_session_fails_closed_without_disk_fallback() {
-    // Reliable realtime phase 0: a pure-CLI / file-IPC-fallback session with no
-    // ACK may no longer materialize through the visible disk fallback. Stale
-    // editor presence can be under-proven, so run_ipc retains the patch and
-    // asks for retry/convergence unless an operator explicitly forces disk.
+fn explicit_ipc_on_detached_session_fails_without_creating_an_inbox() {
+    // An explicit attached-editor transport request cannot silently elect disk
+    // or manufacture a filesystem patch transport when no editor is registered.
     let tmp = TempDir::new().unwrap();
-    for subdir in [
-        "patches",
-        "snapshots",
-        "crdt",
-        "locks",
-        "logs",
-        "pending",
-        "pre-response",
-    ] {
+    for subdir in ["snapshots", "crdt", "locks", "logs", "pending"] {
         fs::create_dir_all(tmp.path().join(".agent-doc").join(subdir)).unwrap();
     }
     let doc = tmp.path().join("session.md");
@@ -800,7 +756,7 @@ fn ipc_timeout_editorless_session_fails_closed_without_disk_fallback() {
     fs::write(&doc, base).unwrap();
     init_git_repo(tmp.path(), &doc);
     let initial_head = head_blob(tmp.path());
-    let baseline = write_baseline(tmp.path(), base);
+    checkpoint_baseline(tmp.path(), base);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -809,8 +765,6 @@ fn ipc_timeout_editorless_session_fails_closed_without_disk_fallback() {
             doc.to_str().unwrap(),
             "--ipc",
             "--commit",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: editorless disk fallback — gpt-5\nbody\n<!-- /patch:exchange -->\n",
@@ -840,17 +794,8 @@ fn ipc_timeout_editorless_session_fails_closed_without_disk_fallback() {
         "ordinary run_ipc no-ACK must not emit a disk fallback:\n{ops_log}"
     );
     assert!(
-        ops_log.contains("recovery=retry_without_disk_write"),
-        "run_ipc no-ACK must emit retry-without-disk recovery:\n{ops_log}"
-    );
-    let patch_jsons = fs::read_dir(tmp.path().join(".agent-doc/patches"))
-        .unwrap()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
-        .count();
-    assert!(
-        patch_jsons > 0,
-        "run_ipc no-ACK must retain the patch file for retry"
+        !tmp.path().join(".agent-doc/patches").exists(),
+        "run_ipc no-ACK must not create a filesystem retry transport"
     );
 }
 
@@ -871,7 +816,7 @@ fn malformed_patchback_is_rejected_instead_of_appended_as_unmatched() {
     );
     fs::write(&doc, content).unwrap();
     init_git_repo(tmp.path(), &doc);
-    let baseline = write_baseline(tmp.path(), content);
+    checkpoint_baseline(tmp.path(), content);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -880,8 +825,6 @@ fn malformed_patchback_is_rejected_instead_of_appended_as_unmatched() {
             doc.to_str().unwrap(),
             "--template",
             "--commit",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: malformed — gpt-5\nbody without closing patch\n",
@@ -927,7 +870,7 @@ fn template_flag_on_crdt_doc_routes_to_stream_merge_instead_of_diff3() {
     fs::write(&doc, base).unwrap();
     init_git_repo(tmp.path(), &doc);
     fs::write(&doc, current).unwrap();
-    let baseline = write_baseline(tmp.path(), base);
+    checkpoint_baseline(tmp.path(), base);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -936,8 +879,6 @@ fn template_flag_on_crdt_doc_routes_to_stream_merge_instead_of_diff3() {
             doc.to_str().unwrap(),
             "--template",
             "--commit",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: crdt template route - gpt-5\n\nDone.\n<!-- /patch:exchange -->\n",
@@ -999,35 +940,30 @@ fn bare_write_stream_on_session_doc_fails_before_mutating_the_document() {
 }
 
 #[test]
-fn write_commit_empty_stdin_adopts_visible_agent_owned_partial_patchback() {
+fn write_commit_empty_stdin_rejects_untracked_visible_patchback() {
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);
     let original = fs::read_to_string(&doc).unwrap();
 
     place_uncommitted_visible_response(tmp.path(), &doc, &original, "### Re: repair — gpt-5\nbody");
 
+    let visible_before = fs::read_to_string(&doc).unwrap();
     agent_doc()
         .current_dir(tmp.path())
         .args(["write", "--commit", doc.to_str().unwrap()])
         .write_stdin("")
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains(
+            "empty response — nothing to write",
+        ));
 
-    let head = head_blob(tmp.path());
-    assert!(
-        head.contains("### Re: repair — gpt-5"),
-        "empty strict write should adopt the visible partial patchback:\n{head}"
-    );
-
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["session-check", doc.to_str().unwrap()])
-        .assert()
-        .success();
+    assert_eq!(fs::read_to_string(&doc).unwrap(), visible_before);
+    assert!(!head_blob(tmp.path()).contains("### Re: repair — gpt-5"));
 }
 
 #[test]
-fn write_commit_empty_stdin_repair_preserves_post_exchange_scratch_comment() {
+fn write_commit_empty_stdin_rejection_preserves_post_exchange_scratch_comment() {
     let (tmp, doc) = setup_session_stream_doc();
     let prompt = "The repair write --commit scratch comment should not be deleted. #spec-test-build-install-commit-push";
     let original = session_stream_doc_content()
@@ -1053,16 +989,16 @@ fn write_commit_empty_stdin_repair_preserves_post_exchange_scratch_comment() {
         .args(["write", "--commit", doc.to_str().unwrap()])
         .write_stdin("")
         .assert()
-        .success();
+        .failure()
+        .stderr(predicates::str::contains(
+            "empty response — nothing to write",
+        ));
 
     let expected_comment = format!(
         "<!--\n{prompt}\n#spec-test-build-install-commit-push\n---\nKeep repair scratch notes visible.\n-->"
     );
     let content = fs::read_to_string(&doc).unwrap();
-    assert!(
-        content.contains("### Re: repair comment ownership — gpt-5"),
-        "repair should keep the visible response:\n{content}"
-    );
+    assert!(content.contains("### Re: repair comment ownership — gpt-5"));
     assert!(
         content.contains(&expected_comment),
         "repair write --commit must preserve owned post-exchange scratch comments:\n{content}"
@@ -1073,16 +1009,10 @@ fn write_commit_empty_stdin_repair_preserves_post_exchange_scratch_comment() {
         head.contains(&expected_comment),
         "repair closeout commit must preserve owned scratch comments:\n{head}"
     );
-
-    agent_doc()
-        .current_dir(tmp.path())
-        .args(["session-check", doc.to_str().unwrap()])
-        .assert()
-        .success();
 }
 
 #[test]
-fn write_commit_empty_stdin_repair_preserves_active_auto_queue_without_done() {
+fn write_commit_empty_stdin_rejection_preserves_active_auto_queue_without_done() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
@@ -1102,9 +1032,9 @@ fn write_commit_empty_stdin_repair_preserves_active_auto_queue_without_done() {
         .args(["write", "--commit", doc.to_str().unwrap()])
         .write_stdin("")
         .assert()
-        .success()
+        .failure()
         .stderr(predicates::str::contains(
-            "[queue] kept head `do #fix1` because the response did not record a completion outcome for #fix1",
+            "empty response — nothing to write",
         ));
 
     let content = fs::read_to_string(&doc).unwrap();
@@ -1123,8 +1053,8 @@ fn write_commit_empty_stdin_repair_preserves_active_auto_queue_without_done() {
 
     let head = head_blob(tmp.path());
     assert!(
-        head.contains("### Re: #next-steps — gpt-5") && head.contains("- do #fix1"),
-        "write --commit repair should commit response while leaving queue head open:\n{head}"
+        !head.contains("### Re: #next-steps — gpt-5") && head.contains("- do #fix1"),
+        "empty write must not commit the untracked response or change the queue:\n{head}"
     );
 }
 
@@ -1340,14 +1270,9 @@ fn finalize_writes_and_commits_template_response() {
         log_stdout
     );
 
-    let cycles_dir = tmp.path().join(".agent-doc/state/cycles");
-    let mut entries = fs::read_dir(&cycles_dir).unwrap();
-    let cycle_path = entries.next().unwrap().unwrap().path();
-    let cycle_json = fs::read_to_string(cycle_path).unwrap();
-    assert!(
-        cycle_json.contains("\"phase\": \"committed\""),
-        "cycle should be committed, got: {}",
-        cycle_json
+    assert_eq!(
+        read_cycle_phase(tmp.path(), &doc).as_deref(),
+        Some("committed")
     );
 
     agent_doc()
@@ -1366,15 +1291,13 @@ fn finalize_stream_auto_reopens_committed_cycle_for_new_response() {
     init_git_repo(tmp.path(), &doc);
 
     let original = fs::read_to_string(&doc).unwrap();
-    let stale_baseline = write_baseline(tmp.path(), &original);
+    checkpoint_baseline(tmp.path(), &original);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            stale_baseline.to_str().unwrap(),
             "--stream",
             "--origin",
             "skill",
@@ -1398,8 +1321,6 @@ fn finalize_stream_auto_reopens_committed_cycle_for_new_response() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            stale_baseline.to_str().unwrap(),
             "--stream",
             "--origin",
             "skill",
@@ -1424,12 +1345,6 @@ fn finalize_stream_auto_reopens_committed_cycle_for_new_response() {
         Some("committed")
     );
 
-    let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
-    assert!(
-        ops_log.contains("explicit_baseline_replay_auto_reopened"),
-        "strict finalize should log the committed-cycle auto-reopen:\n{ops_log}"
-    );
-
     agent_doc()
         .current_dir(tmp.path())
         .args(["session-check", doc.to_str().unwrap()])
@@ -1446,7 +1361,7 @@ fn finalize_stream_rejects_true_duplicate_replay_after_committed_cycle() {
     init_git_repo(tmp.path(), &doc);
 
     let original = fs::read_to_string(&doc).unwrap();
-    let stale_baseline = write_baseline(tmp.path(), &original);
+    checkpoint_baseline(tmp.path(), &original);
 
     let first_response = "<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n";
 
@@ -1455,8 +1370,6 @@ fn finalize_stream_rejects_true_duplicate_replay_after_committed_cycle() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            stale_baseline.to_str().unwrap(),
             "--stream",
             "--origin",
             "skill",
@@ -1471,8 +1384,6 @@ fn finalize_stream_rejects_true_duplicate_replay_after_committed_cycle() {
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            stale_baseline.to_str().unwrap(),
             "--stream",
             "--origin",
             "skill",
@@ -1492,7 +1403,7 @@ fn finalize_stream_rejects_true_duplicate_replay_after_committed_cycle() {
 
     let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
     assert!(
-        ops_log.contains("explicit_baseline_replay_rejected")
+        ops_log.contains("baseline_replay_rejected")
             && ops_log.contains("reason=response_already_in_head"),
         "true replay should log the in-HEAD rejection reason:\n{ops_log}"
     );
@@ -1510,15 +1421,13 @@ fn finalize_stream_rebases_stale_exchange_baseline_to_head_after_new_preflight()
     init_git_repo(tmp.path(), &doc);
 
     let original = fs::read_to_string(&doc).unwrap();
-    let stale_baseline = write_baseline(tmp.path(), &original);
+    checkpoint_baseline(tmp.path(), &original);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            stale_baseline.to_str().unwrap(),
             "--stream",
             "--origin",
             "skill",
@@ -1557,8 +1466,6 @@ fn finalize_stream_rebases_stale_exchange_baseline_to_head_after_new_preflight()
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            stale_baseline.to_str().unwrap(),
             "--stream",
             "--origin",
             "skill",
@@ -1585,12 +1492,6 @@ fn finalize_stream_rebases_stale_exchange_baseline_to_head_after_new_preflight()
         "stale-baseline rebase must preserve the live follow-up prompt:\n{head}"
     );
 
-    let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
-    assert!(
-        ops_log.contains("explicit_baseline_rebased_to_head"),
-        "strict finalize should log that the stale exchange baseline was rebased to HEAD:\n{ops_log}"
-    );
-
     agent_doc()
         .current_dir(tmp.path())
         .args(["session-check", doc.to_str().unwrap()])
@@ -1604,7 +1505,7 @@ fn finalize_rejects_status_only_response_for_imperative_directive() {
     init_git_repo(tmp.path(), &doc);
 
     let original = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &original);
+    checkpoint_baseline(tmp.path(), &original);
     let edited = original.replace(
         "❯ Please reply\n",
         "❯ Please reply\n\ndo #6zyp. run tests. build + install. commit + push\n",
@@ -1617,8 +1518,6 @@ fn finalize_rejects_status_only_response_for_imperative_directive() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: test — gpt-5\nIn progress. Continuing now.\n<!-- /patch:exchange -->\n",
@@ -1642,7 +1541,7 @@ fn finalize_rejects_status_only_response_for_natural_language_pending_task() {
     init_git_repo(tmp.path(), &doc);
 
     let original = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &original);
+    checkpoint_baseline(tmp.path(), &original);
     let edited = original.replace(
         "<!-- agent:backlog -->\n<!-- /agent:backlog -->\n",
         "<!-- agent:backlog -->\n- [ ] [#n8q4] Fix the cross-repo `no-permissions-bypass` miss now dominating benchmark MAE\n<!-- /agent:backlog -->\n",
@@ -1655,8 +1554,6 @@ fn finalize_rejects_status_only_response_for_natural_language_pending_task() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: test — gpt-5\nI’m starting #n8q4 now. First pass is underway.\n<!-- /patch:exchange -->\n",
@@ -1744,7 +1641,6 @@ fn finalize_no_followups_records_closeout_intent_without_visible_guard_marker() 
 fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
-    fs::create_dir_all(tmp.path().join(".agent-doc/state/cycles")).unwrap();
     let doc = tmp.path().join("session.md");
     let committed = session_template_doc_content()
         .replace(
@@ -1761,7 +1657,6 @@ fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
         "❯ Please update the backlog.\n<!-- agent:boundary:1234abcd -->",
     );
     fs::write(&doc, &current).unwrap();
-    let baseline = write_baseline(tmp.path(), &current);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -1777,13 +1672,7 @@ fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
 
     agent_doc()
         .current_dir(tmp.path())
-        .args([
-            "finalize",
-            doc.to_str().unwrap(),
-            "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
-        ])
+        .args(["finalize", doc.to_str().unwrap(), "--force-disk"])
         .write_stdin(response)
         .assert()
         .failure()
@@ -1818,8 +1707,6 @@ fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--pending-add",
             "id=rec1 Regression coverage follow-up",
         ])
@@ -1900,7 +1787,6 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_at_top() {
 fn finalize_next_steps_pending_adds_keep_priority_order_and_status_top() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
-    fs::create_dir_all(tmp.path().join(".agent-doc/state/cycles")).unwrap();
     let doc = tmp.path().join("session.md");
     fs::write(
         &doc,
@@ -2300,7 +2186,7 @@ fn finalize_fails_closed_on_concurrent_prompt_added_after_baseline() {
     let (tmp, doc) = setup_session_stream_doc();
     init_git_repo(tmp.path(), &doc);
     let baseline_content = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
     agent_doc()
         .current_dir(tmp.path())
         .args(["preflight", doc.to_str().unwrap()])
@@ -2320,8 +2206,6 @@ fn finalize_fails_closed_on_concurrent_prompt_added_after_baseline() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--stream",
         ])
         .write_stdin(
@@ -2365,7 +2249,7 @@ fn finalize_forward_merges_late_comment_tail_edit_outside_exchange() {
     fs::write(&doc, shaped).unwrap();
     init_git_repo(tmp.path(), &doc);
     let baseline_content = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
     agent_doc()
         .current_dir(tmp.path())
         .args(["preflight", doc.to_str().unwrap()])
@@ -2382,8 +2266,6 @@ fn finalize_forward_merges_late_comment_tail_edit_outside_exchange() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--stream",
         ])
         .write_stdin(
@@ -2430,7 +2312,7 @@ fn finalize_preserves_current_duplicate_prompt_html_comment_body() {
     fs::write(&doc, baseline_shaped).unwrap();
     init_git_repo(tmp.path(), &doc);
     let baseline_content = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
     agent_doc()
         .current_dir(tmp.path())
         .args(["preflight", doc.to_str().unwrap()])
@@ -2448,8 +2330,6 @@ fn finalize_preserves_current_duplicate_prompt_html_comment_body() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--stream",
         ])
         .write_stdin(
@@ -2482,7 +2362,7 @@ fn finalize_ignores_concurrent_duplicate_prompt_comment_for_session_check() {
     fs::write(&doc, baseline_shaped).unwrap();
     init_git_repo(tmp.path(), &doc);
     let baseline_content = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
     agent_doc()
         .current_dir(tmp.path())
         .args(["preflight", doc.to_str().unwrap()])
@@ -2502,8 +2382,6 @@ fn finalize_ignores_concurrent_duplicate_prompt_comment_for_session_check() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--stream",
         ])
         .write_stdin(
@@ -2562,7 +2440,7 @@ fn finalize_preserves_compacted_exchange_ipc_scratch_comment() {
     fs::write(&doc, baseline_shaped).unwrap();
     init_git_repo(tmp.path(), &doc);
     let baseline_content = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
     agent_doc()
         .current_dir(tmp.path())
         .args(["preflight", doc.to_str().unwrap()])
@@ -2587,8 +2465,6 @@ fn finalize_preserves_compacted_exchange_ipc_scratch_comment() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--stream",
         ])
         .write_stdin(
@@ -2645,7 +2521,7 @@ fn finalize_preserves_baseline_prompt_html_comment_body() {
     fs::write(&doc, shaped).unwrap();
     init_git_repo(tmp.path(), &doc);
     let baseline_content = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
     agent_doc()
         .current_dir(tmp.path())
         .args(["preflight", doc.to_str().unwrap()])
@@ -2658,8 +2534,6 @@ fn finalize_preserves_baseline_prompt_html_comment_body() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--stream",
         ])
         .write_stdin(
@@ -2706,7 +2580,7 @@ fn finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head(
         .assert()
         .success();
     let baseline_content = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -2714,8 +2588,6 @@ fn finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head(
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--done",
             "head",
             "--pending-add",
@@ -2761,7 +2633,7 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_in_active_go_queue() {
         .assert()
         .success();
     let baseline_content = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -2769,8 +2641,6 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_in_active_go_queue() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--done",
             "head",
             "--pending-add",
@@ -2835,7 +2705,7 @@ fn finalize_pending_add_back_appends_to_active_go_queue() {
         .assert()
         .success();
     let baseline_content = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -2843,8 +2713,6 @@ fn finalize_pending_add_back_appends_to_active_go_queue() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--done",
             "head",
             "--backlog-add-back",
@@ -2891,7 +2759,7 @@ fn finalize_icebox_add_back_does_not_append_to_active_go_queue() {
         .assert()
         .success();
     let baseline_content = fs::read_to_string(&doc).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -2899,8 +2767,6 @@ fn finalize_icebox_add_back_does_not_append_to_active_go_queue() {
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--done",
             "head",
             "--icebox-add-back",
@@ -2947,15 +2813,13 @@ fn finalize_consumes_first_queue_prompt_after_commit() {
         "❯ do #fix1\n<!-- agent:boundary:1234abcd -->",
     );
     fs::write(&doc, current).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--force-disk",
         ])
         .write_stdin(
@@ -2996,7 +2860,7 @@ fn finalize_skips_queue_consumption_when_unrelated_prompt_is_already_in_baseline
     fs::write(&doc, &baseline_content).unwrap();
     init_git_repo(tmp.path(), &doc);
 
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
 
     agent_doc()
         .current_dir(tmp.path())
@@ -3004,8 +2868,6 @@ fn finalize_skips_queue_consumption_when_unrelated_prompt_is_already_in_baseline
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: #next-steps — gpt-5\nTop backlog item remains unchanged.\n<!-- /patch:exchange -->\n",
@@ -3039,15 +2901,13 @@ fn finalize_consumes_synthetic_queue_prompt_when_response_topic_targets_head_id(
     );
     fs::write(&doc, &content).unwrap();
     init_git_repo(tmp.path(), &doc);
-    let baseline = write_baseline(tmp.path(), &content);
+    checkpoint_baseline(tmp.path(), &content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--force-disk",
         ])
         .write_stdin(
@@ -3099,15 +2959,13 @@ fn finalize_echoes_consumed_free_text_queue_prompt_into_response() {
     );
     fs::write(&doc, &content).unwrap();
     init_git_repo(tmp.path(), &doc);
-    let baseline = write_baseline(tmp.path(), &content);
+    checkpoint_baseline(tmp.path(), &content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--force-disk",
         ])
         .write_stdin(
@@ -3159,15 +3017,13 @@ fn finalize_skips_queue_consumption_when_user_prompt_diff_targets_other_work() {
         "❯ Continue with plan-auto-queue-continuation-after-finalize.md\n<!-- agent:boundary:1234abcd -->",
     );
     fs::write(&doc, current).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: continuation — gpt-5\nImplemented and verified.\n<!-- /patch:exchange -->\n",
@@ -3215,15 +3071,13 @@ fn finalize_keeps_free_text_queue_head_when_cycle_answers_foreign_exchange_promp
         "❯ Which module owns queue consumption?\n<!-- agent:boundary:1234abcd -->",
     );
     fs::write(&doc, current).unwrap();
-    let baseline = write_baseline(tmp.path(), &content);
+    checkpoint_baseline(tmp.path(), &content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: which module owns queue consumption — gpt-5\nwrite.rs owns it.\n<!-- /patch:exchange -->\n",
@@ -3257,15 +3111,13 @@ fn finalize_consumes_queue_prompt_after_dispatch_directive() {
         "❯ do [#has9]\n<!-- agent:boundary:1234abcd -->",
     );
     fs::write(&doc, current).unwrap();
-    let baseline = write_baseline(tmp.path(), &content);
+    checkpoint_baseline(tmp.path(), &content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--force-disk",
         ])
         .write_stdin(
@@ -3308,15 +3160,13 @@ fn finalize_drains_queue_and_clears_active_on_last_prompt() {
         "❯ describe the project\n<!-- agent:boundary:1234abcd -->",
     );
     fs::write(&doc, current).unwrap();
-    let baseline = write_baseline(tmp.path(), single_prompt);
+    checkpoint_baseline(tmp.path(), single_prompt);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--force-disk",
         ])
         .write_stdin(
@@ -3359,15 +3209,13 @@ fn finalize_drains_queue_and_removes_dispatch_directive_on_last_prompt() {
         "❯ do [#has9]\n<!-- agent:boundary:1234abcd -->",
     );
     fs::write(&doc, current).unwrap();
-    let baseline = write_baseline(tmp.path(), content);
+    checkpoint_baseline(tmp.path(), content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--force-disk",
         ])
         .write_stdin(
@@ -3410,15 +3258,13 @@ fn finalize_consumes_contiguous_queue_items_resolved_by_done_ids() {
         "❯ Handle the whole queued batch in this response.\n<!-- agent:boundary:1234abcd -->",
     );
     fs::write(&doc, current).unwrap();
-    let baseline = write_baseline(tmp.path(), baseline_content);
+    checkpoint_baseline(tmp.path(), baseline_content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--force-disk",
             "--done",
             "cspe",
@@ -3479,15 +3325,13 @@ fn finalize_consumes_done_id_queue_items_interspersed_with_priority_prompt() {
             &reordered_queue,
         );
     fs::write(&doc, current).unwrap();
-    let baseline = write_baseline(tmp.path(), &baseline_content);
+    checkpoint_baseline(tmp.path(), &baseline_content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
             "--force-disk",
             "--done",
             "cspe",
@@ -3532,15 +3376,13 @@ fn finalize_does_not_consume_when_queue_inactive() {
     fs::write(&doc, inactive).unwrap();
     init_git_repo(tmp.path(), &doc);
 
-    let baseline = write_baseline(tmp.path(), inactive);
+    checkpoint_baseline(tmp.path(), inactive);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nThe project is a CLI tool for interactive document sessions.\n<!-- /patch:exchange -->\n",
@@ -3556,7 +3398,7 @@ fn finalize_does_not_consume_when_queue_inactive() {
 }
 
 #[test]
-fn finalize_queue_consume_updates_snapshot_atomically() {
+fn finalize_queue_consume_updates_document_and_commit_atomically() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
@@ -3564,26 +3406,18 @@ fn finalize_queue_consume_updates_snapshot_atomically() {
     fs::write(&doc, &content).unwrap();
     init_git_repo(tmp.path(), &doc);
 
-    // Write snapshot so consume_queue_prompt has something to update
-    let snap_dir = tmp.path().join(".agent-doc/snapshots");
-    // Find snapshot path by running agent-doc to create it via the baseline
-    let baseline = write_baseline(tmp.path(), &content);
+    checkpoint_baseline(tmp.path(), &content);
     let current = content.replace(
         "<!-- agent:boundary:1234abcd -->",
         "❯ do #fix1\n<!-- agent:boundary:1234abcd -->",
     );
     fs::write(&doc, current).unwrap();
-    // Also write snapshot manually to match the document
-    // Use agent-doc snapshot path convention — just write the snapshot content
-    // The binary will create the correct snapshot via finalize
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
             "--force-disk",
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: do #fix1 — gpt-5\nChanged paths: src/write.rs.\nCommands: cargo test finalize_queue.\nVerification: passed.\n<!-- /patch:exchange -->\n",
@@ -3598,23 +3432,15 @@ fn finalize_queue_consume_updates_snapshot_atomically() {
         "first prompt marked complete in file"
     );
 
-    // Verify snapshot was also updated — read all .md files in snapshots dir
-    let mut snapshot_updated = false;
-    for entry in fs::read_dir(&snap_dir).unwrap() {
-        let entry = entry.unwrap();
-        if entry.path().extension().is_some_and(|e| e == "md") {
-            let snap = fs::read_to_string(entry.path()).unwrap();
-            if snap.contains("queue") {
-                assert!(
-                    snap.contains("- ~~do #fix1~~"),
-                    "first prompt must also be marked complete in snapshot: {}",
-                    snap
-                );
-                snapshot_updated = true;
-            }
-        }
-    }
-    assert!(snapshot_updated, "snapshot should exist and be updated");
+    let committed = head_blob(tmp.path());
+    assert!(
+        committed.contains("- ~~do #fix1~~"),
+        "the same commit must contain the queue consumption"
+    );
+    assert_eq!(
+        read_cycle_phase(tmp.path(), &doc).as_deref(),
+        Some("committed")
+    );
 }
 
 #[test]
@@ -3626,15 +3452,13 @@ fn finalize_fails_closed_when_active_queue_component_is_missing() {
     fs::write(&doc, content).unwrap();
     init_git_repo(tmp.path(), &doc);
 
-    let baseline = write_baseline(tmp.path(), content);
+    checkpoint_baseline(tmp.path(), content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nResponse text.\n<!-- /patch:exchange -->\n",
@@ -3668,15 +3492,13 @@ fn finalize_freetext_polluted_queue_parses_but_active_empty_queue_still_fails_cl
     fs::write(&doc, content).unwrap();
     init_git_repo(tmp.path(), &doc);
 
-    let baseline = write_baseline(tmp.path(), content);
+    checkpoint_baseline(tmp.path(), content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: describe the project — gpt-5\nResponse text.\n<!-- /patch:exchange -->\n",
@@ -3704,15 +3526,13 @@ fn finalize_keeps_queue_head_when_later_strict_pending_gate_fails() {
     fs::write(&doc, &content).unwrap();
     init_git_repo(tmp.path(), &doc);
 
-    let baseline = write_baseline(tmp.path(), &content);
+    checkpoint_baseline(tmp.path(), &content);
 
     agent_doc()
         .current_dir(tmp.path())
         .args([
             "finalize",
             doc.to_str().unwrap(),
-            "--baseline-file",
-            baseline.to_str().unwrap(),
         ])
         .write_stdin(
             "<!-- patch:exchange -->\n### Re: recommendations — gpt-5\n## Recommendations\n1. Add regression coverage\n2. Update the spec\n<!-- /patch:exchange -->\n",

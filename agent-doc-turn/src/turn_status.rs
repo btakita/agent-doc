@@ -1,6 +1,6 @@
-//! Pure turn-status marker vocabulary and pane-title policy.
+//! Pure turn-status vocabulary and pane-title policy.
 //!
-//! Callers own tmux commands, project-root resolution, and marker file IO.
+//! Callers own tmux commands, project-root resolution, and state.db IO.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,16 +11,10 @@ pub const TURN_ACTIVE_PANE_TITLE: &str = "⟳ agent-doc: turn in progress";
 /// running a stale binary.
 pub const STALE_SUPERVISOR_PANE_MARKER: &str = "⚠ STALE SUPERVISOR";
 
-/// Project-relative path of the readable stale-supervisor marker.
-pub const STALE_SUPERVISOR_MARKER: &str = ".agent-doc/supervisor-stale";
-
-/// Project-relative path of the readable turn-state marker.
-pub const TURN_ACTIVE_MARKER: &str = ".agent-doc/turn-active.json";
-
 /// Self-expiry window. A missed idle hook must not wedge the session busy.
 pub const TURN_ACTIVE_TTL_SECS: u64 = 3600;
 
-/// Readable turn-state marker contents.
+/// Projected turn-state contents.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnActiveMarker {
     /// The tmux pane the turn is running in (`$TMUX_PANE`), best-effort.
@@ -29,12 +23,12 @@ pub struct TurnActiveMarker {
     pub written_at: u64,
 }
 
-/// True when a turn-active marker is inside the freshness window.
+/// True when a turn-active fact is inside the freshness window.
 pub fn turn_active_marker_is_fresh(marker: &TurnActiveMarker, now: u64) -> bool {
     now.saturating_sub(marker.written_at) < TURN_ACTIVE_TTL_SECS
 }
 
-/// True when a turn-active marker belongs to `pane`.
+/// True when a turn-active fact belongs to `pane`.
 pub fn turn_active_marker_matches_pane(marker: &TurnActiveMarker, pane: &str) -> bool {
     marker.pane == pane
 }

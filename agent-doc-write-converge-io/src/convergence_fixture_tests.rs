@@ -15,7 +15,7 @@ impl EditorConvergenceEffects for TestWriteConvergenceEffects {
         super::atomic_write(file, content)
     }
 
-    fn guard_visible_write_idle_and_current(
+    fn guard_visible_write_expected_current(
         &self,
         file: &Path,
         source: &str,
@@ -35,33 +35,8 @@ impl EditorConvergenceEffects for TestWriteConvergenceEffects {
         expected_current: &str,
         source: &str,
     ) -> Result<()> {
-        self.guard_visible_write_idle_and_current(file, source, expected_current)?;
+        self.guard_visible_write_expected_current(file, source, expected_current)?;
         super::atomic_write(file, content)
-    }
-
-    fn cycle_already_committed(&self, _file: &Path) -> Option<String> {
-        None
-    }
-
-    fn log_file_ipc_already_committed(&self, _file: &Path, _cycle_id: &str) {}
-
-    fn cleanup_fallback_patch_files(&self, _file: &Path) {}
-
-    fn file_ipc_patch_rejected(&self, _file: &Path, _patch_id: &str) -> Option<String> {
-        None
-    }
-
-    fn log_file_ipc_proof_failure(
-        &self,
-        file: &Path,
-        patch_id: Option<&str>,
-        invariant: &str,
-        recovery: &str,
-        detail: &str,
-    ) {
-        super::log_ipc_proof_failure_with_recycle(
-            file, "file_ipc", patch_id, invariant, recovery, detail,
-        );
     }
 }
 
@@ -290,49 +265,6 @@ mod core_tests {
     }
 
     #[test]
-    fn try_compact_editor_converge_ignores_quarantined_stale_live_buffer() {
-        // Quarantined sidecars remain on disk for diagnostics but must not re-enter
-        // live-buffer enumeration and block compaction with `editor_id=unknown`.
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
-        let doc = dir.path().join("plan.md");
-        let current = agent_doc_test_support::drift_baseline();
-        let compacted = agent_doc_test_support::drift_content_ours();
-        fs::write(&doc, &current).unwrap();
-        agent_doc_debounce::record_live_buffer_digest_content(&doc.to_string_lossy(), &current)
-            .unwrap();
-        let sidecar = fs::read_dir(agent_doc_dir.join("live-buffer"))
-            .unwrap()
-            .next()
-            .expect("live-buffer sidecar")
-            .unwrap()
-            .path();
-        let stale_name = format!(
-            "{}.stale-test",
-            sidecar.file_name().unwrap().to_string_lossy()
-        );
-        fs::rename(&sidecar, sidecar.with_file_name(stale_name)).unwrap();
-
-        let converged = try_editor_converge(&doc, &compacted, &current, "compact").unwrap();
-        assert!(converged, "quarantined sidecar must not block compaction");
-        assert_eq!(fs::read_to_string(&doc).unwrap(), compacted);
-
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            log.contains("compact_writeback")
-                && log.contains("transport=disk_detached")
-                && log.contains("reason=no_listener"),
-            "quarantined sidecar should resolve through disk authority:\n{log}"
-        );
-        assert!(
-            !log.contains("reason=editor_capability_missing") && !log.contains("editor_id=unknown"),
-            "quarantined sidecar must not trigger the editor capability gate:\n{log}"
-        );
-    }
-
-    #[test]
     fn try_compact_editor_converge_converges_via_editor_ipc_with_listener() {
         // `#jbcompactcrdt`/`#w42v`: with a live JB IPC listener, compaction must
         // converge the compacted document through the editor (`transport=editor_ipc`)
@@ -355,6 +287,7 @@ mod core_tests {
             compacted.clone(),
         );
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         let converged = try_editor_converge(&doc, &compacted, &source, "compact").unwrap();
         assert!(
@@ -449,6 +382,7 @@ mod core_tests {
             target.clone(),
         );
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
         assert!(
@@ -469,130 +403,6 @@ mod core_tests {
             !log.contains("transport=disk_fallback"),
             "a converged queue consume must not also take the disk fallback:\n{log}"
         );
-    }
-
-    #[test]
-    fn queue_consume_socket_status_error_falls_back_to_proven_file_ipc() {
-        // A live editor socket can accept a patch, emit the early accepted
-        // receipt, then reject the terminal apply (`status:rejected`) because
-        // the editor is busy or the socket-side apply path lost its generation
-        // race. That must not authorize a raw disk write, but it should try the
-        // plugin-owned file-IPC queue in the same cycle and accept it only with
-        // visible-write.
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("visible-write")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
-        let doc = dir.path().join("plan.md");
-
-        let source = agent_doc_test_support::queue_consume_convergence_source();
-        let target = agent_doc_test_support::queue_consume_convergence_target();
-        fs::write(&doc, &source).unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            &source,
-            "jetbrains-test-editor",
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
-
-        let listener_root = dir.path().to_path_buf();
-        let _listener = std::thread::spawn(move || {
-            let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                let patch_id = v
-                    .get("patch_id")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("unknown");
-                Some(
-                    serde_json::json!({
-                        "type": "receipt",
-                        "id": patch_id,
-                        "status": "rejected",
-                        "reason": "socket_apply_failed"
-                    })
-                    .to_string(),
-                )
-            });
-        });
-        agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
-
-        let watcher_dir = agent_doc_dir.join("patches");
-        let watcher_doc = doc.clone();
-        let watcher_doc_str = doc_str.clone();
-        let watcher_target = target.clone();
-        let watcher = std::thread::spawn(move || {
-            for _ in 0..40 {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                let Ok(entries) = fs::read_dir(&watcher_dir) else {
-                    continue;
-                };
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_none_or(|e| e != "json") {
-                        continue;
-                    }
-                    let payload_text = fs::read_to_string(&path).unwrap();
-                    let payload: serde_json::Value = serde_json::from_str(&payload_text).unwrap();
-                    let patch_id = payload
-                        .get("patch_id")
-                        .and_then(|value| value.as_str())
-                        .unwrap()
-                        .to_string();
-                    fs::write(&watcher_doc, &watcher_target).unwrap();
-                    agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-                        &watcher_doc_str,
-                        &watcher_target,
-                        "jetbrains-test-editor",
-                        "jetbrains",
-                        "test",
-                        &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-                    )
-                    .unwrap();
-                    agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
-                        &watcher_doc,
-                        &patch_id,
-                        &watcher_target,
-                        "test_file_ipc_watcher",
-                    )
-                    .unwrap();
-                    fs::remove_file(path).unwrap();
-                    return true;
-                }
-            }
-            false
-        });
-
-        let converged = try_editor_converge(&doc, &target, &source, "queue_consume").unwrap();
-        assert!(
-            converged,
-            "socket status:rejected should retry through proven file IPC before failing closed"
-        );
-        assert!(watcher.join().unwrap(), "file IPC watcher saw no patch");
-
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            log.contains("queue_consume_writeback")
-                && log.contains("send_failed")
-                && log.contains("IPC receipt rejected"),
-            "socket receipt rejection should remain auditable:\n{log}"
-        );
-        assert!(
-            log.contains("queue_consume_file_ipc_convergence_attempt")
-                && log.contains("degraded_cause=socket_status_error")
-                && log.contains("transport=file_ipc"),
-            "socket receipt rejection should fall back to proven file IPC:\n{log}"
-        );
-        assert!(
-            !log.contains("transport=disk_fallback"),
-            "socket receipt-rejection fallback must not raw-write behind the plugin:\n{log}"
-        );
-        assert_eq!(fs::read_to_string(&doc).unwrap(), target);
     }
 
     #[test]
@@ -619,7 +429,7 @@ mod core_tests {
         let root = dir.path().to_path_buf();
         let _listener = start_ack_mismatch_then_refresh_listener(&root, stale_ack);
         agent_doc_test_support::wait_for_live_prompt_drift_listener(&root);
-        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
@@ -675,7 +485,7 @@ mod core_tests {
         let root = dir.path().to_path_buf();
         let _listener = start_ack_mismatch_then_refresh_listener(&root, recovered.clone());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(&root);
-        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .expect("queue consume should accept proven node patch plus editor-owned queue edits");
@@ -727,7 +537,7 @@ mod core_tests {
         let root = dir.path().to_path_buf();
         let _listener = start_ack_mismatch_then_refresh_listener(&root, shorter_ack);
         agent_doc_test_support::wait_for_live_prompt_drift_listener(&root);
-        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         converge_document_or_disk(&doc, &target, &source, "pending_write")
             .expect("safe shorter ack should replay the target response through the editor");
@@ -778,7 +588,7 @@ mod core_tests {
         let root = dir.path().to_path_buf();
         let _listener = start_ack_mismatch_then_refresh_listener(&root, user_ack.clone());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(&root);
-        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
@@ -1047,55 +857,10 @@ mod core_tests {
             missing.is_some(),
             "an under-capable reliable registration must remain fail-closed"
         );
-        let signal = agent_doc_dir
-            .join("patches")
-            .join("publish-live-buffer.signal");
+        let signal = agent_doc_dir.join("patches").join("Lazily-current.signal");
         assert!(
             !signal.exists(),
             "the capability guard must not create a sidecar-era live-buffer signal"
-        );
-    }
-
-    #[test]
-    fn converge_document_or_disk_ignores_projection_only_live_buffer_for_detached_disk() {
-        let dir = TempDir::new().unwrap();
-        let agent_doc_dir = dir.path().join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("live-buffer")).unwrap();
-        let doc = dir.path().join("plan.md");
-
-        let source = agent_doc_test_support::queue_consume_convergence_source();
-        let target = agent_doc_test_support::queue_consume_convergence_target();
-        fs::write(&doc, &source).unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            &format!("{source}\noperator typed text\n"),
-            "jetbrains-new",
-            "jetbrains",
-            "0.2.197",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
-
-        assert_eq!(
-            converge_document_or_disk(&doc, &target, &source, "queue_consume").unwrap(),
-            (),
-            "projection-only live-buffer sidecars must not block detached disk authority"
-        );
-        assert_eq!(
-            fs::read_to_string(&doc).unwrap(),
-            target,
-            "sidecar projection must not be treated as live editor authority"
-        );
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            !log.contains("reason=editor_capability_missing"),
-            "capable sidecar must not trip the capability guard:\n{log}"
-        );
-        assert!(
-            log.contains("transport=disk_detached"),
-            "projection-only sidecar should allow detached disk write:\n{log}"
         );
     }
 
@@ -1160,7 +925,7 @@ mod core_tests {
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so
         // the guard fails closed (protects the buffer) rather than treating the
         // ack-without-content listener as the editor-less CLI-only case.
-        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
             .unwrap_err()
@@ -1237,7 +1002,7 @@ mod core_tests {
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
         // `#6b5h`: a real editor is attached — seed a live plugin-owner lease so
         // the guard fails closed on unproven delivery.
-        agent_doc_test_support::seed_live_plugin_owner_lease(doc.to_str().unwrap());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         let err = converge_or_disk_write(&doc, &source, &target, "pending_write")
             .unwrap_err()
@@ -1264,11 +1029,9 @@ mod core_tests {
         );
     }
     #[test]
-    fn converge_document_or_disk_editorless_socket_blocks_without_ack_proof() {
-        // `#6b5h` cutover: a pure-CLI session may see a connectable
-        // controller-hosted socket with NO plugin editor behind it. An
-        // ack-without-content listener still does not prove editor convergence, so
-        // the realtime path fails closed instead of routing the write to disk.
+    fn converge_document_or_disk_ignores_editorless_controller_socket() {
+        // PID-scoped cutover: a controller-hosted socket with no registered
+        // plugin editor is not an editor endpoint and cannot claim authority.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
@@ -1280,34 +1043,22 @@ mod core_tests {
 
         let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
-        // No plugin-owner lease seeded → no live editor endpoint, but the
-        // connectable socket still requires convergence proof.
+        // No Lazily editor registration is seeded. The unrelated controller
+        // socket therefore cannot prevent a detached disk projection.
 
-        let err = converge_document_or_disk(&doc, &target, &source, "queue_consume")
-            .unwrap_err()
-            .to_string();
-        assert!(
-            err.contains("editor convergence is unproven"),
-            "editorless socket without visible-write proof should fail closed: {err}"
-        );
+        converge_document_or_disk(&doc, &target, &source, "queue_consume").unwrap();
 
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
-            source,
-            "unproven editor convergence must not be followed by a disk write"
+            target,
+            "an editorless controller socket must not impersonate editor authority"
         );
         let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             log.contains("queue_consume_writeback")
-                && log.contains("transport=blocked")
-                && log.contains("reason=no_visible_write_receipt")
-                && log.contains("editor_endpoint=absent")
-                && log.contains("action=editor_convergence_required"),
-            "editorless socket must record a fail-closed convergence requirement:\n{log}"
-        );
-        assert!(
-            !log.contains("transport=disk_fallback"),
-            "editorless socket must not route missing ACK proof to disk fallback:\n{log}"
+                && log.contains("transport=disk_detached")
+                && log.contains("reason=no_listener"),
+            "editorless controller socket must record detached projection:\n{log}"
         );
     }
     #[test]
@@ -1484,7 +1235,12 @@ mod core_tests {
         );
         let current = preflight.replace(historical, "");
         fs::write(&doc, &current).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         // Preflight observed the historical response. The operator deleted it
         // before auto-recovery ran, so recovery must not resurrect it while
         // trying to restore the new response.
@@ -1519,7 +1275,12 @@ mod core_tests {
             agent_doc_test_support::drift_baseline()
         );
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
@@ -1533,7 +1294,9 @@ mod core_tests {
         assert!(!recovered.contains("- original backlog wording"));
         assert_eq!(fs::read_to_string(&doc).unwrap(), recovered);
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
             Some(recovered.as_str()),
             "snapshot must advance to the operator-preserving merged document"
         );
@@ -1549,7 +1312,12 @@ mod core_tests {
         let snapshot = agent_doc_test_support::drift_content_ours();
         let fragmented = agent_doc_test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         // The drift guard fired this cycle and adopted content_ours.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
@@ -1583,7 +1351,12 @@ mod core_tests {
         let snapshot = agent_doc_test_support::drift_content_ours();
         let fragmented = agent_doc_test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
@@ -1593,6 +1366,7 @@ mod core_tests {
             snapshot.clone(),
         );
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert_eq!(
@@ -1644,7 +1418,12 @@ mod core_tests {
         )
         .expect("partial exchange text should be preserved in the target");
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
@@ -1654,6 +1433,7 @@ mod core_tests {
             recovery_target.clone(),
         );
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert_eq!(
@@ -1687,13 +1467,19 @@ mod core_tests {
         let snapshot = agent_doc_test_support::drift_content_ours();
         let fragmented = agent_doc_test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
 
         let _listener = agent_doc_test_support::start_receipt_without_content_listener(dir.path());
         agent_doc_test_support::wait_for_live_prompt_drift_listener(dir.path());
+        agent_doc_test_support::seed_lazily_editor_registration_default(doc.to_str().unwrap());
 
         let recovered = try_auto_recover_live_prompt_drift(&doc, &snapshot, &fragmented).unwrap();
         assert!(
@@ -1731,7 +1517,12 @@ mod core_tests {
         let snapshot = agent_doc_test_support::drift_content_ours();
         let fragmented = agent_doc_test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         // A cycle exists but the drift guard never fired (flag stays false) →
         // not the wedge we own.
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
@@ -1757,7 +1548,12 @@ mod core_tests {
         let snapshot = agent_doc_test_support::drift_content_ours();
         let fragmented = agent_doc_test_support::drift_baseline();
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();
@@ -1809,7 +1605,12 @@ mod core_tests {
         let fragmented =
             agent_doc_test_support::drift_baseline().replace("- do [#fix]\n", "- ~~do [#fix]~~\n");
         fs::write(&doc, &fragmented).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&fragmented))
             .unwrap();
         agent_doc_cycle_state_io::record_ipc_snapshot_adoption_blocked(&doc).unwrap();

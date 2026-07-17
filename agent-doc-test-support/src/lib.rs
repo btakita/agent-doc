@@ -155,26 +155,18 @@ pub fn pane_current_command(iso: &tmux_router::IsolatedTmux, pane: &str) -> Opti
 
 pub fn publish_editor_text_via_crdt_relay(file: &Path, editor_id: &str, content: &str) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    mark_test_local_crdt_relay(&canonical);
+    register_embedded_relay_route(&canonical);
     seed_reliable_sync_editor_registration(
         &canonical,
         editor_id,
         &["operator_text_authority_v1", "lazily_transport_receipts_v1"],
     );
     let canonical_key = canonical.to_string_lossy().to_string();
-    assert!(
-        agent_doc_plugin_owner::try_acquire_plugin_owner(
-            &canonical_key,
-            editor_id,
-            std::process::id(),
-        ),
-        "test setup should acquire a live plugin-owner lease"
-    );
     let identity = format!("{editor_id}:{canonical_key}");
     let (client_id, bootstrap) =
         agent_doc_crdt_relay_io::register_replica_for_file(&canonical, &identity)
             .expect("test editor should register through CRDT relay")
-            .expect("test editor should be attached under plugin-owner authority");
+            .expect("test editor should be attached under Lazily authority");
     let replica = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap)
         .expect("test editor should decode relay bootstrap");
     let replica_text = replica.text();
@@ -185,7 +177,7 @@ pub fn publish_editor_text_via_crdt_relay(file: &Path, editor_id: &str, content:
         &replica.encode_state(),
     )
     .expect("test editor should publish through CRDT relay")
-    .expect("test editor relay update should be accepted under plugin-owner authority");
+    .expect("test editor relay update should be accepted under Lazily authority");
     let _ = spawn_crdt_delivery_pump(canonical, identity, replica);
 }
 
@@ -264,15 +256,8 @@ fn spawn_crdt_delivery_pump(
     })
 }
 
-fn mark_test_local_crdt_relay(file: &Path) {
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
-        .or_else(|| file.parent().map(Path::to_path_buf))
-    else {
-        return;
-    };
-    let agent_doc_dir = project_root.join(".agent-doc");
-    let _ = std::fs::create_dir_all(&agent_doc_dir);
-    let _ = std::fs::write(agent_doc_dir.join("test-local-crdt-relay"), "");
+fn register_embedded_relay_route(file: &Path) {
+    let _ = agent_doc_crdt_relay_io::seed_embedded_relay_for_file(file);
 }
 
 pub fn wait_for_shell(iso: &tmux_router::IsolatedTmux, pane: &str, timeout: Duration) -> bool {
@@ -530,13 +515,13 @@ pub fn wait_for_process_pid(pattern: &str, timeout: Duration) -> u32 {
     panic!("timed out waiting for process matching pattern: {pattern}");
 }
 
-pub fn seed_live_plugin_owner_lease(file: &str) {
+pub fn seed_lazily_editor_registration_default(file: &str) {
     let pid = std::process::id();
-    seed_live_plugin_owner_lease_for_editor(file, &format!("test-editor-{pid}"));
+    seed_lazily_editor_registration(file, &format!("test-editor-{pid}"));
 }
 
-pub fn seed_live_plugin_owner_lease_for_editor(file: &str, editor_id: &str) {
-    seed_live_plugin_owner_lease_without_reliable_sync(file, editor_id);
+pub fn seed_lazily_editor_registration(file: &str, editor_id: &str) {
+    register_embedded_relay_route(Path::new(file));
     seed_reliable_sync_editor_registration(
         Path::new(file),
         editor_id,
@@ -544,29 +529,18 @@ pub fn seed_live_plugin_owner_lease_for_editor(file: &str, editor_id: &str) {
     );
 }
 
-pub fn seed_live_plugin_owner_lease_without_reliable_sync(file: &str, editor_id: &str) {
-    mark_test_local_crdt_relay(Path::new(file));
-    let pid = std::process::id();
-    assert!(
-        agent_doc_plugin_owner::try_acquire_plugin_owner(file, editor_id, pid),
-        "test setup should acquire a live plugin-owner lease"
-    );
-}
-
 /// Model the "phantom editor" state a controller/supervisor recycle leaves
-/// behind: a JB editor genuinely had the document open (a live plugin-owner
-/// lease + a registered CRDT replica), but after the controller recycled the
-/// editor never re-registered its replica. The lease survives — so
-/// `editor_attached()` still reports a live editor — while the recovered hub
+/// behind: an editor genuinely had the document open in Lazily, but after the
+/// controller recycled the editor never re-registered its relay replica. The
+/// durable Open fact survives, so `editor_attached()` remains true while the recovered hub
 /// carries the canonical text with ZERO live replicas (`live_count() == 0`,
 /// delivery converged). This is the exact input to `#stale-lease-cpc-authority`.
 ///
-/// Registers a live replica (which also acquires the plugin-owner lease and marks
-/// the test-local CRDT relay), then deregisters it so the hub keeps the canonical
-/// but reports zero live editors. The lease is left held.
+/// Registers a live replica, then deregisters it so the hub keeps the canonical
+/// but reports zero relay members while Lazily liveness remains open.
 pub fn seed_durable_open_zero_live_replica(file: &Path, editor_id: &str) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    mark_test_local_crdt_relay(&canonical);
+    register_embedded_relay_route(&canonical);
     seed_reliable_sync_editor_registration(
         &canonical,
         editor_id,
@@ -591,6 +565,7 @@ pub fn seed_durable_open_zero_live_replica(file: &Path, editor_id: &str) {
 /// gates without fabricating a filesystem live-buffer projection.
 pub fn seed_reliable_sync_editor_registration(file: &Path, tag: &str, capabilities: &[&str]) {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    register_embedded_relay_route(&canonical);
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let timestamp_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -622,26 +597,25 @@ pub fn seed_reliable_sync_editor_registration(file: &Path, tag: &str, capabiliti
         .lock()
         .unwrap()
         .restore_liveness(&ops);
-    let project_root = agent_doc_project_root_io::project_root_containing(&canonical).unwrap();
-    let outbox = agent_doc_sqlite::reliable_sync_outbox::SqliteOutbox::open(
-        &project_root.join(".agent-doc/reliable_sync_outbox.db"),
-        document_hash.clone(),
+
+    let project_root = canonical
+        .ancestors()
+        .find(|ancestor| ancestor.join(".agent-doc").is_dir())
+        .expect("test document must live under a project .agent-doc directory");
+    let state_db = agent_doc_sqlite::state_store::state_db_path(project_root);
+    let next_epoch = agent_doc_sqlite::reliable_sync_inbox::load(&state_db)
+        .unwrap()
+        .cursors
+        .into_iter()
+        .find(|cursor| cursor.document_hash == document_hash)
+        .map_or(1, |cursor| cursor.ack_through.saturating_add(1));
+    agent_doc_sqlite::reliable_sync_inbox::record_remote_frame(
+        &state_db,
+        &document_hash,
+        next_epoch,
+        Some(&serde_json::to_string(&ops).unwrap()),
     )
     .unwrap();
-    let acked_through = outbox.acked_through();
-    let mut endpoint = agent_doc_reliable_sync_io::push::LivenessPushEndpoint::resuming(
-        document_hash,
-        outbox,
-        acked_through,
-    );
-    endpoint.enqueue(&ops).unwrap();
-    let transport =
-        agent_doc_controller_io::project_controller::RpcLivenessPushTransport::new(&project_root);
-    let progress = endpoint.flush(&transport).unwrap();
-    assert!(
-        !progress.stalled && progress.retained == 0,
-        "test reliable-sync editor registration did not reach controller"
-    );
 }
 
 pub fn patch_with_heading(heading: &str) -> agent_doc_template::PatchBlock {

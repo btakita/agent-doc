@@ -7,8 +7,8 @@
 //!
 //! Members:
 //! - `archive_index` — derived sqlite index over compacted-turn markdown archives.
-//! - `op_log` — durable operation log (actor + causal/Lamport tagging) for the
-//!   operation-scoped drift model (`#op-scoped-drift-1`).
+//! - `op_log` — operation-log tables (actor + causal/Lamport tagging) in the sole
+//!   controller `state.db` for the operation-scoped drift model.
 //! - `state_store` — project-controller actor/lease/dispatch/queue/cycle/
 //!   diagnostic/admin/recovery/layout SQLite state plus the storage and status
 //!   types those queries use.
@@ -16,7 +16,6 @@
 pub mod archive_index;
 pub mod op_log;
 pub mod reliable_sync_inbox;
-pub mod reliable_sync_outbox;
 pub mod state_store;
 
 pub use state_store::{

@@ -1,6 +1,6 @@
 use std::cell::Cell;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 
 use agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts;
@@ -141,7 +141,11 @@ impl agent_doc_git_io::pre_stage_repair::CommitPreStageRepairEffects
     }
 
     fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
-        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
     }
 
     fn log_op(&self, file: &Path, message: &str) {
@@ -245,11 +249,15 @@ impl agent_doc_git_io::guard_marker_cleanup::GuardMarkerCleanupEffects
     for RuntimeGuardMarkerCleanupEffects
 {
     fn load_snapshot(&self, file: &Path) -> Result<Option<String>> {
-        agent_doc_snapshot_io::load(file)
+        agent_doc_snapshot_io::load_document_baseline(file)
     }
 
     fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
-        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
     }
 
     fn read_to_string(&self, file: &Path) -> Result<String> {
@@ -288,8 +296,11 @@ impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects for RuntimeLive
             // deadlock (we ARE the controller, single request-locked).
             return true;
         }
+        if !agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file) {
+            return true;
+        }
         #[cfg(any(test, feature = "test-support"))]
-        if test_local_crdt_relay_enabled(file) {
+        if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
             return test_support_commit_barrier_for_file(file);
         }
         match agent_doc_controller_io::project_controller::commit_barrier_via_controller_model_for_doc(file) {
@@ -321,41 +332,42 @@ impl agent_doc_git_io::live_buffer_guard::LiveBufferGuardEffects for RuntimeLive
     }
 }
 
-#[cfg(any(test, feature = "test-support"))]
-fn test_local_crdt_relay_enabled(file: &Path) -> bool {
-    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file)
-        .or_else(|| file.parent().map(Path::to_path_buf))
-    else {
-        return false;
-    };
-    project_root
-        .join(".agent-doc/test-local-crdt-relay")
-        .is_file()
-}
-
 impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
     for RuntimeBoundaryRepositionEffects
 {
     fn active_run(&self, file: &Path) -> bool {
-        file.canonicalize()
+        agent_doc_repair_io::load_active_pending_response(file)
             .ok()
-            .and_then(|canonical| agent_doc_fs::pending_response_path_for(&canonical).ok())
-            .map(|pending_path| pending_path.exists())
-            .unwrap_or(false)
+            .flatten()
+            .is_some()
     }
 
     fn load_snapshot(&self, file: &Path) -> Result<Option<String>> {
-        agent_doc_snapshot_io::load(file)
+        agent_doc_snapshot_io::load_document_baseline(file)
     }
 
     fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
-        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
     }
 
     fn ipc_listener_active(&self, file: &Path) -> bool {
+        if !agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file) {
+            return false;
+        }
+        let Some(registration) =
+            agent_doc_controller_io::project_controller::live_editor_registration_for_file(file)
+                .ok()
+                .flatten()
+        else {
+            return false;
+        };
         file.canonicalize()
             .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))
-            .map(|root| agent_doc_ipc_io::is_listener_active(&root))
+            .map(|root| agent_doc_ipc_io::is_listener_active_for_pid(&root, registration.pid))
             .unwrap_or(false)
     }
 
@@ -363,27 +375,19 @@ impl agent_doc_git_io::boundary_reposition::BoundaryRepositionEffects
         commit_current_document_content(file, "live_buffer_guard")
     }
 
-    fn queue_file_ipc_reposition_boundary(
+    fn request_editor_boundary_reposition(
         &self,
         file: &Path,
-        committed_boundary_id: Option<&str>,
-        normalize_prefix_lines: &[String],
+        _committed_boundary_id: Option<&str>,
+        _normalize_prefix_lines: &[String],
     ) -> Result<agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery> {
-        match agent_doc_write_ipc_io::queue_file_ipc_reposition_boundary(
-            file,
-            committed_boundary_id,
-            normalize_prefix_lines,
-        )? {
-            agent_doc_write_ipc_io::FileIpcRepositionResult::Queued => {
-                Ok(agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::Queued)
-            }
-            agent_doc_write_ipc_io::FileIpcRepositionResult::DeferredExistingPatch => Ok(
-                agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::DeferredExistingPatch,
-            ),
-            agent_doc_write_ipc_io::FileIpcRepositionResult::Unavailable => {
-                Ok(agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::Unavailable)
-            }
-        }
+        Ok(
+            if agent_doc_write_ipc_io::try_ipc_reposition_boundary(file) {
+                agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::Delivered
+            } else {
+                agent_doc_git_io::boundary_reposition::BoundaryRepositionDelivery::Unavailable
+            },
+        )
     }
 
     fn atomic_write(&self, file: &Path, content: &str) -> Result<()> {
@@ -395,7 +399,11 @@ impl agent_doc_git_io::boundary_invariant::BoundaryInvariantEffects
     for RuntimeBoundaryInvariantEffects
 {
     fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
-        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
     }
 
     fn log_op(&self, file: &Path, message: &str) {
@@ -411,40 +419,37 @@ impl agent_doc_git_io::transient_cleanup::TransientCleanupEffects
     }
 
     fn save_snapshot(&self, file: &Path, content: &str) -> Result<()> {
-        agent_doc_snapshot_io::save(file, content, agent_doc_ops_log_io::log_op)
-    }
-
-    fn save_document_crdt(&self, file: &Path, legacy_state: &[u8], markdown: &str) -> Result<()> {
-        agent_doc_merge_io::save_document_crdt(file, legacy_state, markdown)
-    }
-
-    fn editor_attached(&self, file: &Path) -> bool {
-        // Step 3: share the controller's plane-primary authority so the commit path and
-        // the controller never disagree; the sidecar is only the cold-miss backstop.
-        agent_doc_controller_io::project_controller::crdt_authority_for_file(
-            &file.display().to_string(),
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            content,
+            agent_doc_ops_log_io::log_op,
         )
-        .editor_attached()
     }
 
     fn log_op(&self, file: &Path, message: &str) {
         agent_doc_ops_log_io::log_op(file, message);
     }
 
-    fn project_root_containing(&self, file: &Path) -> Option<PathBuf> {
-        agent_doc_project_root_io::project_root_containing(file)
-    }
-
-    fn ipc_listener_active(&self, project_root: &Path) -> bool {
-        agent_doc_ipc_io::is_listener_active(project_root)
-    }
-
-    fn send_vcs_refresh(&self, project_root: &Path) -> Result<bool> {
-        agent_doc_ipc_io::send_vcs_refresh(project_root)
-    }
-
-    fn write_vcs_refresh_signal(&self, signal_file: &Path) -> Result<()> {
-        Ok(std::fs::write(signal_file, "")?)
+    fn send_vcs_refresh(&self, file: &Path) -> Result<bool> {
+        if !agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(file) {
+            return Ok(false);
+        }
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+        let project_root = agent_doc_project_root_io::resolve_ipc_project_root(&canonical);
+        let registrations =
+            agent_doc_controller_io::project_controller::live_editor_registrations_for_file(file)?;
+        let mut delivered = false;
+        for registration in registrations {
+            if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid) {
+                continue;
+            }
+            delivered |= agent_doc_ipc_io::send_vcs_refresh_to_editor(
+                &project_root,
+                registration.pid,
+                &registration.editor_id,
+            )?;
+        }
+        Ok(delivered)
     }
 }
 
@@ -456,7 +461,9 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
     }
 
     fn load_snapshot(&self, file: &Path) -> Option<String> {
-        agent_doc_snapshot_io::load(file).ok().flatten()
+        agent_doc_snapshot_io::load_document_baseline(file)
+            .ok()
+            .flatten()
     }
 
     fn cycle_is_terminal(&self, file: &Path) -> bool {
@@ -522,10 +529,6 @@ impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects
 
     fn mark_capture_committed(&self, file: &Path, current_content: &str) -> Result<()> {
         agent_doc_capture_io::mark_committed_with_current_content(file, current_content)
-    }
-
-    fn clear_queue_journal(&self, file: &Path) {
-        agent_doc_queue_io::queue_journal::clear(file);
     }
 
     fn reconcile_queue_continuation(
@@ -856,7 +859,7 @@ where
     let timestamp = chrono_timestamp();
     let msg = agent_doc_commit_message_for_file(file, &timestamp);
 
-    let mut snapshot_content = agent_doc_snapshot_io::load(file)?;
+    let mut snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     let mut file_content = commit_current_document_content(file, "commit_initial_current")
         .with_context(|| {
             format!(
@@ -941,7 +944,7 @@ where
         )?
     {
         file_content = recovered;
-        snapshot_content = agent_doc_snapshot_io::load(file)?;
+        snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)?;
     }
     // `#jb-compact-commit-left-uncommitted`: under an authoritative-compaction
     // commit the snapshot loaded above IS the freshly re-asserted compacted
@@ -966,7 +969,7 @@ where
             reason,
             file.display()
         );
-        snapshot_content = agent_doc_snapshot_io::load(file)?;
+        snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)?;
         true
     } else {
         false
@@ -979,12 +982,10 @@ where
     let has_dropped_queue_prompt_evidence = cycle_state_for_commit
         .as_ref()
         .is_some_and(|state| !state.dropped_queue_prompts.is_empty());
-    let active_response_target = captured_response_body_for_commit(
-        file,
-        cycle_state_for_commit.as_ref(),
-    )
-    .and_then(|response_body| {
-        agent_doc_turn::response_text::response_prompt_target_from_re_heading(&response_body)
+    let active_response_body =
+        captured_response_body_for_commit(file, cycle_state_for_commit.as_ref());
+    let active_response_target = active_response_body.as_deref().and_then(|response_body| {
+        agent_doc_turn::response_text::response_prompt_target_from_re_heading(response_body)
     });
     if ipc_snapshot_adoption_blocked
         && let Some(snapshot) = snapshot_content.as_deref()
@@ -1085,20 +1086,52 @@ where
                 active_response_target.as_deref(),
             )
         {
-            eprintln!(
-                "[commit] leaving out-of-band exchange prompt drift unabsorbed for {}",
-                file.display()
-            );
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "snapshot_absorb_skipped_prompt_target file={} reason={} old_snap_len={} new_snap_len={}",
-                    file.display(),
-                    reason,
-                    snap_len,
-                    file_len
-                ),
-            );
+            let captured_response_materialized =
+                active_response_body
+                    .as_deref()
+                    .is_some_and(|response_body| {
+                        agent_doc_turn::response_replay::response_materialized_in_content(
+                            response_body,
+                            &file_content,
+                        )
+                    });
+            if captured_response_materialized {
+                eprintln!(
+                    "[commit] rebasing the captured response onto newer operator prompt drift for {}",
+                    file.display()
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "snapshot_rebased_onto_operator_prompt_current file={} reason={} old_snap_len={} new_snap_len={} captured_response_materialized=true",
+                        file.display(),
+                        reason,
+                        snap_len,
+                        file_len
+                    ),
+                );
+                agent_doc_snapshot_io::checkpoint_document_baseline(
+                    file,
+                    &file_content,
+                    agent_doc_ops_log_io::log_op,
+                )?;
+                snapshot_content = Some(file_content.clone());
+            } else {
+                eprintln!(
+                    "[commit] leaving out-of-band exchange prompt drift unabsorbed for {}",
+                    file.display()
+                );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "snapshot_absorb_skipped_prompt_target file={} reason={} old_snap_len={} new_snap_len={} captured_response_materialized=false",
+                        file.display(),
+                        reason,
+                        snap_len,
+                        file_len
+                    ),
+                );
+            }
         } else if ipc_snapshot_adoption_blocked {
             eprintln!(
                 "[commit] refusing to absorb out-of-band {} mutation after IPC snapshot adoption was blocked for {}",
@@ -1131,7 +1164,11 @@ where
                     file_len
                 ),
             );
-            agent_doc_snapshot_io::save(file, &file_content, agent_doc_ops_log_io::log_op)?;
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                file,
+                &file_content,
+                agent_doc_ops_log_io::log_op,
+            )?;
             snapshot_content = Some(file_content.clone());
         }
     }
@@ -1164,7 +1201,11 @@ where
                 file.display()
             ),
         );
-        agent_doc_snapshot_io::save(file, &cleaned, agent_doc_ops_log_io::log_op)?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &cleaned,
+            agent_doc_ops_log_io::log_op,
+        )?;
         snapshot_content = Some(cleaned);
         snapshot_matches_head = false;
     }
@@ -1240,7 +1281,11 @@ where
                 file_content.len()
             ),
         );
-        agent_doc_snapshot_io::save(file, &file_content, agent_doc_ops_log_io::log_op)?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &file_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
         snapshot_content = Some(file_content.clone());
         snapshot_matches_head = false;
     }
@@ -1297,7 +1342,11 @@ where
                             file_len_after_repair
                         ),
                     );
-                    agent_doc_snapshot_io::save(file, &file_content, agent_doc_ops_log_io::log_op)?;
+                    agent_doc_snapshot_io::checkpoint_document_baseline(
+                        file,
+                        &file_content,
+                        agent_doc_ops_log_io::log_op,
+                    )?;
                     snapshot_content = Some(file_content.clone());
                 } else {
                     eprintln!(
@@ -1325,7 +1374,11 @@ where
             "[commit] WARNING: no snapshot exists for {}. Creating from file content.",
             file.display()
         );
-        agent_doc_snapshot_io::save(file, &file_content, agent_doc_ops_log_io::log_op)?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &file_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
         snapshot_content = Some(file_content.clone());
     }
 
@@ -1419,9 +1472,11 @@ where
                 "[commit] snapshot dropped operator frontmatter key(s) [{}] - restoring from the live document and regenerating the snapshot (#fmdrop)",
                 dropped.join(", ")
             );
-            if let Err(e) =
-                agent_doc_snapshot_io::save(file, &corrected, agent_doc_ops_log_io::log_op)
-            {
+            if let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                file,
+                &corrected,
+                agent_doc_ops_log_io::log_op,
+            ) {
                 eprintln!(
                     "[commit] warning: snapshot regenerate after frontmatter self-heal failed: {e} (non-fatal)"
                 );
@@ -1435,7 +1490,7 @@ where
         ports.boundary_reposition,
         file,
     );
-    if let Ok(Some(reloaded)) = agent_doc_snapshot_io::load(file) {
+    if let Ok(Some(reloaded)) = agent_doc_snapshot_io::load_document_baseline(file) {
         snapshot_content = Some(reloaded);
     }
     file_content = commit_current_document_content(file, "commit_after_boundary_reposition")
@@ -1569,14 +1624,6 @@ where
 
     let mut vcs_refresh_signaled = None;
     if commit_outcome == agent_doc_git_io::commit_result_reporting::CommitCommandOutcome::Success {
-        if agent_doc_git_io::post_commit_cleanup::should_send_post_commit_ipc_reposition(file) {
-            agent_doc_write_ipc_io::try_ipc_reposition_boundary(file);
-        } else {
-            eprintln!(
-                "[commit] skipping IPC boundary reposition: commit changed non-exchange tracked surfaces"
-            );
-        }
-
         vcs_refresh_signaled =
             agent_doc_git_io::transient_cleanup::signal_vcs_refresh(ports.transient_cleanup, file);
 
@@ -1593,15 +1640,14 @@ where
                 Ok(Some(_)) => {}
                 Ok(None) => {
                     if let Err(e) =
-                        agent_doc_git_io::transient_cleanup::refresh_live_closeout_sidecars(
+                        agent_doc_git_io::transient_cleanup::signal_live_closeout_refresh(
                             ports.transient_cleanup,
                             file,
-                            &cleaned,
                             false,
                         )
                     {
                         eprintln!(
-                            "[commit] warning: failed to refresh CRDT sidecars after post-commit cleanup: {}",
+                            "[commit] warning: failed to signal the live closeout refresh after post-commit cleanup: {}",
                             e
                         );
                     }

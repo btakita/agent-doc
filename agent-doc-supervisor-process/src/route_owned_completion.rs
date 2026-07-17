@@ -335,35 +335,23 @@ mod tests {
     }
 
     #[test]
-    fn route_owned_cycle_state_prefers_terminal_projection_over_stale_open_sidecar() {
+    fn route_owned_cycle_state_reads_terminal_state_db_projection() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "body").unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some("body"), Some("body")).unwrap();
-        let sidecar_path = std::fs::read_dir(dir.path().join(".agent-doc/state/cycles"))
-            .unwrap()
-            .next()
-            .expect("cycle state sidecar")
-            .unwrap()
-            .path();
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("body"), Some("body")).unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
-
-        assert!(
-            agent_doc_cycle_state_io::load(&doc)
-                .unwrap()
-                .unwrap()
-                .is_open(),
-            "fixture should leave compatibility sidecar stale and open"
-        );
         let state = load_route_owned_cycle_state(&doc)
             .unwrap()
-            .expect("projection-aware state");
+            .expect("state.db projection");
         assert!(
             !state.is_open(),
-            "route-owned completion should honor terminal closeout projections before sidecars"
+            "route-owned completion should honor the terminal state.db projection"
+        );
+        assert!(
+            !dir.path().join(".agent-doc/state/cycles").exists(),
+            "cycle transitions must not emit compatibility files"
         );
     }
 }

@@ -1,4 +1,4 @@
-//! Owner-pane wedge sidecar I/O.
+//! Owner-pane wedge state-ledger I/O.
 //!
 //! `#recguard-wedge-escape`: persist a small counter for a *wedged*
 //! owner-pane self-invocation loop and let orchestration break it.
@@ -23,57 +23,74 @@
 //! that occasionally self-invokes never escalates.
 
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[cfg(test)]
 use agent_doc_turn::owner_pane_recursion::owner_pane_wedge_threshold_reached;
 use agent_doc_turn::owner_pane_recursion::{OwnerPaneWedgeRecord, record_owner_pane_wedge_fire};
 
-fn wedge_path(file: &Path) -> Result<Option<PathBuf>> {
-    let Some(root) = agent_doc_fs::find_project_root(file) else {
+const OWNER_PANE_WEDGE_STATE_KIND: &str = "owner_pane_wedge";
+
+fn state_identity(file: &Path) -> Result<Option<(std::path::PathBuf, String, String)>> {
+    let canonical = std::fs::canonicalize(file)?;
+    let Some(root) = agent_doc_fs::find_project_root(&canonical) else {
         return Ok(None);
     };
-    let hash = agent_doc_fs::document_state_hash(file)?;
-    Ok(Some(
-        root.join(".agent-doc/owner-pane-wedge-counter")
-            .join(format!("{hash}.json")),
-    ))
+    let hash = agent_doc_fs::document_state_hash(&canonical)?;
+    Ok(Some((root, hash, canonical.to_string_lossy().into_owned())))
 }
 
-fn read_record(path: &Path) -> Option<OwnerPaneWedgeRecord> {
-    let bytes = std::fs::read(path).ok()?;
-    serde_json::from_slice(&bytes).ok()
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Record one owner-pane self-invocation guard fire for `head` and return the
 /// new consecutive count. A new head resets the count to 1. Best-effort: if the
-/// project root or sidecar is unavailable the call still reports `1` so the
+/// project root or ledger is unavailable the call still reports `1` so the
 /// caller falls through to the normal fail-closed diagnostic.
 pub fn record(file: &Path, head: &str) -> Result<u32> {
-    let Some(path) = wedge_path(file)? else {
+    let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
         return Ok(1);
     };
-    let prior = read_record(&path);
+    let mut conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let tx = conn.transaction()?;
+    let prior = agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
+        &tx,
+        &document_hash,
+        OWNER_PANE_WEDGE_STATE_KIND,
+    )?
+    .and_then(|state| serde_json::from_str::<OwnerPaneWedgeRecord>(&state.payload_json).ok());
     let record = record_owner_pane_wedge_fire(prior.as_ref(), head);
     let count = record.count;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, serde_json::to_vec(&record)?)?;
+    agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
+        &tx,
+        &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
+            document_hash,
+            state_kind: OWNER_PANE_WEDGE_STATE_KIND.to_string(),
+            canonical_path,
+            payload_json: serde_json::to_string(&record)?,
+            updated_at_ms: now_ms(),
+        },
+    )?;
+    tx.commit()?;
     Ok(count)
 }
 
-/// Clear the wedge counter (after a halt, or once the head advances). Best-effort
-/// — a missing sidecar is success, not an error.
+/// Clear the wedge counter (after a halt, or once the head advances).
 pub fn clear(file: &Path) -> Result<()> {
-    let Some(path) = wedge_path(file)? else {
+    let Some((root, document_hash, _)) = state_identity(file)? else {
         return Ok(());
     };
-    match std::fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.into()),
-    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_sqlite::state_store::clear_document_runtime_state_in_db(
+        &conn,
+        &document_hash,
+        OWNER_PANE_WEDGE_STATE_KIND,
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

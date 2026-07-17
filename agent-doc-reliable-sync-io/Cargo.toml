@@ -1,8 +1,8 @@
 [package]
 name = "agent-doc-reliable-sync-io"
-version = "0.34.174"
+version = "0.34.175"
 edition = "2024"
-description = "Unix-domain-socket carrier for lazily's reliable-sync plane (#lzsync) — implements IpcSink/IpcSource over agent-doc's existing controller socket (sidecar-retirement Phase 3A)"
+description = "Unix-domain-socket carrier for Lazily reliable-sync intent and visibility receipts"
 license = "MIT"
 repository = "https://github.com/btakita/agent-doc"
 publish = false
@@ -11,12 +11,13 @@ publish = false
 name = "agent_doc_reliable_sync_io"
 
 [dependencies]
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.174" }
-agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.174" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.174" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.175" }
+agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.34.175" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.34.175" }
 anyhow = "1"
 base64 = "0.22"
-lazily = { version = "0.40.0", features = ["ipc", "ipc-msgpack", "serde"] }
+lazily = { version = "0.41.0", features = ["ipc", "ipc-msgpack", "serde"] }
+libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

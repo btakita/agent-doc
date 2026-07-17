@@ -4,6 +4,9 @@ use anyhow::Result;
 use std::path::Path;
 use std::time::Duration;
 
+const PREFLIGHT_AUTO_GC_SCOPE: &str = "preflight_auto_gc";
+const PROJECT_SCOPE_ID: &str = "project";
+
 struct PreflightGcControllerEffects;
 
 impl agent_doc_gc_io::GcControllerEffects for PreflightGcControllerEffects {
@@ -120,7 +123,7 @@ fn run_auto_gc(root: &Path) -> Result<agent_doc_gc_io::GcResult> {
 /// Run the lightweight preflight auto-GC path.
 ///
 /// Stale starting actors are checked every preflight. The broader GC pass is
-/// stamp-gated to once per day under `.agent-doc/gc.stamp`.
+/// gated to once per day by the project coordination state in `state.db`.
 pub fn run_preflight_auto_gc(file: &Path) {
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let Some(root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
@@ -141,15 +144,14 @@ pub fn run_preflight_auto_gc(file: &Path) {
         Ok(_) => {}
         Err(e) => eprintln!("[preflight] actor gc warning: {}", e),
     }
-    let stamp = root.join(".agent-doc/gc.stamp");
-    let needs_gc = match std::fs::metadata(&stamp) {
-        Ok(meta) => meta
-            .modified()
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-            .map(|age| age > Duration::from_secs(86400))
-            .unwrap_or(true),
-        Err(_) => true,
+    let now = current_epoch_secs();
+    let needs_gc = match latest_auto_gc_at(&root) {
+        Ok(Some(timestamp)) => now.saturating_sub(timestamp) > 86_400,
+        Ok(None) => true,
+        Err(error) => {
+            eprintln!("[preflight] gc state warning: {error}");
+            true
+        }
     };
     if needs_gc {
         eprintln!("[preflight] step 0a: auto-gc");
@@ -158,9 +160,46 @@ pub fn run_preflight_auto_gc(file: &Path) {
                 if result.deleted > 0 {
                     eprintln!("[preflight] gc: {} files cleaned", result.deleted);
                 }
-                let _ = std::fs::write(&stamp, "");
+                if let Err(error) = record_auto_gc_run(&root, now) {
+                    eprintln!("[preflight] gc state warning: {error}");
+                }
             }
             Err(e) => eprintln!("[preflight] gc warning: {}", e),
         }
     }
+}
+
+pub fn record_auto_gc_run(root: &Path, timestamp: u64) -> Result<()> {
+    let canonical = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let conn = agent_doc_sqlite::state_store::open_state_db(&canonical)?;
+    agent_doc_sqlite::state_store::upsert_coordination_lease_in_db(
+        &conn,
+        &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+            scope_kind: PREFLIGHT_AUTO_GC_SCOPE.to_string(),
+            scope_id: PROJECT_SCOPE_ID.to_string(),
+            holder: canonical.display().to_string(),
+            holder_pid: None,
+            heartbeat_secs: timestamp,
+        },
+    )
+}
+
+fn latest_auto_gc_at(root: &Path) -> Result<Option<u64>> {
+    let canonical = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let conn = agent_doc_sqlite::state_store::open_state_db(&canonical)?;
+    Ok(
+        agent_doc_sqlite::state_store::load_coordination_lease_from_db(
+            &conn,
+            PREFLIGHT_AUTO_GC_SCOPE,
+            PROJECT_SCOPE_ID,
+        )?
+        .map(|lease| lease.heartbeat_secs),
+    )
+}
+
+fn current_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }

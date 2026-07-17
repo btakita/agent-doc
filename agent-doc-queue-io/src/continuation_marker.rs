@@ -1,7 +1,7 @@
-//! Durable queue-continuation marker storage.
+//! Durable queue-continuation state.
 //!
-//! This module owns queue sidecar paths, serialization, and idempotent marker
-//! cleanup. Callers own continuation detection, actor-ownership gates, and any
+//! This module stores continuation facts in the project state ledger. Callers
+//! own continuation detection, actor-ownership gates, and any
 //! higher-level retry/scan orchestration.
 
 use std::path::{Path, PathBuf};
@@ -12,9 +12,9 @@ use agent_doc_queue::queue_continuation::QueueContinuation;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-const QUEUE_CONTINUATIONS_DIR: &str = ".agent-doc/queue-continuations";
+const QUEUE_CONTINUATION_STATE_KIND: &str = "continuation";
 
-/// Durable on-disk proof that a closed-out document still owes an auto-queue
+/// Durable ledger proof that a closed-out document still owes an auto-queue
 /// continuation. Survives missing Codex hook session state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContinuationMarker {
@@ -51,17 +51,14 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn sidecar_path(file: &Path, dir: &str) -> Result<Option<PathBuf>> {
+fn state_identity(file: &Path) -> Result<Option<(PathBuf, String, String)>> {
     let Some(root) = agent_doc_fs::find_project_root(file) else {
         return Ok(None);
     };
     let hash = agent_doc_hash::path_hash(file)
         .with_context(|| format!("canonicalize document path for hash: {}", file.display()))?;
-    Ok(Some(root.join(dir).join(format!("{hash}.json"))))
-}
-
-pub fn continuation_marker_path(file: &Path) -> Result<Option<PathBuf>> {
-    sidecar_path(file, QUEUE_CONTINUATIONS_DIR)
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    Ok(Some((root, hash, canonical.to_string_lossy().into_owned())))
 }
 
 pub fn write_continuation_marker(
@@ -69,12 +66,9 @@ pub fn write_continuation_marker(
     continuation: &QueueContinuation,
     source_command: &str,
 ) -> Result<()> {
-    let Some(path) = continuation_marker_path(file)? else {
+    let Some((_, _, _)) = state_identity(file)? else {
         return Ok(());
     };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-    }
     // Preserve the last continuation request across reconciles so the Stop-hook
     // non-advancing-head guard still works after a re-detect.
     let last_requested_head =
@@ -88,33 +82,42 @@ pub fn write_continuation_marker(
         commit_head: head_oid(file),
         last_requested_head,
     };
-    let json = serde_json::to_string_pretty(&marker).context("serialize continuation marker")?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
+    save_marker(file, &marker)
 }
 
 pub fn clear_continuation_marker(file: &Path) -> Result<()> {
-    let Some(path) = continuation_marker_path(file)? else {
+    let Some((root, document_hash, _)) = state_identity(file)? else {
         return Ok(());
     };
-    remove_marker_file(&path)
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+        &conn,
+        &document_hash,
+        QUEUE_CONTINUATION_STATE_KIND,
+    )?;
+    Ok(())
 }
 
 pub fn load_continuation_marker(file: &Path) -> Result<Option<ContinuationMarker>> {
-    let Some(path) = continuation_marker_path(file)? else {
+    let Some((root, document_hash, _)) = state_identity(file)? else {
         return Ok(None);
     };
-    match std::fs::read_to_string(&path) {
-        Ok(content) => Ok(serde_json::from_str(&content).ok()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
-    }
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    let Some(record) = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+        &conn,
+        &document_hash,
+        QUEUE_CONTINUATION_STATE_KIND,
+    )?
+    else {
+        return Ok(None);
+    };
+    Ok(serde_json::from_str(&record.payload_json).ok())
 }
 
 /// Scan roots for the first marker the caller confirms is still valid.
 ///
-/// Owns marker directory traversal, JSON reads, invalid-marker skips,
-/// document-level dedupe, and stale marker cleanup. Callers own live document
+/// Owns ledger scans, invalid-record skips, document-level dedupe, and stale
+/// record cleanup. Callers own live document
 /// detection and actor/owner policy.
 pub fn scan_pending_marker_continuations_for_roots<F>(
     roots: &[PathBuf],
@@ -125,24 +128,17 @@ where
 {
     let mut seen = std::collections::HashSet::new();
     for root in roots {
-        let dir = root.join(QUEUE_CONTINUATIONS_DIR);
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(err) => return Err(err).with_context(|| format!("read {}", dir.display())),
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-                continue;
-            }
-            let Ok(content) = std::fs::read_to_string(&path) else {
+        let conn = agent_doc_sqlite::state_store::open_state_db(root)?;
+        let records = agent_doc_sqlite::state_store::list_queue_document_state_from_db(
+            &conn,
+            QUEUE_CONTINUATION_STATE_KIND,
+        )?;
+        for record in records {
+            let Ok(marker) = serde_json::from_str::<ContinuationMarker>(&record.payload_json)
+            else {
                 continue;
             };
-            let Ok(marker) = serde_json::from_str::<ContinuationMarker>(&content) else {
-                continue;
-            };
-            let doc = PathBuf::from(&marker.file);
+            let doc = PathBuf::from(&record.canonical_path);
             if !seen.insert(doc.clone()) {
                 continue;
             }
@@ -152,7 +148,11 @@ where
                 }
                 ContinuationMarkerScanAction::Skip => {}
                 ContinuationMarkerScanAction::RemoveStale => {
-                    let _ = remove_marker_file(&path);
+                    let _ = agent_doc_sqlite::state_store::clear_queue_document_state_in_db(
+                        &conn,
+                        &record.document_hash,
+                        QUEUE_CONTINUATION_STATE_KIND,
+                    );
                 }
             }
         }
@@ -168,20 +168,24 @@ pub fn record_continuation_requested_head(file: &Path, head_prompt: &str) -> Res
         return Ok(());
     };
     marker.last_requested_head = Some(head_prompt.to_string());
-    let Some(path) = continuation_marker_path(file)? else {
-        return Ok(());
-    };
-    let json = serde_json::to_string_pretty(&marker).context("serialize continuation marker")?;
-    std::fs::write(&path, json).with_context(|| format!("write {}", path.display()))?;
-    Ok(())
+    save_marker(file, &marker)
 }
 
-fn remove_marker_file(path: &Path) -> Result<()> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) => Err(err).with_context(|| format!("remove {}", path.display())),
-    }
+fn save_marker(file: &Path, marker: &ContinuationMarker) -> Result<()> {
+    let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
+        return Ok(());
+    };
+    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+        &conn,
+        &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+            document_hash,
+            state_kind: QUEUE_CONTINUATION_STATE_KIND.to_string(),
+            canonical_path,
+            payload_json: serde_json::to_string(marker).context("serialize continuation marker")?,
+            updated_at_secs: now_secs(),
+        },
+    )
 }
 
 fn head_oid(file: &Path) -> Option<String> {
@@ -246,14 +250,9 @@ mod tests {
     }
 
     #[test]
-    fn scan_pending_marker_skips_noise_and_returns_valid_marker() {
+    fn scan_pending_state_returns_valid_marker() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
-        let marker_dir = root.join(QUEUE_CONTINUATIONS_DIR);
-        std::fs::create_dir_all(&marker_dir).unwrap();
-        std::fs::write(marker_dir.join("note.txt"), "not json").unwrap();
-        std::fs::write(marker_dir.join("bad.json"), "{not json").unwrap();
-
         let doc = write_doc(&root);
         let continuation = continuation();
         write_continuation_marker(&doc, &continuation, "commit").unwrap();
@@ -271,36 +270,12 @@ mod tests {
     }
 
     #[test]
-    fn scan_pending_marker_dedupes_documents() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_path_buf();
-        let doc = write_doc(&root);
-        write_continuation_marker(&doc, &continuation(), "commit").unwrap();
-
-        let marker = load_continuation_marker(&doc).unwrap().unwrap();
-        let duplicate = root.join(QUEUE_CONTINUATIONS_DIR).join("duplicate.json");
-        std::fs::write(&duplicate, serde_json::to_string_pretty(&marker).unwrap()).unwrap();
-
-        let mut calls = 0;
-        let found = scan_pending_marker_continuations_for_roots(&[root], |_, marker_doc, _| {
-            calls += 1;
-            assert_eq!(marker_doc, doc.as_path());
-            Ok(ContinuationMarkerScanAction::Skip)
-        })
-        .unwrap();
-
-        assert!(found.is_none());
-        assert_eq!(calls, 1);
-    }
-
-    #[test]
     fn scan_pending_marker_prunes_stale_marker() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         let doc = write_named_doc(&root, "stale.md");
         write_continuation_marker(&doc, &continuation(), "commit").unwrap();
-        let marker_path = continuation_marker_path(&doc).unwrap().unwrap();
-        assert!(marker_path.exists());
+        assert!(load_continuation_marker(&doc).unwrap().is_some());
 
         let found = scan_pending_marker_continuations_for_roots(&[root], |_, marker_doc, _| {
             assert_eq!(marker_doc, doc.as_path());
@@ -309,6 +284,6 @@ mod tests {
         .unwrap();
 
         assert!(found.is_none());
-        assert!(!marker_path.exists());
+        assert!(load_continuation_marker(&doc).unwrap().is_none());
     }
 }

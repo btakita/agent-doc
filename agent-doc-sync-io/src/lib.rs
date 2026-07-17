@@ -443,7 +443,11 @@ impl TestSyncRuntimeEffects {
 
     fn finish_commit(file: &Path) -> Result<()> {
         let content = std::fs::read_to_string(file)?;
-        agent_doc_snapshot_io::save(file, &content, agent_doc_ops_log_io::log_op)?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )?;
         let _ = Self::commit_file(file)?;
         agent_doc_cycle_state_io::mark_committed(
             file,
@@ -484,11 +488,10 @@ impl SyncRuntimeEffects for TestSyncRuntimeEffects {
     }
 
     fn repair(&self, file: &Path) -> Result<agent_doc_turn::repair::RepairOutcome> {
-        let pending_path = agent_doc_fs::pending_response_path_for(file)?;
-        if !pending_path.exists() {
+        let Some(capture) = agent_doc_capture_io::load_active(file)? else {
             return Ok(agent_doc_turn::repair::RepairOutcome::Noop);
-        }
-        let response = std::fs::read_to_string(&pending_path)?;
+        };
+        let response = capture.response_body;
         let state = agent_doc_cycle_state_io::load(file)?;
         let phase = state
             .as_ref()
@@ -510,7 +513,6 @@ impl SyncRuntimeEffects for TestSyncRuntimeEffects {
                 }
             }
         };
-        let _ = std::fs::remove_file(pending_path);
         Ok(outcome)
     }
 
@@ -536,17 +538,11 @@ impl SyncRuntimeEffects for TestSyncRuntimeEffects {
             response,
             &current_content,
         )?;
-        let pending_path = agent_doc_fs::pending_response_path_for(file)?;
-        if let Some(parent) = pending_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(pending_path, response)?;
         Ok(())
     }
 
     fn session_check_inspect(&self, file: &Path) -> Result<SyncSessionCheckStatus> {
-        let pending_path = agent_doc_fs::pending_response_path_for(file)?;
-        if pending_path.exists() {
+        if agent_doc_capture_io::load_active(file)?.is_some() {
             return Ok(SyncSessionCheckStatus::Interrupted(
                 "pending response remains".to_string(),
             ));

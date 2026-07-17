@@ -7,8 +7,7 @@ use agent_doc_document::write_normalization::cleanup_resolved_backlog_prompts_af
 use agent_doc_ipc_protocol::AlreadyAppliedSnapshotOutcome;
 #[cfg(test)]
 use agent_doc_write_converge_io::{
-    AlreadyAppliedSocketSnapshotContext, cleanup_legacy_ipc_degraded,
-    persist_already_applied_socket_content_ours_snapshot,
+    AlreadyAppliedSocketSnapshotContext, persist_already_applied_socket_content_ours_snapshot,
 };
 
 #[cfg(test)]
@@ -18,18 +17,6 @@ pub(crate) fn record_test_visible_write_receipt(
     content: &str,
     source: &str,
 ) {
-    let file_key = file.to_string_lossy();
-    let _ = agent_doc_debounce::record_live_buffer_synced_content_for_editor_with_capabilities(
-        file_key.as_ref(),
-        content,
-        "test-editor",
-        "test",
-        "test",
-        &[
-            agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-            agent_doc_debounce::LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
-        ],
-    );
     let _ =
         agent_doc_controller_io::project_controller::record_visible_write_commit_candidate_for_file(
             file, patch_id, content, source,
@@ -180,7 +167,12 @@ mod submodule_patch_routing_tests {
             "### Re: reply — gpt-5\nbody\n<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, &updated).unwrap();
-        agent_doc_snapshot_io::save(&doc, &updated, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &updated,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let err = super::complete_required_closeout(&doc, false).unwrap_err();
         let message = err.to_string();
@@ -205,504 +197,6 @@ mod submodule_patch_routing_tests {
     // agent-doc workspace itself is a git repo), so `git rev-parse
     // --show-toplevel` from `/tmp/...` walks up into the source tree. The
     // fallback path is exercised in production by non-git workspaces.
-
-    /// Helper: start a fake socket listener that ACKs every message.
-    /// Returns a handle that keeps the listener alive until dropped.
-    fn start_fake_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
-        let root = project_root.to_path_buf();
-        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-        std::thread::spawn(move || {
-            let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                let patch_id = v
-                    .get("patch_id")
-                    .and_then(|p| p.as_str())
-                    .unwrap_or("unknown");
-                let file_path = v.get("file").and_then(|f| f.as_str()).unwrap_or("");
-                if !file_path.is_empty() {
-                    let file = Path::new(file_path);
-                    let before = std::fs::read_to_string(file).unwrap_or_default();
-                    let patches = v
-                        .get("patches")
-                        .and_then(|value| value.as_array())
-                        .map(|items| {
-                            items
-                                .iter()
-                                .filter_map(|item| {
-                                    let name = item
-                                        .get("component")
-                                        .or_else(|| item.get("name"))
-                                        .and_then(|value| value.as_str())?;
-                                    let content =
-                                        item.get("content").and_then(|value| value.as_str())?;
-                                    Some(agent_doc_template::PatchBlock::new(name, content))
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_default();
-                    let unmatched = v
-                        .get("unmatched")
-                        .and_then(|value| value.as_str())
-                        .unwrap_or("");
-                    let after =
-                        agent_doc_template_io::apply_patches(&before, &patches, unmatched, file)
-                            .unwrap_or(before);
-                    let _ = std::fs::write(file, &after);
-                    crate::ipc::transport::record_test_visible_write_receipt(
-                        file,
-                        patch_id,
-                        &after,
-                        "test_socket_listener",
-                    );
-                }
-                Some(
-                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
-                        .to_string(),
-                )
-            });
-        })
-    }
-
-    fn start_already_applied_listener(project_root: &Path) -> std::thread::JoinHandle<()> {
-        let root = project_root.to_path_buf();
-        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-        std::thread::spawn(move || {
-            let _ = agent_doc_ipc_io::start_listener(&root, |_msg| {
-                Some(
-                    serde_json::json!({
-                        "type": "receipt",
-                        "status": "applied",
-                        "reason": "already_applied"
-                    })
-                    .to_string(),
-                )
-            });
-        })
-    }
-
-    fn start_fixed_visible_write_listener(
-        project_root: &Path,
-        visible_write_content: String,
-    ) -> std::thread::JoinHandle<()> {
-        let root = project_root.to_path_buf();
-        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-        std::thread::spawn(move || {
-            let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                let patch_id = v
-                    .get("patch_id")
-                    .and_then(|p| p.as_str())
-                    .unwrap_or("unknown");
-                if let Some(file_path) = v.get("file").and_then(|f| f.as_str()) {
-                    let _ = std::fs::write(file_path, &visible_write_content);
-                    crate::ipc::transport::record_test_visible_write_receipt_with_relay(
-                        Path::new(file_path),
-                        patch_id,
-                        &visible_write_content,
-                        "test_socket_listener",
-                    );
-                }
-                Some(
-                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
-                        .to_string(),
-                )
-            });
-        })
-    }
-
-    fn start_visible_write_only_listener(
-        project_root: &Path,
-        visible_write_content: String,
-    ) -> std::thread::JoinHandle<()> {
-        let root = project_root.to_path_buf();
-        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-        std::thread::spawn(move || {
-            let _ = agent_doc_ipc_io::start_listener(&root, move |msg| {
-                let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                let patch_id = v
-                    .get("patch_id")
-                    .and_then(|p| p.as_str())
-                    .unwrap_or("unknown");
-                if let Some(file_path) = v.get("file").and_then(|f| f.as_str()) {
-                    crate::ipc::transport::record_test_visible_write_receipt_with_relay(
-                        Path::new(file_path),
-                        patch_id,
-                        &visible_write_content,
-                        "test_socket_listener",
-                    );
-                }
-                Some(
-                    serde_json::json!({"type": "receipt", "status": "applied", "id": patch_id})
-                        .to_string(),
-                )
-            });
-        })
-    }
-
-    /// Helper: wait for the socket listener to become connectable (up to 1s).
-    fn wait_for_listener(project_root: &Path) {
-        for _ in 0..100 {
-            if agent_doc_ipc_io::is_listener_active(project_root) {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        panic!("fake socket listener did not start within 1s");
-    }
-
-    fn seed_live_editor(doc: &Path) {
-        agent_doc_test_support::seed_live_plugin_owner_lease_for_editor(
-            doc.to_str().unwrap(),
-            "visible-write-test-editor",
-        );
-    }
-
-    #[test]
-    fn try_ipc_routes_to_submodule_root_not_superproject() {
-        // Verify that try_ipc routes patches to the SUBMODULE's own .agent-doc/
-        // root, not the superproject. The submodule has its own .agent-doc/ so
-        // the IDE plugin's resolveRootFor and Rust's find_project_root both
-        // return the submodule root, keeping IPC state paths in sync.
-        let parent_dir = TempDir::new().unwrap();
-        let sub_src_dir = TempDir::new().unwrap();
-        let parent = parent_dir.path().canonicalize().unwrap();
-        let sub_src = sub_src_dir.path().canonicalize().unwrap();
-
-        // Bootstrap "remote" submodule repo with one commit.
-        git(&sub_src, &["init"]);
-        std::fs::write(sub_src.join("README.md"), "sub").unwrap();
-        git(&sub_src, &["add", "README.md"]);
-        git(&sub_src, &["commit", "-m", "init"]);
-
-        // Bootstrap parent repo and add the submodule.
-        git(&parent, &["init"]);
-        std::fs::write(parent.join("README.md"), "parent").unwrap();
-        git(&parent, &["add", "README.md"]);
-        git(&parent, &["commit", "-m", "init"]);
-        git(
-            &parent,
-            &[
-                "submodule",
-                "add",
-                sub_src.to_string_lossy().as_ref(),
-                "src/submodule",
-            ],
-        );
-
-        // Submodule has its own .agent-doc/ — mirrors the real sample-app layout.
-        let submodule_root = parent.join("src/submodule");
-        std::fs::create_dir_all(submodule_root.join(".agent-doc/snapshots")).unwrap();
-        std::fs::create_dir_all(submodule_root.join(".agent-doc/crdt")).unwrap();
-
-        // Start a fake socket listener on the SUBMODULE root (not the parent).
-        let _listener = start_fake_listener(&submodule_root);
-        wait_for_listener(&submodule_root);
-
-        // Place a document inside the submodule.
-        let doc = submodule_root.join("test.md");
-        std::fs::write(
-            &doc,
-            "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n",
-        )
-        .unwrap();
-        seed_live_editor(&doc);
-
-        let patch = agent_doc_template::PatchBlock::new("exchange", "test response");
-
-        // try_ipc should route to the submodule's socket listener and succeed.
-        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
-        assert!(
-            result.success,
-            "try_ipc should succeed via socket IPC routed to the submodule root"
-        );
-
-        // Verify the parent did NOT get the patch file.
-        let parent_patches = parent.join(".agent-doc/patches");
-        assert!(
-            !parent_patches.exists(),
-            "parent should NOT receive patch files — submodule routes to its own .agent-doc/"
-        );
-    }
-
-    #[test]
-    fn try_ipc_routes_to_git_toplevel_for_non_submodule() {
-        // Verify that try_ipc routes patches to the git toplevel (not a
-        // superproject) when the document lives in a plain git repo. This
-        // exercises the git_toplevel_at path in agent_doc_project_root_io.
-        let dir = TempDir::new().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-
-        // Initialize a plain git repo (not a submodule of anything).
-        git(&root, &["init"]);
-        std::fs::write(root.join("README.md"), "root").unwrap();
-        git(&root, &["add", "README.md"]);
-        git(&root, &["commit", "-m", "init"]);
-
-        // Create .agent-doc structure.
-        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
-        std::fs::create_dir_all(root.join(".agent-doc/crdt")).unwrap();
-
-        // Start a fake socket listener.
-        let _listener = start_fake_listener(&root);
-        wait_for_listener(&root);
-
-        // Create a document in a subdirectory.
-        std::fs::create_dir_all(root.join("tasks")).unwrap();
-        let doc = root.join("tasks/test.md");
-        std::fs::write(
-            &doc,
-            "---\nsession: test\n---\n\n<!-- agent:exchange -->content<!-- /agent:exchange -->\n",
-        )
-        .unwrap();
-        seed_live_editor(&doc);
-
-        let patch = agent_doc_template::PatchBlock::new("exchange", "response");
-
-        let result = try_ipc(&doc, &[patch], "", None, None, None, None, None).unwrap();
-        assert!(
-            result.success,
-            "try_ipc should succeed via socket IPC routed to the git toplevel"
-        );
-    }
-
-    #[test]
-    fn try_ipc_already_applied_socket_refuses_unreceipted_disk_adoption() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-        for subdir in [
-            "patches",
-            "snapshots",
-            "crdt",
-            "logs",
-            "state/cycles",
-            "claimed-patches",
-        ] {
-            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
-        }
-
-        let doc = root.join("session.md");
-        let baseline = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let content_ours = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let live_already_applied_with_user_edit = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "❯ Follow-up typed while closeout saved\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
-        fs::write(&doc, live_already_applied_with_user_edit).unwrap();
-
-        let _listener = start_already_applied_listener(&root);
-        wait_for_listener(&root);
-        seed_live_editor(&doc);
-
-        let patch = agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: Please reply — gpt-5\n\nAnswered.",
-        );
-        let result = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            Some(baseline),
-            Some(content_ours),
-            None,
-            Some("already-applied-patch"),
-        )
-        .unwrap();
-
-        assert!(
-            !result.success,
-            "an attached editor needs a visible-write receipt before closeout can succeed"
-        );
-        assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(baseline),
-            "already_applied must not advance the snapshot from unreceipted disk content"
-        );
-        assert_eq!(
-            fs::read_to_string(&doc).unwrap(),
-            live_already_applied_with_user_edit,
-            "the existing disk projection must remain untouched"
-        );
-        assert!(
-            !agent_doc_cycle_state_io::load(&doc)
-                .unwrap()
-                .unwrap()
-                .ipc_snapshot_adoption_blocked,
-            "fail-closed receipt handling must not manufacture a snapshot-absorb block"
-        );
-
-        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_file_ipc_or_disk_write")
-                && !log.contains("ipc_socket_already_applied_snapshot")
-                && !log.contains("file_ipc_fallback_skip_already_applied"),
-            "unreceipted already_applied must retain the response without disk adoption:\n{log}"
-        );
-        // Without an authoritative receipt, disk divergence is not proof of user
-        // typing. Leave both the buffer and its projection untouched.
-        assert!(!log.contains("finalize_typing_during_write"));
-    }
-
-    #[test]
-    fn try_ipc_already_applied_socket_adopts_visible_write_content_when_disk_lags() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-        for subdir in [
-            "visible-write",
-            "patches",
-            "snapshots",
-            "crdt",
-            "logs",
-            "state/cycles",
-            "claimed-patches",
-        ] {
-            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
-        }
-
-        let doc = root.join("session.md");
-        let baseline = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let content_ours = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let editor_visible_write_content = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "User typed the next prompt while finalize was running.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
-        let doc_str = doc.to_string_lossy().to_string();
-        let editor_id = "jetbrains-test-editor";
-        agent_doc_debounce::record_live_buffer_digest_content_for_editor_with_capabilities(
-            &doc_str,
-            editor_visible_write_content,
-            editor_id,
-            "jetbrains",
-            "test",
-            &[agent_doc_debounce::OPERATOR_TEXT_AUTHORITY_CAPABILITY],
-        )
-        .unwrap();
-        assert!(
-            agent_doc_debounce::editor_sync_statuses(&doc_str)
-                .iter()
-                .any(|status| status.in_flight),
-            "fixture should start with an in-flight editor epoch"
-        );
-
-        let patch_id = "already-applied-visible-write";
-        crate::ipc::transport::record_test_visible_write_receipt_with_relay(
-            &doc,
-            patch_id,
-            editor_visible_write_content,
-            "test_already_applied",
-        );
-
-        let _listener = start_already_applied_listener(&root);
-        wait_for_listener(&root);
-        seed_live_editor(&doc);
-
-        let patch = agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: Please reply — gpt-5\n\nAnswered.",
-        );
-        let result = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            Some(baseline),
-            Some(content_ours),
-            None,
-            Some(patch_id),
-        )
-        .unwrap();
-
-        assert!(
-            result.success,
-            "already_applied socket response with lazily visible-write receipt is a proven editor write"
-        );
-        assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(editor_visible_write_content),
-            "already_applied must adopt fresh editor visible-write content when disk still lags"
-        );
-        assert_eq!(
-            fs::read_to_string(&doc).unwrap(),
-            editor_visible_write_content,
-            "proven visible-write content must be written through so stale disk cannot later overwrite the editor buffer"
-        );
-        assert!(
-            agent_doc_debounce::editor_sync_statuses(&doc_str)
-                .iter()
-                .all(|status| !status.in_flight),
-            "already_applied visible-write receipt should mark the targeted live-buffer epoch synced"
-        );
-
-        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains("ipc_socket_already_applied_skip_file_fallback")
-                && log.contains("ipc_socket_already_applied_snapshot")
-                && log.contains("snap_source=lazily_visible_write_event")
-                && log.contains("visible_write_live_buffer_sync_skipped")
-                && log.contains("reason=sidecar_removed")
-                && log.contains("visible_write_disk_write_through"),
-            "already_applied visible-write adoption should be auditable:\n{log}"
-        );
-    }
 
     #[test]
     fn already_applied_visible_write_content_does_not_overwrite_newer_visible_operator_edit() {
@@ -754,7 +248,12 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-stale-visible-write";
@@ -786,7 +285,9 @@ mod submodule_patch_routing_tests {
             "a stale receipt must not authorize adoption of a newer disk projection"
         );
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
             Some(baseline),
             "a stale receipt must leave the durable snapshot unchanged"
         );
@@ -798,7 +299,9 @@ mod submodule_patch_routing_tests {
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=visible_write_receipt_superseded_by_worktree")
-                && log.contains("recovery=refresh_editor_cut_without_file_ipc_or_disk_write")
+                && log.contains(
+                    "recovery=refresh_editor_cut_without_secondary_transport_or_disk_write"
+                )
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "stale visible-write receipt rejection should be auditable:\n{log}"
         );
@@ -854,7 +357,12 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-unsaved-live-editor";
@@ -890,7 +398,9 @@ mod submodule_patch_routing_tests {
             AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry
         );
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
             Some(baseline),
             "stale visible-write content must not replace the snapshot when the live editor buffer has moved on"
         );
@@ -902,207 +412,11 @@ mod submodule_patch_routing_tests {
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=visible_write_receipt_superseded_by_live_editor")
-                && log.contains("recovery=refresh_editor_cut_without_file_ipc_or_disk_write")
+                && log.contains(
+                    "recovery=refresh_editor_cut_without_secondary_transport_or_disk_write"
+                )
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "stale live-editor visible-write receipt should fail closed before snapshot adoption:\n{log}"
-        );
-    }
-
-    #[test]
-    fn try_ipc_socket_visible_write_content_writes_through_when_disk_lags() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-        for subdir in [
-            "visible-write",
-            "patches",
-            "snapshots",
-            "crdt",
-            "logs",
-            "state/cycles",
-            "claimed-patches",
-        ] {
-            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
-        }
-
-        let doc = root.join("session.md");
-        let baseline = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let content_ours = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let editor_visible_write_content = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
-
-        let patch_id = "socket-visible-write-disk-lags";
-        let _listener =
-            start_visible_write_only_listener(&root, editor_visible_write_content.to_string());
-        wait_for_listener(&root);
-        seed_live_editor(&doc);
-
-        let patch = agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: Please reply — gpt-5\n\nAnswered.",
-        );
-        let result = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            Some(baseline),
-            Some(content_ours),
-            None,
-            Some(patch_id),
-        )
-        .unwrap();
-
-        assert!(
-            result.success,
-            "socket visible-write receipt should prove delivery"
-        );
-        assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(editor_visible_write_content),
-            "socket visible-write content should remain the snapshot authority"
-        );
-        assert_eq!(
-            fs::read_to_string(&doc).unwrap(),
-            editor_visible_write_content,
-            "proven editor-visible content should write through so stale disk cannot overwrite the live buffer"
-        );
-
-        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains("ipc_socket_visible_write")
-                && log.contains("snap_source=lazily_visible_write_event")
-                && log.contains("visible_write_disk_write_through file=")
-                && !log.contains("visible_write_disk_write_through_blocked"),
-            "socket visible-write CRDT adoption should prove its disk projection:\n{log}"
-        );
-    }
-
-    #[test]
-    fn try_ipc_already_applied_socket_leaves_unreceipted_duplicate_untouched() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path().canonicalize().unwrap();
-        for subdir in [
-            "patches",
-            "snapshots",
-            "crdt",
-            "logs",
-            "state/cycles",
-            "claimed-patches",
-        ] {
-            fs::create_dir_all(root.join(".agent-doc").join(subdir)).unwrap();
-        }
-
-        let doc = root.join("session.md");
-        let baseline = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let content_ours = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let duplicated_live_buffer = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please reply\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "### Re: Please reply — gpt-5\n\n",
-            "Answered.\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
-        fs::write(&doc, duplicated_live_buffer).unwrap();
-
-        let _listener = start_already_applied_listener(&root);
-        wait_for_listener(&root);
-        seed_live_editor(&doc);
-
-        let patch = agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: Please reply — gpt-5\n\nAnswered.",
-        );
-        let result = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            Some(baseline),
-            Some(content_ours),
-            None,
-            Some("already-applied-duplicate"),
-        )
-        .unwrap();
-
-        assert!(
-            !result.success,
-            "already_applied duplicate recovery must remain pending without a visible-write receipt"
-        );
-        assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(baseline),
-            "already_applied duplicate repair must not snapshot unproven dedupe"
-        );
-        let disk = fs::read_to_string(&doc).unwrap();
-        assert_eq!(
-            disk.matches("### Re: Please reply — gpt-5").count(),
-            2,
-            "already_applied duplicate repair must leave the editor-visible duplicate state untouched: {disk}"
-        );
-        let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_file_ipc_or_disk_write")
-                && !log.contains("file_ipc_fallback_skip_already_applied")
-                && !log.contains("ipc_socket_already_applied_snapshot"),
-            "unreceipted duplicate retry should be logged without document mutation:\n{log}"
         );
     }
 
@@ -1133,7 +447,12 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         fs::write(&doc, stale_disk_with_live_prompt).unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
@@ -1155,7 +474,9 @@ mod submodule_patch_routing_tests {
             AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry
         );
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
             Some(baseline),
             "an unproven editor delivery must not advance the durable snapshot"
         );
@@ -1167,7 +488,7 @@ mod submodule_patch_routing_tests {
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_file_ipc_or_disk_write")
+                && log.contains("recovery=retry_without_secondary_transport_or_disk_write")
                 && !log.contains("ipc_socket_already_applied_missing_disk_response_repaired"),
             "missing-receipt already_applied must fail closed without disk repair:\n{log}"
         );
@@ -1200,7 +521,12 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
 
         let patch_id = "already-applied-receipt-missing-response";
@@ -1230,7 +556,9 @@ mod submodule_patch_routing_tests {
             AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry
         );
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
             Some(baseline),
             "a receipt without the response must not advance the snapshot"
         );
@@ -1295,7 +623,12 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         fs::write(&doc, disk_now).unwrap();
         let patch_id = "already-applied-not-idle";
         crate::ipc::transport::record_test_visible_write_receipt_with_relay(
@@ -1359,7 +692,12 @@ mod submodule_patch_routing_tests {
         );
         let content_ours = baseline;
         fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
             &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
@@ -1380,14 +718,16 @@ mod submodule_patch_routing_tests {
             AlreadyAppliedSnapshotOutcome::NeedsAuthoritativeRetry
         );
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .as_deref(),
             Some(baseline),
             "response-less already_applied content_ours must not replace the snapshot"
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_file_ipc_or_disk_write")
+                && log.contains("recovery=retry_without_secondary_transport_or_disk_write")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "response-less already_applied should fail proof without file fallback:\n{log}"
         );
@@ -1407,7 +747,12 @@ mod submodule_patch_routing_tests {
             "<!-- /agent:exchange -->\n"
         );
         fs::write(&doc, content_ours).unwrap();
-        agent_doc_snapshot_io::save(&doc, content_ours, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content_ours,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let outcome = persist_already_applied_socket_content_ours_snapshot(
             &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
@@ -1430,130 +775,10 @@ mod submodule_patch_routing_tests {
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=already_applied_missing_visible_write_receipt")
-                && log.contains("recovery=retry_without_file_ipc_or_disk_write")
+                && log.contains("recovery=retry_without_secondary_transport_or_disk_write")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "empty response probe should fail proof without file fallback:\n{log}"
         );
-    }
-
-    #[test]
-    fn socket_visible_write_content_prompt_duplication_fails_closed_without_editor_repair() {
-        let tmp = TempDir::new().unwrap();
-        let root = tmp.path().canonicalize().unwrap();
-        let agent_doc_dir = root.join(".agent-doc");
-        fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("crdt")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("logs")).unwrap();
-        fs::create_dir_all(agent_doc_dir.join("state").join("cycles")).unwrap();
-
-        let doc = root.join("doc.md");
-        let baseline = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "<!-- agent:boundary:before -->\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let content_ours = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please set the production RESEND_API_KEY\n",
-            "### Re: Production key — gpt-5\n\n",
-            "Done.\n",
-            "<!-- agent:boundary:ours -->\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        let duplicated_visible_write_content = concat!(
-            "---\n",
-            "agent_doc_session: test\n",
-            "agent_doc_format: template\n",
-            "---\n\n",
-            "<!-- agent:exchange patch=append -->\n",
-            "❯ Please set the production RESEND_API_KEY\n",
-            "❯ Please set the production RESEND_API_KEY\n",
-            "### Re: Production key — gpt-5\n\n",
-            "Done.\n",
-            "<!-- agent:boundary:bad -->\n",
-            "<!-- /agent:exchange -->\n"
-        );
-        fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(baseline), Some(baseline)).unwrap();
-
-        let _listener =
-            start_fixed_visible_write_listener(&root, duplicated_visible_write_content.to_string());
-        wait_for_listener(&root);
-        seed_live_editor(&doc);
-
-        let patch = agent_doc_template::PatchBlock::new(
-            "exchange",
-            "### Re: Production key — gpt-5\n\nDone.",
-        );
-        let err = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            Some(baseline),
-            Some(content_ours),
-            None,
-            Some("duplicated-visible-write"),
-        )
-        .unwrap_err();
-
-        assert!(
-            err.to_string().contains("refusing direct document write"),
-            "duplicated visible-write repair must fail closed instead of repairing disk: {err}"
-        );
-        assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().as_deref(),
-            Some(baseline),
-            "duplicated visible-write must not replace the existing snapshot without editor proof"
-        );
-        assert_eq!(
-            fs::read_to_string(&doc).unwrap(),
-            duplicated_visible_write_content,
-            "duplicated visible-write content should remain editor-owned"
-        );
-        assert!(
-            agent_doc_cycle_state_io::load(&doc)
-                .unwrap()
-                .unwrap()
-                .ipc_snapshot_adoption_blocked,
-            "later commit stages must not absorb the rejected duplicate sidecar"
-        );
-        let log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
-        assert!(
-            log.contains("reason=prompt_duplication_in_visible_write")
-                && log.contains("duplicate_prompt_count=1")
-                && log.contains("ipc_visible_repair_retry_required_no_disk_write"),
-            "duplicate visible-write rejection and retry should be logged:\n{log}"
-        );
-        assert!(
-            log.contains("ipc_proof_insufficient")
-                && log.contains("invariant=prompt_duplication_in_visible_write")
-                && log.contains("recovery=content_ours_snapshot_and_visible_repair")
-                && log.contains("recovery=retry_without_disk_write"),
-            "duplicate prompt visible-write receipt should name its failed invariant and recovery:\n{log}"
-        );
-    }
-
-    #[test]
-    fn cleanup_legacy_ipc_degraded_removes_marker() {
-        let dir = TempDir::new().unwrap();
-        let root = dir.path();
-        let marker = root.join(".agent-doc/ipc-degraded");
-        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
-        std::fs::write(&marker, "").unwrap();
-        assert!(marker.exists());
-        cleanup_legacy_ipc_degraded(root);
-        assert!(!marker.exists(), "legacy marker should be removed");
     }
 
     #[test]
@@ -2248,10 +1473,8 @@ Can you preserve the second paragraph too?
 }
 
 #[cfg(test)]
-#[cfg(test)]
 mod late_fallback_patch_guard_tests {
-    use super::try_ipc;
-    use agent_doc_flow_io::closeout::{cleanup_fallback_patch_files, cycle_already_committed};
+    use agent_doc_flow_io::closeout::cycle_already_committed;
     use agent_doc_ipc_protocol::{
         EditorBadStateFingerprint, FullContentRepairRedelivery, IpcDiskRepairReason,
         IpcRepairDecision, IpcSnapshotSource,
@@ -2295,7 +1518,11 @@ mod late_fallback_patch_guard_tests {
     }
 
     impl agent_doc_repair_io::RepairRecoveredQueueHeadEffects for NoopRepairReplayWriteEffects {
-        fn strike_recovered_free_text_queue_head(&self, _file: &Path) -> anyhow::Result<()> {
+        fn strike_recovered_free_text_queue_head(
+            &self,
+            _file: &Path,
+            _expected_head: &str,
+        ) -> anyhow::Result<()> {
             Ok(())
         }
     }
@@ -2528,7 +1755,7 @@ mod late_fallback_patch_guard_tests {
     }
 
     #[test]
-    fn cycle_already_committed_prefers_lazily_projection_over_stale_sidecar() {
+    fn cycle_already_committed_uses_ledger_projection() {
         let tmp = TempDir::new().unwrap();
         let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
         let doc = doc_in_agent_doc_project(&tmp, content);
@@ -2546,13 +1773,9 @@ mod late_fallback_patch_guard_tests {
         )
         .unwrap();
 
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle sidecar path");
-        fs::write(sidecar_path, serde_json::to_string_pretty(&opened).unwrap()).unwrap();
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::Committed
         );
 
         assert_eq!(cycle_already_committed(&doc), Some(opened.cycle_id));
@@ -2567,202 +1790,6 @@ mod late_fallback_patch_guard_tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
 
         assert!(cycle_already_committed(&doc).is_none());
-    }
-
-    #[test]
-    fn cleanup_fallback_patch_files_removes_patch_and_writes_sentinel() {
-        let tmp = TempDir::new().unwrap();
-        let doc =
-            doc_in_agent_doc_project(&tmp, "---\nagent_doc_session: test\n---\n\n## Exchange\n");
-        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        let patch_path = tmp
-            .path()
-            .join(".agent-doc/patches")
-            .join(format!("{hash}.json"));
-        let patch_content = serde_json::json!({
-            "patch_id": "test-patch-123",
-            "type": "patch",
-        });
-        fs::write(
-            &patch_path,
-            serde_json::to_string_pretty(&patch_content).unwrap(),
-        )
-        .unwrap();
-        assert!(patch_path.exists());
-
-        cleanup_fallback_patch_files(&doc);
-
-        assert!(
-            !patch_path.exists(),
-            "fallback patch file should be removed"
-        );
-        let sentinel = tmp
-            .path()
-            .join(".agent-doc/claimed-patches")
-            .join("test-patch-123");
-        assert!(sentinel.exists(), "claimed sentinel should be written");
-    }
-
-    #[test]
-    fn cleanup_fallback_patch_files_noop_when_no_patch() {
-        let tmp = TempDir::new().unwrap();
-        let doc =
-            doc_in_agent_doc_project(&tmp, "---\nagent_doc_session: test\n---\n\n## Exchange\n");
-        cleanup_fallback_patch_files(&doc);
-    }
-
-    #[test]
-    fn try_ipc_marks_committed_cycle_skip_as_not_consumed() {
-        let tmp = TempDir::new().unwrap();
-        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\nlate response\n";
-        let doc = doc_in_agent_doc_project(&tmp, content);
-        init_git_repo(tmp.path());
-        git_commit_file(tmp.path(), "doc.md", content, "commit response");
-
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        agent_doc_cycle_state_io::mark_response_captured(
-            &doc,
-            "test",
-            Some(content),
-            Some(content),
-            "fake-sha",
-            None,
-        )
-        .unwrap();
-        agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
-            .unwrap();
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
-            &doc,
-            "test",
-            Some(content),
-            Some(content),
-        )
-        .unwrap();
-
-        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        let stale_patch_path = tmp
-            .path()
-            .join(".agent-doc/patches")
-            .join(format!("{hash}.json"));
-        fs::write(
-            &stale_patch_path,
-            serde_json::json!({"patch_id": "late-patch-123"}).to_string(),
-        )
-        .unwrap();
-
-        let patch = agent_doc_template::PatchBlock::new("exchange", "late response");
-        let result = try_ipc(
-            &doc,
-            &[patch],
-            "",
-            None,
-            None,
-            None,
-            None,
-            Some("current-patch-456"),
-        )
-        .unwrap();
-
-        assert!(
-            !result.success,
-            "committed-cycle IPC skip must not look like a consumed write"
-        );
-        assert_eq!(result.patch_id, "current-patch-456");
-        assert!(
-            result.skipped_committed_cycle,
-            "caller must be able to stop terminal fallback handling"
-        );
-        assert!(
-            !stale_patch_path.exists(),
-            "stale fallback patch should be removed"
-        );
-        assert!(
-            tmp.path()
-                .join(".agent-doc/claimed-patches/late-patch-123")
-                .exists(),
-            "removed stale patch should be claimed so watchers cannot replay it"
-        );
-
-        let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops_log.contains("late_fallback_patch_rejected"));
-        assert!(ops_log.contains("patch_id=current-patch-456"));
-        assert!(ops_log.contains(
-            "flow=closeout stage=terminal_guard outcome=blocked reason=already_committed"
-        ));
-        assert!(
-            !ops_log.contains("ipc_write_consumed"),
-            "terminal skip must not be logged as an IPC consume"
-        );
-    }
-
-    #[test]
-    fn full_content_ipc_skips_committed_cycle_before_socket_or_file_fallback() {
-        let tmp = TempDir::new().unwrap();
-        let content = "---\nagent_doc_session: test\n---\n\n## Exchange\n";
-        let doc = doc_in_agent_doc_project(&tmp, content);
-
-        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
-        agent_doc_cycle_state_io::mark_response_captured(
-            &doc,
-            "test",
-            Some(content),
-            Some(content),
-            "fake-sha",
-            None,
-        )
-        .unwrap();
-        agent_doc_cycle_state_io::mark_write_applied(&doc, "test", Some(content), Some(content))
-            .unwrap();
-        agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
-            &agent_doc_document_realtime_io::RUNTIME_PIPELINE_FRONTMATTER_EFFECTS,
-            &doc,
-            "test",
-            Some(content),
-            Some(content),
-        )
-        .unwrap();
-
-        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        let stale_patch_path = tmp
-            .path()
-            .join(".agent-doc/patches")
-            .join(format!("{hash}.json"));
-        fs::write(
-            &stale_patch_path,
-            serde_json::json!({"patch_id": "full-content-stale"}).to_string(),
-        )
-        .unwrap();
-
-        let result = try_ipc_full_content(&doc, "stale full-content repair").unwrap();
-
-        assert!(!result, "committed-cycle full-content IPC must be skipped");
-        assert_eq!(
-            fs::read_to_string(&doc).unwrap(),
-            content,
-            "full-content IPC must not dirty an already committed cycle"
-        );
-        assert!(
-            !stale_patch_path.exists(),
-            "stale full-content fallback patch should be removed"
-        );
-        assert!(
-            tmp.path()
-                .join(".agent-doc/claimed-patches/full-content-stale")
-                .exists(),
-            "removed full-content fallback patch should be claimed"
-        );
-
-        let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(ops_log.contains("late_fallback_patch_rejected"));
-        assert!(ops_log.contains("patch_id=full_content"));
-        assert!(ops_log.contains(
-            "flow=closeout stage=terminal_guard outcome=blocked reason=already_committed"
-        ));
-        assert!(
-            !ops_log.contains("socket_full_content"),
-            "full-content socket diagnostic must not be emitted after committed-cycle skip"
-        );
     }
 
     #[test]
@@ -2793,7 +1820,9 @@ mod late_fallback_patch_guard_tests {
             "stale full-content replacement must not overwrite live prompt drift"
         );
         assert!(
-            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .is_none(),
             "failed full-content IPC must not save a snapshot"
         );
         let patch_count = fs::read_dir(agent_doc_dir.join("patches"))
@@ -2852,7 +1881,9 @@ mod late_fallback_patch_guard_tests {
             "stale full-content replacement must preserve the live scratch comment"
         );
         assert!(
-            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .is_none(),
             "failed full-content IPC must not save a snapshot"
         );
         let patch_count = fs::read_dir(agent_doc_dir.join("patches"))
@@ -2933,7 +1964,11 @@ mod late_fallback_patch_guard_tests {
             live,
             "stale response fallback must not overwrite live prompt drift"
         );
-        assert!(agent_doc_snapshot_io::load(&doc).unwrap().is_none());
+        assert!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .is_none()
+        );
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("full_content_ipc_authority_rejected")
@@ -3308,7 +2343,11 @@ mod late_fallback_patch_guard_tests {
             "socket listener must not receive stale full-content payloads"
         );
         assert_eq!(fs::read_to_string(&doc).unwrap(), live);
-        assert!(agent_doc_snapshot_io::load(&doc).unwrap().is_none());
+        assert!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .is_none()
+        );
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
             ops_log.contains("full_content_ipc_authority_rejected")
@@ -3363,7 +2402,9 @@ mod late_fallback_patch_guard_tests {
             "socket full-content IPC must be disabled before payload delivery"
         );
         assert!(
-            agent_doc_snapshot_io::load(&doc).unwrap().is_none(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .is_none(),
             "mismatched socket visible-write must not become the saved snapshot"
         );
         assert_eq!(
@@ -3468,7 +2509,12 @@ Implemented.
             "test setup: duplicated content must actually dedupe"
         );
         fs::write(&doc, &deduped).unwrap();
-        agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &deduped,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let head_before = head_count(root);
         let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc)
@@ -3493,7 +2539,9 @@ Implemented.
             1,
             "committed HEAD must hold the deduped response"
         );
-        let snapshot_after = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert_eq!(
             snapshot_after.matches("### Re: topic — opus-4-7").count(),
             1,
@@ -3522,7 +2570,12 @@ Implemented.
 ";
         git_commit_file(root, "session.md", clean, "add clean");
         let doc = root.join("session.md");
-        agent_doc_snapshot_io::save(&doc, clean, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            clean,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc).unwrap();
         assert!(
@@ -3557,7 +2610,12 @@ Implemented.
         // dedupe. Recovery must refuse so we don't auto-commit unrelated drift.
         let user_edit = original.replace("Implemented.", "Implemented and tested.");
         fs::write(&doc, &user_edit).unwrap();
-        agent_doc_snapshot_io::save(&doc, &user_edit, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &user_edit,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let recovered = agent_doc_repair_runtime_io::recover_dedupe_only_drift(&doc).unwrap();
         assert!(
@@ -3599,7 +2657,12 @@ Implemented.
 
         let deduped = agent_doc_turn::response_replay::dedupe_responses(duplicated);
         fs::write(&doc, &deduped).unwrap();
-        agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &deduped,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let head_before = head_count(root);
         let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(
@@ -3658,7 +2721,12 @@ Implemented.
         let doc = root.join("session.md");
         let deduped = agent_doc_turn::response_replay::dedupe_responses(duplicated);
         fs::write(&doc, &deduped).unwrap();
-        agent_doc_snapshot_io::save(&doc, &deduped, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &deduped,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let head_before = head_count(root);
         let recovered = agent_doc_repair_io::recover_empty_response_for_strict_closeout(

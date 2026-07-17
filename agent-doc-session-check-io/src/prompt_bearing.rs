@@ -39,7 +39,7 @@ pub fn realtime_steering_set_since_turn_baseline(
         }
     }
 
-    let baseline = match agent_doc_snapshot_io::load(file)? {
+    let baseline = match agent_doc_snapshot_io::load_document_baseline(file)? {
         Some(snapshot) => snapshot,
         None => head.unwrap_or_default(),
     };
@@ -71,7 +71,7 @@ pub fn realtime_steering_since_turn_baseline(
     // cycle snapshot exists. The queue path activates independently of the
     // turn baseline, so without a snapshot we fall back to the committed `HEAD`
     // blob and then to an empty baseline for untracked docs.
-    let baseline = match agent_doc_snapshot_io::load(file)? {
+    let baseline = match agent_doc_snapshot_io::load_document_baseline(file)? {
         Some(snapshot) => snapshot,
         None => head.unwrap_or_default(),
     };

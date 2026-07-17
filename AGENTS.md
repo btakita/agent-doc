@@ -51,13 +51,13 @@ Interactive document sessions with AI agents.
 - **Sync lock contention must recover stale orphaned owners** — keep `sync.rs`, `README.md`, `SPEC.md`, and the session/tmux command spec aligned on reaping stale orphaned `agent-doc sync` processes that still hold `.agent-doc/sync.lock`, then retrying lock acquisition before reporting contention.
 - **Fresh session-log ownership beats stale process-tree fallback** — keep `sync.rs`, `README.md`, `SPEC.md`, and the session/tmux command spec aligned on the live-owner precedence rule: prefer path/supervisor proof and the latest open session-log owner before generic same-file process-tree matches, so stale panes cannot steal authority back from a fresh reroute.
 - **A pane never owns a document from a different git repository (`#cross-repo-owner-guard`)** — nearest-`.agent-doc` resolution does NOT isolate a nested git submodule that has no local `.agent-doc/`: `find_project_root` collapses it up into the superproject's `.agent-doc/` keyspace, so every `.agent-doc`-root equality check compares `superproject == superproject` and cannot tell a `src/lazily-rs` submodule pane apart from a superproject `tasks/…` document. That blind spot let a supervisor restart re-attach a submodule agent session onto a superproject document's pane. Owner resolution must draw the durable boundary at the **git repository**: `reject_cross_document_owner_pane` (the single chokepoint for `find_live_owner_pane*` and `find_normal_path_owner_pane*`) rejects any candidate pane whose working-directory `git rev-parse --show-toplevel` differs from the document's git toplevel. Keep it a strict tightening — an unknown toplevel on either side is never foreign, so same-repo owners are never spuriously cold-started — and it also closes the bare-foreign-session gap (`pane_runs_other_document_owner` misses a raw `claude`/`codex` pane with no `.md` in its cmdline). Keep `sync.rs`, `agent-doc-tmux-io` (`pane_current_path`), `specs/08-session-routing.md`, `README.md`, and `SPEC.md` aligned.
-- **Response replay is capture-backed** — final parsed responses must be durably persisted before write/hook emission in `.agent-doc/captures/<doc-hash>/<cycle-id>.json`. Recovery replays the captured response body only when the captured snapshot/file hashes still match the current baseline; otherwise fail closed.
+- **Response replay is transaction-backed** — final parsed responses must be durably persisted in `state.db` before write/hook emission. Recovery resumes the same response-cell intent from its recorded phase and semantically rebases it onto Lazily current text; terminal cycles never expose retained history as an active capture.
 - **Bounded accretion context must anchor to the edited turn** — when session-accretion prompt packing replaces the full exchange tail, `prompt_context.rs` must select the `### Re:` block at the prompt's actual position in `exchange`: enclosing response for inline prompt edits, immediately previous response for tail follow-ups, with older unrelated turns left on-demand.
 - **`respond` is the strict response happy path** — `agent-doc respond <FILE>` (`finalize` compatibility alias) must fail before mutating a non-git document and must not report success unless the cycle reaches `committed`. Keep that contract aligned in `main.rs`, `write.rs`, and the command docs.
 - **Run must recheck after pre-commit repair** — when `git::commit()` repairs an already-committed missed patchback and no prompt-bearing diff remains, `run.rs` must fail before child-agent dispatch and point to `agent-doc write --commit <FILE>` instead of submitting an empty or stale prompt.
 - **Post-commit user follow-ups are not missed-response repair** — when `git::commit()` sees `snapshot == HEAD` plus a later user follow-up prompt, keep that prompt uncommitted for the next cycle and log `post_commit_user_follow_up`; do not label that safe shape as `prior_patchback_without_response_body` or `out_of_band_write`. Keep `git.rs`, `README.md`, `SPEC.md`, and closeout specs aligned.
 - **Direct-exec post-write guard stays explicit** — keep `SKILL.md`, `runbooks/commit.md`, `runbooks/harness-invocation.md`, and `specs/07-commands.md` aligned on the Codex/OpenCode/direct-exec requirement to run `agent-doc session-check <FILE>` after `finalize` or manual `write --commit`, and fail closed if it reports an open cycle, a prompt-only exchange tail with no assistant response, or a likely direct assistant patchback that bypassed the binary write path. The only self-heal exception is already-committed historical snapshot drift proven by `HEAD`.
-- **Optional closeout sidecars stay advisory** — keep `session_check.rs`, `capture.rs`, `cycle_state.rs`, `startup_miss.rs`, `snapshot.rs`, and the docs/specs aligned on the rule that a late `NotFound` while reading optional closeout sidecars is treated as absent state rather than as a transient `ENOENT` failure.
+- **Cold recovery projections never become hot-path authority** — keep session-check, snapshot, and repair code aligned on the rule that `state.db` owns closeout intent/state and Lazily owns the current document. Optional recovery projections may aid audit or reconstruction, but their presence, absence, or freshness must never elect delivery, overwrite an editor buffer, or advance the write state machine.
 - **Codex hook backstop is binary-owned** — keep `src/codex_hook.rs`, `src/skill.rs`, `SKILL.md`, `runbooks/harness-invocation.md`, `README.md`, and `SPEC.md` aligned on the installed `.codex/hooks.json` / `.codex/config.toml` contract: `UserPromptSubmit` tracks the active document, and `Stop` first tries to finish the response cycle deterministically from `last_assistant_message` via the normal repair/write/commit path before falling back to capture-and-block / fail-closed behavior. Empty `last_assistant_message` on an open cycle must still fail closed with diagnostics and tracked-prompt recovery because tool-only/authentication steps (for example MCP OAuth / `authenticate`) are sub-steps, not successful closeout boundaries.
 - **Required SSH drift detection must include bare socket EPERM when SSH context is proven** — keep `src/agent/codex.rs`, `README.md`, `SPEC.md`, and the bundled skill surfaces aligned on the rule that a resumed Codex `command_execution` event with output like `socket: Operation not permitted` still counts as required-SSH capability drift when the same event proves an `ssh` command against a declared `required_ssh_targets` entry. Do not collapse localhost/CDP `Operation not permitted` signatures into the SSH path.
 - **Required SSH fresh retries must discard stale resumed prelude text** — keep `src/agent/codex.rs`, `README.md`, `SPEC.md`, and the bundled skill surfaces aligned on the rule that resumed Codex streams for SSH-gated docs buffer early assistant chunks until required SSH is proven safe or the turn completes, so a required-SSH fresh retry can drop stale prelude text from the discarded resumed session.
@@ -96,7 +96,7 @@ src/
   snapshot.rs       # Snapshot path/read/write
   git.rs            # Commit, branch, squash (includes `commit` subcommand + narrow missed-patchback self-heal)
   config.rs         # Global config (~/.config/agent-doc/config.toml)
-  sessions.rs       # Session registry (sessions.json) + Tmux struct
+  sessions.rs       # Transactional session-registry adapter + Tmux struct
   route.rs          # Route harness-specific agent-doc triggers to the correct tmux pane (pub auto_start for sync.rs)
   codex_hook.rs     # Codex UserPromptSubmit/Stop hook bridge + active-doc tracking
   start.rs          # Start configured agent harness inside tmux pane
@@ -107,7 +107,7 @@ src/
   prompt.rs         # Detect permission prompts from Claude Code sessions (strip_ansi is pub(crate))
   skill.rs          # Manage bundled SKILL.md + harness-specific installed content (e.g. Codex AGENTS.md and runbooks)
   install.rs        # System-level setup: check prerequisites (tmux + agent CLI) and install editor plugins
-  resync.rs         # Validate sessions.json, remove dead panes, detect wrong-session/wrong-process panes (--fix [--session <target>])
+  resync.rs         # Validate controller bindings, remove dead panes, detect wrong-session/wrong-process panes (--fix [--session <target>])
   session_cmd.rs    # Show/set configured tmux session with pane migration
   history.rs        # Exchange version history from git + restore
   upgrade.rs        # Self-update via GitHub Releases / PyPI
@@ -187,7 +187,7 @@ Stream mode (`agent_doc_format: template` + `agent_doc_write: crdt`) enables rea
 1. Validates document uses CRDT write strategy (`resolved.is_crdt()`), reads `StreamConfig` from frontmatter
 2. Computes diff, builds prompt requesting patch-block format
 3. Spawns streaming agent (`claude -p --output-format stream-json`)
-4. Buffers accumulated text outside the document; timer ticks may update only recovery sidecars
+4. Buffers accumulated text outside the document; timer ticks may update only cold recovery projections
 5. On completion: validates and writes the complete response once, then saves CRDT state + snapshot, updates resume ID, and optionally commits
 
 **Frontmatter:**
@@ -240,13 +240,13 @@ Stream flushes use the normal mode resolution chain (inline attr > `components.t
 
 Implementation: `flush_to_document()` uses `template::apply_patches()`.
 
-### IPC-First Writes (v0.17.5)
+### Lazily-First Writes
 
-All write paths (`run`, `stream`, `write`) try IPC to the IDE plugin when `.agent-doc/patches/` exists (plugin installed) and `--force-disk` is not set. IPC writes a JSON patch file to `.agent-doc/patches/<hash>.json`; the IDE plugin applies it via Document API (preserving cursor, undo stack, no "externally modified" dialog) and deletes the file as ACK. On IPC timeout or missing response proof, stream/finalize closeout retains the pending response and queued patch for retry, refuses a direct session-document disk write, and logs `recovery=retry_without_disk_write`. Use `agent-doc write --force-disk` only as an explicit operator escape hatch to bypass IPC and write directly to disk.
+All write paths (`run`, `stream`, `write`) capture intent in `state.db`, compare-and-swap against Lazily current state, and send a named intent to the PID-scoped editor socket when an editor owns the document. The editor publishes accepted and visible receipts back through Lazily; only then may the state machine project to disk and commit. There is no file patch inbox, live-buffer sidecar, or file-signal ACK path. On timeout, the binary retains the same intent and recovery resumes from its recorded phase without recapturing the response. Use `agent-doc write --force-disk` only as an explicit operator escape hatch for a detached document.
 
 - `try_ipc(file, patches, unmatched, frontmatter_yaml, baseline, content_ours)` — component-level patches for template/stream documents. `content_ours` is the agent-owned response candidate for merge/proof only; IPC success must verify the editor-visible post-apply content and save that verified state, never an older `content_ours` image that drops operator text.
-- `try_ipc_full_content()` — full document replacement for inline-mode documents
-- Both are safe to call unconditionally; they return `false` immediately if `.agent-doc/patches/` does not exist
+- `try_ipc_full_content()` — canonical document intent for inline-mode documents, fenced by the same expected-current proof
+- Detached documents project directly to disk through the authority resolver; attached documents never fall back around Lazily
 - When no explicit patches exist but unmatched content targets `exchange`/`output` and a boundary marker is present, `try_ipc()` synthesizes a boundary-aware exchange patch automatically
 
 **Key files:** `crdt.rs` (CRDT foundation), `merge.rs` (CRDT merge path), `stream.rs` (command),
@@ -257,8 +257,11 @@ All write paths (`run`, `stream`, `write`) try IPC to the IDE plugin when `.agen
 **One session per document:** Each `agent-doc stream` spawns its own Claude CLI process.
 Multiple documents stream in parallel via separate tmux panes.
 
-**CRDT state storage:** `.agent-doc/crdt/<hash>.yrs` — persisted after each stream for
-subsequent merges. Compacted via `agent-doc compact` to GC tombstones.
+**CRDT state storage:** Lazily owns the live document cell. A cold restart projection
+may be checkpointed in `state.db` at explicit recovery/recycle boundaries; streaming
+and ordinary writes never materialize a per-document CRDT file or use persisted state
+as live authority. `agent-doc compact` compacts the document and its state-ledger
+history without introducing a second document model.
 
 ## Domain Ontology
 

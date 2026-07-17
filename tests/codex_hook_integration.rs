@@ -273,14 +273,12 @@ fn codex_hook_cli_auto_closes_open_cycle_after_user_prompt_submit() {
 #[test]
 fn codex_hook_cli_resumes_original_capture_over_editor_convergence_block() {
     let (tmp, doc) = setup_template_doc();
-    fs::create_dir_all(tmp.path().join(".agent-doc/live-buffer")).unwrap();
     init_git_repo(tmp.path(), &doc);
     let content = fs::read_to_string(&doc).unwrap();
-    agent_doc_snapshot_io::save(&doc, &content, agent_doc_ops_log_io::log_op).unwrap();
-    agent_doc_debounce::record_live_buffer_digest_content_for_editor(
-        &doc.to_string_lossy(),
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        &doc,
         &content,
-        Some("jetbrains-old"),
+        agent_doc_ops_log_io::log_op,
     )
     .unwrap();
     agent_doc_cycle_state_io::start_preflight(&doc, Some(&content), Some(&content)).unwrap();

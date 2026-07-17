@@ -21,16 +21,6 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 filter = 'test(run_auto_queue_starts_fresh_backend_session_after_accretion_threshold)'
 slow-timeout = { period = "120s", terminate-after = 2 }
 
-# File-IPC integration tests use temp-project patch directories but still compete
-# for process-level test binary resources under nextest. Run those binaries
-# serially so watcher/ack timing stays deterministic.
-[[profile.default.overrides]]
-filter = 'binary(live_typing_ipc_replay) | binary(live_ipc_race_integration) | binary(ipc_closeout_model)'
-test-group = 'file-ipc'
-
-[test-groups]
-file-ipc = { max-threads = 1 }
-
 # CI mirrors the default ceiling; kept explicit so a future `--profile ci` run
 # inherits the same deadlock guard.
 [profile.ci]
@@ -39,7 +29,3 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 [[profile.ci.overrides]]
 filter = 'test(run_auto_queue_starts_fresh_backend_session_after_accretion_threshold)'
 slow-timeout = { period = "120s", terminate-after = 2 }
-
-[[profile.ci.overrides]]
-filter = 'binary(live_typing_ipc_replay) | binary(live_ipc_race_integration) | binary(ipc_closeout_model)'
-test-group = 'file-ipc'

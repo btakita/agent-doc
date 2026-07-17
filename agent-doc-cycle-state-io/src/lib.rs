@@ -1,7 +1,8 @@
 //! # Module: cycle_state
 //!
 //! ## Spec
-//! - Persists per-document cycle state under `.agent-doc/state/cycles/<doc-hash>.json`.
+//! - Persists per-document turn intent as typed checkpoints in the project
+//!   Lazily state ledger (`state.db`).
 //! - Tracks the exact phase of the current or most recent response cycle:
 //!   `preflight_started` → `response_captured` → `write_applied` → `committed`.
 //!   A stale `preflight_started` cycle with no response artifact may become
@@ -10,9 +11,9 @@
 //! - Stores cycle-scoped snapshot/file content hashes so callers can reason
 //!   about exact cycle state instead of inferring from file-size drift or only
 //!   the last `ops.log` line.
-//! - Stores the preflight baseline path, prompt targets, queue head identity,
+//! - Stores the preflight baseline reference, prompt targets, queue head identity,
 //!   pending-operation facts, and response capture hash as one durable turn
-//!   checkpoint so restart/recycle paths can resume or fail closed from disk.
+//!   checkpoint so restart/recycle paths can resume or fail closed from the ledger.
 //! - `start_preflight()` opens a new cycle for a document and overwrites any
 //!   prior committed state for that document.
 //! - `mark_response_captured()` advances the open cycle to `response_captured`
@@ -25,19 +26,18 @@
 //! - Lower-rank bookkeeping must never mutate an already-committed or abandoned
 //!   cycle; duplicate terminal bookkeeping stays idempotent for already-committed
 //!   cycles.
-//! - Phase transitions are accepted through `cycle_state_machine`; the sidecar
-//!   remains a compatibility crash-recovery projection emitted after that
-//!   transition table accepts an event, and accepted transitions also append
-//!   typed closeout facts into the state backbone.
-//! - `load()` returns the current persisted JSON compatibility projection when
-//!   present.
+//! - Phase transitions are accepted through `cycle_state_machine`; accepted
+//!   transitions append both the complete turn-intent checkpoint and typed
+//!   closeout facts into the state backbone.
+//! - `load()` returns only complete state-backbone turn checkpoints. It never
+//!   imports or synthesizes lifecycle state from a secondary store.
 //! - `load_closeout_projection()` returns the state-backbone closeout projection
 //!   when lazily facts have been recorded for the document.
 //!
 //! ## Agentic Contracts
 //! - State is per-document, never global across the repo.
-//! - Writes are deterministic JSON file replacements.
-//! - Missing project root or state file returns `Ok(None)`.
+//! - Writes are deterministic, idempotently keyed state-ledger events.
+//! - Missing project root or state-ledger facts returns `Ok(None)`.
 //! - `is_open()` is true for any phase except `Committed` or `Abandoned`.
 //!
 //! ## Evals
@@ -144,8 +144,6 @@ pub struct CycleState {
     pub required_explicit_backlog_item_count: usize,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub required_plan_reference_count: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub baseline_file: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_targets: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -300,7 +298,7 @@ pub struct AdmitOutput {
 pub const STALLED_CYCLE_RESOLVE_SECS: u64 = 120;
 
 /// `#suprecyclespin-falseabandon` — consecutive idle-watch polls
-/// (`AUTO_TRIGGER_POLL_INTERVAL`, 500ms) for which `stalled_pre_response_cycle`
+/// (`AUTO_TRIGGER_POLL_INTERVAL`, 500ms) for which `stalled_before_response_capture_cycle`
 /// must hold at a `turn_boundary` before the supervisor force-abandons the
 /// cycle. A live harness generation never sustains `turn_boundary && stalled`
 /// for this long (the pane is not at a ready prompt while it streams output), so
@@ -326,11 +324,11 @@ impl CycleState {
     }
 
     /// `#suprecyclespin`: whether a stalled open cycle may be force-abandoned at
-    /// a supervisor recycle boundary. Only pre-response cycles are disposable.
+    /// a supervisor recycle boundary. Only cycles before response capture are disposable.
     /// Once a response has been captured or written, the open cycle is durable
     /// recovery evidence and must survive recycle so the fresh process can retry
     /// or reconcile it instead of silently losing the response.
-    pub fn stalled_pre_response_cycle(
+    pub fn stalled_before_response_capture_cycle(
         &self,
         inflight: u64,
         now_secs: u64,
@@ -347,7 +345,7 @@ impl CycleState {
     /// lowercase phase, plus the recorded `turn_id` / `queue_task_id`.
     ///
     /// This is the read-side mirror — preflight surfaces it so any invocation or
-    /// editor plugin can see where the cycle is without parsing the sidecar JSON.
+    /// editor plugin can see where the cycle is without replaying the state ledger.
     /// Cycle-state stays authoritative; the document `agent_doc_pipeline:` block
     /// is only a fallback hint when no live cycle-state exists.
     pub fn to_pipeline(&self) -> agent_doc_frontmatter::frontmatter::AgentDocPipeline {
@@ -361,28 +359,36 @@ impl CycleState {
 }
 
 pub fn load(file: &Path) -> Result<Option<CycleState>> {
-    let Some(path) = agent_doc_fs::cycle_state_path_for(file)? else {
+    let Some(document) = load_document_projection(file)? else {
         return Ok(None);
     };
-    let Some(content) = agent_doc_fs::read_optional_text(&path)? else {
+    let projection = ProjectedCloseoutState::from(document.closeout.clone());
+
+    let mut state = if let Some(checkpoint) = document.closeout.turn_intent_checkpoint {
+        let actual_sha256 = agent_doc_hash::content_hash(&checkpoint.state_json);
+        anyhow::ensure!(
+            actual_sha256 == checkpoint.state_sha256,
+            "turn-intent checkpoint hash mismatch for cycle {}",
+            checkpoint.cycle_id
+        );
+        let decoded: CycleState = serde_json::from_str(&checkpoint.state_json)
+            .context("decode turn-intent checkpoint from state ledger")?;
+        anyhow::ensure!(
+            decoded.cycle_id == checkpoint.cycle_id,
+            "turn-intent checkpoint cycle mismatch: event={} payload={}",
+            checkpoint.cycle_id,
+            decoded.cycle_id
+        );
+        decoded
+    } else {
         return Ok(None);
     };
-    // `#lzsidecaratomic`: the cycle-state JSON is a compatibility crash-recovery
-    // projection, not authoritative state (the state machine + state backbone own
-    // that). A corrupt, torn, or legacy-format sidecar must never fail a
-    // hot/critical-path caller: treat it as absent so the caller falls back to the
-    // durable state-backbone projection (and git), and the next accepted transition
-    // re-persists a clean sidecar.
-    match serde_json::from_str::<CycleState>(&content) {
-        Ok(state) => Ok(Some(state)),
-        Err(err) => {
-            eprintln!(
-                "[cycle-state] WARNING: ignoring unreadable cycle-state sidecar {} (treating as absent): {err}",
-                path.display()
-            );
-            Ok(None)
-        }
+
+    if projection.matches_cycle(&state.cycle_id) {
+        apply_closeout_projection_to_cycle_state(&mut state, &projection);
+        state.pending_semantic_merge_acks = projection.pending_semantic_merge_acks.clone();
     }
+    Ok(Some(state))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -390,9 +396,13 @@ pub struct ProjectedCloseoutState {
     pub cycle_id: Option<String>,
     pub session_id: Option<String>,
     pub phase: Option<CyclePhase>,
+    pub turn_intent_checkpoint_sequence: Option<u64>,
     pub capture_id: Option<String>,
     pub response_sha256: Option<String>,
     pub captured_response: Option<ProjectedCapturedResponse>,
+    pub captured_response_retired_reason: Option<String>,
+    pub response_draft: Option<ProjectedResponseDraft>,
+    pub capture_replayed: bool,
     pub patch_id: Option<String>,
     pub response_cell: Option<ProjectedResponseCell>,
     pub commit: Option<String>,
@@ -417,9 +427,20 @@ pub struct ProjectedCapturedResponse {
     pub capture_id: String,
     pub response_sha256: String,
     pub response_body: String,
+    pub intent_body: Option<String>,
     pub file_hash: Option<String>,
     pub snapshot_hash: Option<String>,
     pub baseline_content: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectedResponseDraft {
+    pub cycle_id: String,
+    pub checkpoint_id: String,
+    pub checkpoint_count: u64,
+    pub response_sha256: String,
+    pub response_body: String,
+    pub file_hash: Option<String>,
 }
 
 /// One content-bearing response checkpoint from the append-only Lazily
@@ -482,6 +503,10 @@ impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutSta
             cycle_id: projection.cycle_id,
             session_id: projection.session_id,
             phase: projection.phase,
+            turn_intent_checkpoint_sequence: projection
+                .turn_intent_checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.checkpoint_sequence),
             capture_id: projection.capture_id,
             response_sha256: projection.response_sha256,
             captured_response: projection.captured_response.map(|capture| {
@@ -490,11 +515,24 @@ impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutSta
                     capture_id: capture.capture_id,
                     response_sha256: capture.response_sha256,
                     response_body: capture.response_body,
+                    intent_body: capture.intent_body,
                     file_hash: capture.file_hash,
                     snapshot_hash: capture.snapshot_hash,
                     baseline_content: capture.baseline_content,
                 }
             }),
+            captured_response_retired_reason: projection.captured_response_retired_reason,
+            response_draft: projection
+                .response_draft
+                .map(|draft| ProjectedResponseDraft {
+                    cycle_id: draft.cycle_id,
+                    checkpoint_id: draft.checkpoint_id,
+                    checkpoint_count: draft.checkpoint_count,
+                    response_sha256: draft.response_sha256,
+                    response_body: draft.response_body,
+                    file_hash: draft.file_hash,
+                }),
+            capture_replayed: projection.capture_replayed,
             patch_id: projection.patch_id,
             response_cell: projection.response_cell.map(|cell| ProjectedResponseCell {
                 operation_id: cell.operation_id,
@@ -537,12 +575,20 @@ pub fn load_projected_captured_response(
         .filter(|capture| capture.capture_id == capture_id))
 }
 
+pub fn load_projected_response_draft(
+    file: &Path,
+    cycle_id: &str,
+) -> Result<Option<ProjectedResponseDraft>> {
+    Ok(load_closeout_projection(file)?
+        .and_then(|projection| projection.response_draft)
+        .filter(|draft| draft.cycle_id == cycle_id))
+}
+
 /// Load a bounded newest-first history of content-bearing response captures.
 ///
-/// Recovery previously had only the latest projection and JSON sidecars. A
-/// malformed latest baseline can therefore hide the valid checkpoint directly
-/// before it. This query keeps Lazily authoritative without replaying the full
-/// event ledger on every repair attempt.
+/// A malformed latest baseline can hide the valid checkpoint directly before
+/// it. This bounded state.db query keeps Lazily authoritative without replaying
+/// the full event ledger on every repair attempt.
 pub fn load_recent_captured_response_checkpoints(
     file: &Path,
     limit: usize,
@@ -624,6 +670,19 @@ fn load_document_projection(
     Ok(ledger.project_document(&document_hash))
 }
 
+/// Load the newest durable agent-doc disk-write observation for `file`.
+///
+/// This is the watcher-facing state-machine seam for self-write echo
+/// filtering. It reads the single `state.db` lifecycle authority.
+pub fn load_document_disk_write(
+    file: &Path,
+) -> Result<Option<agent_doc_state_backbone::DocumentDiskWriteProjection>> {
+    Ok(
+        load_document_projection(file)?
+            .and_then(|projection| projection.document.latest_disk_write),
+    )
+}
+
 pub fn apply_closeout_projection_to_cycle_state(
     state: &mut CycleState,
     projection: &ProjectedCloseoutState,
@@ -645,7 +704,10 @@ pub fn apply_closeout_projection_to_cycle_state(
     if changed {
         state.phase = projected_phase;
     }
-    if (changed || state.phase == projected_phase) && !preserve_noop_commit_event {
+    // A complete turn-intent checkpoint retains the precise transition event.
+    // Projection labels are only needed when reconstructing a pre-cutover
+    // ledger that has typed closeout facts but no checkpoint.
+    if (changed || state.last_event == "synthetic_state") && !preserve_noop_commit_event {
         state.last_event = projection.event_label(projected_phase);
     }
     if state.capture_id.is_none() {
@@ -660,25 +722,7 @@ pub fn apply_closeout_projection_to_cycle_state(
 }
 
 pub fn load_with_closeout_projection(file: &Path) -> Result<Option<CycleState>> {
-    let Some(mut state) = load(file)? else {
-        return Ok(None);
-    };
-    // The closeout projection is read from the durable state backbone (state.db). If
-    // that store is unreadable or corrupt it must not fail the hot/critical path
-    // either — degrade to the sidecar-only state rather than propagating the error.
-    let projection = load_closeout_projection(file).unwrap_or_else(|err| {
-        eprintln!(
-            "[cycle-state] WARNING: ignoring unreadable closeout projection for {} (using sidecar state only): {err}",
-            file.display()
-        );
-        None
-    });
-    if let Some(projection) = projection
-        && projection.matches_cycle(&state.cycle_id)
-    {
-        apply_closeout_projection_to_cycle_state(&mut state, &projection);
-    }
-    Ok(Some(state))
+    load(file)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1006,7 +1050,6 @@ pub fn start_preflight_with_task(
         required_backlog_targets: Vec::new(),
         required_explicit_backlog_item_count: 0,
         required_plan_reference_count: 0,
-        baseline_file: None,
         prompt_targets: Vec::new(),
         queue_task_id: queue_task_id.map(|s| s.to_string()),
         turn_id: turn_id.map(|s| s.to_string()),
@@ -1109,7 +1152,6 @@ pub fn observe_live_queue_heads(file: &Path, doc: &str) -> Result<Option<CycleSt
 /// fields that are only known after queue and diff analysis.
 pub fn record_turn_checkpoint(
     file: &Path,
-    baseline_file: Option<&str>,
     prompt_targets: &[String],
     queue_task_id: Option<&str>,
     turn_id: Option<&str>,
@@ -1121,10 +1163,6 @@ pub fn record_turn_checkpoint(
         return Ok(Some(state));
     }
 
-    let normalized_baseline = baseline_file
-        .map(str::trim)
-        .filter(|path| !path.is_empty())
-        .map(ToOwned::to_owned);
     let normalized_prompt_targets = normalize_checkpoint_text_list(prompt_targets);
     let normalized_queue_task_id = queue_task_id
         .map(normalize_checkpoint_task_id)
@@ -1134,10 +1172,6 @@ pub fn record_turn_checkpoint(
         .filter(|id| !id.is_empty());
 
     let mut changed = false;
-    if state.baseline_file != normalized_baseline {
-        state.baseline_file = normalized_baseline;
-        changed = true;
-    }
     if state.prompt_targets != normalized_prompt_targets {
         state.prompt_targets = normalized_prompt_targets;
         changed = true;
@@ -1782,6 +1816,27 @@ pub fn mark_committed(
     if matches!(state.phase, CyclePhase::Committed)
         && (state.last_event == event || is_stable_commit_event(&state.last_event))
     {
+        let mut refreshed = false;
+        if let Some(snapshot) = snapshot_content {
+            let hash = agent_doc_hash::content_hash(snapshot);
+            let normalized_hash = replay_content_hash(snapshot);
+            refreshed |= state.snapshot_hash.as_deref() != Some(hash.as_str())
+                || state.normalized_snapshot_hash.as_deref() != Some(normalized_hash.as_str());
+            state.snapshot_hash = Some(hash);
+            state.normalized_snapshot_hash = Some(normalized_hash);
+        }
+        if let Some(content) = file_content {
+            let hash = agent_doc_hash::content_hash(content);
+            let normalized_hash = replay_content_hash(content);
+            refreshed |= state.file_hash.as_deref() != Some(hash.as_str())
+                || state.normalized_file_hash.as_deref() != Some(normalized_hash.as_str());
+            state.file_hash = Some(hash);
+            state.normalized_file_hash = Some(normalized_hash);
+        }
+        if refreshed {
+            state.updated_at = now_secs();
+            save(file, &state)?;
+        }
         append_closeout_projection_event(file, &state, CloseoutProjectionEvent::Committed)?;
         return Ok(state);
     }
@@ -1851,13 +1906,21 @@ pub fn reactivate_false_stale_capture_retirement(
     capture_id: &str,
     response_sha256: &str,
 ) -> Result<bool> {
+    let retained_capture = load_projected_captured_response(file, capture_id)?;
     let Some(mut state) = load(file)? else {
         return Ok(false);
     };
+    let retained_capture_matches = retained_capture.as_ref().is_some_and(|capture| {
+        capture.cycle_id == state.cycle_id
+            && capture.capture_id == capture_id
+            && capture.response_sha256 == response_sha256
+    });
     if state.phase == CyclePhase::ResponseCaptured
         && state.capture_id.as_deref() == Some(capture_id)
         && state.response_sha256.as_deref() == Some(response_sha256)
+        && retained_capture_matches
     {
+        reactivate_projected_captured_response(file, &state.cycle_id, capture_id)?;
         return Ok(true);
     }
     if state.phase != CyclePhase::Abandoned
@@ -1865,6 +1928,7 @@ pub fn reactivate_false_stale_capture_retirement(
         || state.cycle_id != capture_id
         || state.capture_id.as_deref() != Some(capture_id)
         || state.response_sha256.as_deref() != Some(response_sha256)
+        || !retained_capture_matches
     {
         return Ok(false);
     }
@@ -1875,6 +1939,7 @@ pub fn reactivate_false_stale_capture_retirement(
     state.blocked_closeout = None;
     save(file, &state)?;
     append_closeout_projection_event(file, &state, CloseoutProjectionEvent::FalseStaleReactivated)?;
+    reactivate_projected_captured_response(file, &state.cycle_id, capture_id)?;
     append_phase_event_to_session_log(file, &state, None);
     Ok(true)
 }
@@ -1909,12 +1974,40 @@ fn append_phase_event_to_session_log(file: &Path, state: &CycleState, file_conte
 }
 
 fn save(file: &Path, state: &CycleState) -> Result<()> {
-    let Some(path) = agent_doc_fs::cycle_state_path_for(file)? else {
+    let Some(document_hash) = cycle_document_hash(file)? else {
         return Ok(());
     };
-    let json = serde_json::to_string_pretty(state)?;
-    write_atomic(&path, &json)?;
+    let state_json = serde_json::to_string(state)?;
+    let state_sha256 = agent_doc_hash::content_hash(&state_json);
+    let checkpoint_sequence = load_closeout_projection(file)?
+        .and_then(|projection| projection.turn_intent_checkpoint_sequence)
+        .unwrap_or(0)
+        .saturating_add(1);
+    let event_id = format!(
+        "turn-intent-checkpoint:{document_hash}:{}:{checkpoint_sequence}:{state_sha256}",
+        state.cycle_id,
+    );
+    append_state_fact(
+        file,
+        event_id,
+        agent_doc_state_backbone::StateFact::TurnIntentCheckpointed {
+            document_hash,
+            cycle_id: state.cycle_id.clone(),
+            checkpoint_sequence,
+            state_sha256,
+            state_json,
+        },
+    )?;
     Ok(())
+}
+
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub fn age_current_cycle_for_tests(file: &Path, age_secs: u64) -> Result<()> {
+    let mut state = load(file)?.context("cycle state")?;
+    state.started_at = state.started_at.saturating_sub(age_secs);
+    state.updated_at = state.updated_at.saturating_sub(age_secs);
+    save(file, &state)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1958,6 +2051,7 @@ fn append_closeout_projection_event(
                 capture_id,
                 response_sha256,
                 response_body: None,
+                intent_body: None,
                 file_hash: None,
                 snapshot_hash: None,
                 baseline_content: None,
@@ -1968,6 +2062,8 @@ fn append_closeout_projection_event(
                 document_hash: document_hash.clone(),
                 cycle_id: state.cycle_id.clone(),
                 patch_id: None,
+                file_hash: state.file_hash.clone(),
+                snapshot_hash: state.snapshot_hash.clone(),
             }
         }
         CloseoutProjectionEvent::Committed => agent_doc_state_backbone::StateFact::CommitObserved {
@@ -1978,6 +2074,8 @@ fn append_closeout_projection_event(
                 .as_ref()
                 .map(|hash| format!("content:{hash}"))
                 .unwrap_or_else(|| format!("event:{}", state.last_event)),
+            file_hash: state.file_hash.clone(),
+            snapshot_hash: state.snapshot_hash.clone(),
         },
         CloseoutProjectionEvent::Abandoned => agent_doc_state_backbone::StateFact::CycleAbandoned {
             document_hash: document_hash.clone(),
@@ -2009,6 +2107,7 @@ pub struct CapturedResponseFactInput<'a> {
     pub capture_id: &'a str,
     pub response_sha256: &'a str,
     pub response_body: &'a str,
+    pub intent_body: Option<&'a str>,
     pub file_hash: Option<&'a str>,
     pub snapshot_hash: Option<&'a str>,
     pub baseline_content: Option<&'a str>,
@@ -2023,6 +2122,7 @@ pub fn append_response_captured_body(
         capture_id,
         response_sha256,
         response_body,
+        intent_body,
         file_hash,
         snapshot_hash,
         baseline_content,
@@ -2030,11 +2130,15 @@ pub fn append_response_captured_body(
     let Some(document_hash) = cycle_document_hash(file)? else {
         return Ok(false);
     };
-    let baseline_hash = baseline_content
-        .map(agent_doc_hash::content_hash)
-        .unwrap_or_else(|| "legacy-hash-only".to_string());
+    let projection_hash = agent_doc_hash::content_hash(&format!(
+        "file={:?}\nsnapshot={:?}\nbaseline={:?}\nintent={:?}",
+        file_hash,
+        snapshot_hash,
+        baseline_content,
+        intent_body.map(agent_doc_hash::content_hash),
+    ));
     let event_id = format!(
-        "closeout-response-captured-body:v2:{document_hash}:{cycle_id}:{capture_id}:{response_sha256}:{baseline_hash}"
+        "closeout-response-captured-body:v3:{document_hash}:{cycle_id}:{capture_id}:{response_sha256}:{projection_hash}"
     );
     append_state_fact(
         file,
@@ -2045,9 +2149,119 @@ pub fn append_response_captured_body(
             capture_id: capture_id.to_string(),
             response_sha256: response_sha256.to_string(),
             response_body: Some(response_body.to_string()),
+            intent_body: intent_body.map(str::to_string),
             file_hash: file_hash.map(str::to_string),
             snapshot_hash: snapshot_hash.map(str::to_string),
             baseline_content: baseline_content.map(str::to_string),
+        },
+    )
+}
+
+/// Retire a captured-response ledger projection after another durable surface
+/// (such as a compact archive referenced by HEAD) proves it remains materialized.
+pub fn retire_projected_captured_response(
+    file: &Path,
+    cycle_id: &str,
+    capture_id: &str,
+    reason: &str,
+) -> Result<bool> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    let event_id = format!(
+        "captured-response-retired:{document_hash}:{cycle_id}:{capture_id}:{}",
+        agent_doc_hash::content_hash(reason)
+    );
+    append_state_fact(
+        file,
+        event_id,
+        agent_doc_state_backbone::StateFact::CapturedResponseRetired {
+            document_hash,
+            cycle_id: cycle_id.to_string(),
+            capture_id: capture_id.to_string(),
+            reason: reason.to_string(),
+        },
+    )
+}
+
+pub fn reactivate_projected_captured_response(
+    file: &Path,
+    cycle_id: &str,
+    capture_id: &str,
+) -> Result<bool> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    append_state_fact(
+        file,
+        format!("captured-response-reactivated:{document_hash}:{cycle_id}:{capture_id}"),
+        agent_doc_state_backbone::StateFact::CapturedResponseReactivated {
+            document_hash,
+            cycle_id: cycle_id.to_string(),
+            capture_id: capture_id.to_string(),
+        },
+    )
+}
+
+pub fn checkpoint_response_draft(
+    file: &Path,
+    cycle_id: &str,
+    checkpoint_id: &str,
+    checkpoint_count: u64,
+    response_sha256: &str,
+    response_body: &str,
+    file_hash: Option<&str>,
+) -> Result<bool> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    let event_id =
+        format!("response-draft:{document_hash}:{cycle_id}:{checkpoint_count}:{response_sha256}");
+    append_state_fact(
+        file,
+        event_id,
+        agent_doc_state_backbone::StateFact::ResponseDraftCheckpointed {
+            document_hash,
+            cycle_id: cycle_id.to_string(),
+            checkpoint_id: checkpoint_id.to_string(),
+            checkpoint_count,
+            response_sha256: response_sha256.to_string(),
+            response_body: response_body.to_string(),
+            file_hash: file_hash.map(str::to_string),
+        },
+    )
+}
+
+pub fn clear_response_draft(file: &Path, cycle_id: &str, reason: &str) -> Result<bool> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    let event_id = format!(
+        "response-draft-cleared:{document_hash}:{cycle_id}:{}",
+        agent_doc_hash::content_hash(reason)
+    );
+    append_state_fact(
+        file,
+        event_id,
+        agent_doc_state_backbone::StateFact::ResponseDraftCleared {
+            document_hash,
+            cycle_id: cycle_id.to_string(),
+            reason: reason.to_string(),
+        },
+    )
+}
+
+pub fn record_response_replay(file: &Path, cycle_id: &str, capture_id: &str) -> Result<bool> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    append_state_fact(
+        file,
+        format!("response-replayed:{document_hash}:{cycle_id}:{capture_id}"),
+        agent_doc_state_backbone::StateFact::ResponseReplayObserved {
+            document_hash,
+            cycle_id: cycle_id.to_string(),
+            capture_id: capture_id.to_string(),
         },
     )
 }
@@ -2165,11 +2379,14 @@ fn append_semantic_merge_ack_carried_forward_events(
 }
 
 fn cycle_document_hash(file: &Path) -> Result<Option<String>> {
-    Ok(agent_doc_fs::cycle_state_path_for(file)?.and_then(|path| {
-        path.file_stem()
-            .and_then(|stem| stem.to_str())
-            .map(|stem| stem.to_string())
-    }))
+    let canonical = match file.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return Ok(None),
+    };
+    if agent_doc_fs::find_project_root(&canonical).is_none() {
+        return Ok(None);
+    }
+    Ok(Some(agent_doc_fs::document_state_hash(&canonical)?))
 }
 
 fn closeout_projection_event_id(
@@ -2211,27 +2428,6 @@ fn closeout_projection_event_id(
     }
 }
 
-/// `#lzsidecaratomic`: write `bytes` to `path` via a temp file in the same
-/// directory plus an atomic `rename`, so a concurrent reader (including the PCP
-/// closeout projection) can never observe a partial file (torn read). `load()`
-/// maps `NotFound` to clean absence, but a truncated mid-write file surfaces as
-/// a parse error; the atomic persist closes that window. Falls back to a direct
-/// write only when the path has no parent to stage a temp file in.
-fn write_atomic(path: &Path, bytes: &str) -> Result<()> {
-    match path.parent() {
-        Some(parent) => {
-            std::fs::create_dir_all(parent)?;
-            let temp = tempfile::NamedTempFile::new_in(parent)?;
-            std::fs::write(temp.path(), bytes)?;
-            temp.persist(path)?;
-        }
-        None => {
-            std::fs::write(path, bytes)?;
-        }
-    }
-    Ok(())
-}
-
 fn synthetic_state(file: &Path, phase: CyclePhase) -> CycleState {
     synthetic_state_with_id(file, phase, None)
 }
@@ -2262,7 +2458,6 @@ fn synthetic_state_with_id(
         required_backlog_targets: Vec::new(),
         required_explicit_backlog_item_count: 0,
         required_plan_reference_count: 0,
-        baseline_file: None,
         prompt_targets: Vec::new(),
         queue_task_id: None,
         turn_id: None,
@@ -2274,7 +2469,10 @@ fn synthetic_state_with_id(
         pending_gated_ids: Vec::new(),
         pending_added_this_cycle: false,
         pending_added_ids: Vec::new(),
-        tracked_work_maintenance_required_at_preflight: Some(false),
+        // A synthetic cycle did not observe a preflight document. Preserve
+        // that distinction instead of asserting a false preflight fact that
+        // the state projection cannot reproduce.
+        tracked_work_maintenance_required_at_preflight: None,
         ipc_snapshot_adoption_blocked: false,
         dropped_exchange_prompts: Vec::new(),
         dropped_queue_prompts: Vec::new(),
@@ -2328,32 +2526,32 @@ mod tests {
         // updated_at far in the past, no IPC inflight → stalled (resolvable).
         state.updated_at = 1_000;
         assert!(state.open_stalled(0, 1_000 + deadline + 1, deadline));
-        assert!(state.stalled_pre_response_cycle(0, 1_000 + deadline + 1, deadline));
+        assert!(state.stalled_before_response_capture_cycle(0, 1_000 + deadline + 1, deadline));
         // Exactly at the deadline is NOT yet stalled (strict `>`).
         assert!(!state.open_stalled(0, 1_000 + deadline, deadline));
-        assert!(!state.stalled_pre_response_cycle(0, 1_000 + deadline, deadline));
+        assert!(!state.stalled_before_response_capture_cycle(0, 1_000 + deadline, deadline));
         // Fresh `updated_at` → a live cycle, never force-closed.
         state.updated_at = 1_000 + deadline + 1;
         assert!(!state.open_stalled(0, 1_000 + deadline + 5, deadline));
-        assert!(!state.stalled_pre_response_cycle(0, 1_000 + deadline + 5, deadline));
+        assert!(!state.stalled_before_response_capture_cycle(0, 1_000 + deadline + 5, deadline));
         // IPC ack connection in flight → finalize is live, never force-closed even
         // if the cycle has been open a long time.
         state.updated_at = 1_000;
         assert!(!state.open_stalled(1, 1_000 + deadline + 100, deadline));
-        assert!(!state.stalled_pre_response_cycle(1, 1_000 + deadline + 100, deadline));
+        assert!(!state.stalled_before_response_capture_cycle(1, 1_000 + deadline + 100, deadline));
         // Once a response is captured, the stalled open cycle is durable recovery
         // evidence. It may keep the recycle gate open until escalation, but must
-        // not be abandoned as disposable pre-response state.
+        // not be abandoned as disposable state before response capture.
         let mut captured = synthetic_state(Path::new("/tmp/doc.md"), CyclePhase::ResponseCaptured);
         captured.updated_at = 1_000;
         captured.capture_id = Some("cycle-1".to_string());
         captured.response_sha256 = Some("abc".to_string());
         assert!(captured.open_stalled(0, 1_000 + deadline + 1, deadline));
-        assert!(!captured.stalled_pre_response_cycle(0, 1_000 + deadline + 1, deadline));
+        assert!(!captured.stalled_before_response_capture_cycle(0, 1_000 + deadline + 1, deadline));
         // A committed cycle is not open, so it is never "stalled".
         let committed = synthetic_state(Path::new("/tmp/doc.md"), CyclePhase::Committed);
         assert!(!committed.open_stalled(0, u64::MAX, deadline));
-        assert!(!committed.stalled_pre_response_cycle(0, u64::MAX, deadline));
+        assert!(!committed.stalled_before_response_capture_cycle(0, u64::MAX, deadline));
     }
 
     #[test]
@@ -2367,7 +2565,7 @@ mod tests {
         state.updated_at = 1_000;
         let incident_stalled_secs = 46; // observed stalled_secs that falsely abandoned a live turn
         assert!(
-            !state.stalled_pre_response_cycle(
+            !state.stalled_before_response_capture_cycle(
                 0,
                 1_000 + incident_stalled_secs,
                 STALLED_CYCLE_RESOLVE_SECS,
@@ -2376,45 +2574,27 @@ mod tests {
         );
         // Still bounded: a genuinely orphaned cycle past the (larger) deadline
         // remains resolvable so the recycle spin cannot wedge forever.
-        assert!(state.stalled_pre_response_cycle(
+        assert!(state.stalled_before_response_capture_cycle(
             0,
             1_000 + STALLED_CYCLE_RESOLVE_SECS + 1,
             STALLED_CYCLE_RESOLVE_SECS,
         ));
         // The consecutive-tick debounce is a second, independent gate on top of
-        // the deadline — a stale sidecar cannot abandon a live turn on a single
-        // transiently-misread boundary poll.
+        // the deadline — a stale observation cannot abandon a live turn on a
+        // single transiently-misread boundary poll.
         assert!(STALLED_CYCLE_RESOLVE_CONFIRM_TICKS > 0);
     }
 
     #[test]
-    fn save_is_atomic_leaves_no_temp_residue() {
+    fn save_persists_ledger_checkpoint() {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
 
-        let cycles_dir = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
-        let entry_count = || fs::read_dir(&cycles_dir).unwrap().count();
-
         let _ = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        assert_eq!(
-            entry_count(),
-            1,
-            "exactly one cycle file after the first atomic save"
-        );
 
         let state = mark_committed(&doc, "evt", Some("snap"), Some("body")).unwrap();
         assert_eq!(state.phase, CyclePhase::Committed);
-        assert_eq!(
-            entry_count(),
-            1,
-            "atomic overwrite leaves no temp-file residue"
-        );
         assert_eq!(load(&doc).unwrap().unwrap().phase, CyclePhase::Committed);
     }
 
@@ -2536,34 +2716,7 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_cycle_sidecar_is_treated_as_absent_not_a_hot_path_error() {
-        // `#lzsidecaratomic`: a corrupt/torn/legacy-format cycle-state sidecar must
-        // never fail a hot/critical-path read. `load` treats it as absent, and
-        // `load_with_closeout_projection` (used across commit/capture/write) does the
-        // same instead of propagating a serde parse error.
-        let dir = setup_project();
-        let doc = dir.path().join("doc.md");
-        fs::write(&doc, "body").unwrap();
-
-        start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle sidecar path");
-        // Overwrite the durable sidecar with unparseable bytes.
-        fs::write(&sidecar_path, "{ this is not valid cycle-state json").unwrap();
-
-        assert!(
-            load(&doc).unwrap().is_none(),
-            "corrupt sidecar must read as absent, not error"
-        );
-        assert!(
-            load_with_closeout_projection(&doc).unwrap().is_none(),
-            "projection-backed read must also degrade to absent on a corrupt sidecar"
-        );
-    }
-
-    #[test]
-    fn document_cell_merge_acks_survive_missing_cycle_sidecar_via_projection() {
+    fn document_cell_merge_acks_survive_in_ledger() {
         use agent_doc_merge::document_cell_merge::AckReason;
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
@@ -2575,11 +2728,7 @@ mod tests {
             &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)],
         )
         .unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle sidecar path");
-        fs::remove_file(&sidecar_path).unwrap();
-        assert!(load(&doc).unwrap().is_none());
+        assert!(load(&doc).unwrap().is_some());
 
         let pending = load_pending_semantic_merge_acks(&doc).unwrap();
         assert_eq!(pending.len(), 1);
@@ -2589,7 +2738,6 @@ mod tests {
         assert_eq!(cycle2.pending_semantic_merge_acks.len(), 1);
         assert!(cycle2.pending_semantic_merge_acks[0].surfaced);
 
-        fs::remove_file(&sidecar_path).unwrap();
         let surfaced = load_pending_semantic_merge_acks(&doc).unwrap();
         assert_eq!(surfaced.len(), 1);
         assert!(surfaced[0].surfaced);
@@ -3024,6 +3172,7 @@ mod tests {
                 capture_id: &started.cycle_id,
                 response_sha256: "response-sha",
                 response_body: "### Re: topic - gpt-5\n\nDone.\n",
+                intent_body: None,
                 file_hash: Some("file-sha"),
                 snapshot_hash: Some("snapshot-sha"),
                 baseline_content: Some("body"),
@@ -3062,6 +3211,7 @@ mod tests {
                     capture_id: &started.cycle_id,
                     response_sha256,
                     response_body,
+                    intent_body: None,
                     file_hash: Some(response_sha256),
                     snapshot_hash: None,
                     baseline_content: Some(baseline),
@@ -3253,36 +3403,7 @@ mod tests {
     }
 
     #[test]
-    fn load_with_closeout_projection_overlays_stale_matching_sidecar_phase() {
-        let dir = setup_project();
-        let doc = dir.path().join("doc.md");
-        fs::write(&doc, "body").unwrap();
-        let opened = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
-        mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
-
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle sidecar path");
-        fs::write(sidecar_path, serde_json::to_string_pretty(&opened).unwrap()).unwrap();
-        assert_eq!(
-            load(&doc).unwrap().unwrap().phase,
-            CyclePhase::PreflightStarted
-        );
-
-        let projected = load_with_closeout_projection(&doc)
-            .unwrap()
-            .expect("cycle state");
-        assert_eq!(projected.cycle_id, opened.cycle_id);
-        assert_eq!(projected.phase, CyclePhase::Committed);
-        assert!(
-            projected
-                .last_event
-                .contains("state_backbone_commit_observed")
-        );
-    }
-
-    #[test]
-    fn load_with_closeout_projection_never_regresses_newer_sidecar_phase() {
+    fn load_with_closeout_projection_never_regresses_newer_checkpoint_phase() {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
@@ -3299,10 +3420,10 @@ mod tests {
 
         // Simulate a crash after the local phase advanced but before the
         // matching backbone fact was appended.
-        let mut sidecar = load(&doc).unwrap().unwrap();
-        sidecar.phase = CyclePhase::WriteApplied;
-        sidecar.last_event = "capture_write_applied_proof".to_string();
-        save(&doc, &sidecar).unwrap();
+        let mut checkpoint = load(&doc).unwrap().unwrap();
+        checkpoint.phase = CyclePhase::WriteApplied;
+        checkpoint.last_event = "capture_write_applied_proof".to_string();
+        save(&doc, &checkpoint).unwrap();
 
         let projected = load_with_closeout_projection(&doc)
             .unwrap()
@@ -3416,17 +3537,24 @@ mod tests {
     }
 
     #[test]
-    fn mark_committed_is_idempotent_for_terminal_cycle() {
+    fn mark_committed_refreshes_terminal_content_proof_idempotently() {
         let dir = setup_project();
         let doc = dir.path().join("doc.md");
         fs::write(&doc, "body").unwrap();
         start_preflight(&doc, Some("snap"), Some("body")).unwrap();
 
         let committed = mark_committed(&doc, "commit_success", Some("body"), Some("body")).unwrap();
+        let refreshed = mark_committed(&doc, "repair_applied", Some("new"), Some("new")).unwrap();
         let replay = mark_committed(&doc, "repair_applied", Some("new"), Some("new")).unwrap();
 
-        assert_eq!(replay, committed);
-        assert_eq!(load(&doc).unwrap().unwrap(), committed);
+        assert_eq!(refreshed.phase, committed.phase);
+        assert_eq!(refreshed.last_event, committed.last_event);
+        assert_eq!(
+            refreshed.file_hash.as_deref(),
+            Some(agent_doc_hash::content_hash("new").as_str())
+        );
+        assert_eq!(replay, refreshed);
+        assert_eq!(load(&doc).unwrap().unwrap(), refreshed);
     }
 
     #[test]
@@ -3492,6 +3620,27 @@ mod tests {
             Some("body"),
             "response-sha",
             Some(&started.cycle_id),
+        )
+        .unwrap();
+        append_response_captured_body(
+            &doc,
+            CapturedResponseFactInput {
+                cycle_id: &captured.cycle_id,
+                capture_id: captured.capture_id.as_deref().unwrap(),
+                response_sha256: "response-sha",
+                response_body: "response body",
+                intent_body: None,
+                file_hash: captured.file_hash.as_deref(),
+                snapshot_hash: captured.snapshot_hash.as_deref(),
+                baseline_content: Some("body"),
+            },
+        )
+        .unwrap();
+        retire_projected_captured_response(
+            &doc,
+            &captured.cycle_id,
+            captured.capture_id.as_deref().unwrap(),
+            "capture_discarded",
         )
         .unwrap();
         mark_abandoned(
@@ -3670,7 +3819,6 @@ mod tests {
         ];
         let state = record_turn_checkpoint(
             &doc,
-            Some("/tmp/baseline.md"),
             &prompts,
             Some("#DurableRecycle"),
             Some("#DurableRecycle"),
@@ -3678,7 +3826,6 @@ mod tests {
         .unwrap()
         .expect("state should exist");
 
-        assert_eq!(state.baseline_file.as_deref(), Some("/tmp/baseline.md"));
         assert_eq!(
             state.prompt_targets,
             vec![
@@ -3690,7 +3837,6 @@ mod tests {
         assert_eq!(state.turn_id.as_deref(), Some("#durablerecycle"));
 
         let loaded = load(&doc).unwrap().unwrap();
-        assert_eq!(loaded.baseline_file, state.baseline_file);
         assert_eq!(loaded.prompt_targets, state.prompt_targets);
         assert_eq!(loaded.queue_task_id, state.queue_task_id);
         assert_eq!(loaded.turn_id, state.turn_id);

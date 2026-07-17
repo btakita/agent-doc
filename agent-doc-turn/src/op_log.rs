@@ -6,8 +6,7 @@
 //!
 //! ## Spec
 //! - `OpActor` names who produced a document operation: the managing `agent`,
-//!   the `user`, a concurrent `foreign_supervisor`, or a lagging `live_buffer`
-//!   editor sidecar.
+//!   the `user`, a concurrent `foreign_supervisor`, or a lagging recovery projection.
 //! - `OpSource` is the signal a caller already has about where an op came from;
 //!   `classify_actor` maps it to an `OpActor`. Phase-1 rules are source-driven:
 //!   a snapshot↔document divergence observed at preflight is a `user` edit,
@@ -29,8 +28,6 @@ use serde::{Deserialize, Serialize};
 pub const PREFLIGHT_START_EVENT: &str = "preflight_diff_start";
 /// Event name emitted when an IPC write was consumed and awaits commit proof.
 pub const IPC_WRITE_CONSUMED_EVENT: &str = "ipc_write_consumed";
-/// Event name emitted when file-IPC saved the snapshot and awaits commit proof.
-pub const SNAPSHOT_SAVED_FILE_IPC_EVENT: &str = "snapshot_saved_file_ipc";
 /// Event name emitted when IPC response-materialization proof is insufficient.
 pub const IPC_PROOF_INSUFFICIENT_EVENT: &str = "ipc_proof_insufficient";
 
@@ -46,7 +43,7 @@ pub fn strip_timestamp_prefix(line: &str) -> &str {
 
 /// True when an ops-log event proves a write landed but commit proof is missing.
 pub fn is_write_completed_commit_missing_event(event: &str) -> bool {
-    event.starts_with(IPC_WRITE_CONSUMED_EVENT) || event.starts_with(SNAPSHOT_SAVED_FILE_IPC_EVENT)
+    event.starts_with(IPC_WRITE_CONSUMED_EVENT)
 }
 
 /// Return the first whitespace-delimited event token from an ops-log event.
@@ -64,7 +61,7 @@ pub enum OpActor {
     User,
     /// A concurrent agent-doc supervisor writing the same document.
     ForeignSupervisor,
-    /// A lagging editor live-buffer sidecar disk write (provenance-spoofed drift).
+    /// A lagging recovery projection disk write (provenance-spoofed drift).
     LiveBuffer,
 }
 
@@ -96,7 +93,7 @@ impl OpActor {
 pub enum OpSource {
     /// snapshot↔document divergence observed at preflight (a user edit).
     SnapshotDiff,
-    /// a lagging live-buffer sidecar disk write (class-5 spoofed drift).
+    /// a lagging recovery projection disk write (class-5 spoofed drift).
     LiveBufferDrift,
     /// a concurrent foreign supervisor write contending the same document.
     ForeignSupervisorWrite,
@@ -237,9 +234,6 @@ mod tests {
         assert_eq!(strip_timestamp_prefix("no bracket"), "no bracket");
         assert!(is_write_completed_commit_missing_event(
             "ipc_write_consumed file=x patches=1"
-        ));
-        assert!(is_write_completed_commit_missing_event(
-            "snapshot_saved_file_ipc file=x snap_len=10"
         ));
         assert!(!is_write_completed_commit_missing_event(
             "preflight_diff_start file=x"

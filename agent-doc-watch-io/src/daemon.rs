@@ -667,24 +667,9 @@ fn run_event_loop(
                 ),
             }
 
-            // Skip if file has an active agent-doc operation (prevents duplicate
-            // responses from watch daemon competing with skill/stream writes)
-            let file_str = path.to_string_lossy().to_string();
-            if agent_doc_debounce::is_busy(&file_str) {
-                eprintln!(
-                    "[watch] skipping {} — busy (active operation in progress)",
-                    path.display()
-                );
-                continue;
-            }
-
-            // Also skip when an agent-doc cycle is freshly in flight. The
-            // cross-process status file used by `is_busy` goes stale after 30s,
-            // but agent response-composition routinely takes longer — without
-            // this guard a zero-debounce reactive watch re-triggers mid-turn and
-            // churns the queue (#queediturn). Bound by freshness so a
-            // crashed/stuck cycle still lets the watch proceed to preflight
-            // (which repairs stale cycles).
+            // Skip while the durable turn state machine has a fresh cycle in
+            // flight. This replaces the former cross-process typing/busy sidecar;
+            // a crashed cycle ages out and preflight owns its recovery.
             let now_secs = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -700,6 +685,7 @@ fn run_event_loop(
             // Route the settled change through the controller-owned document
             // watcher. The legacy direct submit/preflight loop is disabled for
             // realtime cutover; admission/closeout owns follow-up work.
+            let file_str = path.to_string_lossy().to_string();
             eprintln!("Change detected: {}", path.display());
             if let Err(e) = effects.on_file_change(&path) {
                 eprintln!(
@@ -883,13 +869,6 @@ mod tests {
         let cs =
             agent_doc_cycle_state_io::start_preflight(&doc, Some("snap"), Some("body")).unwrap();
         assert!(cs.is_open());
-        let sidecar_path = std::fs::read_dir(dir.path().join(".agent-doc/state/cycles"))
-            .unwrap()
-            .next()
-            .expect("cycle state sidecar")
-            .unwrap()
-            .path();
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         assert!(cycle_freshly_in_flight(&doc, now));
         assert!(cycle_freshly_in_flight(&doc, now + 60));
 
@@ -901,17 +880,13 @@ mod tests {
         ));
 
         agent_doc_cycle_state_io::mark_committed(&doc, "test", Some("snap"), Some("body")).unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
-        assert!(
-            agent_doc_cycle_state_io::load(&doc)
-                .unwrap()
-                .unwrap()
-                .is_open(),
-            "fixture should leave compatibility sidecar stale and open"
-        );
         assert!(
             !cycle_freshly_in_flight(&doc, now + 60),
-            "watch should honor terminal closeout projections before stale sidecars"
+            "watch should honor the terminal state.db projection"
+        );
+        assert!(
+            !dir.path().join(".agent-doc/state/cycles").exists(),
+            "watch cycle transitions must not emit compatibility files"
         );
     }
 

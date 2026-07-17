@@ -268,10 +268,8 @@ impl WatcherRegistry {
     }
 }
 
-/// Whether the editor plugin's own `WatchService` file-apply path is demoted to
-/// read-only buffer reporting. Always `true` post-cutover — the plugin never
-/// autonomously applies file-IPC patches it observes on disk; the
-/// controller-owned watcher + socket IPC are the sole writer.
+/// Whether the editor plugin's `WatchService` is limited to buffer reporting.
+/// The CPC document model and typed editor intents are the only mutation path.
 pub fn plugin_watch_is_readonly() -> bool {
     true
 }

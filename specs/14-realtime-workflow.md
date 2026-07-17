@@ -33,9 +33,10 @@ body, frontmatter edit, queue/backlog edit, prompt, comment, partial word, or
 plugin-defined component content that appears in the editor or visible file and
 was not produced by the current binary-owned write.
 
-`content_ours`, snapshots, CRDT sidecars, lazily visible-write receipts, and captured
-responses are candidates for merge. They are never authority to delete or reset
-operator-authored text.
+Captured agent responses are durable `state.db` intents. File snapshots and
+`state.db` CRDT checkpoints are cold recovery projections. Lazily receipts are
+transition proof. None of these is a
+second current-document candidate or authority to delete/reset operator text.
 
 Snapshots are durable backup/audit state, not hot-path authority. Until every
 write path carries a structured operation record, a snapshot may temporarily
@@ -56,15 +57,15 @@ editor and acknowledged only after the visible text hash converges.
 If disk and editor state disagree, the binary must converge through the editor,
 wait for proven relay delivery, or fail closed. It must not use a direct disk
 write as an automatic recovery behind the editor. There is no full live-buffer
-sidecar: current text lives in the Lazily/CPC CRDT model, while open/close,
+side channel: current text lives in the Lazily/CPC CRDT model, while open/close,
 sync epochs, editor identity, plugin version, and capabilities travel on the
-reliable-sync Lazily plane. Legacy `.agent-doc/live-buffer` files may only be
-deleted during migration; they must never be read as authority or recreated.
+reliable-sync Lazily plane. No filesystem representation of live editor state
+is created or consulted.
 When a controller recycle removes server-side membership but the editor still
 holds a cached client, refresh must retire that cached client and issue a new
 registration. Every stale supervisor/controller recycle request emits that
-forced-refresh event centrally, no matter which turn stage scheduled it. Native-library reload
-broadcasts also refresh all open document
+forced-refresh event centrally, no matter which turn stage scheduled it. The
+typed `reload_library` intent also refreshes all open document
 replicas. Re-registration publishes the exact current editor buffer as the new
 replica baseline. It never installs or saves a Lazily-retained whole-document
 target first. Retained agent intents replay afterward through the ordered
@@ -89,12 +90,11 @@ still matches that merge input before writing. Snapshot text must not replace
 current file content unless the operator explicitly chose a disk-authoritative
 recovery.
 
-Out-of-band disk writes, such as saving the file from an editor without the
-agent-doc plugin, are operator-authored changes. When no editor listener owns
-the document, the next read treats the saved file as `DiskAuthoritative`. When
-an editor listener does own the document, the saved file and the live editor
-buffer are competing operator sources; the binary must reconcile them, preserve
-both when possible, or fail closed before applying any agent delta.
+Out-of-band disk writes are operator-authored only while the document is
+detached. With an attached editor, Lazily current remains the single authority:
+the disk image is an external candidate that must be causally rebased onto the
+current editor generation or rejected. It may never replace the editor cut or
+resurrect nodes deleted in a newer editor generation.
 
 Lazily visible-write receipts prove what an editor observed after a patch. They
 do not prove that older snapshot text should overwrite newer operator text.
@@ -245,10 +245,9 @@ long-term owner of `🚧` semantics.
 | Active HEAD set changes for any reason | Move the `🚧` projection to the active HEAD set in the visible document and backup/audit projection. | Affects a turn only when that turn's active HEAD identity changed or other active-turn input changed. |
 | Edit `agent:exchange` | Preserve and merge the exchange update. | Always affects the active turn. Exchange edits are never hidden as future queue-only state, even when the same source epoch also changes non-selected queue heads. |
 
-Queue crash recovery is part of the Lazily/CPC current-document lineage. The
-former append-only `.agent-doc/queue-journal` is retired and cleared at start; it
-must never replay text over the controller-resolved document because absence
-there may be an operator deletion. A genuinely unsaved queue add survives through
+Queue crash recovery is part of the Lazily/CPC current-document lineage. No
+queue-specific journal or second head set exists: absence from newer Lazily
+current may be an operator deletion and must remain absent. A genuinely unsaved queue add survives through
 the editor's durable CRDT/reliable-sync stream, using the same ordered causality
 as every other editor operation rather than a second queue-specific head set.
 

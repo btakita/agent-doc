@@ -1,10 +1,9 @@
 //! Cross-process editor liveness as OR-set / LWW cells (`#lzsync-liveness`,
 //! sidecar-retirement Phase 3C — the controller *receiver* core).
 //!
-//! This is the derived-authority engine the cutover reads **instead of** scanning
-//! `.agent-doc/live-buffer/*` + `plugin-owner/*.json`: the controller folds the
-//! liveness frames pushed by the editor plugins into lazily's proven convergent
-//! cells and derives the open-set / per-pid-alive / live-doc aggregate.
+//! This is the sole editor-liveness authority: the controller folds liveness
+//! frames pushed by the editor plugins into Lazily's proven convergent cells and
+//! derives the open-set / per-pid-alive / live-doc aggregate.
 //!
 //! The semantics are exactly the ones lazily-spec pins and lazily-formal proves
 //! (`ReliableSync.crdt_liveness_convergence_under_retry`,

@@ -209,7 +209,6 @@ fn read_cycle_state(file: &Path, warnings: &mut Vec<String>) -> CycleStateDoctor
                 last_event: Some(state.last_event),
                 capture_id: state.capture_id,
                 response_sha256: state.response_sha256,
-                baseline_file: state.baseline_file,
                 prompt_targets: state.prompt_targets,
                 queue_task_id: state.queue_task_id,
                 turn_id: state.turn_id,
@@ -331,9 +330,6 @@ fn read_editor_facts(
         }
     };
     EditorDoctorFacts {
-        patches_dir_present: root.join(".agent-doc/patches").is_dir(),
-        legacy_ack_content_dir_present: root.join(".agent-doc/ack-content").is_dir(),
-        legacy_live_buffer_dir_present: root.join(".agent-doc/live-buffer").is_dir(),
         lazily_current_diverges,
     }
 }

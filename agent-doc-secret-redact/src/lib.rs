@@ -3,7 +3,7 @@
 //! ## Spec
 //! - Redacts plaintext API keys and similar secrets before they land in
 //!   `.agent-doc/` state files (captures, snapshots, partial checkpoints,
-//!   pre-response snapshots) or in finalize/stream stdout messages.
+//!   undo checkpoints) or in finalize/stream stdout messages.
 //! - Always-on backend feature with no operator-facing CLI flag.
 //! - Patterns covered (apply most-specific first):
 //!   - `sk-proj-[A-Za-z0-9_-]{20,}` → `[REDACTED_OPENAI]`

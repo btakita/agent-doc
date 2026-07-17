@@ -349,7 +349,6 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
     // append-only queue recovery journal instead of replaying it over that
     // frontier; replay could not distinguish a crash-lost add from an
     // operator-authored deletion and was the direct resurrection source.
-    retire_legacy_queue_journal(file);
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
     let (fm, _body) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &updated_content,
@@ -585,10 +584,6 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
         actor_record,
         post_start_document_model_ensure,
     })
-}
-
-fn retire_legacy_queue_journal(file: &Path) {
-    agent_doc_queue_io::queue_journal::clear(file);
 }
 
 fn close_stale_start_actors(
@@ -1087,19 +1082,6 @@ fn fire_session_start_hooks(
 mod tests {
     use super::*;
     use std::io::Write;
-
-    #[test]
-    fn start_retires_legacy_queue_journal_instead_of_replaying_deleted_heads() {
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc/queue-journal")).unwrap();
-        let file = dir.path().join("session.md");
-        let old = "<!-- agent:queue -->\n\n- deleted by operator\n";
-        agent_doc_queue_io::queue_journal::record(&file, old).unwrap();
-
-        retire_legacy_queue_journal(&file);
-
-        assert!(agent_doc_queue_io::queue_journal::replay_missing(&file, "", None).is_empty());
-    }
 
     #[test]
     fn session_id_short_never_panics_on_short_or_multibyte_sessions() {

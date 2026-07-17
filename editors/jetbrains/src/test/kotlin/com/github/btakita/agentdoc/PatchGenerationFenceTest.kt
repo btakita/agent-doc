@@ -37,7 +37,7 @@ class PatchGenerationFenceTest {
     @Test
     fun `parses cycle_id and baseline hash tokens`() {
         val json =
-            """{"type":"patch","file":"/tmp/plan.md","patches":[],"reposition_boundary":true,
+            """{"type":"apply_canonical","file":"/tmp/plan.md","patches":[],"reposition_boundary":true,
                "cycle_id":"cycle-123","baseline_hash":"deadbeef","baseline_normalized_hash":"facefeed",
                "node_patches":[{"component":"queue","node_key":"queue:0:beta:0","op":"strike",
                  "expected_content":"- do [#beta]\n","expected_content_hash":"cafebabe"}]}"""
@@ -52,7 +52,7 @@ class PatchGenerationFenceTest {
 
     @Test
     fun `tokens are null when absent`() {
-        val json = """{"type":"patch","file":"/tmp/plan.md","patches":[],"reposition_boundary":true}"""
+        val json = """{"type":"apply_canonical","file":"/tmp/plan.md","patches":[],"reposition_boundary":true}"""
         val patch = parsePatchJson(json)
         assertNotNull(patch)
         assertNull(patch!!.cycleId)
@@ -146,46 +146,4 @@ class PatchGenerationFenceTest {
         )
     }
 
-    @Test
-    fun `cycle already committed is superseded`() {
-        val root = File.createTempFile("adoc-fence", "").let {
-            it.delete(); it.mkdirs(); it
-        }
-        try {
-            val doc = File(root, "plan.md")
-            doc.writeText("body\n")
-            val cyclesDir = File(root, ".agent-doc/state/cycles")
-            cyclesDir.mkdirs()
-            val stateFile = File(cyclesDir, "${PatchWatcher.docHash(doc.path)}.json")
-            stateFile.writeText("""{"cycle_id":"cycle-committed","file":"${doc.path}","phase":"committed"}""")
-
-            assertTrue(PatchWatcher.cycleAlreadyCommitted(doc.path, "cycle-committed"))
-            // A different cycle id, or a non-committed phase, must NOT fence.
-            assertFalse(PatchWatcher.cycleAlreadyCommitted(doc.path, "other-cycle"))
-
-            val patch = patchWith(doc.path, cycleId = "cycle-committed", baselineHash = null)
-            assertTrue(PatchWatcher.isPatchGenerationSuperseded(patch, doc.readText()))
-        } finally {
-            root.deleteRecursively()
-        }
-    }
-
-    @Test
-    fun `open cycle is not superseded`() {
-        val root = File.createTempFile("adoc-fence-open", "").let {
-            it.delete(); it.mkdirs(); it
-        }
-        try {
-            val doc = File(root, "plan.md")
-            doc.writeText("body\n")
-            val cyclesDir = File(root, ".agent-doc/state/cycles")
-            cyclesDir.mkdirs()
-            val stateFile = File(cyclesDir, "${PatchWatcher.docHash(doc.path)}.json")
-            stateFile.writeText("""{"cycle_id":"cycle-open","file":"${doc.path}","phase":"write_applied"}""")
-
-            assertFalse(PatchWatcher.cycleAlreadyCommitted(doc.path, "cycle-open"))
-        } finally {
-            root.deleteRecursively()
-        }
-    }
 }

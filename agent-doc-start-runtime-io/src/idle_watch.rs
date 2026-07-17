@@ -6,7 +6,6 @@
 //! helpers, and `supervisor_perform_reexec` directly through `use super::*`.
 
 use super::*;
-use agent_doc_controller_io::project_controller::consume_disk_change_reconcile_via_controller_model_for_doc;
 use agent_doc_queue::queue::{
     CLEAR_COOLDOWN_RESUME_IDLE_TICKS, IdleQueueContextClearInFlightDecision,
     IdleQueueContextClearInFlightFacts, IdleQueueContextClearInFlightSettleFacts,
@@ -14,8 +13,8 @@ use agent_doc_queue::queue::{
     between_turn_enqueue_plan, clean_session_head_forces_context_reset,
     clear_cooldown_resume_ready, drain_blocked_awaiting_clear_settle, drain_dispatch_dedup_skip,
     idle_queue_context_clear_in_flight_decision, idle_queue_context_clear_in_flight_settle_ticks,
-    idle_queue_context_reset_decision_with_editor_typing,
-    idle_queue_drain_decision_with_editor_typing, stale_drain_recycle_yield_requested,
+    idle_queue_context_reset_decision_with_current_transition,
+    idle_queue_drain_decision_with_current_transition, stale_drain_recycle_yield_requested,
 };
 #[cfg(test)]
 use agent_doc_queue::queue::{idle_queue_context_reset_decision, idle_queue_drain_decision};
@@ -171,10 +170,13 @@ fn idle_watch_document_revision(
     file: &Path,
     controller_observation_suppressed: bool,
 ) -> Option<IdleWatchDocumentRevision> {
-    if controller_observation_suppressed
-        || !agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file)
-    {
+    let editor_attached =
+        agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file);
+    if !editor_attached {
         return idle_watch_disk_revision(file, controller_observation_suppressed);
+    }
+    if controller_observation_suppressed {
+        return None;
     }
 
     match agent_doc_controller_io::project_controller::revision_via_controller_model_read_for_doc(
@@ -249,17 +251,19 @@ fn gather_convergence_facts(
     }
 }
 
-fn editor_typing_active_for_idle_queue(file: &std::path::Path) -> bool {
-    let debounce_ms = agent_doc_preflight_io::debounce::preflight_debounce_ms(file);
-    let file_str = file.to_string_lossy();
-    if agent_doc_debounce::is_typing_via_file(&file_str, debounce_ms) {
-        return true;
-    }
+fn current_transition_pending_for_idle_queue(file: &std::path::Path) -> bool {
     let absolute = agent_doc_git_io::dirs::resolve_absolute_file_path(file);
-    if absolute == file {
-        return false;
+    match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&absolute) {
+        Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => false,
+        Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+            delivery_converged, ..
+        }) => !delivery_converged,
+        Ok(
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+        )
+        | Err(_) => true,
     }
-    agent_doc_debounce::is_typing_via_file(&absolute.to_string_lossy(), debounce_ms)
 }
 
 /// `#fbwire` / `#fullboundary` Phase 2 - the convergence gate could not be
@@ -388,7 +392,17 @@ fn record_context_clear_prompt_for_hooks(
 /// deferred `[clean-session]`/`[operator-verify]` heads. Otherwise the watch would
 /// re-inject a no-op `/agent-doc` drain trigger every idle boundary for a queue
 /// that has no continuation required (#qchurn / #goqueuestall / #goqstall2).
-fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum QueueHeadObservation {
+    Observed(Option<String>),
+    AuthorityUnavailable,
+}
+
+fn disk_queue_authority_allowed(editor_attached: bool) -> bool {
+    !editor_attached
+}
+
+fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
     // `#idlewatchdetacheddisk`: when no live editor plugin owns the document,
     // disk is authoritative — a controller CRDT model read resolves back to disk
     // anyway (`live_editors == 0`), so the round-trip is pure overhead. Skip it
@@ -400,7 +414,9 @@ fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
     // recruit session whose controller had grown too slow to answer the 750ms
     // model read). Only when a live editor is attached do we consult the
     // controller so an unsaved editor-buffer queue edit is still observed.
-    if !agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file) {
+    let editor_attached =
+        agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file);
+    if disk_queue_authority_allowed(editor_attached) {
         return idle_watch_disk_queue_head(file);
     }
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
@@ -412,7 +428,7 @@ fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
             .get(&canonical)
             .is_some_and(|last| last.elapsed() < ZERO_REPLICA_IDLE_WATCH_BACKOFF)
         {
-            return idle_watch_disk_queue_head(file);
+            return QueueHeadObservation::AuthorityUnavailable;
         }
         probes.remove(&canonical);
     }
@@ -451,12 +467,14 @@ fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
                 .lock()
                 .expect("zero-replica idle-watch cache poisoned")
                 .insert(canonical, std::time::Instant::now());
-            return idle_watch_disk_queue_head(file);
+            return QueueHeadObservation::AuthorityUnavailable;
         }
     };
-    agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-        &content,
-        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+    QueueHeadObservation::Observed(
+        agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+            &content,
+            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        ),
     )
 }
 
@@ -465,16 +483,27 @@ fn idle_watch_active_queue_head(file: &Path) -> Option<String> {
 /// controller-paused / degraded-cooldown path and the no-live-editor fast path
 /// (`#idlewatchdetacheddisk`); in every one of those states disk is the
 /// authoritative replica for the supervisor's continuation decision.
-fn idle_watch_disk_queue_head(file: &Path) -> Option<String> {
-    let content = agent_doc_fs::read_optional_text(file).ok().flatten()?;
-    agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-        &content,
-        agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-    )
+fn idle_watch_disk_queue_head(file: &Path) -> QueueHeadObservation {
+    let head = agent_doc_fs::read_optional_text(file)
+        .ok()
+        .flatten()
+        .and_then(|content| {
+            agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+                &content,
+                agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+            )
+        });
+    QueueHeadObservation::Observed(head)
 }
 
-fn idle_watch_paused_queue_head(file: &Path) -> Option<String> {
-    idle_watch_disk_queue_head(file)
+fn idle_watch_paused_queue_head(file: &Path) -> QueueHeadObservation {
+    if disk_queue_authority_allowed(
+        agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file),
+    ) {
+        idle_watch_disk_queue_head(file)
+    } else {
+        QueueHeadObservation::AuthorityUnavailable
+    }
 }
 
 fn log_idle_queue_context_reset_submit(
@@ -699,7 +728,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut clear_cooldown_logged = false;
             let mut route_submit_in_flight_logged = false;
             let mut context_clear_route_wait_logged = false;
-            let mut editor_typing_active_logged = false;
+            let mut current_transition_pending_logged = false;
             let mut context_reset_policy_error_logged = false;
             let mut idle_busy_ticks: u32 = 0;
             let mut ready_busy_ticks: u32 = 0;
@@ -812,12 +841,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut cycle_open_defer_streak: u32 = 0;
             let mut cycle_open_defer_escalated_logged = false;
             // `#suprecyclespin-falseabandon`: consecutive polls for which the
-            // sidecar-staleness stall predicate has held at a `turn_boundary`. The
+            // transactional-cycle staleness predicate has held at a `turn_boundary`. The
             // force-abandon only fires once this reaches
             // `STALLED_CYCLE_RESOLVE_CONFIRM_TICKS`, so a transiently-misread
             // boundary during a live harness generation can never abandon the
-            // turn from a merely-stale sidecar (a stale sidecar must not interfere
-            // with the live turn — the CRDT relay stays authoritative).
+            // turn from a merely-stale projection (a stale projection must not
+            // interfere with the live turn — Lazily stays authoritative).
             let mut stalled_resolve_streak: u32 = 0;
             // `#idlewatchctrlbackoff`: when the controller is degraded (its RPCs
             // are timing out), the idle-watch would otherwise hammer it with a
@@ -825,11 +854,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
             // time AND saturating the controller further (observed live: three
             // supervisors × 2 reads/s pinned the controller at ~82% CPU and
             // produced multi-hour controller-lookup timeout storms). Instead,
-            // once a controller failure is observed we read the queue head from
-            // disk (the same authority the paused-queue path already uses,
-            // `#qchurn`) for a cooldown, then probe the controller once per
-            // cooldown window. This cuts per-doc controller load from ~2/s to
-            // ~1/30s during a wedge without losing queue-drain readiness.
+            // once a controller failure is observed we pause queue observation
+            // for a cooldown, then probe the controller once per cooldown window.
+            // We never substitute disk while an editor is attached because that
+            // would resurrect operator-deleted unsaved queue items.
             let mut controller_degraded_until: Option<std::time::Instant> = None;
             let mut controller_backoff_logged = false;
             let mut queue_state_observed = false;
@@ -996,7 +1024,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     // lease and must recover even while the Stop hook keeps the
                     // harness actor active.
                     actor_ready: actor_ready_fast,
-                                editor_typing: editor_typing_active_for_idle_queue(&path),
+                                current_transition_pending: current_transition_pending_for_idle_queue(&path),
                                 ipc_inflight: agent_doc_ipc_io::inflight_connection_handlers(),
                                 worker_in_flight: resume_worker.is_some(),
                                 retry_cooldown_elapsed: retry_cooldown_elapsed
@@ -1193,16 +1221,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         &path,
                     );
                 let queue_controller_paused = queue_pause_reason.is_some();
-                // A controller pause is the unattended flood guard. While it is
-                // active, do not ask the live editor/CRDT model for a head on
-                // every poll just to prove an idle-watch skip; use the saved
-                // document to preserve the supervisor failsafe for drainable
-                // on-disk heads without hammering the controller (#qchurn).
-                //
-                // `#idlewatchctrlbackoff`: the same disk-authority skip applies
-                // while the controller is degraded, so a wedged controller is
-                // not flooded with a CRDT-model read every poll. The cooldown
-                // expires → one controller probe → if it failed again, renew.
+                // A controller pause is the unattended flood guard. During a
+                // pause/cooldown, disk may be consulted only when the editor is
+                // detached. An attached editor with unavailable Lazily authority
+                // yields `AuthorityUnavailable` and the drain simply waits.
                 let now = std::time::Instant::now();
                 let shared_controller_cooldown = agent_doc_controller_io::project_controller::controller_model_pressure_cooldown_active_for_doc(&path);
                 let controller_in_cooldown = controller_degraded_until
@@ -1211,10 +1233,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 if shared_controller_cooldown {
                     controller_degraded_until = Some(now + IDLE_WATCH_CONTROLLER_BACKOFF);
                 }
-                let active_head = if queue_controller_paused || controller_in_cooldown {
+                let active_head_observation = if queue_controller_paused || controller_in_cooldown {
                     idle_watch_paused_queue_head(&path)
                 } else {
-                    let head = idle_watch_active_queue_head(&path);
+                    let observation = idle_watch_active_queue_head(&path);
                     if agent_doc_document_realtime_io::controller_failed_within(
                         std::time::Duration::from_secs(2),
                     ) {
@@ -1231,7 +1253,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                                 ),
                             );
                             eprintln!(
-                                "[agent-doc] idle-queue watch: backing off degraded project controller for {}s (disk authority for queue head)",
+                                "[agent-doc] idle-queue watch: backing off degraded project controller for {}s (attached editor queue authority paused)",
                                 IDLE_WATCH_CONTROLLER_BACKOFF.as_secs()
                             );
                         }
@@ -1240,7 +1262,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // latch so a *later* degradation logs again.
                         controller_backoff_logged = false;
                     }
-                    head
+                    observation
+                };
+                let active_head = match active_head_observation {
+                    QueueHeadObservation::Observed(head) => head,
+                    QueueHeadObservation::AuthorityUnavailable => {
+                        queue_state_observed = false;
+                        last_quiescent_maintenance = None;
+                        continue;
+                    }
                 };
                 if active_head.is_none() {
                     context_reset_in_flight = false;
@@ -1438,14 +1468,14 @@ pub(super) fn spawn_idle_queue_watch_thread(
             } else {
                 route_submit_in_flight_logged = false;
             }
-            let editor_typing_active =
-                active_head.is_some() && editor_typing_active_for_idle_queue(&path);
-            if editor_typing_active {
-                if !editor_typing_active_logged {
+            let current_transition_pending =
+                active_head.is_some() && current_transition_pending_for_idle_queue(&path);
+            if current_transition_pending {
+                if !current_transition_pending_logged {
                     log_event(
                         &mut session_log,
                         &format!(
-                            "idle_queue_watch_skipped harness={} reason=editor_typing_active file={}",
+                            "idle_queue_watch_skipped harness={} reason=current_transition_pending file={}",
                             harness.binary,
                             path.display()
                         ),
@@ -1453,15 +1483,15 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     agent_doc_ops_log_io::log_op(
                         &path,
                         &format!(
-                            "idle_queue_watch_skipped file={} harness={} reason=editor_typing_active",
+                            "idle_queue_watch_skipped file={} harness={} reason=current_transition_pending",
                             path.display(),
                             harness.binary
                         ),
                     );
-                    editor_typing_active_logged = true;
+                    current_transition_pending_logged = true;
                 }
             } else {
-                editor_typing_active_logged = false;
+                current_transition_pending_logged = false;
             }
             let mut context_clear_projection =
                 match agent_doc_controller_io::project_controller::queue_context_clear_in_flight_for_file(&path) {
@@ -2010,20 +2040,6 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         }
                     }
                 }
-                // C1b consumer (`plan-crdt-scramble-and-disk-propagation.md`): if the
-                // controller watch daemon dropped a disk-change-reconcile marker for
-                // this document, ask CPC to reconcile the out-of-band disk change
-                // into the canonical replica and clear the marker. Best-effort — a
-                // reconcile hiccup must not block the idle recycle path below.
-                let disk_change_reconcile =
-                    consume_disk_change_reconcile_via_controller_model_for_doc(&path);
-                match disk_change_reconcile {
-                    Ok(Some(_)) | Ok(None) => {}
-                    Err(err) => eprintln!(
-                        "[agent-doc] disk-change reconcile consume failed for {}: {err}",
-                        path.display()
-                    ),
-                }
                 let supervisor_stale = supervisor_stale_fast;
                 // `#supkill-bg` — publish the live staleness probe so the IPC `Restart`
                 // handler can decide drain-reexec vs immediate relaunch without
@@ -2076,8 +2092,8 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     .flatten()
                 {
                     Some(state) if state.is_open() => {
-                        let pre_response_cycle_stalled = turn_boundary
-                            && state.stalled_pre_response_cycle(
+                        let before_response_capture_cycle_stalled = turn_boundary
+                            && state.stalled_before_response_capture_cycle(
                                 inflight,
                                 current_epoch_secs(),
                                 agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_SECS,
@@ -2089,12 +2105,12 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         // the confirm window, so a transient boundary misread can no
                         // longer abandon a live turn from a stale sidecar; a truly
                         // orphaned cycle stays stalled every poll and still resolves.
-                        if pre_response_cycle_stalled {
+                        if before_response_capture_cycle_stalled {
                             stalled_resolve_streak = stalled_resolve_streak.saturating_add(1);
                         } else {
                             stalled_resolve_streak = 0;
                         }
-                        let stall_confirmed = pre_response_cycle_stalled
+                        let stall_confirmed = before_response_capture_cycle_stalled
                             && stalled_resolve_streak
                                 >= agent_doc_cycle_state_io::STALLED_CYCLE_RESOLVE_CONFIRM_TICKS;
                         if stall_confirmed {
@@ -2458,7 +2474,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // recycle fire on its own. After the recycle the fresh supervisor
                 // (no longer stale) clears the projection and the drain resumes.
                 {
-                    let drain_owner_active = agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(
+                    let drain_owner_active = agent_doc_queue_io::drain_owner::fresh_loop_drain_owner_lease(
                         &file,
                         current_epoch_secs(),
                     )
@@ -2957,11 +2973,11 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     last_context_reset_head.as_deref(),
                     context_reset_in_flight,
                 );
-                match idle_queue_context_reset_decision_with_editor_typing(
+                match idle_queue_context_reset_decision_with_current_transition(
                     prompt_visible,
                     turn_active,
                     route_submit_in_flight,
-                    editor_typing_active,
+                    current_transition_pending,
                     active_head.as_deref(),
                     reset_already_sent_for_active_slot,
                     context_reset_reason.is_some(),
@@ -3125,7 +3141,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     IdleQueueContextResetDecision::SkipNoActiveHead
                     | IdleQueueContextResetDecision::SkipNotIdle
                     | IdleQueueContextResetDecision::SkipTurnActive
-                    | IdleQueueContextResetDecision::SkipEditorTyping
+                    | IdleQueueContextResetDecision::SkipCurrentTransition
                     | IdleQueueContextResetDecision::SkipRouteSubmitInFlight
                     | IdleQueueContextResetDecision::SkipAlreadyResetHead
                     | IdleQueueContextResetDecision::SkipNoResetNeeded => {}
@@ -3236,7 +3252,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // a competing owner; treating it as one stranded paused queues behind
                 // the lease TTL after a clean closeout (#qstallguard Layer D).
                 let drain_owner_lease =
-                    agent_doc_queue::drain_owner::fresh_loop_drain_owner_lease(&file, current_epoch_secs());
+                    agent_doc_queue_io::drain_owner::fresh_loop_drain_owner_lease(&file, current_epoch_secs());
 
                 let mut paused_failsafe_active = false;
                 if active_head.is_some() && queue_controller_paused {
@@ -3280,7 +3296,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // intermediate queue head. The lease is short-TTL, so this is a
                 // brief yield: the edit settles and the next tick drains normally.
                 if let Some(holder_pid) =
-                    agent_doc_queue::queue_edit_owner::foreign_queue_edit_in_flight(&file)
+                    agent_doc_queue_io::queue_edit_owner::foreign_queue_edit_in_flight(&file)
                 {
                     log_event(
                         &mut session_log,
@@ -3290,13 +3306,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     );
                     continue;
                 }
-                match idle_queue_drain_decision_with_editor_typing(IdleQueueDrainDecisionFacts {
+                match idle_queue_drain_decision_with_current_transition(IdleQueueDrainDecisionFacts {
                     clear_cooldown_active,
                     prompt_visible,
                     turn_active,
                     self_driving_loop_active: drain_owner_lease.is_some(),
                     route_submit_in_flight,
-                    editor_typing_active,
+                    current_transition_pending,
                     active_head: active_head.as_deref(),
                     last_dispatched: last_dispatched.as_deref(),
                 }) {
@@ -3674,7 +3690,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                     IdleQueueDrainDecision::SkipNotIdle
                     | IdleQueueDrainDecision::SkipTurnActive
-                    | IdleQueueDrainDecision::SkipEditorTyping
+                    | IdleQueueDrainDecision::SkipCurrentTransition
                     | IdleQueueDrainDecision::SkipRouteSubmitInFlight
                     | IdleQueueDrainDecision::SkipClearCooldown
                     | IdleQueueDrainDecision::SkipAlreadyDispatched => {}
@@ -3721,6 +3737,12 @@ mod tests {
         assert!(!idle_watch_revision_changed(Some(&first), Some(&first)));
         assert!(idle_watch_revision_changed(Some(&first), Some(&changed)));
         assert!(idle_watch_revision_changed(Some(&first), None));
+    }
+
+    #[test]
+    fn attached_editor_never_allows_disk_queue_authority() {
+        assert!(disk_queue_authority_allowed(false));
+        assert!(!disk_queue_authority_allowed(true));
     }
 
     fn context_clear_projection_with_source(
@@ -3775,7 +3797,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             idle_watch_paused_queue_head(&doc),
-            None,
+            QueueHeadObservation::Observed(None),
             "undefined backlog ids in a paused queue must not force a live editor probe"
         );
 
@@ -3792,7 +3814,10 @@ mod tests {
             ),
         )
         .unwrap();
-        assert_eq!(idle_watch_paused_queue_head(&doc).as_deref(), Some("a"));
+        assert_eq!(
+            idle_watch_paused_queue_head(&doc),
+            QueueHeadObservation::Observed(Some("a".to_string()))
+        );
     }
 
     #[test]
@@ -3804,6 +3829,7 @@ mod tests {
         // expression the idle-watch computes from live `cycle_state` and feeds into
         // `supervisor_recycle_action`, proving the wiring — not just the pure policy.
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
         std::fs::write(&file, "# plan\n").unwrap();
 
@@ -3974,29 +4000,6 @@ mod tests {
                 true,
             ),
             IdleQueueContextResetDecision::Reset
-        );
-    }
-
-    #[test]
-    fn idle_queue_typing_guard_checks_absolute_editor_path() {
-        let cwd = std::env::current_dir().unwrap();
-        let dir = tempfile::tempdir_in(&cwd).unwrap();
-        let doc = dir.path().join("task.md");
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        std::fs::write(&doc, "body\n").unwrap();
-        let relative_doc = doc.strip_prefix(&cwd).unwrap();
-
-        agent_doc_debounce::document_changed(doc.to_string_lossy().as_ref());
-        for _ in 0..50 {
-            if super::editor_typing_active_for_idle_queue(relative_doc) {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-
-        assert!(
-            super::editor_typing_active_for_idle_queue(relative_doc),
-            "route-owned supervisors may hold a relative path while editor typing is recorded with the absolute path"
         );
     }
 
@@ -4212,8 +4215,7 @@ mod tests {
         // detached disk replica.
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path();
-        std::fs::create_dir_all(repo.join(".agent-doc/live-buffer")).unwrap();
-        std::fs::write(repo.join(".agent-doc/test-local-crdt-relay"), "").unwrap();
+        std::fs::create_dir_all(repo.join(".agent-doc")).unwrap();
         for args in [
             vec!["init"],
             vec!["config", "user.email", "t@t.com"],
@@ -4363,18 +4365,19 @@ mod tests {
     }
 
     #[test]
-    fn convergence_facts_prefers_lazily_projection_over_stale_open_sidecar() {
+    fn convergence_facts_use_committed_ledger_projection() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("task.md");
         std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
         std::fs::write(&doc, "body\n").unwrap();
-        agent_doc_snapshot_io::save(&doc, "body\n", agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            "body\n",
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n")).unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle state path");
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::mark_write_applied(
             &doc,
             "write_applied",
@@ -4389,10 +4392,9 @@ mod tests {
             Some("body\n"),
         )
         .unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted
+            agent_doc_turn::CyclePhase::Committed
         );
 
         let shared = SupervisorShared::with_actor_runtime(

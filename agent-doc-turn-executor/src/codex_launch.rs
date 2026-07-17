@@ -1526,7 +1526,7 @@ real stderr
 
     #[test]
     fn required_ssh_failure_ignores_historical_capture_grep_output() {
-        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"rg 'Operation not permitted' .agent-doc/captures","aggregated_output":".agent-doc/captures/old/cycle.json:16: \"response_body\": \"required SSH capability failed for target(s) sampleorders-server: socket: Operation not permitted\"","exit_code":0,"status":"completed"}}"#;
+        let line = r#"{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"rg 'Operation not permitted' .agent-doc/logs","aggregated_output":".agent-doc/logs/old-cycle.log:16: required SSH capability failed for target(s) sampleorders-server: socket: Operation not permitted","exit_code":0,"status":"completed"}}"#;
 
         assert_eq!(
             transcript_has_required_ssh_failure(line, &["sampleorders-server".to_string()]),

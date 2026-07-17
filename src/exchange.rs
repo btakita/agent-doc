@@ -71,7 +71,7 @@ fn mutate(file: &Path, transform: impl FnOnce(&str) -> Result<String>) -> Result
     crate::reset::run(file, true, true, false)
         .context("failed to re-baseline snapshot/CRDT after exchange mutation")?;
     eprintln!(
-        "[exchange] mutated {} and re-baselined sidecars",
+        "[exchange] mutated {} and re-baselined state projections",
         file.display()
     );
     Ok(())
@@ -131,7 +131,12 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         std::fs::write(&doc, baseline).unwrap();
-        agent_doc_snapshot_io::save(&doc, baseline, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            baseline,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let response = concat!(
             "<!-- patch:exchange -->\n",
             "### Re: current work — test\n\n",

@@ -2,8 +2,7 @@
 //!
 //! This module owns content-only decisions for active queue continuation,
 //! drainable heads, deferred backlog ids, recurring imperative heads, and queue
-//! noise classification. Callers own file IO, snapshots, controller state,
-//! sidecars, and marker persistence.
+//! noise classification. Callers own file IO, controller state, and marker persistence.
 
 use std::collections::{HashMap, HashSet};
 
@@ -21,21 +20,20 @@ use crate::document_queue::{self, QueueEntry, QueuePrompt};
 /// (`#degraded-ipc-no-stall`).
 ///
 /// The failure this guards against: a `finalize` that reached `committed` +
-/// `session-check ok` through a **proven file-IPC editor fallback** (socket ack
-/// timeouts / a stale or wedged route-owned supervisor) is a *successful*
-/// closeout; the in-session loop does not depend on the socket itself. The
-/// agent must not invent a stop reason from the degraded-but-proven transport.
+/// `session-check ok` through a **proven CPC editor delivery** is a successful
+/// closeout; the in-session loop does not depend on any one connection attempt.
+/// The agent must not invent a stop reason from a recovered-but-proven delivery.
 /// Unproven IPC (`retry_without_disk_write`, missing response proof, no ack) or
 /// a direct session-document disk fallback is different: it stops the loop until
 /// the editor/CRDT path is retried and proven. The normal closeout states that
 /// stop the loop are a FAILED closeout, an unproven IPC/delivery retry
 /// condition, a `session-check` interruption, or a `lint-gate` block. Degraded
-/// / file-IPC-fallback IPC after proof, high session-accretion, a
+/// delivery recovery after proof, high session-accretion, a
 /// `semantic_completion_match` warning, and a `[clean-session]` head wanting
 /// "fresh context" are NOT stop reasons. A stale-binary supervisor is not a
 /// passive keep-going condition either: recycle/yield at the boundary, then
 /// continue on the fresh binary.
-pub const CONTINUATION_NO_STALL_GUIDANCE: &str = "queue continuation required — keep draining after a proven closeout. A closeout that reached committed + session-check ok is successful even via a proven file-IPC editor fallback (socket degraded): the in-session loop does not depend on the socket itself. IPC timeout, missing response proof, recovery=retry_without_disk_write, or recovery=direct_write_fallback are not successful closeouts for an active editor buffer; retry the editor/CRDT path instead of using a direct session-document disk write. Only a failed closeout, unproven IPC/delivery retry condition, session-check interruption, or lint-gate block stops the loop. Degraded IPC after proof, high session-accretion, and semantic_completion_match warnings are NOT stop reasons. A stale-binary supervisor is a recycle/yield concern: follow recycle-yield or stale_install guidance so the supervisor recycles, then continue the drain on the fresh binary.";
+pub const CONTINUATION_NO_STALL_GUIDANCE: &str = "queue continuation required — keep draining after a proven closeout. A closeout that reached committed + session-check ok is successful after any proven CPC editor delivery recovery: the in-session loop does not depend on one connection attempt. IPC timeout, missing response proof, recovery=retry_without_disk_write, or recovery=direct_write_fallback are not successful closeouts for an active editor buffer; retry the editor/CRDT path instead of using a direct session-document disk write. Only a failed closeout, unproven IPC/delivery retry condition, session-check interruption, or lint-gate block stops the loop. Recovered delivery after proof, high session-accretion, and semantic_completion_match warnings are NOT stop reasons. A stale-binary supervisor is a recycle/yield concern: follow recycle-yield or stale_install guidance so the supervisor recycles, then continue the drain on the fresh binary.";
 
 /// `#wd40` / `#staleloop-recycle-restart` guidance surfaced when the route-owned
 /// supervisor is running a stale binary and has asked the in-session loop to
@@ -916,7 +914,10 @@ mod tests {
     #[test]
     fn continuation_guidance_names_degraded_ipc_and_exhaustive_stop_list() {
         let g = CONTINUATION_NO_STALL_GUIDANCE;
-        assert!(g.contains("file-IPC"), "must name the file-IPC fallback");
+        assert!(
+            g.contains("CPC editor delivery"),
+            "must name CPC delivery recovery"
+        );
         assert!(
             g.contains("committed") && g.contains("session-check") && g.contains("proven"),
             "must state the successful-closeout proof"

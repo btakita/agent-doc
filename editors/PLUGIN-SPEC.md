@@ -1,292 +1,169 @@
 # Agent-Doc Editor Plugin Specification
 
-Shared functional requirements for all agent-doc editor plugins (JetBrains, VSCode, and future editors).
+This contract is shared by JetBrains, VS Code, and future editor adapters.
+Plugins are thin adapters over the editor API and Lazily. Markdown semantics,
+turn state, queue state, recovery decisions, and commit ownership remain in the
+Rust binary.
 
-## 1. Overview
+## 1. Core invariants
 
-Editor plugins are a **thin integration layer** between the agent-doc CLI binary and the editor's native APIs. All document logic, session management, and agent orchestration live in the `agent-doc` binary. Plugins handle only:
+- The open editor buffer is the operator-visible current document. Lazily owns
+  that live value and its causal history.
+- Disk is a projection and commit surface. It is not a fallback live authority
+  while an editor replica is attached.
+- `state.db` is the exclusive durable authority for intent identity, expected
+  generation, delivery phase, leases, captures, and exact-once closeout state.
+- The binary rebases a narrow agent intent onto Lazily current. It never sends a
+  stale whole-document replacement.
+- A background delivery must not open, select, focus, or scroll an editor. If
+  the target is not already open, the adapter rejects the intent.
+- Operator edits are monotonic. An agent intent may not resurrect text that the
+  operator deleted from a newer editor generation.
+- Missing capabilities, an incompatible ABI, an unknown intent, or ambiguous
+  structure fails closed without mutating the buffer or disk.
 
-- Watching for IPC patch files and applying them via the editor's Document API
-- Exposing user actions (submit, claim, sync) as keybindings/commands
-- Watching CPC-owned editor signal files and controller events
-- Reporting editor layout state to the CLI for tmux sync
-- Providing slash-command autocomplete from CLI metadata
+There is no filesystem delivery queue, live-value projection, receipt file,
+plugin-owner file, queue journal, or file-signal compatibility transport.
 
-**Architecture principle:** If a feature requires document manipulation logic, it belongs in the Rust binary, not the plugin. Plugins must never parse markdown, resolve components, or make document-level decisions.
+## 2. Registration and transport
 
-## 2. Required Features (Phase 1 -- Current)
-
-### 2.1 IPC Patch Watcher
-
-The patch watcher receives document updates from `agent-doc write --ipc` and applies them through the editor's native Document API. This preserves cursor position, undo stack, and avoids "file externally modified" dialogs.
-
-**Startup:**
-- Locate `.agent-doc/patches/` by walking up from workspace root. Create it if the `.agent-doc/` directory exists but `patches/` does not.
-- Process any existing `*.json` files on startup (pending patches from before plugin load).
-- Begin watching for new `*.json` files via filesystem watcher (NIO WatchService for JB, `FileSystemWatcher` for VSCode).
-
-**Patch application flow:**
-1. Read and parse patch JSON file.
-2. Open the target document via editor API (`FileDocumentManager` for JB, `workspace.openTextDocument` for VSCode).
-3. Wait for the shared typing debounce before computing or applying an editor-visible mutation. If the bounded wait times out, do not mutate the document; leave file-watch patches for retry and let socket delivery fail closed.
-4. Capture an editor apply proof from the exact buffer content and editor generation (`Document.modificationStamp` / `TextDocument.version`). Re-check the proof immediately before every visible mutation. If the buffer text or generation changed, reject the patch without publishing a lazily receipt so live typing cannot be overwritten by a stale IPC apply.
-5. If `fullContent` is non-empty: do not mutate the editor buffer. File-watch payloads may be deleted as disabled stale/foreign patches so they cannot retry indefinitely; socket payloads fail closed.
-6. Otherwise, apply structured patches:
-   a. Apply `frontmatter` field: merge YAML key/value pairs into existing frontmatter block (`---\n...\n---\n`). Preserve key order; append new keys.
-   b. Apply `patches[]` array: for each `{component, content}`, find the matching component markers and apply content according to mode.
-   c. Apply `unmatched` content: try `exchange` component first, fall back to `output` component.
-7. Write changes atomically via editor's write-command API (`WriteCommandAction` for JB, `WorkspaceEdit` for VSCode).
-8. Save the document to disk.
-
-**Component matching:**
-- Open tag regex: `<!-- agent:NAME(\s[^>]*)? -->`  (supports inline attributes)
-- Close tag: `<!-- /agent:NAME -->`
-- Content region is everything between the open tag's end and the close tag's start.
-- **Tag sanitization:** The write pipeline sanitizes component names before emitting tags — stripping or replacing characters that would produce malformed HTML comments (e.g., `--` sequences, leading/trailing whitespace). Plugins may receive sanitized names that differ slightly from what the user typed; this is expected and not an error.
-- **Code range detection:** The CLI binary uses `pulldown-cmark` to detect fenced code block boundaries before applying patches. This prevents a patch from accidentally splitting a code block. Plugins do not parse markdown; they rely on the pre-processed patch content already respecting code boundaries.
-
-**Mode resolution:**
-- Parse `patch=<value>` (or `mode=<value>` as backward-compatible alias) from the open tag's inline attributes (the `(\s[^>]*)` capture group). `patch=` takes precedence if both are present.
-- If a component patch object carries `op: "replace"`, `op: "append"`, or `op: "prepend"`, that explicit operation overrides the component marker's `patch=` / `mode=` attribute. This lets the binary send repair/convergence patches that replace an append-mode component without rewriting the open tag first.
-- Supported modes:
-  - `replace` (default): replace content region with `\n` + trimmed content + `\n`
-  - `append`: preserve existing content, append `\n` + trimmed content + `\n` before close tag
-  - `prepend`: insert `\n` + trimmed content before existing content (after open tag)
-
-**Exchange prompt prefix normalization (`normalize_prefix_lines`):**
-- After applying component patches, if the patch JSON contains a non-empty `normalize_prefix_lines` array, the plugin must add a `❯ ` prefix to each matching prompt line in the `agent:exchange` user region (the region before the LAST `<!-- agent:boundary:... -->` marker).
-- When the same patch requests `reposition_boundary`, the plugin must apply component patches/unmatched content, reposition the exchange boundary, and only then run `normalize_prefix_lines`. This order is required because users commonly type the next prompt after the previous boundary marker; normalizing before boundary cleanup skips that prompt in the sidecar and forces the binary to fall back to `content_ours`.
-- **Algorithm:** scan the user region line-by-line. `### Re:` / `## Assistant` headings start an assistant-response block; older `<!-- agent:boundary:... -->` markers end that response block because later user prompts may appear before the newest boundary. While inside an assistant-response block, do not prefix ordinary assistant prose/list lines such as `Verification:`, `❯ **Verification:**`, `Commit / push:`, or `- Passed focused tests:` even if they match a normalization target; only a fresh prompt-like line starts a new prompt run. Response-label checks must strip an optional `❯`, list marker, markdown emphasis, and leading whitespace before testing known labels. For eligible prompt-run lines, compare `docLine.trimEnd()` against the set of `targetLine.trimEnd()` values from `normalize_prefix_lines`. If the trimmed document line matches a trimmed target line and does not already start with `❯ `, prepend `❯ ` to the original (un-trimmed) document line.
-- **Trailing whitespace resilience:** comparison must use `trimEnd()` on both sides. Editors such as IntelliJ strip trailing whitespace from the buffer on save, so exact string matching against the binary's disk-side payload would silently fail when the line ends with a space.
-- **Idempotent:** lines already starting with `❯ ` are left unchanged.
-- **Agent region excluded:** lines at or after the last boundary marker must not be prefixed.
-- **Blank target lines skipped:** entries in `normalize_prefix_lines` that are blank after trimming must be ignored.
-- **Binary-side verification:** The binary verifies the lazily visible-write receipt/projection by checking that each non-blank `normalize_prefix_lines` target appears with a `❯ ` prefix (using `trimEnd()` comparison). If any target is missing its prefix, the binary falls back to `content_ours` as the snapshot source instead of the receipt payload, then re-applies the same `normalize_prefix_lines` to that fallback before saving the snapshot. If the rejected visible-write payload can be repaired by normalization and boundary reposition alone, the binary should send a narrow repair payload (`patches: []`, `unmatched: ""`, `normalize_prefix_lines`, `reposition_boundary: true`). Full-content redelivery is disabled; when a narrow repair is unavailable or not consumed, the binary uses the normal snapshot/disk repair path.
-- **Typed repair decision:** Before repairing a sidecar-normalization divergence or duplicate-response IPC snapshot, the binary resolves a typed decision with the repaired snapshot content, snapshot source, disk-repair reason, normalization targets, editor bad-state length/hash fingerprint, and an explicit `redeliver_editor` boolean. Plugins must not synthesize `fullContent` redelivery when the binary skips it; skipped or rejected redelivery leaves the binary to repair disk/snapshot state without editor replacement.
-- **Narrow repair shape:** the CLI may send an otherwise empty patch payload (`patches: []`, `unmatched: ""`) that carries only `normalize_prefix_lines` plus `reposition_boundary: true`. This is editor redelivery work, not snapshot-only repair and not pure reposition. Plugins must process it through the normal patch path: apply component/unmatched changes, reposition the exchange boundary, then run `normalize_prefix_lines` so prompts typed after a stale boundary are still in scope.
-- **Pure reposition fast path:** editor-specific "reposition only" shortcuts are valid only when the payload has no `normalize_prefix_lines`, `frontmatter`, `fullContent`, or unmatched text. A `patches: []` payload that still carries normalization work is not a pure boundary move.
-
-**Delivery and receipt protocol:**
-- On successful file-IPC application: publish a lazily visible-write receipt for `patch_id`, then delete the patch JSON file. Deletion is only the file-delivery signal; the receipt/projection is the closeout proof.
-- On failure: leave the file in place and log a warning. The CLI will time out and exit with code 75 (`EX_TEMPFAIL`).
-- For typed `save_document` recovery, the editor must save the already-open buffer through the native editor API, then publish the saved text through `agent_doc_editor_content_applied_for_editor_v1` with `lazily_transport_receipts_v1`. This operation is allowed to call the editor save API, but must not replace the document buffer, select/open/focus an editor tab, write `.agent-doc/ack-content`, or replay `fullContent`. Missing receipt support is an incompatible plugin/native-library version error.
-
-**File-not-found retry:**
-- If the target file is not found in the editor's VFS, wait 200ms, refresh VFS, and try once more.
-- If still not found, log warning and leave patch file for retry.
-
-### 2.2 Claim Action
-
-- **Trigger:** User action (default: `Ctrl+Shift+Alt+C`, configurable).
-- **Precondition:** Active file is `.md`.
-- **Behavior:**
-  1. Detect editor split position (left/right/top/bottom) by walking the editor's splitter component tree.
-  2. Run `agent-doc claim <relative-path> --position <pos>` via subprocess from project root. Pane/window ownership remains binary-owned; plugins must not inspect `.agent-doc/sessions.json` or live tmux state to choose a target window.
-  3. On success: show inline hint, then trigger a silent layout sync (Section 2.4).
-  4. On failure: show persistent error notification.
-- **Position detection:** Map the file's editor group to a split position. JetBrains uses Swing `Splitter` tree traversal; VSCode uses `TabGroups` API with `viewColumn` heuristic.
-
-### 2.3 Submit Action (Route)
-
-- **Trigger:** User action (default: `Ctrl+Shift+Alt+A`, configurable).
-- **Precondition:** Active file is `.md`.
-- **Behavior:**
-  1. Save the active document to disk.
-  2. Send a PCP/project-controller `editor_route` request for `<relative-path>` from the project root. This must send the plain `agent-doc <FILE>` reopen into the owning session, not a post-`/clear` restart shortcut.
-  3. Show an immediate in-flight info notification while route is running, then an inline hint on success and a persistent error notification on failure. Failure UI must preserve the exact route error text in a copyable surface (for example, copy action plus saved diagnostics file) instead of only a transient toast. A later successful route for the same document must clear that saved route-error diagnostic so obsolete startup/proof failures are not surfaced after recovery.
-  4. Do not start prompt polling; permission prompts remain in the owning agent/tmux surface (Section 2.6).
-- **Run action ownership:** Do not infer live pane state in the plugin. Repeated Run presses may dedupe or supersede editor-owned in-flight requests, but dispatch and pane targeting remain binary/controller-owned.
-- **Truncation detection (`diff --wait`):** The CLI's diff path runs `agent-doc diff --wait <file>` before reading, which polls for up to 5 seconds until the last line of the file is not a partial (truncated) write. Plugins do not need to implement this — it is handled inside the binary. However, plugins should save the document to disk *before* invoking route so that `diff --wait` sees the latest content.
-
-### 2.4 Layout Sync
-
-- **Trigger:** User action (default: `Ctrl+Shift+Alt+L`, configurable) or automatic after claim.
-- **Behavior:**
-  1. Collect all visible `.md` files across editor split groups.
-  2. Detect 2D columnar layout (which files are stacked vertically vs. side-by-side).
-  3. Call the PCP-owned `sync_tmux_layout` native endpoint with the comma-joined column strings and focused absolute file.
-     Preserve empty `--col` placeholders when a sibling editor split has no markdown file so the binary can keep left/right column identity. If the visible split spans the workspace root and a nested submodule, keep every visible markdown path in the reported layout instead of dropping the out-of-root file, and execute the sync from the workspace root `.agent-doc/` instead of the focused file's nested root so remembered column state survives unmanaged markdown focus changes. Plugins report layout only; window scoping, passive autostart, ambiguity handling, and cross-root owner resolution are all owned by the Rust binary.
-     Manual layout sync passes `no_autostart=false`; the controller uses that full
-     sync path to repair window order to `0:agent-doc`, `1:stash`, and adjacent
-     overflow `N:stash` windows before reconciliation. Automatic
-     tab sync uses `--no-autostart` and must not perform that repair step.
-     The binary must protect open-cycle panes from DETACH, but it must still attach/focus a different requested document immediately around that protected owner instead of deferring sync to preserve pane cardinality.
-  4. Show inline hint with layout summary on manual trigger when sync applies. If the PCP receipt reports a preserved-layout outcome, show the preserve-layout warning visibly so the user can tell the tmux layout was intentionally left unchanged. Silent on automatic trigger.
-
-### 2.5 Tab-to-Pane Sync (Automatic)
-
-- **Trigger:** Editor tab selection or visible editor set changes.
-- **Debounce:** 100ms. Skip if the visible file set + active file signature is unchanged.
-- **Immediate focus handoff:** On a real active markdown selection change, issue a best-effort PCP `focus_document_pane` call immediately for the selected document, before the debounced reconciliation timer fires and before automatic-sync dedup can skip the event. This must ignore missing/dead pane and inactive-window receipts and must not replace the later passive `sync --no-autostart` call when a real tab/layout change occurred; it exists only to make existing-pane handoffs feel immediate while full reconciliation continues in the background. Plugins must not spawn `agent-doc focus` or select tmux panes directly.
-- **Concurrency guard:** One automatic command at a time, driven by editor events on an event loop or scheduled executor rather than hot polling, spinlocks, or thread-per-delay retry loops. When a newer selection/layout request arrives while a command is still running, queue only the latest request and replay it immediately after the running command finishes. If the older running command finishes with a retryable preserved-layout or sync-lock-contention result after a newer request exists, the plugin must skip that older deferred retry instead of requeueing an intermediate document.
-- **Timeout:** Manual PCP-backed layout sync calls and automatic layout-sync subprocesses must have bounded timeouts. On timeout, release the plugin-local running guard and leave the sync state pending so the latest queued editor selection or the next manual `Sync Tmux Layout` can invoke the binary recovery path again. Automatic sync must use a shorter timeout than manual sync and exponential retry backoff so a slow tmux/controller repair cannot monopolize the editor event path.
-- **Snapshot contract:** Capture the exact focus/layout snapshot from the triggering editor event and replay that latest captured snapshot after any in-flight command. Do not resample the live editor state later and risk landing on an earlier splitter hop.
-- **Behavior:** Same as Section 2.4, but runs silently (no user notification) with `--no-autostart --exact-visible` when the plugin has captured a real tab-selection or visible-layout change and the full visible markdown projection. Automatic tab-to-pane sync must dispatch the passive sync path, not only `focus_document_pane`, even when only one markdown file is visible; the passive sync path owns stash rescue, protected-closeout attach/focus behavior, and safe pane replacement. `--exact-visible` prevents a one-file editor snapshot from expanding through remembered column memory and reintroducing a stale sibling pane. Editor-specific focus-only events that do not change the visible markdown projection, such as JetBrains focus/mouse activation events or VS Code active-editor changes while clicking between already-open split editors, may run only the lightweight PCP `focus_document_pane` handoff and must not repeatedly launch full passive sync. If output from an older binary reports preserve-layout output, keep the selection pending and retry unless the output also includes `[sync] safe_passive_layout_preserved_reselected_focus`, which proves the already-visible focus pane was selected. Do not update the automatic dedup state for a legacy preserved-layout noop without that marker. Errors are silently ignored.
-- **Safety:** Startup must not run `agent-doc resync` or `resync --fix`. Session repair/audit is an explicit operator action only, because even report-only audits can traverse large tmux/process graphs and stall the IDE in large workspaces.
-
-### 2.6 Prompt Polling Removed
-
-- **Removed from first-party editor plugins.** JetBrains and VS Code must not
-  start a defensive `agent-doc prompt --all` poller, call `agent-doc prompt
-  --answer`, auto-save tracked documents, or run timer-based merge/reload logic
-  from prompt handling. Permission prompts remain in the owning agent/tmux
-  surface.
-
-### 2.7 Popup Menu
-
-- **Trigger:** `Alt+Enter` on a `.md` file.
-- **Behavior:** Show a numbered action list including Submit, Claim, Compact Exchange, Sync Layout, Show Session Status, Recycle Supervisor, Restart Agent, Clear Session Context, and Copy Session Diagnostics. Lower-frequency actions such as Run with Junie and Force Claim must remain available from a non-numbered overflow path instead of consuming primary popup digits.
-
-### 2.8 Session Operator Actions
-
-- **Compact Exchange:** Wait for typing idle, save the active document, then run `agent-doc compact <relative-path> --component exchange --commit`. The binary owns archive/snapshot/commit semantics and uses the guarded direct-write path rather than editor IPC full-content delivery. If the editor-visible digest still differs from disk, the binary must fail closed before rewriting the file.
-- **Show Session Status:** Run `agent-doc session status <relative-path>`. Plugins must display the exact CLI output instead of paraphrasing actor/registry/supervisor state themselves. A successful status command for the same document must clear any persisted editor route-error diagnostic for that document because the old failure is no longer the latest observed state.
-- **Recycle Supervisor:** Run `agent-doc session restart-supervisor <relative-path>` (the legacy `session restart` alias remains valid). Plugins must not send raw tmux control keys as a substitute for the actor-owned recycle path. If recycle is refused because the pane is busy or the authoritative actor is still starting, surface an operator warning with `Interrupt and restart`, `Show status`, and `Copy details` actions instead of showing the raw command failure. Interrupt-and-restart must require explicit confirmation and then invoke `agent-doc session restart-supervisor --force <relative-path>`.
-- **Clear Session Context:** Run `agent-doc session clear <relative-path>` so Codex/Claude clear behavior stays aligned with the binary-owned clear-command path. The next Run action must still dispatch the bare reopen into the same live session. If a non-interrupting clear meets a busy active auto-loop, the binary queues exactly one deferred clear for the next proven idle boundary; repeated clears report the existing queued clear instead of injecting another `/clear`, and plugins must surface that CLI output as accepted deferred work. If clear is refused because the pane contains protected prompt input or an explicit busy cue that cannot be deferred, surface an operator warning with `Interrupt and clear`, `Show status`, and `Copy details` actions instead of showing the raw command failure. Interrupt-and-clear must be an explicit confirmation path that invokes `agent-doc session interrupt-clear <relative-path>`. Once confirmed, plugins must leave terminal mutation to the binary-owned operator path, including harness interrupts, Vim/Neovim prompt recovery, idle/closed waiting, final clear retry, and precise timeout guidance.
-- **Clear statelessness:** Plugins must not block Clear Session Context on plugin-local response-status or busy flags. The binary owns live pane evidence and is responsible for refusing protected prompt-input states such as permission prompts, queued drafts, shell search, or drafted user input, and explicit busy cues such as an active Codex turn, hook-review prompt, or help screen; ordinary active/status panes and `pane_current_command=agent-doc` alone must not make Clear Session Context fail closed.
-- **Copy Session Diagnostics:** Run `agent-doc session doctor <relative-path>`, preserve the exact text in an IDE diagnostics surface, and provide a one-click copy path.
-- **Verification floor:** Plugin tests must cover exact session-status display, `session clear` command wiring, and a persistent stage-specific route-dispatch failure surface.
-
-### 2.8 Slash Command Autocomplete
-
-- **Trigger:** User types `/` at the start of a line in a `.md` file.
-- **Behavior:**
-  1. On first trigger, run `agent-doc commands` and cache the JSON array result.
-  2. Provide completion items with `name`, `args` (detail), and `description`.
-  3. Top-level commands (no spaces after `/`) sort above subcommands.
-- **Cache:** Commands are loaded once per session and cached in memory.
-
-### 2.9 CLI Resolution
-
-Resolve the `agent-doc` binary path by checking these locations in order:
-1. `~/bin/agent-doc`
-2. `~/.local/bin/agent-doc`
-3. `~/.cargo/bin/agent-doc`
-4. `/usr/local/bin/agent-doc`
-5. Fall back to bare `agent-doc` (rely on `$PATH`).
-
-Cache the resolved path for the session lifetime.
-
-Embedded native/FFI calls follow the same safety rule: they must not launch `std::env::current_exe()` unless the executable basename is `agent-doc*`. Inside an editor host, `current_exe()` is the IDE process, so treating it as the CLI opens JetBrains/VS Code with controller arguments instead of starting a controller. Controller, recycle, and handoff launch paths must resolve the real CLI through an explicit agent-doc binary override or the install-path/PATH search above.
-
-### 2.10 Notifications
-
-- **In flight:** Lightweight information notification while the route/fix command is still running; clear it when the subprocess exits.
-- **Success:** Lightweight inline hint near cursor, auto-dismissing after ~2 seconds.
-- **Error:** Persistent notification (balloon/error message). Never auto-dismiss errors.
-- **Logging:** Use the editor's built-in logging facility (`Logger` for JB, `OutputChannel` for VSCode). No temp files.
-
-## 3. Future Features (Phase 2 -- CRDT-via-FFI)
-
-### 3.1 CRDT Document Model
-
-- Load `libagent_doc_crdt` shared library via FFI (JNI for JetBrains, napi/N-API for VSCode).
-- Maintain an in-memory CRDT document (Yrs) per open session document.
-- Capture user keystrokes in the editor buffer and convert them to CRDT operations.
-- Exchange CRDT replica messages only with the CPC/project-controller socket (`.agent-doc/controller.sock`), never a per-session supervisor socket.
-- Receive peer CRDT delivery by watching `.agent-doc/crdt-replica-events/*.json` and draining the named document's queued controller deliveries; do not run a fixed interval pull loop.
-- Treat prompt steering as CPC-owned. Legacy supervisor freshness must not veto editor IPC apply, receipt, visible-write proof, repair, or retry decisions; supervisor recycle remains a separate operator/session action.
-- Turn-state/status projection refreshes are event-driven, cached, and bounded. Plugins must coalesce file/editor events, enforce a minimum refresh interval, and back off slow native projection calls instead of synchronously probing projection state on every file-system event.
-- Sync merged result to editor buffer atomically (single write-command action).
-- Re-initialize CRDT from file on external edit detection.
-
-### 3.2 State Synchronization
-
-Three states must be reconciled:
-
-| State | Location | Authority |
-|-------|----------|-----------|
-| **File** | Disk | Persisted state, used for snapshots and git |
-| **Editor** | Buffer | User's live edits, may be unsaved |
-| **CRDT** | Yrs (memory) | Authoritative during active sessions |
-
-- CRDT is authoritative while a session is active.
-- External edit (file changed outside editor+CRDT) triggers CRDT reset: re-initialize from disk content.
-- Plugin crash recovery: re-initialize CRDT from file on restart.
-- Session end: flush CRDT to disk, discard in-memory state.
-
-## 4. IPC Protocol
-
-### 4.1 Patch File Format
-
-- **Path:** `.agent-doc/patches/<sha256_hash>.json`
-- **Lifecycle:** CLI writes file, plugin reads, applies through the editor API, publishes a lazily visible-write receipt/projection, then deletes the file as a consumption signal. CLI treats deletion without a matching lazily receipt as unproven delivery.
-
-**JSON schema:**
+An editor replica registers over the project-controller's PID-scoped local
+socket with:
 
 ```json
 {
-  "file": "/absolute/path/to/document.md",
-  "patches": [
-    {
-      "component": "exchange",
-      "content": "New content for the component",
-      "op": "replace"
-    }
-  ],
-  "unmatched": "Content that didn't match any component",
-  "frontmatter": "key: value\nanother_key: value",
-  "fullContent": "Disabled legacy complete document replacement; plugins must not apply it",
-  "expected_content_hash": "Historical source-buffer proof for disabled fullContent payloads",
-  "expected_content_len": 123
+  "editor_id": "stable-process-member-id",
+  "pid": 12345,
+  "plugin_version": "0.2.275",
+  "document": "/absolute/path/session.md",
+  "generation": 42,
+  "capabilities": [
+    "lazily_current_v1",
+    "lazily_transport_receipts_v1",
+    "typed_editor_intents_v1"
+  ]
 }
 ```
 
-- `file` (required): Absolute path to the target document.
-- `patches` (required): Array of component-level patches. May be empty. Each patch may carry `op` (`replace`, `append`, or `prepend`) to override the target component's marker mode for that patch.
-- `unmatched` (required): Content that didn't match a named component. Falls back to `exchange` then `output`.
-- `frontmatter` (optional): YAML key/value pairs to merge into the document's frontmatter.
-- `fullContent` (optional): Disabled legacy/foreign complete document replacement. First-party CLI paths no longer emit this field, and plugins must not apply it when present.
-- `expected_content_hash` / `expected_content_len` (optional): historical source-buffer proof fields for legacy `fullContent` payloads. They are no longer authorization to replace the document.
+Registration, current-value observation, remote CRDT delivery, ACKs, and
+visibility receipts use the reliable-sync Lazily plane. Endpoint discovery is
+PID-scoped so a stale listener from another editor process cannot receive a
+delivery.
 
-### 4.2 Typed Editor-Owned Save
+The native library and plugin must advertise the exact required ABI and intent
+capabilities. Version skew is an explicit incompatible state; adapters do not
+degrade to files or disk writes.
 
-- Socket-capable editors accept `{"type":"save_document","file":"<absolute path>","patch_id":"<uuid>"}` on the IPC socket.
-- VS Code accepts the same payload from `.agent-doc/patches/save-document.signal`; the binary uses that file signal when no socket listener is active.
-- The receiver must locate an already-open markdown document for `file`, wait for typing idle, save through the native editor API, then publish the saved text through `agent_doc_editor_content_applied_for_editor_v1` with `lazily_transport_receipts_v1`.
-- The receiver must reject missing documents, non-markdown targets, active-typing timeout, failed saves, and missing receipt support without writing `.agent-doc/ack-content`. The binary treats an absent lazily visible-write receipt/projection as an unproven flush.
-- This protocol never carries replacement content and never authorizes `Document.setText`, `WorkspaceEdit`, VFS binary writes, editor selection/focus changes, reconnect reread repair, or legacy `fullContent` redelivery.
+## 3. Shared intent vocabulary
 
-### 4.3 CRDT State Exchange
+Rust, JetBrains, and VS Code use the same `EditorIntent` names:
 
-- **Controller IPC:** editor replicas register, update, pull, ack, and deregister through `.agent-doc/controller.sock` using the controller `crdt_replica` envelope.
-- **Wake signal:** the CPC writes `.agent-doc/crdt-replica-events/<sha256_hash>.json` after it queues fan-out or replace-rebootstrap work for live editor replicas.
-- **Durable recovery projection:** `.agent-doc/crdt/<sha256_hash>.yrs` remains a recovery projection, not an editor delivery queue. Durable delivery proof must come from typed CRDT ACK/receipt state, not sidecar deletion alone.
-- **Retained ACK replay:** After a remote target is visible, the plugin retains its delivery ACK frontier until the controller accepts the current editor-content hash. Replay sends one oldest pending ACK per drain because the accepted current hash cumulatively acknowledges every represented generation through its matching target. Failed transport or a refused hash leaves that frontier for a later retry without synchronously replaying obsolete generations. A successful forced replica swap retires the old member's frontier only after the replacement is installed and before the old member is deregistered. The `ack_recovery_force_refresh` event force-refreshes only the named open document from its editor/Lazily reconnect target.
+| Intent | Meaning |
+|---|---|
+| `apply_canonical` | Apply a narrow canonical mutation to Lazily current |
+| `reposition` | Move the exchange boundary without changing user text |
+| `save_document` | Save the already-open current buffer through the editor API |
+| `refresh_content` | Republish the already-open editor value to Lazily |
+| `observe_lazily_current` | Return current value, generation, and causal proof |
+| `deliver_crdt_remote` | Integrate a remote Lazily change |
+| `refresh_vcs` | Refresh editor VCS decoration after a durable commit |
+| `reload_library` | Reload a compatible native library at a safe boundary |
 
-## 5. Error Handling
+Every mutating intent carries `intent_id`, `cycle_id`, `expected_generation`,
+and expected current-value proof. Unknown fields may be observed for forward
+diagnostics, but an unknown intent or missing required proof is rejected.
 
-- **Never swallow errors silently.** Every failure must produce a log entry at minimum.
-- **Log to editor-visible output:** JetBrains `Logger` (visible in `idea.log` with debug enabled), VSCode `OutputChannel` (visible in Output panel).
-- **Leave IPC files on failure** so the CLI detects the timeout and can report the error. Disabled `fullContent` file-watch payloads are the exception: delete them as stale/foreign patches after logging so they cannot keep retrying against a live editor buffer.
-- **Content hash verification** (optional): Compare document content hash before and after patch application to detect race conditions with concurrent edits.
-- **Graceful degradation:** If a component marker is not found during patch application, skip that patch entry and log a warning. Do not abort the entire patch.
+## 4. Monotonic delivery state machine
 
-### 2.11 Stash Window Behavior
+The binary owns one durable state machine per intent:
 
-When the editor has more open `.md` panes than tmux columns can accommodate, the overflow panes are **stashed**:
+```text
+IntentCaptured
+  -> CanonicalApplied
+  -> ReplicaAccepted
+  -> ReplicaVisible
+  -> DiskProjected
+  -> Committed
+```
 
-- The CLI assigns stash slots named `stash-1`, `stash-2`, … in overflow order.
-- Stashed panes are hidden from the active tmux layout but remain claimed and tracked in `sessions.json`.
-- The plugin must still report stashed panes during layout sync (Section 2.4) so the CLI can maintain their session state.
-- When a stash slot is promoted (user brings it into view), the next layout sync removes the `stash-N` name and assigns a real column position.
+Transitions are monotonic and idempotent. A retry resumes the same `intent_id`
+from its recorded phase. It does not recapture the response or create a second
+delivery. `ReplicaAccepted` alone is not visible-write proof, and
+`DiskProjected` alone is not commit proof.
 
-Plugins do not need to implement stash logic — the CLI manages stash assignments entirely. Plugins only need to accurately report which files are visible vs. hidden during sync.
+The plugin publishes typed receipts containing the intent, editor member,
+generation, current-value hash, and causal frontier. The binary advances only
+when the receipt matches the expected intent and current lineage.
 
-## 6. Testing Requirements
+## 5. Apply algorithm
 
-Each plugin implementation should have tests (or manual test procedures) covering:
+For `apply_canonical`, the adapter must:
 
-1. **Patch application -- replace mode:** Content between markers is fully replaced.
-2. **Patch application -- append mode:** New content is appended after existing content, before the close marker.
-3. **Patch application -- prepend mode:** New content is inserted after the open marker, before existing content.
-4. **Component matching with inline attributes:** `<!-- agent:exchange patch=append -->` is correctly parsed; mode is extracted from attributes. `mode=append` also works as a backward-compatible alias.
-5. **Disabled full content replacement:** `fullContent` payloads are logged and ignored/deleted without applying a whole-document replacement.
-6. **Frontmatter merge:** New keys are appended, existing keys are updated, key order is preserved.
-7. **Missing component graceful fallback:** Patch for a non-existent component is skipped without error; `unmatched` falls back from `exchange` to `output`.
-8. **File-not-found retry:** Target file not in VFS triggers 200ms wait + VFS refresh + retry.
-9. **Receipt protocol:** Patch file is deleted only after successful application and lazily receipt publication; left in place on failure.
-10. **Concurrent edit safety:** Patch application while user is typing does not corrupt the document or lose user edits. A typing-debounce timeout is a no-mutation result, not permission to apply the latest patch anyway.
-11. **Double-invocation guard:** Rapid submit/claim calls do not produce duplicate CLI invocations.
-12. **`agent:backlog` component:** A patch targeting `agent:backlog` (or legacy `agent:pending`) applies in replace mode, overwriting the checkbox list rather than appending to it.
-13. **Tag sanitization:** Component names with special characters are sanitized before tag emission; the plugin correctly matches sanitized tags.
+1. Confirm the target markdown document is already open without changing focus.
+2. Observe Lazily current plus the editor generation.
+3. Wait for the bounded typing-idle condition.
+4. Recheck current value and generation immediately before mutation.
+5. Ask the shared native document model to apply the node-keyed/component-keyed
+   intent against that exact current value.
+6. Reject an expected-node or generation mismatch. The controller then rebases
+   the same intent on the newer current value.
+7. Apply the accepted edit as one native undoable editor command.
+8. Publish accepted and visible receipts after the editor exposes the exact
+   resulting current value.
+
+The plugin does not parse markdown, merge components, normalize duplicated
+scaffolds, or decide which side wins. Those decisions are shared native-model
+operations so every editor implements the same semantics.
+
+## 6. Save, reconnect, and reload
+
+`save_document` saves the already-open buffer and publishes the resulting
+Lazily current hash and disk-projection receipt. It never replaces the buffer.
+
+On reconnect, the editor republishes its current value and generation. The
+controller rebases pending intents from `state.db`; the plugin must not reread
+an old delivery or replay a full document. A zero-member state is not proof of
+a visible write.
+
+`reload_library` is accepted only at a safe operation boundary. The adapter
+must quiesce old native calls, load the announced ABI, re-register capabilities,
+and preserve the same Lazily replica. A library reload must not change the
+active document or editor focus.
+
+## 7. User actions and routing
+
+Submit, claim, compact, and sync actions invoke the resolved `agent-doc` binary
+and route through the controller. Rapid duplicate actions are coalesced by
+document/cycle identity. A busy harness pane is never injected into until the
+harness-specific idle-prompt proof is present; modal UI and online artifacts
+are busy states.
+
+Plugins report layout and document membership without changing layout. Hidden
+or stashed panes remain registered, while background document delivery remains
+focus-neutral.
+
+## 8. Error handling
+
+- Log every rejection with intent id, document, expected/current generation,
+  editor member, and reason.
+- Keep failures visible in the editor; never silently acknowledge them.
+- Never treat timeout, socket disappearance, file save, or process exit as an
+  inferred delivery ACK.
+- Recovery retries are bounded and resume the durable state-machine phase.
+- Structural ambiguity and two-sided concurrent edits are rebase inputs, not a
+  reason to elect disk or replace the buffer.
+
+## 9. Required tests
+
+Each adapter must cover:
+
+1. Current-generation apply and exact accepted/visible receipts.
+2. Typing between observation and apply rejects with no mutation.
+3. Operator deletion followed by retry does not resurrect deleted queue text.
+4. Reconnect resumes one intent exactly once.
+5. Duplicate/out-of-order receipts cannot regress state.
+6. No attached-editor path reads disk as current authority.
+7. Background delivery never opens, focuses, selects, or scrolls a document.
+8. Missing ABI/capability fails closed without fallback.
+9. Save projects the existing buffer and does not replace it.
+10. Crash points at every state-machine transition converge under simulation.

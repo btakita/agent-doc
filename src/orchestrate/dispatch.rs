@@ -238,7 +238,7 @@ pub(crate) fn run_ordered_task_step(
         finalize_text
     };
 
-    lifecycle.finalize(file, None, &finalize_text, mode)?;
+    lifecycle.finalize(file, &finalize_text, mode)?;
     lifecycle.session_check(file)?;
     Ok(())
 }
@@ -277,8 +277,12 @@ pub(crate) fn close_open_preflight_handoff_cycle(file: &Path) -> Result<()> {
         file,
         "orchestrate_preflight_handoff_close",
     )?;
-    let snapshot_content = agent_doc_snapshot_io::load(file)?;
-    agent_doc_snapshot_io::save(file, &file_content, agent_doc_ops_log_io::log_op)?;
+    let snapshot_content = agent_doc_snapshot_io::load_document_baseline(file)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        file,
+        &file_content,
+        agent_doc_ops_log_io::log_op,
+    )?;
     agent_doc_cycle_state_io::mark_abandoned(
         file,
         "orchestrate_preflight_handoff_closed",
@@ -303,12 +307,7 @@ fn preflight_handoff_cycle_has_capture(
     {
         return Ok(true);
     }
-    if let Some(capture_id) = state.capture_id.as_deref()
-        && agent_doc_capture_io::load_by_id(file, capture_id)?.is_some()
-    {
-        return Ok(true);
-    }
-    agent_doc_capture_io::load_by_id(file, &state.cycle_id).map(|capture| capture.is_some())
+    Ok(false)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -439,7 +438,12 @@ mod tests {
 
         let snapshot = template_doc();
         fs::write(&doc, &snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         Command::new("git")
             .current_dir(dir.path())
             .args(["add", "session.md"])
@@ -461,7 +465,9 @@ mod tests {
         close_open_preflight_handoff_cycle(&doc).unwrap();
         inject_prompt(&doc, "do #first").unwrap();
 
-        let snap = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         let live = fs::read_to_string(&doc).unwrap();
         assert!(snap.contains("synchronous orchestra"));
         assert!(!snap.contains("❯ do #first"));
@@ -473,13 +479,18 @@ mod tests {
     }
 
     #[test]
-    fn close_open_preflight_handoff_cycle_prefers_projection_over_stale_sidecar() {
+    fn close_open_preflight_handoff_cycle_preserves_captured_ledger_state() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("session.md");
         let snapshot = template_doc();
         fs::write(&doc, &snapshot).unwrap();
-        agent_doc_snapshot_io::save(&doc, &snapshot, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         let started =
             agent_doc_cycle_state_io::start_preflight(&doc, Some(&snapshot), Some(&snapshot))
                 .unwrap();
@@ -489,22 +500,7 @@ mod tests {
         )
         .unwrap();
 
-        let sidecar = agent_doc_fs::cycle_state_path_for(&doc)
-            .unwrap()
-            .expect("cycle state path");
-        let mut stale_state = agent_doc_cycle_state_io::load(&doc)
-            .unwrap()
-            .expect("cycle state");
-        stale_state.phase = agent_doc_turn::CyclePhase::PreflightStarted;
-        stale_state.capture_id = None;
-        stale_state.response_sha256 = None;
-        fs::write(
-            &sidecar,
-            serde_json::to_string_pretty(&stale_state).unwrap(),
-        )
-        .unwrap();
-        fs::remove_file(agent_doc_capture_io::capture_path_for(&doc, &capture.capture_id).unwrap())
-            .unwrap();
+        assert!(!capture.capture_id.is_empty());
 
         close_open_preflight_handoff_cycle(&doc).unwrap();
 
@@ -517,10 +513,16 @@ mod tests {
         );
         assert_eq!(
             agent_doc_cycle_state_io::load(&doc).unwrap().unwrap().phase,
-            agent_doc_turn::CyclePhase::PreflightStarted,
-            "stale JSON sidecar should remain untouched; projection prevented abandonment"
+            agent_doc_turn::CyclePhase::ResponseCaptured,
+            "the ledger capture must prevent abandonment"
         );
-        assert_eq!(stale_state.cycle_id, started.cycle_id);
+        assert_eq!(
+            agent_doc_cycle_state_io::load(&doc)
+                .unwrap()
+                .unwrap()
+                .cycle_id,
+            started.cycle_id
+        );
     }
     #[test]
     fn injected_prompt_diff_preserves_multiline_task_as_prompt_bearing_diff() {

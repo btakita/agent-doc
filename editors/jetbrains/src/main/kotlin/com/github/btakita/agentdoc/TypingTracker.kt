@@ -13,7 +13,6 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.UUID
 
 object EditorIdentity {
@@ -120,11 +119,10 @@ private fun reverseApplyEditorOps(finalText: String, ops: List<PendingEditorOp>)
 }
 
 /**
- * Tracks document changes and reports editor-buffer projections.
+ * Tracks document changes and reports Lazily current-document observations.
  *
- * On every .md document change, queues the lightweight
- * `agent_doc_document_changed()` marker and the coalesced current-document report off
- * the document listener path.
+ * On every .md document change, queues the coalesced current-document report off
+ * the document listener path. Lazily owns edit ordering and current authority.
  *
  * Registered as a bulk DocumentListener in PluginLifecycleListener.
  */
@@ -147,8 +145,6 @@ object TypingTracker : DocumentListener {
 
     private val pendingContentReports = ConcurrentHashMap<String, ContentReportState>()
     private val pendingEditorOps = ConcurrentHashMap<String, MutableList<PendingEditorOp>>()
-    private val pendingNativeChangeMarkers = ConcurrentHashMap.newKeySet<String>()
-    private val nativeChangeDrainQueued = AtomicBoolean(false)
 
     // #falsetyping-guard: paths with an unsaved *local operator* edit ahead of
     // disk. Set only when an operator-attributable document change lands; cleared whenever
@@ -174,9 +170,6 @@ object TypingTracker : DocumentListener {
             unsyncedLocalEditPaths.add(filePath)
         }
 
-        if (operatorEdit) {
-            requestNativeDocumentChanged(filePath)
-        }
         val op = PendingEditorOp(
             offset = event.offset,
             oldFragment = event.oldFragment.toString(),
@@ -186,41 +179,6 @@ object TypingTracker : DocumentListener {
         recordPendingEditorOp(filePath, op)
         scheduleFullContentReport(filePath, event.document)
         LOG.debug("[native] document_changed queued content report: ${vFile.name} (operatorEdit=$operatorEdit)")
-    }
-
-    private fun requestNativeDocumentChanged(filePath: String) {
-        pendingNativeChangeMarkers.add(filePath)
-        scheduleNativeChangeDrain()
-    }
-
-    private fun scheduleNativeChangeDrain() {
-        if (!nativeChangeDrainQueued.compareAndSet(false, true)) return
-        contentReportExecutor.execute {
-            try {
-                drainNativeChangeMarkers()
-            } finally {
-                nativeChangeDrainQueued.set(false)
-                if (pendingNativeChangeMarkers.isNotEmpty()) {
-                    scheduleNativeChangeDrain()
-                }
-            }
-        }
-    }
-
-    private fun drainNativeChangeMarkers() {
-        val paths = pendingNativeChangeMarkers.toList()
-        paths.forEach { pendingNativeChangeMarkers.remove(it) }
-        if (paths.isEmpty()) return
-        val lib = AgentDocLib.get() ?: return
-        for (filePath in paths) {
-            try {
-                lib.agent_doc_document_changed(filePath)
-            } catch (_: UnsatisfiedLinkError) {
-                // older cdylib without the lightweight marker; fall back to local debounce
-            } catch (_: NoSuchMethodError) {
-                // older cdylib without the lightweight marker; fall back to local debounce
-            }
-        }
     }
 
     private fun recordPendingEditorOp(filePath: String, op: PendingEditorOp) {
@@ -243,27 +201,6 @@ object TypingTracker : DocumentListener {
     fun reportOpenMarkdownDocuments(project: Project) {
         for (file in FileEditorManager.getInstance(project).openFiles) {
             scheduleOpenDocumentReport(file)
-        }
-    }
-
-    /**
-     * Acquire / refresh the plugin-owner lease for this editor with our LIVE pid.
-     * The JetBrains plugin previously never called the acquire FFI (only VS Code
-     * did, on patch handling), so it never registered a live lease — after an IDE
-     * restart the stale lease kept a dead pid and the document read as headless
-     * (not editor-attached), so the realtime/CRDT paths never engaged. Called on
-     * document open + on each debounced buffer report so a restart re-establishes a
-     * fresh lease. Best-effort: an older cdylib without the symbol is a no-op.
-     */
-    private fun refreshPluginOwner(lib: AgentDocLib, filePath: String) {
-        try {
-            lib.agent_doc_plugin_owner_try_acquire(
-                filePath,
-                EditorIdentity.id,
-                ProcessHandle.current().pid(),
-            )
-        } catch (_: UnsatisfiedLinkError) {
-        } catch (_: NoSuchMethodError) {
         }
     }
 
@@ -303,11 +240,6 @@ object TypingTracker : DocumentListener {
                 return@execute
             }
             try {
-                lib.agent_doc_plugin_owner_release(filePath, EditorIdentity.id)
-            } catch (_: UnsatisfiedLinkError) {
-            } catch (_: NoSuchMethodError) {
-            }
-            try {
                 lib.agent_doc_document_closed_for_editor(filePath, EditorIdentity.id)
             } catch (_: UnsatisfiedLinkError) {
             // Older cdylib without per-editor reliable-sync close support.
@@ -318,7 +250,7 @@ object TypingTracker : DocumentListener {
         }
     }
 
-    fun publishCurrentDocumentNow(filePath: String): Boolean {
+    fun observeLazilyCurrentNow(filePath: String): Boolean {
         val lib = AgentDocLib.get() ?: return false
         val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return false
         if (!file.name.endsWith(".md")) return false
@@ -409,9 +341,6 @@ object TypingTracker : DocumentListener {
         requireAuthority: Boolean,
     ): Boolean {
         return try {
-            // Heartbeat the plugin-owner lease with our live pid on each debounced
-            // buffer report so the document stays editor-attached while open.
-            refreshPluginOwner(lib, filePath)
             val text = com.intellij.openapi.application.ApplicationManager.getApplication()
                 .runReadAction<String> { document.text }
             // #falsetyping-guard: derive replica-churn provenance. A document that
@@ -434,23 +363,15 @@ object TypingTracker : DocumentListener {
                 )
                 if (!replicaRefreshAccepted) return false
             }
-            val reported = try {
-                lib.agent_doc_document_changed_digest_content_for_editor_v3(
-                    filePath,
-                    text,
-                    EditorIdentity.id,
-                    "jetbrains",
-                    pluginVersion(),
-                    EDITOR_CAPABILITIES,
-                    if (noUnsavedOperatorEdits) 1 else 0,
-                )
-                true
-            } catch (_: UnsatisfiedLinkError) {
-                reportCompatibilityContentV2OrV1(lib, filePath, text, requireAuthority)
-            } catch (_: NoSuchMethodError) {
-                reportCompatibilityContentV2OrV1(lib, filePath, text, requireAuthority)
-            }
-            if (!reported) return false
+            lib.agent_doc_lazily_current_observed_v1(
+                filePath,
+                text,
+                EditorIdentity.id,
+                "jetbrains",
+                pluginVersion(),
+                EDITOR_CAPABILITIES,
+                if (noUnsavedOperatorEdits) 1 else 0,
+            )
             if (!requireAuthority) {
                 CrdtReplicaManager.ensureReplicaForOpenDocument(
                     filePath = filePath,
@@ -475,56 +396,6 @@ object TypingTracker : DocumentListener {
         } catch (e: Throwable) {
             LOG.debug("[native] content report skipped: ${e.message}")
             false
-        }
-    }
-
-    /**
-     * #falsetyping-guard: fall back from the v3 (replica-churn provenance) content
-     * report to v2, then to v1, when running against an older cdylib that lacks
-     * the newer symbol. Returns whether a report was delivered. Older binaries
-     * simply omit the provenance flag (conservative fail-closed default), so this
-     * degrades safely.
-     */
-    private fun reportCompatibilityContentV2OrV1(
-        lib: AgentDocLib,
-        filePath: String,
-        text: String,
-        requireAuthority: Boolean,
-    ): Boolean {
-        return try {
-            lib.agent_doc_document_changed_digest_content_for_editor_v2(
-                filePath,
-                text,
-                EditorIdentity.id,
-                "jetbrains",
-                pluginVersion(),
-                EDITOR_CAPABILITIES,
-            )
-            true
-        } catch (_: UnsatisfiedLinkError) {
-            if (requireAuthority) false else {
-                reportCompatibilityContentV1(lib, filePath, text)
-                true
-            }
-        } catch (_: NoSuchMethodError) {
-            if (requireAuthority) false else {
-                reportCompatibilityContentV1(lib, filePath, text)
-                true
-            }
-        }
-    }
-
-    private fun reportCompatibilityContentV1(lib: AgentDocLib, filePath: String, text: String) {
-        try {
-            lib.agent_doc_document_changed_digest_content_for_editor(
-                filePath,
-                text,
-                EditorIdentity.id,
-            )
-        } catch (_: UnsatisfiedLinkError) {
-            lib.agent_doc_document_changed_digest_content(filePath, text)
-        } catch (_: NoSuchMethodError) {
-            lib.agent_doc_document_changed_digest_content(filePath, text)
         }
     }
 

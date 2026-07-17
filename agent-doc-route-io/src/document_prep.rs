@@ -44,7 +44,9 @@ pub fn prepare_route_document(
         eprintln!("[route] Generated session UUID: {}", session_id);
     }
 
-    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     let head_doc = agent_doc_git_io::revision::show_head(file).ok().flatten();
     let mut preserve_docs = Vec::new();
     preserve_docs.push(updated_content.as_str());

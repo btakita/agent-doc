@@ -72,7 +72,7 @@ impl RepairOutcome {
                 "respected a manual assistant-tail removal while closing the cycle"
             }
             Self::StaleCaptureRetired => {
-                "retired a wedged write-applied capture and rebuilt sidecars from the current document"
+                "retired a wedged write-applied capture and rebuilt recovery projections from the current document"
             }
             Self::StalePreflightLockRepaired => "closed a stale preflight-started cycle",
             Self::StalePreflightCycleAbandoned => "abandoned a stale empty preflight-started cycle",

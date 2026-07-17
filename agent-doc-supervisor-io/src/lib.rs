@@ -1,4 +1,6 @@
-//! Supervisor marker storage I/O for agent-doc.
+//! Supervisor coordination I/O for agent-doc.
+
+mod state_events;
 
 pub mod config;
 pub mod cwd;

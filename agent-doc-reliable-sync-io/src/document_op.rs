@@ -8,8 +8,7 @@
 //! plugin hold the doc open) is fixed by the liveness plane. The *content* half is
 //! this module: even when authority is correctly kept for the editor, the resolve
 //! path served the relay **canonical**, which was frozen-stale *because no replica fed
-//! it* — the operator's edits lived only in a passive live-buffer sidecar the relay
-//! reconciled opportunistically. That is how a deleted queue head (`#sy71`)
+//! it*. That is how a deleted queue head (`#sy71`)
 //! resurrected: a stale canonical was served over a live edit.
 //!
 //! The fix is structural: the connected plugin replicates its document ops into the

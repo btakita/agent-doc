@@ -3,7 +3,7 @@
 //! Migrate session state after a document file rename/move.
 //!
 //! When a document is renamed, all hash-keyed state files (snapshots, locks,
-//! pending, CRDT, pre-response) become orphaned because the hash is derived
+//! pending, and cold CRDT projections) become orphaned because the hash is derived
 //! from the canonical path. This module migrates those files from the old hash
 //! to the new hash and updates the durable session registry.
 //!
@@ -22,8 +22,8 @@
 //!
 //! ## Agentic Contracts
 //!
-//! - All state file types are migrated: snapshots, locks, pending, crdt,
-//!   pre-response.
+//! - All remaining cold state file types are migrated: snapshots, locks, pending,
+//!   and CRDT recovery projections.
 //! - Missing source files are silently skipped (idempotent).
 //! - Existing destination files cause an error (prevents accidental overwrite).
 //! - Registry updates are performed under `RegistryLock`.
@@ -38,7 +38,6 @@ const STATE_FILES: &[(&str, &str)] = &[
     ("locks", "lock"),
     ("pending", "md"),
     ("crdt", "yrs"),
-    ("pre-response", "md"),
 ];
 
 /// Migrate session state after a document rename.
@@ -115,15 +114,6 @@ pub fn run(old_path: &Path, new_path: &Path) -> Result<()> {
     let new_snap_lock = locks_dir.join(format!("{}.md.lock", new_hash));
     if old_snap_lock.exists() && !new_snap_lock.exists() {
         std::fs::rename(&old_snap_lock, &new_snap_lock)?;
-        migrated += 1;
-    }
-
-    // CRDT lock files
-    let crdt_dir = project_root.join(".agent-doc/crdt");
-    let old_crdt_lock = crdt_dir.join(format!("{}.yrs.lock", old_hash));
-    let new_crdt_lock = crdt_dir.join(format!("{}.yrs.lock", new_hash));
-    if old_crdt_lock.exists() && !new_crdt_lock.exists() {
-        std::fs::rename(&old_crdt_lock, &new_crdt_lock)?;
         migrated += 1;
     }
 

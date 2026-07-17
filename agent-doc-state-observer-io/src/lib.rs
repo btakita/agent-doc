@@ -45,14 +45,28 @@ fn editor_sync_epochs(file: &Path) -> (u64, u64) {
     }
 }
 
-/// `true` when a live IPC listener owns the document's project root. A missing /
-/// unresolvable root fails safe to "no listener" (`file_fallback`).
+/// `true` when a live PID-scoped editor endpoint owns the document. A missing /
+/// unresolvable endpoint leaves transport degraded while the same durable intent
+/// waits for re-registration; it never selects a file transport.
 fn ipc_listener_active(file: &Path) -> bool {
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    let registration = agent_doc_reliable_sync_io::global_liveness_plane()
+        .lock()
+        .ok()
+        .and_then(|plane| {
+            plane
+                .projection()
+                .live_registrations(&document_hash)
+                .into_iter()
+                .max_by_key(|registration| registration.timestamp_ms)
+        });
+    let Some(registration) = registration else {
+        return false;
+    };
     file.canonicalize()
         .ok()
-        .map(|c| agent_doc_project_root_io::resolve_ipc_project_root(&c))
-        .map(|root| agent_doc_ipc_io::is_listener_active(&root))
-        .unwrap_or(false)
+        .map(|canonical| agent_doc_project_root_io::resolve_ipc_project_root(&canonical))
+        .is_some_and(|root| agent_doc_ipc_io::is_listener_active_for_pid(&root, registration.pid))
 }
 
 /// `true` when the installed agent-doc artifacts predate the newest local source
@@ -177,7 +191,7 @@ mod tests {
     fn advisory_snapshot_is_well_formed_for_missing_state() {
         // A path with no live buffer / cycle state still yields a stable, fully
         // labeled four-region advisory line (all regions at their initial leaf,
-        // no listener → file_fallback).
+        // no endpoint → degraded transport awaiting registration).
         let dir = std::env::temp_dir().join("adstatechart_snapshot_test_missing");
         let _ = std::fs::create_dir_all(&dir);
         let file = dir.join("doc.md");
@@ -189,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn advisory_snapshot_prefers_terminal_projection_over_stale_sidecar() {
+    fn advisory_snapshot_reports_terminal_ledger_projection() {
         let dir = std::env::temp_dir().join(format!(
             "adstatechart_snapshot_projection_{}_{}",
             std::process::id(),
@@ -203,10 +217,6 @@ mod tests {
         let content = "body";
         std::fs::write(&file, content).unwrap();
         agent_doc_cycle_state_io::start_preflight(&file, Some(content), Some(content)).unwrap();
-        let sidecar_path = agent_doc_fs::cycle_state_path_for(&file)
-            .unwrap()
-            .expect("cycle state path");
-        let stale_open_sidecar = std::fs::read(&sidecar_path).unwrap();
         agent_doc_cycle_state_io::mark_committed(
             &file,
             "commit_success",
@@ -214,8 +224,6 @@ mod tests {
             Some(content),
         )
         .unwrap();
-        std::fs::write(&sidecar_path, stale_open_sidecar).unwrap();
-
         let snap = advisory_snapshot(&file);
         assert!(snap.contains("closeout.committed"), "got: {snap}");
         let _ = std::fs::remove_dir_all(&dir);

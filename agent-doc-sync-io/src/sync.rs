@@ -21,7 +21,7 @@
 //! ## Spec
 //! - `run(col_args, window, focus)` is the primary entry point. When no explicit
 //!   `col_args` are provided, it falls back to the recorded
-//!   `.agent-doc/last_layout.json` for the current sync scope. It preserves empty
+//!   project `state.db` layout state for the current sync scope. It preserves empty
 //!   col_args as positional placeholders through column-memory substitution, then
 //!   drops any still-empty columns before tmux-router parsing. This lets editor
 //!   plugins represent a non-markdown sibling split without losing left/right
@@ -76,7 +76,7 @@
 //!   calling `agent-doc sync --focus <new_path>` on `FileRenameEvent` (JB) or
 //!   `onDidRenameFiles` (VS Code).
 //! - **Rename debounce (#qam7):** When `--rename` is passed, sync writes a debounce marker
-//!   (`.agent-doc/rename-debounce/<hash>.marker`) for the focused file. Any sync within
+//!   (a typed `rename_debounce` state.db lease) for the focused file. Any sync within
 //!   5 seconds that finds the marker will skip auto-start for that file. This prevents
 //!   spurious pane creation when FileRenameListener triggers sync for a file that has no
 //!   alive pane. The subsequent EditorTabSyncListener-triggered sync also respects the
@@ -120,7 +120,7 @@
 //!   disk existence of the old one. Safe to call from any context.
 //! - File rename re-registration reuses the existing `sessions::register` path, so
 //!   single-session-per-pane invariant and `RegistryLock` apply as normal.
-//! - **Column memory:** `.agent-doc/last_layout.json` persists a column→agent-doc mapping.
+//! - **Column memory:** project `state.db` persists a column→agent-doc mapping.
 //!   When a column has no agent doc (user switches to a non-session file), sync substitutes
 //!   the last known agent doc for that column index. Empty `--col` placeholders from editor
 //!   split detection keep the original column position stable, so a right-hand markdown file
@@ -172,18 +172,16 @@
 //!   returns true.
 //! - file_rename_updates_registry: registry with old path entry + detection confirms
 //!   rename logic; entry pane preserved.
-//! - rename_debounce_suppresses_auto_start: marker written for file → `has_rename_debounce`
+//! - rename_debounce_suppresses_auto_start: lease recorded for file → `has_rename_debounce`
 //!   returns true within TTL, auto-start is skipped.
-//! - rename_debounce_expires_after_ttl: marker with old timestamp → `has_rename_debounce`
-//!   returns false, marker file is deleted.
-//! - rename_debounce_does_not_affect_other_files: marker for file A → file B still
+//! - rename_debounce_expires_after_ttl: lease with old timestamp → `has_rename_debounce`
+//!   returns false and clears the lease.
+//! - rename_debounce_does_not_affect_other_files: lease for file A → file B still
 //!   passes the debounce check.
 //! - batch_summary_format_multiple_panes: 3 auto-started panes → summary string contains
 //!   count and all pane→file mappings.
 //! - batch_summary_not_printed_for_single_pane: 1 auto-started pane → batch summary
 //!   condition (len > 1) is false.
-//! - check_build_stamp_clears_locks: new build timestamp → stale `.lock` files removed,
-//!   stamp file updated.
 
 use anyhow::{Context, Result};
 use std::cell::RefCell;
@@ -209,12 +207,12 @@ use agent_doc_sync::{
     SYNC_LOCK_WAIT_BUDGET, SYNC_LOCK_WAIT_LATENCY_BUDGET, SYNC_OWNERSHIP_PROOF_BUDGET,
     SYNC_PROJECTION_REFRESH_BUDGET, SYNC_PRUNE_BUDGET, SYNC_PRUNE_SUBPHASE_BUDGET,
     SYNC_ROUTER_BUDGET, SYNC_SAFE_PASSIVE_TOTAL_BUDGET, SYNC_WINDOW_RESOLUTION_BUDGET,
-    WindowIndexNormalizationPlan, auto_started_panes_summary, effective_sync_columns,
-    epoch_millis_now, is_file_rename, last_visible_excerpt, latency_budget_status,
-    plan_window_index_normalization, planned_stash_window_indices, preserved_layout_focus_marker,
-    registry_relative_file_path, rename_debounce_expired,
-    reselect_visible_focus_pane_failed_warning, safe_passive_prune_cleanup_throttle,
-    sanitize_excerpt, sync_latency_message, sync_prune_state_update, sync_repair_stamp_path,
+    WindowIndexNormalizationPlan, auto_started_panes_summary,
+    destructive_repair_throttle_state_key, effective_sync_columns, epoch_millis_now,
+    is_file_rename, last_visible_excerpt, latency_budget_status, plan_window_index_normalization,
+    planned_stash_window_indices, preserved_layout_focus_marker, registry_relative_file_path,
+    rename_debounce_expired, reselect_visible_focus_pane_failed_warning, sanitize_excerpt,
+    sync_latency_message,
 };
 use agent_doc_tmux::{
     AssociatedPaneCandidate, AssociatedPaneResolution, AssociatedPaneSource,
@@ -313,7 +311,7 @@ fn parse_frontmatter_for_sync<'a>(
 }
 
 fn save_sync_status_snapshot(file: &Path, updated: &str) -> Result<()> {
-    agent_doc_snapshot_io::save(file, updated, agent_doc_ops_log_io::log_op)
+    agent_doc_snapshot_io::checkpoint_document_baseline(file, updated, agent_doc_ops_log_io::log_op)
 }
 
 fn log_sync_status(message: String) {
@@ -529,48 +527,65 @@ fn run_with_options_at_root(
     )
 }
 
-/// Write a debounce marker for a file that was just renamed.
+/// Record a debounce lease for a file that was just renamed.
 /// Subsequent syncs within 5s will skip auto-start for this file.
 pub fn write_rename_debounce(file_path: &str) {
-    let debounce_dir = Path::new(".agent-doc/rename-debounce");
-    if std::fs::create_dir_all(debounce_dir).is_err() {
-        return;
-    }
-    let hash = agent_doc_fs::document_state_hash(Path::new(file_path)).unwrap_or_default();
+    let file = Path::new(file_path);
+    let hash = agent_doc_fs::document_state_hash(file).unwrap_or_default();
     if hash.is_empty() {
         return;
     }
-    let marker = debounce_dir.join(format!("{}.marker", hash));
-    let _ = std::fs::write(&marker, file_path);
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return;
+    };
+    let _ = agent_doc_controller_io::project_controller::upsert_coordination_lease(
+        &project_root,
+        &agent_doc_sqlite::state_store::CoordinationLeaseRecord {
+            scope_kind: "rename_debounce".to_string(),
+            scope_id: hash.clone(),
+            holder: file_path.to_string(),
+            holder_pid: Some(std::process::id()),
+            heartbeat_secs: agent_doc_sqlite::state_store::timestamp_secs(),
+        },
+    );
     eprintln!(
-        "[sync] rename debounce marker set for {} ({})",
+        "[sync] rename debounce state recorded for {} ({})",
         file_path, hash
     );
     sync_log(&format!(
-        "rename-debounce: set marker for {} hash={}",
+        "rename-debounce: recorded lease for {} hash={}",
         file_path, hash
     ));
 }
 
-/// Check if a file has an active rename debounce marker (within TTL).
+/// Check if a file has an active rename debounce lease (within TTL).
 fn has_rename_debounce(file_path: &Path) -> bool {
     let hash = match agent_doc_fs::document_state_hash(file_path) {
         Ok(h) => h,
         Err(_) => return false,
     };
-    let marker = Path::new(".agent-doc/rename-debounce").join(format!("{}.marker", hash));
-    if !marker.exists() {
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file_path) else {
         return false;
-    }
-    let expired = marker
-        .metadata()
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.elapsed().ok())
-        .map(|d| rename_debounce_expired(d, Duration::from_secs(RENAME_DEBOUNCE_TTL_SECS)))
-        .unwrap_or(true);
+    };
+    let Some(lease) = agent_doc_controller_io::project_controller::load_coordination_lease(
+        &project_root,
+        "rename_debounce",
+        &hash,
+    )
+    .ok()
+    .flatten() else {
+        return false;
+    };
+    let age = Duration::from_secs(
+        agent_doc_sqlite::state_store::timestamp_secs().saturating_sub(lease.heartbeat_secs),
+    );
+    let expired = rename_debounce_expired(age, Duration::from_secs(RENAME_DEBOUNCE_TTL_SECS));
     if expired {
-        let _ = std::fs::remove_file(&marker);
+        let _ = agent_doc_controller_io::project_controller::clear_coordination_lease(
+            &project_root,
+            "rename_debounce",
+            &hash,
+        );
         return false;
     }
     true
@@ -1393,42 +1408,62 @@ fn reselect_visible_focus_pane_if_present(
     }
 }
 
-/// Check the per-server-per-session destructive-repair stamp. Returns `true`
-/// when a destructive repair ran within `DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS` (so
-/// this pass should skip it); otherwise records a fresh stamp and returns
-/// `false`. Failing to resolve the stamp path (no `.agent-doc/`) never throttles.
+/// Check the per-server-per-session destructive-repair throttle in the project
+/// state transaction. No filesystem stamp participates in the sync hot path.
 fn throttle_destructive_repair(project_root: &Path, tmux: &Tmux, session_name: &str) -> bool {
-    let Some(path) =
-        sync_repair_stamp_path(project_root, tmux.server_socket.as_deref(), session_name)
-    else {
-        return false;
-    };
     let now = epoch_millis_now();
-    let last = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| s.trim().parse::<u64>().ok());
+    match destructive_repair_throttle_at(
+        project_root,
+        tmux.server_socket.as_deref(),
+        session_name,
+        now,
+    ) {
+        Ok((true, last)) => {
+            sync_log(&format!(
+                "destructive_repair_throttled session={} last={:?} now={} min_ms={}",
+                session_name,
+                last,
+                now,
+                agent_doc_tmux::DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS
+            ));
+            true
+        }
+        Ok((false, _)) => false,
+        Err(error) => {
+            eprintln!(
+                "[sync] warning: could not update destructive-repair throttle in state.db: {}",
+                error
+            );
+            false
+        }
+    }
+}
+
+fn destructive_repair_throttle_at(
+    project_root: &Path,
+    server_socket: Option<&str>,
+    session_name: &str,
+    now: u64,
+) -> Result<(bool, Option<u64>)> {
+    let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
+    let state_key = destructive_repair_throttle_state_key(server_socket, session_name);
+    let last =
+        agent_doc_sqlite::state_store::load_project_runtime_state_from_db(&conn, &state_key)?
+            .and_then(|value| value.parse::<u64>().ok());
     if agent_doc_tmux::destructive_repair_throttled(
         last,
         now,
         agent_doc_tmux::DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS,
     ) {
-        sync_log(&format!(
-            "destructive_repair_throttled session={} last={:?} now={} min_ms={}",
-            session_name,
-            last,
-            now,
-            agent_doc_tmux::DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS
-        ));
-        return true;
+        return Ok((true, last));
     }
-    if let Err(e) = std::fs::write(&path, now.to_string()) {
-        eprintln!(
-            "[sync] warning: could not write destructive-repair stamp {}: {}",
-            path.display(),
-            e
-        );
-    }
-    false
+    agent_doc_sqlite::state_store::upsert_project_runtime_state_in_db(
+        &conn,
+        &state_key,
+        &now.to_string(),
+        now,
+    )?;
+    Ok((false, last))
 }
 
 fn current_tmux_session_name(tmux: &Tmux) -> Option<String> {
@@ -1488,28 +1523,6 @@ fn sync_doctor_repair_candidate(col_args: &[String], focus: Option<&str>) -> Opt
         })
 }
 
-fn safe_passive_prune_cleanup_mode_at(
-    state_path: &Path,
-    col_args: &[String],
-    window: Option<&str>,
-    now_ms: u64,
-) -> agent_doc_tmux::PruneCleanupMode {
-    let throttle_ms = safe_passive_prune_cleanup_throttle().as_millis() as u64;
-    let raw_state = std::fs::read_to_string(state_path).ok();
-    let update =
-        sync_prune_state_update(raw_state.as_deref(), col_args, window, now_ms, throttle_ms);
-
-    if update.should_write {
-        if let Some(parent) = state_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Ok(raw) = serde_json::to_string(&update.state) {
-            let _ = std::fs::write(state_path, raw);
-        }
-    }
-    agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
-}
-
 #[cfg(test)]
 fn safe_passive_prune_cleanup_mode(
     auto_start_mode: AutoStartMode,
@@ -1523,10 +1536,10 @@ fn safe_passive_prune_cleanup_mode(
 
 fn safe_passive_prune_cleanup_mode_at_root(
     auto_start_mode: AutoStartMode,
-    col_args: &[String],
-    window: Option<&str>,
-    focus: Option<&str>,
-    project_root: &Path,
+    _col_args: &[String],
+    _window: Option<&str>,
+    _focus: Option<&str>,
+    _project_root: &Path,
 ) -> agent_doc_tmux::PruneCleanupMode {
     if !matches!(auto_start_mode, AutoStartMode::SafePassive) {
         return agent_doc_tmux::PruneCleanupMode::Full;
@@ -1535,8 +1548,6 @@ fn safe_passive_prune_cleanup_mode_at_root(
     // stale registry rows, but it must not spend the selection budget scanning
     // stash panes or retained dead panes before tmux-router can detach any extra
     // visible pane from the active editor projection.
-    let state_path = agent_doc_sync::sync_prune_state_path(col_args, focus, project_root);
-    let _ = safe_passive_prune_cleanup_mode_at(&state_path, col_args, window, epoch_millis_now());
     agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
 }
 
@@ -1835,44 +1846,6 @@ fn normalize_window_to_index(
     }
 }
 
-/// Check if this binary is a new build and clear stale caches if so.
-/// Compares the embedded build timestamp against `.agent-doc/build.stamp`.
-/// On mismatch: clears startup locks (`.agent-doc/starting/*.lock`) and updates stamp.
-fn check_build_stamp(project_root: &Path) {
-    let build_ts = option_env!("AGENT_DOC_BUILD_TIMESTAMP").unwrap_or(env!("CARGO_PKG_VERSION"));
-    let stamp_path = project_root.join(".agent-doc/build.stamp");
-    let stored = std::fs::read_to_string(&stamp_path).unwrap_or_default();
-    if stored.trim() == build_ts {
-        return; // Same build
-    }
-    eprintln!(
-        "[sync] new build detected ({}→{}), clearing stale caches",
-        stored.trim(),
-        build_ts
-    );
-    // Clear startup locks
-    let starting_dir = project_root.join(".agent-doc/starting");
-    if starting_dir.exists()
-        && let Ok(entries) = std::fs::read_dir(&starting_dir)
-    {
-        for entry in entries.flatten() {
-            if entry
-                .path()
-                .extension()
-                .map(|e| e == "lock")
-                .unwrap_or(false)
-            {
-                let _ = std::fs::remove_file(entry.path());
-            }
-        }
-    }
-    // Update stamp
-    if let Some(parent) = stamp_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(&stamp_path, build_ts);
-}
-
 // `#panefocussteal`: a passive sync (the JetBrains 5s layout poll or a
 // tab-select) reconciles tmux layout but must **never** select a pane. Moving
 // tmux focus is a separate, explicit action — the `agent-doc focus <file>`
@@ -2043,7 +2016,6 @@ fn run_with_options_internal_at_root(
     let _lock_guard = lock_guard;
 
     // Check for new build and clear stale caches
-    check_build_stamp(&scope_root);
     {
         match agent_doc_controller_io::project_controller::close_stale_starting_actors_for_caller(
             &scope_root,
@@ -2083,7 +2055,6 @@ fn run_with_options_internal_at_root(
     // agent doc so the reconciler preserves the pane from the previous layout.
     // When sync is called without explicit columns, fall back to that recorded layout.
     let layout_state_root = scope_root;
-    let layout_state_path = agent_doc_sync::layout_state_path(col_args, focus, project_root);
     let saved_layout =
         match agent_doc_controller_io::project_controller::load_layout_state(&layout_state_root) {
             Ok(layout) => layout,
@@ -2093,10 +2064,7 @@ fn run_with_options_internal_at_root(
                     layout_state_root.display(),
                     err
                 );
-                std::fs::read_to_string(&layout_state_path)
-                    .ok()
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_default()
+                Vec::new()
             }
         };
 
@@ -2125,7 +2093,7 @@ fn run_with_options_internal_at_root(
         sanitized
     };
 
-    let input_cols = effective_sync_columns(col_args, &saved_layout, &layout_state_path)?;
+    let input_cols = effective_sync_columns(col_args, &saved_layout, &layout_state_root)?;
     let column_memory = agent_doc_tmux::apply_column_memory(
         &agent_doc_tmux::classify_sync_layout_columns(&input_cols, first_agent_doc_in_col),
         &saved_layout,
@@ -2417,9 +2385,11 @@ fn run_with_options_internal_at_root(
                 // Save snapshot BEFORE committing — git::commit() uses the snapshot
                 // to determine what to stage. Without this, the snapshot has stale
                 // content and the commit fails with a drift warning.
-                if let Err(e) =
-                    agent_doc_snapshot_io::save(path, &scaffold, agent_doc_ops_log_io::log_op)
-                {
+                if let Err(e) = agent_doc_snapshot_io::checkpoint_document_baseline(
+                    path,
+                    &scaffold,
+                    agent_doc_ops_log_io::log_op,
+                ) {
                     eprintln!(
                         "[sync] warning: failed to save scaffold snapshot for {}: {}",
                         path.display(),
@@ -5016,6 +4986,45 @@ mod tests {
     use std::time::Duration;
     use tmux_router::IsolatedTmux;
 
+    #[test]
+    fn destructive_repair_throttle_roundtrips_in_state_db_without_stamp() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path();
+        let first = 10_000;
+        let after_interval = first + agent_doc_tmux::DESTRUCTIVE_REPAIR_MIN_INTERVAL_MS + 1;
+
+        assert_eq!(
+            destructive_repair_throttle_at(root, Some("/tmp/test.sock"), "agent-doc", first)
+                .unwrap(),
+            (false, None)
+        );
+        assert_eq!(
+            destructive_repair_throttle_at(root, Some("/tmp/test.sock"), "agent-doc", first + 1)
+                .unwrap(),
+            (true, Some(first))
+        );
+        assert_eq!(
+            destructive_repair_throttle_at(
+                root,
+                Some("/tmp/test.sock"),
+                "agent-doc",
+                after_interval,
+            )
+            .unwrap(),
+            (false, Some(first))
+        );
+        assert!(root.join(".agent-doc/state.db").exists());
+        assert!(
+            std::fs::read_dir(root.join(".agent-doc"))
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".stamp"))
+        );
+    }
+
     // `#sync-cross-root-autostart`: a superproject sync must not restore or
     // auto-start a document owned by a nested/submodule `.agent-doc` root.
     #[test]
@@ -5166,7 +5175,12 @@ mod tests {
             "<!-- /agent:exchange -->\n"
         );
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         init_git_repo(root, &doc);
 
         let materialized = original.replace(
@@ -5174,7 +5188,12 @@ mod tests {
             "### Re: crash recovery -- gpt-5\n\nRecovered by sync.\n<!-- agent:boundary:test -->",
         );
         std::fs::write(&doc, &materialized).unwrap();
-        agent_doc_snapshot_io::save(&doc, &materialized, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &materialized,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::pipeline_frontmatter::mark_committed(
             &TEST_PIPELINE_FRONTMATTER_EFFECTS,
             &doc,
@@ -5768,7 +5787,9 @@ mod tests {
         assert!(updated.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX));
         assert!(updated.contains("sync auto-start frontmatter"));
 
-        let snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(snapshot.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX));
 
         std::fs::write(
@@ -5776,7 +5797,7 @@ mod tests {
             "---\nagent_doc_session: test\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n[agent-doc sync] malformed frontmatter during auto-start.\n\nsync auto-start frontmatter: invalid YAML frontmatter in tasks/bad.md: boom\n<!-- /agent:status -->\n",
         )
         .unwrap();
-        agent_doc_snapshot_io::save(
+        agent_doc_snapshot_io::checkpoint_document_baseline(
             &doc,
             "---\nagent_doc_session: test\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\n[agent-doc sync] malformed frontmatter during auto-start.\n\nsync auto-start frontmatter: invalid YAML frontmatter in tasks/bad.md: boom\n<!-- /agent:status -->\n",
             agent_doc_ops_log_io::log_op,
@@ -5790,7 +5811,9 @@ mod tests {
             !cleared.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX),
             "managed sync warning should be removed once parsing succeeds"
         );
-        let cleared_snapshot = agent_doc_snapshot_io::load(&doc).unwrap().unwrap();
+        let cleared_snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
         assert!(
             !cleared_snapshot.contains(agent_doc_sync::SYNC_FRONTMATTER_STATUS_PREFIX),
             "snapshot should track the cleared status too"
@@ -5806,13 +5829,20 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         let original = "---\nagent_doc_session: test\n---\n\n## Status\n\n<!-- agent:status patch=replace -->\nuser-owned status\n<!-- /agent:status -->\n";
         std::fs::write(&doc, original).unwrap();
-        agent_doc_snapshot_io::save(&doc, original, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            original,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         crate::clear_frontmatter_status_with(&doc, save_sync_status_snapshot, log_sync_status);
 
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), original);
         assert_eq!(
-            agent_doc_snapshot_io::load(&doc).unwrap().unwrap(),
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
             original
         );
     }
@@ -6876,24 +6906,6 @@ mod tests {
         );
     }
     #[test]
-    fn safe_passive_prune_state_skips_stash_cleanup_from_first_pass() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let state_path = tmp.path().join(".agent-doc/sync-prune-state.json");
-        let cols = vec!["tasks/a.md,tasks/b.md".to_string()];
-
-        let first = safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_000);
-        assert_eq!(
-            first,
-            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
-        );
-
-        let second = safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_500);
-        assert_eq!(
-            second,
-            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
-        );
-    }
-    #[test]
     fn safe_passive_prune_cleanup_skips_stash_scan_for_editor_handoff() {
         let tmp = tempfile::TempDir::new().unwrap();
         let _cwd_guard = ScopedCurrentDir::set(tmp.path());
@@ -6931,33 +6943,6 @@ mod tests {
                 &changed_cols,
                 Some("agent:1"),
                 Some("tasks/b.md"),
-            ),
-            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
-        );
-    }
-    #[test]
-    fn safe_passive_prune_state_keeps_skipping_on_layout_change_or_expiry() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let state_path = tmp.path().join(".agent-doc/sync-prune-state.json");
-        let cols = vec!["tasks/a.md,tasks/b.md".to_string()];
-        let changed_cols = vec!["tasks/a.md".to_string(), "tasks/b.md".to_string()];
-
-        assert_eq!(
-            safe_passive_prune_cleanup_mode_at(&state_path, &cols, Some("agent:1"), 1_000),
-            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
-        );
-        assert_eq!(
-            safe_passive_prune_cleanup_mode_at(&state_path, &changed_cols, Some("agent:1"), 1_100),
-            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
-        );
-
-        let expired_ms = 1_100 + safe_passive_prune_cleanup_throttle().as_millis() as u64;
-        assert_eq!(
-            safe_passive_prune_cleanup_mode_at(
-                &state_path,
-                &changed_cols,
-                Some("agent:1"),
-                expired_ms
             ),
             agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup
         );
@@ -7126,58 +7111,39 @@ mod tests {
     #[test]
     fn rename_debounce_suppresses_auto_start() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let debounce_dir = tmp.path().join(".agent-doc/rename-debounce");
-        std::fs::create_dir_all(&debounce_dir).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
 
         // Create a file with known content for hashing
         let file = tmp.path().join("test.md");
         std::fs::write(&file, "---\nagent_doc_session: abc123\n---\n").unwrap();
 
-        // Write marker using the same hash function
-        let hash = agent_doc_fs::document_state_hash(&file).unwrap();
-        let marker = debounce_dir.join(format!("{}.marker", hash));
-        std::fs::write(&marker, file.to_string_lossy().as_ref()).unwrap();
-
-        // Check: marker exists and is fresh → has_rename_debounce should find it
-        // (We test the marker file existence and freshness directly since
-        // has_rename_debounce uses a hardcoded path relative to cwd)
-        assert!(marker.exists(), "marker should exist after write");
-        let age = marker
-            .metadata()
-            .unwrap()
-            .modified()
-            .unwrap()
-            .elapsed()
-            .unwrap();
-        assert!(
-            age.as_secs() < RENAME_DEBOUNCE_TTL_SECS,
-            "marker should be fresh"
-        );
+        write_rename_debounce(&file.to_string_lossy());
+        assert!(has_rename_debounce(&file));
+        assert!(!tmp.path().join(".agent-doc/rename-debounce").exists());
     }
     #[test]
     fn rename_debounce_does_not_affect_other_files() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let debounce_dir = tmp.path().join(".agent-doc/rename-debounce");
-        std::fs::create_dir_all(&debounce_dir).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
 
         let file_a = tmp.path().join("a.md");
         let file_b = tmp.path().join("b.md");
         std::fs::write(&file_a, "---\nagent_doc_session: aaa\n---\n").unwrap();
         std::fs::write(&file_b, "---\nagent_doc_session: bbb\n---\n").unwrap();
 
-        // Only write marker for file_a
+        // Only record debounce state for file_a.
         let hash_a = agent_doc_fs::document_state_hash(&file_a).unwrap();
-        let marker_a = debounce_dir.join(format!("{}.marker", hash_a));
-        std::fs::write(&marker_a, file_a.to_string_lossy().as_ref()).unwrap();
+        write_rename_debounce(&file_a.to_string_lossy());
 
         // file_b should have a different hash, no marker
         let hash_b = agent_doc_fs::document_state_hash(&file_b).unwrap();
-        let marker_b = debounce_dir.join(format!("{}.marker", hash_b));
         assert_ne!(
             hash_a, hash_b,
             "different files should have different hashes"
         );
-        assert!(!marker_b.exists(), "no marker should exist for file_b");
+        assert!(has_rename_debounce(&file_a));
+        assert!(!has_rename_debounce(&file_b));
+        assert!(!tmp.path().join(".agent-doc/rename-debounce").exists());
     }
     #[test]
     fn skip_auto_start_for_recent_session_loss_detects_repeated_window() {
@@ -7907,8 +7873,18 @@ mod tests {
         );
         std::fs::write(&doc_a, content_a).unwrap();
         std::fs::write(&doc_b, content_b).unwrap();
-        agent_doc_snapshot_io::save(&doc_a, content_a, agent_doc_ops_log_io::log_op).unwrap();
-        agent_doc_snapshot_io::save(&doc_b, content_b, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc_a,
+            content_a,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc_b,
+            content_b,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let pane_a = iso.new_session("test", root).unwrap();
         let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
@@ -8535,11 +8511,8 @@ mod tests {
                 .to_string_lossy()
                 .to_string(),
         ];
-        std::fs::write(
-            root.join(".agent-doc/last_layout.json"),
-            serde_json::to_string(&layout_state).unwrap(),
-        )
-        .unwrap();
+        agent_doc_controller_io::project_controller::store_layout_state(root, &layout_state)
+            .unwrap();
 
         let iso = IsolatedTmux::new("sync-focus-only-editor-switch");
         let left_pane = iso.new_session("test", root).unwrap();
@@ -8632,11 +8605,8 @@ mod tests {
                 .to_string_lossy()
                 .to_string(),
         ];
-        std::fs::write(
-            root.join(".agent-doc/last_layout.json"),
-            serde_json::to_string(&layout_state).unwrap(),
-        )
-        .unwrap();
+        agent_doc_controller_io::project_controller::store_layout_state(root, &layout_state)
+            .unwrap();
 
         let iso = IsolatedTmux::new("sync-focus-only-visible-sibling");
         let bugs_pane = iso.new_session("test", root).unwrap();
@@ -8769,7 +8739,7 @@ mod tests {
         assert_eq!(
             ordered,
             vec![new_left_pane.clone(), right_pane.clone()],
-            "focus-only sync should derive the current split from visible registered panes when last_layout.json is absent"
+            "focus-only sync should derive the current split from visible registered panes when state.db has no layout row"
         );
         assert_eq!(
             iso.active_pane("test").unwrap(),

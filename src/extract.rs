@@ -232,7 +232,11 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
     // Update source: replace exchange content with remaining
     let new_source = exchange.replace_content(&source_content, &remaining);
     agent_doc_document_realtime_io::atomic_write_through_authority(source, &new_source)?;
-    agent_doc_snapshot_io::save(source, &new_source, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        source,
+        &new_source,
+        agent_doc_ops_log_io::log_op,
+    )?;
 
     // Append extracted content to target's exchange component with source annotation
     let annotation = format_source_annotation(source, "Extract");
@@ -267,7 +271,11 @@ pub fn run(source: &Path, target: &Path, component_name: Option<&str>) -> Result
     };
 
     agent_doc_document_realtime_io::atomic_write_through_authority(target, &new_target)?;
-    agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        target,
+        &new_target,
+        agent_doc_ops_log_io::log_op,
+    )?;
 
     eprintln!(
         "[extract] Moved last entry from {}:{} → {}:{}",
@@ -384,7 +392,11 @@ pub fn transfer(
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(target, &target_content)?;
-        agent_doc_snapshot_io::save(target, &target_content, agent_doc_ops_log_io::log_op)?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            target,
+            &target_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
         eprintln!("[transfer] Auto-created {} (template)", target.display());
     }
 
@@ -417,7 +429,11 @@ pub fn transfer(
     // Clear source component
     let new_source = comp.replace_content(&source_content, "\n");
     agent_doc_document_realtime_io::atomic_write_through_authority(source, &new_source)?;
-    agent_doc_snapshot_io::save(source, &new_source, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        source,
+        &new_source,
+        agent_doc_ops_log_io::log_op,
+    )?;
 
     // Append to target component (or end of file) with source annotation
     let annotation = format_source_annotation(source, "Transfer");
@@ -444,7 +460,11 @@ pub fn transfer(
     };
 
     agent_doc_document_realtime_io::atomic_write_through_authority(target, &new_target)?;
-    agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        target,
+        &new_target,
+        agent_doc_ops_log_io::log_op,
+    )?;
 
     // Also transfer tracked list surfaces that belong with the moved context.
     if !is_backlog_component(component_name) && !is_icebox_component(component_name) {
@@ -461,7 +481,7 @@ pub fn transfer(
                     target,
                     &new_target_surface,
                 )?;
-                agent_doc_snapshot_io::save(
+                agent_doc_snapshot_io::checkpoint_document_baseline(
                     target,
                     &new_target_surface,
                     agent_doc_ops_log_io::log_op,
@@ -470,7 +490,7 @@ pub fn transfer(
                     source,
                     &new_source_surface,
                 )?;
-                agent_doc_snapshot_io::save(
+                agent_doc_snapshot_io::checkpoint_document_baseline(
                     source,
                     &new_source_surface,
                     agent_doc_ops_log_io::log_op,
@@ -564,7 +584,11 @@ fn transfer_pending_items(
     };
     let new_source = source_pending.replace_content(&source_content, &new_pending_content);
     agent_doc_document_realtime_io::atomic_write_through_authority(source, &new_source)?;
-    agent_doc_snapshot_io::save(source, &new_source, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        source,
+        &new_source,
+        agent_doc_ops_log_io::log_op,
+    )?;
 
     // Append matched items to target component
     let target_pending = target_comps
@@ -583,7 +607,11 @@ fn transfer_pending_items(
     };
 
     agent_doc_document_realtime_io::atomic_write_through_authority(target, &new_target)?;
-    agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        target,
+        &new_target,
+        agent_doc_ops_log_io::log_op,
+    )?;
 
     agent_doc_commit_io::commit(target)?;
 
@@ -697,7 +725,11 @@ fn transfer_referral(source: &Path, target: &Path, component_name: &str) -> Resu
     };
 
     agent_doc_document_realtime_io::atomic_write_through_authority(target, &new_target)?;
-    agent_doc_snapshot_io::save(target, &new_target, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(
+        target,
+        &new_target,
+        agent_doc_ops_log_io::log_op,
+    )?;
 
     agent_doc_commit_io::commit(target)?;
 

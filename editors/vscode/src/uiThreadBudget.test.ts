@@ -8,19 +8,18 @@ describe('editor UI thread budget', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const start = source.indexOf('this.typingListener = vscode.workspace.onDidChangeTextDocument');
         assert.ok(start >= 0, 'typing listener should exist');
-        const end = source.indexOf('this.outputChannel.appendLine(`PatchWatcher: watching', start);
+        const end = source.indexOf('this.outputChannel.appendLine(`PatchWatcher: Lazily endpoint active', start);
         assert.ok(end > start, 'typing listener should precede watcher startup log');
         const listener = source.slice(start, end);
 
-        assert.ok(listener.includes('this.scheduleNativeDocumentChanged(fsPath, eventProjectRoot);'));
-        assert.ok(listener.includes('this.scheduleLiveBufferReport(e.document, eventProjectRoot);'));
+        assert.ok(listener.includes('this.scheduleLazilyCurrentObservation(e.document, eventProjectRoot);'));
     assert.ok(listener.includes('this.scheduleCrdtLocalChangeDelta(fsPath, changes, admission);'));
     assert.ok(listener.includes('this.scheduleEditorOpReport(fsPath, e.contentChanges, eventProjectRoot);'));
     assert.ok(listener.includes('const operatorEdit = !remoteCrdtApply && (e.document.isDirty || e.reason !== undefined);'));
     assert.ok(listener.includes('const admission = this.crdtReplicas?.captureLocalChange(fsPath, operatorEdit);'));
         assert.strictEqual(listener.includes('e.document.getText()'), false);
         assert.strictEqual(listener.includes('native.documentChanged('), false);
-        assert.strictEqual(listener.includes('documentChangedDigestContent'), false);
+        assert.strictEqual(listener.includes('lazilyCurrentObserved'), false);
         assert.strictEqual(listener.includes('native.recordEditorOp('), false);
         assert.strictEqual(listener.includes('reportEditorChange('), false);
         assert.strictEqual(listener.includes('handleLocalChangeDelta('), false);
@@ -29,10 +28,10 @@ describe('editor UI thread budget', () => {
     it('VS Code coalesces full-buffer reporting through lazily KeepLatest debounce', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         assert.ok(source.includes("import { DebounceCore } from '../../../../lazily-js/src/rateshape.js';"));
-        assert.ok(source.includes('new DebounceCore<string>(LIVE_BUFFER_REPORT_DELAY_MS)'));
+        assert.ok(source.includes('new DebounceCore<string>(LAZILY_CURRENT_OBSERVATION_DELAY_MS)'));
         assert.ok(source.includes('state.debounce.input(monotonicMillis(), fsPath)'));
         assert.ok(source.includes('state.debounce.tick(monotonicMillis())'));
-        assert.ok(source.includes('this.liveBufferReports.get(fsPath) !== state'));
+        assert.ok(source.includes('this.lazilyCurrentObservations.get(fsPath) !== state'));
     });
 
     it('VS Code CRDT local-change hot path updates shadows from deltas', () => {
@@ -56,11 +55,11 @@ describe('editor UI thread budget', () => {
         assert.ok(source.includes('private async drainRequestedRemoteUpdates()'));
     });
 
-    it('VS Code watches CRDT events and reads turn state from Project Controller lazily projection', () => {
+    it('VS Code receives CRDT events through its PID endpoint and reads Project Controller state', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
-        assert.ok(source.includes("'.agent-doc', 'crdt-replica-events'"));
-        assert.ok(source.includes('private onCrdtReplicaEvent('));
-        assert.ok(source.includes('this.crdtReplicas?.requestRemoteDrain(event.file);'));
+        assert.strictEqual(source.includes("'.agent-doc', 'crdt-replica-events'"), false);
+        assert.ok(source.includes('case EditorIntent.DeliverCrdtRemote:'));
+        assert.ok(source.includes('this.crdtReplicas?.requestRemoteDrain(filePath);'));
         assert.ok(source.includes('configureTurnStatusWatcher()'));
         assert.ok(source.includes('TURN_STATUS_MIN_REFRESH_INTERVAL_MS'));
         assert.ok(source.includes("command: 'state_subscribe'"));
@@ -99,8 +98,8 @@ describe('editor UI thread budget', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
         const start = source.indexOf('private scheduleCrdtLocalChangeDelta');
         assert.ok(start >= 0, 'CRDT local-change scheduler should exist');
-        const end = source.indexOf('private async onPatchFileCreated', start);
-        assert.ok(end > start, 'CRDT scheduler should precede patch processing');
+        const end = source.indexOf('private projectRoot()', start);
+        assert.ok(end > start, 'CRDT scheduler should precede the next endpoint helper');
         const scheduler = source.slice(start, end);
 
         assert.ok(scheduler.includes('setTimeout(() => {'));
@@ -128,30 +127,19 @@ describe('editor UI thread budget', () => {
         assert.ok(method.includes('setTimeout'));
     });
 
-    it('VS Code publish-live-buffer signal is read-only and off the typing listener', () => {
+    it('VS Code observes Lazily current continuously without a file signal', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
-        assert.ok(source.includes("'publish-live-buffer.signal'"));
-        assert.ok(source.includes('this.onPublishLiveBufferSignal(patchesDir)'));
+        assert.strictEqual(source.includes('observe-lazily-current.signal'), false);
+        assert.ok(source.includes('this.scheduleLazilyCurrentObservation(document, projectRoot);'));
+        assert.ok(source.includes('case EditorIntent.ObserveLazilyCurrent:'));
 
-        const handlerStart = source.indexOf('private async processPublishLiveBufferSignal');
-        assert.ok(handlerStart >= 0, 'publish-live-buffer signal handler should exist');
-        const handlerEnd = source.indexOf('private writeEditorContentProjection', handlerStart);
-        assert.ok(handlerEnd > handlerStart, 'handler should precede content projection helper');
-        const handler = source.slice(handlerStart, handlerEnd);
-        assert.ok(handler.includes('this.publishCurrentDocumentNow(document, projectRoot);'));
-        assert.ok(handler.includes('PUBLISH_LIVE_BUFFER_SIGNAL_MAX_AGE_MS'));
-        assert.ok(handler.includes('signalMtimeMs'));
-        assert.ok(handler.includes('stale signal ignored'));
-        assert.strictEqual(handler.includes('workspace.applyEdit'), false);
-        assert.strictEqual(handler.includes('.save('), false);
-
-        const publishStart = source.indexOf('private publishCurrentDocumentNow');
+        const publishStart = source.indexOf('private observeLazilyCurrentNow');
         assert.ok(publishStart >= 0, 'immediate live-buffer publisher should exist');
         const publishEnd = source.indexOf('private scheduleEditorOpReport', publishStart);
         assert.ok(publishEnd > publishStart, 'publisher should precede editor-op scheduler');
         const publisher = source.slice(publishStart, publishEnd);
         assert.ok(publisher.includes('document.getText()'));
-        assert.ok(publisher.includes('native.documentChangedDigestContent(fsPath, text, projectRoot, EDITOR_ID, noUnsavedOperatorEdits);'));
+        assert.ok(publisher.includes('native.lazilyCurrentObserved(fsPath, text, projectRoot, EDITOR_ID, noUnsavedOperatorEdits);'));
         assert.ok(publisher.includes('this.crdtReplicas?.attachDocument(fsPath, text, true)'));
         assert.strictEqual(publisher.includes('workspace.applyEdit'), false);
         assert.strictEqual(publisher.includes('.save('), false);

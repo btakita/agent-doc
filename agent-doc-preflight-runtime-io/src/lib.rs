@@ -95,13 +95,13 @@ impl agent_doc_preflight_io::PreflightMaintenanceWriteEffects
         agent_doc_document_realtime_io::record_document_write_provenance(file, content);
     }
 
-    fn guard_visible_write_idle_and_current(
+    fn guard_visible_write_expected_current(
         &self,
         file: &Path,
         source: &str,
         expected_current: &str,
     ) -> Result<()> {
-        agent_doc_document_realtime_io::guard_visible_write_idle_and_current(
+        agent_doc_document_realtime_io::guard_visible_write_expected_current(
             file,
             source,
             expected_current,
@@ -169,7 +169,11 @@ pub fn enforce_no_uncommitted_closeout_drift(
             file,
             &replay.deduped_content,
         )?;
-        agent_doc_snapshot_io::save(file, &replay.deduped_content, agent_doc_ops_log_io::log_op)?;
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            file,
+            &replay.deduped_content,
+            agent_doc_ops_log_io::log_op,
+        )?;
         return Ok(());
     }
 
@@ -191,7 +195,7 @@ pub fn enforce_no_uncommitted_closeout_drift(
             file,
             &overapplication.remediated_content,
         )?;
-        agent_doc_snapshot_io::save(
+        agent_doc_snapshot_io::checkpoint_document_baseline(
             file,
             &overapplication.remediated_content,
             agent_doc_ops_log_io::log_op,
@@ -284,7 +288,7 @@ pub fn relocate_out_of_exchange_prompt_before_diff(file: &Path) -> Result<bool> 
         return Ok(false);
     };
 
-    if let Some(snapshot_content) = agent_doc_snapshot_io::load(file)? {
+    if let Some(snapshot_content) = agent_doc_snapshot_io::load_document_baseline(file)? {
         repaired =
             normalize_user_prompts_in_exchange_safe(&repaired, &repaired, &snapshot_content, file);
         repaired = agent_doc_template_io::normalize_template_structure_or_fail(&repaired, file)?;
@@ -337,7 +341,9 @@ pub fn remove_post_exchange_duplicate_prompt_comments_for_preflight(
     rc: &agent_doc_run_context_io::CycleContext,
 ) -> Result<bool> {
     let current = resolve_current_preflight_document(file, "duplicate_prompt_comments")?;
-    let snapshot_doc = agent_doc_snapshot_io::load(file).ok().flatten();
+    let snapshot_doc = agent_doc_snapshot_io::load_document_baseline(file)
+        .ok()
+        .flatten();
     let head_doc = rc.head_content();
     let mut preserve_docs = Vec::new();
     preserve_docs.push(current.as_str());
@@ -522,47 +528,57 @@ pub fn recover_ipc_truncated_worktree_from_editor_buffer(
 
     let patch_id = uuid::Uuid::new_v4().to_string();
     let path_str = canonical.to_string_lossy().to_string();
-    let barrier = agent_doc_debounce::await_editor_sync_barrier(&path_str, 75, 150);
-    let in_flight = barrier
-        .statuses
-        .iter()
-        .filter(|status| status.in_flight)
-        .count();
+    let lazily_current = agent_doc_crdt_relay_io::current_text_for_file(&canonical)?;
+    let (authority_state, delivery_converged) = match &lazily_current {
+        agent_doc_crdt_relay_io::CurrentText::Detached => ("detached", true),
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            delivery_converged, ..
+        } => ("current", *delivery_converged),
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+            ("editor_attached_missing_replica", false)
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => ("editor_sync_pending", false),
+    };
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "editor_sync_barrier file={} barrier=ipc_truncation_recover outcome={:?} statuses={} in_flight={} typing_recent={}",
+            "lazily_authority_observed file={} transition=ipc_truncation_recover state={} delivery_converged={}",
             file.display(),
-            barrier.kind,
-            barrier.statuses.len(),
-            in_flight,
-            barrier.typing_recent
+            authority_state,
+            delivery_converged,
         ),
     );
-    let socket_active = agent_doc_ipc_io::is_listener_active(&project_root);
-    if socket_active {
-        match agent_doc_ipc_io::send_save_document(&project_root, &path_str, &patch_id) {
-            Ok(true) => {}
-            Ok(false) | Err(_) => return Ok(false),
-        }
-    } else {
-        match agent_doc_ipc_io::send_save_document_file_signal(&project_root, &path_str, &patch_id)
-        {
-            Ok(true) => {}
-            Ok(false) | Err(_) => return Ok(false),
-        }
-        if poll_save_document_visible_write_receipt(&project_root, &canonical, &patch_id)?.is_none()
-        {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "ipc_truncation_recover_rejected file={} save_document_file_signal=unproven_visible_write patch_id={}",
-                    file.display(),
-                    patch_id
-                ),
-            );
-            return Ok(false);
-        }
+    if !delivery_converged {
+        return Ok(false);
+    }
+    let Some(registration) =
+        agent_doc_controller_io::project_controller::live_editor_registration_for_file(file)?
+    else {
+        return Ok(false);
+    };
+    if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid) {
+        return Ok(false);
+    }
+    match agent_doc_ipc_io::send_save_document_to_editor(
+        &project_root,
+        registration.pid,
+        &registration.editor_id,
+        &path_str,
+        &patch_id,
+    ) {
+        Ok(true) => {}
+        Ok(false) | Err(_) => return Ok(false),
+    }
+    if poll_save_document_visible_write_receipt(&project_root, &canonical, &patch_id)?.is_none() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "ipc_truncation_recover_rejected file={} save_document=unproven_visible_write patch_id={}",
+                file.display(),
+                patch_id
+            ),
+        );
+        return Ok(false);
     }
 
     let flushed = resolve_current_preflight_document(&canonical, "ipc_truncation_recover")?;
@@ -579,7 +595,7 @@ pub fn recover_ipc_truncated_worktree_from_editor_buffer(
         return Ok(false);
     }
 
-    agent_doc_snapshot_io::save(file, &head, agent_doc_ops_log_io::log_op)?;
+    agent_doc_snapshot_io::checkpoint_document_baseline(file, &head, agent_doc_ops_log_io::log_op)?;
     rc.invalidate_snapshot_content();
     agent_doc_ops_log_io::log_op(
         file,
@@ -629,25 +645,24 @@ mod tests {
     }
 
     #[test]
-    fn preflight_missing_editor_model_uses_idle_disk_without_model_ensure() {
+    fn preflight_missing_editor_model_pauses_without_reading_disk_authority() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        std::fs::write(dir.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
         let file = dir.path().join("session.md");
         let disk = "---\nagent: codex\n---\n\nbody\n";
         std::fs::write(&file, disk).unwrap();
+        agent_doc_crdt_relay_io::register_embedded_relay_route_for_file(&file).unwrap();
         let file = file.canonicalize().unwrap();
         let owner = "preflight-missing-editor-model-test";
         seed_reliable_sync_open(&file, owner);
 
-        let current = resolve_current_preflight_document(&file, "test")
-            .expect("idle missing editor model should fall back to the disk session document");
-        assert_eq!(current, disk);
+        let error = resolve_current_preflight_document(&file, "test")
+            .expect_err("an attached editor with a missing model must pause");
+        assert!(format!("{error:#}").contains("editor_attached_model_missing"));
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("realtime_doc_resolve_disk_fallback")
-                && ops_log.contains("reason=missing_replica"),
-            "preflight should use the idle disk fallback when the editor model is missing:\n{ops_log}"
+            !ops_log.contains("realtime_doc_resolve_disk_fallback"),
+            "preflight must not demote an attached editor to disk when its model is missing:\n{ops_log}"
         );
         assert!(
             !ops_log.contains("document_model_ensure_start"),
@@ -655,7 +670,7 @@ mod tests {
         );
         assert!(
             !ops_log.contains("preflight_current_document_local_relay_unavailable"),
-            "preflight must not fast-fail before shared recovery:\n{ops_log}"
+            "preflight should report the shared authority error directly:\n{ops_log}"
         );
     }
 
@@ -663,10 +678,10 @@ mod tests {
     fn preflight_missing_editor_model_recovers_after_delayed_replica_registration() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        std::fs::write(dir.path().join(".agent-doc/test-local-crdt-relay"), "").unwrap();
         let file = dir.path().join("session.md");
         let disk = "---\nagent: codex\n---\n\nbody\n";
         std::fs::write(&file, disk).unwrap();
+        agent_doc_crdt_relay_io::register_embedded_relay_route_for_file(&file).unwrap();
         let file = file.canonicalize().unwrap();
         let owner = "preflight-missing-editor-model-recover-test";
         seed_reliable_sync_open(&file, owner);
@@ -682,16 +697,18 @@ mod tests {
             .expect("editor-attached register should allocate model");
         });
 
-        let current = resolve_current_preflight_document(&file, "test_preflight_recover")
-            .expect("preflight should use the idle disk document while the editor model recovers");
+        let error = resolve_current_preflight_document(&file, "test_preflight_recover")
+            .expect_err("preflight must wait for the attached editor model");
+        assert!(format!("{error:#}").contains("editor_attached_model_missing"));
         register.join().unwrap();
+        let current = resolve_current_preflight_document(&file, "test_preflight_recovered")
+            .expect("preflight should resume after replica registration");
         assert_eq!(current, disk);
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("realtime_doc_resolve_disk_fallback")
-                && ops_log.contains("reason=missing_replica"),
-            "preflight should use idle disk fallback instead of waiting for model ensure:\n{ops_log}"
+            !ops_log.contains("realtime_doc_resolve_disk_fallback"),
+            "preflight must not use disk while the attached model is recovering:\n{ops_log}"
         );
         assert!(
             !ops_log.contains("document_model_ensure_start"),

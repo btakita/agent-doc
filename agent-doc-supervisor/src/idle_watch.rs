@@ -10,13 +10,14 @@ use std::time::Duration;
 /// Scalar gate for a supervisor-owned captured-finalize resume. The effectful
 /// idle watch supplies these facts. A durable captured operation already owns
 /// the closeout lease, so recovery must remain live even while the harness turn
-/// is blocked by its Stop hook. Typing, IPC, controller pressure, maintenance,
-/// and another resume worker remain the actual concurrency gates.
+/// is blocked by its Stop hook. A pending Lazily current transition, IPC,
+/// controller pressure, maintenance, and another resume worker remain the actual
+/// concurrency gates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapturedFinalizeResumeFacts {
     pub captured_operation_present: bool,
     pub actor_ready: bool,
-    pub editor_typing: bool,
+    pub current_transition_pending: bool,
     pub ipc_inflight: u64,
     pub worker_in_flight: bool,
     pub retry_cooldown_elapsed: bool,
@@ -26,7 +27,7 @@ pub struct CapturedFinalizeResumeFacts {
 
 pub fn captured_finalize_resume_should_start(facts: CapturedFinalizeResumeFacts) -> bool {
     facts.captured_operation_present
-        && !facts.editor_typing
+        && !facts.current_transition_pending
         && facts.ipc_inflight == 0
         && !facts.worker_in_flight
         && facts.retry_cooldown_elapsed
@@ -126,7 +127,7 @@ mod tests {
         CapturedFinalizeResumeFacts {
             captured_operation_present: true,
             actor_ready: true,
-            editor_typing: false,
+            current_transition_pending: false,
             ipc_inflight: 0,
             worker_in_flight: false,
             retry_cooldown_elapsed: true,
@@ -146,7 +147,7 @@ mod tests {
         ));
         for blocked in [
             CapturedFinalizeResumeFacts {
-                editor_typing: true,
+                current_transition_pending: true,
                 ..ready_resume_facts()
             },
             CapturedFinalizeResumeFacts {

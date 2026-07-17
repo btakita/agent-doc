@@ -315,7 +315,7 @@ One.
         assertTrue(fullContent.contains("#spec-test-build-install-commit-push"))
         assertTrue(fullContent.contains("dispatch #spec-test-build-install-commit-push"))
         assertTrue(socketFullContentGuard >= 0 && socketApplyStart > socketFullContentGuard)
-        assertTrue(fileFullContentGuard >= 0 && fileApplyStart > fileFullContentGuard)
+        assertTrue(fileFullContentGuard < 0)
         assertFalse(source.contains("awaitIdleBeforeDocumentMutation("))
         assertFalse(source.contains("document.setText(patch.fullContent)"))
         assertFalse(source.contains("setBinaryContent(patch.fullContent"))
@@ -333,7 +333,7 @@ One.
         assertTrue(source.contains("hasPendingMemoryDiskConflict(targetFile)"))
         assertTrue(source.contains("lastApplyBlockedForFileCacheConflict = true"))
         assertTrue(source.contains("ui_outcome=real_component_conflict"))
-        assertTrue(source.contains("Patch blocked by File Cache Conflict; deleted queued payload"))
+        assertTrue(source.contains("File Cache Conflict pending for") && source.contains("rejecting patch without mutating document"))
         assertTrue(source.contains("recordFileCacheConflictOps("))
         assertTrue(source.contains("\"editor_ipc_convergence\""))
         assertTrue(source.contains("\"write_finalize_ipc\""))
@@ -489,16 +489,14 @@ One.
         assertFalse(patchWatcher.contains("document.setText(result)"))
         assertFalse(patchWatcher.contains("setBinaryContent("))
 
-        val applied = patchWatcher.indexOf("val applied = try", patchWatcher.indexOf("fun processPatchFile"))
-        val appliedDelete = patchWatcher.indexOf("if (applied) {", applied)
-        val deletePatch = patchWatcher.indexOf("patchFile.delete()", appliedDelete)
-
-        assertTrue(applied >= 0 && applied < appliedDelete)
-        assertTrue(deletePatch > appliedDelete)
+        assertTrue(patchWatcher.contains("private fun handleSocketMessageV2"))
+        assertTrue(patchWatcher.contains("StateProjectionBridge.recordEditorPatchApplied"))
+        assertFalse(patchWatcher.contains("processPatchFile"))
+        assertFalse(patchWatcher.contains(".agent-doc/patches"))
     }
 
     @Test
-    fun `already applied dedup publishes content projection before already_applied or delete`() {
+    fun `already applied socket dedup publishes content projection before receipt`() {
         val patchWatcherPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
@@ -518,14 +516,12 @@ One.
         val socketAlreadyApplied = socketPatch.indexOf("APPLY_ALREADY_APPLIED", socketProjection)
         assertTrue("socket dedup must publish content projection before already_applied", socketPrecheck >= 0 && socketPrecheck < socketProjection && socketProjection < socketAlreadyApplied)
 
-        val filePrecheck = patchWatcher.indexOf("// patch_id dedup: if socket IPC already applied")
-        val fileProjection = patchWatcher.indexOf("writeAlreadyAppliedContentProjection(patch, \"file_precheck\")", filePrecheck)
-        val fileDelete = patchWatcher.indexOf("patchFile.delete()", fileProjection)
-        assertTrue("file watcher dedup must publish content projection before deleting the patch", filePrecheck >= 0 && filePrecheck < fileProjection && fileProjection < fileDelete)
+        assertFalse(patchWatcher.contains("file_precheck"))
+        assertFalse(patchWatcher.contains("patchFile.delete()"))
     }
 
     @Test
-    fun `socket patch publishes plugin owner before editor receipt`() {
+    fun `socket patch requires explicit Lazily editor targeting before receipt`() {
         val patchWatcherPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
@@ -535,14 +531,15 @@ One.
             .substringAfter("\"patch\" -> {")
             .substringBefore("when {")
 
-        val owner = socketBranch.indexOf("ownsDocument(patch.file)")
+        val target = socketBranch.indexOf("if (!patch.targetsThisEditor())")
         val queued = socketBranch.indexOf("StateProjectionBridge.recordEditorPatchQueued")
         val apply = socketBranch.indexOf("applyPatch(patch)")
         val ack = socketBranch.indexOf("StateProjectionBridge.recordEditorPatchApplied")
 
-        assertTrue("socket IPC must acquire/publish plugin-owner proof before queueing", owner >= 0 && owner < queued)
-        assertTrue("socket IPC must acquire/publish plugin-owner proof before applying", owner >= 0 && owner < apply)
-        assertTrue("socket IPC must acquire/publish plugin-owner proof before recording receipt", owner >= 0 && owner < ack)
+        assertTrue("socket IPC must reject foreign/untargeted delivery before queueing", target >= 0 && target < queued)
+        assertTrue("socket IPC must reject foreign/untargeted delivery before applying", target >= 0 && target < apply)
+        assertTrue("socket IPC must reject foreign/untargeted delivery before recording receipt", target >= 0 && target < ack)
+        assertFalse("plugin-owner compatibility must be absent", patchWatcher.contains("plugin_owner"))
     }
 
     @Test

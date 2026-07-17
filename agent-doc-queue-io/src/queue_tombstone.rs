@@ -9,8 +9,7 @@
 //! Provenance principle: an operator delete is an **authoritative** action and
 //! must stick. This module records the ids the operator deleted (present-and-
 //! active in the committed snapshot queue, now entirely gone from the live queue
-//! — *not* merely struck/consumed) in a durable sidecar
-//! `<project_root>/.agent-doc/queue-tombstones/<hash>.json`. The mirror then
+//! — *not* merely struck/consumed) in the project's durable state ledger. The mirror then
 //! skips re-adding tombstoned ids. A tombstone self-clears when the operator
 //! re-adds the id (it reappears as an active head) — their re-add is just as
 //! authoritative as their delete.
@@ -24,7 +23,7 @@ use std::path::{Path, PathBuf};
 use agent_doc_queue::backlog_sync::reconcile_queue_tombstones;
 use serde::{Deserialize, Serialize};
 
-const TOMBSTONE_DIR: &str = ".agent-doc/queue-tombstones";
+const TOMBSTONE_STATE_KIND: &str = "operator_delete_tombstones";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct QueueTombstoneState {
@@ -38,50 +37,38 @@ struct QueueTombstoneState {
     observed_active_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum StoredQueueTombstones {
-    Legacy(Vec<String>),
-    State(QueueTombstoneState),
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct LoadedQueueTombstones {
     tombstones: HashSet<String>,
     observed_active_ids: HashSet<String>,
 }
 
-/// `<project_root>/.agent-doc/queue-tombstones/<sha256_hash>.json`, mirroring the
-/// snapshot/pending/crdt sidecar convention. Falls back to the document's parent
-/// directory when no `.agent-doc/` project root is found.
-fn tombstone_path_for(doc: &Path) -> Option<PathBuf> {
+fn state_identity(doc: &Path) -> Option<(PathBuf, String, String)> {
     let canonical = doc.canonicalize().ok()?;
-    let hash = agent_doc_fs::document_state_hash_from_str(&canonical.to_string_lossy());
+    let hash = agent_doc_fs::document_state_hash(&canonical).ok()?;
     let project_root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
-    Some(
-        project_root
-            .join(TOMBSTONE_DIR)
-            .join(format!("{hash}.json")),
-    )
+    Some((project_root, hash, canonical.to_string_lossy().into_owned()))
 }
 
 /// Load the persisted operator-delete tombstone set (lowercased ids). Returns an
-/// empty set when the sidecar is absent or unreadable — tombstones are advisory,
-/// so a missing/corrupt file never blocks the mirror.
+/// empty set when the ledger row is absent or unreadable.
 fn load(doc: &Path) -> LoadedQueueTombstones {
-    let Some(path) = tombstone_path_for(doc) else {
+    let Some((project_root, document_hash, _)) = state_identity(doc) else {
         return LoadedQueueTombstones::default();
     };
-    let Ok(bytes) = std::fs::read(&path) else {
+    let Ok(conn) = agent_doc_sqlite::state_store::open_state_db(&project_root) else {
         return LoadedQueueTombstones::default();
     };
-    match serde_json::from_slice::<StoredQueueTombstones>(&bytes) {
-        Ok(StoredQueueTombstones::Legacy(ids)) => LoadedQueueTombstones {
-            tombstones: ids.into_iter().map(|id| id.to_ascii_lowercase()).collect(),
-            observed_active_ids: HashSet::new(),
-        },
-        Ok(StoredQueueTombstones::State(state)) => LoadedQueueTombstones {
+    let Ok(Some(record)) = agent_doc_sqlite::state_store::load_queue_document_state_from_db(
+        &conn,
+        &document_hash,
+        TOMBSTONE_STATE_KIND,
+    ) else {
+        return LoadedQueueTombstones::default();
+    };
+    match serde_json::from_str::<QueueTombstoneState>(&record.payload_json) {
+        Ok(state) => LoadedQueueTombstones {
             tombstones: state
                 .tombstones
                 .into_iter()
@@ -95,8 +82,7 @@ fn load(doc: &Path) -> LoadedQueueTombstones {
         },
         Err(e) => {
             eprintln!(
-                "[preflight] queue: ignoring unreadable tombstone sidecar {}: {e}",
-                path.display()
+                "[preflight] queue: ignoring unreadable tombstone state document_hash={document_hash}: {e}",
             );
             LoadedQueueTombstones::default()
         }
@@ -106,18 +92,9 @@ fn load(doc: &Path) -> LoadedQueueTombstones {
 /// Persist the tombstone set (sorted for stable diffs). Best-effort: a write
 /// failure is logged but never fatal.
 fn save(doc: &Path, state: &LoadedQueueTombstones) {
-    let Some(path) = tombstone_path_for(doc) else {
+    let Some((project_root, document_hash, canonical_path)) = state_identity(doc) else {
         return;
     };
-    if let Some(parent) = path.parent()
-        && let Err(e) = std::fs::create_dir_all(parent)
-    {
-        eprintln!(
-            "[preflight] queue: could not create tombstone dir {}: {e}",
-            parent.display()
-        );
-        return;
-    }
     let mut tombstones: Vec<String> = state.tombstones.iter().cloned().collect();
     tombstones.sort();
     let mut observed_active_ids: Vec<String> = state.observed_active_ids.iter().cloned().collect();
@@ -126,15 +103,26 @@ fn save(doc: &Path, state: &LoadedQueueTombstones) {
         tombstones,
         observed_active_ids,
     };
-    match serde_json::to_vec_pretty(&stored) {
-        Ok(bytes) => {
-            if let Err(e) = std::fs::write(&path, bytes) {
-                eprintln!(
-                    "[preflight] queue: could not persist tombstones {}: {e}",
-                    path.display()
-                );
-            }
-        }
+    match serde_json::to_string(&stored) {
+        Ok(payload_json) => match agent_doc_sqlite::state_store::open_state_db(&project_root)
+            .and_then(|conn| {
+                agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+                    &conn,
+                    &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                        document_hash,
+                        state_kind: TOMBSTONE_STATE_KIND.to_string(),
+                        canonical_path,
+                        payload_json,
+                        updated_at_secs: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                    },
+                )
+            }) {
+            Ok(()) => {}
+            Err(e) => eprintln!("[preflight] queue: could not persist tombstones: {e}"),
+        },
         Err(e) => eprintln!("[preflight] queue: could not serialize tombstones: {e}"),
     }
 }

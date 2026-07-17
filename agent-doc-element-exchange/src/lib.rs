@@ -252,7 +252,7 @@ pub fn exchange_shrink_guard_block(
     })
 }
 
-/// True when a file-IPC apply consumed the patch while live exchange edits were
+/// True when a CPC delivery consumed the patch while live exchange edits were
 /// present, but the caller lacks visible-write proof and the resulting exchange
 /// text did not materialize those live edits.
 pub fn live_exchange_without_visible_write_retry_required(
@@ -1645,19 +1645,19 @@ pub fn preserve_head_exchange_prompt_prefix_state(content: &str, head: &str) -> 
     exchange.replace_content(content, &rebuilt)
 }
 
-/// Verify that sidecar content preserved every expected `❯ ` prompt prefix.
-pub fn verify_sidecar_normalization(sidecar: &str, normalize_prefix_lines: &[String]) -> bool {
+/// Verify that editor-visible content preserved every expected `❯ ` prompt prefix.
+pub fn verify_visible_normalization(visible: &str, normalize_prefix_lines: &[String]) -> bool {
     if normalize_prefix_lines.is_empty() {
         return true;
     }
 
-    let sidecar_exchange = exchange_content(sidecar)
+    let visible_exchange = exchange_content(visible)
         .map(ToOwned::to_owned)
-        .unwrap_or_else(|| sidecar.to_string());
+        .unwrap_or_else(|| visible.to_string());
     let target_counts = normalization_target_counts(normalize_prefix_lines);
 
     let mut prefixed_counts = HashMap::<String, usize>::new();
-    for line in exchange_prompt_prefix_eligible_lines(&sidecar_exchange, Some(&target_counts)) {
+    for line in exchange_prompt_prefix_eligible_lines(&visible_exchange, Some(&target_counts)) {
         let trimmed = line.trim_end();
         if let Some(stripped) = trimmed.strip_prefix("❯ ") {
             *prefixed_counts.entry(stripped.to_string()).or_default() += 1;

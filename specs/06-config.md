@@ -107,11 +107,11 @@ When none hold, the gate returns an error naming the opt-in paths (`agent-doc in
 Socket-based IPC via Unix domain sockets (`.agent-doc/ipc.sock`) is the primary IPC transport. The editor plugin starts a listener via `agent_doc_start_ipc_listener()` FFI call on project open. The CLI sender connects, sends NDJSON messages, and waits for ack.
 
 **Protocol:** Newline-delimited JSON (NDJSON). Message types:
-- `{"type": "patch", "file": "...", "patches": [...], ...}` — apply component patches
+- `{"type": "apply_canonical", "file": "...", "patches": [...], ...}` — apply canonical component deltas
 - `{"type": "reposition", "file": "..."}` — reposition boundary marker
-- `{"type": "vcs_refresh"}` — trigger VCS/VFS refresh
+- `{"type": "refresh_vcs"}` — trigger VCS/VFS refresh
 
-**Fallback:** If socket is unavailable (no listener), falls back to file-based IPC (JSON patch files in `.agent-doc/patches/`).
+**Detached behavior:** If no editor owns the document, the authority resolver may project to disk. If an editor owns it but its PID-scoped socket is unavailable, the write remains retained and fails closed; there is no file-IPC fallback.
 
 ## IPC Write Verification
 
@@ -122,7 +122,7 @@ After the IDE plugin consumes an IPC patch file:
 4. **Claimed stale-patch cleanup:** If the CLI rejects an IPC patch because the cycle already committed, it writes `.agent-doc/claimed-patches/<patch_id>`. Plugins must treat that sentinel as a durable per-patch skip signal and delete the stale patch file instead of replaying it into the editor buffer; the sentinel must survive repeated watcher scans so multiple editor consumers cannot race a stale patch into a duplicate external edit.
 5. **Append patch idempotence:** Editor-side component patch application must treat append-mode patches as replay-safe. Before appending a patch into `agent:exchange` or another append component, the native/shared patcher and editor fallbacks compare the normalized existing component body against the normalized patch body, ignoring transient `(HEAD)` response-heading markers and `agent:boundary` comments. If the patch body is already present, the plugin must leave the document unchanged instead of duplicating the exchange. JetBrains File Cache Conflict retries also revalidate against the current disk file and committed `HEAD`; `HEAD` is accepted as proof only when the disk file still matches it, so stale editor buffers are not left missing a committed response.
 6. **Snapshot freshness cleanup:** On pending-patch pickup, if `.agent-doc/snapshots/<hash>.md` is newer than the patch file, the patch is stale and must be deleted without apply.
-7. **Malformed patchback rejection:** Before socket or file IPC delivery, the CLI validates the parsed template patchback shape. If patch/replace markers are present outside code blocks but no closed patch blocks parse, the write fails closed and logs `template_patchback_malformed_rejected` instead of sending raw unmatched text that the plugin could append into `agent:exchange`.
+7. **Malformed patchback rejection:** Before capturing or sending a named socket intent, the CLI validates the parsed template patchback shape. If patch/replace markers are present outside code blocks but no closed patch blocks parse, the write fails closed with `template_patchback_malformed_rejected`; no transaction or editor mutation is created.
 8. **Forensic visible-write logging:** Socket IPC sends log `ipc_socket_attempt` with patch counts, synthesized IPC patch counts, unmatched lengths, baseline length, normalization target count, and unmatched marker count. Successful lazily visible-write receipts log `ipc_socket_visible_write` with receipt source and pre-write disk hashes/lengths before snapshot persistence.
 
 ## Sync Layout Authority
@@ -130,32 +130,33 @@ After the IDE plugin consumes an IPC patch file:
 `sync_after_claim()` uses editor-provided `col_args` when available (authoritative layout from the IDE plugin). Only falls back to registry-based file discovery when no `col_args` given. This prevents stale registry entries from creating incorrect multi-pane layouts.
 When that helper runs under an injected tmux handle (for example isolated route verification), the follow-up sync must stay on that same tmux server instead of falling back to the process-default server. Otherwise verification can accidentally stash panes in the operator's live `agent-doc` window while trying to reconcile a test-only layout.
 
-## Document State Model (4 States)
+## Document State Model
 
-A document has four concurrent representations during a write cycle:
+A document has one live text authority and three projections during a write cycle:
 
 | State | Location | Owner | Purpose |
 |-------|----------|-------|---------|
-| **Snapshot** | `.agent-doc/snapshots/<hash>.md` | Binary | Last committed agent state. Used by `diff::compute()` to detect user changes since last response. |
-| **Baseline** | `.agent-doc/baselines/<hash>.md` | Binary (preflight) | Document at start of response generation. Common ancestor for 3-way/CRDT merge. Saved by preflight after commit (step 2b). |
-| **File on disk** | The document file | Editor (auto-save) | Last editor save. Lags behind the editor buffer. Used by non-IPC write paths. |
-| **Editor buffer** | Editor memory | Editor (Document API) | Live content including unsaved edits. IPC writes target this via the Document API, preserving cursor position and undo history. |
+| **Lazily current** | in-process CRDT replicas | Lazily + editor replica | Sole live text, including unsaved operator edits and semantic agent cells. |
+| **Transaction state** | `.agent-doc/state.db` | Binary state machine | Baselines, captured responses, operation ids, phases, receipts, queue tombstones, and recovery checkpoints. |
+| **Disk projection** | document file | Binary/editor save integration | Durable visible projection after `ReplicaVisible`; never an attached-editor merge authority. |
+| **Snapshot** | `.agent-doc/snapshots/<hash>.md` | Binary | Cold recovery/audit image emitted after verified convergence. |
 
-CRDT sidecar state is versioned. The legacy merge engine state lives at `.agent-doc/crdt/<hash>.yrs` and stores the whole markdown document in a Yrs text root named `content`. The structured markdown AST overlay lives beside it at `.agent-doc/crdt/<hash>.overlay.yrs`; it stores `agent_doc_overlay.schema_version = 1`, a `markdown` projection, and a `components` Yrs array whose entries are component maps (`name`, `attrs`, byte span, `items`). Item entries are maps (`id`, `text`, `raw`, byte span, `kind`, `struck`, `pinned`, `agent_pinned`); `kind` is itself a map with `type` and optional `checkbox`. Runtime write/stream/IPC/compact/commit-refresh sidecar rebuilds must save both states from the same markdown snapshot. Loading an old `content` state migrates by reparsing that markdown through the component overlay, while empty legacy state can use the current markdown file as a fallback.
+There is no live-buffer, baseline, capture, pending, cycle JSON, or CRDT file
+sidecar and no compatibility import for one. The structured CRDT recovery
+checkpoint is stored in `state.db`; file snapshots cannot override Lazily
+current text or the transaction ledger.
 
 **Consistency invariants:**
-- After preflight step 2b: `baseline == snapshot` (minus boundary markers)
-- After `agent-doc write`: `snapshot` reflects the verified post-apply
-  source-of-truth document. When no operator drift occurred, that may equal the
-  agent-owned `baseline + response` candidate; when operator-visible text
-  changed, the verified state must preserve that operator text or the write
-  fails closed.
-- After `agent-doc commit`: git HEAD and the on-disk snapshot converge to the same clean boundary shape (no `(HEAD)` markers). The working tree and editor buffer preserve `(HEAD)` annotations on response headings
-- The editor buffer may diverge from all three persistent states (unsaved user edits)
 
-**Staleness risk:** If the baseline is saved before preflight (the old SKILL.md approach), it becomes stale when commit repositions the boundary marker. The binary guard in `write.rs` detects this via component-aware comparison:
-- Parses both snapshot and baseline into elements (`agent_doc_element::element::parse`)
-- Only checks **append-mode** components (exchange, findings) — these grow monotonically
-- Skips **replace-mode** components (status, pending) — user-editable, expected to diverge
-- Falls back to prefix check for non-template (inline) documents
-- When stale: re-applies patches to current file content instead of the stale baseline
+- Preflight records the exact Lazily generation and semantic baseline in `state.db`.
+- Agent writes rebase node-keyed intent onto the newest Lazily generation; an
+  operator deletion or edit wins on a same-node conflict.
+- The delivery state advances monotonically through `IntentCaptured`,
+  `CanonicalApplied`, `ReplicaAccepted`, `ReplicaVisible`, `DiskProjected`, and
+  `Committed`. A later phase can be retried idempotently; it cannot send the
+  transaction backward or expose a terminal capture as active.
+- Disk projection happens only after visible-replica proof. Detached documents
+  may project directly through the same authority resolver.
+- After commit, Git `HEAD`, the disk projection, and the cold snapshot agree on
+  the clean boundary shape. Lazily may additionally retain editor-only display
+  annotations.

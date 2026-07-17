@@ -88,7 +88,7 @@ pub fn consume_with_options(
     // preflight queue maintenance and the supervisor idle-watch defer instead of
     // round-tripping a torn intermediate queue. Released on drop (incl. early
     // return / `bail!`).
-    let _queue_edit_guard = agent_doc_queue::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
     let target = count.max(1);
     let content = effects.current_document_content(file, "queue_consume_classify")?;
     match classify_active_queue_head(&content)? {
@@ -204,7 +204,7 @@ pub fn consume(effects: &impl QueueCommandEffects, file: &Path, count: usize) ->
 pub fn prune_noise(effects: &impl QueueCommandEffects, file: &Path) -> Result<()> {
     // #sqedit-race Phase 2: hold the queue-edit lease across the prune so the
     // supervisor idle-watch + preflight maintenance defer (single queue writer).
-    let _queue_edit_guard = agent_doc_queue::queue_edit_owner::QueueEditGuard::acquire(file);
+    let _queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file);
     let struck = effects.prune_noise_queue_heads(file)?;
     if struck == 0 {
         println!(
@@ -229,7 +229,13 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
         |path, current, target| {
             effects.converge_document_or_disk(path, target, current, "queue_sync")
         },
-        |path, content| agent_doc_snapshot_io::save(path, content, agent_doc_ops_log_io::log_op),
+        |path, content| {
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                path,
+                content,
+                agent_doc_ops_log_io::log_op,
+            )
+        },
     )? {
         OneShotQueueSyncResult::AlreadyInSync {
             requested_count,
@@ -375,7 +381,12 @@ mod tests {
             "<!-- /agent:backlog -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let effects = FakeEffects;
         sync_with_effects(&effects, &doc).expect("enqueue marker should append to queue");
@@ -415,7 +426,12 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let effects = FakeEffects;
         consume_with_options(&effects, &doc, 2, ConsumeOptions { force_disk: true })
@@ -450,7 +466,12 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let effects = FakeEffects;
         consume_with_options(&effects, &doc, 5, ConsumeOptions { force_disk: true })
@@ -479,7 +500,12 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let effects = FakeEffects;
         let err = consume(&effects, &doc, 1).unwrap_err();
@@ -506,7 +532,12 @@ mod tests {
             "<!-- /agent:queue -->\n",
         );
         std::fs::write(&doc, content).unwrap();
-        agent_doc_snapshot_io::save(&doc, content, agent_doc_ops_log_io::log_op).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
 
         let effects = FakeEffects;
         let err = consume(&effects, &doc, 1).unwrap_err();

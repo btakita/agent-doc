@@ -2,7 +2,8 @@
 //!
 //! Given on-disk document content and an optional live editor-buffer snapshot,
 //! decide which source is authoritative for a cycle read. This module owns only
-//! deterministic policy; callers own sidecar IO, logging, and filesystem paths.
+//! deterministic policy; callers own Lazily/controller IO, logging, and cold
+//! recovery projection paths.
 
 /// Which document source the cycle should treat as authoritative this read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

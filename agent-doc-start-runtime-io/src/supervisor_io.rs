@@ -149,6 +149,49 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcSnapshotState for SupervisorShar
             .map(|runtime| runtime.file.display().to_string())
     }
 
+    fn editor_authority_snapshot(&self) -> Option<serde_json::Value> {
+        let file = self.actor_runtime.as_ref()?.file.clone();
+        let display = file.display().to_string();
+        Some(
+            match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&file) {
+                Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => serde_json::json!({
+                    "file": display,
+                    "authority": "detached",
+                    "in_flight": false,
+                }),
+                Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                    live_editors,
+                    delivery_converged,
+                    ..
+                }) => serde_json::json!({
+                    "file": display,
+                    "authority": "lazily_current",
+                    "live_editors": live_editors,
+                    "delivery_converged": delivery_converged,
+                    "in_flight": !delivery_converged,
+                }),
+                Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+                    serde_json::json!({
+                        "file": display,
+                        "authority": "editor_attached_missing_replica",
+                        "in_flight": true,
+                    })
+                }
+                Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => serde_json::json!({
+                    "file": display,
+                    "authority": "editor_sync_pending",
+                    "in_flight": true,
+                }),
+                Err(error) => serde_json::json!({
+                    "file": display,
+                    "authority": "unavailable",
+                    "in_flight": true,
+                    "error": error.to_string(),
+                }),
+            },
+        )
+    }
+
     fn restart_count(&self) -> u32 {
         self.restart_count.load(Ordering::Relaxed)
     }
@@ -186,17 +229,7 @@ mod tests {
     use agent_doc_project_config_io as project_config_io;
     use agent_doc_supervisor::ipc_protocol::IpcMethod;
     use std::collections::HashMap;
-    use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
-    /// A throwaway tracked document under a temp project root so `doc_hash` /
-    /// authority lease resolution work against a real path.
-    fn crdt_temp_doc(name: &str) -> (TempDir, std::path::PathBuf) {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let path = dir.path().join(name);
-        std::fs::write(&path, format!("# {name}\n\nbody\n")).unwrap();
-        (dir, path)
-    }
 
     #[test]
     fn restart_ipc_refreshes_stale_binary_before_reexec_decision() {
@@ -333,43 +366,6 @@ mod tests {
             written.lock().unwrap().as_slice(),
             b"agent-doc tasks/software/tsift.md\ragent-doc tasks/software/tsift.md\r"
         );
-    }
-
-    #[test]
-    fn handle_ipc_state_includes_editor_sync_for_actor_file() {
-        let (_dir, doc) = crdt_temp_doc("state-editor-sync.md");
-        let project_root = doc.parent().unwrap().to_path_buf();
-        let file_str = doc.display().to_string();
-        agent_doc_debounce::document_changed_with_content_for_editor(
-            &file_str,
-            "disk plus unsaved editor text",
-            Some("jetbrains:state"),
-        );
-        let runtime = SessionActorRuntime {
-            project_root,
-            file: doc.clone(),
-            session_id: "state-session".to_string(),
-            pane_id: "%1".to_string(),
-            generation: 7,
-        };
-        let shared = Arc::new(SupervisorShared::with_actor_runtime(
-            "test",
-            "state-instance".to_string(),
-            None,
-            "claude",
-            Some(runtime),
-            Some(agent_doc_sqlite::state_store::ActorState::Ready),
-            None,
-        ));
-
-        let response =
-            agent_doc_supervisor_io::ipc::handle_supervisor_ipc(IpcMethod::State, shared.as_ref());
-        assert!(response.ok, "{response:?}");
-        let data = response.data.expect("state data");
-        let sync = data.get("editor_sync").expect("editor_sync field");
-        assert_eq!(sync["file"], file_str);
-        assert_eq!(sync["statuses"][0]["edit_epoch"], 1);
-        assert_eq!(sync["statuses"][0]["in_flight"], true);
     }
 
     #[test]

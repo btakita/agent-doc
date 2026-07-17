@@ -94,7 +94,6 @@ pub struct CycleStateDoctorFacts {
     pub open: Option<bool>,
     pub capture_id: Option<String>,
     pub response_sha256: Option<String>,
-    pub baseline_file: Option<String>,
     pub prompt_targets: Vec<String>,
     pub queue_task_id: Option<String>,
     pub turn_id: Option<String>,
@@ -134,9 +133,6 @@ pub struct GitDoctorFacts {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EditorDoctorFacts {
-    pub patches_dir_present: bool,
-    pub legacy_ack_content_dir_present: bool,
-    pub legacy_live_buffer_dir_present: bool,
     pub lazily_current_diverges: Option<bool>,
 }
 
@@ -426,16 +422,6 @@ fn evaluate_editor_convergence(
             "editor convergence failure marker found in ops log",
             operator_steps(invariant),
         );
-    }
-    if facts.editor.legacy_ack_content_dir_present {
-        result
-            .disproof_markers
-            .push("legacy ack-content directory is ignored as editor proof".to_string());
-    }
-    if facts.editor.legacy_live_buffer_dir_present {
-        result
-            .disproof_markers
-            .push("legacy live-buffer directory is ignored as editor proof".to_string());
     }
     if facts.editor.lazily_current_diverges == Some(false) {
         return result

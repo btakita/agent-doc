@@ -69,7 +69,8 @@ pub fn transport_degraded(facts: &ChartFacts) -> bool {
     facts.ipc_send_failed
 }
 
-/// No socket listener owns the project, so writes fall back to the file signal.
+/// No CPC editor listener currently owns the project. Durable intent remains
+/// retained until a Lazily replica registers; there is no file fallback.
 pub fn transport_no_listener(facts: &ChartFacts) -> bool {
     facts.ipc_no_listener
 }
@@ -112,7 +113,7 @@ pub fn guard_map(facts: &ChartFacts) -> std::collections::HashMap<String, bool> 
 /// assembled with the typed lazily 0.19 [`ChartBuilder`] (Phase E rung 3 typed
 /// migration; the definition-equivalent of the former `CHART_DEF_JSON`).
 ///
-/// - `transport`:   `socket → degraded → file_fallback` (+ recovery back)
+/// - `transport`:   `socket ↔ degraded` (recovery retries the same durable intent)
 /// - `editor_sync`: `synced → editor_ahead → publishing`
 /// - `closeout`:    `idle → written → committed → session_ok` (final)
 /// - `supervisor`:  `sup_idle / sup_busy / sup_stale → sup_recycle`
@@ -131,17 +132,12 @@ pub fn adstatechart_def() -> Result<ChartDef, String> {
                 .parent("transport")
                 .on("send_timeout", "degraded")
                 .on("no_ack", "degraded")
-                .on("no_ipc_listener", "file_fallback"),
+                .on("no_ipc_listener", "degraded"),
         )
         .state(
             StateBuilder::atomic("degraded")
                 .parent("transport")
-                .on("no_ipc_listener", "file_fallback")
-                .on("socket_recovered", "socket"),
-        )
-        .state(
-            StateBuilder::atomic("file_fallback")
-                .parent("transport")
+                .on("no_ipc_listener", "degraded")
                 .on("socket_recovered", "socket"),
         )
         // editor_sync region
@@ -267,7 +263,7 @@ pub struct ObservedPhases {
 /// visible rather than silently dropped.
 fn region_label(leaf: &str) -> String {
     let region = match leaf {
-        "socket" | "degraded" | "file_fallback" => "transport",
+        "socket" | "degraded" => "transport",
         "synced" | "editor_ahead" | "publishing" => "editor_sync",
         "idle" | "written" | "committed" | "session_ok" => "closeout",
         "sup_idle" | "sup_busy" | "sup_stale" | "sup_recycle" => "supervisor",
@@ -510,9 +506,9 @@ mod tests {
         assert!(chart.send(&ctx, "send_timeout", &g));
         assert!(chart.matches(&ctx, "degraded"));
         assert!(chart.matches(&ctx, "written"));
-        // Transport degrades further to file fallback.
+        // A missing endpoint stays degraded; recovery keeps the same intent.
         assert!(chart.send(&ctx, "no_ipc_listener", &g));
-        assert!(chart.matches(&ctx, "file_fallback"));
+        assert!(chart.matches(&ctx, "degraded"));
         assert!(chart.matches(&ctx, "written"));
     }
 
@@ -544,10 +540,10 @@ mod tests {
         assert!(snap.contains("transport.degraded"), "got: {snap}");
         assert!(snap.contains("editor_sync.editor_ahead"), "got: {snap}");
 
-        // No listener beats degraded (file_fallback).
+        // No listener remains degraded; there is no hot-path file transport.
         f.ipc_no_listener = true;
         let snap = configuration_snapshot(&f, &ObservedPhases::default());
-        assert!(snap.contains("transport.file_fallback"), "got: {snap}");
+        assert!(snap.contains("transport.degraded"), "got: {snap}");
     }
 
     #[test]

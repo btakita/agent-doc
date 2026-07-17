@@ -2052,7 +2052,16 @@ fn agent_projection_integrity_valid(content: &str) -> bool {
     if agent_doc_element::element::structural_corruption_reason(content).is_some() {
         return false;
     }
-    let boundary_singleton = content.matches("<!-- agent:boundary:").count() <= 1
+    let code_ranges = agent_doc_element::element::find_code_ranges(content);
+    let boundary_count = content
+        .match_indices("<!-- agent:boundary:")
+        .filter(|(start, _)| {
+            !code_ranges
+                .iter()
+                .any(|&(code_start, code_end)| *start >= code_start && *start < code_end)
+        })
+        .count();
+    let boundary_singleton = boundary_count <= 1
         && agent_doc_template::collapse_adjacent_boundary_markers(content)
             .is_ok_and(|normalized| normalized == content);
     let single_exchange = agent_doc_template::repair_duplicate_exchange_opener(content)
@@ -2166,6 +2175,65 @@ fn remove_single_unmatched_duplicate_component_close(content: &str) -> Option<St
     agent_projection_integrity_valid(&repaired).then_some(repaired)
 }
 
+/// Remove the earlier of exactly two standalone boundary markers inside the
+/// one parseable exchange component. Boundary markers are binary-owned
+/// protocol frontiers; retaining the last frontier is the same ordering rule
+/// used by normal response-cell rendering. Every other byte remains from the
+/// current Lazily/editor cut, and ambiguous shapes fail closed.
+fn remove_stale_standalone_exchange_boundary(content: &str) -> Option<String> {
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let exchanges = components
+        .iter()
+        .filter(|component| component.name == "exchange")
+        .collect::<Vec<_>>();
+    let [exchange] = exchanges.as_slice() else {
+        return None;
+    };
+    let ignored = agent_doc_element::element::find_code_ranges(content)
+        .into_iter()
+        .chain(agent_doc_element::element::find_quoted_ranges(content))
+        .collect::<Vec<_>>();
+    let mut boundaries = Vec::new();
+    let mut offset = 0usize;
+
+    for line in content.split_inclusive('\n') {
+        let line_start = offset;
+        let line_end = line_start + line.len();
+        offset = line_end;
+        let leading = line.len() - line.trim_start_matches([' ', '\t']).len();
+        let marker_start = line_start + leading;
+        if marker_start < exchange.open_end
+            || marker_start >= exchange.close_start
+            || ignored
+                .iter()
+                .any(|&(start, end)| marker_start >= start && marker_start < end)
+        {
+            continue;
+        }
+
+        let trimmed = line.trim();
+        let Some(id) = trimmed
+            .strip_prefix("<!-- agent:boundary:")
+            .and_then(|rest| rest.strip_suffix(" -->"))
+            .map(str::trim)
+        else {
+            continue;
+        };
+        if id.is_empty() || agent_doc_element::id::format_boundary_marker(id) != trimmed {
+            return None;
+        }
+        boundaries.push((line_start, line_end));
+    }
+
+    let [(start, end), _] = boundaries.as_slice() else {
+        return None;
+    };
+    let mut repaired = String::with_capacity(content.len() - (end - start));
+    repaired.push_str(&content[..*start]);
+    repaired.push_str(&content[*end..]);
+    agent_projection_integrity_valid(&repaired).then_some(repaired)
+}
+
 /// Normalize the narrow structural transient produced when a retained response
 /// replay duplicates response cells, protocol boundary markers, or a component
 /// closing marker. This is deliberately pure: callers validate and write the
@@ -2179,6 +2247,11 @@ pub fn normalize_recoverable_response_replay_duplication(content: &str) -> Optio
         .ok()
         .flatten()
         .unwrap_or_else(|| content.to_string());
+    if !agent_projection_integrity_valid(&normalized)
+        && let Some(repaired) = remove_stale_standalone_exchange_boundary(&normalized)
+    {
+        normalized = repaired;
+    }
     if !agent_projection_integrity_valid(&normalized) {
         normalized = remove_single_unmatched_duplicate_component_close(&normalized)?;
     }
@@ -4624,6 +4697,57 @@ mod tests {
         assert!(normalized.contains("agent:boundary:latest"));
         assert!(normalized.contains("❯ operator prompt"));
         assert!(normalized.contains("Retained response."));
+    }
+
+    #[test]
+    fn standalone_boundary_fallback_keeps_latest_frontier_and_operator_cut() {
+        let duplicated = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Earlier exchange.\n",
+            "<!-- agent:boundary:stale -->\n",
+            "❯ operator prompt after the old frontier\n",
+            "### Re: retained — gpt-5\n\nRetained response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- keep-this-item\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let normalized = remove_stale_standalone_exchange_boundary(duplicated)
+            .expect("exactly two exchange frontiers should retain the latest");
+
+        assert!(agent_projection_integrity_valid(&normalized));
+        assert!(!normalized.contains("agent:boundary:stale"));
+        assert!(normalized.contains("agent:boundary:latest"));
+        assert!(normalized.contains("❯ operator prompt after the old frontier"));
+        assert!(normalized.contains("Retained response."));
+        assert!(normalized.contains("- keep-this-item"));
+        assert!(!normalized.contains("deleted-queue-item"));
+    }
+
+    #[test]
+    fn boundary_fallback_fails_closed_for_ambiguous_or_example_markers() {
+        let three = concat!(
+            "<!-- agent:exchange -->\n",
+            "<!-- agent:boundary:first -->\n",
+            "<!-- agent:boundary:second -->\n",
+            "<!-- agent:boundary:third -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let example = concat!(
+            "<!-- agent:exchange -->\n",
+            "```md\n",
+            "<!-- agent:boundary:example -->\n",
+            "```\n",
+            "<!-- agent:boundary:real -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(remove_stale_standalone_exchange_boundary(three).is_none());
+        assert!(remove_stale_standalone_exchange_boundary(example).is_none());
+        assert!(agent_projection_integrity_valid(example));
     }
 
     #[test]

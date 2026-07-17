@@ -1046,10 +1046,20 @@ pub fn structural_corruption_reason(doc: &str) -> Option<String> {
         return Some(reason);
     }
 
+    let code_ranges = find_code_ranges(doc);
     let boundary_count = doc
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
+        .match_indices("<!-- agent:boundary:")
+        .filter(|(start, _)| {
+            !code_ranges
+                .iter()
+                .any(|&(code_start, code_end)| *start >= code_start && *start < code_end)
+        })
+        .filter(|(start, _)| {
+            let line_start = doc[..*start].rfind('\n').map_or(0, |pos| pos + 1);
+            let line_end = doc[*start..]
+                .find('\n')
+                .map_or(doc.len(), |relative| *start + relative);
+            let trimmed = doc[line_start..line_end].trim();
             trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with("-->")
         })
         .count();
@@ -2503,6 +2513,20 @@ Fix applied to skip non-agent <!-- sequences.
             structural_corruption_reason(doc).as_deref(),
             Some("duplicate_exchange_boundary:2")
         );
+    }
+
+    #[test]
+    fn structural_corruption_ignores_boundary_examples_inside_code_fences() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "```md\n",
+            "<!-- agent:boundary:example -->\n",
+            "```\n",
+            "<!-- agent:boundary:real -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert_eq!(structural_corruption_reason(doc), None);
     }
 
     #[test]

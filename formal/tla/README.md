@@ -37,6 +37,9 @@ external request.
 - delivery ACK and native editor save are distinct transitions;
 - a replay-created unmatched component close is normalized before commit, while
   the operator cut and queue deletion tombstones remain unchanged;
+- a replay-created second exchange boundary is an explicit transient that must
+  normalize to the latest frontier before commit, without changing the
+  operator cut or queue deletion tombstones;
 - an operator advance between save request and save invalidates the old proof
   without losing the durable agent intent; and
 - commit is impossible until the retained agent intent is applied and the exact

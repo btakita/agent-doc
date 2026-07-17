@@ -176,6 +176,24 @@ ReplayDuplicatesComponentClose ==
                     editorSaveRequested, ackCursor, committed, responseCellLive,
                     boundaryCount>>
 
+ReplayDuplicatesBoundary ==
+    /\ responseCellLive
+    /\ ~committed
+    /\ boundaryCount = 1
+    /\ boundaryCount' = 2
+    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible, durableQueueVisible,
+                    pendingAgentIntent, staleFramePending, currentFramePending, disk,
+                    editorSaveRequested, ackCursor, committed, responseCellLive,
+                    componentCloseDelta>>
+
+NormalizeDuplicateBoundary ==
+    /\ boundaryCount = 2
+    /\ boundaryCount' = 1
+    /\ UNCHANGED <<lineage, canonical, operatorDelete, queueVisible, durableQueueVisible,
+                    pendingAgentIntent, staleFramePending, currentFramePending, disk,
+                    editorSaveRequested, ackCursor, committed, responseCellLive,
+                    componentCloseDelta>>
+
 NormalizeDuplicateComponentClose ==
     /\ componentCloseDelta = 1
     /\ componentCloseDelta' = 0
@@ -189,6 +207,7 @@ Commit ==
     /\ canonical = "agent-applied"
     /\ ~currentFramePending
     /\ disk = canonical
+    /\ boundaryCount = 1
     /\ componentCloseDelta = 0
     /\ committed' = TRUE
     /\ pendingAgentIntent' = FALSE
@@ -213,6 +232,8 @@ Next ==
     \/ OperatorAdvancesAfterSaveRequest
     \/ CrashDropsCleanQueue
     \/ RecoverDurableQueue
+    \/ ReplayDuplicatesBoundary
+    \/ NormalizeDuplicateBoundary
     \/ ReplayDuplicatesComponentClose
     \/ NormalizeDuplicateComponentClose
     \/ Commit
@@ -222,6 +243,7 @@ Spec == Init /\ [][Next]_vars
         /\ WF_vars(DeliverStaleFrame)
         /\ WF_vars(DeliverCurrentFrame)
         /\ WF_vars(RecoverDurableQueue)
+        /\ WF_vars(NormalizeDuplicateBoundary)
         /\ WF_vars(NormalizeDuplicateComponentClose)
 
 TypeOK ==
@@ -238,7 +260,7 @@ TypeOK ==
     /\ ackCursor \in 0..2
     /\ committed \in BOOLEAN
     /\ responseCellLive \in BOOLEAN
-    /\ boundaryCount \in 0..1
+    /\ boundaryCount \in 1..2
     /\ componentCloseDelta \in 0..1
 
 DeletedQueueNeverResurrects == operatorDelete => ~queueVisible
@@ -251,7 +273,7 @@ ReplacementPreservesOperatorIntent ==
 PendingIntentIsDurable ==
     (pendingAgentIntent /\ lineage = "current") =>
     (canonical = "agent-applied" /\ responseCellLive) \/ currentFramePending
-SingleBoundary == boundaryCount <= 1
+CommitRequiresSingleBoundary == committed => boundaryCount = 1
 CommitRequiresBalancedComponents == committed => componentCloseDelta = 0
 ResponseProjectionPreservesOperatorCut ==
     (operatorDelete /\ responseCellLive) => ~queueVisible /\ ~durableQueueVisible
@@ -260,5 +282,6 @@ StaleFrameEventuallyAcked ==
 CleanCrashEventuallyRecovers ==
     (~operatorDelete /\ durableQueueVisible /\ ~queueVisible) ~> queueVisible
 DuplicateCloseEventuallyNormalizes == componentCloseDelta = 1 ~> componentCloseDelta = 0
+DuplicateBoundaryEventuallyNormalizes == boundaryCount = 2 ~> boundaryCount = 1
 
 =============================================================================

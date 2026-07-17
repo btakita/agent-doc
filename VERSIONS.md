@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.165
+
+- **A replay-created second exchange boundary can no longer block its own recovery.** Before the generic integrity gate, session-check and preflight now have a strict fallback for exactly two standalone protocol boundaries inside one parseable exchange: the earlier stale frontier is removed, the latest is retained, and the result is accepted only when the complete projection becomes valid. The current Lazily/editor cut remains byte-stable otherwise, preserving prompts and unsaved queue/backlog deletions.
+- **Boundary integrity uses one fenced-code policy.** Structural validation, recovery validation, response-cell normalization, and final lint now agree that marker examples inside fenced code are prose, not live protocol. Ambiguous shapes—multiple exchanges, more than two live boundaries, inline markers, and malformed component trees—still fail closed.
+- **The recovery model includes duplicate-boundary replay as a real transient.** `CrdtLineageFence` now explores replay producing two boundaries, proves fair normalization returns to one, and forbids commit while the duplicate exists without weakening queue-deletion tombstones or exact native-save requirements.
+
 ## 0.34.164
 
 - **Response-bearing semantic rebases no longer wedge on missing whole-document lineage.** A retained non-capture response target is now recognized as a semantic cell, reconciled over the current Lazily operator cut, and settled through a native editor save. Operator prompts and queue/backlog deletions remain authoritative; non-response whole-document targets still require causal operator-cut proof.

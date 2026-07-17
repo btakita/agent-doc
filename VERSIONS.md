@@ -6,6 +6,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.0
+
+- **Compact Exchange preserves independent live cells.** After CRDT convergence, compaction rebases its live and committed projections onto authoritative sibling components before checkpointing or committing. Queue/backlog deletions made while exchange compaction is running now survive normally. The post-`agent:boundary` exchange tail is also independent live operator state: it may change during compaction without failing, remains visible after compaction, and stays out of the committed compact snapshot; only drift in the compact-owned archiveable prefix fails closed (`#compact-independent-cells`).
+- **Active exchange prompts expose syntax-aware working state.** Preflight marks the selected prompt's first free-text line with `❯ 🚧` and prefixes subsequent prose with `❯`. Lists and fenced regions are untouched; headings retain their `#` structure and carry `❯ 🚧` inside the heading text. Closeout clears the cosmetic marker while retaining prompt identity (`#exchange-active-prompt-marker`).
+- **Lazily performance baseline upgraded.** The release consumes Lazily 0.41.0 across the realtime, CRDT, controller, state, and durable IPC paths, including its inline value storage, reusable graph-traversal scratch space, single-lock invalidation frontier, and cached read-guard improvements.
+
 ## 0.34.175
 
 - **Controller lifetime and editor status refresh are crash-bounded.** Lazy controller launch now creates a new Unix process session, so a Codex/terminal launcher crash cannot kill the project daemon through inherited process-group cleanup. JetBrains banner collection is cache-only and no longer feeds projection completion back into another projection request; open/selection/editor-intent events remain the only refresh triggers.

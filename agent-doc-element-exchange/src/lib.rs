@@ -1,4 +1,9 @@
 //! Exchange element descriptor.
+//!
+//! Module harness invariants:
+//! - `#exchange-active-prompt-marker`: selected live exchange prompts expose
+//!   `❯ 🚧` on free text while preserving headings and excluding list/fenced
+//!   syntax; closeout removes only the active marker.
 
 use std::collections::{HashMap, HashSet};
 
@@ -1378,6 +1383,186 @@ fn heading_level(trimmed: &str) -> Option<usize> {
     }
 }
 
+const EXCHANGE_PROMPT_PREFIX: &str = "❯ ";
+const EXCHANGE_IN_PROGRESS_MARKER: &str = "🚧 ";
+
+fn strip_exchange_prompt_decorators(mut text: &str) -> &str {
+    loop {
+        if let Some(stripped) = text.strip_prefix(EXCHANGE_PROMPT_PREFIX) {
+            text = stripped;
+            continue;
+        }
+        if let Some(stripped) = text.strip_prefix(EXCHANGE_IN_PROGRESS_MARKER) {
+            text = stripped;
+            continue;
+        }
+        return text;
+    }
+}
+
+/// Decorate one prompt-bearing prose line without changing its Markdown shape.
+///
+/// Lists and code fences are intentionally not callers of this helper. ATX
+/// headings keep their leading `#` syntax and receive the decorations inside
+/// the heading text (`### ❯ 🚧 prompt`).
+fn decorate_exchange_prompt_line(line: &str, in_progress: bool) -> Option<String> {
+    let trimmed = line.trim_start();
+    let indent = &line[..line.len().saturating_sub(trimmed.len())];
+    let undecorated = strip_exchange_prompt_decorators(trimmed);
+    if undecorated.is_empty()
+        || undecorated.starts_with("<!--")
+        || line_looks_like_markdown_list_item(undecorated)
+    {
+        return None;
+    }
+
+    let marker = if in_progress {
+        EXCHANGE_IN_PROGRESS_MARKER
+    } else {
+        ""
+    };
+    if let Some(level) = heading_level(undecorated) {
+        let heading_prefix = &undecorated[..=level];
+        let heading_text = strip_exchange_prompt_decorators(&undecorated[level + 1..]);
+        return Some(format!(
+            "{indent}{heading_prefix}{EXCHANGE_PROMPT_PREFIX}{marker}{heading_text}"
+        ));
+    }
+
+    Some(format!(
+        "{indent}{EXCHANGE_PROMPT_PREFIX}{marker}{undecorated}"
+    ))
+}
+
+fn decorate_active_exchange_prompt_block(block: &str) -> String {
+    let mut rebuilt = String::with_capacity(block.len() + 8);
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 3usize;
+    let mut marked = false;
+
+    for segment in block.split_inclusive('\n') {
+        let (line, newline) = split_line_segment(segment);
+        let trimmed = line.trim();
+        let fence_delimiter = if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+                true
+            } else {
+                false
+            }
+        } else if fence_close(trimmed, fence_char, fence_len) {
+            in_fence = false;
+            true
+        } else {
+            false
+        };
+
+        if !in_fence && !fence_delimiter {
+            if let Some(decorated) = decorate_exchange_prompt_line(line, !marked) {
+                rebuilt.push_str(&decorated);
+                marked = true;
+            } else {
+                rebuilt.push_str(line);
+            }
+        } else {
+            rebuilt.push_str(line);
+        }
+        rebuilt.push_str(newline);
+    }
+    rebuilt
+}
+
+fn clear_active_exchange_prompt_marker_from_line(line: &str) -> String {
+    let trimmed = line.trim_start();
+    let indent = &line[..line.len().saturating_sub(trimmed.len())];
+    if let Some(rest) = trimmed.strip_prefix("❯ 🚧 ") {
+        return format!("{indent}❯ {rest}");
+    }
+    if let Some(level) = heading_level(trimmed)
+        && let Some(rest) = trimmed[level + 1..].strip_prefix("❯ 🚧 ")
+    {
+        return format!("{indent}{} ❯ {rest}", &trimmed[..level]);
+    }
+    line.to_string()
+}
+
+/// Mark prompt targets in the live post-boundary exchange tail as active work.
+///
+/// Each target gets one `🚧` marker on its first free-text/heading line. Free
+/// prose receives the `❯ ` prompt prefix, headings retain their Markdown level
+/// and receive `❯ 🚧` inside the heading text, and list/fenced content is left
+/// byte-for-byte unchanged.
+pub fn mark_active_exchange_prompts_in_progress(content: &str, targets: &[String]) -> String {
+    let Some(exchange) = exchange_component(content) else {
+        return content.to_string();
+    };
+    let exchange_content = exchange.content(content);
+    let tail_start = last_exchange_boundary_tail_start(exchange_content).unwrap_or(0);
+    let (history, tail) = exchange_content.split_at(tail_start);
+    let mut marked_tail = tail.to_string();
+
+    for target in targets {
+        if target.trim().is_empty() {
+            continue;
+        }
+        let decorated = decorate_active_exchange_prompt_block(target);
+        if decorated == *target || marked_tail.contains(&decorated) {
+            continue;
+        }
+        if let Some(start) = marked_tail.find(target) {
+            marked_tail.replace_range(start..start + target.len(), &decorated);
+        }
+    }
+
+    if marked_tail == tail {
+        return content.to_string();
+    }
+    exchange.replace_content(content, &format!("{history}{marked_tail}"))
+}
+
+/// Clear the active-work marker after closeout while retaining prompt prefixes.
+pub fn clear_active_exchange_prompt_markers(content: &str) -> String {
+    let Some(exchange) = exchange_component(content) else {
+        return content.to_string();
+    };
+    let exchange_content = exchange.content(content);
+    let mut rebuilt = String::with_capacity(exchange_content.len());
+    let mut in_fence = false;
+    let mut fence_char = '`';
+    let mut fence_len = 3usize;
+
+    for segment in exchange_content.split_inclusive('\n') {
+        let (line, newline) = split_line_segment(segment);
+        let trimmed = line.trim();
+        let fence_delimiter = if !in_fence {
+            if let Some((fc, fl)) = fence_open(trimmed) {
+                in_fence = true;
+                fence_char = fc;
+                fence_len = fl;
+                true
+            } else {
+                false
+            }
+        } else if fence_close(trimmed, fence_char, fence_len) {
+            in_fence = false;
+            true
+        } else {
+            false
+        };
+
+        if !in_fence && !fence_delimiter {
+            rebuilt.push_str(&clear_active_exchange_prompt_marker_from_line(line));
+        } else {
+            rebuilt.push_str(line);
+        }
+        rebuilt.push_str(newline);
+    }
+    exchange.replace_content(content, &rebuilt)
+}
+
 fn strip_exchange_boundary_markers(content: &str) -> String {
     let filtered: Vec<&str> = content
         .lines()
@@ -1536,10 +1721,14 @@ pub fn normalize_user_prompts_in_exchange(content: &str, baseline: &str, snapsho
         } else if fence_close(trimmed, content_fence_char, content_fence_len) {
             in_content_fence = false;
         }
-        if !in_content_fence && user_added.contains(line) {
-            normalized_user.push_str("❯ ");
+        if !in_content_fence
+            && user_added.contains(line)
+            && let Some(decorated) = decorate_exchange_prompt_line(line, false)
+        {
+            normalized_user.push_str(&decorated);
+        } else {
+            normalized_user.push_str(line);
         }
-        normalized_user.push_str(line);
         normalized_user.push('\n');
     }
     if !content_user_region.is_empty() && !content_user_region.ends_with('\n') {
@@ -2188,6 +2377,89 @@ ship it
         assert!(eligible.contains(&"do #next"));
         assert!(!eligible.contains(&"- verified"));
         assert!(!eligible.contains(&"after boundary"));
+    }
+
+    #[test]
+    fn active_exchange_prompt_marker_is_markdown_shape_aware() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "Archived response.\n",
+            "<!-- agent:boundary:x -->\n",
+            "### Heading prompt\n",
+            "Free-text detail.\n",
+            "- list item stays literal\n",
+            "```text\n",
+            "fenced content stays literal\n",
+            "```\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let target = concat!(
+            "### Heading prompt\n",
+            "Free-text detail.\n",
+            "- list item stays literal\n",
+            "```text\n",
+            "fenced content stays literal\n",
+            "```",
+        );
+
+        let marked = mark_active_exchange_prompts_in_progress(doc, &[target.to_string()]);
+
+        assert!(marked.contains("### ❯ 🚧 Heading prompt\n"), "{marked}");
+        assert!(marked.contains("❯ Free-text detail.\n"), "{marked}");
+        assert!(marked.contains("- list item stays literal\n"), "{marked}");
+        assert!(!marked.contains("❯ - list item"), "{marked}");
+        assert!(
+            marked.contains("```text\nfenced content stays literal\n```"),
+            "{marked}"
+        );
+        assert_eq!(
+            mark_active_exchange_prompts_in_progress(&marked, &[target.to_string()]),
+            marked,
+            "active prompt marking must be idempotent"
+        );
+    }
+
+    #[test]
+    fn active_exchange_prompt_marker_only_touches_post_boundary_tail() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "Duplicate prompt text.\n",
+            "<!-- agent:boundary:x -->\n",
+            "Duplicate prompt text.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let marked =
+            mark_active_exchange_prompts_in_progress(doc, &["Duplicate prompt text.".to_string()]);
+
+        assert!(
+            marked.contains(
+                "Duplicate prompt text.\n<!-- agent:boundary:x -->\n❯ 🚧 Duplicate prompt text."
+            ),
+            "{marked}"
+        );
+    }
+
+    #[test]
+    fn active_exchange_prompt_marker_clears_at_closeout_but_keeps_prefix() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "### ❯ 🚧 Heading prompt\n",
+            "❯ Follow-up detail.\n",
+            "```text\n",
+            "❯ 🚧 literal fence content\n",
+            "```\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let cleared = clear_active_exchange_prompt_markers(doc);
+
+        assert!(cleared.contains("### ❯ Heading prompt\n"), "{cleared}");
+        assert!(cleared.contains("❯ Follow-up detail.\n"), "{cleared}");
+        assert!(
+            cleared.contains("```text\n❯ 🚧 literal fence content\n```"),
+            "{cleared}"
+        );
     }
 
     #[test]

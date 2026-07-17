@@ -53,6 +53,10 @@
 //!   verification use the committed target. A converged live relay is never reset to the
 //!   committed-only projection (`#jb-compact-two-target-lineage`). A stale zero-editor relay fallback
 //!   is repaired to the live target, and concurrent live-editor drift fails closed.
+//! - Template compaction owns only its selected component cell. After CRDT convergence, concurrent
+//!   sibling-cell edits (including queue item deletions) are rebased into both the live and committed
+//!   targets before snapshot/commit; concurrent edits inside the compacted cell remain fail-closed
+//!   (`#compact-independent-cells`).
 //! - Before an editor-IPC `--commit` closeout, `flush_editor_buffer_to_disk_after_compact` asks the
 //!   live editor to save its converged buffer to disk (`save_document` IPC) so the working-tree file
 //!   converges to the compacted content. The plugin applies convergence patches to the in-memory
@@ -127,12 +131,83 @@ struct CompactDocumentTargets {
     committed: String,
 }
 
+struct CompactApplyOptions<'a> {
+    target_component: Option<&'a str>,
+    refresh_crdt: bool,
+    force_disk: bool,
+}
+
 impl CompactDocumentTargets {
     fn same(content: String) -> Self {
         Self {
             live: content.clone(),
             committed: content,
         }
+    }
+
+    /// Rebase the compacted target cell onto the authoritative sibling cells.
+    ///
+    /// Compact owns only the archiveable region of `target`. A concurrent
+    /// operator edit in `queue`, `backlog`, or another sibling component is
+    /// independent and must survive in both projections. For `exchange`, the
+    /// post-boundary tail is also independent live state: the committed target
+    /// is the compact-owned prefix, while the live target may extend it with the
+    /// latest authoritative tail. Drift inside the compact-owned region remains
+    /// fail-closed.
+    fn rebase_onto_authoritative_siblings(self, authoritative: &str, target: &str) -> Result<Self> {
+        let intended_components = element::parse(&self.live)?;
+        let committed_components = element::parse(&self.committed)?;
+        let authoritative_components = element::parse(authoritative)?;
+        let intended_target = intended_components
+            .iter()
+            .find(|component| component.name == target)
+            .ok_or_else(|| {
+                anyhow::anyhow!("component '{}' not found in compacted target", target)
+            })?;
+        let committed_target = committed_components
+            .iter()
+            .find(|component| component.name == target)
+            .ok_or_else(|| {
+                anyhow::anyhow!("component '{}' not found in compacted snapshot", target)
+            })?;
+        let authoritative_target = authoritative_components
+            .iter()
+            .find(|component| component.name == target)
+            .ok_or_else(|| {
+                anyhow::anyhow!("component '{}' not found after compact convergence", target)
+            })?;
+
+        let intended_target_content = intended_target.content(&self.live);
+        let committed_target_content = committed_target.content(&self.committed);
+        let authoritative_target_content = authoritative_target.content(authoritative);
+        let compact_owned_content_matches = if target == "exchange" {
+            intended_target_content.starts_with(committed_target_content)
+                && authoritative_target_content.starts_with(committed_target_content)
+        } else {
+            authoritative_target_content == intended_target_content
+        };
+        if authoritative_target.attrs != intended_target.attrs || !compact_owned_content_matches {
+            anyhow::bail!(
+                "compact: '{}' compact-owned content changed during compaction; refusing to rebase a same-cell edit over the compacted target",
+                target
+            );
+        }
+
+        let mut live = authoritative.to_string();
+        let mut committed =
+            authoritative_target.replace_content(authoritative, committed_target_content);
+        if let Some(reconciled) =
+            agent_doc_document::status_projection::reconcile_top_backlog_status_content(&live)?
+        {
+            live = reconciled;
+        }
+        if let Some(reconciled) =
+            agent_doc_document::status_projection::reconcile_top_backlog_status_content(&committed)?
+        {
+            committed = reconciled;
+        }
+
+        Ok(Self { live, committed })
     }
 }
 
@@ -514,14 +589,17 @@ pub fn run_in_controller(
             compacted = reconciled;
         }
 
-        apply_compacted_document(
+        let inline_targets = apply_compacted_document(
             file,
             &compacted,
             &compacted,
             &content,
             &write_base_content,
-            false,
-            force_disk,
+            CompactApplyOptions {
+                target_component: None,
+                refresh_crdt: false,
+                force_disk,
+            },
         )?;
         discard_archived_captures(file, &archive_content);
 
@@ -535,7 +613,7 @@ pub fn run_in_controller(
             to_keep.len(),
             file.display()
         );
-        CompactDocumentTargets::same(compacted)
+        inline_targets
     };
 
     // A no-op compact is not a response-repair escape hatch. In particular,
@@ -573,11 +651,12 @@ pub fn run_in_controller(
     let updated = effects
         .force_disk_document_content(file, "compact_post_write_disk_verify")
         .with_context(|| format!("failed to re-read {} after compact", file.display()))?;
-    // `#compactdropitem`: re-verify against the document actually on disk so a
-    // concurrent stale-supervisor CRDT merge that interleaved over the written
-    // file (dropping a non-exchange item) fails closed before commit instead of
-    // staging the corrupted snapshot into HEAD.
-    assert_non_exchange_items_preserved(file, &content, &updated, "post_write")?;
+    // `#compact-independent-cells`: do not compare sibling item counts against
+    // the pre-compact document here. Successful CRDT convergence may include
+    // authoritative concurrent queue/backlog edits, and `targets` already
+    // rebased the snapshot/commit projection onto those sibling cells. The
+    // deterministic pre-write guard still proves that the compaction rebuild
+    // itself changed only its target component.
     let changed = updated != content;
     // `#jb-compact-commit-editor-ipc-async`: the post-compact on-disk re-read
     // (`updated`) can lag the editor-converged buffer when the compaction wrote
@@ -1155,9 +1234,13 @@ fn apply_compacted_document(
     snapshot_content: &str,
     validation_source_content: &str,
     write_base_content: &str,
-    refresh_crdt: bool,
-    force_disk: bool,
-) -> Result<()> {
+    options: CompactApplyOptions<'_>,
+) -> Result<CompactDocumentTargets> {
+    let CompactApplyOptions {
+        target_component,
+        refresh_crdt,
+        force_disk,
+    } = options;
     // Fail closed before any write if the rebuilt exchange is structurally
     // malformed (#jb-compact-malformed-response-commit).
     validate_compacted_exchange(file, compacted)?;
@@ -1171,6 +1254,10 @@ fn apply_compacted_document(
     // (#compactqattr).
     assert_non_exchange_markers_preserved(file, validation_source_content, compacted, "apply")?;
 
+    let mut targets = CompactDocumentTargets {
+        live: compacted.to_string(),
+        committed: snapshot_content.to_string(),
+    };
     if force_disk {
         runtime_effects()?.force_disk_atomic_write(file, compacted)?;
         if let Some(outcome) = agent_doc_crdt_relay_io::apply_disk_change_for_file(file, compacted)?
@@ -1209,22 +1296,46 @@ fn apply_compacted_document(
         // raw CPC error (the reported JB `Compact Exchange` exit-1). The zero-live
         // editor case is already resolved to disk authority by #stale-lease-cpc-authority.
         converge_compacted_with_retry(runtime_effects()?, file, compacted, write_base_content)?;
+
+        // #compact-independent-cells: editor/CRDT convergence may legitimately
+        // carry a concurrent edit from a sibling component cell (for example,
+        // queue deletions while exchange compaction is running). Rebase the two
+        // compact projections onto that authoritative sibling state before the
+        // snapshot/commit boundary. Same-target drift remains fail-closed.
+        if let Some(target) = target_component {
+            let authoritative = runtime_effects()?
+                .current_document_content(file, "compact_post_converge_rebase")?;
+            if authoritative != targets.live {
+                targets = targets.rebase_onto_authoritative_siblings(&authoritative, target)?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "compact_rebased_authoritative_siblings file={} target={} live_hash={} committed_hash={}",
+                        file.display(),
+                        target,
+                        agent_doc_hash::content_hash(&targets.live),
+                        agent_doc_hash::content_hash(&targets.committed),
+                    ),
+                );
+            }
+        }
     }
 
     agent_doc_snapshot_io::checkpoint_document_baseline(
         file,
-        snapshot_content,
+        &targets.committed,
         agent_doc_ops_log_io::log_op,
     )?;
 
     if refresh_crdt {
-        let new_crdt = agent_doc_merge::crdt::CrdtDoc::from_text(compacted).encode_state();
-        let lineage = format!("compact:{}", agent_doc_hash::content_hash(compacted));
+        let new_crdt =
+            agent_doc_merge::crdt_sync::ReplicaState::from_text(1, &targets.live).encode_state();
+        let lineage = format!("compact:{}", agent_doc_hash::content_hash(&targets.live));
         agent_doc_snapshot_io::checkpoint_crdt_recovery_projection(file, &new_crdt, &lineage)?;
         eprintln!("[compact] cold CRDT recovery projection refreshed from post-compact content");
     }
 
-    Ok(())
+    Ok(targets)
 }
 
 /// Compact a named component in a template/stream-mode document.
@@ -1340,14 +1451,17 @@ fn run_component_compact_with_options(
     {
         snapshot_compacted = reconciled;
     }
-    apply_compacted_document(
+    let targets = apply_compacted_document(
         file,
         &compacted,
         &snapshot_compacted,
         content,
         write_base_content,
-        is_crdt,
-        force_disk,
+        CompactApplyOptions {
+            target_component: Some(target),
+            refresh_crdt: is_crdt,
+            force_disk,
+        },
     )?;
     discard_archived_captures(file, &archive_content);
 
@@ -1359,10 +1473,7 @@ fn run_component_compact_with_options(
         archive_path.display()
     );
 
-    Ok(CompactDocumentTargets {
-        live: compacted,
-        committed: snapshot_compacted,
-    })
+    Ok(targets)
 }
 
 /// Partial compact a named component in a template/stream-mode document.
@@ -1494,14 +1605,17 @@ fn run_component_compact_partial(
     {
         snapshot_compacted = reconciled;
     }
-    apply_compacted_document(
+    let targets = apply_compacted_document(
         file,
         &compacted,
         &snapshot_compacted,
         content,
         write_base_content,
-        is_crdt,
-        force_disk,
+        CompactApplyOptions {
+            target_component: Some(target),
+            refresh_crdt: is_crdt,
+            force_disk,
+        },
     )?;
     discard_archived_captures(file, &archive_body);
 
@@ -1517,10 +1631,7 @@ fn run_component_compact_partial(
         file.display()
     );
 
-    Ok(CompactDocumentTargets {
-        live: compacted,
-        committed: snapshot_compacted,
-    })
+    Ok(targets)
 }
 
 /// Build archive content from a component.
@@ -1790,6 +1901,96 @@ mod tests {
         assert!(msg.contains("agent-doc admin recycle"), "message: {msg}");
         assert!(!msg.contains("--force"), "message: {msg}");
         assert!(!msg.contains("interrupt-clear"), "message: {msg}");
+    }
+
+    #[test]
+    fn compact_targets_rebase_onto_concurrent_sibling_queue_deletions() {
+        // #compact-independent-cells: Compact Exchange owns only the exchange
+        // cell. Queue deletions that converge while compaction is in flight are
+        // authoritative sibling-cell edits and must survive both the live and
+        // committed projections.
+        let base = COMPACTDROPITEM_DOC.replace(
+            "## Review\n",
+            concat!(
+                "## Queue\n\n",
+                "<!-- agent:queue -->\n",
+                "- do [#q1]\n",
+                "- do [#q2]\n",
+                "- do [#q3]\n",
+                "<!-- /agent:queue -->\n\n",
+                "## Review\n",
+            ),
+        );
+        let compacted = base.replace("Response one.", "*Compacted exchange.*");
+        let current = compacted.replace("- do [#q2]\n- do [#q3]\n", "");
+
+        let rebased = CompactDocumentTargets::same(compacted)
+            .rebase_onto_authoritative_siblings(&current, "exchange")
+            .expect("independent queue deletions should rebase under compacted exchange");
+
+        for projection in [&rebased.live, &rebased.committed] {
+            assert!(projection.contains("*Compacted exchange.*"));
+            assert!(projection.contains("- do [#q1]"));
+            assert!(!projection.contains("- do [#q2]"));
+            assert!(!projection.contains("- do [#q3]"));
+        }
+    }
+
+    #[test]
+    fn compact_targets_rebase_preserves_two_target_exchange_lineage() {
+        let base = COMPACTDROPITEM_DOC.replace(
+            "## Review\n",
+            concat!(
+                "## Queue\n\n",
+                "<!-- agent:queue -->\n",
+                "- do [#q1]\n",
+                "- do [#q2]\n",
+                "<!-- /agent:queue -->\n\n",
+                "## Review\n",
+            ),
+        );
+        let live = base.replace(
+            "Response one.",
+            "*Compacted exchange.*\n\nOperator prompt remains live.",
+        );
+        let committed = base.replace("Response one.", "*Compacted exchange.*");
+        let authoritative = live.replace("- do [#q2]\n", "").replace(
+            "Operator prompt remains live.",
+            "Operator edited the post-boundary prompt while compact ran.",
+        );
+
+        let rebased = CompactDocumentTargets { live, committed }
+            .rebase_onto_authoritative_siblings(&authoritative, "exchange")
+            .expect("sibling deletion should preserve the two-target exchange lineage");
+
+        assert!(
+            rebased
+                .live
+                .contains("Operator edited the post-boundary prompt while compact ran.")
+        );
+        assert!(!rebased.live.contains("Operator prompt remains live."));
+        assert!(!rebased.committed.contains("Operator prompt remains live."));
+        assert!(
+            !rebased
+                .committed
+                .contains("Operator edited the post-boundary prompt")
+        );
+        assert!(!rebased.live.contains("- do [#q2]"));
+        assert!(!rebased.committed.contains("- do [#q2]"));
+    }
+
+    #[test]
+    fn compact_targets_rebase_fails_closed_on_same_cell_exchange_drift() {
+        let compacted = COMPACTDROPITEM_DOC.replace("Response one.", "*Compacted exchange.*");
+        let authoritative = compacted.replace(
+            "*Compacted exchange.*",
+            "*Operator edited the compacted exchange summary.*",
+        );
+
+        let err = CompactDocumentTargets::same(compacted)
+            .rebase_onto_authoritative_siblings(&authoritative, "exchange")
+            .expect_err("same-cell exchange drift must remain fail-closed");
+        assert!(err.to_string().contains("same-cell edit"), "{err:#}");
     }
 
     #[test]
@@ -2647,9 +2848,12 @@ mod tests {
         let recovery = agent_doc_snapshot_io::load_crdt_recovery_projection(&file)
             .unwrap()
             .unwrap();
-        let projected = agent_doc_merge::crdt::CrdtDoc::decode_state(&recovery.projection)
-            .unwrap()
-            .to_text();
+        let projected = agent_doc_document_realtime::crdt_relay::RelayHub::recover_from_projection(
+            1,
+            &recovery.projection,
+        )
+        .unwrap()
+        .canonical_text();
         assert!(
             !projected.contains("topic 0"),
             "recovery projection must contain the compacted document, not the pre-compaction one:\n{projected}"
@@ -3719,8 +3923,11 @@ mod tests {
             malformed_compacted,
             source,
             source,
-            false,
-            false,
+            CompactApplyOptions {
+                target_component: Some("exchange"),
+                refresh_crdt: false,
+                force_disk: false,
+            },
         )
         .unwrap_err();
         assert!(
@@ -4277,9 +4484,15 @@ mod tests {
         let recovery = agent_doc_snapshot_io::load_crdt_recovery_projection(&file)
             .unwrap()
             .expect("post-compact recovery projection");
-        let recovery_markdown = agent_doc_merge::crdt::CrdtDoc::decode_state(&recovery.projection)
+        // Recovery checkpoints persist the relay's compact ReplicaState
+        // (`ADCR1`), the same projection the cold-start runtime consumes.
+        let recovery_markdown =
+            agent_doc_document_realtime::crdt_relay::RelayHub::recover_from_projection(
+                1,
+                &recovery.projection,
+            )
             .unwrap()
-            .to_text();
+            .canonical_text();
         assert_eq!(
             normalize_transient_agent_doc_markers(&recovery_markdown),
             normalize_transient_agent_doc_markers(&live_after),

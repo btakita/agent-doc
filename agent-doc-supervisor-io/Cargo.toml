@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-supervisor-io"
-version = "0.34.175"
+version = "0.35.0"
 edition = "2024"
 description = "Supervisor marker storage I/O for agent-doc"
 license = "MIT"
@@ -11,21 +11,21 @@ publish = false
 name = "agent_doc_supervisor_io"
 
 [dependencies]
-agent-doc-config = { path = "../agent-doc-config", version = "0.34.175" }
-agent-doc-controller = { path = "../agent-doc-controller", version = "0.34.175" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.34.175" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.34.175" }
-agent-doc-harness = { path = "../agent-doc-harness", version = "0.34.175" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.34.175" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.34.175" }
-agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.34.175" }
-agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.34.175" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.34.175" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.34.175" }
-agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.34.175" }
-agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.34.175" }
-agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.34.175" }
-agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.34.175" }
+agent-doc-config = { path = "../agent-doc-config", version = "0.35.0" }
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.0" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.0" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.0" }
+agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.0" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.0" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.0" }
+agent-doc-project-config-io = { path = "../agent-doc-project-config-io", version = "0.35.0" }
+agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.0" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.0" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.0" }
+agent-doc-supervisor = { path = "../agent-doc-supervisor", version = "0.35.0" }
+agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.0" }
+agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.0" }
+agent-doc-turn-executor-tmux = { path = "../agent-doc-turn-executor-tmux", version = "0.35.0" }
 anyhow = "1"
 indexmap = { version = "2", features = ["serde"] }
 interprocess = { version = "2", default-features = false }

@@ -105,8 +105,77 @@ pub fn strip_guard_markers(content: &str) -> String {
 
 pub fn normalize_transient_agent_doc_markers(content: &str) -> String {
     agent_doc_frontmatter::frontmatter::strip_pipeline_block_lines(&strip_guard_markers(
-        &strip_head_markers(&strip_boundary_markers(content)),
+        &strip_head_markers(&strip_exchange_active_prompt_markers(
+            &strip_boundary_markers(content),
+        )),
     ))
+}
+
+fn strip_active_prompt_marker_from_line(line: &str) -> String {
+    let trimmed = line.trim_start();
+    let indent_len = line.len().saturating_sub(trimmed.len());
+    if let Some(rest) = trimmed.strip_prefix("❯ 🚧 ") {
+        return format!("{}❯ {}", &line[..indent_len], rest);
+    }
+
+    let heading_level = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    if (1..=6).contains(&heading_level)
+        && trimmed.as_bytes().get(heading_level) == Some(&b' ')
+        && let Some(rest) = trimmed[heading_level + 1..].strip_prefix("❯ 🚧 ")
+    {
+        return format!(
+            "{}{} ❯ {}",
+            &line[..indent_len],
+            &trimmed[..heading_level],
+            rest
+        );
+    }
+    line.to_string()
+}
+
+/// Remove the cosmetic active-work marker only from exchange prompt prose.
+/// Fenced regions are excluded so literal examples remain byte-for-byte stable.
+pub fn strip_exchange_active_prompt_markers(content: &str) -> String {
+    fn strip_lines(content: &str) -> String {
+        let code_ranges = code_block_byte_ranges(content);
+        let mut stripped = String::with_capacity(content.len());
+        let mut offset = 0usize;
+        for segment in content.split_inclusive('\n') {
+            let (line, newline) = segment
+                .strip_suffix('\n')
+                .map(|line| (line, "\n"))
+                .unwrap_or((segment, ""));
+            if is_in_code_block(&code_ranges, offset) {
+                stripped.push_str(line);
+            } else {
+                stripped.push_str(&strip_active_prompt_marker_from_line(line));
+            }
+            stripped.push_str(newline);
+            offset += segment.len();
+        }
+        stripped
+    }
+
+    let Ok(components) = agent_doc_element::element::parse(content) else {
+        return content.to_string();
+    };
+    let mut rebuilt = String::with_capacity(content.len());
+    let mut last = 0usize;
+    for component in components {
+        if component.open_end < last {
+            continue;
+        }
+        rebuilt.push_str(&content[last..component.open_end]);
+        if component.name == "exchange" {
+            rebuilt.push_str(&strip_lines(component.content(content)));
+        } else {
+            rebuilt.push_str(component.content(content));
+        }
+        rebuilt.push_str(&content[component.close_start..component.close_end]);
+        last = component.close_end;
+    }
+    rebuilt.push_str(&content[last..]);
+    rebuilt
 }
 
 /// Replace the `agent:queue` component with a canonical empty placeholder for
@@ -196,24 +265,45 @@ pub fn normalize_post_commit_re_heading_drift(content: &str) -> String {
 
 pub fn strip_exchange_prompt_prefixes_for_compare(content: &str) -> String {
     fn strip_line(line: &str) -> String {
-        let trimmed = line.trim_start();
-        let indent_len = line.len().saturating_sub(trimmed.len());
+        let active_marker_stripped = strip_active_prompt_marker_from_line(line);
+        let trimmed = active_marker_stripped.trim_start();
+        let indent_len = active_marker_stripped.len().saturating_sub(trimmed.len());
         if let Some(rest) = trimmed.strip_prefix("❯ ") {
-            format!("{}{}", &line[..indent_len], rest)
+            format!("{}{}", &active_marker_stripped[..indent_len], rest)
         } else {
-            line.to_string()
+            let heading_level = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+            if (1..=6).contains(&heading_level)
+                && trimmed.as_bytes().get(heading_level) == Some(&b' ')
+                && let Some(rest) = trimmed[heading_level + 1..].strip_prefix("❯ ")
+            {
+                format!(
+                    "{}{} {}",
+                    &active_marker_stripped[..indent_len],
+                    &trimmed[..heading_level],
+                    rest
+                )
+            } else {
+                active_marker_stripped
+            }
         }
     }
 
     fn strip_lines(content: &str) -> String {
+        let code_ranges = code_block_byte_ranges(content);
         let mut stripped = String::with_capacity(content.len());
+        let mut offset = 0usize;
         for segment in content.split_inclusive('\n') {
             let (line, newline) = segment
                 .strip_suffix('\n')
                 .map(|line| (line, "\n"))
                 .unwrap_or((segment, ""));
-            stripped.push_str(&strip_line(line));
+            if is_in_code_block(&code_ranges, offset) {
+                stripped.push_str(line);
+            } else {
+                stripped.push_str(&strip_line(line));
+            }
             stripped.push_str(newline);
+            offset += segment.len();
         }
         if !content.ends_with('\n') && content.is_empty() {
             stripped.clear();
@@ -547,6 +637,34 @@ do #one
             left,
             &changed_outside_exchange
         ));
+    }
+
+    #[test]
+    fn exchange_prompt_prefix_equivalence_ignores_active_markers_and_heading_internal_prefixes() {
+        let active = concat!(
+            "<!-- agent:exchange -->\n",
+            "### ❯ 🚧 Heading prompt\n",
+            "❯ Detail\n",
+            "```md\n",
+            "❯ 🚧 literal\n",
+            "```\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let bare = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Heading prompt\n",
+            "Detail\n",
+            "```md\n",
+            "❯ 🚧 literal\n",
+            "```\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        assert!(exchange_prompt_prefix_equivalent(active, bare));
+        assert_eq!(
+            strip_exchange_active_prompt_markers(active),
+            active.replace("### ❯ 🚧 Heading prompt", "### ❯ Heading prompt")
+        );
     }
 
     #[test]

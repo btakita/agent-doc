@@ -12,9 +12,10 @@ use agent_doc_document::write_normalization::{
     normalize_user_prompt_prefixes_applied,
 };
 use agent_doc_element_exchange::{
-    dedupe_adjacent_prompt_prefix_duplicates_in_doc, dedupe_live_prompt_prefix_variants_in_doc,
-    dedupe_prompt_lines_against_before_doc, exchange_shrink_guard_block,
-    normalize_user_prompts_in_exchange, preserve_head_exchange_prompt_prefix_state,
+    clear_active_exchange_prompt_markers, dedupe_adjacent_prompt_prefix_duplicates_in_doc,
+    dedupe_live_prompt_prefix_variants_in_doc, dedupe_prompt_lines_against_before_doc,
+    exchange_shrink_guard_block, normalize_user_prompts_in_exchange,
+    preserve_head_exchange_prompt_prefix_state,
 };
 
 pub fn check_exchange_shrink_guard_with_log(
@@ -371,6 +372,7 @@ pub fn normalize_user_prompts_in_exchange_safe_with_log(
     mut logger: impl FnMut(&Path, &str),
 ) -> String {
     let mut normalized = normalize_user_prompts_in_exchange(content, baseline, snapshot);
+    normalized = clear_active_exchange_prompt_markers(&normalized);
     if normalized != content
         && let Some(head) = load_head(file)
     {

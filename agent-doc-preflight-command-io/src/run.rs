@@ -1290,6 +1290,38 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     if prompt_edit_independent_of_active_turn {
         user_intent_prompt_changes.clear();
     }
+    // #exchange-active-prompt-marker: once preflight has selected the exact
+    // prompt targets for this turn, publish that working state into the live
+    // exchange tail. The pure exchange transformation preserves Markdown
+    // structure: prose is `❯`-prefixed, headings keep their `#` syntax and
+    // carry `❯ 🚧` inside the heading text, and list/fenced regions are never
+    // decorated. Probe mode remains side-effect-free.
+    if !options.probe {
+        let active_exchange_prompt_targets = user_intent_prompt_changes
+            .iter()
+            .filter(|change| change.kind == agent_doc_diff::PromptBearingChangeKind::PromptTarget)
+            .map(|change| change.text.clone())
+            .collect::<Vec<_>>();
+        if !active_exchange_prompt_targets.is_empty() {
+            let authoritative =
+                resolve_current_preflight_document(file, "active_exchange_prompt_marker")?;
+            let marked = agent_doc_element_exchange::mark_active_exchange_prompts_in_progress(
+                &authoritative,
+                &active_exchange_prompt_targets,
+            );
+            if marked != authoritative {
+                agent_doc_document_realtime_io::atomic_write_through_authority(file, &marked)?;
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "active_exchange_prompt_marked file={} targets={} marker=🚧 prefix=❯",
+                        file.display(),
+                        active_exchange_prompt_targets.len()
+                    ),
+                );
+            }
+        }
+    }
     let exchange_prompt_preempts_queue = !user_intent_prompt_changes.is_empty();
 
     // #codex-owned-pane-prompt-miss-followups: surface a structured owner-pane

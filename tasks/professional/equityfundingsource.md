@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -109,19 +109,24 @@ One judgement call worth surfacing: **an absent TMO value does not blank out wha
 Verification is stronger here than last cycle: alongside the pure `fund_tmo_override_plan_` unit tests, I added **behavioral** tests against real SQLite proving reconcile-not-duplicate, TMO winning the conflicting fields, the right vesting chosen among several, and bind still succeeding when no vesting maps. Fixing those also exposed that the test fixture was missing `lender_vestings` — now aligned to the real schema.
 
 Still not live-verified (no seeded lender with vestings on a real portal); the D1 migration `0139` also needs applying wherever you run it.
-<!-- agent:boundary:7132438c -->
+
+### Re: Options 1 → 2 → 3 already complete — gpt-5
+
+> **Queue prompt:** go...do options 1 -> 2 -> 3
+
+No duplicate implementation was needed. The exact ordered batch is already shipped:
+
+1. `#fund-vesting-fk` — migration `0139` adds `funds.lender_vesting_id`; create-funding wiring and tests are present.
+2. `#lender-sync-tmo-ui` — `AdminLenderVestings` and its per-vesting `TmoLenderPicker` / Sync with TMO flow are present.
+3. `#fundlink2` — `fund_tmo_override_plan_` and `tmo_unmatched_funding_bind_` reconcile an existing fund to the pulled TMO record instead of inserting a duplicate, with behavioral tests.
+
+Verification: delivery commits `1bb5c02` and `0ac4402` are both ancestors of the current EFS `HEAD`; targeted tsift searches found the migration, UI, reconciliation functions, and tests. The prior completed response records the full suite at **1660 pass / 0 fail**. Changed paths this cycle: none. Confidence: high; escalation: none.
+
+The session-accretion warning is noted; queue processing continued without compaction as configured.
+<!-- agent:boundary:b575456a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~do [#tmo-lender-picker-verify]. "LOS/LSS lenders": I only want LOS lenders. LSS is not used by EFS. deploy~~
-- ~~Can we create loan funding records in the api?~~
-- ~~do [#lender-sync-tmo]~~
-- ~~do [#h8rz]~~
-- ~~do [#fundlink1]~~
-- ~~do [#fundlink2]~~
-- ~~Each deal needs to be associated with a vesting. How would you recommend we bind the deal to the vesting? April questioned if we even need to link EFS <-> TMO vestings. I'm still unsure how we can reliably link the vesting to the lender. I think we probably need to link somehow to have the EFS lender portal UI match the TMO backend.~~
-- ~~do [#lender-sync-tmo-ui]: We need to support bi-directional linking. If an application is received through EFS, then we need to create the funding by associating with a lender in TMO or creating a new lender. We also need to handle the case when a TMO funding and a EFS deal are created and need to be linked. In that case, the TMO funding is the source of truth and should override any conflicting fields.~~
-- go...do options 1 -> 2 -> 3
 <!-- /agent:queue -->
 
 ## Notes

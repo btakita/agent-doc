@@ -417,7 +417,19 @@ Live Haiven verification also advanced past the prior malformed-tree gate. A fre
 The fresh route/controller supervisor stderr fix shipped in agent-doc v0.34.163 (`523e422c9`): stderr is redirected before process startup, and the process regression proves boot diagnostics cannot bleed into the agent pane. The subsequent editor-authority recovery fixes shipped through v0.34.165 (`4a437cb87`), which is pushed, tagged, installed, reloaded, and recycled. The full `make check` suite and TLA+ models pass.
 
 No actionable follow-up remains for this item.
-<!-- agent:boundary:91647dd8 -->
+
+### Re: editor-authority churn, retained writes, and routed dispatch proof — gpt-5
+
+Your re-added Haiven prompt is canonical operator text. I left the Haiven exchange untouched while repairing the binary, and the follow-up verification will require that prompt to remain exactly once.
+
+The remaining editor churn defect is fixed, installed, and released as agent-doc `v0.34.169` (`c9a9f233d7`). The root cause was narrower than an ACK timeout: the CRDT delivery loop emitted `DocumentWriteConverged` as soon as the editor plugin ACKed the canonical frontier, before the IDE had natively saved those bytes. That prematurely discarded the durable write intent. Queue/backlog maintenance could then exist only in editor authority while `session-check` had neither disk convergence nor retained lineage, producing the repeated recycle/reregister wedge and allowing older disk queue state to return later.
+
+ACK and disk convergence are now separate transitions. An ACKed write stays durable until the exact editor bytes are proven on disk. In no-cycle or preflight-only historical states created by older binaries, a valid member-backed, delivery-converged editor buffer is treated as the source of truth: agent-doc requests the editor's native save, verifies the same bytes in editor authority and disk, and never force-writes or rebases disk over the buffer. This preserves unsaved prompt text and queue deletions.
+
+Live dogfood recovered this document through that exact path. The editor authority hash `b7eeafbd…` was saved natively to disk, `#restartstderrbleed2` is absent from the active backlog and archived in the done file, and the old preflight boundary recovered on the freshly recycled `0.34.169` controller. The full `make check` gate and focused ACK/native-save regressions passed; the CLI/native library and JetBrains integration were reinstalled, and the controller was recycled.
+
+`#5bzd` is also code-complete in the current release. Both supervisor-IPC and direct-pane dispatch paths now detect a busy harness before spending the normal dispatch-start proof budget. They return the typed `AcceptedQueuedBehindActiveTurn` result, emit `route_dispatch_start_queued_behind_active_turn`, and do not file the false `accepted_without_dispatch_start_proof` issue. The focused queued/busy dispatch tests pass. The separate `#r4gq` item remains the appropriate live operator verification, so the historical implementation item can be reaped without losing the live-proof gate.
+<!-- agent:boundary:5c8d3590 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -468,7 +480,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
 ~~~
-- ~~~~📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~t~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~~~📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~t~~
 - ~~📌 haiven.md response was not committed.~~
 - ~~📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.~~
 - ~~📌 do [#zqv8]~~
@@ -480,12 +492,12 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ 📌 do [#jblocalhistverify]
 - ⏭️ 📌 do [#compactcrdtretry]
 - ⏭️ 📌 do [#capturebacklogatomic]
-- 📌 do [#opcapturelazily]
+- ⏭️ 📌 do [#opcapturelazily]
 - ~~📌 do [#tmuxfocusfollow]~~
 - ~~📌 do [#clippy197cleanup]~~
 - 📌 do [#jbtsiftnosub2verify]
 - ~~📌 do [#restartstderrbleed2]~~
-- 📌 do [#5bzd]
+- 🚧 📌 do [#5bzd]
 - 📌 do [#sidecarstate]
 - 📌 do [#64we]
 - 📌 do [#adstatechart2]
@@ -520,7 +532,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ 📌 do [#jblocalhistverify]
 - ⏭️ 📌 do [#compactcrdtretry]
 - ⏭️ 📌 do [#capturebacklogatomic]
-- 📌 do [#opcapturelazily]
+- ⏭️ 📌 do [#opcapturelazily]
 <!-- /agent:queue -->
 
 ## Notes

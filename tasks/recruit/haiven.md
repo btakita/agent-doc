@@ -5,16 +5,13 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: start
+queue: go
 ---
 
 ## Status
 
 <!-- agent:status patch=replace -->
 **Follow-ups complete (2026-07-06):**
-- Tailored resume → `resume/BrianTakita-haiven.pdf` (profile `resume/profiles/haiven.toml`; lazily-go added to `resume/BrianTakita.md` + `resume/data.toml`)
-- Application survey answers + AI-screen rehearsal script (6 STAR answers) → `tasks/recruit/haiven-prep.md`
-- Craig Fryar contact profile → `mail/contacts/craig-fryar/CLAUDE.md`; Haiven company quick-ref in `haiven-prep.md`
 
 Deliverable files are in the working tree (resume + mail are submodules — uncommitted; say the word to commit them). Session doc recovered via direct-write + git commit because the editor IPC transport is wedged (stale/dead editor → `already_applied` deadlock).
 <!-- /agent:status -->
@@ -140,7 +137,6 @@ The editor restart cleared the 0.2.271→0.2.272 plugin gap. The merge kept your
 Closed `#friendfanout` (it said "implement resolve mode", which we decided against in favour of the friend-frame). `make check` green, wspool tests pass under `-race`. Pushed: submodule `1a55783` + superproject gitlink, both in sync with origin.
 
 **Next: the take-home v2 review** — the actual deliverable, and where I'd put the remaining time.
-
 ### Re: gRPC leg, a 10× harness bug, and batching latency — opus-4-8
 
 Built the gRPC leg. Then it caught a bug in my own benchmark that invalidated everything I'd told you about this leg.
@@ -174,7 +170,108 @@ Built the gRPC leg. Then it caught a bug in my own benchmark that invalidated ev
 **Caveat I owe you:** I have *not* measured latency — that's reasoned from a measured ~1 µs unmarshal and ~50 µs RTT. Given I just found a 10× bug in this same suite, weight it accordingly. Queued `#dslatency` for p50/p99 instrumentation.
 
 `make check` green, grpcpool passes `-race`. Pushed: `c290d2e` + `9cd9db7`, gitlinks bumped.
-<!-- agent:boundary:8c22a925 -->
+❯ I'm deferring to DESIGN.md and focusing haiven-websocket-hub-takehome-v2.md on salient design aspects + load test-driven design evolution. Please review. I need the highlights of the benchmarks. Please print them here. If we need to redo any benchmarks, please do so. I have until tomorrow morning.
+❯ I'm deferring to DESIGN.md and focusing haiven-websocket-hub-takehome-v2.md on salient design aspects + load test-driven design evolution. Please review. I need the highlights of the benchmarks. Please print them here. If we need to redo any benchmarks, please do so. I have until tomorrow morning.
+❯ I'm deferring to DESIGN.md and focusing haiven-websocket-hub-takehome-v2.md on salient design aspects + load test-driven design evolution. Please review. I need the highlights of the benchmarks. Please print them here. If we need to redo any benchmarks, please do so. I have until tomorrow morning.
+### Re: benchmark highlights + v2 review — opus-4-8
+
+Deferring to DESIGN.md **changes my earlier review**, so start there: I previously told you to lift the missing assignment sections (backpressure, fan-out, heartbeat, edge cases, envelope, metrics, defer, team questions) into v2. Ignore that. If v2 points at DESIGN.md, those sections stay there and v2 gets to be one argument instead of a table of contents. DESIGN.md is now clean enough to carry them — 664→510 lines, gorilla/readPump/writePump gone, every required section intact.
+
+That makes v2's spine: **load testing drove the design, and here is each place it did.**
+
+## Benchmark highlights
+
+**Scale + memory**
+
+| | measured |
+|---|---|
+| connections, one node | **100M in ~106 GiB** (measured, not projected) |
+| per-conn | ~740 B Go heap / ~1.05 KiB RSS |
+| fan-out ceiling | 3.59 M deliveries/sec @ 1M clients |
+| breaker under 10× overload | sheds 93%, all 1M conns live, heap bounded |
+
+**Sharding the registry** (`-shards 1` = the unsharded shape, reproducible from the shipped binary)
+
+| | unsharded | sharded |
+|---|---|---|
+| fan-out @1M | 1.41 M/s | **3.59 M/s** |
+| scaling behaviour | **flat with scale** (single-bottleneck signature) | rises with scale |
+| connect (1M) | 2.211s | 0.895s |
+| heap/conn | 738 B | 738 B — speed cost no memory |
+
+**Friend presence — the unbounded one** (20k conns, 30% of friends online)
+
+| | median friends | online friendships | per-conn RSS |
+|---|---|---|---|
+| no friend presence | — | 0 | 2.55 KiB |
+| unbounded graph | 300 | 2,614,246 | 31.30 KiB |
+| unbounded graph | 3000 | 26,172,087 | **215.95 KiB** (4.13 GiB RSS) |
+| 50-friend frame | 300 | 904,497 | 22.06 KiB |
+| 50-friend frame | 3000 | 999,864 | 21.79 KiB |
+| 50-friend frame | 10000 | 1,000,000 | 22.32 KiB |
+
+10× more friends costs **6.9× unbounded** and **−1.2% framed**. Framed subscriptions saturate at exactly 1,000,000 = 20,000 × 50: **the frame, not the graph, is what the node pays for.**
+
+**Transport — ceiling** (pooled + batched, 0 shed)
+
+ws **321k msg/s**, gRPC **318k msg/s** — identical within noise. The in-process control *cannot be rate-tested unpaced at all*: it sheds **86.9%** because its single queue overflows, and a shedding arm contributes no latency sample, so it reads artificially fast.
+
+**Transport — latency at matched offered load** (median of 3 runs; the only comparable form)
+
+| offered | in-process | ws | gRPC |
+|---|---|---|---|
+| 500k deliv/s | 6 µs | 31 µs | 33 µs |
+| 1 M | 61 µs | 120 µs | 135 µs |
+| 2 M | 34 µs | 233 µs | 187 µs |
+| 3 M (ρ≈0.94) | 1.19 ms | 9.04 ms | 5.85 ms |
+
+Boundary costs **~2–7× at realistic load** — µs-scale, invisible next to a 1–50 ms internet RTT.
+
+**Transport — the traps**
+
+- **3 M deliveries/s is not an operating point.** It is ρ ≈ 0.94 of the leg ceiling, where `W = 1/(μ−λ)` explodes. gRPC drew **4.15 ms and 188.64 ms on identical runs** — 40× spread. Any single measurement there is noise.
+- **gRPC defaults are a trap:** stock 64 KiB windows shed **71.5%** where ws shed **0%**. Raising windows on both ends → 0%.
+- **The pool is a cliff, not a gradient:** 1 conn sheds **89.7%**, 4 conns shed **0%**.
+- **Batching:** pool=2+batch = 0 shed vs pool=4 unbatched; ~6.5× fewer syscalls; **lowers p50 35–43%** under backlog. Avg batch self-tunes 15.0 → 6.5 as the pool grows — a pressure gauge.
+
+## v2 corrections (P0 — a reviewer will check these)
+
+**Both ASCII tables (lines 122–148) must go.** Every in-process figure in them (`4µs`, `3µs/6µs`, `291.8k/s`) is the inline-handler artifact that violates §4.2, and `~18,000×` / `~14,000×` are that artifact restated. Replace with the matched-load table above.
+
+- **line 29** `~21k messages/sec` → **~321k/s (ws) / ~318k/s (gRPC)**. 15× understatement, and it carries your whole in-process-vs-socket argument.
+- **line 30** `332.4k sends/sec` is attributed to gRPC *without* batching — that figure is **with batch=64 at pool=16** (unbatched pool=16 is 291.5k).
+- **line 30** "Opportunistic batching would achieve millions per second" is **not measured** (332k msg/s = 3.34 M deliveries/s). Sentence also truncates: *"...but at an increased latency due to ."*
+- **line 30 contradicts line 110.** Line 30 says batching costs latency; line 110 says it reduced it. **Line 110 is right** — measured, batching *lowers* p50 35–43%. Line 30 describes the flush-timer failure mode you deliberately didn't build.
+- **line 12** "Copy And Swap" → **Compare**-And-Swap. Cheap to fix, expensive to leave in a section about the primitive.
+- **line 74** `<100GB RAM` → **~106 GiB** (which is *more* than 100 GB — wrong and inverted).
+- **line 106** "dropped sockets under load" was never observed; the finding was **breaker shedding**. Also `upstream` → `downstream`, and the pool was *demonstrated*, not adopted.
+- **line 114** `~2.57M–3.02M deliveries/sec` blends two runs; the number is **3.59 M @ 1M clients**.
+- **line 20** `DropNewest: ...` unfinished.
+- **structure:** two `# 1` headers (8, 38); `### 2.1` sits under `# 1 High-level Design`; mermaid line 47 still says `read/write loops`.
+
+## The design-decision log you asked for
+
+Each of these was **driven by a measurement**, which is exactly the spine you want:
+
+| decision | what forced it |
+|---|---|
+| goroutine pair → gnet + gobwas/ws | goroutine-per-conn was the memory ceiling (not epoll — Go's netpoller already uses it). 20–40 KB → 740 B/conn |
+| actor registry → sharded locks | actor capped fan-out **flat at 1.4 M/s regardless of scale** — the single-bottleneck signature |
+| typing DropNewest → ConflateByEntity | DropNewest discards the *arriving* frame, including terminal "stopped" → stuck "is typing…" forever |
+| friend graph → friend-frame | per-conn RSS unbounded and linear in a *log-normal* variable: 2.55 → 215.95 KiB |
+| ws pool → gRPC streams | N ordered channels without N sockets; ceilings identical, contracts better |
+| "route by volume" → **withdrawn** | batching removed the constraint volume was a proxy for. Now: failure-mode + resource-profile |
+
+## The one thing I'd change about the framing
+
+The brief says *"limit the use of AI"* and *"spend no more than 2–4 hours,"* and judges reasoning over artifacts. §1 currently **opens** with the prototype and the tooling — the part the brief asked you to limit.
+
+Invert it: lead with the reasoning, let the prototype land as **validation**. "I reasoned the goroutine pair was the memory ceiling, so I measured it: 740 B/conn, 100M on one box" reads far stronger than "I built a prototype and here's what it found." Same facts, and it answers the question asked.
+
+And the strongest asset you have is the one that isn't in v2 at all: **four measurement bugs, every one flattering the control**, caught by one rule — *measure the control, not just the subject; never vary shedding or offered load alongside latency.* Most candidates submit numbers. Almost none submit "here's how I found my numbers were lying." That deserves its own short section, not a footnote.
+
+**Repo:** `31d0871` (settle/handled), `9ee0b04` (pacing + matched-load table), `dc12bc0` (DESIGN.md). 198 tests pass, vet clean, **unpushed** — say the word.
+<!-- agent:boundary:7c4a87f2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -182,22 +279,57 @@ Built the gRPC leg. Then it caught a bug in my own benchmark that invalidated ev
 <!-- agent:queue go -->
 - ⏭️ /goal Implement backlog item(s): #b10a
 - ⏭️ /goal Implement backlog item(s): #yyzn
-- ~~Please go through LOADTEST.md. Simplify based on the existing benchmarks. Show before/after for interesting code events such as no sharding vs sharding. We should be able to replicate no sharding with a sharding of 1. Please simplify LOADTEST.md + DESIGN.md + README.md. They have accumulated cruft as we iterated...some of the content is outdated + inaccurate with the current system.~~
-- ~~Please add a websocket pool to the downstream connections. Load test with 1 websocket connection per downstream service...then load test with the websocket pool. Compare dropped connections + dropped messages/retries.~~
-- ~~Implement grpc with opportunistic batching and benchmark.~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#friendsnapshot]
-- ~~do [#friendfanout]~~
-- do [#yyzn-clarify]
-- do [#haivenwsopt]
-- do [#tnpa]
-- I'm hand-writing /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/haiven-websocket-hub-takehome-v2.md. Please review and help me to complete handwriting it. I will include sections from websocket-hub-design where appropriate. I want it to show how I think of the problem. Please review our sessions and our design changes so I can include a short log of our design decisions. Note the assignment is located at /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/backend-coding-challenge.md
+- ⏭️ do [#friendsnapshot]
+- ⏭️ do [#yyzn-clarify]
+- ⏭️ do [#haivenwsopt]
+- ⏭️ do [#tnpa]
+- ~~I'm hand-writing /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/haiven-websocket-hub-takehome-v2.md. Please review and help me to complete handwriting it. I will include sections from websocket-hub-design where appropriate. I want it to show how I think of the problem. Please review our sessions and our design changes so I can include a short log of our design decisions. Note the assignment is located at /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/backend-coding-challenge.md~~
+- ~~I'm hand-writing /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/haiven-websocket-hub-takehome-v2.md. Please review and help me to complete handwriting it. I will include sections from websocket-hub-design where appropriate. I want it to show how I think of the problem. Please review our sessions and our design changes so I can include a short log of our design decisions. Note the assignment is located at /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/backend-coding-challenge.md~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Implement grpc with opportunistic batching and benchmark.~~
+- ⏭️ do [#friendsnapshot]
+- ⏭️ do [#yyzn-clarify]
+- ~~Implement grpc with opportunistic batching and benchmark.~~
+- ⏭️ do [#friendsnapshot]
+- ⏭️ do [#yyzn-clarify]
+- ⏭️ do [#haivenwsopt]
+- 🚧 do [#tnpa]
+- ~~Implement grpc with opportunistic batching and benchmark.~~
+- ⏭️ do [#friendsnapshot]
+- ⏭️ do [#yyzn-clarify]
+- ⏭️ do [#haivenwsopt]
+- ⏭️ do [#tnpa]
+- ~~Implement grpc with opportunistic batching and benchmark.~~
+- ⏭️ do [#friendsnapshot]
+- ⏭️ do [#yyzn-clarify]
+- ⏭️ do [#haivenwsopt]
+- ⏭️ do [#tnpa]
+- ~~I'm hand-writing /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/haiven-websocket-hub-takehome-v2.md. Please review and help me to complete handwriting it. I will include sections from websocket-hub-design where appropriate. I want it to show how I think of the problem. Please review our sessions and our design changes so I can include a short log of our design decisions. Note the assignment is located at /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/backend-coding-challenge.md~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Implement grpc with opportunistic batching and benchmark.~~
+- ⏭️ do [#friendsnapshot]
+- ⏭️ do [#yyzn-clarify]
+- ~~Implement grpc with opportunistic batching and benchmark.~~
+- ⏭️ do [#friendsnapshot]
+- ⏭️ do [#yyzn-clarify]
+- ⏭️ do [#haivenwsopt]
+- 🚧 do [#tnpa]
+- ~~Implement grpc with opportunistic batching and benchmark.~~
+- ⏭️ do [#friendsnapshot]
+- ⏭️ do [#yyzn-clarify]
+- ⏭️ do [#haivenwsopt]
+- ⏭️ do [#tnpa]
+- ~~Implement grpc with opportunistic batching and benchmark.~~
+- ⏭️ do [#friendsnapshot]
+- ⏭️ do [#yyzn-clarify]
+- ⏭️ do [#haivenwsopt]
+- ⏭️ do [#tnpa]
+- ~~I'm hand-writing /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/haiven-websocket-hub-takehome-v2.md. Please review and help me to complete handwriting it. I will include sections from websocket-hub-design where appropriate. I want it to show how I think of the problem. Please review our sessions and our design changes so I can include a short log of our design decisions. Note the assignment is located at /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/backend-coding-challenge.md~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
 - [ ] [#friendsnapshot] haiven-websocket-hub: a friend-frame needs a presence snapshot on frame change — presence is at-most-once + conflated, so a newly-framed friend produces no replay and renders 'offline' until their next tick. Add a 'give me current state for these K' query (design §6.1 already specifies snapshot-on-resume for at-most-once classes) + model frame paging (re-subscribe churn on scroll) in the realistic loadtest. This is the real work item behind -friends-frame, not the subscription cap.
-- [ ] [#yyzn-clarify] Queue head '/goal Implement backlog item(s): #yyzn' references a backlog ID that does not exist in this document (backlog/icebox/done all lack it); the binary marks it skipped_queue_head_ids. Confirm the intended item or remove the head.
+- [ ] 🚧 [#yyzn-clarify] Queue head '/goal Implement backlog item(s): #yyzn' references a backlog ID that does not exist in this document (backlog/icebox/done all lack it); the binary marks it skipped_queue_head_ids. Confirm the intended item or remove the head.
 - [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 <!-- /agent:backlog -->
@@ -215,5 +347,3 @@ Built the gRPC leg. Then it caught a bug in my own benchmark that invalidated ev
 - 2026-07-16 [#typeconflate] haiven-websocket-hub: typing overflow is DropNewest (hub/backpressure.go:81) — on a full queue sendqueue.go:93 silently discards the ARRIVING frame, including the terminal 'stopped', leaving a stuck 'is typing…' indicator (no TTL exists anywhere in the repo). Switch typing to ConflateByEntity (as presence uses, backpressure.go:80) so the newest always wins and is bounded per entity; ALSO add a receiver-side typing TTL (~5-10s) for the never-sent-stop case (typist crash/disconnect), which no queue policy can fix. Note: conflation will change the realistic loadtest typing delivery counts in docs/LOADTEST.md.
 - 2026-07-16 [#friendfanout] haiven-websocket-hub: implement -friends-fanout=subscribe|resolve in the realistic loadtest — resolve mode drops friend-topic subscriptions and has the presence service resolve i's online friends (reverse adjacency, built once in the harness = the service's store) issuing SendToClient per friend. Then re-run the friends-median sweep to confirm hub per-conn heap stays flat at the friends-off row (~2.31 KiB) at any median, and measure the CPU/throughput cost of the trade (1 SendToTopic -> F SendToClient per presence update). This is the fix for the unbounded friend-presence memory documented in docs/LOADTEST.md.
 <!-- /agent:done -->
-
-

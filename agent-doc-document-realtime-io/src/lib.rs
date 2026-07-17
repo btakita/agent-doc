@@ -1530,7 +1530,7 @@ pub fn atomic_repair_write_if_current_through_authority(
     content: &str,
     expected_current: &str,
     source: &str,
-) -> Result<()> {
+) -> Result<String> {
     match atomic_write_if_current_through_authority(path, content, expected_current, source) {
         Ok(()) => {
             let canonical = try_resolve_current_document_content(path, source)?;
@@ -1544,7 +1544,7 @@ pub fn atomic_repair_write_if_current_through_authority(
                 agent_doc_hash::content_hash(&disk),
             );
             clear_all_deferred_document_write_intents(path, source)?;
-            return Ok(());
+            return Ok(canonical);
         }
         Err(err)
             if err
@@ -1557,13 +1557,44 @@ pub fn atomic_repair_write_if_current_through_authority(
     }
 
     let canonical = try_resolve_current_document_content(path, source)?;
-    anyhow::ensure!(
-        canonical == content,
-        "{source}: zero-replica repair target for {} was not retained exactly (expected_hash={}, canonical_hash={}); refusing force-disk projection",
-        path.display(),
-        agent_doc_hash::content_hash(content),
-        agent_doc_hash::content_hash(&canonical),
-    );
+    let retained_target = if visible_write_content_matches(&canonical, content) {
+        canonical
+    } else {
+        // The editor may advance between repair composition and the serialized
+        // CRDT apply. `apply_canonical_replace_if_attached` rebases the repair
+        // candidate over that newer operator cut. Prove that the canonical
+        // frontier is exactly that semantic rebase before treating it as the
+        // retained repair target; byte equality with the stale candidate would
+        // reject a valid monotonic merge and strand the closeout.
+        let editor_cut =
+            editor_operator_cut_for_agent_rebase(path, expected_current, &canonical, source);
+        let merged = rebase_agent_candidate_over_editor_cut(expected_current, content, &editor_cut)
+            .with_context(|| {
+                format!(
+                    "{source}: failed to verify the retained repair rebase for {}",
+                    path.display()
+                )
+            })?;
+        let verified = canonicalize_and_validate_agent_rebase(&merged, content, path, source)?;
+        anyhow::ensure!(
+            visible_write_content_matches(&canonical, &verified),
+            "{source}: zero-replica repair target for {} was not retained as the requested semantic rebase (requested_hash={}, verified_hash={}, canonical_hash={}); refusing force-disk projection",
+            path.display(),
+            agent_doc_hash::content_hash(content),
+            agent_doc_hash::content_hash(&verified),
+            agent_doc_hash::content_hash(&canonical),
+        );
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "{source}_retained_rebased_repair_target file={} requested_hash={} canonical_hash={} authority=editor_cut",
+                path.display(),
+                agent_doc_hash::content_hash(content),
+                agent_doc_hash::content_hash(&canonical),
+            ),
+        );
+        canonical
+    };
     let pre_force_disk = resolve_disk_current_document_content(path, source)?;
     let reconnect_base = pending_document_write(path)
         .and_then(|pending| {
@@ -1572,21 +1603,21 @@ pub fn atomic_repair_write_if_current_through_authority(
             })
         })
         .unwrap_or_else(|| pre_force_disk.clone());
-    atomic_write_force_disk_through_authority(path, content)?;
+    atomic_write_force_disk_through_authority(path, &retained_target)?;
     let disk = resolve_disk_current_document_content(path, source)?;
     anyhow::ensure!(
-        disk == content,
+        disk == retained_target,
         "{source}: zero-replica repair projection for {} did not materialize exactly (expected_hash={}, disk_hash={})",
         path.display(),
-        agent_doc_hash::content_hash(content),
+        agent_doc_hash::content_hash(&retained_target),
         agent_doc_hash::content_hash(&disk),
     );
     clear_all_deferred_document_write_intents(path, source)?;
-    if reconnect_base != content {
+    if reconnect_base != retained_target {
         ensure_deferred_document_write_intent(
             path,
             &reconnect_base,
-            content,
+            &retained_target,
             "repair_force_disk",
             DocumentWriteDeferredReason::RetainEditorReconnectLineageBeforeDiskProjection,
         )?;
@@ -1596,10 +1627,10 @@ pub fn atomic_repair_write_if_current_through_authority(
         &format!(
             "{source}_zero_replica_repair_projected file={} content_hash={} authority=retained_crdt_cas transport=audited_force_disk",
             path.display(),
-            agent_doc_hash::content_hash(content),
+            agent_doc_hash::content_hash(&retained_target),
         ),
     );
-    Ok(())
+    Ok(retained_target)
 }
 
 /// Apply a binary/CPC-authored document update to the live CRDT relay.
@@ -5864,6 +5895,86 @@ mod tests {
             pending_document_write(&file).is_none(),
             "settling the final reconnect target must not uncover an older intermediate repair"
         );
+    }
+
+    #[test]
+    fn zero_replica_repair_projects_semantic_rebase_over_newer_operator_cut() {
+        let editor_base = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ Original prompt.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- do [#keep]\n- do [#deleted]\n<!-- /agent:queue -->\n",
+        );
+        let response_target = editor_base.replace(
+            "<!-- agent:boundary:base -->",
+            "### Re: Original prompt. — gpt-5\n\nAnswered.\n<!-- agent:boundary:base -->",
+        );
+        let operator_cut = response_target
+            .replace(
+                "❯ Original prompt.\n",
+                "❯ Original prompt.\n❯ Prompt typed during repair.\n",
+            )
+            .replace("- do [#deleted]\n", "");
+        let (_dir, file, _canonical) = temp_doc(editor_base);
+        let identity = "test-repair-zero-replica-semantic-rebase";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let race_file = file.clone();
+        let race_response_target = response_target.clone();
+        let race_operator_cut = operator_cut.clone();
+        let race = std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            loop {
+                let pull = test_support_pull_replica_updates_for_file(&race_file, identity)
+                    .expect("pull repair delivery")
+                    .expect("test editor remains attached until the raced delivery arrives");
+                if !pull.updates.is_empty() {
+                    agent_doc_crdt_relay_io::with_hub(&race_file, |hub| {
+                        hub.apply_local(
+                            client_id,
+                            0,
+                            race_response_target.chars().count() as u32,
+                            &race_operator_cut,
+                        )
+                        .unwrap();
+                        hub.deregister(client_id);
+                    })
+                    .unwrap();
+                    return;
+                }
+                assert!(
+                    started.elapsed() < std::time::Duration::from_secs(3),
+                    "timed out waiting for the repair delivery race"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        });
+
+        let materialized = atomic_repair_write_if_current_through_authority(
+            &file,
+            &response_target,
+            editor_base,
+            "repair_zero_replica_semantic_rebase_test",
+        )
+        .unwrap();
+        race.join().unwrap();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), materialized);
+        assert!(materialized.contains("Prompt typed during repair."));
+        assert!(!materialized.contains("#deleted"));
+        assert_eq!(
+            materialized
+                .matches("### Re: Original prompt. — gpt-5")
+                .count(),
+            1
+        );
+        assert_eq!(materialized.matches("agent:boundary:").count(), 1);
+        let pending = pending_document_write(&file)
+            .expect("rebased repair target must remain available for editor reconnect");
+        assert_eq!(pending.target_content, materialized);
     }
 
     #[test]

@@ -18,7 +18,7 @@ impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects {
         content: &str,
         expected_current: &str,
         source: &str,
-    ) -> Result<()> {
+    ) -> Result<String> {
         repair_atomic_write_if_current(file, content, expected_current, source)
     }
 
@@ -74,7 +74,7 @@ impl agent_doc_repair_io::RepairTemplateWriteEffects for RuntimeRepairIoEffects 
         content: &str,
         expected_current: &str,
         source: &str,
-    ) -> Result<()> {
+    ) -> Result<String> {
         repair_atomic_write_if_current(file, content, expected_current, source)
     }
 
@@ -112,31 +112,23 @@ fn repair_atomic_write_if_current(
     content: &str,
     expected_current: &str,
     source: &str,
-) -> Result<()> {
-    agent_doc_document_realtime_io::atomic_repair_write_if_current_through_authority(
-        file,
-        content,
-        expected_current,
-        source,
-    )?;
+) -> Result<String> {
     let authoritative =
-        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)?;
-    anyhow::ensure!(
-        authoritative == content,
-        "{source}: repair write for {} did not materialize the exact authoritative target (expected_hash={}, current_hash={}); refusing snapshot/save closeout",
-        file.display(),
-        agent_doc_hash::content_hash(content),
-        agent_doc_hash::content_hash(&authoritative),
-    );
+        agent_doc_document_realtime_io::atomic_repair_write_if_current_through_authority(
+            file,
+            content,
+            expected_current,
+            source,
+        )?;
     let disk = agent_doc_document_realtime_io::resolve_disk_current_document_content(file, source)?;
     anyhow::ensure!(
-        disk == content,
+        disk == authoritative,
         "{source}: repair write for {} left a stale disk projection (expected_hash={}, disk_hash={}); refusing snapshot/save closeout",
         file.display(),
-        agent_doc_hash::content_hash(content),
+        agent_doc_hash::content_hash(&authoritative),
         agent_doc_hash::content_hash(&disk),
     );
-    Ok(())
+    Ok(authoritative)
 }
 
 pub struct RuntimeSessionCheckEffects;

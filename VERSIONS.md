@@ -1,5 +1,7 @@
 # Versions
 
+- **Repair closeout follows the materialized editor rebase.** Repair writes now return the canonical document actually retained by Lazily/CPC, and template normalization, prompt-prefix cleanup, scaffold repair, completed-backlog reap, disk proof, and snapshot checkpointing carry that value forward. When an editor cut advances after repair composition and the replica then disappears, zero-replica recovery recomputes the semantic three-way merge before projecting the rebased target; it no longer wedges on byte inequality with or checkpoints the stale pre-rebase candidate.
+
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.

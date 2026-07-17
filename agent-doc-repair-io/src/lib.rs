@@ -149,7 +149,7 @@ pub trait RepairIoEffects {
         content: &str,
         expected_current: &str,
         source: &str,
-    ) -> Result<()>;
+    ) -> Result<String>;
 
     fn mark_committed_frontmatter(
         &self,
@@ -221,7 +221,7 @@ pub trait RepairTemplateWriteEffects {
         content: &str,
         expected_current: &str,
         source: &str,
-    ) -> Result<()>;
+    ) -> Result<String>;
 
     fn repair_response_prompt_order_for_file(
         &self,
@@ -1301,7 +1301,7 @@ pub fn repair_template_doc_if_needed(
             }
             None => true,
         };
-        effects.atomic_write_if_current(
+        repaired = effects.atomic_write_if_current(
             file,
             &repaired,
             doc_content,
@@ -1420,7 +1420,7 @@ pub fn repair_response_body_prompt_prefixes_if_needed(
         }
         None => true,
     };
-    effects.atomic_write_if_current(
+    let repaired = effects.atomic_write_if_current(
         file,
         &repaired,
         doc_content,
@@ -1468,7 +1468,7 @@ pub fn repair_duplicate_exchange_scaffold_if_needed(
         }
         None => true,
     };
-    effects.atomic_write_if_current(
+    let repaired = effects.atomic_write_if_current(
         file,
         &repaired,
         doc_content,
@@ -2782,7 +2782,12 @@ pub fn repair_completed_backlog_items(
         repaired = reconciled;
     }
 
-    effects.atomic_write_if_current(file, &repaired, &content, "repair_completed_backlog_reap")?;
+    repaired = effects.atomic_write_if_current(
+        file,
+        &repaired,
+        &content,
+        "repair_completed_backlog_reap",
+    )?;
 
     let repaired_snapshot = if let Some(snap_content) =
         agent_doc_snapshot_io::load_document_baseline(file)?
@@ -3011,7 +3016,7 @@ mod tests {
             content: &str,
             expected_current: &str,
             _source: &str,
-        ) -> Result<()> {
+        ) -> Result<String> {
             anyhow::ensure!(
                 agent_doc_document_realtime_io::resolve_disk_current_document_content(
                     file,
@@ -3020,7 +3025,7 @@ mod tests {
                 "test repair write baseline changed"
             );
             std::fs::write(file, content)?;
-            Ok(())
+            Ok(content.to_string())
         }
 
         fn mark_committed_frontmatter(

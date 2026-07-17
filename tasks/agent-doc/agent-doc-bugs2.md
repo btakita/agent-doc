@@ -379,7 +379,23 @@ Verified today:
 - The current v0.34.160 release passed the full `make check` suite (7,780 tests).
 
 No new implementation was needed in this drain cycle; this closes the stale wrapper without replaying or duplicating the shipped work.
-<!-- agent:boundary:4ce45491 -->
+
+
+### Re: Clippy 1.97 all-target cleanup — gpt-5
+
+Completed `#clippy197cleanup`.
+
+- `make clippy` now runs `cargo clippy --all-targets --all-features -- -D warnings`, so test-target lints are part of the normal local and CI gate.
+- Replaced the three single-element loops in `tests/test_cli.rs` with direct assertions.
+- Resolved the additional Clippy 1.97 findings in the session-clear invariant test and realtime SimWorld convergence helper.
+- I did not pin Rust: the repository intentionally tracks stable, and covering all targets closes the actual blind spot without freezing compiler and security updates.
+
+Verification passed: the explicit all-target Clippy command and the full `make check` suite are green. The required one-shot CI inspection was also green.
+
+Source commit `01c2856e1` is pushed to `agent-doc/main`. Root gitlink commit `34f76625a` is local only because the root branch still contains unrelated concurrent commits that should not be pushed together.
+
+Preflight still reports that the running IDE host has JetBrains plugin 0.2.271 loaded while 0.2.272 is installed; the previously requested IDE restart remains necessary before relying on live editor-delivery ACK behavior.
+<!-- agent:boundary:68da5116 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -437,14 +453,14 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~📌 do [#crde]~~
 - ~~📌 do [#steeringobservableset]~~
 - ~~📌 do [#jbcompactexchange]~~
-- ⏭️ 📌 do [#goal1d0k]
-- ⏭️ 📌 do [#idlewatchturnactive]
-- ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#compactcrdtretry]
-- ⏭️ 📌 do [#capturebacklogatomic]
-- ⏭️ 📌 do [#opcapturelazily]
+- ~~📌 do [#goal1d0k]~~
+- ~~📌 do [#idlewatchturnactive]~~
+- 📌 do [#jblocalhistverify]
+- 📌 do [#compactcrdtretry]
+- 📌 do [#capturebacklogatomic]
+- 📌 do [#opcapturelazily]
 - ~~📌 do [#tmuxfocusfollow]~~
-- ⏭️ 📌 do [#clippy197cleanup]
+- ~~📌 do [#clippy197cleanup]~~
 - 📌 do [#jbtsiftnosub2verify]
 - 🚧 📌 do [#restartstderrbleed2]
 - 📌 do [#5bzd]
@@ -475,21 +491,14 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 t
 - 📌 do [#5qjj]
 - ~~📌 do [#jbcompactexchange]~~
-- ⏭️ 📌 do [#goal1d0k]
-- ⏭️ 📌 do [#idlewatchturnactive]
-- ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#compactcrdtretry]
-- ⏭️ 📌 do [#goal1d0k]
-- ⏭️ 📌 do [#idlewatchturnactive]
-- ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#compactcrdtretry]
-- ⏭️ 📌 do [#goal1d0k]
-- ⏭️ 📌 do [#idlewatchturnactive]
-- ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#compactcrdtretry]
-- ⏭️ 📌 do [#capturebacklogatomic]
-- ⏭️ 📌 do [#opcapturelazily]
-- ⏭️ 📌 do [#clippy197cleanup]
+- 📌 do [#jblocalhistverify]
+- 📌 do [#compactcrdtretry]
+- 📌 do [#jblocalhistverify]
+- 📌 do [#compactcrdtretry]
+- 📌 do [#jblocalhistverify]
+- 📌 do [#compactcrdtretry]
+- 📌 do [#capturebacklogatomic]
+- 📌 do [#opcapturelazily]
 <!-- /agent:queue -->
 
 ## Notes

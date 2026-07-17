@@ -34,7 +34,6 @@ class TurnStateBannerProvider : EditorNotificationProvider {
         if (!file.name.endsWith(".md")) return null
         val refresher = TurnStateBannerRefresher.getInstance(project)
         refresher.start()
-        refresher.requestRefresh(file, "banner-collect")
         // Empty label == idle / not-an-agent-doc-turn → no banner.
         val presentation = refresher.cachedPresentationFor(file.path)
         val label = presentation.label

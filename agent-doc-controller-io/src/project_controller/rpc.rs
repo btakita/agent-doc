@@ -6499,11 +6499,15 @@ fn close_inherited_fds_on_exec(command: &mut Command) {
     use std::os::unix::process::CommandExt;
 
     let close_limit = inherited_fd_close_limit();
-    // The controller is often launched by an editor plugin process. Some editor
-    // file descriptors are not CLOEXEC, so explicitly drop everything except
-    // stdio in the controller child before exec.
+    // The controller is often launched by an editor plugin or harness process.
+    // Start a new session so terminal/harness process-group cleanup cannot kill
+    // the daemon when the launcher crashes. Some editor file descriptors are not
+    // CLOEXEC, so explicitly drop everything except stdio before exec as well.
     unsafe {
         command.pre_exec(move || {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
             for fd in 3..close_limit {
                 libc::close(fd);
             }
@@ -14533,6 +14537,25 @@ mod tests {
         assert!(status.control_plane.projection_workers.owned_items >= 1);
         assert!(status.control_plane.store_actor.owned_items >= 11);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn detached_controller_command_starts_a_new_process_session() {
+        let mut command = Command::new("sleep");
+        command
+            .arg("1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        close_inherited_fds_on_exec(&mut command);
+        let mut child = command.spawn().expect("spawn detached-session probe");
+        let pid = child.id() as libc::pid_t;
+        let sid = unsafe { libc::getsid(pid) };
+        assert_eq!(sid, pid, "detached daemon must own a new process session");
+        child.kill().expect("stop detached-session probe");
+        child.wait().expect("reap detached-session probe");
+    }
+
     #[test]
     fn controller_runtime_refreshes_memory_after_write_through_commit() {
         let dir = tempfile::TempDir::new().unwrap();

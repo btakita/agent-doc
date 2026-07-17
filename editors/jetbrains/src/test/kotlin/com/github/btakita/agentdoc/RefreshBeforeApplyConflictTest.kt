@@ -177,6 +177,7 @@ class RefreshBeforeApplyConflictTest {
         assertTrue("turn projection must show Project Controller disconnects", turnBridge.contains("Project Controller disconnected"))
         assertFalse("turn projection must not call the legacy sidecar-capable FFI", turnBridge.contains("agent_doc_turn_projection"))
         assertFalse("banner collection must read cached state", turnProvider.contains("TurnStateBridge.presentationForFile"))
+        assertFalse("banner collection must not trigger its own refresh loop", turnProvider.contains("banner-collect"))
         assertFalse("typing debounce report must not probe turn-state just for logging", typingTracker.contains("TurnStateBridge.presentationForFile"))
         assertFalse("CRDT replica manager must not schedule fixed-delay pulls", crdtReplica.contains("scheduleWithFixedDelay"))
         assertFalse("CRDT replica manager must not keep a poller thread", crdtReplica.contains("crdt-replica-poller"))

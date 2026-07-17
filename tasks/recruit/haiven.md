@@ -271,7 +271,7 @@ Invert it: lead with the reasoning, let the prototype land as **validation**. "I
 And the strongest asset you have is the one that isn't in v2 at all: **four measurement bugs, every one flattering the control**, caught by one rule — *measure the control, not just the subject; never vary shedding or offered load alongside latency.* Most candidates submit numbers. Almost none submit "here's how I found my numbers were lying." That deserves its own short section, not a footnote.
 
 **Repo:** `31d0871` (settle/handled), `9ee0b04` (pacing + matched-load table), `dc12bc0` (DESIGN.md). 198 tests pass, vet clean, **unpushed** — say the word.
-<!-- agent:boundary:7c4a87f2 -->
+<!-- agent:boundary:01bdeb44 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -283,46 +283,6 @@ And the strongest asset you have is the one that isn't in v2 at all: **four meas
 - ⏭️ do [#yyzn-clarify]
 - ⏭️ do [#haivenwsopt]
 - ⏭️ do [#tnpa]
-- ~~I'm hand-writing /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/haiven-websocket-hub-takehome-v2.md. Please review and help me to complete handwriting it. I will include sections from websocket-hub-design where appropriate. I want it to show how I think of the problem. Please review our sessions and our design changes so I can include a short log of our design decisions. Note the assignment is located at /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/backend-coding-challenge.md~~
-- ~~I'm hand-writing /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/haiven-websocket-hub-takehome-v2.md. Please review and help me to complete handwriting it. I will include sections from websocket-hub-design where appropriate. I want it to show how I think of the problem. Please review our sessions and our design changes so I can include a short log of our design decisions. Note the assignment is located at /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/backend-coding-challenge.md~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Implement grpc with opportunistic batching and benchmark.~~
-- ⏭️ do [#friendsnapshot]
-- ⏭️ do [#yyzn-clarify]
-- ~~Implement grpc with opportunistic batching and benchmark.~~
-- ⏭️ do [#friendsnapshot]
-- ⏭️ do [#yyzn-clarify]
-- ⏭️ do [#haivenwsopt]
-- 🚧 do [#tnpa]
-- ~~Implement grpc with opportunistic batching and benchmark.~~
-- ⏭️ do [#friendsnapshot]
-- ⏭️ do [#yyzn-clarify]
-- ⏭️ do [#haivenwsopt]
-- ⏭️ do [#tnpa]
-- ~~Implement grpc with opportunistic batching and benchmark.~~
-- ⏭️ do [#friendsnapshot]
-- ⏭️ do [#yyzn-clarify]
-- ⏭️ do [#haivenwsopt]
-- ⏭️ do [#tnpa]
-- ~~I'm hand-writing /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/haiven-websocket-hub-takehome-v2.md. Please review and help me to complete handwriting it. I will include sections from websocket-hub-design where appropriate. I want it to show how I think of the problem. Please review our sessions and our design changes so I can include a short log of our design decisions. Note the assignment is located at /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/backend-coding-challenge.md~~ — auto-struck: answered this cycle (#ftstrike)
-- ~~Implement grpc with opportunistic batching and benchmark.~~
-- ⏭️ do [#friendsnapshot]
-- ⏭️ do [#yyzn-clarify]
-- ~~Implement grpc with opportunistic batching and benchmark.~~
-- ⏭️ do [#friendsnapshot]
-- ⏭️ do [#yyzn-clarify]
-- ⏭️ do [#haivenwsopt]
-- 🚧 do [#tnpa]
-- ~~Implement grpc with opportunistic batching and benchmark.~~
-- ⏭️ do [#friendsnapshot]
-- ⏭️ do [#yyzn-clarify]
-- ⏭️ do [#haivenwsopt]
-- ⏭️ do [#tnpa]
-- ~~Implement grpc with opportunistic batching and benchmark.~~
-- ⏭️ do [#friendsnapshot]
-- ⏭️ do [#yyzn-clarify]
-- ⏭️ do [#haivenwsopt]
-- ⏭️ do [#tnpa]
-- ~~I'm hand-writing /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/haiven-websocket-hub-takehome-v2.md. Please review and help me to complete handwriting it. I will include sections from websocket-hub-design where appropriate. I want it to show how I think of the problem. Please review our sessions and our design changes so I can include a short log of our design decisions. Note the assignment is located at /home/brian/work/btakita/agent-loop/tasks/recruit/haiven/backend-coding-challenge.md~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Backlog

@@ -256,6 +256,18 @@ impl RelayHub {
         self.legacy_document_ops_allowed = false;
     }
 
+    /// Fence durable frames produced by a superseded incarnation of one logical
+    /// editor replica without changing the canonical text/state.
+    ///
+    /// Editor integrations reconnect by opening a fresh native replica before
+    /// retiring the old one.  The fresh replica receives the current lineage;
+    /// rotating it at the replacement boundary makes every late durable frame
+    /// from the prior incarnation terminally stale instead of union-merging it
+    /// into the replacement canonical.
+    pub fn fence_replica_generation(&mut self) {
+        self.rotate_lineage();
+    }
+
     /// Build the thread-safe reactive liveness core shared by every constructor:
     /// a `ThreadSafeContext`, an on-demand `client_id -> live` cell family, a membership
     /// epoch cell, and the derived live-member count slot.

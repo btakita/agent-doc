@@ -2324,6 +2324,94 @@ pub fn normalize_recoverable_response_replay_duplication(content: &str) -> Optio
     (normalized != content && agent_projection_integrity_valid(&normalized)).then_some(normalized)
 }
 
+/// Collapse the exact full-document concatenation produced when two raw editor
+/// generations were briefly registered as independent CRDT heads. One branch
+/// must be byte-identical to the retained pending target; the other is treated
+/// as the current operator cut and receives the pending semantic change through
+/// the normal three-way rebase. Ambiguous shapes fail closed.
+fn recover_concatenated_document_generations(
+    file: &Path,
+    content: &str,
+    expected: &str,
+    target: &str,
+    source: &str,
+) -> Result<Option<String>> {
+    if content == target || target.is_empty() || expected.is_empty() {
+        return Ok(None);
+    }
+    if !agent_projection_integrity_valid(expected) || !agent_projection_integrity_valid(target) {
+        return Ok(None);
+    }
+    let expected_session = agent_doc_frontmatter::frontmatter::session_id_from_content(expected);
+    let target_session = agent_doc_frontmatter::frontmatter::session_id_from_content(target);
+    if expected_session.is_none() || expected_session != target_session {
+        return Ok(None);
+    }
+
+    let prefix_editor = content
+        .strip_suffix(target)
+        .filter(|candidate| !candidate.is_empty());
+    let suffix_editor = content
+        .strip_prefix(target)
+        .filter(|candidate| !candidate.is_empty());
+    let editor_generation = match (prefix_editor, suffix_editor) {
+        (Some(prefix), Some(suffix)) if prefix == target && suffix == target => target,
+        (Some(prefix), None) => prefix,
+        (None, Some(suffix)) => suffix,
+        _ => return Ok(None),
+    };
+    if !agent_projection_integrity_valid(editor_generation)
+        || agent_doc_frontmatter::frontmatter::session_id_from_content(editor_generation)
+            != expected_session
+    {
+        return Ok(None);
+    }
+
+    if editor_generation == target {
+        return Ok(Some(target.to_string()));
+    }
+    let editor_cut =
+        editor_operator_cut_for_agent_rebase(file, expected, editor_generation, source);
+    let merged = rebase_agent_candidate_over_editor_cut(expected, target, &editor_cut)?;
+    let canonical = canonicalize_and_validate_agent_rebase(&merged, target, file, source)?;
+    Ok((canonical != content).then_some(canonical))
+}
+
+/// File-aware replay normalization. In addition to the narrow pure repairs,
+/// this may collapse two concatenated logical editor generations, but only when
+/// the durable pending intent proves one complete branch byte-for-byte.
+pub fn normalize_recoverable_response_replay_duplication_for_file(
+    file: &Path,
+    content: &str,
+    source: &str,
+) -> Result<Option<String>> {
+    if let Some(pending) = pending_document_write(file)
+        && let Some(expected) = pending.expected_content.as_deref()
+        && agent_doc_hash::content_hash(expected) == pending.expected_hash
+        && agent_doc_hash::content_hash(&pending.target_content) == pending.target_hash
+        && let Some(recovered) = recover_concatenated_document_generations(
+            file,
+            content,
+            expected,
+            &pending.target_content,
+            source,
+        )?
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_concatenated_editor_generations_recovered file={} intent_id={} observed_hash={} recovered_hash={} strategy=pending_intent_semantic_rebase",
+                file.display(),
+                pending.intent_id,
+                agent_doc_hash::content_hash(content),
+                agent_doc_hash::content_hash(&recovered),
+            ),
+        );
+        return Ok(Some(recovered));
+    }
+    Ok(normalize_recoverable_response_replay_duplication(content))
+}
+
 fn validate_canonical_document_target(file: &Path, content: &str, source: &str) -> Result<()> {
     if let Some(reason) = agent_doc_element::element::structural_corruption_reason(content) {
         anyhow::bail!(
@@ -4763,6 +4851,100 @@ mod tests {
         assert!(normalized.contains("agent:boundary:latest"));
         assert!(normalized.contains("❯ operator prompt"));
         assert!(normalized.contains("Retained response."));
+    }
+
+    #[test]
+    fn concatenated_logical_generations_rebase_pending_target_over_operator_cut() {
+        let base = concat!(
+            "---\nagent_doc_session: sim-refresh\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ original prompt\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- manually-delete-me\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let target = base.replace(
+            "<!-- agent:boundary:base -->",
+            "### Re: retained — gpt-5\n\nRetained answer.\n<!-- agent:boundary:target -->",
+        );
+        let operator_cut = base
+            .replace(
+                "<!-- agent:boundary:base -->",
+                "❯ prompt added during refresh\n<!-- agent:boundary:base -->",
+            )
+            .replace("- manually-delete-me\n", "");
+        let (_dir, file, _) = temp_doc(base);
+
+        for duplicated in [
+            format!("{target}{operator_cut}"),
+            format!("{operator_cut}{target}"),
+        ] {
+            assert!(!agent_projection_integrity_valid(&duplicated));
+            let recovered = recover_concatenated_document_generations(
+                &file,
+                &duplicated,
+                base,
+                &target,
+                "test_refresh_recovery",
+            )
+            .unwrap()
+            .expect("one branch is the exact pending target");
+            assert!(agent_projection_integrity_valid(&recovered));
+            assert_eq!(
+                recovered.matches("agent_doc_session: sim-refresh").count(),
+                1
+            );
+            assert_eq!(recovered.matches("agent:boundary:").count(), 1);
+            assert_eq!(recovered.matches("Retained answer.").count(), 1);
+            assert_eq!(recovered.matches("prompt added during refresh").count(), 1);
+            assert!(!recovered.contains("manually-delete-me"));
+        }
+    }
+
+    #[test]
+    fn concatenated_generation_recovery_requires_exact_pending_branch() {
+        let base = concat!(
+            "---\nagent_doc_session: sim-refresh\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ original prompt\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let target = base.replace(
+            "original prompt",
+            "original prompt\n\n### Re: retained\nAnswer",
+        );
+        let unrelated = base.replace("original prompt", "different operator document");
+        let (_dir, file, _) = temp_doc(base);
+
+        let duplicated_without_target = format!("{unrelated}{base}");
+        assert!(
+            recover_concatenated_document_generations(
+                &file,
+                &duplicated_without_target,
+                base,
+                &target,
+                "test_refresh_recovery",
+            )
+            .unwrap()
+            .is_none()
+        );
+
+        let exact_retry = format!("{target}{target}");
+        assert_eq!(
+            recover_concatenated_document_generations(
+                &file,
+                &exact_retry,
+                base,
+                &target,
+                "test_refresh_recovery",
+            )
+            .unwrap()
+            .as_deref(),
+            Some(target.as_str())
+        );
     }
 
     #[test]

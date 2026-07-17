@@ -322,16 +322,34 @@ This is `plan-realtime-reconcile-replicas.md` Phase 2 + the `#crdtsvdom` correct
   logic in the shared FFI, each plugin a thin consumer. Spec: `specs/14-realtime-workflow.md`
   § Editor Parity Requirement. Divergence between frontends is a forbidden shape.
 - **D3 — Wire the dead state machine.** Drive `DiskDriftObserved` / `PluginlessDiskSave` /
-  `OperatorSourcesReconciled` (`document-realtime/src/lib.rs`) from C/D so the flow is modeled
-  and observable via `admin inspect`, not implicit.
+`OperatorSourcesReconciled` (`document-realtime/src/lib.rs`) from C/D so the flow is modeled
+and observable via `admin inspect`, not implicit.
+- **D4 — Logical editor replica generations — LANDED (2026-07-16).** A JetBrains
+`:<path>:refresh-N` identity is a new native incarnation of the same visible editor, not a
+collaborative head. A per-document registration fence serializes simultaneous refresh attempts and
+publishes the successor identity before hub membership changes, so a late old update cannot exploit
+the register/metadata transition window. Registration retires every prior incarnation sharing the
+stable logical identity, rotates and durably checkpoints the CRDT lineage, and returns the canonical
+bootstrap to the sole successor. Late direct updates from a retired raw identity are terminal
+no-ops; late durable document-op frames carry the retired lineage and are quarantined by the same
+lineage fence. An old deregister cannot remove the replacement.
+
+Already-corrupted two-generation projections recover before the generic integrity gate only when a
+durable pending intent proves one entire branch byte-for-byte. That target is semantically rebased
+over the other operator branch, preserving unsaved prompt/queue edits while materializing the agent
+response once; ambiguous shapes remain blocked. Together these changes close the observed 93 KB →
+179 KB whole-document duplication/second-boundary failure without electing disk over the operator
+buffer.
 
 ### Phase E — Regression surface
 
 Property-style tests injecting: (i) a disk `git checkout HEAD` while a live editor holds newer
 buffer; (ii) an operator direct-edit to the `.md` while a cycle is mid-flight; (iii) a disk change
-the editor already applied (idempotent no-op); (iv) each Phase-A point bug. Assert: converges or
+the editor already applied (idempotent no-op); (iv) sequential and concurrent logical editor
+refreshes with late direct and durable frames from prior incarnations; (v) strict recovery of an
+already-concatenated pending-target/operator pair; (vi) each Phase-A point bug. Assert: converges or
 fails open to buffer — never corrupts HEAD, never wedges, never drops operator text. SimWorld
-coverage for the disk→replica→buffer loop.
+coverage for the disk→replica→buffer loop and exhaustive refresh-generation interleavings.
 
 ## Guardrails (do not regress)
 

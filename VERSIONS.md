@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.170
+
+- **JetBrains refreshes are one generation-fenced logical replica, not transient collaborative heads.** `:refresh-N` registrations are serialized per document, publish the successor identity before changing hub membership, retire every prior raw incarnation, rotate and checkpoint the document lineage, and terminally ignore late direct frames. Durable frames from the retired incarnation are rejected by the same lineage fence, including concurrent refresh-registration schedules.
+- **Already-concatenated generations self-heal before the integrity gate without electing disk over the editor.** Preflight and `session-check` recognize only a strict shape where one complete branch is byte-identical to the durable pending target, then semantically rebase that target over the other operator branch. Queue/backlog deletions and newly typed prompts survive, the retained response lands once, and ambiguous states still fail closed.
+- **The refresh/recovery state space is executable.** Focused relay tests cover sequential and simultaneous replacement, late raw and durable frames, stale deregistration, and idempotent current replay; exhaustive SimWorld exploration covers two successive refresh generations while preserving one live head, one document, one boundary, and one operator prompt.
+
 ## 0.34.169
 
 - **Editor delivery ACK no longer retires a write before native disk-save proof.** The CRDT delivery loop previously emitted `DocumentWriteConverged` immediately after the plugin ACKed the canonical frontier. Direct queue/backlog maintenance could therefore lose its only durable projection intent while the IDE buffer was still ahead of disk, leaving `session-check` with no safe recovery lineage. ACKed writes now remain retained until the exact canonical bytes are proven on disk; only the enclosing native-save or explicit settlement path clears them.

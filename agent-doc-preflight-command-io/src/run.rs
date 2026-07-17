@@ -124,7 +124,11 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     // through Lazily before the generic integrity gate; otherwise the gate
     // blocks the recovery that can safely collapse it.
     if let Some(normalized) =
-        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(&content)
+        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+            file,
+            &content,
+            "preflight_response_replay_dedup",
+        )?
     {
         agent_doc_document_realtime_io::atomic_write_through_authority(file, &normalized)?;
         content = resolve_current_preflight_document(file, "after_response_replay_dedup")?;

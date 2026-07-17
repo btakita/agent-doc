@@ -978,7 +978,11 @@ fn self_heal_response_replay_duplication(
         "session_check_response_replay_dedup_current",
     )?;
     let Some(normalized) =
-        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication(&current)
+        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+            file,
+            &current,
+            "session_check_response_replay_dedup",
+        )?
     else {
         return Ok(false);
     };

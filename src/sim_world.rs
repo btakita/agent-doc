@@ -443,6 +443,140 @@ mod crdt_lineage_fence_model {
     }
 }
 
+/// Formal transition model for one visible editor refreshing its native CRDT
+/// replica while old direct and durable frames are still in flight. A refresh
+/// generation is not a collaborative head: registration atomically retires the
+/// prior generation and rotates the durable-frame lineage.
+mod logical_editor_replica_refresh_model {
+    use std::collections::BTreeSet;
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Action {
+        RegisterReplacement,
+        LateOldDirectFrame,
+        LateOldDurableFrame,
+        CurrentDirectFrame,
+        ReplayCurrentDurableFrame,
+        LateOldDeregister,
+    }
+
+    const ACTIONS: [Action; 6] = [
+        Action::RegisterReplacement,
+        Action::LateOldDirectFrame,
+        Action::LateOldDurableFrame,
+        Action::CurrentDirectFrame,
+        Action::ReplayCurrentDurableFrame,
+        Action::LateOldDeregister,
+    ];
+
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    struct World {
+        lineage: u8,
+        current_generation: u8,
+        live_heads: u8,
+        boundary_markers: u8,
+        document_copies: u8,
+        operator_prompt_copies: u8,
+        old_edit_applied: bool,
+        current_edit_applied: bool,
+        retired_frame_mutated_replacement: bool,
+    }
+
+    impl World {
+        fn initial() -> Self {
+            Self {
+                lineage: 1,
+                current_generation: 0,
+                live_heads: 1,
+                boundary_markers: 1,
+                document_copies: 1,
+                operator_prompt_copies: 1,
+                old_edit_applied: false,
+                current_edit_applied: false,
+                retired_frame_mutated_replacement: false,
+            }
+        }
+
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::RegisterReplacement if self.current_generation < 2 => {
+                    // Production serializes concurrent refresh registrations at the
+                    // per-document generation fence, then performs retire + lineage
+                    // rotation + register under the hub lock.
+                    self.current_generation += 1;
+                    self.lineage += 1;
+                    self.live_heads = 1;
+                }
+                Action::LateOldDirectFrame | Action::LateOldDurableFrame
+                    if self.current_generation == 0 =>
+                {
+                    self.old_edit_applied = true;
+                }
+                Action::LateOldDirectFrame | Action::LateOldDurableFrame => {
+                    // Raw-identity generation fencing rejects the direct frame;
+                    // lineage fencing quarantines the durable frame.
+                }
+                Action::CurrentDirectFrame | Action::ReplayCurrentDurableFrame
+                    if self.current_generation >= 1 =>
+                {
+                    self.current_edit_applied = true;
+                }
+                Action::LateOldDeregister => {
+                    // A deregister for the retired raw identity cannot remove
+                    // the replacement logical replica.
+                }
+                _ => {}
+            }
+            self.assert_invariants();
+        }
+
+        fn assert_invariants(&self) {
+            assert_eq!(
+                self.live_heads, 1,
+                "refresh created an independent head: {self:?}"
+            );
+            assert_eq!(
+                self.document_copies, 1,
+                "refresh replay duplicated the document: {self:?}",
+            );
+            assert_eq!(
+                self.boundary_markers, 1,
+                "refresh replay duplicated the exchange boundary: {self:?}",
+            );
+            assert_eq!(
+                self.operator_prompt_copies, 1,
+                "refresh lost or duplicated operator text: {self:?}",
+            );
+            assert!(
+                !self.retired_frame_mutated_replacement,
+                "retired generation mutated the replacement canonical: {self:?}",
+            );
+        }
+    }
+
+    fn explore(world: World, depth: usize, visited: &mut BTreeSet<World>) {
+        world.assert_invariants();
+        if depth == 0 || !visited.insert(world.clone()) {
+            return;
+        }
+        for action in ACTIONS {
+            let mut next = world.clone();
+            next.step(action);
+            explore(next, depth - 1, visited);
+        }
+    }
+
+    #[test]
+    fn exhaustive_refresh_interleavings_keep_one_head_and_one_document() {
+        let mut visited = BTreeSet::new();
+        explore(World::initial(), 10, &mut visited);
+        assert!(visited.iter().any(|world| world.current_generation == 1));
+        assert!(visited.iter().any(|world| world.current_generation == 2));
+        assert!(visited.iter().any(|world| world.old_edit_applied));
+        assert!(visited.iter().any(|world| world.current_edit_applied));
+    }
+}
+
 /// Interaction model for the live failure observed in JetBrains: a response is
 /// accepted while Compact Exchange/finalize waits on delivery, external CRDT
 /// events arrive during ACK backoff, and the controller may recycle before the

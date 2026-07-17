@@ -52,7 +52,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -293,6 +293,23 @@ fn replica_identity_registry() -> &'static Mutex<HashMap<String, HashMap<u64, St
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Serialize logical-generation replacement for one document. Identity
+/// metadata is the generation fence read by update handlers, while the hub is
+/// the membership/canonical store; without this small per-document critical
+/// section two concurrent refresh registrations can both observe the old head
+/// and install themselves as independent successors.
+fn replica_registration_lock(document_hash: &str) -> Result<Arc<Mutex<()>>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    let mut locks = LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|e| anyhow::anyhow!("replica registration lock registry poisoned: {e}"))?;
+    Ok(locks
+        .entry(document_hash.to_string())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone())
+}
+
 /// Extract the owning process id from identities minted by editor integrations.
 /// Both integrations append document/refresh suffixes after their stable
 /// `editor-pid-uuid` prefix, so only the decimal field immediately after the
@@ -306,6 +323,68 @@ fn editor_process_id(identity: &str) -> Option<u32> {
         return None;
     }
     pid.parse().ok()
+}
+
+/// Stable logical identity shared by successive native-replica incarnations of
+/// one editor document. JetBrains appends `:refresh-N` while swapping a fresh
+/// native replica into the same visible editor; that suffix is a generation,
+/// not an independent collaborative head.
+fn logical_replica_identity(identity: &str) -> &str {
+    let Some((base, suffix)) = identity.rsplit_once(":refresh-") else {
+        return identity;
+    };
+    if !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+        base
+    } else {
+        identity
+    }
+}
+
+fn superseded_logical_replica_ids(
+    document_hash: &str,
+    identity: &str,
+    client_id: u64,
+) -> Result<Vec<u64>> {
+    let registry = replica_identity_registry()
+        .lock()
+        .map_err(|e| anyhow::anyhow!("replica identity registry poisoned: {e}"))?;
+    let logical = logical_replica_identity(identity);
+    Ok(registry
+        .get(document_hash)
+        .into_iter()
+        .flat_map(|members| members.iter())
+        .filter_map(|(registered_id, registered_identity)| {
+            (*registered_id != client_id
+                && logical_replica_identity(registered_identity) == logical)
+                .then_some(*registered_id)
+        })
+        .collect())
+}
+
+/// A missing raw client id may auto-heal only when no newer generation of the
+/// same logical editor is registered. Otherwise a late update from the retired
+/// forwarder would resurrect it as a second head.
+fn logical_replica_generation_is_current(
+    document_hash: &str,
+    identity: &str,
+    client_id: u64,
+) -> Result<bool> {
+    let registry = replica_identity_registry()
+        .lock()
+        .map_err(|e| anyhow::anyhow!("replica identity registry poisoned: {e}"))?;
+    let Some(members) = registry.get(document_hash) else {
+        return Ok(true);
+    };
+    if members
+        .get(&client_id)
+        .is_some_and(|registered| registered == identity)
+    {
+        return Ok(true);
+    }
+    let logical = logical_replica_identity(identity);
+    Ok(!members.iter().any(|(registered_id, registered_identity)| {
+        *registered_id != client_id && logical_replica_identity(registered_identity) == logical
+    }))
 }
 
 fn dead_editor_replica_ids(
@@ -1390,16 +1469,34 @@ fn register_replica_for_file_with_liveness(
         return Ok(None);
     }
     let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let registration_lock = replica_registration_lock(&document_hash)?;
+    let _registration_guard = registration_lock
+        .lock()
+        .map_err(|e| anyhow::anyhow!("replica registration lock poisoned: {e}"))?;
     let client_id = mint_client_id(identity);
     // Gather under the metadata lock, then release it before taking the hub
     // lock. This lock order is deliberate: registration and deregistration can
     // never deadlock each other by holding both registries at once.
     let dead_client_ids = dead_editor_replica_ids(&document_hash, is_pid_live)?;
-    let bootstrap = with_hub_seeded_from_file(file, |hub| {
-        for dead_client_id in &dead_client_ids {
-            hub.deregister(*dead_client_id);
+    let superseded_client_ids =
+        superseded_logical_replica_ids(&document_hash, identity, client_id)?;
+    let mut retired_client_ids = dead_client_ids.clone();
+    retired_client_ids.extend(superseded_client_ids.iter().copied());
+    retired_client_ids.sort_unstable();
+    retired_client_ids.dedup();
+    // Publish the new logical generation before changing hub membership. From
+    // this point a late frame from the retired forwarder is fenced. A new-
+    // generation update racing the remainder of registration can safely exercise
+    // the existing idempotent reattach path against the same client id.
+    record_replica_identity(&document_hash, client_id, identity, &retired_client_ids)?;
+    let (bootstrap, replacement_projection) = with_hub_seeded_from_file(file, |hub| {
+        for retired_client_id in &retired_client_ids {
+            hub.deregister(*retired_client_id);
         }
-        if hub.is_registered(client_id) {
+        if !superseded_client_ids.is_empty() {
+            hub.fence_replica_generation();
+        }
+        let bootstrap = if hub.is_registered(client_id) {
             // Idempotent re-register (e.g. an editor reconnect that re-announces
             // the same stable identity): reconnect/sync the existing mirror, then
             // return the current canonical bootstrap state.
@@ -1408,9 +1505,14 @@ fn register_replica_for_file_with_liveness(
         } else {
             hub.register(client_id)
                 .map(|()| hub.canonical_encoded_state())
-        }
+        }?;
+        let replacement_projection = (!superseded_client_ids.is_empty())
+            .then(|| (hub.canonical_encoded_state(), hub.lineage().to_string()));
+        Ok::<_, anyhow::Error>((bootstrap, replacement_projection))
     })??;
-    record_replica_identity(&document_hash, client_id, identity, &dead_client_ids)?;
+    if let Some((projection, lineage)) = replacement_projection {
+        save_crdt_projection_with_lineage(file, &projection, &lineage)?;
+    }
     // Editor attach is an explicit event → drive the reactive open-docs authority.
     mark_editor_open_docs_open(file);
     // Seed the legacy process-exit watcher from durable reliable-sync open pids.
@@ -1418,11 +1520,13 @@ fn register_replica_for_file_with_liveness(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={} dead_members_pruned={}",
+            "crdt_replica_register file={} authority=multi_replica client_id={} bootstrap_bytes={} dead_members_pruned={} superseded_generations_pruned={} generation_fenced={}",
             file.display(),
             client_id,
             bootstrap.len(),
             dead_client_ids.len(),
+            superseded_client_ids.len(),
+            !superseded_client_ids.is_empty(),
         ),
     );
     Ok(Some((client_id, bootstrap)))
@@ -1479,6 +1583,27 @@ pub fn relay_replica_update_for_file(
         return Ok(None);
     }
     let client_id = mint_client_id(identity);
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    if !logical_replica_generation_is_current(&document_hash, identity, client_id)? {
+        let canonical_len =
+            with_hub_seeded_from_file(file, |hub| hub.canonical_text().chars().count())?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_replica_stale_generation_ignored file={} authority=multi_replica client_id={} logical_identity={} canonical_len={} recovery=fence_retired_forwarder",
+                file.display(),
+                client_id,
+                logical_replica_identity(identity),
+                canonical_len,
+            ),
+        );
+        return Ok(Some(FanOut {
+            origin: client_id,
+            update: Vec::new(),
+            targets: Vec::new(),
+            canonical_len,
+        }));
+    }
     // Zero-member relay auto-heal: after a
     // controller/supervisor recycle (`#statedbgc`), the in-process `hub_registry`
     // restarts empty and the hub is rebuilt from the durable `.yrs` projection with
@@ -3354,6 +3479,20 @@ mod tests {
     }
 
     #[test]
+    fn logical_replica_identity_collapses_only_numeric_refresh_generations() {
+        let base = "jetbrains-1234-a1b2:/tmp/doc.md";
+        assert_eq!(logical_replica_identity(base), base);
+        assert_eq!(
+            logical_replica_identity("jetbrains-1234-a1b2:/tmp/doc.md:refresh-89"),
+            base,
+        );
+        assert_eq!(
+            logical_replica_identity("jetbrains-1234-a1b2:/tmp/doc.md:refresh-next"),
+            "jetbrains-1234-a1b2:/tmp/doc.md:refresh-next",
+        );
+    }
+
+    #[test]
     fn replacement_registration_prunes_dead_editor_members_before_delivery_barrier() {
         let (_dir, doc) = temp_doc("dead-editor-member.md");
         let file_str = doc.display().to_string();
@@ -3393,6 +3532,171 @@ mod tests {
             assert!(hub.is_registered(replacement_id));
             assert_eq!(hub.live_count(), 1);
             assert!(hub.delivery_converged());
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn refresh_replaces_one_logical_replica_and_fences_both_late_frame_paths() {
+        let (_dir, doc) = temp_doc("logical-refresh-fence.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let base_identity = format!(
+            "jetbrains-{}-logical-refresh:/tmp/logical-refresh-fence.md",
+            std::process::id(),
+        );
+        let (old_id, old_bootstrap) =
+            register_replica_for_file_with_liveness(&doc, &base_identity, |_| true)
+                .unwrap()
+                .expect("initial logical replica should attach");
+        let old_lineage = current_lineage_for_file(&doc)
+            .unwrap()
+            .expect("initial lineage");
+        let old_replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(old_id, &old_bootstrap).unwrap();
+        let old_frontier = old_replica.state_vector();
+        let old_len = old_replica.text().chars().count() as u32;
+        old_replica.apply_local_edit(old_len, 0, "late retired generation\n");
+        let late_delta = old_replica.diff(&old_frontier).unwrap();
+
+        let refresh_identity = format!("{base_identity}:refresh-1");
+        let (refresh_id, refresh_bootstrap) =
+            register_replica_for_file_with_liveness(&doc, &refresh_identity, |_| true)
+                .unwrap()
+                .expect("replacement logical replica should attach");
+        let refresh_lineage = current_lineage_for_file(&doc)
+            .unwrap()
+            .expect("replacement lineage");
+        assert_ne!(old_lineage, refresh_lineage);
+        with_hub(&doc, |hub| {
+            assert!(!hub.is_registered(old_id));
+            assert!(hub.is_registered(refresh_id));
+            assert_eq!(hub.live_count(), 1);
+        })
+        .unwrap();
+
+        let clean = current_text_for_file(&doc).unwrap();
+        let clean = match clean {
+            CurrentText::Current { text, .. } => text,
+            other => panic!("expected relay current text, got {other:?}"),
+        };
+        let clean_boundary_count = clean.matches("agent:boundary:").count();
+        let ignored = relay_replica_update_for_file(&doc, &base_identity, &late_delta)
+            .unwrap()
+            .expect("stale generation is terminally acknowledged");
+        assert!(ignored.update.is_empty());
+        assert!(ignored.targets.is_empty());
+        assert_eq!(
+            apply_document_op_delta_for_file_in_lineage(&doc, Some(&old_lineage), &late_delta,)
+                .unwrap(),
+            Some(DocumentOpDeltaOutcome::StaleLineage),
+        );
+        with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), clean)).unwrap();
+
+        let refresh_replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(refresh_id, &refresh_bootstrap)
+                .unwrap();
+        let refresh_frontier = refresh_replica.state_vector();
+        let refresh_len = refresh_replica.text().chars().count() as u32;
+        refresh_replica.apply_local_edit(refresh_len, 0, "current operator edit\n");
+        let current_delta = refresh_replica.diff(&refresh_frontier).unwrap();
+        relay_replica_update_for_file(&doc, &refresh_identity, &current_delta)
+            .unwrap()
+            .expect("current generation update should relay");
+        // A durable replay of the same frame is idempotent in the current
+        // lineage and can never append a second document copy.
+        assert_eq!(
+            apply_document_op_delta_for_file_in_lineage(
+                &doc,
+                Some(&refresh_lineage),
+                &current_delta,
+            )
+            .unwrap(),
+            Some(DocumentOpDeltaOutcome::Applied { changed: false }),
+        );
+        with_hub(&doc, |hub| {
+            let canonical = hub.canonical_text();
+            assert_eq!(canonical.matches("current operator edit").count(), 1);
+            assert_eq!(
+                canonical.matches("agent:boundary:").count(),
+                clean_boundary_count,
+            );
+            assert!(!canonical.contains("late retired generation"));
+            assert_eq!(hub.live_count(), 1);
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn concurrent_refresh_registrations_elect_one_logical_successor() {
+        let (_dir, doc) = temp_doc("concurrent-logical-refresh.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let base_identity = format!(
+            "jetbrains-{}-concurrent-refresh:/tmp/concurrent-logical-refresh.md",
+            std::process::id(),
+        );
+        register_replica_for_file_with_liveness(&doc, &base_identity, |_| true)
+            .unwrap()
+            .expect("initial logical replica should attach");
+
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let mut handles = Vec::new();
+        for generation in [1, 2] {
+            let doc = doc.clone();
+            let identity = format!("{base_identity}:refresh-{generation}");
+            let thread_barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                thread_barrier.wait();
+                let (client_id, bootstrap) =
+                    register_replica_for_file_with_liveness(&doc, &identity, |_| true)
+                        .unwrap()
+                        .expect("concurrent replacement should attach");
+                (identity, client_id, bootstrap)
+            }));
+        }
+        barrier.wait();
+        let registrations = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect::<Vec<_>>();
+
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let current_id = {
+            let registry = replica_identity_registry().lock().unwrap();
+            let members = registry.get(&document_hash).expect("identity metadata");
+            let logical_members = members
+                .iter()
+                .filter(|(_, identity)| logical_replica_identity(identity) == base_identity)
+                .map(|(client_id, _)| *client_id)
+                .collect::<Vec<_>>();
+            assert_eq!(logical_members.len(), 1);
+            logical_members[0]
+        };
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.live_count(), 1);
+            assert!(hub.is_registered(current_id));
+        })
+        .unwrap();
+
+        let (retired_identity, retired_id, retired_bootstrap) = registrations
+            .iter()
+            .find(|(_, client_id, _)| *client_id != current_id)
+            .expect("one concurrent generation must be retired");
+        let retired_replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(*retired_id, retired_bootstrap)
+                .unwrap();
+        let frontier = retired_replica.state_vector();
+        let len = retired_replica.text().chars().count() as u32;
+        retired_replica.apply_local_edit(len, 0, "late concurrent generation\n");
+        let late_delta = retired_replica.diff(&frontier).unwrap();
+        let ignored = relay_replica_update_for_file(&doc, retired_identity, &late_delta)
+            .unwrap()
+            .expect("retired generation is terminally ignored");
+        assert!(ignored.update.is_empty());
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.live_count(), 1);
+            assert!(!hub.canonical_text().contains("late concurrent generation"));
         })
         .unwrap();
     }

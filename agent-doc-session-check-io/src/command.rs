@@ -343,14 +343,10 @@ pub fn run_with_options(
         )? {
             return Err(error);
         }
-        let recovered = crate::resolve_current_document_content(
+        validate_integrity_after_captured_resume(
             file,
             "session_check_integrity_gate_after_captured_resume",
-        )?;
-        agent_doc_lint_io::validate_integrity_on_content_with_logger(
-            file,
-            &recovered,
-            agent_doc_ops_log_io::log_op,
+            effects,
         )?;
     }
     let mut authority_content =
@@ -367,18 +363,14 @@ pub fn run_with_options(
         &disk_content,
         effects,
     )? {
-        authority_content = crate::resolve_current_document_content(
+        authority_content = validate_integrity_after_captured_resume(
             file,
             "session_check_terminal_convergence_after_captured_resume",
+            effects,
         )?;
         disk_content = crate::resolve_disk_document_content(
             file,
             "session_check_terminal_convergence_after_captured_resume",
-        )?;
-        agent_doc_lint_io::validate_integrity_on_content_with_logger(
-            file,
-            &authority_content,
-            agent_doc_ops_log_io::log_op,
         )?;
     }
     ensure_terminal_authority_disk_convergence(file, &authority_content, &disk_content, effects)?;
@@ -969,6 +961,21 @@ fn self_heal_response_replay_duplication(
         ),
     );
     Ok(true)
+}
+
+fn validate_integrity_after_captured_resume(
+    file: &Path,
+    source: &str,
+    effects: &impl SessionCheckEffects,
+) -> Result<String> {
+    self_heal_response_replay_duplication(file, effects)?;
+    let recovered = crate::resolve_current_document_content(file, source)?;
+    agent_doc_lint_io::validate_integrity_on_content_with_logger(
+        file,
+        &recovered,
+        agent_doc_ops_log_io::log_op,
+    )?;
+    Ok(recovered)
 }
 
 pub fn enforce_clean_closeout(file: &Path, effects: &impl SessionCheckEffects) -> Result<()> {
@@ -2026,6 +2033,35 @@ mod terminal_convergence_tests {
         assert!(healed.contains("❯ operator prompt"));
         assert!(healed.contains("Retained response."));
         agent_doc_lint_io::validate_structure_on_content(&file, &healed).unwrap();
+    }
+
+    #[test]
+    fn captured_resume_normalizes_replay_boundary_before_revalidation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let replayed = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ operator prompt\n",
+            "<!-- agent:boundary:stale -->\n",
+            "### Re: retained — gpt-5\n\nRetained response.\n",
+            "<!-- agent:boundary:latest -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, replayed).unwrap();
+
+        let recovered = validate_integrity_after_captured_resume(
+            &file,
+            "test_post_resume_integrity",
+            &TestEffects,
+        )
+        .expect("post-resume validation should first normalize replay artifacts");
+
+        assert_eq!(recovered.matches("agent:boundary:").count(), 1);
+        assert!(recovered.contains("agent:boundary:latest"));
+        assert!(recovered.contains("❯ operator prompt"));
+        assert!(recovered.contains("Retained response."));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), recovered);
     }
 
     #[test]

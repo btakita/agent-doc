@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.166
+
+- **Retained replay normalization now runs after replay, not only before it.** Live proof on `agent-doc-bugs2.md` showed canonical Lazily authority was structurally valid with one boundary at `session-check` entry; the retained response resume then created the second boundary later in the same call, after the entry normalizer had already passed. Both captured-resume validation branches now normalize the replay result before their integrity check, preserving the operator cut while preventing the resumed delivery from blocking itself.
+- **Post-resume ordering has a dedicated regression.** The session-check fixture starts from the exact replayed two-boundary shape and proves the shared post-resume validator retains the latest frontier, operator prompt, and response before accepting integrity. The existing TLA+ model already permits duplicate-boundary replay at any point, requires fair normalization, and forbids commit while two boundaries exist.
+
 ## 0.34.165
 
 - **A replay-created second exchange boundary can no longer block its own recovery.** Before the generic integrity gate, session-check and preflight now have a strict fallback for exactly two standalone protocol boundaries inside one parseable exchange: the earlier stale frontier is removed, the latest is retained, and the result is accepted only when the complete projection becomes valid. The current Lazily/editor cut remains byte-stable otherwise, preserving prompts and unsaved queue/backlog deletions.

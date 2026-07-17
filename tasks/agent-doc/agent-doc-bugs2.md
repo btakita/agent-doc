@@ -417,7 +417,7 @@ Live Haiven verification also advanced past the prior malformed-tree gate. A fre
 The fresh route/controller supervisor stderr fix shipped in agent-doc v0.34.163 (`523e422c9`): stderr is redirected before process startup, and the process regression proves boot diagnostics cannot bleed into the agent pane. The subsequent editor-authority recovery fixes shipped through v0.34.165 (`4a437cb87`), which is pushed, tagged, installed, reloaded, and recycled. The full `make check` suite and TLA+ models pass.
 
 No actionable follow-up remains for this item.
-<!-- agent:boundary:1e1fc0ec -->
+<!-- agent:boundary:91647dd8 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -468,7 +468,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required
 ```
 ~~~
-- ~~📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~t
+- ~~~~📌 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active.~~t~~ — auto-struck: answered this cycle (#ftstrike)
 - ~~📌 haiven.md response was not committed.~~
 - ~~📌 Please look at the remaining queue items & the backlog. Many of these items are likely stale. Please close anything that is stale as moot and keep anything still relevant.~~
 - ~~📌 do [#zqv8]~~
@@ -479,12 +479,12 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~📌 do [#idlewatchturnactive]~~
 - ⏭️ 📌 do [#jblocalhistverify]
 - ⏭️ 📌 do [#compactcrdtretry]
-- 📌 do [#capturebacklogatomic]
+- ⏭️ 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
 - ~~📌 do [#tmuxfocusfollow]~~
 - ~~📌 do [#clippy197cleanup]~~
 - 📌 do [#jbtsiftnosub2verify]
-- 🚧 📌 do [#restartstderrbleed2]
+- ~~📌 do [#restartstderrbleed2]~~
 - 📌 do [#5bzd]
 - 📌 do [#sidecarstate]
 - 📌 do [#64we]
@@ -519,7 +519,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ 📌 do [#compactcrdtretry]
 - ⏭️ 📌 do [#jblocalhistverify]
 - ⏭️ 📌 do [#compactcrdtretry]
-- 📌 do [#capturebacklogatomic]
+- ⏭️ 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
 <!-- /agent:queue -->
 

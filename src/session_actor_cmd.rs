@@ -4240,6 +4240,21 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
     }
 
     #[test]
+    fn live_pane_prompt_ready_accepts_idle_claude_with_artifact_attachment_chip() {
+        let harness = agent_doc_harness::HarnessConfig::claude();
+        let idle = concat!(
+            "────────────────────\n",
+            "❯\n",
+            "────────────────────\n",
+            "  Opus 4.8 ctx:24% ~/work/project main brian@host\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n",
+            "  ⧉  arbitrary-session-artifact-label\n",
+        );
+
+        assert!(live_pane_prompt_ready(&harness, idle));
+    }
+
+    #[test]
     fn live_pane_prompt_ready_rejects_busy_claude_turn() {
         let harness = agent_doc_harness::HarnessConfig::claude();
         // Mid-turn: spinner above an otherwise-idle-looking composer. The busy cue

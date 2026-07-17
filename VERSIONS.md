@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.171
+
+- **A first-phase `[x]` completion cannot block its own retained closeout as a resurrection.** The reaped-item guard now distinguishes terminal `Done` state from a genuinely reopened `Open`/`Gated` copy. The same-capture retry therefore proceeds from mark to archive instead of repeatedly refusing the still-visible two-phase checkbox, while a stale editor that actually reopens the item remains fail-closed.
+- **Claude artifact attachments no longer make an idle pane look busy.** A bare `⧉ <label>` attachment chip is generic idle composer chrome, independent of its session-owned label, so JetBrains `Run Agent Doc` finds the earlier `❯`/permissions composer and dispatches normally. The actual online-artifact picker (`Enter to open` plus its artifact URL) remains a typed operator-owned blocker and receives no injected keys.
+
 ## 0.34.170
 
 - **JetBrains refreshes are one generation-fenced logical replica, not transient collaborative heads.** `:refresh-N` registrations are serialized per document, publish the successor identity before changing hub membership, retire every prior raw incarnation, rotate and checkpoint the document lineage, and terminally ignore late direct frames. Durable frames from the retired incarnation are rejected by the same lineage fence, including concurrent refresh-registration schedules.

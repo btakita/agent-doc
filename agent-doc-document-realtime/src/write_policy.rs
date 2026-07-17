@@ -2405,7 +2405,10 @@ pub fn detect_reintroduced_reaped_pending_ids(
     {
         let (_, items, _) = agent_doc_element_backlog::backlog::parse_items(component.content(doc));
         for item in items {
-            if !item.id.is_empty() && reaped_ids.contains(&item.id) && seen.insert(item.id.clone())
+            if item.state != agent_doc_element_backlog::backlog::PendingState::Done
+                && !item.id.is_empty()
+                && reaped_ids.contains(&item.id)
+                && seen.insert(item.id.clone())
             {
                 reintroduced.push(item.id);
             }
@@ -4540,6 +4543,29 @@ Working.
             &candidate,
             |_, _, _| Some("<<<<<<< conflict\n>>>>>>>".to_string())
         ));
+    }
+
+    #[test]
+    fn reintroduced_reaped_guard_accepts_done_mark_and_rejects_live_reopen() {
+        let reaped_ids = HashSet::from(["5bzd".to_string()]);
+        let marked_done = concat!(
+            "<!-- agent:backlog -->\n",
+            "- [x] [#5bzd] completed routing fix\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        assert_eq!(
+            detect_reintroduced_reaped_pending_ids(marked_done, &reaped_ids).unwrap(),
+            Vec::<String>::new(),
+            "the first --done phase is terminal work, not a stale editor resurrection"
+        );
+
+        let reopened = marked_done.replace("- [x]", "- [ ]");
+        assert_eq!(
+            detect_reintroduced_reaped_pending_ids(&reopened, &reaped_ids).unwrap(),
+            vec!["5bzd".to_string()],
+            "only an active/gated copy should block closeout as reintroduced"
+        );
     }
 }
 

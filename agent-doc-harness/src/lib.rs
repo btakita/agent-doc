@@ -284,7 +284,9 @@ impl HarnessConfig {
             // status line — never the active-turn spinner — matches; combined with
             // the Claude busy cue (checked first in `live_pane_prompt_ready`), this
             // can only surface the composer for panes with no active turn.
-            "claude" => is_claude_status_chrome_line(trimmed),
+            "claude" => {
+                is_claude_status_chrome_line(trimmed) || is_claude_artifact_attachment_line(trimmed)
+            }
             _ => false,
         }
     }
@@ -861,6 +863,17 @@ fn claude_artifact_picker_open(recent_lower: &[String]) -> bool {
             .iter()
             .take(5)
             .any(|line| line.contains("enter to open"))
+}
+
+/// A completed Claude online artifact remains attached to the idle composer as
+/// a `⧉ <label>` chip. The label is session-owned and arbitrary; the icon is the
+/// stable UI shape. This is idle composer chrome, unlike the artifact picker,
+/// whose separate `Enter to open` + artifact URL shape remains a typed blocker.
+fn is_claude_artifact_attachment_line(line: &str) -> bool {
+    line.strip_prefix('⧉').is_some_and(|label| {
+        let label = label.trim();
+        !label.is_empty() && !label.to_ascii_lowercase().contains("enter to open")
+    })
 }
 
 /// True for a Claude working-spinner line: a spinner glyph at the start, a gerund
@@ -1507,6 +1520,27 @@ mod tests {
         assert!(
             !h.is_dispatch_ready_prompt_line("hub-benchmarks · Enter to open"),
             "artifact selection must never be treated as an injectable composer"
+        );
+    }
+
+    #[test]
+    fn claude_attached_artifact_chip_is_idle_composer_chrome() {
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "────────────────────────────────────────\n",
+            "❯\n",
+            "────────────────────────────────────────\n",
+            "  Opus 4.8 ctx:24% ~/work/project main brian@host\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n",
+            "  ⧉  arbitrary-session-artifact-label\n",
+        );
+
+        assert!(h.is_ignorable_output_line("⧉ arbitrary label"));
+        assert_eq!(h.dispatch_blocker_reason(pane), None);
+        let candidate = h.last_prompt_candidate(pane).unwrap();
+        assert!(
+            h.is_dispatch_ready_prompt_line(&candidate),
+            "attachment chip must be skipped to the idle composer: {candidate:?}"
         );
     }
 

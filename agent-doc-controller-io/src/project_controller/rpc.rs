@@ -8197,7 +8197,7 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    {
+    let dead_open_pids = {
         let mut plane = controller_liveness_plane()
             .lock()
             .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
@@ -8207,11 +8207,29 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
         for cursor in &snapshot.cursors {
             plane.restore_cursor(&cursor.document_hash, cursor.ack_through);
         }
-    }
+        plane
+            .projection()
+            .all_open_pids()
+            .into_iter()
+            .filter(|pid| {
+                u32::try_from(*pid)
+                    .ok()
+                    .is_none_or(|pid| !agent_doc_plugin_owner::plugin_owner_pid_is_live(pid))
+            })
+            .collect::<Vec<_>>()
+    };
     restored_reliable_sync_projects()
         .lock()
         .map_err(|_| anyhow::anyhow!("reliable-sync restored-project set poisoned"))?
         .insert(project_key);
+    // A process can die while the controller is down, so its exit watcher never
+    // gets a chance to publish Alive(false). Reconcile those durable Open facts
+    // once at hydration and record the death through the same durable LWW path
+    // as a live exit event. This prevents a dead IDE pid from retaining editor
+    // authority forever after controller/IDE restart.
+    for pid in dead_open_pids {
+        record_reliable_sync_editor_exit(project_root, pid);
+    }
     Ok(())
 }
 
@@ -8275,7 +8293,16 @@ fn handle_reliable_sync_status(
     let plane_live = projection.live_docs();
     let per_doc_pids: Vec<(String, Vec<u64>)> = plane_open
         .iter()
-        .map(|doc| (doc.clone(), projection.open_pids(doc).into_iter().collect()))
+        .map(|doc| {
+            (
+                doc.clone(),
+                projection
+                    .open_pids(doc)
+                    .into_iter()
+                    .filter(|pid| projection.pid_alive(*pid))
+                    .collect(),
+            )
+        })
         .collect();
     let registrations = projection.all_live_registrations();
     let plane_open_paths: Vec<(String, Option<String>)> = plane_open
@@ -13422,7 +13449,7 @@ mod tests {
     }
 
     #[test]
-    fn crdt_current_text_rpc_recovers_projection_when_requested() {
+    fn crdt_current_text_rpc_does_not_promote_projection_when_editor_is_attached() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
@@ -13472,22 +13499,22 @@ mod tests {
                 .get("data")
                 .and_then(|data| data.get("status"))
                 .and_then(|status| status.as_str()),
-            Some("current")
+            Some("editor_attached_model_missing")
         );
         assert_eq!(
             envelope
                 .get("data")
                 .and_then(|data| data.get("text"))
                 .and_then(|text| text.as_str()),
-            Some("controller projection")
+            None
         );
         assert!(!should_stop);
         let ops_log =
             std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default();
         assert!(
-            ops_log.contains("crdt_current_text_projection_recovered")
-                && ops_log.contains("status=current"),
-            "controller should recover the durable projection on explicit request:\n{ops_log}"
+            !ops_log.contains("crdt_current_text_projection_recovered")
+                && ops_log.contains("status=editor_attached_model_missing"),
+            "an attached editor must republish; the controller must not promote a durable projection:\n{ops_log}"
         );
     }
 

@@ -388,10 +388,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             try {
                 val text = editorText ?: ApplicationManager.getApplication().runReadAction<String> { document.text }
                 chars = text.length
-                val deferredReconnect = if (forceRefresh) {
-                    NativePatching.deferredWriteReconnectContent(filePath, text)
-                } else null
-                val registrationText = deferredReconnect ?: text
+                // The open IntelliJ Document is the live authority. A forced refresh
+                // must never install a retained whole-document target before the
+                // replacement replica exists: that target may predate unsaved operator
+                // prompts/deletions and saving it here makes the loss durable. Register
+                // from this exact editor cut, then let binary-owned semantic intents
+                // replay granularly over the new baseline.
+                val registrationText = text
                 val registrationState = templateStructureState(filePath, registrationText, "replica-registration")
                 if (!replicaRegistrationStructureAcceptedUtil(registrationState)) {
                     log.warn(
@@ -400,30 +403,17 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     )
                     return@attach false
                 }
-                if (registrationText != text &&
-                    !installDeferredReconnectContent(filePath, document, text, registrationText)
-                ) {
-                    log.info(
-                        "[crdt-replica] deferred open-document reconnect for ${File(filePath).name}; " +
-                            "the visible editor advanced before the canonical target could be installed",
-                    )
-                    return@attach false
-                }
                 chars = registrationText.length
-                if (forceRefresh && deferredReconnect != null) {
-                    forwarders.remove(filePath)?.deregister()
-                }
-                shadows[filePath] = registrationText
                 val forwarder = forwarderFor(
                     filePath,
                     registrationText,
                     bypassRegisterBackoff = forceRefresh,
+                    replaceCached = forceRefresh,
+                    expectedEditorTextAtSwap = if (forceRefresh) registrationText else null,
                 )
                 (forwarder != null).also { attached ->
                     if (attached) {
-                        if (deferredReconnect != null) {
-                            NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
-                        }
+                        shadows[filePath] = registrationText
                         requestRemoteDrain(filePath, "open-document")
                     }
                 }
@@ -479,57 +469,6 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             log.warn("[crdt-replica] closing editor cut publish failed for $filePath: ${e.message}")
             false
         }
-    }
-
-    private fun installDeferredReconnectContent(
-        filePath: String,
-        document: Document,
-        expectedText: String,
-        canonical: String,
-    ): Boolean {
-        if (hasPendingLocal(filePath)) return false
-        var installed = false
-        ApplicationManager.getApplication().invokeAndWait {
-            val targetFile = FileDocumentManager.getInstance().getFile(document) ?: return@invokeAndWait
-            if (!refreshCleanDocumentBeforeRemoteApply(filePath, targetFile, document)) {
-                return@invokeAndWait
-            }
-            val before = document.text
-            if (before == canonical) {
-                shadows[filePath] = canonical
-                installed = persistRemoteCrdtTextIfSafe(
-                    filePath,
-                    document,
-                    expectedText,
-                    canonical,
-                )
-                return@invokeAndWait
-            }
-            if (before != expectedText || hasPendingLocal(filePath)) return@invokeAndWait
-            advanceNonOperatorMutationEpoch(filePath)
-            applyingRemote.add(filePath)
-            try {
-                runUndoableRemoteUpdateCommand(document) {
-                    applyMinimalDocumentEditUtil(document, before, canonical)
-                }
-                shadows[filePath] = canonical
-                installed = persistRemoteCrdtTextIfSafe(
-                    filePath,
-                    document,
-                    expectedText,
-                    canonical,
-                )
-                if (installed) {
-                    log.info(
-                        "[crdt-replica] installed and saved deferred reconnect target for ${File(filePath).name} " +
-                            "before replacement registration (${canonical.length} chars)",
-                    )
-                }
-            } finally {
-                applyingRemote.remove(filePath)
-            }
-        }
-        return installed
     }
 
     private fun forwardLocalDeltaFromShadow(
@@ -1533,18 +1472,18 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         if (initialEditorText != null) {
             forwarder.ensureEditorText(initialEditorText)
         }
+        if (
+            expectedEditorTextAtSwap != null &&
+            (editorBufferText(filePath) != expectedEditorTextAtSwap ||
+                (!allowPendingLocalAtSwap && hasPendingLocal(filePath)))
+        ) {
+            // Registration and native bootstrap can block. Fence both first
+            // registration and replacement registration at the actual swap so
+            // neither can publish a snapshot older than the visible editor.
+            forwarder.deregister()
+            return null
+        }
         if (replaceCached && cached != null) {
-            if (
-                expectedEditorTextAtSwap != null &&
-                (editorBufferText(filePath) != expectedEditorTextAtSwap ||
-                    (!allowPendingLocalAtSwap && hasPendingLocal(filePath)))
-            ) {
-                // Registration may block long enough for another editor event
-                // to arrive. Revalidate at the actual swap boundary so the new
-                // member can never retire a lineage containing a newer edit.
-                forwarder.deregister()
-                return null
-            }
             if (forwarders.replace(filePath, cached, forwarder)) {
                 // The replacement is now authoritative. Retire the prior
                 // member's retained ACK frontier only after the successful

@@ -5181,6 +5181,52 @@ mod tests {
         );
     }
 
+    /// Haiven regression: a whole-document replay may repeat the surviving
+    /// queue block several times after the operator has deleted older heads.
+    /// Convergence restores the snapshot-authored multiplicity of the heads
+    /// that remain visible, but it must never use the snapshot to add an entry
+    /// that is absent from the live editor cut.
+    #[test]
+    fn converge_collapses_replayed_block_without_resurrecting_editor_deletions() {
+        let snapshot = vec![
+            p("do [#haivenresume]"),
+            p("do [#haivenapply]"),
+            p("do [#haivenprofiles]"),
+            p("Implement grpc with opportunistic batching and benchmark."),
+            p("review the take-home v2 design"),
+        ];
+        let entries = vec![
+            p("Implement grpc with opportunistic batching and benchmark."),
+            p("review the take-home v2 design"),
+            p("Implement grpc with opportunistic batching and benchmark."),
+            p("review the take-home v2 design"),
+            p("Implement grpc with opportunistic batching and benchmark."),
+            p("review the take-home v2 design"),
+        ];
+
+        let out = converge(&entries, &snapshot);
+        let texts: Vec<&str> = out
+            .iter()
+            .filter_map(|entry| match entry {
+                QueueEntry::Prompt(prompt) => Some(prompt.text.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            texts,
+            vec![
+                "Implement grpc with opportunistic batching and benchmark.",
+                "review the take-home v2 design",
+            ],
+            "replay duplicates collapse while editor-deleted queue identities remain deleted"
+        );
+        assert!(
+            converge_queue_via_lifecycle(&out, &snapshot).is_none(),
+            "the repaired queue must be a fixpoint"
+        );
+    }
+
     /// Idempotence: converging the output again is a no-op (`None`). This is the
     /// fixpoint guarantee — a re-emit storm settles to a stable queue.
     #[test]

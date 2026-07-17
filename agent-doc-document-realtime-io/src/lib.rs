@@ -5734,6 +5734,65 @@ mod tests {
     }
 
     #[test]
+    fn haiven_boundary_rebase_preserves_live_prompt_once_and_deleted_queue_items_stay_deleted() {
+        let live_prompt = "❯ I'm deferring to DESIGN.md and focusing haiven-websocket-hub-takehome-v2.md on salient design aspects + load test-driven design evolution. Please review. I need the highlights of the benchmarks. Please print them here. If we need to redo any benchmarks, please do so. I have until tomorrow morning.";
+        let baseline = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Compare the profiles.\n",
+            "<!-- agent:boundary:15ab685a -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#haivenresume]\n",
+            "- do [#haivenapply]\n",
+            "- do [#haivenprofiles]\n",
+            "- do [#kept]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#haivenresume] resume\n",
+            "- [ ] [#haivenapply] apply\n",
+            "- [ ] [#haivenprofiles] profiles\n",
+            "- [ ] [#kept] keep\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let agent_target = baseline.replace(
+            "<!-- agent:boundary:15ab685a -->",
+            "### Re: Compare the profiles. — gpt-5\n\nComparison complete.\n<!-- agent:boundary:response -->",
+        );
+        let editor_cut = baseline
+            .replace(
+                "<!-- agent:boundary:15ab685a -->",
+                &format!("{live_prompt}\n<!-- agent:boundary:operator -->"),
+            )
+            .replace("- do [#haivenresume]\n", "")
+            .replace("- do [#haivenapply]\n", "")
+            .replace("- do [#haivenprofiles]\n", "")
+            .replace("- [ ] [#haivenresume] resume\n", "")
+            .replace("- [ ] [#haivenapply] apply\n", "")
+            .replace("- [ ] [#haivenprofiles] profiles\n", "");
+
+        let rebased =
+            rebase_agent_candidate_over_editor_cut(baseline, &agent_target, &editor_cut).unwrap();
+
+        assert_eq!(
+            rebased.matches(live_prompt).count(),
+            1,
+            "rebased:\n{rebased}"
+        );
+        assert_eq!(
+            rebased.matches("agent:boundary:").count(),
+            1,
+            "rebased:\n{rebased}"
+        );
+        assert_eq!(rebased.matches("### Re: Compare the profiles.").count(), 1);
+        assert!(rebased.contains("[#kept]"));
+        assert!(!rebased.contains("haivenresume"));
+        assert!(!rebased.contains("haivenapply"));
+        assert!(!rebased.contains("haivenprofiles"));
+        assert!(agent_projection_integrity_valid(&rebased));
+    }
+
+    #[test]
     fn retained_response_rebase_is_noop_after_cell_is_already_live() {
         let baseline = concat!(
             "<!-- agent:exchange -->\n❯ Question.\n<!-- /agent:exchange -->\n",

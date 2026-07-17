@@ -605,15 +605,15 @@ pub fn current_text_for_file_with_authority_nonblocking(
 /// Resolve current text after a publish-live-buffer request has already had a
 /// bounded chance to restore the live relay model.
 ///
-/// This keeps the first read strict: while an editor owns the document, the
-/// binary must ask the editor/controller to republish before it uses the durable
-/// `.yrs` recovery projection. The projection remains restart recovery input,
-/// not markdown/disk authority.
+/// While an editor owns the document, durable `.yrs` state is never promoted
+/// into a missing live hub: it can predate unsaved operator edits. The editor
+/// must republish its exact buffer or this remains unavailable. Durable
+/// projection recovery is reserved for detached authority.
 pub fn current_text_for_file_with_authority_recovering_projection(
     file: &Path,
     authority: CrdtAuthority,
 ) -> Result<CurrentText> {
-    current_text_for_file_with_authority_inner(file, authority, true, true)
+    current_text_for_file_with_authority_inner(file, authority, false, true)
 }
 
 fn current_text_for_file_with_authority_inner(
@@ -784,10 +784,10 @@ fn looks_like_legacy_markdown_projection(text: &str) -> bool {
 /// markdown or live-buffer sidecars as authoritative. When the editor owns the
 /// document but the relay is missing or not converged, it asks the editor to
 /// republish/register its live buffer via the read-only `publish_live_buffer` IPC
-/// path, waits for a bounded interval, and only then may restore the in-memory
-/// relay hub from the durable `.yrs` restart projection. Callers should surface
-/// this failure instead of the raw "missing replica" state so startup/reconcile
-/// is the final contract, not the pre-recovery observation.
+/// path and waits for a bounded interval. It never restores an editor-attached
+/// hub from durable projection because that would make stale restart state race
+/// the live buffer. Callers surface the bounded failure until the editor
+/// republishes.
 pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
     let authority = authority_for_file(&file.display().to_string());
     let first = current_text_for_file_with_authority(file, authority)?;
@@ -882,23 +882,10 @@ fn ensure_document_model_with_current_text_observer_inner(
         return Err(err);
     }
 
-    // `#missingreplicarecycle`: bound how long we wait before recycling the
-    // document model from the durable projection. `EditorAttachedMissingReplica`
-    // means the durable reliable-sync open set says the editor holds the document,
-    // but no CRDT
-    // replica is registered at all — the registry has no hub for this doc. A
-    // healthy editor registers its replica on open, so a *persistently* missing
-    // replica is a stale/half-synced editor (e.g. a JetBrains buffer that
-    // keeps its durable Open fact live, yet never publishes a replica). Waiting the
-    // full publish timeout on every read then wedges the single-threaded controller
-    // and times out every other reader (idle-watch reads give up at 750ms). Give
-    // such an editor only a brief window to answer the publish request above, then
-    // recycle from the durable `.yrs` projection — the last-known relay canonical,
-    // a valid CRDT authority (not disk). If the editor does come alive its
-    // `register_replica` merges into the recovered hub
-    // (`with_hub_seeded_from_file` adds to the existing hub, never clobbers it).
-    // `EditorSyncPending` keeps the full window: there a hub already exists with the
-    // editor's un-flushed ops that are worth waiting for.
+    // Bound how long we wait for the editor to republish. A persistent missing
+    // replica must fail closed: neither disk nor a durable restart projection can
+    // prove the current unsaved editor cut. `EditorSyncPending` keeps the full
+    // window because a hub already exists with un-flushed ops worth waiting for.
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ensure_timeout_ms);
     let mut last_label = first_label;
     let mut last_observer_error: Option<String> = None;
@@ -910,7 +897,7 @@ fn ensure_document_model_with_current_text_observer_inner(
                         agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
-                                "document_model_ensure_ready file={} source={} initial_state={} final_state={} recovery=durable_projection_after_publish_timeout",
+                                "document_model_ensure_ready file={} source={} initial_state={} final_state={} recovery=live_editor_republished_after_timeout",
                                 file.display(),
                                 source,
                                 first_label,
@@ -928,7 +915,7 @@ fn ensure_document_model_with_current_text_observer_inner(
                         agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
-                                "document_model_ensure_projection_recovery_not_ready file={} source={} initial_state={} final_state={} recovery=retry_without_disk_write",
+                                "document_model_ensure_republish_observer_not_ready file={} source={} initial_state={} final_state={} recovery=retry_without_disk_write",
                                 file.display(),
                                 source,
                                 first_label,
@@ -945,7 +932,7 @@ fn ensure_document_model_with_current_text_observer_inner(
                         agent_doc_ops_log_io::log_op(
                             file,
                             &format!(
-                                "document_model_ensure_projection_recovery_error file={} source={} initial_state={} last_state={} error={} recovery=retry_without_disk_write",
+                                "document_model_ensure_republish_observer_error file={} source={} initial_state={} last_state={} error={} recovery=retry_without_disk_write",
                                 file.display(),
                                 source,
                                 first_label,
@@ -1298,7 +1285,7 @@ pub fn request_document_model_live_buffer_publish_with_timeout(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "document_model_ensure_publish_unavailable file={} canonical={} source={} transport={} project_root={} listener_active={} doc_hash={} process_pid={} recovery=continue_to_projection_recovery",
+                    "document_model_ensure_publish_unavailable file={} canonical={} source={} transport={} project_root={} listener_active={} doc_hash={} process_pid={} recovery=continue_waiting_for_live_editor_publish",
                     file.display(),
                     canonical.display(),
                     source,
@@ -1315,7 +1302,7 @@ pub fn request_document_model_live_buffer_publish_with_timeout(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "document_model_ensure_publish_error file={} canonical={} source={} transport={} project_root={} listener_active={} doc_hash={} process_pid={} error={} recovery=continue_to_projection_recovery",
+                    "document_model_ensure_publish_error file={} canonical={} source={} transport={} project_root={} listener_active={} doc_hash={} process_pid={} error={} recovery=continue_waiting_for_live_editor_publish",
                     file.display(),
                     canonical.display(),
                     source,
@@ -4042,7 +4029,7 @@ mod tests {
     }
 
     #[test]
-    fn editor_attached_projection_recovery_requires_explicit_recovery_read() {
+    fn editor_attached_projection_recovery_read_still_requires_live_editor_publish() {
         let (_dir, doc) = temp_doc("attached-projection-recovery.md");
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let mut prior = RelayHub::new(CANONICAL_CLIENT_ID);
@@ -4064,16 +4051,9 @@ mod tests {
             &doc,
             CrdtAuthority::MultiReplica,
         )
-        .expect("explicit recovery read should restore the relay hub");
-        match recovered {
-            CurrentText::Current {
-                text, live_editors, ..
-            } => {
-                assert_eq!(text, "durable recovery");
-                assert_eq!(live_editors, 0, "editors re-register after recovery");
-            }
-            other => panic!("expected recovered relay current text, got {other:?}"),
-        }
+        .expect("recovery read should remain a legal missing-model state");
+        assert_eq!(recovered, CurrentText::EditorAttachedMissingReplica);
+        assert!(!hub_is_allocated_for_test(&hash));
     }
 
     #[test]
@@ -4112,7 +4092,7 @@ mod tests {
     }
 
     #[test]
-    fn projection_recovery_repairs_legacy_markdown_sidecar() {
+    fn editor_attached_recovery_does_not_promote_legacy_markdown_sidecar() {
         let legacy_markdown = "---\ntitle: legacy\n---\n\n<!-- agent:exchange -->\nBody\n";
         let (_dir, doc) = temp_doc("attached-legacy-markdown-projection.md");
         agent_doc_snapshot_io::save_crdt(&doc, legacy_markdown.as_bytes()).unwrap();
@@ -4121,22 +4101,16 @@ mod tests {
             &doc,
             CrdtAuthority::MultiReplica,
         )
-        .expect("explicit recovery read should repair legacy markdown sidecar");
-
-        match recovered {
-            CurrentText::Current { text, .. } => assert_eq!(text, legacy_markdown),
-            other => panic!("expected markdown projection recovery, got {other:?}"),
-        }
-        let repaired = agent_doc_snapshot_io::load_crdt(&doc)
+        .expect("editor-attached recovery should fail closed without mutation");
+        assert_eq!(recovered, CurrentText::EditorAttachedMissingReplica);
+        let retained = agent_doc_snapshot_io::load_crdt(&doc)
             .unwrap()
-            .expect("repaired projection should be persisted");
-        assert_ne!(repaired, legacy_markdown.as_bytes());
-        let rebuilt = RelayHub::recover_from_projection(CANONICAL_CLIENT_ID, &repaired).unwrap();
-        assert_eq!(rebuilt.canonical_text(), legacy_markdown);
+            .expect("legacy projection should remain untouched for detached recovery");
+        assert_eq!(retained, legacy_markdown.as_bytes());
     }
 
     #[test]
-    fn ensure_document_model_recovers_projection_after_publish_timeout() {
+    fn ensure_document_model_does_not_promote_projection_after_publish_timeout() {
         let (_dir, doc) = temp_doc("ensure-model-projection-recovery.md");
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let mut prior = RelayHub::new(CANONICAL_CLIENT_ID);
@@ -4150,7 +4124,7 @@ mod tests {
 
         let poll_count = Arc::new(Mutex::new(0usize));
         let poll_count_for_observer = Arc::clone(&poll_count);
-        let current = ensure_document_model_with_current_text_recovery_observer(
+        let err = ensure_document_model_with_current_text_recovery_observer(
             &doc,
             "test_projection_recovery",
             CurrentText::EditorAttachedMissingReplica,
@@ -4165,25 +4139,18 @@ mod tests {
                 )
             },
         )
-        .expect("ensure should fall back to durable projection after publish timeout");
+        .expect_err("attached authority must wait for an exact live editor publish");
 
         assert!(
             *poll_count.lock().unwrap() > 0,
             "ensure should poll the strict observer before recovery"
         );
-        match current {
-            CurrentText::Current {
-                text, live_editors, ..
-            } => {
-                assert_eq!(text, "projection after publish");
-                assert_eq!(live_editors, 0);
-            }
-            other => panic!("expected projection-backed current text, got {other:?}"),
-        }
+        assert!(format!("{err:#}").contains("editor authority stayed"));
+        assert!(!hub_is_allocated_for_test(&hash));
     }
 
     #[test]
-    fn ensure_document_model_recycles_missing_replica_within_short_window() {
+    fn ensure_document_model_fails_closed_for_missing_replica_within_short_window() {
         let (_dir, doc) = temp_doc("ensure-model-missing-replica-recycle.md");
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let mut prior = RelayHub::new(CANONICAL_CLIENT_ID);
@@ -4199,7 +4166,7 @@ mod tests {
         let poll_count_for_observer = Arc::clone(&poll_count);
         // The editor never registers a replica (stale/half-synced): the strict
         // observer stays at EditorAttachedMissingReplica forever.
-        let current = ensure_document_model_with_current_text_recovery_observer(
+        let err = ensure_document_model_with_current_text_recovery_observer(
             &doc,
             "test_missing_replica_recycle",
             CurrentText::EditorAttachedMissingReplica,
@@ -4214,12 +4181,9 @@ mod tests {
                 )
             },
         )
-        .expect("missing-replica ensure should recycle the model from the durable projection");
-
-        match current {
-            CurrentText::Current { text, .. } => assert_eq!(text, "recycled from projection"),
-            other => panic!("expected projection-recycled current text, got {other:?}"),
-        }
+        .expect_err("missing-replica ensure must not replace a live editor from projection");
+        assert!(format!("{err:#}").contains("editor authority stayed"));
+        assert!(!hub_is_allocated_for_test(&hash));
         // `#missingreplicarecycle`: the missing-replica case uses the short window
         // (`DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS` = 60ms in test /
         // `DOCUMENT_MODEL_ENSURE_POLL_MS` = 25ms → ~2-3 polls), well under the full
@@ -4233,7 +4197,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_document_model_recovers_compacted_exchange_projection_after_publish_timeout() {
+    fn ensure_document_model_does_not_promote_compacted_projection_over_live_editor() {
         let (_dir, doc) = temp_doc("ensure-model-compact-exchange-recovery.md");
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let old_blocks = (0..8)
@@ -4264,7 +4228,7 @@ mod tests {
         agent_doc_snapshot_io::save_crdt(&doc, &prior.projection_bytes()).unwrap();
         hub_registry().lock().unwrap().remove(&hash);
 
-        let current = ensure_document_model_with_current_text_recovery_observer(
+        let err = ensure_document_model_with_current_text_recovery_observer(
             &doc,
             "test_compact_exchange_projection_recovery",
             CurrentText::EditorAttachedMissingReplica,
@@ -4276,27 +4240,17 @@ mod tests {
                 )
             },
         )
-        .expect("ensure should recover compacted exchange from durable projection");
-
-        match current {
-            CurrentText::Current {
-                text, live_editors, ..
-            } => {
-                assert_eq!(text, compacted);
-                assert_eq!(live_editors, 0, "editors re-register after recovery");
-                assert!(text.contains("### Session Summary"));
-                assert!(text.contains(kept_block));
-                assert!(
-                    !text.contains("Archived response body."),
-                    "archived response bodies must not be re-expanded from stale disk"
-                );
-            }
-            other => panic!("expected compacted projection current text, got {other:?}"),
-        }
+        .expect_err("compacted restart state must not replace an attached editor cut");
+        assert!(format!("{err:#}").contains("editor authority stayed"));
+        assert!(!hub_is_allocated_for_test(&hash));
+        let retained = agent_doc_snapshot_io::load_crdt(&doc).unwrap().unwrap();
+        let rebuilt = RelayHub::recover_from_projection(CANONICAL_CLIENT_ID, &retained).unwrap();
+        assert_eq!(rebuilt.canonical_text(), compacted);
+        assert!(rebuilt.canonical_text().contains(kept_block));
     }
 
     #[test]
-    fn ensure_document_model_recovers_projection_after_publish_transport_failure() {
+    fn ensure_document_model_does_not_promote_projection_after_publish_transport_failure() {
         let (dir, doc) = temp_doc("ensure-model-publish-transport-failure.md");
         let canonical = doc.canonicalize().unwrap();
         let file_str = canonical.to_string_lossy().to_string();
@@ -4314,27 +4268,18 @@ mod tests {
 
         std::fs::write(dir.path().join(".agent-doc").join("patches"), "not a dir").unwrap();
 
-        let current = ensure_document_model(&canonical, "test_publish_transport_failure")
-            .expect("publish transport failure should continue to durable projection recovery");
-
-        match current {
-            CurrentText::Current {
-                text, live_editors, ..
-            } => {
-                assert_eq!(text, compacted);
-                assert_eq!(live_editors, 0);
-                assert!(text.contains("### Session Summary"));
-            }
-            other => panic!("expected projection-backed current text, got {other:?}"),
-        }
+        let err = ensure_document_model(&canonical, "test_publish_transport_failure")
+            .expect_err("transport failure must not authorize stale projection promotion");
+        assert!(format!("{err:#}").contains("editor authority stayed"));
+        assert!(!hub_is_allocated_for_test(&hash));
 
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("document_model_ensure_publish_error")
-                && log.contains("recovery=continue_to_projection_recovery")
-                && log.contains("document_model_ensure_ready")
-                && log.contains("recovery=durable_projection_after_publish_timeout"),
-            "failed publish transport should be audited and then recovered from projection:\n{log}"
+                && log.contains("recovery=continue_waiting_for_live_editor_publish")
+                && log.contains("document_model_ensure_failed")
+                && log.contains("recovery=retry_without_disk_write"),
+            "failed publish transport should be audited and fail closed for live-editor republish:\n{log}"
         );
     }
 

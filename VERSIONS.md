@@ -4,6 +4,12 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.172
+
+- **JetBrains re-registration is editor-first and non-destructive.** Forced refresh now validates and publishes the exact live IntelliJ buffer before swapping replica generations; it no longer fetches, installs, or saves a deferred whole-document reconnect target. Retained responses and granular mutations replay afterward over that authoritative cut, preventing prompt loss, deleted-queue resurrection, repeated queue blocks, and duplicate exchange boundaries.
+- **Attached-document recovery fails closed instead of promoting a stale CRDT projection.** A missing in-memory model waits for an exact editor republish; restore-time liveness reconciles durable open pids with the OS and durably retires dead IDE processes. The Haiven regression proves one prompt/response/boundary, monotonic queue deletions, replay-block deduplication, and stable convergence.
+- **The formal cache-conflict model now encodes operator intent.** TLC models unsaved prompt insertion, queue deletion, exact editor-baseline re-registration, granular response replay, singleton-boundary integrity, and eventual convergence; the old save-before-register transition is forbidden.
+
 ## 0.34.171
 
 - **A first-phase `[x]` completion cannot block its own retained closeout as a resurrection.** The reaped-item guard now distinguishes terminal `Done` state from a genuinely reopened `Open`/`Gated` copy. The same-capture retry therefore proceeds from mark to archive instead of repeatedly refusing the still-visible two-phase checkbox, while a stale editor that actually reopens the item remains fail-closed.

@@ -220,6 +220,18 @@ impl LivenessProjection {
             .collect()
     }
 
+    /// Every pid with at least one present open-set membership. Controller
+    /// hydration uses this to reconcile durable open facts with OS process
+    /// liveness after a crash/restart where the editor's exit watcher could not
+    /// publish its terminal `Alive(false)` fact.
+    pub fn all_open_pids(&self) -> BTreeSet<Pid> {
+        self.open_set
+            .iter()
+            .filter(|(_, set)| set.present())
+            .map(|((_, pid), _)| *pid)
+            .collect()
+    }
+
     /// Whether this projection has ever received an open/close fact for the
     /// document. Unlike `open_docs().is_empty()`, this distinguishes a durably
     /// known closed document from a never-hydrated cold process.
@@ -698,6 +710,11 @@ mod tests {
         );
         // open_docs (open-set ground truth) still shows all three — death is not a close.
         assert_eq!(p.open_docs().len(), 3);
+        assert_eq!(
+            p.all_open_pids(),
+            [100, 200].into_iter().collect(),
+            "restore-time OS reconciliation must still see a dead pid whose durable open facts remain"
+        );
     }
 
     // A doc shared by a dead pid and a live pid stays live (cascade is per-pid).

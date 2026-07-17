@@ -298,34 +298,32 @@ class TypingTrackerEdtBudgetTest {
         )
         assertTrue(
             "authority-bearing publish/open document repair must wait for the CRDT replica while ordinary open reports stay asynchronous",
-            source.contains("fun ensureOpenDocumentReplica(") &&
+                source.contains("fun ensureOpenDocumentReplica(") &&
                 source.contains("forceRefresh: Boolean = false") &&
                 source.contains("bypassRegisterBackoff = forceRefresh") &&
-            source.contains("NativePatching.deferredWriteReconnectContent(filePath, text)") &&
-                source.contains("installDeferredReconnectContent(filePath, document, text, registrationText)") &&
+                source.contains("replaceCached = forceRefresh") &&
+                source.contains("expectedEditorTextAtSwap = if (forceRefresh) registrationText else null") &&
                 source.contains("executor.submit<Boolean> { attach() }") &&
                 source.contains(".get(CRDT_AWAIT_ATTACH_TIMEOUT_MS, TimeUnit.MILLISECONDS)") &&
                 source.contains("private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L") &&
-            source.contains("executor.execute { attach() }") &&
+                source.contains("executor.execute { attach() }") &&
                 source.contains("forwarder.ensureEditorText(initialEditorText)"),
         )
         val forceRefreshAttachBody = source.substringAfter("fun ensureOpenDocumentReplica(")
-            .substringBefore("private fun installDeferredReconnectContent(")
-        assertTrue(
-            "forced refresh must install the reconciled target into the visible editor before registering its replacement replica",
-            forceRefreshAttachBody.indexOf("installDeferredReconnectContent(filePath, document, text, registrationText)") <
-                forceRefreshAttachBody.indexOf("val forwarder = forwarderFor("),
+            .substringBefore("private fun publishClosingDocumentCut(")
+        assertFalse(
+            "forced refresh must not replace the visible editor from a retained whole-document target",
+            forceRefreshAttachBody.contains("deferredWriteReconnectContent(") ||
+                forceRefreshAttachBody.contains("applyMinimalDocumentEditUtil(") ||
+                forceRefreshAttachBody.contains("persistRemoteCrdtTextIfSafe("),
         )
-        val reconnectInstallBody = source.substringAfter("private fun installDeferredReconnectContent(")
-            .substringBefore("private fun forwardLocalDeltaFromShadow(")
         assertTrue(
-            "deferred reconnect installation must reject editor drift and suppress local CRDT replay while applying canonical text",
-            reconnectInstallBody.contains("before != expectedText || hasPendingLocal(filePath)") &&
-                reconnectInstallBody.contains("advanceNonOperatorMutationEpoch(filePath)") &&
-                reconnectInstallBody.contains("applyingRemote.add(filePath)") &&
-                reconnectInstallBody.contains("applyMinimalDocumentEditUtil(document, before, canonical)") &&
-                reconnectInstallBody.contains("shadows[filePath] = canonical") &&
-                reconnectInstallBody.contains("applyingRemote.remove(filePath)"),
+            "forced refresh must register from the exact editor cut and fence a raced swap",
+            forceRefreshAttachBody.contains("val registrationText = text") &&
+                forceRefreshAttachBody.contains("replaceCached = forceRefresh") &&
+                source.contains("editorBufferText(filePath) != expectedEditorTextAtSwap") &&
+                source.contains("forwarder.deregister()") &&
+                source.contains("return null"),
         )
         assertTrue(
             "every non-operator editor projection must close the prior native op-capture epoch",

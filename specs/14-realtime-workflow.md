@@ -65,9 +65,10 @@ holds a cached client, refresh must retire that cached client and issue a new
 registration. Every stale supervisor/controller recycle request emits that
 forced-refresh event centrally, no matter which turn stage scheduled it. Native-library reload
 broadcasts also refresh all open document
-replicas. Re-registration restores a Lazily-retained deferred target into an
-unchanged buffer or component-merges later unsaved operator edits over the
-retained base.
+replicas. Re-registration publishes the exact current editor buffer as the new
+replica baseline. It never installs or saves a Lazily-retained whole-document
+target first. Retained agent intents replay afterward through the ordered
+document-cell/CRDT delivery path over that published operator cut.
 If a hot-path read observes an editor owner but no usable CRDT relay model, the
 binary must first attempt a bounded document-model ensure through read-only
 editor publish/re-registration before returning an error. A failed ensure is a
@@ -450,9 +451,10 @@ text is never accepted as proof. A mismatched proof triggers the replace-capable
 re-bootstrap, while a transport failure remains in the client ACK replay ledger.
 The binary wakes this replay while convergence is pending and, after a bounded
 grace period, sends a targeted force-refresh event that re-registers the document
-replica from the editor plus the Lazily deferred-write reconnect target. The
-candidate is retained before delivery, so process exit, controller recycle, or a
-same-target finalize retry cannot lose or duplicate the response. Recovery is
+replica from the exact editor buffer. The deferred candidate remains retained
+as an ordered semantic intent and replays only after that editor baseline is
+published, so process exit, controller recycle, or a same-target finalize retry
+cannot lose or duplicate the response. Recovery is
 bounded and automatic; it must not require closing the editor tab, recycling the
 controller, or choosing between force-disk and an uncommitted response.
 

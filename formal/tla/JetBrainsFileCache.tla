@@ -2,57 +2,73 @@
 EXTENDS Naturals, TLC
 
 (***************************************************************************
-Models the repaired deferred-reconnect delivery.  The JetBrains adapter first
-refreshes a clean VirtualFile stamp, installs and saves the canonical frontier,
-and only then ACKs.  The controller observes that disk already has the same
-bytes and performs no redundant atomic rewrite.  Concurrent VFS refreshes must
-therefore never observe an unsaved document with a newer disk stamp.
+Models editor-first reload/reregister and granular retained-intent replay.
+
+The live IntelliJ Document is authoritative while attached.  An operator may
+author a prompt and delete a queue item without saving.  A plugin/native reload
+must publish that exact editor cut before a retained agent response is replayed;
+the replay changes only the response cell.  No transition may install an older
+whole-document target, resurrect the deleted queue item, duplicate the exchange
+boundary, or require a save before the operator cut becomes authoritative.
 ***************************************************************************)
 
-Texts == {"baseline", "canonical"}
-
-(* --fair algorithm SavedReconnectProjection
+(* --fair algorithm EditorFirstReconnect
 variables
-editorText = "baseline",
-diskText = "baseline",
+editorHasPrompt = FALSE,
+editorQueuePresent = TRUE,
+editorHasResponse = FALSE,
+editorDirty = FALSE,
+diskHasPrompt = FALSE,
+diskQueuePresent = TRUE,
+diskHasResponse = FALSE,
+canonicalHasPrompt = FALSE,
+canonicalQueuePresent = TRUE,
+canonicalHasResponse = FALSE,
+operatorCutAuthored = FALSE,
+operatorCutPublished = FALSE,
+retainedIntent = TRUE,
+projectionSaved = FALSE,
+boundaryCount = 1,
 documentStamp = 0,
 fileStamp = 0,
-documentDirty = FALSE,
-deliveryAcked = FALSE,
-controllerDiskWrites = 0,
 cacheConflict = FALSE;
 
-process Plugin = "plugin"
+process Operator = "operator"
 begin
-RefreshCleanTarget:
-assert ~documentDirty;
-documentStamp := fileStamp;
-InstallAndSaveCanonical:
-editorText := "canonical";
-diskText := "canonical";
-fileStamp := fileStamp + 1;
-documentStamp := fileStamp;
-documentDirty := FALSE;
-AckSavedFrontier:
-assert editorText = "canonical" /\ diskText = "canonical" /\ ~documentDirty;
-deliveryAcked := TRUE;
-PluginDone:
+AuthorUnsavedCut:
+editorHasPrompt := TRUE;
+editorQueuePresent := FALSE;
+editorDirty := TRUE;
+operatorCutAuthored := TRUE;
+OperatorDone:
 while TRUE do
 skip;
 end while;
 end process;
 
-process Controller = "controller"
+process Plugin = "plugin"
 begin
-AwaitAck:
-await deliveryAcked;
-ProjectIfNeeded:
-if diskText # "canonical" then
-diskText := "canonical";
+AwaitOperatorCut:
+await operatorCutAuthored;
+ReregisterFromExactEditorCut:
+canonicalHasPrompt := editorHasPrompt;
+canonicalQueuePresent := editorQueuePresent;
+canonicalHasResponse := editorHasResponse;
+operatorCutPublished := TRUE;
+ReplayRetainedResponseCell:
+await operatorCutPublished;
+canonicalHasResponse := TRUE;
+editorHasResponse := TRUE;
+retainedIntent := FALSE;
+SaveConvergedProjection:
+diskHasPrompt := editorHasPrompt;
+diskQueuePresent := editorQueuePresent;
+diskHasResponse := editorHasResponse;
 fileStamp := fileStamp + 1;
-controllerDiskWrites := controllerDiskWrites + 1;
-end if;
-ControllerDone:
+documentStamp := fileStamp;
+editorDirty := FALSE;
+projectionSaved := TRUE;
+PluginDone:
 while TRUE do
 skip;
 end while;
@@ -62,7 +78,7 @@ process Vfs = "vfs"
 begin
 VfsRefresh:
 while TRUE do
-if documentDirty /\ documentStamp # fileStamp then
+if editorDirty /\ documentStamp # fileStamp then
 cacheConflict := TRUE;
 else
 documentStamp := fileStamp;
@@ -72,27 +88,47 @@ end process;
 end algorithm; *)
 
 TypeOK ==
-/\ editorText \in Texts
-/\ diskText \in Texts
+/\ editorHasPrompt \in BOOLEAN
+/\ editorQueuePresent \in BOOLEAN
+/\ editorHasResponse \in BOOLEAN
+/\ editorDirty \in BOOLEAN
+/\ diskHasPrompt \in BOOLEAN
+/\ diskQueuePresent \in BOOLEAN
+/\ diskHasResponse \in BOOLEAN
+/\ canonicalHasPrompt \in BOOLEAN
+/\ canonicalQueuePresent \in BOOLEAN
+/\ canonicalHasResponse \in BOOLEAN
+/\ operatorCutAuthored \in BOOLEAN
+/\ operatorCutPublished \in BOOLEAN
+/\ retainedIntent \in BOOLEAN
+/\ projectionSaved \in BOOLEAN
+/\ boundaryCount \in Nat
 /\ documentStamp \in Nat
 /\ fileStamp \in Nat
-/\ documentDirty \in BOOLEAN
-/\ deliveryAcked \in BOOLEAN
-/\ controllerDiskWrites \in Nat
 /\ cacheConflict \in BOOLEAN
+
+OperatorIntentIsMonotonic ==
+operatorCutAuthored => editorHasPrompt /\ ~editorQueuePresent
+
+PublishedBaselineContainsOperatorCut ==
+operatorCutPublished => canonicalHasPrompt /\ ~canonicalQueuePresent
+
+ResponseReplayIsGranular ==
+canonicalHasResponse => canonicalHasPrompt /\ ~canonicalQueuePresent
+
+SavedProjectionContainsOperatorCut ==
+projectionSaved =>
+/\ diskHasPrompt
+/\ ~diskQueuePresent
+/\ diskHasResponse
+/\ ~editorDirty
+/\ documentStamp = fileStamp
+
+SingletonBoundary == boundaryCount = 1
 
 NoFileCacheConflict == ~cacheConflict
 
-AckRequiresSavedCanonical ==
-deliveryAcked =>
-/\ editorText = "canonical"
-/\ diskText = "canonical"
-/\ ~documentDirty
-/\ documentStamp = fileStamp
-
-NoRedundantControllerProjection == controllerDiskWrites = 0
-
-EventuallySavedAndAcked ==
-<> (deliveryAcked /\ editorText = diskText /\ documentStamp = fileStamp)
+EventuallyConverged ==
+<> (projectionSaved /\ ~retainedIntent /\ editorHasResponse /\ diskHasResponse)
 
 =============================================================================

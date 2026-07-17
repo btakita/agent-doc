@@ -2296,7 +2296,11 @@ pub unsafe extern "C" fn agent_doc_state_projection(document_hash: *const c_char
 /// An explicit external-disk target remains pending while the editor shows its
 /// pre-write cut and is cleared when a newer editor cut appears.
 ///
-/// Returns null when no deferred write exists or recovery cannot be proven.
+/// Returns non-null only when the result is byte-identical to the visible editor
+/// cut. Divergent retained targets remain binary-owned semantic intents; an
+/// editor refresh must publish its exact live baseline before normal delivery
+/// replays them. This fail-closed filter protects older plugin jars that treated
+/// a divergent result as permission to replace and save the whole document.
 /// Caller must free a non-null result with [`agent_doc_free_string`].
 ///
 /// # Safety
@@ -2378,10 +2382,34 @@ pub unsafe extern "C" fn agent_doc_deferred_write_reconnect_content(
             None
         }
     };
+    let recovered =
+        exact_editor_reregister_candidate(std::path::Path::new(path), editor_content, recovered);
     recovered
         .and_then(|content| CString::new(content).ok())
         .map(CString::into_raw)
         .unwrap_or(std::ptr::null_mut())
+}
+
+fn exact_editor_reregister_candidate(
+    file: &std::path::Path,
+    editor_content: &str,
+    candidate: Option<String>,
+) -> Option<String> {
+    candidate.and_then(|content| {
+        if content == editor_content {
+            return Some(content);
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "deferred_write_editor_reregister_held file={} editor_hash={} candidate_hash={} reason=live_editor_baseline_first visible_editor_mutation=none",
+                file.display(),
+                agent_doc_hash::content_hash(editor_content),
+                agent_doc_hash::content_hash(&content),
+            ),
+        );
+        None
+    })
 }
 
 /// Settle a pending external-disk candidate after the editor has successfully
@@ -3429,6 +3457,22 @@ fn force_link_core_ffi_symbols() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_reregister_never_returns_a_divergent_whole_document_candidate() {
+        let file = std::path::Path::new("session.md");
+        let live = "<!-- agent:exchange -->\n❯ live prompt\n<!-- /agent:exchange -->\n";
+        let stale = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+
+        assert_eq!(
+            exact_editor_reregister_candidate(file, live, Some(live.to_string())).as_deref(),
+            Some(live),
+        );
+        assert_eq!(
+            exact_editor_reregister_candidate(file, live, Some(stale.to_string())),
+            None,
+        );
+    }
 
     #[test]
     fn resolve_turn_phase_makes_document_model_authoritative() {

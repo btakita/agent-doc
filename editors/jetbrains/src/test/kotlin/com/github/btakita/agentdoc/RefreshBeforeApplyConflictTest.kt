@@ -87,30 +87,29 @@ class RefreshBeforeApplyConflictTest {
         assertTrue(helper.contains("targetFile.refresh(false, false)"))
         assertTrue(helper.contains("isDocumentUnsaved(document)"))
         assertTrue(
-            "delta, REPLACE, and deferred reconnect delivery must refresh the clean target before mutation",
-            crdtReplica.split("refreshCleanDocumentBeforeRemoteApply(").size - 1 >= 4,
+        "delta and REPLACE delivery must refresh the clean target before mutation",
+        crdtReplica.split("refreshCleanDocumentBeforeRemoteApply(").size - 1 >= 3,
         )
     }
 
     @Test
-    fun `deferred reconnect saves before replacement registration can ack`() {
+    fun `forced reconnect registers from the live editor without preinstalling a retained target`() {
         val crdtReplicaPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
         ).first { Files.exists(it) }
         val crdtReplica = Files.readString(crdtReplicaPath)
-        val deferredReconnect = functionBody(
+        val ensureOpenReplica = functionBody(
             crdtReplica,
-            "private fun installDeferredReconnectContent(",
+            "fun ensureOpenDocumentReplica(",
         )
 
-        val refresh = deferredReconnect.indexOf("refreshCleanDocumentBeforeRemoteApply(")
-        val edit = deferredReconnect.indexOf("applyMinimalDocumentEditUtil(")
-        val save = deferredReconnect.lastIndexOf("persistRemoteCrdtTextIfSafe(")
-        assertTrue("deferred reconnect must refresh the clean VFS stamp", refresh >= 0)
-        assertTrue("deferred reconnect must edit only after refreshing", edit > refresh)
-        assertTrue("deferred reconnect must save before it reports installed", save > edit)
-        assertTrue(deferredReconnect.contains("installed = persistRemoteCrdtTextIfSafe("))
+        assertFalse(ensureOpenReplica.contains("deferredWriteReconnectContent("))
+        assertFalse(ensureOpenReplica.contains("applyMinimalDocumentEditUtil("))
+        assertFalse(ensureOpenReplica.contains("persistRemoteCrdtTextIfSafe("))
+        assertTrue(ensureOpenReplica.contains("registrationText = text"))
+        assertTrue(ensureOpenReplica.contains("replaceCached = forceRefresh"))
+        assertTrue(ensureOpenReplica.contains("expectedEditorTextAtSwap = if (forceRefresh) registrationText else null"))
     }
 
     @Test

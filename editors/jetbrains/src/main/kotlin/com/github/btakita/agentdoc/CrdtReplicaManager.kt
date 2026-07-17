@@ -414,6 +414,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 (forwarder != null).also { attached ->
                     if (attached) {
                         shadows[filePath] = registrationText
+                        // Registration published this exact visible editor cut.
+                        // Let the binary settle a matching reconnect decision,
+                        // but never fetch or install a whole-document target here.
+                        NativePatching.deferredWriteReconnectPropagated(filePath, registrationText)
                         requestRemoteDrain(filePath, "open-document")
                     }
                 }

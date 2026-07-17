@@ -320,6 +320,7 @@ class TypingTrackerEdtBudgetTest {
         assertTrue(
             "forced refresh must register from the exact editor cut and fence a raced swap",
             forceRefreshAttachBody.contains("val registrationText = text") &&
+                forceRefreshAttachBody.contains("deferredWriteReconnectPropagated(filePath, registrationText)") &&
                 forceRefreshAttachBody.contains("replaceCached = forceRefresh") &&
                 source.contains("editorBufferText(filePath) != expectedEditorTextAtSwap") &&
                 source.contains("forwarder.deregister()") &&

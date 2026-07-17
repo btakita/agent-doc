@@ -4,6 +4,11 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.34.173
+
+- **A retained capture cannot converge on a target that dropped its response.** When editor, Lazily/CRDT, and disk exactly match an incomplete reconnect target, `session-check` now replays the durable response cell over that editor-authoritative cut, preserving newer operator prompts and queue deletions, then settles only after editor ACK and disk projection.
+- **JetBrains reconnect settlement is reported without reinstalling a whole document.** Successful replica registration publishes the exact live editor bytes to the binary's reconnect decision state machine; the plugin never fetches, applies, or saves a retained whole-document target during registration.
+
 ## 0.34.172
 
 - **JetBrains re-registration is editor-first and non-destructive.** Forced refresh now validates and publishes the exact live IntelliJ buffer before swapping replica generations; it no longer fetches, installs, or saves a deferred whole-document reconnect target. Retained responses and granular mutations replay afterward over that authoritative cut, preventing prompt loss, deleted-queue resurrection, repeated queue blocks, and duplicate exchange boundaries.

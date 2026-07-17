@@ -108,6 +108,7 @@ class RefreshBeforeApplyConflictTest {
         assertFalse(ensureOpenReplica.contains("applyMinimalDocumentEditUtil("))
         assertFalse(ensureOpenReplica.contains("persistRemoteCrdtTextIfSafe("))
         assertTrue(ensureOpenReplica.contains("registrationText = text"))
+        assertTrue(ensureOpenReplica.contains("deferredWriteReconnectPropagated(filePath, registrationText)"))
         assertTrue(ensureOpenReplica.contains("replaceCached = forceRefresh"))
         assertTrue(ensureOpenReplica.contains("expectedEditorTextAtSwap = if (forceRefresh) registrationText else null"))
     }

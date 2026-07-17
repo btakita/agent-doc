@@ -1306,7 +1306,46 @@ pub fn settle_retained_captured_projection_through_authority(
         captured_response,
         &canonical,
     ) {
-        return Ok(false);
+        // A reconnect intent can itself be the incomplete value: older
+        // recovery code retained the editor/CRDT merge as the newest target
+        // even when that merge had dropped the captured response. Replaying
+        // that target forever can never make progress. The captured response
+        // is a durable semantic intent, so materialize only its response cell
+        // over the exact current editor-authoritative document. This keeps
+        // every newer operator edit/deletion outside that cell intact.
+        let Some(replayed_target) =
+            agent_doc_turn::response_replay::materialize_response_in_current_exchange(
+                &canonical,
+                captured_response,
+            )
+        else {
+            return Ok(false);
+        };
+        if replayed_target == canonical {
+            return Ok(false);
+        }
+        validate_canonical_document_target(path, &replayed_target, source)?;
+        let Some(relay_write) = apply_canonical_replace_if_attached(
+            path,
+            &canonical,
+            &replayed_target,
+            "retained_captured_response_cell_replay",
+        )?
+        else {
+            return Ok(false);
+        };
+        if !relay_write.delivery_converged {
+            return Ok(false);
+        }
+        canonical = try_resolve_current_document_content(path, source)?;
+        if canonical != replayed_target
+            || !agent_doc_turn::response_replay::response_materialized_in_content(
+                captured_response,
+                &canonical,
+            )
+        {
+            return Ok(false);
+        }
     }
     validate_canonical_document_target(path, &canonical, source)?;
     let settled_target_hash = agent_doc_hash::content_hash(&canonical);
@@ -6392,6 +6431,57 @@ mod tests {
             captured_target,
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), captured_target);
+    }
+
+    #[test]
+    fn retained_capture_replays_response_when_reconnect_target_dropped_it() {
+        let editor_cut =
+            "# Session\n\n<!-- agent:exchange -->\nPlease investigate.\n<!-- /agent:exchange -->\n";
+        let captured_response = "### Re: investigate\n\nRecovered from the durable capture.\n";
+        let replayed_target =
+            agent_doc_turn::response_replay::materialize_response_in_current_exchange(
+                editor_cut,
+                captured_response,
+            )
+            .expect("response cell should materialize over the editor cut");
+        let (_dir, file, _canonical) = temp_doc(editor_cut);
+        let identity = "test-retained-capture-missing-from-reconnect-target";
+        seed_reliable_sync_open(&file, identity);
+        let (_client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        ensure_deferred_document_write_intent(
+            &file,
+            editor_cut,
+            editor_cut,
+            "editor_reconnect_incomplete_target_test",
+            DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget,
+        )
+        .expect("the historical incomplete reconnect target should be retained");
+        assert!(pending_document_write(&file).is_some());
+
+        let ack = ack_crdt_deliveries(file.clone(), identity, 1, std::time::Duration::ZERO);
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_capture_missing_response_replay_test",
+            )
+            .unwrap(),
+            "the binary should replay, ACK, project, and settle the missing response cell"
+        );
+        ack.join().unwrap();
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "retained_capture_missing_response_replay_current",
+            )
+            .unwrap(),
+            replayed_target,
+        );
+        assert!(pending_document_write(&file).is_none());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), replayed_target);
     }
 
     #[test]

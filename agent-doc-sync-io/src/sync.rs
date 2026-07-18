@@ -2517,6 +2517,7 @@ fn run_with_options_internal_at_root(
         let context_session: Option<String> = target_session
             .clone()
             .or_else(|| window.and_then(|w| session_name_for_target_window(tmux, w)));
+        let per_file_loop_start = Instant::now();
         for file_path in &all_files {
             if !file_path.exists() {
                 continue;
@@ -3356,6 +3357,22 @@ fn run_with_options_internal_at_root(
             }
         }
 
+        // `#syncobscache`: the per-document ownership loop is the bulk of
+        // `ownership_proof` (~978ms measured, over its 750ms budget). Time it
+        // separately so the cost is attributable per document instead of hiding
+        // inside one coarse phase.
+        log_sync_latency(
+            focus,
+            "ownership_per_file_loop",
+            per_file_loop_start.elapsed(),
+            SYNC_OWNERSHIP_PROOF_BUDGET,
+            auto_start_mode,
+        );
+        sync_log(&format!(
+            "ownership_per_file_loop_detail files={} elapsed_ms={}",
+            all_files.len(),
+            per_file_loop_start.elapsed().as_millis()
+        ));
         if matches!(auto_start_mode, AutoStartMode::SafePassive) {
             let newly_blocked = block_unresolved_safe_passive_managed_files(
                 &safe_passive_managed_files.borrow(),

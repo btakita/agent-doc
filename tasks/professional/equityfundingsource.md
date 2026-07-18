@@ -111,7 +111,49 @@ The suite caught two real defects mid-change: my modal violated the `.modal-body
 I also updated `tests/tmo-lender-picker.test.ts`, which pinned the old inline union source. Its intent (picker unions both sources, deduped by account) is unchanged; the assertions now point at the shared helper.
 
 **One judgment call to confirm.** I gated the button on `selected` because you said "when the lender is selected," and it matches the funding lifecycle. But an admin might want to fix a mapping *before* selecting — during diligence, when the tab-level reconcile flags someone as unlinked. The tab-level button covers that case coarsely. If you want the per-lender modal on every interested lender rather than only the selected one, that's a one-line change to the gate.
-<!-- agent:boundary:e61907df -->
+❯ Does EFS api support LOS lenders to be created without a funding?
+
+### Re: Does the EFS API support creating LOS lenders without a funding? — opus-4-8
+
+**No.** EFS has no API path that creates a lender in TMO at all — with or without a funding. I verified this against the code rather than the PRD.
+
+**The complete set of TMO endpoints EFS calls** is twelve, all `LOS.svc`:
+
+```
+GetLoan  GetLoans  GetLoansByTimestamp  NewLoan  UpdateLoan  DeleteLoan
+GetLoanFundings  AddLoanFunding  GetLoanPaymentSchedule
+GetLoanAttachment(s)  AddAttachment
+```
+
+None creates a lender. The only lender-bearing write is `AddLoanFunding`, and lender identity rides *on the funding* — `FirstName`, `LastName`, `FullName`, `EmailAddress`, `Street/City/State/ZipCode`, `Institutional` are fields of `tmo_loan_funding_body_T`. That's the LOS-embed decision (D1). The type's required fields are `LoanNumber`, `Account`, and `AmountFunded`, so creating a lender this way necessarily creates a funding, against a specific loan, for an amount.
+
+It has exactly one caller — `admin_funds_by_id_confirm_wire_PUT_` — which is gated twice over:
+
+- 409 unless `loan.final_docs_ready_for_funding_at` is set ("escrow/title must confirm signed final docs are ready for funding")
+- 400 if the amount exceeds the loan's remaining available amount
+
+So there is no way to reach `AddLoanFunding` as a "create the lender shell now, fund later" path.
+
+**TMO does support it — EFS deliberately doesn't wire it.** `POST /LSS.svc/NewLender` creates a lender/vendor with no funding (`docs/TMO/new-lender.md`, verified 2026-06-23 against the TMO developer docs). EFS is LOS-only by choice: `grep` finds zero `LSS.svc` calls in app code — one comment in the picker, nothing else. Lender creation in TMO is a manual admin step (steps 4–6 of the documented workflow: admin creates/finds the lender in TMO, syncs, then records the exact account number in EFS).
+
+**What EFS *does* support without a funding is the mapping, not the creation.** A lender can exist in EFS, be accredited, hold vestings, and be selectable — with no funding anywhere:
+
+- `lender_vestings.tmo_lender_account` per vesting (the reconcile modal edits exactly this)
+- `users.lender_account` on the user
+- `lender_vesting_tmo_lenders_R_` surfaces those never-funded lenders in the picker (#fundpick-roster), which was the whole point of that phase
+
+So: **create the lender manually in TMO → record the account in EFS.** EFS never originates the TMO lender record.
+
+---
+
+**One consequence you should know about, because it touches what I shipped this morning.**
+
+The `unknown_to_tmo` state in the reconcile modal derives `in_los` *solely* from `LOS.svc/GetLoanFundings`. A lender an admin legitimately created in TMO but who has **never funded** will therefore read **"Unconfirmed in TMO."**
+
+That label is technically honest — EFS genuinely cannot confirm the account, because fundings are the only lender-shaped thing it reads. But an operator looking at a correctly-created lender will read it as an error, and that's precisely the never-funded lender the #fundpick-roster phase existed to make first-class.
+
+The clean fix is one **read** endpoint: `GET /LSS.svc/GetLender/:Account`. It confirms an account exists without opening the LSS write surface — `NewLender`/`UpdateLender` stay unwired and lender creation stays manual. That gives a third provenance flag so "confirmed in TMO, no funding yet" is distinguishable from "nothing in TMO." Queued as **#tmo-getlender-confirm**, not implemented — wiring a new TMO service is your call, not something to slip in under a question.
+<!-- agent:boundary:67815167 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -138,6 +180,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmo-getlender-confirm] [recommended] Wire read-only GET /LSS.svc/GetLender/:Account so EFS can confirm a TMO lender account that has never funded. Today tmo_lender_roster_ derives in_los solely from LOS.svc/GetLoanFundings, so a lender an admin legitimately created in TMO but never funded reads as 'Unconfirmed in TMO' in the #deal-tmo-reconcile-vesting modal — an accurate statement of EFS's knowledge, but it looks like an error to an operator. GetLender is a single READ endpoint; it does not open the LSS write surface (NewLender/UpdateLender stay unwired, lender creation stays manual per docs/TMO/new-lender.md). Add a third provenance flag (in_lss) so 'confirmed in TMO, no funding yet' is distinguishable from 'nothing in TMO'. Spec: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 <!-- /agent:backlog -->
 
 ## Review

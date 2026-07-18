@@ -39,13 +39,57 @@ done
 Compacted content:
 - Archived 4 response topic(s): Can we speed up compact exchange?; JB `Run Agent Doc` route deferred; fix all issues identified this session; 1 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): cycle with no new prompt; repeated no-op invocations were a su...
-<!-- agent:boundary:2fbd9881 -->
+
+### Re: #jbsteerinterrupt — JB Run Agent Doc interrupting a live Claude turn — opus-4-8
+
+Mechanism verified against live captures, then fixed. Not a guess — the item said don't guess, so here is the evidence chain.
+
+**What was actually happening**
+
+`route_eager_busy_cue_recovery` (`authoritative_dispatch.rs`) promotes a `Busy` actor to `Ready` when the pane shows no busy cue, then dispatches the trigger. On a Claude pane the busy cue was being missed, so the trigger was submitted **into the running turn** — and Claude Code renders a mid-turn submission as "Interrupted".
+
+You were right that `attempt_busy_existing_pane_interrupt_recovery` is codex/opencode-only and could not be the source. Nothing sent an interrupt key. The dispatch *was* the interrupt.
+
+Proof from `ops.log`, 14:42:13, pane `%2`, harness=claude — two events in the same second:
+
+- `route_dispatch_only_busy_active_turn_skip_wait` … `cue="* Envisioning… (24s · ↓ 255 tokens)"`
+- `route_eager_busy_cue_recovery` … `busy_cue=false`
+
+Two functions disagreeing about the same pane. `busy_proof_line` saw the cue; `has_busy_cue` did not.
+
+**Three defects behind that disagreement**
+
+1. **The elapsed-timer scanner only matched `(<digits>s`.** Claude Code switches to `(3m 43s` past a minute, so **every turn running longer than 60 seconds lost its busy cue.** This is the big one — it is deterministic, not racy.
+2. **The spinner glyph was matched against a hardcoded frame list.** A live pane rendered `✽` (U+273D), absent from the old `· ✶ ✳ ✻ ● *` set.
+3. **The `#jb-stale-busy-idle-footer` part-2 override cancelled live cues.** I instrumented it: the only thing it ever matched on a Claude pane was `has_dispatch_ready_prompt` — the bare `❯` composer and the `⏵⏵ … (shift+tab to cycle)` hint. A live capture proves Claude renders **both of those during an active turn** (it accepts type-ahead while working). That is static chrome, not idle evidence. The existing `CLAUDE_BUSY_PANE` fixture only escaped because its permissions row happened to read `· 1 shell`.
+
+Also widened the Claude bottom-scan window 8 → 16: a live capture put the spinner at *exactly* row 8, so one transient row (rotating `Tip:` hint, `⎿` tool-result line) dropped it.
+
+**Live before/after**, captured from a real busy pane:
+
+```
+busy_proof_line  = Some("✶ Cooking… (11m 57s · ↓ 34.4k tokens)")
+has_busy_cue     = true
+blocker          = Some("active claude turn")
+```
+
+At `11m 57s` the old scanner could not possibly have matched. That capture is now a regression fixture.
+
+**Defense in depth.** The eager recovery no longer promotes on a single frame. A live turn re-renders its spinner every frame, so a second confirming capture separates a genuinely stale projection from a torn/mid-redraw one; it fails closed on capture error. Unlike OpenCode's lingering `Working` banner, Claude replaces the spinner with the final response when a turn ends, so there is no stale shape left to suppress — and if a cue ever does linger, the result is a *deferred* dispatch, which is the correct direction under `#realtime-steering-verbatim`.
+
+**Verification:** `make check` green — 7627/7627, clean clippy. Committed `6ef6dd056`, pushed, `make install` done (0.35.6, JB package installed to 4 IDEs — restart them to pick it up).
+
+**CI note:** latest CI is red, but on `b7e17f4d5` (#queuedrainednoop), which predates this push, and the failure is `finalize_skips_ignored_untracked_session_doc` — a gitignore/finalize test with no relationship to busy-cue detection. It passes locally. Filed as its own backlog item rather than folded in here.
+
+One follow-up is genuinely operator-gated: the live JB `Run Agent Doc` eyeball against a busy pane. Let the turn run past a minute first — that is the case that was hard-broken.
+<!-- agent:boundary:a0bda83f -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - do [#promptselect]
 - do [#realtimesalient]
+- do [#jbsteerinterrupt]
 - do [#syncobscache2]
 - ⏭️ do [#jblocalhistverify]
 - ⏭️ do [#capturebacklogatomic]

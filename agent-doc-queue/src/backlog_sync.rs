@@ -463,11 +463,68 @@ pub fn enqueue_created_ids_in_content(
         .collect();
 
     let mut seen = HashSet::new();
-    let new_lines: Vec<String> = queueable
+    let mut fresh: Vec<String> = queueable
         .iter()
         .filter(|id| !existing.contains(*id) && seen.insert((*id).clone()))
-        .map(|id| format!("- do [#{id}]"))
+        .cloned()
         .collect();
+
+    // `#queueingressorder`: the `priority` graph is ALWAYS active — apply it at
+    // ingress, not only in a later preflight maintenance pass. Ordering here is
+    // fully deterministic and derives from metadata the agent already declares on
+    // the backlog item: `priority=1..9` (1 highest) and `after=#id`.
+    //
+    // Within the inserted block: prerequisites first (a declared `after=` edge
+    // wins over a numerically better priority, since a dependency is a hard
+    // constraint and priority is only a preference), then priority rank, then the
+    // order the items were filed as a stable tie-break. Cycles degrade to the
+    // priority/filed order rather than dropping anything.
+    let ranks = collect_backlog_priority_ranks(&components, content);
+    let deps = collect_after_deps(&components, content);
+    let block: HashSet<String> = fresh.iter().cloned().collect();
+    fresh.sort_by_key(|id| {
+        (
+            ranks.get(id).copied().unwrap_or(u8::MAX),
+            id.clone(),
+        )
+    });
+    let mut ordered: Vec<String> = Vec::with_capacity(fresh.len());
+    let mut placed: HashSet<String> = HashSet::new();
+    // Insert each id after any in-block prerequisite it declares. Bounded to
+    // `fresh.len()` passes, so a dependency cycle cannot loop forever.
+    for _ in 0..fresh.len() {
+        let mut progressed = false;
+        for id in &fresh {
+            if placed.contains(id) {
+                continue;
+            }
+            let ready = deps
+                .get(id)
+                .map(|d| {
+                    d.iter().all(|dep| {
+                        let dep = dep.trim().trim_start_matches('#').to_ascii_lowercase();
+                        !block.contains(&dep) || placed.contains(&dep)
+                    })
+                })
+                .unwrap_or(true);
+            if ready {
+                ordered.push(id.clone());
+                placed.insert(id.clone());
+                progressed = true;
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    // Anything left is part of a cycle: keep it, in priority/filed order.
+    for id in &fresh {
+        if !placed.contains(id) {
+            ordered.push(id.clone());
+        }
+    }
+
+    let new_lines: Vec<String> = ordered.iter().map(|id| format!("- do [#{id}]")).collect();
     if new_lines.is_empty() {
         return Ok(None);
     }
@@ -902,6 +959,46 @@ mod tests {
         let fresh = updated.find("- do [#fresh]").expect("fresh head present");
         let goal = updated.find("- /goal").unwrap();
         assert!(fresh < goal, "the follow-up goes to the head:\n{updated}");
+    }
+
+    /// `#queueingressorder`: the priority graph is active at ingress, derived
+    /// deterministically from `priority=` and `after=` metadata on the item.
+    #[test]
+    fn enqueue_orders_new_block_by_dependency_then_priority() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#existing]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            // Filed order is c, b, a — none of which is the correct run order.
+            "- [ ] [#c] priority=1 fast but depends on b\n",
+            "- [ ] [#b] priority=5 depends on a\n",
+            "- [ ] [#a] priority=9 lowest priority but a prerequisite\n",
+            "- [ ] [#existing] already queued\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        // Declare the edges: c after b, b after a.
+        let content = content
+            .replace("[#c] priority=1 fast", "[#c] priority=1 after=#b fast")
+            .replace("[#b] priority=5 depends", "[#b] priority=5 after=#a depends");
+
+        let updated = enqueue_created_ids_in_content(
+            &content,
+            &["c".into(), "b".into(), "a".into()],
+            FollowUpQueuePlacement::Prepend,
+        )
+        .unwrap()
+        .expect("all three enqueue");
+
+        let a = updated.find("- do [#a]").unwrap();
+        let b = updated.find("- do [#b]").unwrap();
+        let c = updated.find("- do [#c]").unwrap();
+        assert!(
+            a < b && b < c,
+            "a declared `after=` edge is a hard constraint and must beat a better \
+             priority= rank and the filed order:\n{updated}"
+        );
     }
 
     #[test]

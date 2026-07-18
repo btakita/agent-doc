@@ -2022,6 +2022,13 @@ fn run_with_options_internal_at_root(
     // invalidates the memo, and the guard drops it at the end of the run so the
     // next sync always re-observes.
     let _tmux_observations = agent_doc_tmux_io::begin_observation_scope();
+    // The pane-liveness half lives in tmux-router because that crate issues the
+    // `list-panes -a` scans directly (its spawn sites bypass the
+    // `TmuxCommandRunner` trait the cache above wraps). `pane_alive`/`pane_dead`
+    // each scan the full listing for one id, so a caller checking N panes issued
+    // N identical full scans (19 in a measured focus sync). The scope shares one
+    // snapshot; tmux-router's pane-mutating methods invalidate it themselves.
+    let _pane_snapshot = tmux_router::begin_pane_snapshot_scope();
     let _lock_guard = lock_guard;
 
     // Check for new build and clear stale caches

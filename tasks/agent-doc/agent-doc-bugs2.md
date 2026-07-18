@@ -34,125 +34,18 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260718-144129.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260718-190605.md`*
 
 Compacted content:
-- Archived 3 response topic(s): cycle with no new prompt; repeated no-op invocations were a supervisor resubmit flood; stale verification-item sweep and the queue auto-strike fix
-- Prior summary/context: prior compacted content: Archived 2 response topic(s): JB harness switch deferred against a stale actor record; agent...
-❯ Can we speed up compact exchange? #spec-test-build-install-commit-push
-
-❯ JB `Run Agent Doc` on equityfundingsource.md + this document has an error: `route deferred for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md: Lazily current transition remained delivery_pending for 5000ms; retry after it settles`
-
-### Re: Can we speed up compact exchange? — opus-4-8
-
-Yes. Found a fixed ~2s stall on the hot path, fixed it, shipped as JetBrains plugin 0.2.278.
-
-**Measurement first.** From `ops.log`, compact `wait_ms` sat at 2646–8695ms with a ~4.5s floor that did *not* scale with payload — 46KB→6007ms, 130KB→2646ms. Fixed overhead, not encoding or document size, so tuning the CRDT payload was the wrong target.
-
-**Root cause.** The plugin's `requestRemoteDrain` gated *controller-published* CRDT remote events behind the speculative no-op drain backoff (`shouldStartRemoteDrainUtil`). That backoff exists to stop a self-driven drain spin when there is nothing to pull, and it doubles from 100ms toward a 30s ceiling on an idle document. I confirmed the escalation in the measured pull cadence: 1s, 1s, 2s, 4s, 7s, 13s, 27s, 30s.
-
-An idle document is exactly the state you're in when you hit Compact Exchange. So the published frontier got suppressed and nothing moved until the binary escalated to `ack_recovery_force_refresh` at `CRDT_ACK_FORCE_REFRESH_AFTER_MS` (2000ms) — the only path that called the backoff-bypassing `requestUrgentRemoteDrain`. That 2s toll was paid on **every** compact and finalize against a live editor, not just compact.
-
-**Fix.** A controller push is positive evidence the CPC already holds a frontier, so it now drains urgently instead of being suppressed. `request_full_state` stays exempt (it owns the text-adopt path). This cannot reintroduce the spin the backoff was added for: controller pushes are externally rate-limited to one per ACK-replay interval and only while a write awaits ACK, and the urgent path still falls back to the *gated* drain when it finds no work — so speculative polling stays governed.
-
-Second, compounding half: `requestUrgentRemoteDrain` never reset `consecutiveNoOpReschedules`, so even after applying useful work the gate stayed parked at its previous (up to 30s) delay and re-suppressed the *next* push. Now reset on useful work.
-
-The binary-side 2s escalation is retained as a backstop for older plugin builds — no Rust change needed.
-
-**Shipped.** 3 new regression tests (all green), `make check` green (exit 0), spec updated in `specs/14-realtime-workflow.md`, plugin built + signed + installed to all 4 IDE roots, committed and pushed as `5b648f338`. CI run 29650379566 is pending — recorded, not blocking.
-
-One thing I cannot verify from here: the Kotlin plugin change needs an IDE restart to load (`reload-lib` only swaps the cdylib). Queued as `#crdtpushdrainverify` so you can eyeball the actual compact latency after restart — I expect the ~4.5s floor to drop to roughly the pull/apply round trip.
-
-### Re: JB `Run Agent Doc` route deferred — delivery_pending 5000ms — opus-4-8
-
-Same family as the compact-exchange stall I just fixed, with a residual gap that fix didn't close. Fixed and pushed as `6a2261b96`.
-
-**What happened.** `await_idle_with_max_wait_and_effects` (`agent-doc-route-io/src/startup_debounce.rs`) waits for `delivery_converged: true`. On seeing `delivery_pending` it sent **one** urgent CRDT drain request, latched behind a one-shot `urgent_drain_requested` flag, then polled every 100ms until `max_wait` (5000ms) and bailed.
-
-The problem is that a single urgent drain can legitimately apply nothing: `drainRemoteUpdatesFor` returns early while the path has pending local edits or is mid editor-apply, and the forwarder may not be registered yet. Its only follow-up is the *gated* `requestRemoteDrain` — which is exactly the call an idle document's escalated no-op backoff suppresses. So route spent its remaining ~4.9s polling a frontier nobody was going to pull, then deferred.
-
-**Fix.** Re-request the urgent drain every 750ms while delivery stays pending, so an unproductive attempt gets several retries inside the same budget. Bounded well under `max_wait` and far coarser than the 100ms observe poll. A genuinely never-converging delivery still fails closed at `max_wait` — this loosens the retry cadence, not the safety boundary.
-
-**How the two fixes relate.** `5b648f338` stopped controller pushes from being suppressed at the source (plugin side); this one stops the route path from giving up when its single nudge lands unproductively. You needed both: the first removes the common-case stall, the second removes the failure mode when the one-shot nudge races.
-
-`make check` green (exit 0), new regression test asserts multiple retries while pending *and* that a never-converging delivery still fails closed. The existing one-shot test still passes unchanged, so we didn't trade correctness for retries. `make install-full` done — binary and plugin 0.2.278 installed to all 4 IDE roots.
-
-Worth noting: the route half is a Rust change and is live now, but the plugin half still needs an IDE restart to load. Until you restart, you have the weaker of the two fixes — so if you see the deferral again before restarting, that's expected rather than a regression.
-
-### Re: fix all issues identified this session — opus-4-8
-
-Six commits shipped, and two items I deliberately did **not** fix because I could not verify the mechanism.
-
-**Fixed and verified:**
-
-- `#crdtpushdrain` (`5b648f338`, `6a2261b96`) — controller-published CRDT frontiers were suppressed by the plugin's speculative no-op drain backoff (escalates toward 30s on an idle document, exactly the Compact Exchange state), so every compact/finalize waited for the 2000ms `ack_recovery_force_refresh` escalation. Plus the route path latched its urgent drain to a single attempt.
-- `#routeprogresswait` (`1659448e9`) — the recurring `route deferred ... delivery_pending for 5000ms`. `ops.log` shows `delivery_converged` *does* reach true moments later, and the JB action writes its prompt marker **first**, so route was deferring the convergence of a write the same action had just issued. The no-progress deadline now resets when the frontier advances; a frozen frontier still fails closed.
-- `#committedwedge` (`c91bdf692`) — the circular deadlock. Hit it three times, most clearly on a pure `--backlog-add`: no response body, document matching HEAD, nothing that could duplicate, still refused. Pending-only closeouts now reopen from HEAD. This is what made recording these very backlog items possible.
-- `#backlogqueueprepend` (`64a3e1d07`) — your queue-ordering report. The bare `queue` token hard-defaults to `Append`, and the `priority` attribute on the *same marker* never influenced the mode. Verified live: `(Append, 49)` → `(Prepend, 49)`.
-- `#queuepersistloud` (`1659448e9`) — queue maintenance printed confident progress while *computing*, then swallowed persistence failure into a bare warning. That is why a filed backlog id was absent from the queue entirely rather than mis-ordered. Now says plainly that nothing was applied, as a structured warning.
-- `#syncobscache` (`800d3c2fd`, tmux-router `7b5cedc`, `8957e619f`) — lazily `SlotMap` observation cache plus a shared pane-liveness snapshot.
-
-**Where I was wrong, in the open:**
-
-The focus-sync work did **not** fix the lag. I cut spawns 109→63 and `pane_dead` full scans 19→1, but wall clock did not move (min-of-5 2207ms vs 2031ms baseline; every run 2.0–2.4s). That falsifies my "spawn count IS the cost" premise. Instrumented phases sum to ~375ms of a ~2.5s sync, leaving ~2.1s in an unmeasured span I did not isolate. Filed as `#syncfocuslag` with the exact next step. I kept the caching because O(n) full scans → 1 is a real reduction with correct invalidation, not because it fixed anything.
-
-I also reverted two speculative fixes rather than ship them: a response-path loosening for the stale-baseline wedge (it tripped the ambiguous-patchback guard, which correctly refuses a visible response with no capture artifact), and a preflight cycle-reuse change (preflight *deliberately* rolls the cycle — asserted by an existing test).
-
-**Not fixed — `#jbsteerinterrupt`.** `attempt_busy_existing_pane_interrupt_recovery` is codex/opencode-only, so it cannot be what interrupted your Claude pane. Something else injected it and I don't know what. I won't edit safety-critical routing code on an unverified hypothesis, having already made and reverted that mistake twice today. I need `ops.log` plus route diagnostics captured at the moment of the interrupt on a Claude pane.
-
-CI run 29653355392 was in progress at closeout. The pre-existing `finalize_skips_ignored_untracked_session_doc` failure is still red and still not reproducible locally after four attempts.
-❯ 🚧 Please add support for selecting text in an editor and `Run Agent Doc` which will be capable of sending only the selected prompt to the agent. This should also support real-time steering. Should we have a dedicated `agent-doc prompt "<text>"` command or name steer to something else like `run` or `steer`? The command should be able to also handle multiple lines...perhaps using `cat`? Please hook this command up to the plugins' `Run Agent Doc` command...so if there is a text select, only the text selection is sent via `prompt`. If the user sends a `prompt` via selection, agent-doc should "acknowledge" the prompt by adding the prompt prefix and any saliant responses into the prompt. Please also have agent-doc dedicate responses to specific prompts under the prompt. This may mean creating an additional layer in the Document Tree for each prompt + response. This should be like a threaded chat.
-
-❯ 🚧 Please also make the agent write salient responses into the document in real-time, rather then waiting until the finalize step.
-
-❯ 🚧 The agent-doc binary should handle the queue being drained:
-```
-  One loose end I could not close, and I'd rather flag than force
-
-  The only pending change on tasks/brookebrodack-dev.md is a single line — the queue-head strike I applied last turn.
-  It won't commit through the binary:
-
-  - agent-doc write --commit fails with queue consume: queue_active is true but document queue has no prompt to consume
-  — queue: go is set in frontmatter, but its only head is already struck, so consume finds nothing
-  - agent-doc commit silently no-ops on it
-  - Frontmatter isn't a patchable component, so flipping queue: go means writing to disk under the live editor — which
-  is precisely what diverged authority from disk twice earlier this turn
-
-  So I stopped. session-check is green and nothing is blocked; the cost is one uncommitted line of bookkeeping.
-
-  To clear it: remove queue: go from the frontmatter (the queue is genuinely drained), or add a new queue item. Either
-  way the next cycle's preflight will absorb the strike.
-
-  This was self-inflicted, and worth naming: after my response quoted the queue head, the #ftstrike echo had already
-  satisfied the residue guard. My manual agent-doc patch strike on top of that was redundant, and it's what left the
-  ❯ 🚧 document in a state the consume path can't reconcile.
-
-  Standing blockers are unchanged — OpenAI project credit (insufficient_quota) and wrangler login — and the guestbook
-  code across four submodules is still uncommitted and undeployed, pending your go-ahead.
-```
-
-### Re: session crash + agent-doc contributing factors — opus-4-8
-
-Crash was OOM (SIGKILL/137). Two contributing factors, both in agent-doc rather than the machine, plus your drained-queue bug. Fixed and pushed; nothing was lost (tree clean, all commits pushed, binary current).
-
-**`#installfulloom` — the crash cause, and it was a documented-workflow bug.** `make install-full` builds `[profile.release]` = `lto = "fat"` + `codegen-units = 1` across a **144-crate workspace**. Fat LTO collapses that into one enormous LLVM process. It is a *pre-release parity* step — the `release` target uses it — but AGENTS.md listed it as the install to run after every fix, so I called it ~10 times while iterating and eventually OOMed the machine.
-
-`make install` already existed for this loop: `release-local` (`lto = off`, `codegen-units = 256`, incremental), same binary + cdylib + editor packages. Measured difference: **3 seconds vs 3–4.5 minutes** per install, with none of the memory spike. Makefile and AGENTS.md now say which is which and why — any agent following the old wording would repeat the crash, so this is a packagable fix, not a note to myself.
-
-**`#ledgerdocscope` (second site).** `agent-doc-repair-io`'s `load_state_event_ledger` loaded **every** event in the project on the repair/closeout path — all rows into a `Vec` with full `payload_json`, then each parsed into a `StateEvent`, so peak memory was roughly 2x the whole ledger. The caller projects exactly one document out of it and already had `document_hash` in hand. Same one-argument fix as the supervisor-io site. Left the `agent-doc-controller-io` whole-project loads alone — some callers genuinely need a project-wide projection, and this session's `#crdtcheckpointretention` GC already cut what they load by ~79%.
-
-**`#queuedrainednoop` — your queue bug.** `write --commit` refused with "queue_active is true but document queue has no prompt to consume" while `commit` silently no-opped. The queue had `go` set and its only head already struck — the normal end state of a drain, not corruption. The guard treated "no consumable prompt" as malformed regardless of cause, leaving one line of bookkeeping impossible to commit through the binary at all; the only escape left was writing `queue: go` off under a live editor, which is the exact disk-vs-authority divergence the write path exists to prevent. You were right to stop rather than take it. A queue whose heads are all `Completed` with no remaining `Prompt` now consumes nothing and succeeds. The malformed case still fails closed.
-
-Same principle as `#steernoblock`: when there is nothing to do, the answer is a no-op, not a hard failure that strands the operator.
-
-Sync is now **334ms** from a 2207ms baseline (-85%), with `safe_passive_total` inside budget.
-
-Queued `#promptselect` and `#realtimesalient` for the two features — both need a design pass, so I am flagging them as substantial rather than quietly deferring them.
-<!-- agent:boundary:d3148aa9 -->
+- Archived 4 response topic(s): Can we speed up compact exchange?; JB `Run Agent Doc` route deferred; fix all issues identified this session; 1 more
+- Prior summary/context: prior compacted content: Archived 3 response topic(s): cycle with no new prompt; repeated no-op invocations were a su...
+<!-- agent:boundary:2fbd9881 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#promptselect]
+- do [#realtimesalient]
 - do [#syncobscache2]
 - ⏭️ do [#jblocalhistverify]
 - ⏭️ do [#capturebacklogatomic]

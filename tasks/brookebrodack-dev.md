@@ -340,7 +340,7 @@ Design decisions, each made where the alternative fails silently:
 `make check` green, 98 tests (12 new). Also verified the supervised host still judges correctly on the new binary: restarted the unit, submitted a link-spam entry, rejected through the live push path.
 
 freehold `137adb3`. Not yet exercised with two concurrent model plugins for the obvious reason — there is still only one, and `#gpupol` gates it. The unit tests cover the contention directly, which is the part that would otherwise only be observable as an intermittent double-abstention in production.
-<!-- agent:boundary:ba43d26c -->
+<!-- agent:boundary:88c7317f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -375,7 +375,6 @@ freehold `137adb3`. Not yet exercised with two concurrent model plugins for the 
 
 <!-- agent:backlog priority queue -->
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
-- [ ] [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
 - [ ] [#nd8n] Add cgroup limits for the bwrap sandbox path in src/freehold via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin. Confirmed still absent: mem_limit_mb exists on PluginSpec but no systemd-run/cgroup call site

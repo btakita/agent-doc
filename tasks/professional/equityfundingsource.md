@@ -37,7 +37,7 @@ complete
 Compacted content: 
 - Archived 4 response topic(s): Production Cloudflare environment; Brief Cloudflare account instructions for Judith; Is $5/month enough, and the CF instructions as a file; 1 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): Remove the single TMO lender id; map vestings to TMO lenders; ...
-In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?tab=pipeline&dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=interests, please give the Reconcile with TMO a dedicated url. What TMO api endpoint the dropdown list act on?
+❯ In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?tab=pipeline&dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=interests, please give the Reconcile with TMO a dedicated url. What TMO api endpoint the dropdown list act on?
 
 ### Re: Dedicated URL for Reconcile with TMO — opus-4-8
 
@@ -72,7 +72,7 @@ The dropdown fetches `GET /api/admin/tmo-lenders` (`admin_tmo_lenders_GET_`). Th
 One correction landed with this: the `TmoLenderPicker` comment claimed the dropdown was a live `LSS.svc/GetLenders` list. It never was — `GetLenders` is unwired. The comment now describes the actual path above.
 
 **Verification:** `make check` green — 1787 pass, 0 fail. Not deployed; say the word and I'll push it to the worker.
-<!-- agent:boundary:4b7c800f -->
+<!-- agent:boundary:2af1522a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

@@ -320,7 +320,27 @@ There is no answer that is best in every deployment, so I did not pick one — t
 Changes (freehold `cf7d1bb`): new `credential.rs` with the precedence as a pure function over the environment — testable without a filesystem, a password manager, or a live agent; `deploy/freehold-host.service`; `config.rs` widened to all three reserved vars; README §"Under a supervisor". `make check` green, 90 tests.
 
 **Reboot survival is the operator's call, not done by default.** Option (a) is configured and needs a login session. Switching to (b) is uncommenting two lines, writing the key `umask 077`, and `loginctl enable-linger` — deliberately not done for you, since it puts a secret at rest and that is a decision to make on purpose.
-<!-- agent:boundary:1fbbb255 -->
+
+### Re: #gpulease — built it, and the item's own gate was the wrong test — opus-4-8
+
+> **Queue prompt:** do [#gpulease]
+
+Done. `crates/freehold-host/src/gpu.rs` — a plugin declaring `gpu = true` holds one of `gpu.slots` while it runs; everything else still starts at once.
+
+**The item said this was only worth building once more than one local-model plugin existed concurrently. I built it anyway, and the reason is worth stating.** The contention is not incidental, it is structural: `run_plugins` fans the panel out with `join_all`, so every plugin starts simultaneously, always. That is right for plugins that only compute and wrong the moment two of them call the same model — one GPU serving two concurrent requests does not halve each one's latency, it lengthens both and can push them past their budgets *together*. Two plugins that would each have answered then both abstain, and the quorum loses two voices at once. The panel gets **less** decisive under load, which is exactly when a wrong escalation costs the most. And `#fhagentspec` already put the first model plugin in the example panel — so the second one arriving would otherwise be both the trigger and the thing that discovers this.
+
+Design decisions, each made where the alternative fails silently:
+
+- **Declared, never detected.** The host has no way to know whether a plugin will call the model, and guessing permissively is precisely the failure admission control exists to prevent. `gpu = true` in `freehold.toml` or nothing.
+- **The wait is bounded by the plugin's own budget.** Unbounded, a plugin could queue past its job's deadline and then start work whose answer arrives too late to apply — wasted GPU time for a result nobody can use. Timing out is the same outcome, no opinion, reached earlier and cheaply. It logs; an abstention that drops a plugin out of the quorum must never be silent.
+- **Non-GPU plugins are granted immediately and hold nothing**, so this can never serialise the rest of the panel — the lease is per plugin, not per panel.
+- **One lease per host, not per job.** The GPU is a property of the machine; a per-job semaphore would let two jobs each admit their own model plugin, which is the stampede with extra steps.
+- **`gpu = true` with `slots = 0` is refused at config load.** It would wait out its budget on every job and abstain forever, with nothing showing that a config line did it — the same silent-abstention shape the rest of that validator exists to catch. The type also clamps to one slot, so it cannot represent the deadlock either.
+
+`make check` green, 98 tests (12 new). Also verified the supervised host still judges correctly on the new binary: restarted the unit, submitted a link-spam entry, rejected through the live push path.
+
+freehold `137adb3`. Not yet exercised with two concurrent model plugins for the obvious reason — there is still only one, and `#gpupol` gates it. The unit tests cover the contention directly, which is the part that would otherwise only be observable as an intermittent double-abstention in production.
+<!-- agent:boundary:ba43d26c -->
 <!-- /agent:exchange -->
 
 ## Queue

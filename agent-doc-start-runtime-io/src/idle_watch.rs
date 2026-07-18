@@ -251,19 +251,81 @@ fn gather_convergence_facts(
     }
 }
 
-fn current_transition_pending_for_idle_queue(file: &std::path::Path) -> bool {
-    let absolute = agent_doc_git_io::dirs::resolve_absolute_file_path(file);
-    match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&absolute) {
-        Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => false,
-        Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+/// Outcome of the idle-watch document-transition check.
+///
+/// `Unresolved` is deliberately distinct from `Pending`: "the document is
+/// mid-sync" and "we could not find out" are different facts, and only the first
+/// one justifies skipping the drain indefinitely. See
+/// [`agent_doc_supervisor::idle_reconcile::unresolved_transition_blocks_dispatch`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IdleQueueTransition {
+    Converged,
+    Pending,
+    Unresolved,
+}
+
+impl IdleQueueTransition {
+    fn from_converged(delivery_converged: bool) -> Self {
+        if delivery_converged {
+            Self::Converged
+        } else {
+            Self::Pending
+        }
+    }
+}
+
+/// `#recycletransitionwedge` — resolve whether a document transition is still in
+/// flight, through the CONTROLLER, which is the process that actually owns the
+/// CRDT hub.
+///
+/// This must not use the crdt-relay `current_text` file helpers. Those
+/// resolve against `hub_registry()`, a process-local map that only the project
+/// controller ever populates (`replica_register` is served by the controller RPC,
+/// and the supervisor's IPC protocol explicitly rejects the replica methods). A
+/// supervisor asking its own registry can only ever miss, and once durable
+/// liveness reports the editor as attached that miss reads as
+/// `EditorAttachedMissingReplica` — permanently, for the life of the process.
+///
+/// That is exactly the wedge this fixes: the local read pinned "pending", the
+/// drain skipped every tick with `reason=current_transition_pending`, and because
+/// the skip log is one-shot the session went silent with a queue head still owed.
+/// Route it the same way `idle_watch_active_queue_head` and
+/// `idle_watch_document_revision` already do, and report an unanswerable read as
+/// `Unresolved` so the caller can bound it instead of blocking forever.
+fn current_transition_for_idle_queue(file: &std::path::Path) -> IdleQueueTransition {
+    match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
+        file,
+        "current_transition_for_idle_queue",
+    ) {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) => {
+            IdleQueueTransition::Converged
+        }
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
             delivery_converged, ..
-        }) => !delivery_converged,
-        Ok(
+        })) => {
+            if delivery_converged {
+                IdleQueueTransition::Converged
+            } else {
+                IdleQueueTransition::Pending
+            }
+        }
+        Ok(Some(
             agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
             | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
-        )
-        | Err(_) => true,
+        ))
+        | Ok(None)
+        | Err(_) => IdleQueueTransition::Unresolved,
     }
+}
+
+/// Fail-closed single-shot view for callers that have no tick budget to spend
+/// (the captured-finalize resume diagnostic). An unresolved read counts as
+/// pending here; that path retries on its own cadence and never gates the drain.
+fn current_transition_pending_for_idle_queue(file: &std::path::Path) -> bool {
+    !matches!(
+        current_transition_for_idle_queue(file),
+        IdleQueueTransition::Converged
+    )
 }
 
 /// `#fbwire` / `#fullboundary` Phase 2 - the convergence gate could not be
@@ -394,7 +456,15 @@ fn record_context_clear_prompt_for_hooks(
 /// that has no continuation required (#qchurn / #goqueuestall / #goqstall2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum QueueHeadObservation {
-    Observed(Option<String>),
+    /// The drainable head plus the delivery-transition state observed by the SAME
+    /// authority read. Keeping them together is deliberate: they must agree, and
+    /// resolving them separately meant a second per-tick controller round-trip
+    /// (`#idlewatchctrlbackoff`) or — worse — a process-local relay read that the
+    /// supervisor can never satisfy (`#recycletransitionwedge`).
+    Observed {
+        head: Option<String>,
+        transition: IdleQueueTransition,
+    },
     AuthorityUnavailable,
 }
 
@@ -437,22 +507,29 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
             file,
             "idle_watch_active_queue_head",
         );
-    let content = match current {
+    let (content, transition) = match current {
         Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
-            text, live_editors, ..
+            text,
+            live_editors,
+            delivery_converged,
+            ..
         })) if live_editors > 0 => {
             ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
                 .lock()
                 .expect("zero-replica idle-watch cache poisoned")
                 .remove(&canonical);
-            text
+            (text, IdleQueueTransition::from_converged(delivery_converged))
         }
-        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            delivery_converged,
+            ..
+        })) => {
             ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
                 .lock()
                 .expect("zero-replica idle-watch cache poisoned")
                 .insert(canonical, std::time::Instant::now());
-            text
+            (text, IdleQueueTransition::from_converged(delivery_converged))
         }
         Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) => {
             return idle_watch_disk_queue_head(file);
@@ -470,12 +547,13 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
             return QueueHeadObservation::AuthorityUnavailable;
         }
     };
-    QueueHeadObservation::Observed(
-        agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+    QueueHeadObservation::Observed {
+        head: agent_doc_queue::queue_continuation::live_drainable_continuation_head(
             &content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
         ),
-    )
+        transition,
+    }
 }
 
 /// Resolve the drainable active-queue continuation head straight from the
@@ -493,7 +571,12 @@ fn idle_watch_disk_queue_head(file: &Path) -> QueueHeadObservation {
                 agent_doc_queue::queue_continuation::DrainScope::Supervisor,
             )
         });
-    QueueHeadObservation::Observed(head)
+    // Disk IS the authority on this path, so there is no editor delivery in
+    // flight to wait for — the transition is converged by construction.
+    QueueHeadObservation::Observed {
+        head,
+        transition: IdleQueueTransition::Converged,
+    }
 }
 
 fn idle_watch_paused_queue_head(file: &Path) -> QueueHeadObservation {
@@ -1264,8 +1347,10 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     }
                     observation
                 };
-                let active_head = match active_head_observation {
-                    QueueHeadObservation::Observed(head) => head,
+                // The head and its delivery-transition state come out of ONE
+                // authority read (`#recycletransitionwedge`).
+                let (active_head, active_transition) = match active_head_observation {
+                    QueueHeadObservation::Observed { head, transition } => (head, transition),
                     QueueHeadObservation::AuthorityUnavailable => {
                         queue_state_observed = false;
                         last_quiescent_maintenance = None;
@@ -1468,8 +1553,13 @@ pub(super) fn spawn_idle_queue_watch_thread(
             } else {
                 route_submit_in_flight_logged = false;
             }
+            // `#recycletransitionwedge`: the transition comes from the SAME
+            // controller model read that produced `active_head` this tick — never a
+            // second read (a per-tick extra controller round-trip is what
+            // `#idlewatchctrlbackoff` exists to prevent) and never the supervisor's
+            // own process-local relay registry, which can only ever miss.
             let current_transition_pending =
-                active_head.is_some() && current_transition_pending_for_idle_queue(&path);
+                active_head.is_some() && active_transition == IdleQueueTransition::Pending;
             if current_transition_pending {
                 if !current_transition_pending_logged {
                     log_event(
@@ -3705,6 +3795,64 @@ mod tests {
     use super::*;
 
     #[test]
+    fn idle_queue_transition_maps_delivery_convergence() {
+        assert_eq!(
+            IdleQueueTransition::from_converged(true),
+            IdleQueueTransition::Converged
+        );
+        assert_eq!(
+            IdleQueueTransition::from_converged(false),
+            IdleQueueTransition::Pending
+        );
+    }
+
+    #[test]
+    fn disk_queue_head_reports_converged_transition() {
+        // `#recycletransitionwedge`: on the disk-authority path there is no editor
+        // delivery in flight, so the drain must never be told a transition is
+        // pending — that is what used to skip the drain on every tick.
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("d.md");
+        std::fs::write(&doc, "---\nqueue_active: true\n---\n\n").unwrap();
+        match idle_watch_disk_queue_head(&doc) {
+            QueueHeadObservation::Observed { transition, .. } => {
+                assert_eq!(transition, IdleQueueTransition::Converged);
+            }
+            QueueHeadObservation::AuthorityUnavailable => {
+                panic!("disk authority must always observe")
+            }
+        }
+    }
+
+    #[test]
+    fn idle_watch_transition_never_reads_the_process_local_relay() {
+        // The regression guard (`#recycletransitionwedge`). The supervisor process
+        // never hosts a CRDT hub — only the project controller registers replicas,
+        // and the supervisor IPC protocol rejects the replica methods outright. So
+        // any `current_text_for_file*` read from this module resolves against an
+        // always-empty local `hub_registry()`; once durable liveness says an editor
+        // is attached that miss reads as `EditorAttachedMissingReplica` forever,
+        // pinning `current_transition_pending` true and wedging the queue drain
+        // with no self-heal (observed live after an execve self-recycle).
+        //
+        // Transition state must be resolved through the controller instead. Assert
+        // the source has no local-relay read left in it, so a future edit cannot
+        // silently reintroduce the wedge.
+        // Built from fragments so this guard never matches its own source text.
+        let needle = ["agent_doc_crdt_relay_io", "::", "current_text", "_for_file"].concat();
+        let offenders: Vec<&str> = include_str!("idle_watch.rs")
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .filter(|line| line.contains(needle.as_str()))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "idle_watch must resolve document text/transition state through the \
+             project controller, never the supervisor-local relay registry; found: {offenders:#?}"
+        );
+    }
+
+    #[test]
     fn idle_watch_fast_path_requires_observed_ready_nonurgent_state() {
         assert!(idle_watch_fast_path_can_sleep(true, true, false, false));
         assert!(!idle_watch_fast_path_can_sleep(false, true, false, false));
@@ -3797,7 +3945,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             idle_watch_paused_queue_head(&doc),
-            QueueHeadObservation::Observed(None),
+            QueueHeadObservation::Observed {
+                head: None,
+                transition: IdleQueueTransition::Converged
+            },
             "undefined backlog ids in a paused queue must not force a live editor probe"
         );
 
@@ -3816,7 +3967,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             idle_watch_paused_queue_head(&doc),
-            QueueHeadObservation::Observed(Some("a".to_string()))
+            QueueHeadObservation::Observed {
+                head: Some("a".to_string()),
+                transition: IdleQueueTransition::Converged
+            }
         );
     }
 

@@ -18499,9 +18499,20 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "start-runtime post-registration current-text checks must use CPC read-only state instead of allocating or foreground-ensuring the CRDT hub locally"
     );
     assert!(
-        orchestration_start_idle_watch.contains("current_text_for_file_nonblocking")
-            && !orchestration_start_idle_watch.contains("consume_disk_change_reconcile"),
-        "start-runtime idle-watch must observe Lazily current state without a second disk-change replay path"
+        orchestration_start_idle_watch.contains("current_text_via_controller_model_read_for_doc")
+            && !orchestration_start_idle_watch.contains("consume_disk_change_reconcile")
+            && !orchestration_start_idle_watch
+                .contains("agent_doc_crdt_relay_io::current_text_for_file"),
+        "start-runtime idle-watch must observe Lazily current state through the project \
+         controller, without a second disk-change replay path. This assertion previously \
+         required `current_text_for_file_nonblocking`, which codified a defect \
+         (`#recycletransitionwedge`): that helper resolves against the process-local \
+         `hub_registry()`, which ONLY the controller ever populates (the supervisor IPC \
+         protocol rejects the replica methods outright). A supervisor reading its own \
+         registry can only miss, and once durable liveness reports the editor attached the \
+         miss pins at `EditorAttachedMissingReplica` for the life of the process — which \
+         pinned `current_transition_pending` true and wedged the queue drain permanently, \
+         with no self-heal, after an execve self-recycle."
     );
     assert!(
         orchestration_start_idle_watch.contains("live_editor_endpoint_attached_for_file(file)")

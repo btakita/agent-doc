@@ -470,6 +470,51 @@ as the primary risk, not secrecy.
 Worth stating plainly: the key is **server-side only** — it lives in the Pages
 Function and the Worker, and is never sent to the browser. Nothing in the guestbook
 client touches it.
+❯ What API key permissions should I use?
+
+### Re: API key permissions — opus-4-8
+
+I grepped the codebase rather than answering from memory. This code calls **exactly
+one OpenAI endpoint**:
+
+```
+POST https://api.openai.com/v1/chat/completions
+```
+
+That's the only `api.openai.com` reference in the tree (`scripts/_lib/guestbook-moderation.ts:144`).
+Every other match is a test stub. Nothing reads models, uploads files, or touches
+assistants, threads, fine-tuning, batch, or vector stores.
+
+So on a **restricted** project key: set **Model capabilities → Write**, and leave
+every other permission group at **None**.
+
+**The honest caveat about granularity.** "Model capabilities" is a broad bucket — it
+covers chat completions, embeddings, images, audio, and moderations together. OpenAI
+does not let you scope a key down to a single endpoint, so this is the tightest
+setting available, not a tight one. A leaked key could still call image or audio
+endpoints and cost you money.
+
+That's exactly why the **project budget cap is the real control**, not the permission
+list. Permissions bound *what* the key can do; only the cap bounds *how much*. Set
+both.
+
+You do **not** need:
+
+- `Models → Read` — nothing in the code lists models. (My benchmark script doesn't
+  either; it only calls chat completions.)
+- Any read scope on usage or audit logs. Those are for dashboards, not this code.
+
+Two things to watch:
+
+1. **The dashboard's exact labels may differ from what I've written** — my knowledge
+   of that UI is from January 2026. The durable rule is the one above: grant only
+   what `POST /v1/chat/completions` needs, deny the rest.
+2. **Some newer models are Responses-API-only.** If `gpt-5.6-luna` (or another 5.x
+   pick) is only served on `/v1/responses`, our chat-completions call will fail
+   outright and the entry will escalate — fail-closed, but it won't moderate. The
+   benchmark script will surface that immediately as an error row rather than a
+   score. If that happens, tell me and I'll add a Responses-API provider; it's a
+   small change against the existing provider interface.
 <!-- agent:boundary:5d41cd94 -->
 <!-- /agent:exchange -->
 

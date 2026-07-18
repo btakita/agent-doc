@@ -38,8 +38,8 @@ Compacted content:
 - Archived 4 response topic(s): Reconcile each lender with TMO from the deal interests tab; Per-lender reconcile modal, vesting granularity; Does the EFS API support creating LOS lenders without a funding?; 1 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): Binding a deal to a vesting; Funding-linking items deferred (⏭...
 
-❯ 🚧 My understanding is that LSS.svc is a completely separate system. EFS has a lender record but the EFS lender record does not map to a TMO lender record. The EFS lender vestings do map to the TMO lender records. Please change the UI to reflect that. Remove the single TMO lender id in EFS lender and map the EFS lender vestings to TMO lenders.
-❯ 🚧 #spec-test-commit-push-deploy
+❯ My understanding is that LSS.svc is a completely separate system. EFS has a lender record but the EFS lender record does not map to a TMO lender record. The EFS lender vestings do map to the TMO lender records. Please change the UI to reflect that. Remove the single TMO lender id in EFS lender and map the EFS lender vestings to TMO lenders.
+❯ #spec-test-commit-push-deploy
 
 ### Re: Remove the single TMO lender id; map vestings to TMO lenders — opus-4-8
 
@@ -128,13 +128,46 @@ The Servicing Agents finding is the one I'd expect to save the most time later: 
 **Verification:** `make check` 1730 pass / 0 fail. Production D1 confirms the column is gone and the new vesting query returns correctly — lender10 reads `3 vestings, 1 linked`, exactly the partial state the dropped column could never represent. Live bundles string-checked for `Map Vestings To TMO`, `LenderTmoReconcileModal`, and `In TMO · no funding yet`; `TMO lender account ID` and the dead route are absent.
 
 One thing I did **not** do: the `confirmed_no_funding` path has no live proof. Nothing in the current production data is `in_lss && !in_los`, so the LSS call has not actually returned a record against real TMO — it is covered by tests and degrades safely, but the first real confirmation is unobserved. Queued as `#tmo-getlender-verify`; it needs an operator to point at a TMO lender created but never funded.
-<!-- agent:boundary:8103f9bf -->
+
+❯ I don't have access to the TMO production api key. We want to launch the website over the weekend. Until we obtain the production API key, we will operate as a split system. Please ensure the entire app will work without any blocking issues & without sync until we can obtain the TMO api key.
+
+
+### Re: Launch without the TMO production key — opus-4-8
+
+Found one hard blocker and fixed it. Shipped and deployed — worker `f6bfb70a`, commit `15c9acfe`.
+
+**The blocker: approving an application was dead without the key.** `tmo_application_create_` was the only TMO caller with no config gate. It read the credentials with a silent empty-string fallback and fired `LOS.svc/NewLoan` anyway, so the request 401'd on an empty `Token` header and threw. That throw landed *before* `application_tmo_loan_persist_`, which meant no `loans` row, so document copy, acceptance, and `admin_deal_publish_` never ran. Every approved application became `failed` with a 502 to the admin, and nothing ever reached the investor marketplace. It was also sending real requests to `api.themortgageoffice.com` with empty credentials on every attempt.
+
+**The fix.** The `NewLoan` body and the loan number are computed from local data, so with TMO unconfigured the approve flow now does everything the connected path does and skips only the network call:
+
+- creates the loan, copies application documents, accepts the application, auto-publishes the deal
+- records the writeback as `gated` — never `sent` — so nothing claims a success that did not happen
+- parks the exact `NewLoan` body plus the loan number EFS assigned in `tmo_cache_outbox` as a `pending` `create_loan_application`, so when the key arrives the replay pushes what would have been sent and nobody re-keys an approved application
+
+`tmo_application_create_` now throws `TmoUnconfiguredError` locally rather than calling the vendor, so a future caller that forgets the gate fails loudly here instead of quietly burning auth failures against your TMO account.
+
+Two smaller things fixed alongside it. `application_tmo_loan_number_tmo_exists_` re-threw anything that was not "not found" or "not configured", so a *wrong* key (as opposed to a missing one) would have broken loan-number generation — it now degrades on any TMO error, and local uniqueness against `loans` + `tmo_cache_entities` remains the binding constraint while EFS is the only writer. And `admin_tmo_lenders_GET_` hardcoded `configured: true`, so the lender picker's clean "TMO is not connected. Enter the account number manually." branch was unreachable and admins instead read the misleading "No TMO lenders returned."
+
+**Everything else was already safe.** I audited every TMO call site rather than assuming:
+
+| Flow | Without the key |
+|---|---|
+| Sign-in, borrower portal, document upload | Zero TMO references |
+| Investor marketplace, deal browsing | Reads EFS D1, never TMO |
+| `*/15` sync cron | No-op — nothing sourced from TMO to sweep; per-loan failures caught, run timestamp persisted before the sweep, so no retry loop and no log flood |
+| Lender roster confirmation, document sync, borrower/admin writebacks | Gated on `tmo_config_`, degrade to unconfirmed or return `null` |
+
+There is no startup env validation anywhere, so the worker boots clean with zero TMO vars, and `wrangler.toml` has no TMO entries to unset.
+
+**Verification:** full suite 1750 pass / 0 fail (typecheck + build clean). Three source-assertion tests in `apply4-full-application-p6` pinned the old call ordering and the old `already_in_tmo` line; the deferred branch introduces earlier occurrences of `application_tmo_loan_persist_` and `admin_deal_publish_`, so I re-anchored those to the create path rather than loosening them. Live bundle string-checked for `TMO writeback queued`, `Accepted (TMO writeback queued)`, and `TMO is not connected`; the worker bundle carries `tmo_deferred`, `create_loan_application`, `TmoUnconfiguredError`, and `writeback_status = 'gated'`. Public routes smoke-checked: `/`, `/apply`, `/contact`, `/login`, `/admin/login` all 200.
+
+Spec is `prds/tmo-split-system-launch.md`; the operator steps for when the key lands (secrets, verification, the outbox drain query) are in `docs/operator-runbook-pending-config.md`.
+
+**One thing you should know about the weekend launch that is not a code issue.** `equityfundingsource.com` has no A or AAAA record at all, and its nameservers are still DreamHost (`ns1/2/3.dreamhost.com`). `wrangler.toml` declares no route or custom domain for it. The site is live and correct on `equityfundingsource.brian-takita.workers.dev`, but the apex domain currently resolves to nothing — that DNS cutover needs registrar and Cloudflare access I do not have. Queued as `#efs-dns-cutover`; it is the real remaining gate on launching over the weekend, and it is worth starting early because NS propagation is not instant.
+<!-- agent:boundary:2826030d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~do [#lender-account-drop-column]~~
-- ~~do [#tmo-lender-vesting-doc]~~
-- ~~do [#tmo-getlender-confirm]~~
 <!-- /agent:queue -->
 
 ## Notes
@@ -158,6 +191,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#efs-dns-cutover] [operator-verify] equityfundingsource.com does not resolve: no A/AAAA record, nameservers still ns1/2/3.dreamhost.com, and wrangler.toml declares no route or custom_domain. The worker is live and correct at equityfundingsource.brian-takita.workers.dev. Needs registrar + Cloudflare access: move the zone to Cloudflare (or add a CNAME at the registrar), add the custom domain / route to wrangler.toml, verify /login/access-callback still works, and allow for NS propagation. This is the remaining gate on the weekend launch. Advances #tcb0 / #efs-cutover-sso-plan.
 - [ ] [#tmo-getlender-verify] [operator-verify] Confirm the #tmo-getlender-confirm LSS path against real TMO data: nothing in production is currently in_lss && !in_los, so GET /LSS.svc/GetLender/:Account has never returned a record in prod — the confirmed_no_funding state is covered by tests and degrades safely on failure, but its success path is unobserved. Needs an operator to name a TMO lender account created but never funded; map a vesting to it, open the reconcile modal, and confirm it reads 'In TMO · no funding yet' rather than 'Unconfirmed in TMO'. Spec: src/equityfundingsource-dev/docs/TMO/get-lender.md.
 <!-- /agent:backlog -->
 
@@ -189,7 +223,7 @@ After 20:30
 - [/] [#67v2-auto-advance] Admin pipeline auto-advance: define stage requirement checks from the TMO-aligned Kanban, run them against D1/tmo_cache, and enqueue audited status updates; keep replay gated by #dzmm. Advances #67v2.
 - [/] [#jnzs-approval-followup] [recommended] Send/track funded-deals approval packet: attach current screenshots/copy/lien-position language plus the full_application ESIGN/UETA disclosure excerpt, record Judith/EFS reviewer decision, and convert requested edits into implementation backlog. Advances #jnzs.
 - [/] [#xcvg-prod-email] [recommended] Borrower secure-message email production pass: after #f4rq/#m6ch/#p40t or #z3kx path-of-record is decided, enable borrower/admin outbound notifications, verify inbound reply threading, and add production env/runbook checks. Advances #xcvg.
-- [/] [#dzmm-writeback-replay] EFS->TMO writeback replay: once #7a4d field map and #k2xg support answers arrive, replay tmo_cache_outbox with idempotency keys, conflict logging, retry/dead-letter state, and tests across broker/admin/investor writebacks. Advances #dzmm/#37ah/#67v2/#zwws.
+- [/] [#dzmm-writeback-replay] EFS->TMO writeback replay: once #7a4d field map and #k2xg support answers arrive, replay tmo_cache_outbox with idempotency keys, conflict logging, retry/dead-letter state, and tests across broker/admin/investor writebacks. Now also covers the #tmo-split-launch 'create_loan_application' rows — applications approved while EFS ran split carry the full LOS.svc/NewLoan body plus the EFS-assigned loan number and sit at writeback_status='gated' until replayed. Advances #dzmm/#37ah/#67v2/#zwws.
 - [/] [#xcvg] [recommended] Borrower message email round-trip: email notification when a borrower sends a secure-portal message, inbound email reply that appends back into the D1 chat, and a borrower-facing email when an admin replies. Builds on the shipped chat_sessions/chat_messages + admin owner. Gated on a verified Resend EFS sending domain (f4rq) and Google Workspace SMTP (m6ch/p40t). (Distinct from the operator/comms emails to Judith + Robert.)
 - [/] [#jnzs] [recommended] Await Judith or EFS reviewer approval on funded-deal images, copy, and lien-position wording before invoicing or launch sign-off. The funded-deals page carries no standalone legal/disclosure text; the disclosure needing legal review is the ESIGN/UETA Electronic record and signature disclosure on the borrower full-application/document-uploads flow (full_application.tsx). Funded-deals copy was reframed as real closed deals and shipped.
 - [/] [#67v2] Admin loan pipeline: TMO-aligned stages + Kanban (drag cards, auto-advance when stage requirements met) synced to dashboard; mirror TMO stages as single source of truth. From 2026-06-03 call. Relates to #dzmm/#k2xg.

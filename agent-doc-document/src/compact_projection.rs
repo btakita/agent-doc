@@ -152,6 +152,61 @@ pub fn split_component_content_at_boundary(content: &str) -> (String, String) {
     (before, after)
 }
 
+/// Return the sortable archive timestamp from a binary-generated compact
+/// exchange summary.
+///
+/// This deliberately recognizes only the default `### Session Summary` plus
+/// archive-pointer shape. Custom compact messages and malformed/prompt-prefixed
+/// summaries are not recovery authority.
+pub fn compacted_exchange_archive_timestamp(content: &str) -> Option<String> {
+    let components = element::parse(content).ok()?;
+    let exchange = components
+        .iter()
+        .find(|component| component.name == "exchange")?;
+    let exchange_content = exchange.content(content);
+    let mut non_empty_lines = exchange_content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    if non_empty_lines.next()? != "### Session Summary" {
+        return None;
+    }
+
+    let archive_path = non_empty_lines.find_map(|line| {
+        line.strip_prefix("*Compacted. Content archived to `")
+            .and_then(|rest| rest.strip_suffix("`*"))
+    })?;
+    let file_name = archive_path.rsplit('/').next()?;
+    let stem = file_name.strip_suffix(".md")?;
+    const TIMESTAMP_LEN: usize = "YYYYMMDD-HHMMSS".len();
+    let timestamp_start = stem.len().checked_sub(TIMESTAMP_LEN)?;
+    if timestamp_start == 0 || stem.as_bytes().get(timestamp_start - 1) != Some(&b'-') {
+        return None;
+    }
+    let timestamp = &stem[timestamp_start..];
+    if timestamp.as_bytes().get(8) != Some(&b'-')
+        || !timestamp
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| index == 8 || byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(timestamp.to_string())
+}
+
+/// True when `current` carries a strictly newer binary compact archive than
+/// `retained` for the exchange component.
+pub fn newer_compacted_exchange_supersedes(retained: &str, current: &str) -> bool {
+    let Some(retained_timestamp) = compacted_exchange_archive_timestamp(retained) else {
+        return false;
+    };
+    let Some(current_timestamp) = compacted_exchange_archive_timestamp(current) else {
+        return false;
+    };
+    current_timestamp > retained_timestamp
+}
+
 /// Find malformed compact summary lines rendered as user prompts inside
 /// `agent:exchange`.
 pub fn malformed_compact_summary_lines(compacted: &str) -> Vec<String> {
@@ -299,6 +354,45 @@ mod tests {
             "<!-- /agent:exchange -->\n",
         );
         assert!(malformed_compact_summary_lines(doc).is_empty());
+    }
+
+    fn compacted_doc(timestamp: &str, suffix: &str) -> String {
+        format!(
+            concat!(
+                "# Session\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\n",
+                "*Compacted. Content archived to `.agent-doc/archives/doc-hash-{}.md`*\n\n",
+                "{}",
+                "<!-- /agent:exchange -->\n",
+            ),
+            timestamp, suffix
+        )
+    }
+
+    #[test]
+    fn newer_binary_compact_summary_supersedes_older_summary() {
+        let older = compacted_doc("20260717-225006", "old trailing prompt\n");
+        let newer = compacted_doc("20260717-225039", "new trailing prompt\n");
+
+        assert_eq!(
+            compacted_exchange_archive_timestamp(&older).as_deref(),
+            Some("20260717-225006")
+        );
+        assert!(newer_compacted_exchange_supersedes(&older, &newer));
+        assert!(!newer_compacted_exchange_supersedes(&newer, &older));
+        assert!(!newer_compacted_exchange_supersedes(&newer, &newer));
+    }
+
+    #[test]
+    fn compact_supersession_rejects_custom_or_malformed_summaries() {
+        let older = compacted_doc("20260717-225006", "");
+        let custom = older.replace("### Session Summary", "### Custom summary");
+        let malformed = older.replace("doc-hash-20260717-225006.md", "doc-hash-latest.md");
+
+        assert!(compacted_exchange_archive_timestamp(&custom).is_none());
+        assert!(compacted_exchange_archive_timestamp(&malformed).is_none());
+        assert!(!newer_compacted_exchange_supersedes(&older, &custom));
     }
 
     #[test]

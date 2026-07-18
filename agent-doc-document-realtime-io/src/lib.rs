@@ -1352,6 +1352,11 @@ pub fn settle_retained_non_capture_projection_through_authority(
         );
         return Ok(true);
     }
+    let mut canonical = try_resolve_current_document_content(path, source)?;
+    if retire_superseded_compact_projection_intents(path, &canonical, source)? > 0 {
+        return Ok(true);
+    }
+
     let exact_projection_reason = matches!(
         pending.reason,
         DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica
@@ -1379,7 +1384,6 @@ pub fn settle_retained_non_capture_projection_through_authority(
         );
         return Ok(false);
     }
-    let mut canonical = try_resolve_current_document_content(path, source)?;
     if let Some(semantic_base) = semantic_response_base {
         let rebased = rebase_agent_candidate_over_editor_cut(
             semantic_base,
@@ -1492,6 +1496,82 @@ pub fn settle_retained_non_capture_projection_through_authority(
         ),
     );
     Ok(true)
+}
+
+fn retire_superseded_compact_projection_intents(
+    path: &Path,
+    canonical: &str,
+    source: &str,
+) -> Result<usize> {
+    let Some(current_archive_timestamp) =
+        agent_doc_document::compact_projection::compacted_exchange_archive_timestamp(canonical)
+    else {
+        return Ok(0);
+    };
+    if resolve_disk_current_document_content(path, source)? != canonical {
+        return Ok(0);
+    }
+    let authority_exact = match observe_live_editor_authority_after_model_ensure(path, source)? {
+        agent_doc_crdt_relay_io::CurrentText::Detached => true,
+        agent_doc_crdt_relay_io::CurrentText::Current {
+            text,
+            delivery_converged: true,
+            ..
+        } => text == canonical,
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending
+        | agent_doc_crdt_relay_io::CurrentText::Current {
+            delivery_converged: false,
+            ..
+        } => false,
+    };
+    if !authority_exact {
+        return Ok(0);
+    }
+
+    let mut retired = 0;
+    for intent in pending_document_write_journal(path) {
+        let eligible_source = intent.source == "post_commit_reposition"
+            || intent.source.starts_with("serialized_atomic_write");
+        let eligible_reason = matches!(
+            intent.reason,
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending
+                | DocumentWriteDeferredReason::ExtendPendingEditorReconnectTarget
+        );
+        let target_hash_exact = intent
+            .target_hash
+            .eq_ignore_ascii_case(&agent_doc_hash::content_hash(&intent.target_content));
+        if !eligible_source
+            || !eligible_reason
+            || !target_hash_exact
+            || !agent_doc_document::compact_projection::newer_compacted_exchange_supersedes(
+                &intent.target_content,
+                canonical,
+            )
+        {
+            continue;
+        }
+
+        let retained_archive_timestamp =
+            agent_doc_document::compact_projection::compacted_exchange_archive_timestamp(
+                &intent.target_content,
+            )
+            .expect("superseded compact projection must have a validated timestamp");
+        clear_deferred_document_write_intent(path, &intent.target_hash, source)?;
+        retired += 1;
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "retained_superseded_compact_projection_retired file={} intent_id={} target_hash={} retained_archive_timestamp={} current_archive_timestamp={} canonical_disk_exact=true authority_delivery_exact=true stale_target_replayed=false",
+                path.display(),
+                intent.intent_id,
+                intent.target_hash,
+                retained_archive_timestamp,
+                current_archive_timestamp,
+            ),
+        );
+    }
+    Ok(retired)
 }
 
 /// Finish the disk half of a response projection only after a live editor has
@@ -6648,6 +6728,150 @@ mod tests {
             editor_base,
             "retiring the cosmetic intent must not rewrite disk"
         );
+    }
+
+    fn compact_projection_test_document(
+        timestamp: &str,
+        queue_entry: &str,
+        exchange_tail: &str,
+    ) -> String {
+        format!(
+            concat!(
+                "# Session\n\n",
+                "<!-- agent:queue -->\n{}\n<!-- /agent:queue -->\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Session Summary\n\n",
+                "*Compacted. Content archived to `.agent-doc/archives/doc-hash-{}.md`*\n\n",
+                "{}",
+                "<!-- /agent:exchange -->\n",
+            ),
+            queue_entry, timestamp, exchange_tail
+        )
+    }
+
+    #[test]
+    fn newer_compact_projection_retires_stale_composed_journal_without_replay() {
+        let stale_reposition = compact_projection_test_document(
+            "20260717-225006",
+            "- [ ] stale queue item",
+            "old prompt\n",
+        );
+        let stale_composite = compact_projection_test_document(
+            "20260717-225007",
+            "- [ ] stale queue item\n- [ ] another stale item",
+            "old prompt\n",
+        );
+        let current = compact_projection_test_document(
+            "20260717-225039",
+            "- [x] retained current item",
+            "❯ 🚧 current prompt\n",
+        );
+        let (_dir, file, _canonical) = temp_doc(&current);
+        let identity = "test-superseded-compact-projection";
+        seed_reliable_sync_open(&file, identity);
+        let (_client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach at the newer compact projection");
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        for (event_id, intent_id, target, source, reason) in [
+            (
+                "stale-compact-reposition",
+                "intent-stale-reposition",
+                stale_reposition.as_str(),
+                "post_commit_reposition",
+                DocumentWriteDeferredReason::ExtendPendingEditorReconnectTarget,
+            ),
+            (
+                "stale-compact-composite",
+                "intent-stale-composite",
+                stale_composite.as_str(),
+                "serialized_atomic_write",
+                DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            ),
+        ] {
+            let event = agent_doc_state_backbone::StateEvent::new(
+                event_id,
+                agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                    document_hash: document_hash.clone(),
+                    intent_id: intent_id.to_string(),
+                    expected_hash: agent_doc_hash::content_hash(&current),
+                    expected_content: Some(current.clone()),
+                    target_hash: agent_doc_hash::content_hash(target),
+                    target_content: target.to_string(),
+                    source: source.to_string(),
+                    reason,
+                },
+            );
+            agent_doc_controller_io::project_controller::append_state_event(
+                file.parent().unwrap(),
+                &event,
+            )
+            .unwrap();
+        }
+
+        assert_eq!(pending_document_write_journal(&file).len(), 2);
+        assert!(
+            settle_retained_non_capture_projection_through_authority(
+                &file,
+                "superseded_compact_projection_test",
+            )
+            .unwrap()
+        );
+        assert!(pending_document_write_journal(&file).is_empty());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), current);
+        assert!(
+            !std::fs::read_to_string(&file)
+                .unwrap()
+                .contains("stale queue item")
+        );
+    }
+
+    #[test]
+    fn newer_compact_projection_does_not_retire_unrelated_write_source() {
+        let stale = compact_projection_test_document(
+            "20260717-225006",
+            "- [ ] stale queue item",
+            "old prompt\n",
+        );
+        let current = compact_projection_test_document(
+            "20260717-225039",
+            "- [x] current item",
+            "current prompt\n",
+        );
+        let (_dir, file, _canonical) = temp_doc(&current);
+        let identity = "test-unrelated-compact-projection";
+        seed_reliable_sync_open(&file, identity);
+        let (_client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach at the newer compact projection");
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let event = agent_doc_state_backbone::StateEvent::new(
+            "unrelated-compact-target",
+            agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                document_hash,
+                intent_id: "intent-unrelated-source".to_string(),
+                expected_hash: agent_doc_hash::content_hash(&current),
+                expected_content: Some(current),
+                target_hash: agent_doc_hash::content_hash(&stale),
+                target_content: stale,
+                source: "queue_mutation".to_string(),
+                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            },
+        );
+        agent_doc_controller_io::project_controller::append_state_event(
+            file.parent().unwrap(),
+            &event,
+        )
+        .unwrap();
+
+        assert!(
+            !settle_retained_non_capture_projection_through_authority(
+                &file,
+                "unrelated_compact_projection_test",
+            )
+            .unwrap()
+        );
+        assert_eq!(pending_document_write_journal(&file).len(), 1);
     }
 
     #[test]

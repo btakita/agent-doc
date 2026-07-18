@@ -6,6 +6,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.2
+
+- **Newer Compact Exchange state retires stale 0.35.0 composition chains without replay.** Recovery recognizes only strictly older binary-generated compact archive pointers from the historical `post_commit_reposition` / `serialized_atomic_write` paths, requires exact canonical, disk, editor-delivery, target-hash, source, and reason proof, and clears those intents while preserving newer queue deletions and post-boundary prompt edits byte-for-byte. Unrelated retained writes remain fail-closed.
+
 ## 0.35.1
 
 - **Transient prompt working state can no longer wedge closeout.** Preflight publishes the syntax-aware `❯ 🚧` exchange marker through one best-effort canonical CRDT projection, never the durable serialized-write pipeline. A delayed editor ACK or projection error cannot fail preflight or create a retained document-write intent.

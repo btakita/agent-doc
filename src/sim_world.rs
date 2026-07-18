@@ -4187,6 +4187,10 @@ fn closeout_sim_fault_points_fail_closed_then_recover() {
                 world.phase
             );
             assert!(
+                world.captured_response.is_some(),
+                "fault {fault:?} must retain the captured response as recovery authority"
+            );
+            assert!(
                 world.coverage.fault_fail_closed > 0,
                 "fault {fault:?} should be recorded as a fail-closed interruption"
             );

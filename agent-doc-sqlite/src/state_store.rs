@@ -19,10 +19,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const STATE_DB_FILE: &str = "state.db";
 const STATE_DB_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
+const STATE_DB_SCHEMA_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 
 // ---------------------------------------------------------------------------
 // Storage types (moved from agent-doc-orchestration::session_actor).
@@ -364,8 +365,34 @@ fn open_and_init_state_db(path: &Path) -> Result<Connection> {
     let conn =
         Connection::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
-    initialize_state_db(&conn)?;
+    let started = Instant::now();
+    loop {
+        match initialize_state_db(&conn) {
+            Ok(()) => break,
+            Err(error)
+                if is_state_db_lock_error(&error) && started.elapsed() < STATE_DB_BUSY_TIMEOUT =>
+            {
+                let remaining = STATE_DB_BUSY_TIMEOUT.saturating_sub(started.elapsed());
+                std::thread::sleep(STATE_DB_SCHEMA_RETRY_INTERVAL.min(remaining));
+            }
+            Err(error) => return Err(error),
+        }
+    }
     Ok(conn)
+}
+
+fn is_state_db_lock_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<rusqlite::Error>(),
+            Some(rusqlite::Error::SqliteFailure(sqlite, _))
+                if matches!(
+                    sqlite.code,
+                    rusqlite::ffi::ErrorCode::DatabaseBusy
+                        | rusqlite::ffi::ErrorCode::DatabaseLocked
+                )
+        )
+    })
 }
 
 pub fn initialize_state_db(conn: &Connection) -> Result<()> {
@@ -2935,6 +2962,50 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concurrent_state_db_schema_initializers_converge_without_replacing_authority() -> Result<()>
+    {
+        let dir = tempfile::TempDir::new()?;
+        let project_root = std::sync::Arc::new(dir.path().to_path_buf());
+        let workers = 16;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(workers));
+        let handles = (0..workers)
+            .map(|_| {
+                let project_root = std::sync::Arc::clone(&project_root);
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || -> Result<()> {
+                    barrier.wait();
+                    let conn = open_state_db(&project_root)?;
+                    let documents: i64 =
+                        conn.query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))?;
+                    anyhow::ensure!(documents == 0, "new state authority must be empty");
+                    Ok(())
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for handle in handles {
+            handle
+                .join()
+                .expect("concurrent state-db initializer must not panic")?;
+        }
+
+        assert!(state_db_path(&project_root).is_file());
+        let state_files = std::fs::read_dir(project_root.join(".agent-doc"))?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<std::io::Result<Vec<_>>>()?;
+        assert!(
+            state_files.iter().all(|name| {
+                matches!(
+                    name.to_str(),
+                    Some("state.db" | "state.db-wal" | "state.db-shm")
+                )
+            }),
+            "concurrent initialization must not replace or quarantine authority: {state_files:?}"
+        );
+        Ok(())
+    }
 
     #[test]
     fn store_actor_record_waits_for_concurrent_writer_before_reading_cas_state() -> Result<()> {

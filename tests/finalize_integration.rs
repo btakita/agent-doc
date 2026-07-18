@@ -2,10 +2,8 @@ use agent_doc_hash::content_hash;
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
-use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
-use std::time::Instant;
 use tempfile::TempDir;
 
 fn agent_doc() -> Command {
@@ -92,21 +90,6 @@ fn checkpoint_baseline(root: &Path, content: &str) {
 fn crdt_path(root: &Path, doc: &Path) -> PathBuf {
     root.join(".agent-doc/crdt")
         .join(format!("{}.yrs", doc_hash(doc)))
-}
-
-fn pending_external_disk_candidate(
-    root: &Path,
-    doc: &Path,
-) -> agent_doc_state_backbone::DocumentWriteIntentProjection {
-    let projection =
-        agent_doc_controller_io::project_controller::load_state_backbone_projection(root)
-            .expect("load Lazily state projection");
-    let document_hash = agent_doc_hash::document_id_for_path(doc);
-    projection
-        .document(&document_hash)
-        .and_then(|document| document.document.pending_external_disk.as_ref())
-        .cloned()
-        .expect("force-disk reconnect intent must remain durable")
 }
 
 fn seed_reliable_sync_open(doc: &Path, tag: &str) {
@@ -501,151 +484,6 @@ fn finalize_editor_absent_skips_ipc_and_applies_done_directly() {
         head_blob(tmp.path()),
         "editor-absent direct write should commit the response and tracked-work mutation"
     );
-}
-
-#[test]
-#[ignore = "removed legacy authority rollback path"]
-fn write_commit_force_disk_with_editor_owner_recovers_without_waiting_for_crdt() {
-    let (tmp, doc) = setup_session_stream_doc();
-    fs::create_dir_all(tmp.path().join(".agent-doc/patches")).unwrap();
-    fs::create_dir_all(tmp.path().join(".agent-doc/crdt")).unwrap();
-    init_git_repo(tmp.path(), &doc);
-    let initial_head = head_blob(tmp.path());
-    agent_doc_test_support::seed_lazily_editor_registration(
-        doc.to_str().unwrap(),
-        "jetbrains-test-owner",
-    );
-    let current_content = fs::read_to_string(&doc).unwrap();
-    agent_doc_repair_io::pending::save_pending_with_current_content(
-        &doc,
-        "<!-- patch:exchange -->\n### Re: retained response — gpt-5\nRecovered through force disk.\n<!-- /patch:exchange -->\n",
-        &current_content,
-    )
-    .unwrap();
-    let crdt_lock_path = crdt_path(tmp.path(), &doc).with_extension("yrs.lock");
-    let crdt_lock = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&crdt_lock_path)
-        .unwrap();
-    let lock_result = unsafe { libc::flock(crdt_lock.as_raw_fd(), libc::LOCK_EX) };
-    assert_eq!(
-        lock_result,
-        0,
-        "failed to lock {}",
-        crdt_lock_path.display()
-    );
-
-    let started = Instant::now();
-    let assertion = agent_doc()
-        .current_dir(tmp.path())
-        .args(["write", "--commit", "--force-disk", doc.to_str().unwrap()])
-        .write_stdin("")
-        .assert()
-        .success();
-    let stderr = String::from_utf8_lossy(&assertion.get_output().stderr);
-    assert!(
-        started.elapsed().as_secs() < 10,
-        "force-disk recovery must bypass the wedged CRDT checkpoint:\n{stderr}"
-    );
-
-    let content = fs::read_to_string(&doc).unwrap();
-    assert!(
-        content.contains("### Re: retained response — gpt-5"),
-        "force-disk must materialize the retained response on disk:\n{content}"
-    );
-    assert_ne!(
-        initial_head,
-        head_blob(tmp.path()),
-        "force-disk recovery must commit the response"
-    );
-    let pending = pending_external_disk_candidate(tmp.path(), &doc);
-    assert_eq!(
-        pending.expected_content.as_deref(),
-        Some(current_content.as_str()),
-        "post-commit refinements must retain the original editor cut as the reconnect merge base"
-    );
-    assert_eq!(pending.target_content, content);
-    assert_eq!(pending.source, "force_disk");
-    assert_eq!(head_blob(tmp.path()), content);
-}
-
-#[test]
-#[ignore = "removed legacy authority rollback path"]
-fn finalize_force_disk_with_editor_owner_recovers_and_preserves_disk_drift() {
-    let (tmp, doc) = setup_session_stream_doc();
-    fs::create_dir_all(tmp.path().join(".agent-doc/crdt")).unwrap();
-    init_git_repo(tmp.path(), &doc);
-    let initial_head = head_blob(tmp.path());
-    agent_doc_test_support::seed_lazily_editor_registration(
-        doc.to_str().unwrap(),
-        "jetbrains-test-owner-merge",
-    );
-    let baseline_content = fs::read_to_string(&doc).unwrap();
-    checkpoint_baseline(tmp.path(), &baseline_content);
-    let current = baseline_content.replace(
-        "<!-- agent:boundary:1234abcd -->",
-        "❯ live editor drift\n<!-- agent:boundary:1234abcd -->",
-    );
-    fs::write(&doc, &current).unwrap();
-    let crdt_lock_path = crdt_path(tmp.path(), &doc).with_extension("yrs.lock");
-    let crdt_lock = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&crdt_lock_path)
-        .unwrap();
-    let lock_result = unsafe { libc::flock(crdt_lock.as_raw_fd(), libc::LOCK_EX) };
-    assert_eq!(
-        lock_result,
-        0,
-        "failed to lock {}",
-        crdt_lock_path.display()
-    );
-
-    let started = Instant::now();
-    let assertion = agent_doc()
-        .current_dir(tmp.path())
-        .args([
-            "finalize",
-            doc.to_str().unwrap(),
-            "--force-disk",
-        ])
-        .write_stdin(
-            "<!-- patch:exchange -->\n### Re: live drift — gpt-5\nRecovered without checkpoint lock.\n<!-- /patch:exchange -->\n",
-        )
-        .assert()
-        .success();
-    let stderr = String::from_utf8_lossy(&assertion.get_output().stderr);
-    assert!(
-        started.elapsed().as_secs() < 10,
-        "force-disk finalize must bypass the wedged CRDT checkpoint:\n{stderr}"
-    );
-
-    let content = fs::read_to_string(&doc).unwrap();
-    assert!(
-        content.contains("### Re: live drift — gpt-5"),
-        "force-disk finalize must materialize the response on disk:\n{content}"
-    );
-    assert!(
-        content.contains("❯ live editor drift"),
-        "force-disk finalize must preserve the existing live editor drift projection:\n{content}"
-    );
-    assert_ne!(
-        initial_head,
-        head_blob(tmp.path()),
-        "force-disk finalize must commit the merged response"
-    );
-    let pending = pending_external_disk_candidate(tmp.path(), &doc);
-    assert_eq!(
-        pending.expected_content.as_deref(),
-        Some(current.as_str()),
-        "post-commit refinements must retain the original drifted editor cut as the merge base"
-    );
-    assert_eq!(pending.target_content, content);
-    assert_eq!(pending.source, "force_disk");
-    assert_eq!(head_blob(tmp.path()), content);
 }
 
 #[test]

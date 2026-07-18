@@ -1,10 +1,14 @@
 # Versions
 
-- **Repair closeout follows the materialized editor rebase.** Repair writes now return the canonical document actually retained by Lazily/CPC, and template normalization, prompt-prefix cleanup, scaffold repair, completed-backlog reap, disk proof, and snapshot checkpointing carry that value forward. When an editor cut advances after repair composition and the replica then disappears, zero-replica recovery recomputes the semantic three-way merge before projecting the rebased target; it no longer wedges on byte inequality with or checkpoints the stale pre-rebase candidate.
-
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
+
+## 0.35.3
+
+- **The live tmux sweep no longer executes retired authority-rollback tests.** Two obsolete `--force-disk` integration tests were removed from the generic `--ignored` sweep, while deterministic SimWorld fault coverage now explicitly proves every interrupted closeout retains its captured response authority through recovery.
+- **Concurrent state-ledger schema opens now serialize instead of failing startup.** The SQLite state-store retries only `SQLITE_BUSY`/`SQLITE_LOCKED` initialization failures against the same authoritative database for the existing bounded timeout. Controller startup and simultaneous status probes no longer race `PRAGMA journal_mode=WAL`; corruption and every non-lock error still fail closed without replacing or quarantining `state.db`.
+- **Repair closeout follows the materialized editor rebase.** Repair writes now return the canonical document actually retained by Lazily/CPC, and template normalization, prompt-prefix cleanup, scaffold repair, completed-backlog reap, disk proof, and snapshot checkpointing carry that value forward. When an editor cut advances after repair composition and the replica then disappears, zero-replica recovery recomputes the semantic three-way merge before projecting the rebased target; it no longer wedges on byte inequality with or checkpoints the stale pre-rebase candidate.
 
 ## 0.35.2
 
@@ -142,7 +146,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.155
 
-- **JetBrains Compact Exchange no longer wakes unrelated document recovery (JetBrains plugin 0.2.267).** The action saves only its selected Markdown document before routing instead of calling `saveAllDocuments()`, so a retained EFS ACK recovery cannot make a Monster Rod Holders compact fail with EFS's delivery error. A target-save failure is logged and compaction continues from live editor/CRDT authority.
+- **JetBrains Compact Exchange no longer wakes unrelated document recovery (JetBrains plugin 0.2.267).** The action saves only its selected Markdown document before routing instead of calling `saveAllDocuments()`, so a retained sample-portal ACK recovery cannot make a sample-app compact fail with the sample portal's delivery error. A target-save failure is logged and compaction continues from live editor/CRDT authority.
 
 ## 0.34.154
 
@@ -269,7 +273,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## 0.34.130
 
-- **JetBrains `Run Agent Doc` can provision nested-project documents into a shared root tmux window without manual pane deletion.** When the target project's registry has no live anchor but the target session already has an `agent-doc` window, route startup now inspects every visible pane's process-tree document owner. It uses the requested left/right edge pane only as a split anchor when all owners are proven and different from the requested document; an unknown owner or an unregistered same-document owner still fails closed. This fixes the live `monsterrodholders.md` refusal where the nested `boost-client` registry was stale while the shared window's `%14`/`%15` panes safely owned root-project documents.
+- **JetBrains `Run Agent Doc` can provision nested-project documents into a shared root tmux window without manual pane deletion.** When the target project's registry has no live anchor but the target session already has an `agent-doc` window, route startup now inspects every visible pane's process-tree document owner. It uses the requested left/right edge pane only as a split anchor when all owners are proven and different from the requested document; an unknown owner or an unregistered same-document owner still fails closed. This fixes the live `sampleorders.md` refusal where the nested `sample-app` registry was stale while the shared window's `%14`/`%15` panes safely owned root-project documents.
 - **Active typing cannot age out while a current-document authority query is blocked.** The resolver now snapshots the typing indicator before querying the controller/CRDT model and checks it again before idle disk fallback. If either observation is active, it fails closed, preventing controller/SQLite contention from turning a read that began during an operator edit into disk authority. This also removes the parallel-suite race in the missing-model fallback regression.
 
 ## 0.34.129

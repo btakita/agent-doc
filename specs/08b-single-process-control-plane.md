@@ -53,8 +53,13 @@ admission.
 generations, dispatch attempts, queue heads, queue controls, queue
 backpressure, document cycles, pending backlog mutations, supervisor leases,
 admin operations, and projection diagnostics.
+- Concurrent controller/status opens initialize that authority through one
+  bounded SQLite lock-retry policy. `SQLITE_BUSY`/`SQLITE_LOCKED` during schema
+  bootstrap retries against the same database image; every other error and a
+  lock that outlives the deadline fail closed, and no retry may replace or
+  quarantine the authoritative ledger.
 - Schema initialization transactionally retires state-event variants removed
-  from the strict backbone ABI before any ledger projection. The migration is
+from the strict backbone ABI before any ledger projection. The migration is
   recorded in `state_schema_migrations`; it deletes redundant retired rows and
   does not add a legacy deserializer or runtime compatibility branch.
 - `.agent-doc/proof-ledger/<document-hash>.jsonl` is the append-only operation

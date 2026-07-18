@@ -4,8 +4,8 @@ EXTENDS Naturals, TLC
 CONSTANT MaxAckFailures
 
 (***************************************************************************
-The PlusCal algorithm models the closeout fault family behind the haiven and
-equityfundingsource incidents.  A turn starts with a retained response and an
+The PlusCal algorithm models the closeout fault family behind sample-app and
+sample-portal incidents.  A turn starts with a retained response and an
 old preflight/plugin generation.  `make install` first converges the package on
 disk, an editor restart publishes that package as the live generation, and the
 closeout actor must revalidate before replaying and committing.  Delivery ACKs

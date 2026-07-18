@@ -479,7 +479,7 @@ impl HarnessConfig {
         output
             .lines()
             .rev()
-            .take(8)
+            .take(CLAUDE_BUSY_CUE_SCAN_LINES)
             .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
             .map(|line| line.trim().to_string())
             .filter(|line| !line.is_empty())
@@ -546,10 +546,19 @@ impl HarnessConfig {
             // elapsed-seconds timer). This must fire before any composer/footer-based
             // idle inference so a live turn is never mis-read as idle once the static
             // status line becomes ignorable (part 2).
+            // #jbsteerinterrupt: Claude's composer chrome is tall (blank row +
+            // two box borders + composer + status + permissions hint = 6 rows)
+            // and Claude Code renders transient rows above it (rotating `Tip:`
+            // hints, `⎿` tool-result rows). A live capture put the spinner at
+            // exactly row 8 — the last slot of the old window — so a single extra
+            // transient row dropped the busy cue and the route dispatched into
+            // the running turn. Scan deep enough to clear the chrome with margin;
+            // `bottom_idle_chrome_suffix_present` below still cancels a stale
+            // scrollback cue sitting above a redrawn idle footer.
             let recent = output
                 .lines()
                 .rev()
-                .take(8)
+                .take(CLAUDE_BUSY_CUE_SCAN_LINES)
                 .map(agent_doc_turn_executor_tmux::prompt::strip_ansi)
                 .map(|line| line.trim().to_ascii_lowercase())
                 .collect::<Vec<_>>();
@@ -557,14 +566,26 @@ impl HarnessConfig {
                 return Some("claude artifact picker open".to_string());
             }
             if claude_active_turn_busy(&recent) {
-                // #jb-stale-busy-idle-footer part 2: when a stale working spinner
-                // or interrupt hint sits in scrollback but the bottom of the pane
-                // shows idle chrome (status line + empty ❯ composer), override the
-                // busy classification — the turn completed and the TUI drew the
-                // idle composer below the old active-turn marker.
-                if self.bottom_idle_chrome_suffix_present(output, 8) {
-                    return None;
-                }
+                // #jbsteerinterrupt: no idle-chrome override for Claude. The
+                // `#jb-stale-busy-idle-footer` part-2 override cancelled a live
+                // cue here, because the only thing it ever matched on a Claude
+                // pane was `has_dispatch_ready_prompt` — the bare `❯` composer
+                // and the `⏵⏵ … (shift+tab to cycle)` permissions hint. A live
+                // capture proves Claude Code renders BOTH of those *during* an
+                // active turn (it accepts type-ahead while working), so they are
+                // static chrome, not idle evidence, and the override fired on
+                // genuinely busy panes. That is what let the route promote a busy
+                // actor to ready and dispatch into the running turn, which Claude
+                // Code renders as "Interrupted".
+                //
+                // Unlike OpenCode's lingering `Working (21s - esc to interrupt)`
+                // banner, Claude Code replaces the spinner row with the final
+                // response when a turn ends, so there is no stale-spinner shape
+                // to suppress. If a cue ever does linger in scrollback the result
+                // is a deferred dispatch (queue behind the pane), which is the
+                // safe direction: `#realtime-steering-verbatim` says the prompt is
+                // already in the document and the running turn should consume it
+                // as steering, so never interrupting is strictly correct.
                 return Some("active claude turn".to_string());
             }
             return None;
@@ -876,33 +897,71 @@ fn is_claude_artifact_attachment_line(line: &str) -> bool {
     })
 }
 
+/// How many bottom pane rows to scan for a Claude active-turn cue.
+///
+/// `#jbsteerinterrupt`: Claude Code's idle composer chrome alone is 6 rows and it
+/// renders transient rows (rotating `Tip:` hints, `⎿` tool-result lines) between
+/// the spinner and that chrome. A live busy capture put the spinner at row 8, so
+/// the previous 8-row window had zero margin.
+const CLAUDE_BUSY_CUE_SCAN_LINES: usize = 16;
+
 /// True for a Claude working-spinner line: a spinner glyph at the start, a gerund
-/// ellipsis (`…`), and an elapsed-seconds timer (`(<N>s`). Requiring all three
-/// keeps the idle composer, status, and permissions lines from matching.
+/// ellipsis (`…`), and an elapsed timer (`(<N>s`, `(<N>m <N>s`, `(<N>h <N>m <N>s`).
+/// Requiring all three keeps the idle composer, status, and permissions lines from
+/// matching.
+///
+/// `#jbsteerinterrupt`: the leading glyph is matched structurally (first
+/// non-whitespace char is not alphanumeric) rather than against a hardcoded frame
+/// list. Claude Code cycles through more spinner frames than any fixed set
+/// captured — a live busy pane rendered `✽ Cooking… (3m 43s · ↓ 9.5k tokens)`,
+/// whose `✽` (U+273D) was absent from the old `· ✶ ✳ ✻ ● *` set, so a genuinely
+/// busy pane read as idle. The `…` + elapsed-timer pair already carries the
+/// discrimination; prose and status lines start with a letter and are rejected.
 fn is_claude_working_spinner_line(line: &str) -> bool {
-    let has_spinner = line.starts_with('·')
-        || line.starts_with('✶')
-        || line.starts_with('✳')
-        || line.starts_with('✻')
-        || line.starts_with('●')
-        || line.starts_with('*');
+    let has_spinner = line
+        .trim_start()
+        .chars()
+        .next()
+        .is_some_and(|c| !c.is_alphanumeric());
     has_spinner && line.contains('…') && contains_elapsed_seconds_timer(line)
 }
 
-/// True if `line` contains an elapsed-seconds timer token `(<digits>s` (e.g. the
-/// `(14s` in a Claude spinner). Byte-scanned so it is safe across the multi-byte
-/// glyphs that surround it.
+/// True if `line` contains an elapsed timer token: `(<digits>s` (e.g. the `(14s`
+/// in a Claude spinner) or an hour/minute-qualified form such as `(3m 43s` /
+/// `(1h 2m 3s`. Byte-scanned so it is safe across the multi-byte glyphs that
+/// surround it.
+///
+/// `#jbsteerinterrupt`: the minute/hour forms are why a long-running Claude turn
+/// used to read as idle. Claude Code switches from `(47s` to `(1m 3s` once a turn
+/// passes a minute; the old scanner required the digit run to be followed
+/// immediately by `s`, so every turn running longer than 60 seconds lost its busy
+/// cue and the route promoted the actor to ready mid-turn.
 fn contains_elapsed_seconds_timer(line: &str) -> bool {
     let b = line.as_bytes();
     let mut i = 0;
     while i < b.len() {
         if b[i] == b'(' {
             let mut j = i + 1;
-            while j < b.len() && b[j].is_ascii_digit() {
-                j += 1;
-            }
-            if j > i + 1 && j < b.len() && b[j] == b's' {
-                return true;
+            // Accept a chain of `<digits><unit>` segments (`3m 43s`, `1h 2m 3s`)
+            // and report a match as soon as one segment closes with `s`.
+            loop {
+                let digits_start = j;
+                while j < b.len() && b[j].is_ascii_digit() {
+                    j += 1;
+                }
+                if j == digits_start || j >= b.len() {
+                    break;
+                }
+                match b[j] {
+                    b's' => return true,
+                    b'm' | b'h' | b'd' => {
+                        j += 1;
+                        while j < b.len() && b[j] == b' ' {
+                            j += 1;
+                        }
+                    }
+                    _ => break,
+                }
             }
         }
         i += 1;
@@ -1491,6 +1550,94 @@ mod tests {
             "  ⏵⏵ bypass permissions on · 1 shell\n",
         );
         assert!(h.has_busy_cue(pane), "esc to interrupt must read as busy");
+    }
+
+    // #jbsteerinterrupt — reproduced row-for-row from a live busy Claude Code
+    // pane (2026-07-18). Two properties this capture pins that the older
+    // synthetic fixtures missed: the elapsed timer is minute-qualified
+    // (`3m 43s`), and the spinner glyph is `✽` (U+273D), which was absent from
+    // the old hardcoded frame list. Either alone made a genuinely busy pane read
+    // as idle, which let `route_eager_busy_cue_recovery` promote the actor to
+    // ready and dispatch the trigger into the running turn — the "Interrupted"
+    // the operator saw after JB `Run Agent Doc`.
+    const CLAUDE_BUSY_PANE_LONG_RUNNING: &str = concat!(
+        "Some earlier tool output line here\n",
+        "✽ Cooking… (3m 43s · ↓ 9.5k tokens)\n",
+        "  ⎏ ⏵ Tip: Use /voice to enable push-to-talk dictation\n",
+        "\n",
+        "────────────────────────────────────────\n",
+        "❯\n",
+        "────────────────────────────────────────\n",
+        "  Opus 4.8 ctx:13% ~/…/src/agent-doc main brian@cachyos-x8664\n",
+        "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n",
+    );
+
+    #[test]
+    fn claude_long_running_turn_is_a_busy_cue() {
+        let h = HarnessConfig::claude();
+        assert!(
+            h.has_busy_cue(CLAUDE_BUSY_PANE_LONG_RUNNING),
+            "a turn running past a minute must still read as busy (#jbsteerinterrupt)"
+        );
+        assert_eq!(
+            h.dispatch_blocker_reason(CLAUDE_BUSY_PANE_LONG_RUNNING)
+                .as_deref(),
+            Some("active claude turn")
+        );
+        assert!(
+            h.busy_proof_line(CLAUDE_BUSY_PANE_LONG_RUNNING)
+                .is_some_and(|line| line.contains("Cooking")),
+            "busy-guard refusals must cite the live spinner as proof"
+        );
+    }
+
+    #[test]
+    fn claude_elapsed_timer_accepts_minute_and_hour_forms() {
+        assert!(contains_elapsed_seconds_timer("(14s · ↓ 200 tokens)"));
+        assert!(contains_elapsed_seconds_timer("(3m 43s · ↓ 9.5k tokens)"));
+        assert!(contains_elapsed_seconds_timer("(1h 2m 3s)"));
+        // No elapsed timer: minutes alone never render without a seconds field.
+        assert!(!contains_elapsed_seconds_timer("(shift+tab to cycle)"));
+        assert!(!contains_elapsed_seconds_timer("ctx:13% (1M context)"));
+    }
+
+    #[test]
+    fn claude_spinner_matches_unlisted_frame_glyphs() {
+        // Claude Code cycles more frames than any fixed set we captured; the
+        // `…` + elapsed-timer pair carries the discrimination.
+        for glyph in ['·', '✶', '✳', '✻', '✽', '✢', '∗', '●', '*'] {
+            let line = format!("{glyph} thinking… (12s · ↓ 4 tokens)");
+            assert!(
+                is_claude_working_spinner_line(&line),
+                "spinner frame {glyph:?} must read as busy (#jbsteerinterrupt)"
+            );
+        }
+        // Prose and status rows start with a letter and must not match.
+        assert!(!is_claude_working_spinner_line(
+            "Opus 4.8 ctx:13% … running (12s)"
+        ));
+    }
+
+    #[test]
+    fn claude_busy_cue_survives_transient_rows_above_the_composer() {
+        let h = HarnessConfig::claude();
+        // Two extra tool-result rows push the spinner past the old 8-row window.
+        let pane = concat!(
+            "✽ Cooking… (2m 7s · ↓ 9.5k tokens)\n",
+            "  ⎿ Read agent-doc-harness/src/lib.rs (120 lines)\n",
+            "  ⎿ Ran cargo test -p agent-doc-harness\n",
+            "  ⎏ ⏵ Tip: Use /voice to enable push-to-talk dictation\n",
+            "\n",
+            "────────────────────────────────────────\n",
+            "❯\n",
+            "────────────────────────────────────────\n",
+            "  Opus 4.8 ctx:13% ~/…/src/agent-doc main brian@cachyos-x8664\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents\n",
+        );
+        assert!(
+            h.has_busy_cue(pane),
+            "transient rows above the composer must not drop the busy cue (#jbsteerinterrupt)"
+        );
     }
 
     #[test]
@@ -3173,3 +3320,5 @@ Click to expand
         assert!(!h.is_idle_chrome_only_output(output));
     }
 }
+
+

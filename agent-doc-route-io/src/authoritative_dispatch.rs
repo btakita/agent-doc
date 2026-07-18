@@ -63,6 +63,22 @@ pub struct RouteAuthoritativeActorEffects {
     pub wait_for_ready_override: fn() -> Option<Duration>,
 }
 
+/// Re-capture the pane after a short delay and report whether it *still* shows no
+/// busy cue.
+///
+/// `#jbsteerinterrupt`: used to confirm a stale-busy projection before promoting
+/// it to ready. A live turn re-renders its spinner every frame, so a second
+/// cue-free capture distinguishes a genuinely idle pane from a torn or mid-redraw
+/// frame. Fails closed — a capture error reports "not confirmed idle", leaving the
+/// busy projection in place.
+fn confirm_pane_still_idle(tmux: &Tmux, pane: &str, harness: &HarnessConfig) -> bool {
+    std::thread::sleep(Duration::from_millis(250));
+    match tmux.capture_pane(pane, Some(80)) {
+        Ok(content) => !harness.has_busy_cue(&content),
+        Err(_) => false,
+    }
+}
+
 fn detect_active_queue_continuation(
     file: &Path,
     source: &str,
@@ -577,9 +593,18 @@ pub fn route_via_authoritative_actor(
         && prompt_context.is_some()
         && let Ok(content) = tmux.capture_pane(&dispatch_pane, Some(80))
         && !harness.has_busy_cue(&content)
+        // #jbsteerinterrupt: never promote a busy projection to ready on a single
+        // frame. Promotion here dispatches the trigger into the pane, and if the
+        // turn is actually live that submission is what Claude Code renders as
+        // "Interrupted" — the exact outcome `#realtime-steering-verbatim` forbids,
+        // since the prompt is already in the document for the running turn to
+        // consume as steering. A genuinely stale projection stays cue-free across
+        // frames, while a live turn re-renders its spinner, so require a second
+        // confirming capture. Cheap insurance against a torn or mid-redraw frame.
+        && confirm_pane_still_idle(tmux, &dispatch_pane, harness)
     {
         eprintln!(
-            "[route] eager busy-cue check for {}: actor projected busy but pane has no busy cue (queue fallback skipped the wait); promoting stale busy projection to ready and dispatching",
+            "[route] eager busy-cue check for {}: actor projected busy but pane has no busy cue across two captures (queue fallback skipped the wait); promoting stale busy projection to ready and dispatching",
             file.display()
         );
         agent_doc_ops_log_io::log_op(

@@ -85,7 +85,30 @@ Also documented the scope limit on `pane_composer_has_pending_trigger` so the ne
 One honest gap: this was diagnosed and fixed from log and capture evidence, not from watching a fresh flood stop. Filed `#autotriggerscrollbackechoverify` as the live proof — it needs an idle-watch cycle on the recycled supervisor showing no `auto_trigger_*_stranded` markers for a consumed trigger.
 
 Unrelated and still open: the top backlog item, `crash_resilience::tests::log_panic_to_file_appends_without_panicking`, which shares a fixed panic-log path across concurrent test binaries and so fails under `cargo test --workspace` while passing in isolation.
-<!-- agent:boundary:bcd36ca2 -->
+
+### Re: stale verification-item sweep and the queue auto-strike fix — opus-4-8
+
+Recovering the rationale for three directive heads that were archived into `agent:done` in cycle `cycle-1784355960603` without a response record (`#compact-reap-no-response-record`). The removals were operator-directed; only the write path was wrong — `--backlog-only` skips exchange synthesis, so the reasoning never landed in the document.
+
+**Removed as stale (operator directive: "just remove the items that require verification — these are stale, we removed the sidecars"):**
+
+- `#jblocalhistverify` — live proof gate for `#jblocalhistcrash`. Also pinned `agent-doc-jetbrains-0.2.232.zip` while the live registration is 0.2.277, so the proof would have run against a 45-version-old install.
+- `#gd88` — live re-proof for `#restartstderrbleed` on a fixed binary.
+- `#kj5flive` — `#mergestatemachine3` live proof (JB+VSCode attach/detach, File Cache Conflict, `#6b5h` repro).
+- `#qftlossdelta` — removed from `agent:review` via `--review-remove`.
+
+`#qeditrace` was explicitly **kept**: it is `[focused-cycle]`, not verification-gated, and does not depend on sidecars. It tracks a live defect (multi-line pre-run queue additions revert to all-but-first) that is distinct from `#qdedupsync`'s duplication class. `#sidecarstate` and `#opcapturelazily` were also kept — they *are* the sidecar-retirement work, not casualties of it.
+
+`#ipcauthority` was corrected rather than removed. Its text credited a landed "durable recovery sidecar" (`write_policy::content_ours_drops_operator_text` + `agent_doc_fs::preserve_dropped_operator_buffer` → `.agent-doc/recovery/`, commit `317a336f`) as closing the `#qftlossdelta` artifact gap. With the sidecars removed that reads as a safety net someone would rely on, so it now carries a `SUPERSEDED PREMISE` marker and the remaining goal: make the CRDT/reliable-sync plane the single closeout authority and demote `content_ours`/snapshot to audit-only.
+
+**Queue auto-strike defect found and fixed while verifying the removals (`#qdonestrike-durable`, agent-doc submodule `4faed5b01`).**
+
+Resolved heads were not clearing from `agent:queue`. The strike logic was never the problem — it computed correctly on every run, logging `auto-struck already-resolved head prompt "📌 do [#jblocalhistverify]" source=done`. The loss was in persistence: `persist_queue_maintenance_doc` applies maintenance as one compare-and-swap against the Lazily head, and on `EditorAttachedMissingReplica` / `EditorSyncPending` it bailed with no retry, discarding the entire plan. Because maintenance is recomputed each preflight, the strike was calculated and thrown away every single cycle — which is also why the `#mirrorall` backlog→queue sync kept re-appending the same heads (the duplicate `📌 do [#jblocalhistverify]` pair was that re-mirror, not a `#qdedupsync` variant bug).
+
+Fix: drive the bounded `ensure_document_model` transition and re-observe before failing closed. That helper reads relay state only and never elects a disk/sidecar projection while an editor is attached, so it stays fail-closed against clobbering a live buffer; a head still not ready after the ensure bails as before, now with a diagnostic reason instead of an opaque "not ready". The head decision is extracted as the pure `queue_maintenance_head_action(current, already_ensured)` so the not-ready → ensure → re-observe → fail-closed transition is unit-provable without a relay, editor, or controller. `make check`: 7599 passed, 0 failed.
+
+**Not yet provable live.** Controller `serve` pid 1501201 and route-owned supervisor pid 2040014 still map the pre-fix binary (new build installed 02:47:36), and the requested recycle is deferred to an idle boundary that does not arrive while this session is active. Preflight now reports the honest underlying state instead of the opaque bail: `editor authority stayed in editor_attached_model_missing after a bounded Lazily-current observation request; recovery=retry_without_disk_write`. The controller was deliberately **not** killed: it is project-scoped (`--project-root .../agent-loop`) and `tasks/professional/equityfundingsource.md` is foreign-owned by concurrent pane `%31`, so a kill would hit that session too. Tracked by `#qdonestrikeverify`.
+<!-- agent:boundary:d49ac76a -->
 <!-- /agent:exchange -->
 ## Queue
 

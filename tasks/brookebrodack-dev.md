@@ -300,14 +300,34 @@ One deliberate refusal: a caller that cannot name its panel records nothing and 
 Changes (brookebrodack-dev `5b14cb5`): migration `0004_guestbook_escalation.sql` — applied to the remote D1 *before* the push, per the ordering rule `wrangler.toml` documents; `decision_a1__apply` takes an optional `panel_id` and records escalations without touching status; the dispatch hub derives the panel from the `hello` advert and keeps it in a socket attachment so it survives DO hibernation; the cron sweep filters and records under its own id. Both Workers deployed.
 
 One existing test needed rewriting rather than deleting — `escalates and writes nothing when OpenAI fails` asserted zero statements, which was standing in for "publishes nothing". Its stub now separates status writes from escalation records, so the real invariant stays asserted and the new one joins it. Suite: 76 pass, 0 fail.
-<!-- agent:boundary:568bfdb6 -->
+
+### Re: #fhsystemd — supervised, and the credential was the real question — opus-4-8
+
+> **Queue prompt:** do [#fhsystemd]
+
+Done. `systemctl --user enable --now freehold-host` is running the host now, and a link-spam entry submitted to production was rejected through the supervised process — not the `nohup` one, which is gone.
+
+The unit file was the easy half. **The credential is where the item's own parenthetical turned out to be the whole problem:** "passage cannot be read from a unit" is true at boot and false in a login session, and every alternative fails somewhere real. An env var in the unit puts the secret in `systemctl show`. A password manager keeps nothing at rest but needs an agent that does not exist before you log in. A file survives a reboot and is the only one that does, at the cost of sitting on disk.
+
+There is no answer that is best in every deployment, so I did not pick one — the host now reads from `FREEHOLD_DISPATCH_KEY`, then `FREEHOLD_DISPATCH_KEY_FILE`, then the stdout of `FREEHOLD_DISPATCH_KEY_COMMAND`, and the operator chooses by configuring one. Both are written out in the unit with the consequence attached, including that option (a) means *not* enabling linger, since a lingering unit starts before the agent exists. Nothing falls back from one source to the next: a deployment meaning to read from a locked password manager should fail loudly rather than quietly find a stale copy on disk.
+
+**Two defects came out of running it rather than writing it**, and both are fixed:
+
+**systemd splits an unquoted `Environment=` at the first space.** So `FREEHOLD_DISPATCH_KEY_COMMAND=passage show btak/...` silently became plain `passage`, which printed its usage, exited 0, and the host spent forever reconnecting with a usage message as its bearer token. The only symptom was `failed to parse header value` on a retry loop. Quoting the unit line fixes this instance; requiring the key to be a single token fixes the class, so anything that is not a credential — a usage message, a multi-line error, an agent prompt — is one clear line at startup instead of a loop that never succeeds and never explains itself.
+
+**`env_allow` guarded the old variable and not the two new ones.** A plugin holding `FREEHOLD_DISPATCH_KEY_FILE` reads the credential off disk; one holding `FREEHOLD_DISPATCH_KEY_COMMAND` asks the password manager for it. Both are the same compromise as handing over the key, one step removed, and I opened both by teaching the host to read three ways — so the config check now refuses all three. That one is on me, and it is the kind of hole that would have sat there looking like a feature.
+
+Changes (freehold `cf7d1bb`): new `credential.rs` with the precedence as a pure function over the environment — testable without a filesystem, a password manager, or a live agent; `deploy/freehold-host.service`; `config.rs` widened to all three reserved vars; README §"Under a supervisor". `make check` green, 90 tests.
+
+**Reboot survival is the operator's call, not done by default.** Option (a) is configured and needs a login session. Switching to (b) is uncommenting two lines, writing the key `umask 077`, and `loginctl enable-linger` — deliberately not done for you, since it puts a secret at rest and that is a decision to make on purpose.
+<!-- agent:boundary:1fbbb255 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
 - ~~do [#fhescalate]~~
-- do [#fhsystemd]
+- ~~do [#fhsystemd]~~
 - ~~do [#fhdeploy]~~
 - ~~do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.~~
 - ~~do [#fhoneshot]~~
@@ -334,7 +354,6 @@ One existing test needed rewriting rather than deleting — `escalates and write
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fhsystemd] supervise the freehold host instead of running it under nohup — a systemd user unit plus a credential source it can read without an interactive gpg unlock (passage cannot be read from a unit). Until this lands the push path dies with the login session, and the 15-minute cron in workers/guestbook-moderate is the only backstop
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
@@ -378,4 +397,5 @@ One existing test needed rewriting rather than deleting — `escalates and write
 - 2026-07-18 [#k0ye] #gbdispatch2: Durable Object + WebSocket transport + auth for the moderation dispatch edge (now freehold-hub/freehold, submodule src/freehold) — the sandbox/aggregation half is done and pushed; the edge half is unwritten
 - 2026-07-18 [#fhdeploy] Deploy the freehold push path in order: (1) cd workers/guestbook-dispatch && bunx wrangler secret put FREEHOLD_DISPATCH_KEY && bunx wrangler deploy; (2) add the [[services]] FREEHOLD_HUB_SVC binding to the Pages project and deploy (a Pages deploy against a service that does not exist yet fails); (3) run freehold with FREEHOLD_EDGE_URL + the same key. Keep workers/guestbook-moderate deployed as the offline backstop
 - 2026-07-18 [#fhescalate] an escalated entry stays 'pending' and is re-dispatched on every notify and every alarm, so the panel re-judges it forever. Decide between marking it escalated (edge stops offering it; a later, better panel never gets a second look) and a backoff on re-offer, then implement. Seen live: two identical jobs for the same two entries 8s apart
+- 2026-07-18 [#fhsystemd] supervise the freehold host instead of running it under nohup — a systemd user unit plus a credential source it can read without an interactive gpg unlock (passage cannot be read from a unit). Until this lands the push path dies with the login session, and the 15-minute cron in workers/guestbook-moderate is the only backstop
 <!-- /agent:done -->

@@ -43,10 +43,12 @@ wrangler, and OpenAI-billing work stays in that document.
 - [x] Protocol generalized: `Job {id, kind, payload, deadline}`; moderation is one task kind
 - [x] Single-holder rule replaced by lease-based work claiming
 - [x] License Apache-2.0 → MIT, matching the rest of the workspace
-- [x] 22 tests, `make check` clean; live `bwrap` run + end-to-end Docker round-trip
+- [x] Connection state machine — claiming, capacity, deadlines, late-result drop (pure, deterministic)
+- [x] 36 tests, `make check` clean; live `bwrap` run + end-to-end Docker round-trip
 - [x] Network denial verified empirically (no `--share-net` ⇒ no resolution)
 - [x] Manifesto drafted with verified attributions
-- [ ] WebSocket transport + Durable Object (`#gbdispatch2`) — not written, not stubbed
+- [ ] WebSocket IO shell (tokio-tungstenite) + auth on upgrade — state machine done, transport not
+- [ ] Durable Object on the edge (`#gbdispatch2`)
 - [ ] seccomp filter — the default bwrap profile has **no syscall filtering**
 - [ ] Egress proxy — model plugins are routed to a network that does not exist yet
 - [ ] Decide public vs private for the repo

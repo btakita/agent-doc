@@ -223,6 +223,51 @@ const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 60;
 #[cfg(not(test))]
 const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 400;
 
+/// Per-document count of editor replica registrations observed in this process.
+///
+/// `#ensurewindowsize`: `ensure_document_model` gives a missing-replica editor
+/// only [`DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS`] to answer, on the
+/// assumption that a non-answering editor is stale and must not wedge the
+/// single-threaded controller. That assumption breaks for a large document: a
+/// live editor answering with a multi-megabyte CRDT bootstrap cannot complete
+/// inside that window, so it is judged stale while it is demonstrably alive.
+/// A completed registration is positive liveness proof, so the ensure loop
+/// watches this counter and extends to the full timeout once it moves.
+///
+/// LIMITATION — this counter is process-global, so it only closes the gap when
+/// the registration and the ensure share a process (the embedded-relay path).
+/// On the split CLI/controller path the register lands in the controller while
+/// `ensure_document_model` runs in the CLI, so the CLI observes no bump and the
+/// window is NOT extended (`window_extended=false` in
+/// `document_model_ensure_failed`). Closing that case needs the liveness proof
+/// carried across the IPC boundary — or the ensure performed controller-side,
+/// where the registration already is. Tracked in `agent:backlog`; do not read a
+/// `window_extended=false` line as "no editor answered".
+fn replica_registration_counts() -> &'static Mutex<HashMap<String, u64>> {
+    static COUNTS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    COUNTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn note_replica_registration(file: &Path) {
+    let Ok(key) = agent_doc_fs::document_state_hash(file) else {
+        return;
+    };
+    if let Ok(mut counts) = replica_registration_counts().lock() {
+        *counts.entry(key).or_insert(0) += 1;
+    }
+}
+
+fn replica_registration_count(file: &Path) -> u64 {
+    let Ok(key) = agent_doc_fs::document_state_hash(file) else {
+        return 0;
+    };
+    replica_registration_counts()
+        .lock()
+        .ok()
+        .and_then(|counts| counts.get(&key).copied())
+        .unwrap_or(0)
+}
+
 /// Process-global per-document relay-hub registry, keyed by document hash.
 ///
 /// Per-document isolation (`#xdocsuper1/3`): each document's replicas live in
@@ -846,10 +891,40 @@ fn ensure_document_model_with_current_text_observer_inner(
     // replica must fail closed: neither disk nor a durable restart projection can
     // prove the current unsaved editor cut. `EditorSyncPending` keeps the full
     // window because a hub already exists with un-flushed ops worth waiting for.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ensure_timeout_ms);
+    let started_at = std::time::Instant::now();
+    let mut deadline = started_at + std::time::Duration::from_millis(ensure_timeout_ms);
+    // `#ensurewindowsize`: a registration completing during this window is proof
+    // the editor is alive and answering, which is exactly what the short
+    // missing-replica timeout was guessing about. A large document's bootstrap
+    // (observed at 1.3MB on a real session) cannot register inside 400ms, so
+    // without this the live editor is judged stale on every single attempt and
+    // queue maintenance can never persist. Extend once, to the full timeout; an
+    // editor that never registers still fails closed on the short window, so the
+    // single-threaded controller keeps its anti-starvation guarantee.
+    let registrations_at_start = replica_registration_count(file);
+    let mut extended_for_registration = false;
     let mut last_label = first_label;
     let mut last_observer_error: Option<String> = None;
     loop {
+        if !extended_for_registration
+            && ensure_timeout_ms < DOCUMENT_MODEL_ENSURE_TIMEOUT_MS
+            && replica_registration_count(file) > registrations_at_start
+        {
+            extended_for_registration = true;
+            deadline = started_at
+                + std::time::Duration::from_millis(DOCUMENT_MODEL_ENSURE_TIMEOUT_MS);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_model_ensure_window_extended file={} source={} initial_state={} reason=replica_registered_during_window from_ms={} to_ms={}",
+                    file.display(),
+                    source,
+                    first_label,
+                    ensure_timeout_ms,
+                    DOCUMENT_MODEL_ENSURE_TIMEOUT_MS,
+                ),
+            );
+        }
         if std::time::Instant::now() >= deadline {
             if let Some(observer) = observe_recovery_current_text.as_mut() {
                 match observer() {
@@ -906,12 +981,21 @@ fn ensure_document_model_with_current_text_observer_inner(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "document_model_ensure_failed file={} source={} initial_state={} final_state={} timeout_ms={} last_observer_error={} recovery=retry_without_disk_write",
+                    // `#ensurewindowsize`: log the deadline actually granted, not
+                    // the long-form constant. This previously always printed 5000
+                    // while a missing-replica ensure really got 400ms, which sent
+                    // diagnosis after a phantom 5s stall for a long time.
+                    "document_model_ensure_failed file={} source={} initial_state={} final_state={} timeout_ms={} window_extended={} last_observer_error={} recovery=retry_without_disk_write",
                     file.display(),
                     source,
                     first_label,
                     last_label,
-                    DOCUMENT_MODEL_ENSURE_TIMEOUT_MS,
+                    if extended_for_registration {
+                        DOCUMENT_MODEL_ENSURE_TIMEOUT_MS
+                    } else {
+                        ensure_timeout_ms
+                    },
+                    extended_for_registration,
                     last_observer_error.as_deref().unwrap_or("none"),
                 ),
             );
@@ -1247,6 +1331,10 @@ fn register_replica_for_file_with_liveness(
     mark_editor_open_docs_open(file);
     // Seed the legacy process-exit watcher from durable reliable-sync open pids.
     mark_editor_attach_open(file);
+    // `#ensurewindowsize`: record that a live editor answered for this document.
+    // `ensure_document_model` uses this as liveness proof to extend its otherwise
+    // very short missing-replica window — see `note_replica_registration`.
+    note_replica_registration(file);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -3681,6 +3769,54 @@ mod tests {
         );
         assert!(format!("{err:#}").contains("editor authority stayed"));
         assert!(!hub_is_allocated_for_test(&hash));
+    }
+
+    #[test]
+    fn ensure_document_model_extends_window_when_editor_registers_a_replica() {
+        // `#ensurewindowsize`: a LIVE editor whose bootstrap is too large to land
+        // inside DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS must not be
+        // judged stale. A completed registration is liveness proof, so the window
+        // extends and the editor gets to finish. Without the extension this
+        // observer never gets far enough to return Current and queue maintenance
+        // can never persist on a large document.
+        let (_dir, doc) = temp_doc("ensure-model-window-extend.md");
+        let polls = Arc::new(Mutex::new(0usize));
+        let polls_for_observer = Arc::clone(&polls);
+        let doc_for_observer = doc.clone();
+
+        let current = ensure_document_model_with_current_text_observer(
+            &doc,
+            "test_window_extend",
+            CurrentText::EditorAttachedMissingReplica,
+            move || {
+                let mut n = polls_for_observer.lock().unwrap();
+                *n += 1;
+                if *n == 1 {
+                    // The editor answers by registering, but its bootstrap is
+                    // still in flight — the model is not observable yet.
+                    note_replica_registration(&doc_for_observer);
+                    return Ok(CurrentText::EditorAttachedMissingReplica);
+                }
+                if *n < 4 {
+                    return Ok(CurrentText::EditorAttachedMissingReplica);
+                }
+                Ok(CurrentText::Current {
+                    text: "live editor text".to_string(),
+                    live_editors: 1,
+                    delivery_converged: true,
+                })
+            },
+        )
+        .expect("a registering editor must be given the full window, not failed as stale");
+
+        assert!(
+            matches!(current, CurrentText::Current { .. }),
+            "expected the extended window to reach Current, got {current:?}"
+        );
+        assert!(
+            *polls.lock().unwrap() >= 4,
+            "the observer must keep polling past the short missing-replica window"
+        );
     }
 
     #[test]

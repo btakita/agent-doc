@@ -4248,16 +4248,31 @@ pub(crate) fn persist_queue_maintenance_doc(
     let observed = agent_doc_crdt_relay_io::current_text_for_file(file)?;
     let current = match queue_maintenance_head_action(&observed, false) {
         QueueMaintenanceHeadAction::EnsureThenReobserve => {
-            let ensured = agent_doc_crdt_relay_io::ensure_document_model(file, source)?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "queue_maintenance_model_ensure source={source} before={} after={}",
-                    queue_maintenance_head_label(&observed),
-                    queue_maintenance_head_label(&ensured),
+            // `#ensurewindowsize`: log the outcome on BOTH paths. This log used to
+            // sit after the `?`, so the failure case — the only case anyone needs
+            // to debug — recorded no before/after label at all, and the ops.log
+            // showed a bare `document_model_ensure_failed` with no queue-side
+            // context.
+            let ensured = agent_doc_crdt_relay_io::ensure_document_model(file, source);
+            match &ensured {
+                Ok(ensured) => agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_model_ensure source={source} before={} after={} outcome=ready",
+                        queue_maintenance_head_label(&observed),
+                        queue_maintenance_head_label(ensured),
+                    ),
                 ),
-            );
-            ensured
+                Err(err) => agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "queue_maintenance_model_ensure source={source} before={} outcome=failed error={}",
+                        queue_maintenance_head_label(&observed),
+                        format!("{err:#}").replace('\n', " | ").chars().take(240).collect::<String>(),
+                    ),
+                ),
+            }
+            ensured?
         }
         _ => observed,
     };

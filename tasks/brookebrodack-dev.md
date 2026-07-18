@@ -135,7 +135,26 @@ Changes:
 - `crates/freehold-tribunal/tests/aggregate.rs` — new `a_lone_configured_plugin_can_approve`; kept `a_single_compromised_plugin_cannot_approve` green under the new rule with a comment explaining why it still holds.
 
 Verification: `make check` exit 0, `cargo test --workspace` 37 passed / 0 failed across 12 suites. Committed to the freehold submodule as `d296bd7` (not pushed, and the superproject gitlink is not bumped — concurrent sessions are live in this tree).
-<!-- agent:boundary:ede8fbd1 -->
+
+### Re: #fhoneshot — one-shot CLI-agent plugin — opus-4-8
+
+> **Queue prompt:** do [#fhoneshot]
+
+Done. New `freehold-agent` crate — the second answering voice `#fhquorum2` said the panel was missing — invoked one-shot per request.
+
+**The one-shot property is enforced, not documented.** `agent_argv` validates the configured `FREEHOLD_AGENT_ARGV` against a deny-list of session-reuse flags (`--resume`, `-r`, `--continue`, `-c`, `--session-id`, `--fork-session`, `--thread`, `resume`, …), matched case-insensitively on whole args and on the `--flag=value` form. A match refuses to run and the plugin abstains; there is no default-invocation fallback, because a fallback would silently undo whatever the operator configured. I chose a deny-list of *behaviours* over a per-CLI allow-list of known-good flags: the agent CLIs move faster than this repo, and a stale allow-list would reject valid new one-shot flags, while a stale deny-list only misses a flag it does not yet name.
+
+**Untrusted output stays on the existing firewall.** `extract_envelope` only *locates* JSON in agent stdout (agents wrap answers in prose and fences regardless of instruction) — scanning for the last balanced top-level object carrying `decisions`, so an agent that restates the schema before answering does not shadow its real answer. What is *trusted* is still decided by `freehold_tribunal::parse_verdicts`, unchanged. Every failure path exits nonzero without printing an envelope, which aggregation reads as no opinion; no path in the binary produces a verdict the agent did not produce.
+
+Files:
+- `crates/freehold-agent/{Cargo.toml,src/lib.rs,src/main.rs}` — new crate; `lib.rs` holds the parts testable without spawning anything, `main.rs` is the I/O shell.
+- `crates/freehold-agent/tests/one_shot.rs` — 11 tests, all fail-closed properties: resumed/continued/forked sessions refused in every flag form, unconfigured/empty argv abstains rather than defaulting, prose-and-fence-wrapped verdicts still read, restated schema does not shadow the answer, a verdict for an unshown entry is no opinion.
+- `Cargo.toml` workspace members; `README.md` crate table + security-model note; `docs/plugin-isolation.md` new subsection under §5 plus the §4 aggregation block corrected to the `#fhquorum2` rule.
+
+Verification: `make check` exit 0 — 48 tests passed, 0 failed, across 16 suites; rustfmt and clippy clean. Committed as `a916f1c` (not pushed; superproject gitlink not bumped).
+
+**Not wired up yet, and deliberately so:** no `PluginSpec` for this plugin ships in a config, because a working spec needs decisions I should not make silently — `egress_hosts` for whichever model the agent CLI reaches, the `env_allow` list carrying `FREEHOLD_AGENT_ARGV` plus any credential, and a `budget_ms` that suits an agent round-trip rather than a rules match. Queued as `#fhagentspec`.
+<!-- agent:boundary:50d2ecb8 -->
 <!-- /agent:exchange -->
 
 ## Queue

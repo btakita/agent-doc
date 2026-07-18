@@ -945,9 +945,18 @@ fn verify_auto_trigger_submitted(
             pane_captured: capture.is_some(),
             trigger_pending_in_composer: capture.as_deref().is_some_and(|content| {
                 agent_doc_harness::ready_prompt_candidate(content, harness_cfg).is_some()
-                    && agent_doc_controller::dispatch::pane_composer_has_pending_trigger(
+                    // (`#autotriggerscrollbackecho`) Scope the "still unsubmitted"
+                    // test to the CURRENT draft. `pane_composer_has_pending_trigger`
+                    // substring-matches the whole capture, which is only sound on the
+                    // brand-new fresh pane it was written for (`#jbtsiftnosub2`). This
+                    // supervisor entry point runs against a long-lived pane whose
+                    // scrollback holds every previously-submitted trigger, and whose
+                    // queued-input region echoes an ACCEPTED trigger verbatim, so a
+                    // whole-capture match reads consumed history as a stranded draft.
+                    && agent_doc_controller::dispatch::route_trigger_visible_in_current_draft(
                         content,
                         submitted_text,
+                        |line| harness_cfg.is_prompt_line(line),
                     )
             }),
             already_resubmitted,

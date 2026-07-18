@@ -1370,6 +1370,14 @@ pub const fn fresh_start_ack_outcome(
 /// cycle is acknowledged (so this branch is never reached); on a brand-new fresh
 /// pane the only way the trigger literal can appear is the just-injected,
 /// not-yet-submitted draft, so a whitespace-insensitive match cannot false-fire.
+///
+/// **Scope limit (`#autotriggerscrollbackecho`):** that "cannot false-fire"
+/// premise holds ONLY for a brand-new fresh pane with empty scrollback. On a
+/// long-lived pane the same literal appears in consumed transcript history and
+/// in the harness's queued-input region, where it means *accepted*, not
+/// *stranded*. Callers outside the fresh-pane path must use
+/// `route_trigger_visible_in_current_draft`, which requires that no later prompt
+/// line follows the match.
 pub fn pane_composer_has_pending_trigger(pane_content: &str, trigger: &str) -> bool {
     let stripped_trigger = strip_all_whitespace(trigger);
     if stripped_trigger.is_empty() {
@@ -3076,6 +3084,107 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 |_| false
             ),
             "a prior submitted /clear in scrollback must not suppress or resubmit the next drain"
+        );
+    }
+
+    /// (`#autotriggerscrollbackecho`) The live flood: the supervisor auto-trigger
+    /// verifier read a long-lived pane's CONSUMED transcript echo of
+    /// `/agent-doc <FILE>` as a stranded composer draft, resent `Enter`, and
+    /// re-dispatched the same document every idle tick.
+    ///
+    /// Captured from pane `%30` on 2026-07-18 while the loop was running.
+    #[test]
+    fn auto_trigger_scrollback_echo_is_not_a_pending_draft() {
+        let content = concat!(
+            "  no drainable head, so the trigger is firing against an idle document.\n",
+            "\n",
+            "✻ Cogitated for 1m 0s\n",
+            "\n",
+            "❯ /agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md\n",
+            "\n",
+            "  Searching for 8 patterns, reading 3 files, running 5 shell commands…\n",
+            "❯\n",
+            "  Opus 4.8 ctx:17% ~/…/src/agent-doc main brian@host\n",
+        );
+
+        assert!(
+            !route_trigger_visible_in_current_draft(
+                content,
+                "/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md",
+                |line| line.trim() == "❯" || line.trim().starts_with("❯ "),
+            ),
+            "a consumed trigger above a later prompt line is transcript history, not a stranded draft"
+        );
+    }
+
+    /// (`#autotriggerscrollbackecho`) The harder half: Claude Code QUEUES input
+    /// received while busy and echoes it verbatim above
+    /// `❯ Press up to edit queued messages`. That shape means the trigger was
+    /// ACCEPTED. Resending `Enter` there submits it a second time, which is what
+    /// turned one stranded-trigger guard into a duplicate-dispatch flood.
+    #[test]
+    fn auto_trigger_queued_message_echo_is_not_a_pending_draft() {
+        let content = concat!(
+            "✽ Razzle-dazzling… (2m 32s · ↓ 7.2k tokens)\n",
+            "\n",
+            "  ❯ /agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md\n",
+            "\n",
+            "────────────────────\n",
+            "❯ Press up to edit queued messages\n",
+            "────────────────────\n",
+            "  Opus 4.8 ctx:17% ~/…/src/agent-doc main brian@host\n",
+        );
+
+        assert!(
+            !route_trigger_visible_in_current_draft(
+                content,
+                "/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md",
+                |line| line.trim() == "❯" || line.trim().starts_with("❯ "),
+            ),
+            "a queued (accepted) trigger must never be resubmitted as if it were unsubmitted"
+        );
+    }
+
+    /// Pins WHY the scope limit on `pane_composer_has_pending_trigger` exists:
+    /// the whole-capture substring match DOES false-fire on the same live
+    /// capture. It stays sound only for its brand-new-fresh-pane caller
+    /// (`#jbtsiftnosub2`), where scrollback is empty.
+    #[test]
+    fn whole_capture_match_false_fires_on_scrollback_echo() {
+        let content = concat!(
+            "❯ /agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md\n",
+            "  Searching for 8 patterns…\n",
+            "❯\n",
+        );
+
+        assert!(
+            pane_composer_has_pending_trigger(
+                content,
+                "/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md",
+            ),
+            "documents the defect: whole-capture matching cannot tell consumed history from a draft"
+        );
+    }
+
+    /// The negative control. Without it the two tests above would pass for a
+    /// verifier that simply never reports a stranded draft, silently regressing
+    /// `#restartfreshtriggerstranded` back to the original stranded prompt.
+    #[test]
+    fn auto_trigger_genuinely_stranded_draft_is_still_detected() {
+        let content = concat!(
+            "  Welcome to Claude Code\n",
+            "\n",
+            "❯ /agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md\n",
+            "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
+        );
+
+        assert!(
+            route_trigger_visible_in_current_draft(
+                content,
+                "/agent-doc /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md",
+                |line| line.trim() == "❯",
+            ),
+            "a trigger sitting in the composer with no later prompt line is the stranded shape"
         );
     }
 

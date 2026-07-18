@@ -484,6 +484,21 @@ pub fn run_with_controller_effects(
     total_deleted += tag_deleted;
     total_skipped += tag_kept;
 
+    // `#statedbvacuum`: retention pruning frees SQLite pages but never returns
+    // them to the filesystem. `gc` is the explicit maintenance step, so this is
+    // where the full-file rewrite belongs — never `open_state_db`, which routine
+    // RPCs call.
+    if !dry_run {
+        match agent_doc_sqlite::state_store::reclaim_state_db_free_space(&project_root) {
+            Ok(0) => {}
+            Ok(reclaimed) => eprintln!(
+                "[gc] state.db: reclaimed {:.0} MB of free space",
+                reclaimed as f64 / (1024.0 * 1024.0)
+            ),
+            Err(err) => eprintln!("[gc] warning: state.db reclaim skipped: {err:#}"),
+        }
+    }
+
     eprintln!(
         "[gc] Total: {} deleted, {} kept",
         total_deleted, total_skipped

@@ -973,6 +973,7 @@ dependencies = [
  "agent-doc-git-io",
  "agent-doc-project-root-io",
  "agent-doc-session-registry-io",
+ "agent-doc-sqlite",
  "agent-doc-supervisor-io",
  "anyhow",
  "filetime",

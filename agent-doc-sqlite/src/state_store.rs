@@ -826,6 +826,58 @@ fn prune_superseded_crdt_recovery_checkpoints_to(
     Ok(())
 }
 
+/// Fraction of the state-db file that must be reclaimable before
+/// [`reclaim_state_db_free_space`] rewrites it (`#statedbvacuum`).
+///
+/// `VACUUM` rewrites the entire database and takes an exclusive lock, so it is a
+/// maintenance operation only — never the hot path. The threshold keeps it from
+/// running on a database that is merely a little fragmented.
+const STATE_DB_VACUUM_FREE_FRACTION: f64 = 0.25;
+
+/// Reclaim free pages in the project state db, returning the bytes released.
+///
+/// `#statedbvacuum`: retention pruning (`#authorityfactretention`,
+/// `#crdtcheckpointretention`) frees SQLite *pages*, but SQLite never returns
+/// them to the filesystem without a `VACUUM`. Live measurement 2026-07-18 after
+/// checkpoint GC: payload dropped 512MB -> 119MB while the file stayed at 521MB,
+/// so ~400MB remained allocated. That inflates every whole-file operation —
+/// backup, copy, page-cache pressure — even though query cost is already fixed.
+///
+/// Deliberately NOT called from `open_state_db`: a full-file rewrite under an
+/// exclusive lock must be an explicit maintenance step (`agent-doc gc`), not
+/// something a routine RPC can trigger. Returns `Ok(0)` when the database is not
+/// fragmented enough to be worth rewriting.
+pub fn reclaim_state_db_free_space(project_root: &Path) -> Result<u64> {
+    let path = state_db_path(project_root);
+    if !path.exists() {
+        return Ok(0);
+    }
+    let conn = open_state_db(project_root)?;
+
+    let page_count: i64 = conn
+        .query_row("PRAGMA page_count", [], |row| row.get(0))
+        .context("failed to read state db page_count")?;
+    let free_count: i64 = conn
+        .query_row("PRAGMA freelist_count", [], |row| row.get(0))
+        .context("failed to read state db freelist_count")?;
+
+    if page_count <= 0 || free_count <= 0 {
+        return Ok(0);
+    }
+    let free_fraction = free_count as f64 / page_count as f64;
+    if free_fraction < STATE_DB_VACUUM_FREE_FRACTION {
+        return Ok(0);
+    }
+
+    let before = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    conn.execute_batch("VACUUM")
+        .context("failed to vacuum state db")?;
+    let after = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(before);
+    // Saturating: a concurrent write can grow the file between the two stats,
+    // and reporting a negative reclaim would be worse than reporting none.
+    Ok(before.saturating_sub(after))
+}
+
 const RETIRE_PENDING_RESPONSE_FACTS_MIGRATION: &str = "retire_pending_response_fact_variants_v1";
 
 /// Remove event variants that no longer exist in the strict state-backbone ABI.

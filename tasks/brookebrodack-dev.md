@@ -735,7 +735,29 @@ would ship a concurrent session's in-progress merge code to every live editor.
 **Next step is yours.** `#teah` is at the head and I can work it directly from the
 backlog on your word — that needs no queue binding at all. Or once the other
 session's fix lands, the arming pass should complete on its own.
-<!-- agent:boundary:bb7b5120 -->
+
+### Re: another session owns the wedge — opus-4-8
+
+Good — standing down on it. I will not touch `src/agent-doc`, run `make install`,
+or retry the arming pass from here, so nothing I do can collide with that fix
+mid-flight.
+
+State as it stands, so the other session's work is the only variable:
+
+- Queue **populated**, 11 items, `do [#teah]` at the head, `queue: start`.
+- Queue **not armed** — `queue_drainable_head_count: 0`,
+  `queue_continuation_required: false`. That clears when their fix lands; it
+  needs nothing further from this document.
+- Backlog ordered, three operator-gated items in `agent:review`, `#fhmig` filed
+  for the freehold migration.
+
+No auto-loop from me while the binding is down.
+
+`#teah` is the head and is the oldest thing outstanding here — the harness
+evaluation you asked for, which needs real web research rather than recall. Say
+the word and I will work it straight from the backlog; it does not need the queue
+binding at all.
+<!-- agent:boundary:bd6113ed -->
 <!-- /agent:exchange -->
 
 ## Queue

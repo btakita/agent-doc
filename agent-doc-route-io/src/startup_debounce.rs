@@ -5,6 +5,12 @@ use anyhow::Result;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+/// `#crdtpushdrain`: how often route re-requests an urgent CRDT delivery drain
+/// while the current transition stays `delivery_pending`. Bounded well under the
+/// route `max_wait` budget so a drain that applies nothing gets several attempts
+/// instead of one, while staying far coarser than the 100ms observe poll.
+const URGENT_DRAIN_RETRY_INTERVAL: Duration = Duration::from_millis(750);
+
 /// Wait for Lazily's current-document transition to settle.
 ///
 /// Route fails closed instead of dispatching through an incomplete current
@@ -41,7 +47,7 @@ where
     let poll_interval = Duration::from_millis(100);
     let start = Instant::now();
     let _ = debounce;
-    let mut urgent_drain_requested = false;
+    let mut last_urgent_drain: Option<Instant> = None;
 
     loop {
         let current = observe(file, "route_startup_current_transition");
@@ -65,8 +71,17 @@ where
             return Ok(());
         }
 
-        if let Some(targets) = drain_targets.filter(|_| !urgent_drain_requested) {
-            urgent_drain_requested = true;
+        // #crdtpushdrain: re-request on a bounded cadence rather than once. A single
+        // urgent drain can legitimately apply nothing — `drainRemoteUpdatesFor`
+        // returns early while the path has pending local edits or is mid editor
+        // apply, and the forwarder may not be registered yet. Its only follow-up is
+        // the *gated* `requestRemoteDrain`, which an idle document's escalated no-op
+        // backoff suppresses, so a one-shot latch left the remaining budget polling a
+        // frontier nobody would pull and route deferred at `max_wait`.
+        let urgent_drain_due = last_urgent_drain
+            .is_none_or(|last| last.elapsed() >= URGENT_DRAIN_RETRY_INTERVAL);
+        if let Some(targets) = drain_targets.filter(|_| urgent_drain_due) {
+            last_urgent_drain = Some(Instant::now());
             let reason = CrdtReplicaEventReason::AckRecoveryForceRefresh;
             match signal(file, reason, targets) {
                 Ok(()) => eprintln!(
@@ -155,5 +170,55 @@ mod tests {
             vec![(CrdtReplicaEventReason::AckRecoveryForceRefresh, 1)]
         );
         assert!(observations.get() >= 4);
+    }
+
+    /// `#crdtpushdrain`: regression for the reported
+    /// `route deferred ...: Lazily current transition remained delivery_pending for
+    /// 5000ms`. A single urgent drain can apply nothing (pending local edits, a
+    /// mid-apply path, an unregistered forwarder), and its only follow-up is the
+    /// *gated* drain that an idle document's escalated no-op backoff suppresses. A
+    /// one-shot latch therefore burned the whole budget on a frontier nobody pulled.
+    #[test]
+    fn route_startup_retries_urgent_delivery_drain_while_delivery_stays_pending() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let signals = RefCell::new(Vec::new());
+
+        let outcome = await_idle_with_max_wait_and_effects(
+            &doc,
+            Duration::from_millis(10),
+            URGENT_DRAIN_RETRY_INTERVAL * 3,
+            |_file, _source| {
+                Ok(Some(CurrentText::Current {
+                    text: "prompt".to_owned(),
+                    live_editors: 2,
+                    delivery_converged: false,
+                }))
+            },
+            |_file, reason, targets| {
+                signals.borrow_mut().push((reason, targets));
+                Ok(())
+            },
+        );
+
+        assert!(
+            outcome.is_err(),
+            "a never-converging delivery must still fail closed at max_wait"
+        );
+        let signals = signals.into_inner();
+        assert!(
+            signals.len() >= 3,
+            "route must keep re-requesting the urgent drain while delivery is pending, \
+             not latch after one attempt (got {} request(s))",
+            signals.len()
+        );
+        assert!(
+            signals
+                .iter()
+                .all(|(reason, targets)| *reason
+                    == CrdtReplicaEventReason::AckRecoveryForceRefresh
+                    && *targets == 2),
+            "every retry must carry the same force-refresh reason and live target count"
+        );
     }
 }

@@ -72,7 +72,40 @@ The dropdown fetches `GET /api/admin/tmo-lenders` (`admin_tmo_lenders_GET_`). Th
 One correction landed with this: the `TmoLenderPicker` comment claimed the dropdown was a live `LSS.svc/GetLenders` list. It never was — `GetLenders` is unwired. The comment now describes the actual path above.
 
 **Verification:** `make check` green — 1787 pass, 0 fail. Not deployed; say the word and I'll push it to the worker.
-<!-- agent:boundary:2af1522a -->
+❯ 🚧 I do have access to https://app2.themortgageoffice.com/default#BusinessContacts?type=F8260DDD13AB4CB399B0808CABCDCB20&LockDD= in the sandbox mode, which gives me full LOS access in the sandbox.
+
+Please investigate why Jeff Blake is in the system. Please remove Lucas Huang from the sandbox.
+
+### Re: Jeff Blake and Lucas Huang — opus-4-8
+
+Investigated both against EFS D1 (staging + production) and the live TMO API. Nothing deleted — read-only so far, because what I found changes what the right delete is.
+
+**Jeff Blake is not in EFS at all.** Zero rows in `users` (staging *and* production), `loans`, `application_leads`, `contact_messages`, `tmo_cache_entities`, or `tmo_cache_outbox`. He also isn't reachable as a TMO lender (`LSS.svc/GetLender` → "Lender not found"). EFS could not have created him either: the outbox holds only 40 rows, all `select_lender` / `update_loan_status`, all still `pending` — no borrower or contact create has ever been pushed. So Jeff Blake is a TMO-native record, not something EFS put there.
+
+**Lucas Huang is EFS test debris, and he is *not* in TMO.** He appears in exactly one place: the cached TMO loan `TST113` in `tmo_cache_entities` (loan RecID `89B3B9CD0A6E47DF81161AD805897B5C`, cached 2026-06-08). Asking TMO for it directly returns **`Loan not found`**.
+
+That turned out to be the bigger finding:
+
+| | |
+|---|---|
+| Loans in the TMO database EFS queries | 24 |
+| Loans cached in `tmo_cache_entities` | 19 |
+| Overlap | **1** (`1010`) |
+
+The other 18 — `TST042`, `TST113`, `TST217`, `TST254`, `TST374`, `TST388`, `TST723`, `TST762`, `TST766`, `TST999`, `AVW580`, `FTM631`, `GQI751`, `ICL909`, `MBQ435`, `PIP038`, `SRV532`, `554466` — are EFS-generated test rows that render in the admin TMO views as though TMO vouched for them. `Lucas Huang` sits right among `Test Q Borrower` / `Test A Borrower222`. Worth noting `GQI751` is in that list, which is the loan behind the `#dealtab500` review item.
+
+**Why I did not delete anything yet — two blockers, one question**
+
+1. *Which "sandbox"?* If you mean the TMO record you can see in BusinessContacts, EFS cannot reach it. `DELETE /LOS.svc/DeleteBorrower/:borrowerRecId` needs the **borrower** RecId; what EFS cached is the **loan** RecId, and there is no enumeration endpoint to resolve one (`LOS.svc/GetBorrowers` and `LSS.svc/GetBorrowers` both 404). Since you have full LOS access, deleting him from the BusinessContacts screen is one click and zero risk; or paste me his RecId and I'll do it via the API.
+2. *Which database?* The API token points EFS at the EFS company database (value in passage `equityfundingsource/TMO_API_DATABASE`), **not** `API Sandbox`. Please confirm that is the same database you're looking at in app2 — if it isn't, that alone explains why TST113/Lucas Huang is invisible to the API, and it changes where the writeback work lands.
+
+If instead you meant "get Lucas Huang out of EFS", that's the orphan cache row and I can prune it — but I'd rather fix the class than the row, which is `#tmo-orphan-cache` below.
+
+**Queued** (no code changed this cycle, so nothing to spec/test/commit):
+
+- `#tmo-orphan-cache` — prune/tombstone cached TMO rows whose `source_id` is absent from `GetLoans`, so stale test data stops masquerading as TMO records. The existing `DELETE /api/admin/tmo-loans/:loan_number` does **not** cover this: it only disables EFS `loans` rows and never touches `tmo_cache_entities` (and `TST113` has no `loans` row, so it would be a silent no-op).
+- `#tmo-contact-enumeration` — no contact-enumeration API; add it to the ABS support thread (rides `#k2xg`) and wire an operator-supplied-RecId delete path in the meantime.
+<!-- agent:boundary:044048bc -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -103,6 +136,8 @@ We have not cut over the DNS today. The current CF environment will be staging. 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmo-orphan-cache] Prune/reconcile orphan tmo_cache_entities rows: 18 of 19 cached TMO 'loan' rows (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) do not exist in the TMO database EFS is pointed at — GetLoans returns 24 loans and only '1010' overlaps. They are EFS test debris that renders as if it were TMO data (this is where 'Lucas Huang' shows up). Add an admin prune action or a sync tombstone pass so a cached row whose source_id is absent from GetLoans is marked deleted instead of shown as a live TMO record. Note admin_tmo_loans_by_loan_number_DELETE_ does NOT cover this — it only disables EFS 'loans' rows and never touches tmo_cache_entities.
+- [ ] [#tmo-contact-enumeration] TMO exposes no borrower/business-contact enumeration API (LOS.svc/GetBorrowers and LSS.svc/GetBorrowers both 404; LSS.svc/GetLenders returns an empty list for the EFS company database), so EFS cannot answer 'who is in TMO' or resolve a contact to the RecId that DELETE /LOS.svc/DeleteBorrower/:borrowerRecId requires. Add the enumeration question to the ABS support thread (rides #k2xg), and until then wire an operator-supplied-RecId delete path rather than guessing record ids.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'.
 - [ ] [#efs-prod-seed] [operator-verify] Decide whether the production Cloudflare environment should be seeded from staging before launch. Production D1 (equityfundingsource-production) is schema-complete and empty; staging holds 33 users / 7 loans / 7 deals. If that is real business data it must be exported+imported once, immediately before cutover (a second import collides on primary keys), and R2_DOCUMENTS must be copied separately or uploaded documents 404 in production despite their D1 rows existing. Recipe: src/equityfundingsource-dev/docs/deploy.md 'Seeding production from staging'. Blocked on the operator confirming real-vs-test data. See #efs-cf-account-custody — if custody moves first, seed once after the move.
 - [ ] [#efs-cf-account-custody] [operator-verify] Move EFS to its own Cloudflare account. Both environments currently live in Brian's personal account (1e7e194ff8da4ad9e40ce041aea84f76), which also hosts unrelated projects. STEP 1 (Judith, instructions drafted 2026-07-18): sign up at dash.cloudflare.com/sign-up with a SHARED EFS address (becomes billing + recovery contact), verify the email (hard prerequisite — invites and 2FA both fail without it), invite Brian as Super Administrator via Manage Account -> Members -> Invite, enable 2FA, have a company card ready for the R2 checkout. Super Administrator is required, not just Workers Platform Admin, because R2 activation is a purchase and the deploy pipeline needs an account-owned API token. STEP 2 (Brian): D1 databases and R2 buckets cannot move between accounts — create them in the new account, update the ids under [env.production] in wrangler.toml, export+import D1, copy R2, re-push secrets (per-account AND per-environment), then repoint DNS. Sequencing: do this before #efs-prod-seed to migrate the data once instead of twice. Advances #efs-dns-cutover.

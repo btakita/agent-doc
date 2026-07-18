@@ -189,4 +189,4 @@
 	url = git@github.com:lazily-hub/lazily-react.git
 [submodule "src/freehold"]
 	path = src/freehold
-	url = git@github.com:btakita/freehold.git
+	url = git@github.com:freehold-hub/freehold.git

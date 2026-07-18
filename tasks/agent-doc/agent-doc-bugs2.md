@@ -82,11 +82,37 @@ At `11m 57s` the old scanner could not possibly have matched. That capture is no
 **CI note:** latest CI is red, but on `b7e17f4d5` (#queuedrainednoop), which predates this push, and the failure is `finalize_skips_ignored_untracked_session_doc` — a gitignore/finalize test with no relationship to busy-cue detection. It passes locally. Filed as its own backlog item rather than folded in here.
 
 One follow-up is genuinely operator-gated: the live JB `Run Agent Doc` eyeball against a busy pane. Let the turn run past a minute first — that is the case that was hard-broken.
-<!-- agent:boundary:8fc11a5c -->
+
+### Re: /goal complete the entire queue — opus-4-8
+
+I can't drain it, and the reason is worth more than a partial attempt: **the queue machinery itself is wedged.**
+
+`preflight` reports `queue_drainable_head_count: 0`, `queue_continuation_required: false`, and `queue_prompts: null` — while the document visibly holds `#promptselect`, `#realtimesalient`, `#syncobscache2` and ~50 more. `plan` sees no prompt targets at all. That mismatch is not the queue being empty; it is `queue_maintenance_not_persisted` firing for the third time this session, so the recomputed queue never lands and the binary hands me nothing to drain.
+
+**Root cause, from this document's `ops.log`** — two observers of the same document disagreeing:
+
+- `19:32:45` — `controller_crdt_current_text source=preflight_queue_maintenance` → `status=current live_editors=1 delivery_converged=true`
+- `19:32:47` — same queue_maintenance path → `document_model_ensure_start initial_state=editor_attached_model_missing`
+- `19:32:47` — `crdt_replica_register` succeeds: `data_kind=ok generation_fenced=true bootstrap_bytes=1312802`
+- `19:32:48` — `document_model_ensure_republish_observer_not_ready` → `document_model_ensure_failed`
+
+A replica registers successfully carrying 1.3 MB of bootstrap, and the ensure-path observer still reports no replica. Every `document_model_ensure_start` this session says missing — across `queue_maintenance`, `pending_add_sync`, and `controller_recycle_request` — while the controller says current throughout. The ensure path is not seeing a model the controller demonstrably has.
+
+I checked a plausible culprit (`recover_current_text_from_local_projection_after_controller_error`, which hardcodes `EditorAttachedMissingReplica` as its starting state) and **ruled it out** — no `projection_recovery` lines appear in the log. Saying so because I'd rather report a ruled-out lead than a confident wrong one.
+
+**I stopped before fixing it.** `src/agent-doc-editor-authority-fix` is a live worktree whose last three commits are `preserve attached editor authority during retry`, `bound idle authority replay`, and `repair empty duplicate document scaffold`. Another session already owns this exact defect. Landing a competing fix in `src/agent-doc` would collide with it. My diagnosis is filed so that session can use it.
+
+**Also found:** the queue and backlog opening tags are accumulating duplicate attributes — `priority` now appears twice in both. I verified this is *not* `ensure_queue_priority_attr` (reproduced against the real tag; its guard is correctly idempotent). The tag-rebuild helpers normalize `key=true`→`key` but never dedup boolean tokens, so once a duplicate appears it is permanent and can keep growing. Filed with the fix direction.
+
+**On the goal itself:** even with the wedge cleared, "complete the entire queue" is not a single turn. 31 of the mirrored heads are `[operator-verify]` — they need a human at a live editor/pane and no agent can close them. Of the agent-drainable remainder, `#promptselect` and `#realtimesalient` both say "design pass needed before implementation" in their own text. Tell me to start with a specific one and I'll take it properly; I'd rather do one of those well than half-do four.
+
+Unblock order I'd suggest: editor authority (other session) → then this queue drains on its own.
+<!-- agent:boundary:73e1eefc -->
 <!-- /agent:exchange -->
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- /goal complete the entire queue
 - do [#promptselect]
 - do [#realtimesalient]
 - ~~do [#jbsteerinterrupt]~~
@@ -175,7 +201,9 @@ What are #next-steps to fix bugs?
 
 ## Backlog
 
-<!-- agent:backlog priority queue -->
+<!-- agent:backlog priority priority queue -->
+- [ ] [#zq8e] Editor-authority wedge blocks ALL queue maintenance (root of the #goal drain stall). Evidence in ops.log for this doc: at 19:32:45 `controller_crdt_current_text source=preflight_queue_maintenance` returns `status=current live_editors=1 delivery_converged=true`; 2s later the SAME queue_maintenance path logs `document_model_ensure_start initial_state=editor_attached_model_missing`, a `crdt_replica_register` succeeds (`data_kind=ok generation_fenced=true bootstrap_bytes=1312802`), then `document_model_ensure_republish_observer_not_ready` -> `document_model_ensure_failed` after 5s. EVERY `document_model_ensure_start` this session reports missing-replica across unrelated sources (queue_maintenance, pending_add_sync, controller_recycle_request) while the controller consistently reports current. Two observers of one document disagree; the ensure-path observer does not see a replica the controller demonstrably has. NOTE: likely already owned by the `src/agent-doc-editor-authority-fix` worktree (commits `preserve attached editor authority during retry`, `bound idle authority replay`) — coordinate before landing a rival fix in src/agent-doc.
+- [ ] [#a2zx] Queue/backlog opening-tag attribute duplication: the live doc now carries `<!-- agent:queue priority preset="..." priority go -->` and `<!-- agent:backlog priority priority queue -->` — `priority` twice in both. Verified NOT from `ensure_queue_priority_attr` (its `attrs.contains_key("priority")` guard is idempotent; reproduced clean against the real tag). `set_auto_in_queue_tag`/`rewrite_queue_tag_attrs` normalize `key=true`->`key` but never dedup boolean tokens, so any writer that appends an already-present flag accumulates duplicates permanently. Fix: dedup boolean attrs when rebuilding the tag (they are flags; a repeat carries no information), then find the appending writer. Suspect it rides the failed queue-convergence path above.
 - [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).
 - [ ] [#ay80] CI red on main, pre-existing and unrelated to #jbsteerinterrupt: `finalize_skips_ignored_untracked_session_doc` (tests/finalize_integration.rs:248) fails in GitHub Actions with `Unexpected stderr, failed var.contains(skipped ignored untracked path scratch/session.md)` but PASSES locally (7627/7627 green). Run 29657026491 on b7e17f4d5. Likely a CI-environment gitignore/tmpdir difference; reproduce with the CI runner git config.
 - [ ] [#promptselect] #agent-doc-feature Selection-scoped `Run Agent Doc`: send ONLY the editor text selection as the prompt. Needs (a) a dedicated CLI verb — `agent-doc prompt "<text>"` (or `steer`; `run` is taken) accepting multi-line via stdin/cat, (b) JB+VSCode `Run Agent Doc` hooked to it so a non-empty selection routes through `prompt` instead of the whole-document trigger, (c) acknowledgement: agent-doc echoes the prompt into the document with the prompt prefix plus salient response, (d) responses attached UNDER their originating prompt — a threaded prompt->response layer in the Document Tree rather than a flat exchange tail. Must compose with realtime steering (#realtime-steering-verbatim) since a selection sent mid-turn IS steering. Design pass needed before implementation.

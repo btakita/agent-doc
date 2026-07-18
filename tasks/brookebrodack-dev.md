@@ -242,13 +242,120 @@ billing workaround.
 
 Four open questions are listed at the end of the plan; the truncated sentence is the
 one that actually blocks starting.
-<!-- agent:boundary:345525a5 -->
+
+### Re: GitHub project + container-isolated plugins — opus-4-8
+
+Done, and pushed: **[btakita/brookebrodack-dispatch](https://github.com/btakita/brookebrodack-dispatch)**,
+registered as a submodule at `src/brookebrodack-dispatch`. Rust, per your
+mid-turn correction — I had started in TypeScript and threw it away, which was
+the right call: a single static binary with no `node_modules` is a much smaller
+thing to trust inside a security boundary.
+
+**I created the repo private.** All your other `brookebrodack` repos are public,
+so flag it if you want consistency — private was the reversible default and it's
+one click to flip.
+
+### The thing I want to push back on
+
+Containers do **not** solve prompt injection. They bound the blast radius of a
+compromised plugin, which is worth having, but they do nothing about the failure
+that actually hurts you: a plugin steered into voting `approve`. Sandbox it
+perfectly and it still votes.
+
+So the isolation ask is one of three defences, and the other two do more work:
+
+| Failure | Defence | Where |
+|---|---|---|
+| Plugin steered into approving | unanimous-to-approve | `aggregate.rs` |
+| Plugin exfiltrates / attacks LAN | egress allowlist + dropped caps | `sandbox.rs` |
+| Injected text reaches a visitor | strict verdict schema | `plugin.rs` |
+
+**The real firewall is the verdict schema.** A plugin's entire output surface is
+`{id, decision, reason}`, strictly parsed, everything else discarded. A fully
+compromised plugin cannot publish attacker content — it can only vote, in a
+three-valued vocabulary it doesn't control. A verdict for an entry it wasn't
+shown rejects the whole response rather than getting filtered.
+
+**And unanimous-to-approve is a security control, not a tie-breaker.** With
+`plugin-rules` — deterministic, no model, structurally un-injectable — in every
+quorum, a steered model plugin cannot approve anything by itself. That's why the
+container ask and the aggregation policy are the same defence, and it's the one
+piece still pending your confirmation (`#50fc`).
+
+Two design choices that follow: **one sandbox per request, not per plugin** (an
+injection carried by entry *n* has no process to survive into entry *n+1*), and
+the dispatch API key lives in the host and never enters a plugin sandbox.
+
+### Re: Podman for the plugins — yes, and I had this wrong
+
+I originally defaulted to `bwrap` on a latency argument. Your question made me
+measure it, and the argument doesn't survive: **bwrap 2 ms, Docker 139 ms** on
+this machine — but plugins run *concurrently*, so startup is paid **once per
+request, not once per plugin**. That's ~5% of a 3 s inline deadline. I was
+treating it as an N× cost when it's 1×.
+
+Podman buys two things worth more than 5%:
+
+- **A default seccomp profile.** bwrap gives namespaces and capability drops but
+  *no* syscall filtering unless you author the BPF yourself. This is the biggest
+  gap between them.
+- **Image-pinned dependencies.** A bwrap plugin executes against the host `/usr`,
+  which puts every host library inside the trust boundary — a host package
+  update silently changes what the plugin runs. For a model plugin (HTTP client,
+  TLS, an SDK) that supply-chain surface is the *realistic* attack path, and
+  it's larger than the injection path the sandbox was built for.
+
+So Podman is now the default, pinned by a test. Podman over Docker because
+rootless removes the root daemon and an escalation path with it. `bwrap` stays
+right for `plugin-rules`: no network, no dependencies, 2 ms.
+
+### Re: should the service itself run on Podman — no
+
+The host **spawns** the sandboxes. Containerising it means Podman-in-Podman,
+which needs either a privileged outer container or a mounted container socket —
+both hand the outer container escape-equivalent power, weakening the exact
+boundary this design exists to create. You'd trade real isolation for
+reproducibility that a single static Rust binary already gives you.
+
+Run it on the metal as a systemd **user** unit: it needs to survive reboots,
+dial out, and hold the dispatch API key that must never be inside a plugin
+sandbox. Containerise the untrusted part; leave the thing enforcing the boundary
+outside it.
+
+### Verified
+
+- **19 tests pass**, `make check` clean (fmt + clippy `-D warnings` + tests).
+  They assert fail-closed properties, not happy paths: a single compromised
+  plugin can't approve, one reject overrides many approvals, abstention isn't
+  approval, dead plugins escalate, unanimity across a *subset* isn't unanimity.
+- **A live `bwrap` run**, not just argv assertions — and it caught a real bug.
+  The sandbox never mounted the plugin binary, so it couldn't exec. That fails
+  as "no opinion", which would have silently dropped that plugin out of every
+  quorum. Fixed with a read-only self-bind.
+- **Network denial probed empirically:** without `--share-net` the sandbox
+  resolves nothing; with it, `example.com` resolves.
+- I also caught the live test **silently skipping** because `plugin-rules`
+  wasn't built in the debug profile. The `Makefile` and CI now build it first.
+
+### Two gaps I'm not going to paper over
+
+1. **The Podman path is argv-verified only.** Podman isn't installed here, so no
+   plugin has actually executed under it — the default I just recommended is the
+   one profile with no end-to-end proof. Said so in the README, queued to fix.
+2. **The egress proxy doesn't exist.** `sandbox_argv` routes model plugins to a
+   `dispatch_plugin_egress` network that nothing creates yet, so a model plugin
+   has no working network path today. Only `plugin-rules` (which wants no
+   network) actually runs. Queued.
+
+The WebSocket transport is `#gbdispatch2` and is deliberately unwritten rather
+than stubbed with something that looks finished.
+<!-- agent:boundary:6293975f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- 📌 Please plan to create a dispatch service that runs on my local machine. This service will have a websocket connection via api key to the brookebrodack.net backend. The service will allow actor plugins receive guestbook moderation requests and will approve or deny. It will automatically
+- 📌 Please create a github project for this service. I want to run each plugin in a separate docker container or some lightweight alternative to firewall any prompt injection risks.
 <!-- /agent:queue -->
 
 ## Notes
@@ -259,6 +366,9 @@ one that actually blocks starting.
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#dj8c] Verify the Podman sandbox path end-to-end — it is now the declared default in brookebrodack-dispatch but only argv-verified; Podman is not installed on this machine, so no plugin has executed under it. Install podman, run cargo test, and add a live Podman twin of tests/sandbox_live.rs
+- [ ] [#p0rw] Write the allowlisting egress proxy for dispatch_plugin_egress — model plugins are routed to it by sandbox_argv but it does not exist yet, so a model plugin currently has no working network path (~50-line CONNECT proxy, allowlist generativelanguage.googleapis.com)
+- [ ] [#k0ye] #gbdispatch2: Durable Object + WebSocket transport + auth for brookebrodack-dispatch — the sandbox/aggregation half is done and pushed; the edge half is unwritten
 - [ ] [#50fc] Confirm the truncated dispatch requirement — the queued prompt ends mid-sentence at "It will automatically", which leaves the plugin aggregation/automation policy (§6 of tasks/software/plan-brookebrodack-guestbook-dispatch-service.md) unspecified; blocks #gbdispatch2
 - [ ] [#wqr2] Design done: local moderation dispatch service — tasks/software/plan-brookebrodack-guestbook-dispatch-service.md (#gbdispatch1). Phases #gbdispatch2 (Durable Object + wire protocol + auth), #gbdispatch3 (local service + plugin host), #gbdispatch4 (edge integration + fail-closed), #gbdispatch5 (tests)
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean

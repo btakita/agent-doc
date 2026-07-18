@@ -114,17 +114,69 @@ Two things to flag rather than silently absorb:
 
 - **Stale install.** Preflight reports `~/.cargo/bin/agent-doc`, the cdylib, and both built artifacts predate the latest local `src/agent-doc` source edit. That is a concurrent session's tree, not mine — I did not rebuild it, so live tmux/JetBrains sessions may be running pre-edit code at an unchanged version.
 - **The editor-authority wedge is not fixed**, only worked around for this write. If `queue_maintenance_not_persisted` keeps recurring the mirror will stay unreliable and queue state will need `queue sync` each time. That is an agent-doc-repo defect, so it does not belong in this document's EFS backlog.
-<!-- agent:boundary:5182131f -->
+
+### Re: do [#tmo-orphan-reconcile-exec] — opus-4-8
+
+Shipped and pushed to `equityfundingsource-dev` as `213e42c9`. `bun run check` green: 1927 tests, build, worker build.
+
+**Executor** — `lib/tmo-api/orphan_execute.ts`, split the same way the planner is:
+
+- `orphan_exec_plan_()` — pure gate. Turns decisions into ordered operations, or moves them into `skipped` **with the reason each was withheld**. No I/O.
+- `orphan_execute_()` — driver over an injected effects port. That port is the only thing touching D1 or TMO, so the destructive and creative paths are unit-testable end to end with a recording fake rather than a network mock.
+
+The gate, in order:
+
+1. `blocked_no_vesting` **never** executes, at any opt-in level. The planner already refused to attribute the funding; running it anyway produces exactly the unattributable TMO data Phase 1 exists to prevent.
+2. `reconcile_cache` / `tombstone` are EFS-local and unguarded.
+3. `push_funding` / `create_loan_then_funding` need explicit `--push`, and against a **non-sandbox** database additionally the EFS→TMO push gate (`#dzmm` / `#7a4d`).
+
+Rule 3's sandbox test is on the `Database` header, mirroring `bin/tmo-sandbox-purge.ts` as the backlog item asked: the TMO token is identical across environments and only that header selects one, so the database name is the only thing between a sandbox run and a production write. I check it **inside** the planner layer rather than trusting a caller's flag. `create_loan_then_funding` calls `NewLoan` before `AddLoanFunding` and does not push when the create fails — there is a test for exactly that ordering.
+
+`bin/tmo-orphan-reconcile.ts` runs it: D1 through the same `cf-wrangler` path the deploy runbook uses, TMO through `fetch`. Default is a dry run; `--apply` alone runs **only** the EFS-local actions. The lender account is resolved through `lender_vestings.tmo_lender_account`, not `users.lender_account` — per migration 0138 one lender has many vestings and TMO holds one account per vesting, and a fund with no linked vesting resolves to NULL, which is what the planner turns into `blocked_no_vesting`.
+
+### Re: Can we backup the tmo db? — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#tmo-orphan-reconcile-exec]
+>
+> do [#tmo-sandbox-purge-apply]
+
+
+**No — TMO has no backup.** No dump, no export, no restore endpoint. The API is per-entity REST with no bulk import and no server-side trash, and `docs/TMO/delete-loan.md` says outright that `DeleteLoan` "permanently removes the loan... There is no undo and no TMO-side trash."
+
+That is a bad place to be with `#tmo-sandbox-purge-apply` sitting in the queue holding 16 permanent deletes, so I built the closest available substitute rather than leaving the question at "no": `bin/tmo-snapshot.ts` sweeps the documented GET endpoints — loan index, per-loan record, fundings, payment schedule, attachment metadata, lender and borrower rosters — into one timestamped JSON file.
+
+I want to be blunt about what it is not. **A snapshot is evidence, not a restore:**
+
+- TMO has no bulk import — restoring means replaying `NewLoan` / `AddLoanFunding` per record.
+- RecIDs are server-assigned and will **not** round-trip, so every EFS row holding one (`funds.tmo_funding_rec_id`, `lender_vestings.tmo_lender_rec_id`) needs re-reconciling after any rebuild.
+- Attachment **bytes** are not captured, only metadata. Documents deleted in TMO are gone.
+- Borrowers survive a `DeleteLoan`, so a loan-level rebuild can collide with surviving borrower records.
+
+Those four print on every run, sit in the module, and lead `docs/TMO/snapshot.md`. A snapshot that reads as a backup is worse than no snapshot, because it licenses a delete nobody can undo.
+
+Two properties make it usable as a gate. `--covers` exits non-zero unless every named loan was captured **cleanly**, and the process exits non-zero on any incomplete sweep at all — so a partial capture can't silently authorize a purge:
+
+```bash
+bun ./bin/tmo-snapshot.ts --covers "$LOANS" --out tmp/before.json \
+  && bun ./bin/tmo-sandbox-purge.ts --apply
+```
+
+I wired that precondition into `#tmo-sandbox-purge-apply` rather than leaving it as advice.
+
+**One caveat you should weigh before relying on this.** The tool is fully tested at the pure layer but has **never run against real TMO** — I have no token. In particular `LSS.svc/GetLenders` and `LOS.svc/GetBorrowers` are inferred from the documented API surface and are *not* covered by any file in `docs/TMO/`. If either 404s, the sweep records it as an error and correctly refuses to report `complete`, but the roster capture would be empty. Filed as `#tmo-snapshot-verify` and made a blocker on the purge.
+<!-- agent:boundary:362983a6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#vesting-gap-admin-queue]~~
-- do [#tmo-orphan-reconcile-exec]
+- ~~do [#tmo-orphan-reconcile-exec]~~
 - do [#tmo-reconcile-binder]
 - do [#efs-do-hibernation]
 - do [#efs-prod-secret-parity]
 - do [#tmo-orphan-cache]
-- do [#tmo-sandbox-purge-apply]
+- ~~do [#tmo-sandbox-purge-apply]~~
 - do [#efs-cf-account-custody]
 - do [#efs-prod-seed]
 - do [#efs-dns-cutover]
@@ -134,12 +186,12 @@ Two things to flag rather than silently absorb:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-orphan-reconcile-exec] Executor for the #tmo-orphan-as-fundings planner: read the orphan tmo_cache_entities rows + LOS.svc/GetLoans + GetLoanFundings + the EFS funds/vesting roster, run orphan_reconcile_plan_, and apply it. reconcile_cache and tombstone are EFS-local and unguarded; push_funding and create_loan_then_funding (isolated by orphan_plan_writes_) need explicit opt-in and, in production, the EFS->TMO push gate (#dzmm/#7a4d). Sandbox execution is NOT gated — run it there first against the clean slate bin/tmo-sandbox-purge.ts leaves. Mirror the sandbox guard from bin/tmo-sandbox-purge.ts: the TMO token is identical across environments and only the Database header selects one. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
+- [ ] [#tmo-snapshot-verify] [operator-verify] Run bin/tmo-snapshot.ts against the real TMO sandbox with the operator token (TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)") and confirm the sweep reports complete=true. The tool, its pure manifest/coverage layer, and its tests shipped 2026-07-18 (#tmo-orphan-reconcile-exec cycle) but no run has ever touched real TMO, so the endpoint set is unverified — in particular LSS.svc/GetLenders and LOS.svc/GetBorrowers are inferred from the documented API surface and are NOT covered by docs/TMO/*.md. If either 404s, drop it from the sweep or correct the path. This is the precondition for #tmo-sandbox-purge-apply. Spec: docs/TMO/snapshot.md.
 - [ ] [#tmo-reconcile-binder] Binder for the #tmo-reconcile-auto matcher: read tmo_unmatched_fundings + the lender/vesting roster (users.lender_account, lender_vestings.tmo_lender_account, funds.tmo_funding_rec_id), run funding_match_all_, apply auto_bind decisions through the existing admin_tmo_unmatched_funding_bind_POST_ path, and persist review/ambiguous candidate rankings so the admin queue opens pre-ranked instead of blank. Per PRD D4 the bind reconciles EFS to TMO (the TMO funding wins on conflict) and must record what it overrode. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#efs-prod-secret-parity] Production is missing secrets staging has and .dev.vars cannot supply (values are only in Cloudflare and cannot be read back out): DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN gate document sync. AUTH_SECRET, ADMIN_GLOBAL_PASSWORD, CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ACCOUNT_ID are already set (2026-07-18); TMO_API_TOKEN / TMO_DATABASE are intentionally unset so production runs split (#tmo-split-launch). AWS_*/S3_BUCKET_NAME are local bin/assets-*.sh only and are NOT needed in the worker. Compare with 'bun run cf:secrets:list' vs 'bun run cf:secrets:list:production'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#tmo-orphan-cache] SUPERSEDED 2026-07-18 by #tmo-orphan-as-fundings per operator directive — do NOT prune/tombstone these rows as the default. The 18 orphan tmo_cache_entities 'loan' rows are the reconciliation corpus: push them into TMO as fundings and tombstone only pure debris with no EFS deal. Kept as context for the loan-number list (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) and for the note that admin_tmo_loans_by_loan_number_DELETE_ does NOT cover them — it only disables EFS 'loans' rows and never touches tmo_cache_entities. Execute via #tmo-orphan-reconcile-exec. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
-- [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: `TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply` deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). Held pending operator go because DeleteLoan is permanent with no TMO-side undo. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code and cannot be selected. Dry run verified 2026-07-18: purge=16 keep=2. Recipe: src/equityfundingsource-dev/docs/TMO/delete-loan.md.
+- [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: `TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply` deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). SNAPSHOT FIRST (added 2026-07-18): TMO has no backup or restore and DeleteLoan is permanent, so gate the purge on `bun ./bin/tmo-snapshot.ts --covers <the 16 loan numbers> --out tmp/tmo-before-purge.json`, which exits non-zero unless every named loan was captured cleanly. Blocked on #tmo-snapshot-verify (the snapshot tool has never run against real TMO). Held pending operator go because DeleteLoan is permanent with no TMO-side undo. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code and cannot be selected. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
 - [ ] [#efs-cf-account-custody] [operator-verify] Move EFS to its own Cloudflare account. Both environments currently live in Brian's personal account (1e7e194ff8da4ad9e40ce041aea84f76), which also hosts unrelated projects. STEP 1 (Judith, instructions drafted 2026-07-18): sign up at dash.cloudflare.com/sign-up with a SHARED EFS address (becomes billing + recovery contact), verify the email (hard prerequisite — invites and 2FA both fail without it), invite Brian as Super Administrator via Manage Account -> Members -> Invite, enable 2FA, have a company card ready for the R2 checkout. Super Administrator is required, not just Workers Platform Admin, because R2 activation is a purchase and the deploy pipeline needs an account-owned API token. STEP 2 (Brian): D1 databases and R2 buckets cannot move between accounts — create them in the new account, update the ids under [env.production] in wrangler.toml, export+import D1, copy R2, re-push secrets (per-account AND per-environment), then repoint DNS. Sequencing: do this before #efs-prod-seed to migrate the data once instead of twice. Advances #efs-dns-cutover. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#efs-prod-seed] [operator-verify] Decide whether the production Cloudflare environment should be seeded from staging before launch. Production D1 (equityfundingsource-production) is schema-complete and empty; staging holds 33 users / 7 loans / 7 deals. If that is real business data it must be exported+imported once, immediately before cutover (a second import collides on primary keys), and R2_DOCUMENTS must be copied separately or uploaded documents 404 in production despite their D1 rows existing. Recipe: src/equityfundingsource-dev/docs/deploy.md 'Seeding production from staging'. Blocked on the operator confirming real-vs-test data. See #efs-cf-account-custody — if custody moves first, seed once after the move. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#efs-dns-cutover] [operator-verify] equityfundingsource.com does not resolve: no A/AAAA record, nameservers still ns1/2/3.dreamhost.com, and wrangler.toml declares no route or custom_domain. The worker is live and correct at equityfundingsource.brian-takita.workers.dev. Needs registrar + Cloudflare access: move the zone to Cloudflare (or add a CNAME at the registrar), add the custom domain / route to wrangler.toml, verify /login/access-callback still works, and allow for NS propagation. This is the remaining gate on the weekend launch. Advances #tcb0 / #efs-cutover-sso-plan. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.

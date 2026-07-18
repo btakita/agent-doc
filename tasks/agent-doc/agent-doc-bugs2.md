@@ -1,6 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -39,11 +39,61 @@ done
 Compacted content:
 - Archived 1 response topic(s): JetBrains route deferred on retained delivery
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): Compact Exchange concurrent queue edits and recovered closeout
-<!-- agent:boundary:666ed602 -->
+❯ I switched from Codex to Claude. Then ran JB `Restart Agent`. Then JB `Run Agent Doc` when Claude was open. Got an error. The prompt was sent but not submitted.
+```
+Agent Doc did not switch harnesses for tasks/agent-doc/agent-doc-bugs2.md. Current actor is codex; frontmatter now resolves to claude-code. The pane is not at a dispatch-ready boundary. Use Interrupt and restart to force the harness switch.
+```
+
+❯ #spec-test-build-install-commit-push
+
+### Re: JB harness switch deferred against a stale actor record — opus-4-8
+
+Reproduced from the log — `Restart Agent` worked, and `Run Agent Doc` then refused based on a record that was never updated. Four distinct defects; the error message you saw was wrong on its own terms.
+
+**Timeline from `.agent-doc/logs/ops.log` (all cycle-1784347905776):**
+
+| Time | Event |
+|---|---|
+| 04:12:06 | `restart_agent_menu_invoked source=jetbrains` |
+| 04:12:07 | `harness_change_detected old=codex new=claude gate=Restart` |
+| 04:12:09 | `agent_restart_performed old_harness=codex new_harness=claude action=spawn_fresh_harness` |
+| 04:12:14 | `route_authoritative_actor_harness_mismatch_deferred stored_harness=codex expected_harness=claude-code actor_state=busy` |
+| 04:12:18 | `controller_lifecycle state=busy caller=dispatch reason=auto_trigger_inject` |
+
+The restart **succeeded** — Claude was spawned fresh at 04:12:09. Five seconds later route still read `stored_harness=codex`.
+
+**1. The harness writeback never reaches the persisted record (root cause).**
+`run.rs:562` calls `shared.set_current_harness(&new_harness)` under the `#actor-harness-switch-writeback` tag. That setter only mutates an in-memory `Mutex<String>`; its single consumer is `supervisor_io.rs:35`, feeding `tmux_submit_profile_for_harness` for inject delivery. Nothing propagates it to the `harness_id` column that `authoritative_actor.rs:244` reads. The doc comment on `set_current_harness` claims it exists "so the persisted authoritative actor record stops reading the old harness" — that plumbing was never wired.
+
+**2. The comparison normalizes only one side.**
+```rust
+let expected_harness = agent_doc_harness::normalize_harness_name(&harness.binary);
+if !record.harness.trim().is_empty()
+    && record.harness != "default"
+    && record.harness != expected_harness
+```
+`record.harness` is raw. The restart logs `new_harness=claude` while route expects `claude-code`, so fixing #1 alone would still mismatch — this one is latent behind the first.
+
+**3. The advice you got was self-inflicted.**
+`forceRequired` fired on `actor_state=busy`, but busy came from `restart_continue_spawn` — the restart the plugin had just performed (generation stayed 1485 throughout). "Use Interrupt and restart to force the harness switch" told you to redo the thing that had already worked.
+
+**4. The stranded prompt.**
+The pane reconciled `ready` at 04:12:17 and `auto_trigger_inject` typed the trigger one second later, while Claude Code was still starting. Text landed in the composer, Enter did not take. Same shape as `#jbtsiftnosub2`, but on a restart-fresh spawn instead of a JB-created fresh pane — the existing stranded-draft resubmit path doesn't cover this entry point.
+
+**Coverage gap:** `set_current_harness_updates_state_backbone_harness_identity` asserts only the in-memory getter round-trip, so nothing failed when the persisted-record half was absent.
+
+Filed as `#actorharnessrecordwriteback`, `#actorharnessnormcompare`, `#actorswitchdeferbusyself`, `#restartfreshtriggerstranded`, `#actorharnessswitchcoverage`.
+
+**Not implemented this cycle** — this is diagnosis only. The fix spans `start-runtime-io`, the controller actor-record write path, and `route-io`, and the defer-guard change (#3) needs SimWorld coverage to avoid trading a false defer for a false dispatch. I did not want to land a partial multi-crate change and call it done.
+
+**Recovery now:** `agent-doc session restart-supervisor --force`, or revert `agent:` to `codex` and switch again after the queue drains.
+
+One incidental note: preflight first failed the integrity gate (`unclosed component: &lt;!-- agent:exchange --&gt;`) while the CRDT model was mid-reconcile on your pasted fenced block; it cleared on retry once the stale `preflight_started` cycle aged out. No repair was needed.
+<!-- agent:boundary:7544a7d7 -->
 <!-- /agent:exchange -->
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ⏭️ 📌 do [#jblocalhistverify]
 - ⏭️ 📌 do [#capturebacklogatomic]
 - ⏭️ 📌 do [#opcapturelazily]
@@ -129,6 +179,11 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#actorharnessrecordwriteback] 2026-07-18 #agent-doc-bug an in-loop `agent:` switch never persists the new harness into the authoritative ActorRecord. `start-runtime-io/src/run.rs:562` `shared.set_current_harness(&new_harness)` only mutates the in-memory `SupervisorShared::harness_binary`, whose sole consumer is `supervisor_io.rs:35` (tmux submit profile for inject delivery). Nothing writes the `harness_id` column that `route-io/src/authoritative_actor.rs:244` reads, so route keeps deferring to a boundary restart that already ran. Live proof ops.log: 04:12:09 `agent_restart_performed old_harness=codex new_harness=claude action=spawn_fresh_harness` then 04:12:14 `route_authoritative_actor_harness_mismatch_deferred stored_harness=codex expected_harness=claude-code`. Fix: propagate the switched harness to the persisted actor record at the same point as the in-memory writeback.
+- [ ] [#actorharnessnormcompare] 2026-07-18 #agent-doc-bug `route-io/src/authoritative_actor.rs:243-247` normalizes only one side of the harness comparison: `expected_harness = normalize_harness_name(&harness.binary)` yields `claude-code` and is compared against raw `record.harness`. The restart path records the raw binary name `claude`, so even after #actorharnessrecordwriteback lands, `claude != claude-code` still trips the mismatch guard. Normalize both sides before comparing.
+- [ ] [#actorswitchdeferbusyself] 2026-07-18 #agent-doc-bug the harness-switch defer chose `forceRequired` ("The pane is not at a dispatch-ready boundary. Use Interrupt and restart to force the harness switch") because `actor_state=busy` — but busy came from `controller_lifecycle reason=restart_continue_spawn`, the restart the plugin had just performed (generation 1485 unchanged across 04:12:08-04:12:18). Advising interrupt-and-restart immediately after a successful restart is wrong. The defer must recognize a self-induced busy window from its own in-flight restart and wait for the boundary. Needs SimWorld coverage so this does not trade a false defer for a false dispatch.
+- [ ] [#restartfreshtriggerstranded] 2026-07-18 #agent-doc-bug after a harness-switch restart, `auto_trigger_inject` (`start-runtime-io/src/lib.rs:664-694`) typed the trigger into the freshly-spawned Claude pane and it stayed in the composer unsubmitted — the operator-visible "prompt was sent but not submitted". Pane reconciled `ready` at 04:12:17 and inject fired at 04:12:18 while Claude Code was still starting. Same class as #jbtsiftnosub2 but on a restart-fresh spawn rather than a JB-created fresh pane, so the existing stranded-draft resubmit/ack path does not cover this entry point.
+- [ ] [#actorharnessswitchcoverage] 2026-07-18 #agent-doc-bug `set_current_harness_updates_state_backbone_harness_identity` (`start-runtime-io/src/lib.rs:2956`) comments that IPC `state` "feeds the persisted actor record" but asserts only the in-memory getter round-trip, so the missing persisted-record half failed nothing. Add SimWorld coverage driving a codex->claude restart that asserts the persisted ActorRecord harness and a following route dispatch that does NOT defer.
 - [ ] [#compacttombgc] [recommended] Add a fenced Compact Exchange CRDT epoch: rebootstrap attached replicas from the compacted snapshot, reject or component-rebase older-epoch deltas, expose the all-replica stability frontier, then run TextCrdt tombstone GC.
 - [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
 - [ ] [#5qjj] steeringmirrorverify|[operator-verify] Restart IntelliJ IDEA 2026.1 to activate plugin 0.2.258 (if stale bytecode appears, uninstall, restart, reinstall the signed local zip, and restart); during an active turn, make multiple exchange edits and verify the JetBrains banner and VS Code status item report the aggregate count/full hover, then run agent-doc once after editing and confirm the handoff queues without submitting a partial edit.

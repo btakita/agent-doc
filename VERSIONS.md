@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.4
+
+- **JetBrains Compact Exchange ACK recovery no longer replays the pre-compact editor buffer.** When a retained CRDT delivery is waiting behind the plugin's background no-op drain backoff, the two-second recovery event now performs one immediate targeted pull on the existing replica. It does not re-register from stale visible text, so controller-owned compaction reaches the editor and the compact same-cell guard remains reserved for genuine operator edits.
+
 ## 0.35.3
 
 - **The live tmux sweep no longer executes retired authority-rollback tests.** Two obsolete `--force-disk` integration tests were removed from the generic `--ignored` sweep, while deterministic SimWorld fault coverage now explicitly proves every interrupted closeout retains its captured response authority through recovery.

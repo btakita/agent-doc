@@ -1,5 +1,7 @@
 package com.github.btakita.agentdoc
 
+import java.nio.file.Files
+import java.nio.file.Paths
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -45,6 +47,21 @@ class CrdtReplicaAckFrontierTest {
     fun `external replica events cannot bypass retained ack backoff`() {
         assertFalse(shouldStartRemoteDrainUtil(backoffScheduled = true))
         assertTrue(shouldStartRemoteDrainUtil(backoffScheduled = false))
+    }
+
+    @Test
+    fun `ack recovery urgently drains retained delivery without replacing editor authority`() {
+        val watcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val watcher = Files.readString(watcherPath)
+        val recoveryBranch = watcher
+            .substringAfter("CrdtReplicaEventReason.AckRecoveryForceRefresh ->")
+            .substringBefore("else -> Unit")
+
+        assertTrue(recoveryBranch.contains("CrdtReplicaManager.requestUrgentRemoteDrain("))
+        assertFalse(recoveryBranch.contains("forceRefreshOpenDocumentReplica("))
     }
 
     @Test

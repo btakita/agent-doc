@@ -1082,9 +1082,10 @@ publication without file-IPC fallback;
 as a Lazily deferred-write intent, returns promptly, and does not project to
 disk; the central stale-recycle operation emits an
 `ack_recovery_force_refresh` event for every turn-stage caller, editor
-reload/controller-replacement handlers rebuild cached open-document
-forwarders, and later replica bootstrap/publication restores and proves that
-target;
+ACK recovery bypasses only the background no-op drain timer for a targeted pull
+on the existing replica, editor reload/controller-replacement handlers rebuild
+cached open-document forwarders, and later replica bootstrap/publication
+restores and proves that target;
 - response-cell retry materialization normalizes transient ` (HEAD)` and
   boundary annotations, and a latest complete response supersedes only
   uncommitted assistant-response nodes after the last unchanged committed

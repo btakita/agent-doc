@@ -540,6 +540,34 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     }
 
     /**
+     * Foreground delivery recovery for a controller write that is already
+     * retained in the existing replica's ACK frontier. This deliberately
+     * bypasses only the background no-op drain timer: it neither clears that
+     * timer nor replaces the replica. Re-registering from the visible editor
+     * here would publish the pre-delivery buffer back into canonical and undo
+     * the controller write before the editor had a chance to apply it.
+     */
+    fun requestUrgentRemoteDrain(filePath: String, reason: String) {
+        executor.execute {
+            val forwarder = forwarders[filePath] ?: return@execute
+            var applied = 0
+            try {
+                applied = drainRemoteUpdatesFor(filePath, forwarder)
+            } catch (e: Exception) {
+                log.debug("[crdt-replica] urgent remote drain skipped for $filePath: ${e.message}")
+            } finally {
+                log.debug(
+                    "[crdt-replica] urgent remote drain completed for ${File(filePath).name}; " +
+                        "reason=$reason applied=$applied",
+                )
+                if (applied == 0 && !disposed.get()) {
+                    requestRemoteDrain(filePath, "$reason-follow-up")
+                }
+            }
+        }
+    }
+
+    /**
      * Controller-proven reattach recovery. This is intentionally the only path
      * that sends a bounded text adopt: push the authoritative editor text, then
      * re-register so the native replica/frontier bootstraps from the rebuilt
@@ -1607,6 +1635,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun requestRemoteDrain(project: Project, filePath: String? = null, reason: String = "event") {
             instances[project]?.requestRemoteDrain(filePath, reason)
+        }
+
+        fun requestUrgentRemoteDrain(project: Project, filePath: String, reason: String) {
+            instances[project]?.requestUrgentRemoteDrain(filePath, reason)
         }
 
         fun requestTextAdopt(project: Project, filePath: String) {

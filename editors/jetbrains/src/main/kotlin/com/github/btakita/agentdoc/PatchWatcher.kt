@@ -449,7 +449,7 @@ class PatchWatcher(private val project: Project) : Disposable {
                     CrdtReplicaEventReason.RequestFullState ->
                         CrdtReplicaManager.requestTextAdopt(project, file)
                     CrdtReplicaEventReason.AckRecoveryForceRefresh ->
-                        CrdtReplicaManager.forceRefreshOpenDocumentReplica(
+                        CrdtReplicaManager.requestUrgentRemoteDrain(
                             project,
                             file,
                             "delivery-ack-recovery",

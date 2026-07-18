@@ -107,12 +107,47 @@ I checked a plausible culprit (`recover_current_text_from_local_projection_after
 **On the goal itself:** even with the wedge cleared, "complete the entire queue" is not a single turn. 31 of the mirrored heads are `[operator-verify]` — they need a human at a live editor/pane and no agent can close them. Of the agent-drainable remainder, `#promptselect` and `#realtimesalient` both say "design pass needed before implementation" in their own text. Tell me to start with a specific one and I'll take it properly; I'd rather do one of those well than half-do four.
 
 Unblock order I'd suggest: editor authority (other session) → then this queue drains on its own.
-<!-- agent:boundary:73e1eefc -->
+
+### Re: Fix the contributing causes of the queue wedge — opus-4-8
+
+Partial fix. Two causes fixed and verified, one root cause quantified but **not** closed, and one attempted fix reverted because the test suite proved it dangerous. Being precise about which is which.
+
+**First, a correction to my last turn.** I told you the `agent-doc-editor-authority-fix` worktree was an active concurrent session and declined to touch this. Its last commit is 2026-07-13 — five days stale — and one of its three commits is already merged. It was not a live session, and I was wrong to treat it as a reason to stop.
+
+**Fixed and verified**
+
+The `document_model_ensure_failed` log printed `timeout_ms=5000` unconditionally, but a missing-replica ensure is only granted 400ms. It logged the long-form constant instead of the deadline actually used, so the diagnosis was chasing a phantom 5-second stall. Also, `queue_maintenance_model_ensure` sat *after* the `?`, so it only logged on success — the failure path recorded nothing. Both fixed; live telemetry now reads:
+
+```
+timeout_ms=400 window_extended=false
+```
+
+That single line is what made the real cause measurable.
+
+**Root cause, now quantified**
+
+A 400ms budget is fixed, while CRDT bootstrap time scales with document size. On this document the register carries **1,312,802 bytes**. Earlier registers this session were 358–437 KB and succeeded; the failures began when bootstrap crossed ~1.3 MB. A live editor cannot deliver 1.3 MB in 400 ms, so it is judged stale on every attempt — and the 400 ms exists deliberately, to stop a stale editor wedging the single-threaded controller.
+
+I made a completed `crdt_replica_register` count as liveness proof and extend the window to the full timeout, keeping fail-closed behaviour for an editor that never registers.
+
+**What I did not fix — and I want this to land, not be buried**
+
+That extension does not work on the path that matters. The counter is process-global; the register happens in the **controller** while the ensure runs in the **CLI**, so the CLI never sees it. Live telemetry still says `window_extended=false` and **the wedge is still present**. I documented the gap at the definition and filed it rather than leaving it to look fixed. Closing it needs the proof carried across IPC, or the ensure run controller-side.
+
+**The wrong turn, and what caught it**
+
+I also routed preflight's initial current-doc resolve through the ensure path. `make check` failed two tests — `preflight_missing_editor_model_pauses_without_reading_disk_authority` ("preflight current-doc reads must not enter document-model ensure") and the delayed-registration test, which showed my change made preflight resolve to **disk content** instead of waiting for the attached editor. That is the clobber hazard the whole design exists to prevent. Reverted. Those tests earned their keep, and the invariant is now recorded in the commit so the next attempt doesn't repeat it.
+
+**Verification:** `make check` green — 7628/7628 with the new regression test, clean clippy. Committed `bbc50c26e`, pushed, installed.
+
+**My read on the durable fix:** 1.3 MB of bootstrap for a 47 KB document is ~28x the text in accumulated CRDT history. Widening timeouts only buys time against that growth. I'd rather attack the bootstrap size — filed as the second backlog item. Say the word and I'll take it next.
+<!-- agent:boundary:3aeac364 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - /goal complete the entire queue
+- Fix the contributing causes of the queue wedge.
 - do [#promptselect]
 - do [#realtimesalient]
 - ~~do [#jbsteerinterrupt]~~
@@ -202,6 +237,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#7n20] Finish the ensure-window liveness fix across the CLI/controller process boundary. `bbc50c26e` extends the 400ms missing-replica ensure window when a `crdt_replica_register` proves the editor is alive, but the counter is process-global: on the split path the register lands controller-side while `ensure_document_model` runs CLI-side, so live telemetry still shows `window_extended=false` and the wedge persists. Two options: carry the liveness proof across IPC, or run the ensure controller-side where the registration already is. Do NOT route preflight's initial current-doc resolve through the ensure path — tried in this cycle and reverted; it violates `preflight_missing_editor_model_pauses_without_reading_disk_authority` and made preflight resolve to DISK content instead of waiting for the attached editor.
+- [ ] [#42xb] Bootstrap size is the wedge's real driver — investigate shrinking it. Live `crdt_replica_register` on agent-doc-bugs2.md carries 1,312,802 bytes for a 47KB document, i.e. ~28x the text in accumulated CRDT history, and the failures began when bootstrap crossed ~1.3MB (earlier registers at 358-437KB succeeded). Even a corrected ensure window only buys time; compaction/GC of replica history would remove the pressure. Check whether `agent-doc compact` reduces the register bootstrap, and whether superseded-generation pruning actually reclaims history.
 - [ ] [#zq8e] Editor-authority wedge blocks ALL queue maintenance (root of the #goal drain stall). Evidence in ops.log for this doc: at 19:32:45 `controller_crdt_current_text source=preflight_queue_maintenance` returns `status=current live_editors=1 delivery_converged=true`; 2s later the SAME queue_maintenance path logs `document_model_ensure_start initial_state=editor_attached_model_missing`, a `crdt_replica_register` succeeds (`data_kind=ok generation_fenced=true bootstrap_bytes=1312802`), then `document_model_ensure_republish_observer_not_ready` -> `document_model_ensure_failed` after 5s. EVERY `document_model_ensure_start` this session reports missing-replica across unrelated sources (queue_maintenance, pending_add_sync, controller_recycle_request) while the controller consistently reports current. Two observers of one document disagree; the ensure-path observer does not see a replica the controller demonstrably has. NOTE: likely already owned by the `src/agent-doc-editor-authority-fix` worktree (commits `preserve attached editor authority during retry`, `bound idle authority replay`) — coordinate before landing a rival fix in src/agent-doc.
 - [ ] [#a2zx] Queue/backlog opening-tag attribute duplication: the live doc now carries `<!-- agent:queue priority preset="..." priority go -->` and `<!-- agent:backlog priority priority queue -->` — `priority` twice in both. Verified NOT from `ensure_queue_priority_attr` (its `attrs.contains_key("priority")` guard is idempotent; reproduced clean against the real tag). `set_auto_in_queue_tag`/`rewrite_queue_tag_attrs` normalize `key=true`->`key` but never dedup boolean tokens, so any writer that appends an already-present flag accumulates duplicates permanently. Fix: dedup boolean attrs when rebuilding the tag (they are flags; a repeat carries no information), then find the appending writer. Suspect it rides the failed queue-convergence path above.
 - [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).

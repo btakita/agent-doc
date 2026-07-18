@@ -325,15 +325,38 @@ long-document editing. Add **`bench/crdt.bench.*`** in each port before/after
       (±10–27% on unmodified code) swamps it. The win is allocation-side, proven
       by `dependency_trackers_are_pooled_and_reused` rather than by a benchmark.
 
-- [ ] **`#lzrsgetarc`** — Expose a `Send + Sync` analog to `get_rc` so
-      `ThreadSafeContext` callers can read without cloning. Today
-      `get_slot` always clones (line 600). Risk: medium — needs API surface
-      decision.
+- [x] **`#lzrsgetarc`** ✅ lazily-rs v0.45.0 — Expose a `Send + Sync` analog to
+      `get_rc` so `ThreadSafeContext` callers can read without cloning. Today
+      `get_slot` always clones (line 600).
+      **Status:** `ThreadSafeContext::get_arc(&slot) -> Arc<T>`, bound
+      `T: Send + Sync + 'static` (no `Clone`). Reads through the cached-read
+      sidecar (`read_fresh_arc`), which already stores the value behind an
+      `Arc`; only inline-storage slots fall back to the locked node read.
+      **Reading the node under the state lock instead was the first attempt and
+      was 2.3× slower** (146 ns vs 64 ns instrumented) — it bypassed the sidecar
+      the whole fast-path design exists for. Caught only because the regenerated
+      BENCHMARKS.md contradicted the hand-run number; worth remembering that the
+      doc's numbers come from the `instrumentation` build.
+      Measured (`typed_cache_reads`, instrumented): **384-byte `String`
+      72.5 → 64.2 ns (−11%)**; `usize` 56.5 → 64.6 ns (**+14%, a real
+      regression** — the atomic bump exceeds a scalar copy). `get_arc` is flat
+      in `size_of::<T>()` where `get` grows, so the margin widens with value
+      size. SPEC.md documents the split: `get` for scalars, `get_arc` for
+      heap-backed values.
 
-- [ ] **`#lzrsasyncsmallany`** — `AsyncContext.set_cell` always wraps the
-      value in `Arc::new(value)` (line 681). For small `Copy + Send + Sync`
-      primitives, a `SmallAny`-style inline storage avoids the per-write
-      allocation. Risk: medium — touches the async value contract.
+- [~] **`#lzrsasyncsmallany`** ❌ **rejected 2026-07-18** (re-open only with
+      workload evidence) — `AsyncContext.set_cell` always wraps the value in
+      `Arc::new(value)` (line 681). For small `Copy + Send + Sync` primitives, a
+      `SmallAny`-style inline storage avoids the per-write allocation.
+      **Why not:** measured, the async write path costs ~95 µs per batch where
+      the sync context costs ~6.4 µs — the async machinery is ~15× the whole
+      operation, so a ~20 ns allocation is unmeasurable (same conclusion as
+      `#lzrsdeppool`'s benchmark). On memory it is a wash-to-negative: small
+      scalars save a heap box, but *every* node grows by the 24-byte inline
+      envelope, so large-valued async graphs regress. The sync/thread-safe
+      `AnyValue` win was real because sync recompute is allocation-dominated;
+      the async path is scheduler-dominated. Not worth a third copy of unsafe
+      inline-storage machinery on those numbers.
 
 ### Phase 3 — algorithmic wins (spec-coordinated, medium scope)
 
@@ -465,10 +488,16 @@ in wire size, per-node memory, and compute latency.
   failing on; fixed in `3b6d7d5`. (b) `BENCHMARKS.md` is still stamped
   `version 0.40.1` against a `0.44.0` package, so
   `readme_benchmark_results_track_package_version` (`#lzbenchver`) fails — the
-  v0.41–v0.44 releases never ran `make benchmark-update`. **Still open.** The
-  per-item wire/latency numbers claimed in Phases 3–4 above are therefore not
-  reflected in `BENCHMARKS.md`. Regenerate on a quiet host: the async benches
-  drift ±10–27% run-to-run on a busy one, which would bake noise into the doc.
+  v0.41–v0.44 releases never ran `make benchmark-update`. Regenerated in
+  v0.45.0. (c) `make test-ipc` failed to compile — the `#lzspecintern` test
+  called `encode_json_intern` without the `any(ffi, webrtc)` gate that the whole
+  JSON-codec family carries, broken since v0.42.0; fixed in v0.45.0 by gating
+  the test and pointing `test-ipc` at `--features ffi` so the gated codec tests
+  actually run instead of silently vanishing. **`make check` is green as of
+  v0.45.0** — it had been red through four releases, which is how (a) and (c)
+  survived. Caveat on the regenerated numbers: captured on a loaded host, and
+  the async families drift ±10–27% run-to-run there, so re-run on a quiet
+  machine before quoting them anywhere load-bearing.
 
 - **lazily-go audit is summary-only** — the dispatched agent returned the
   top finding (`reflect.DeepEqual` at three sites) but not the full

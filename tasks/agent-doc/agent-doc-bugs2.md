@@ -34,37 +34,12 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260718-033104.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260718-041115.md`*
 
 Compacted content:
-- Archived 1 response topic(s): Compact Exchange concurrent queue edits and recovered closeout
-- Prior summary/context: prior compacted content: Archived 17 response topic(s): editor save-flush authority and agent-doc churn; interrupted ...
-❯ 🚧 JB `Run Agent Doc` error on equityfundingsource.md. #spec-test-build-install-commit-push
-```
-route deferred for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md: Lazily current transition remained delivery_pending for 5000ms; retry after it settles
-```
-
-### Re: JetBrains route deferred on retained delivery — gpt-5
-
-You did not change the compact-owned content. The trace shows route startup reached a valid attached canonical document at delivery generation 11 with ACK generation 0, then passively polled `delivery_pending` for five seconds. The fixed JetBrains replica eventually pulled all 11 retained generations about nine seconds later, after the route had already failed. The failure was therefore a route-startup wake-up race, not an operator edit or same-cell rebase.
-
-I shipped agent-doc 0.35.5 so the route gate sends exactly one urgent `ack_recovery_force_refresh` drain signal on its first retained-delivery observation, then continues polling Lazily's canonical convergence state. It still fails closed at the existing deadline if convergence cannot be proved. The regression test first failed because that wake-up path did not exist, then passed with three consecutive pending observations proving the signal is emitted only once.
-
-The 11 generations are already coalesced operationally: the relay returns them in one pull, the JetBrains native replica folds the causal updates, and the plugin schedules one final editor-text apply. Further wire-level squashing might reduce decode work, but it would not improve this incident materially; the delay was the background-drain backoff before that single batch pull.
-
-Compact Exchange can garbage-collect its deleted-text tombstones immediately only after a safe compaction epoch boundary. Lazily's `TextCrdt::gc_with` already supports collecting causally stable, unreferenced tombstones, but agent-doc does not yet fence older offline replicas or expose an all-replica stability frontier. Calling GC now could let an older replica reintroduce discarded exchange lineage. The safe design is: commit the compacted snapshot, increment a document/component epoch, rebootstrap attached replicas, reject or component-rebase older-epoch deltas, and only then collect stable tombstones. I captured that as recommended backlog item `#compacttombgc`; it is intentionally separate from this correctness fix.
-
-Changed public paths include `agent-doc-route-io/src/startup_debounce.rs`, its route contract documentation, `specs/11-debounce.md`, and the 0.35.5 release metadata. Verification passed:
-
-- focused red/green regression test
-- complete `agent-doc-route-io` test suite
-- full `make check`
-- `git diff --check` and the public private-name denylist
-- optimized binary/native-library/editor-package build and install
-- installed CLI reports `agent-doc 0.35.5`; JetBrains package 0.2.276 is installed in all four detected IDEs
-
-The latest pre-existing main CI run was red in `finalize_skips_ignored_untracked_session_doc`; the exact test and the full suite both pass locally, and that failure is outside this route path. The public fix is committed and pushed to `main` as `932884861` (`fix: actively drain retained deliveries before route dispatch`). The superproject pointer and Codex skill update are committed as `cfe2bbaab`; the session document remains exclusively on this binary-owned closeout path before the final superproject push. Confidence is high. No privilege escalation was needed.
-<!-- agent:boundary:3cec0682 -->
+- Archived 1 response topic(s): JetBrains route deferred on retained delivery
+- Prior summary/context: prior compacted content: Archived 1 response topic(s): Compact Exchange concurrent queue edits and recovered closeout
+<!-- agent:boundary:666ed602 -->
 <!-- /agent:exchange -->
 ## Queue
 

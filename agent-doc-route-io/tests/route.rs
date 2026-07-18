@@ -3708,3 +3708,36 @@ fn route_coalesces_monotonic_whole_document_replay_before_residue_guard() {
     );
     assert!(cleanup.content.contains("#spec-test-commit-push-deploy"));
 }
+
+/// `#steernoblock`: the pre-dispatch settle wait must never abort a route
+/// invocation.
+///
+/// By the time route runs, the operator's prompt is ALREADY in the document (the
+/// JetBrains action writes its prompt marker before routing) and an active turn
+/// consumes it as realtime steering. Propagating the settle-wait expiry aborted
+/// dispatch with "route deferred ...: Lazily current transition remained
+/// delivery_pending for 5000ms" — reporting a failure for work that had already
+/// landed and leaving the operator retrying a no-op.
+///
+/// Pinned as a source contract because exercising the live path needs a real
+/// editor replica and tmux pane: the call must not use `?` on `await_idle`.
+#[test]
+fn route_settle_wait_never_blocks_dispatch() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/command.rs"),
+    )
+    .expect("route command source should be readable");
+
+    assert!(
+        !source.contains("await_idle(file, Duration::from_millis(debounce_ms))?;"),
+        "the settle wait must not `?`-propagate — that aborts dispatch and blocks realtime steering"
+    );
+    assert!(
+        source.contains("route_settle_wait_advisory"),
+        "an unsettled transition must be recorded as advisory and proceed"
+    );
+    assert!(
+        source.contains("#steernoblock"),
+        "the non-blocking contract should stay documented at the call site"
+    );
+}

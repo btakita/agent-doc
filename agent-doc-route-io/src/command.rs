@@ -79,8 +79,39 @@ pub fn run_with_tmux_with_options(
     // Debounce: wait for file mtime and editor typing indicator to settle before
     // route performs visible mutations such as session UUID insertion or
     // duplicate-prompt cleanup.
-    if debounce_ms > 0 {
-        await_idle(file, Duration::from_millis(debounce_ms))?;
+    //
+    // `#steernoblock`: this settle wait must NEVER block dispatch. It runs at the
+    // top of route, before route knows whether it has anything to dispatch, and
+    // propagating its expiry aborted the whole invocation with
+    // "route deferred ...: Lazily current transition remained delivery_pending".
+    //
+    // That is wrong for realtime steering: by the time route runs, the operator's
+    // prompt is ALREADY in the document (the JetBrains action writes its prompt
+    // marker before routing), and an active turn consumes it as steering
+    // (`#realtime-steering-verbatim`). Refusing to dispatch does not undo that
+    // delivery — it just reports a failure for work that already landed, and
+    // leaves the operator retrying a no-op.
+    //
+    // So the wait is now advisory: it still gives typing a chance to settle, and
+    // an unsettled transition is recorded, but dispatch proceeds. The visible
+    // mutations it guards run through the CRDT/editor authority with their own
+    // compare-and-swap, so they fail closed on a real conflict rather than
+    // depending on this pre-wait for correctness.
+    if debounce_ms > 0
+        && let Err(err) = await_idle(file, Duration::from_millis(debounce_ms))
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_settle_wait_advisory file={} outcome=proceeding reason={:?} (#steernoblock)",
+                file.display(),
+                err.to_string()
+            ),
+        );
+        eprintln!(
+            "[route] editor transition did not settle before dispatch ({}); proceeding anyway so realtime steering is never blocked (#steernoblock)",
+            err
+        );
     }
 
     let prepared = prepare_route_document(file, effects.document_prep_effects)?;

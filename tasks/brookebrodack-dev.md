@@ -119,13 +119,29 @@ Acknowledged — the completed `~~do [#gbmig3]~~` head is removed from the queue
 **Queue state:** the binary reports `queue_drainable_head_count: 0` / `queue_continuation_required: false`, so no in-session auto-loop. The remaining heads (`#fhquorum2`, `#fhoneshot`, `#gpupol`, `#gpulease`, `#rak9`, `#p0rw`, `#sbv9`, `#nd8n`, `#k0ye`, `#fhmig`, `#50fc`, `#y457`, `#j0ee`, `#2amm`) are not in-session drainable from here — the freehold items in particular belong to `tasks/software/freehold.md`, which preflight reports as foreign-owned by pane `%27` (also `%3` for equityfundingsource, `%23` for agent-doc-bugs2). Those drain in their own sessions.
 
 **Editor authority wedge (recorded, non-blocking for this response):** preflight computed the backlog→queue mirror (15 active ids) but could not persist it — `editor_attached_model_missing`, `recovery=retry_without_disk_write`. A typed `agent-doc admin reload-lib` delivered cdylib v0.35.6 to 1/1 editor endpoints and unwedged the read path (`agent-doc plan` now resolves), but the mutation path still reports the same state, so the queue text on record is the pre-maintenance text. Binary-owned replica re-registration and retained-intent replay continue asynchronously; `operator_action=none`, so I did not force-disk or repair.
-<!-- agent:boundary:be342fb3 -->
+
+### Re: #fhquorum2 — quorum of 1 — opus-4-8
+
+> **Queue prompt:** do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.
+
+Done. `APPROVE_QUORUM_MIN` is now `1` in `freehold-tribunal/src/lib.rs`, so a single-plugin deployment can approve instead of escalating every entry to a human.
+
+**The anti-capture property moved rather than disappeared.** The old minimum of 2 existed so that owning one plugin could not publish — with the minimum at 1 and no other change, an owned plugin voting `Approve` while its peers were dead would have published, and the existing `a_single_compromised_plugin_cannot_approve` test would have gone red. So `aggregate` now also requires `answered.len() == results.len()`: **every configured plugin must answer**, and all answers must agree. A compromised plugin cannot approve on its own by silencing its peers, because a plugin dropping out of the quorum still withholds approval — the invariant `docs/plugin-isolation.md:166` asks for ("a plugin falling out of the quorum must never be a silent event"). In a single-plugin deployment that one plugin *is* the whole panel; compromising it is compromising the panel, which is the tradeoff you asked for.
+
+**Second half of the directive was already satisfied.** Plugin calls are not sequential — `freehold-host/src/lib.rs:47` fans them out through `futures::future::join_all`, so however many plugins are configured, they run in parallel. No change needed there.
+
+Changes:
+- `crates/freehold-tribunal/src/lib.rs` — `APPROVE_QUORUM_MIN: 2 → 1`; added the all-configured-answered condition to `aggregate`; new `escalate_reason` branch `"only N of M configured plugin(s) answered"`; corrected the module and const docs, which still claimed one plugin can never publish.
+- `crates/freehold-tribunal/tests/aggregate.rs` — new `a_lone_configured_plugin_can_approve`; kept `a_single_compromised_plugin_cannot_approve` green under the new rule with a comment explaining why it still holds.
+
+Verification: `make check` exit 0, `cargo test --workspace` 37 passed / 0 failed across 12 suites. Committed to the freehold submodule as `d296bd7` (not pushed, and the superproject gitlink is not bumped — concurrent sessions are live in this tree).
+<!-- agent:boundary:ede8fbd1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.
+- ~~do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.~~
 - do [#fhoneshot]
 - do [#gpupol]
 - do [#gpulease]
@@ -150,7 +166,6 @@ Acknowledged — the completed `~~do [#gbmig3]~~` head is removed from the queue
 
 <!-- agent:backlog priority queue -->
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
-- [ ] [#fhquorum2] Approval is currently UNREACHABLE in freehold: APPROVE_QUORUM_MIN = 2 (freehold-tribunal/src/lib.rs) but freehold-rules is the only plugin binary in the workspace, so at most one plugin can ever answer and every entry escalates to a human. A second answering verdict plugin is required before auto-approve can fire at all — and a third if you want approval to survive the local model being down (freehold-rules abstains unless it matches a deterministic spam rule, so it cannot be relied on as one of the two)
 - [ ] [#fhoneshot] When adding a CLI-agent-backed verdict plugin, invoke it ONE-SHOT per request (claude -p / codex exec, non-interactive) under the existing PluginSpec budget_ms + OCI sandbox contract. Do NOT pool or reuse sessions: retained conversation state breaks per-entry verdict independence and makes a successful prompt injection persist across future verdicts, which is the exact threat the sandbox exists to contain
 - [ ] [#gpupol] Run ONE persistent local-inference server (vllm or ollama, both already installed) as the sole GPU owner, outside the sandbox. Model plugins reach it over the existing egress-proxy path with egress_hosts: ["127.0.0.1:<port>"] — no new mechanism, and /dev/nvidia* never enters the sandbox. Depends on #p0rw (the proxy must exist first). Start with ollama for its idle-unload behaviour; switch to vLLM only if sustained concurrency exceeds ~4-8 requests
 - [ ] [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
@@ -189,4 +204,5 @@ Acknowledged — the completed `~~do [#gbmig3]~~` head is removed from the queue
 - 2026-07-18 [#teah] UNANSWERED PROMPT — evaluate AI harness candidates for the dispatch actor plugins (5090 for local models; tmux-router drives Claude/Codex/opencode; hermes available) AND search for the 'newish agent that creates a custom harness that learns'. Asked in the exchange and never addressed; the turn went to the repo/sandbox work. Needs real web research — do NOT answer from recall, the agent-name recall is exactly what would be hallucinated
 - 2026-07-18 [#gggp] Re-auth wrangler (`bunx wrangler login`) — the stored OAuth token has the right scopes and has not expired, but the API rejects it with "Invalid format for Authorization header [code: 6111]", blocking secret-put and deploy
 - 2026-07-18 [#gbmig3] Apply d1/migrations/0003_guestbook_soft_delete.sql to the remote D1: bunx wrangler d1 execute brookebrodack --remote --file d1/migrations/0003_guestbook_soft_delete.sql (migrations are applied by hand — wrangler.toml sets no migrations_dir). Code is committed and pushed (24bec1a) but the column does not exist remotely yet, so guestbook read paths will error against prod until this runs. BLOCKED on #gggp
+- 2026-07-18 [#fhquorum2] Approval is currently UNREACHABLE in freehold: APPROVE_QUORUM_MIN = 2 (freehold-tribunal/src/lib.rs) but freehold-rules is the only plugin binary in the workspace, so at most one plugin can ever answer and every entry escalates to a human. A second answering verdict plugin is required before auto-approve can fire at all — and a third if you want approval to survive the local model being down (freehold-rules abstains unless it matches a deterministic spam rule, so it cannot be relied on as one of the two)
 <!-- /agent:done -->

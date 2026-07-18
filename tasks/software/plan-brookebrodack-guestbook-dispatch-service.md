@@ -58,6 +58,22 @@ This is the main architectural consequence, and it is not optional:
 - A **Durable Object** is the correct primitive: single-instance, addressable,
   holds the socket and in-flight request state. Use **WebSocket Hibernation** so
   an idle connection does not burn duration billing.
+- **Shard the DO per site, not one globally** (`idFromName(site)`). A single DO
+  is single-threaded and becomes a funnel once more than one site is served;
+  sharding makes it scale horizontally with no coordination. Addressability is
+  the whole point of a DO — using one instance for everything throws it away.
+
+> **Transport re-evaluated 2026-07-18 and KEPT.** An earlier revision of this
+> plan argued for replacing the pushed WebSocket with long-polling a queue,
+> citing Buildkite/GitHub-runner/Temporal precedent. That argument was wrong:
+> it blamed the transport for two problems that were design choices — the
+> single-holder rule (§3) and an unsharded DO (above). WebSockets scale fine
+> (Slack, Discord, Figma), and push is *better* here: true zero-latency
+> delivery, bidirectional capacity reporting, no reconnect storm, and clean
+> server-initiated cancellation on deadline expiry. Temporal's own "long poll"
+> runs over multiplexed gRPC streams, which is nearer a persistent connection
+> than to classic polling, so the precedent was weaker than it appeared. Fix
+> the two design choices; keep the socket.
 - So the topology grows one component:
 
 ```
@@ -81,9 +97,21 @@ paths share one connection.
 - Key lives in `passage brookebrodack/guestbook/DISPATCH_API_KEY` locally and as
   a Worker secret on the edge. Distinct from the OpenAI key; different blast
   radius.
-- **Single-holder rule.** One connection at a time. A second authenticated
-  connect supersedes the first (last-writer-wins) rather than fanning out — two
-  laptops answering the same request is a correctness problem, not redundancy.
+- ~~**Single-holder rule.**~~ **Superseded 2026-07-18 — replaced by lease-based
+  work-claiming.** The original rule (one connection, last-writer-wins) solved a
+  real problem — two hosts answering the same request is a correctness bug, not
+  redundancy — but it solved it at the wrong layer, and permanently capped the
+  system at one host.
+
+  The correct fix is to make *work* exclusive rather than *connections*: a host
+  claims a `request_id` with a short **lease** (a visibility timeout), and the
+  claim, not the socket, is what is single-holder. A lease that expires without
+  a verdict returns the work to the pool. This is the standard queue-consumer
+  pattern (Temporal task queues, SQS visibility timeouts, Buildkite agents) and
+  it makes N connected hosts safe by construction.
+
+  Consequence: `hello` should advertise capacity, and the edge should hand work
+  to whichever host has spare capacity rather than to "the" host.
 
 ## 4. Wire protocol
 

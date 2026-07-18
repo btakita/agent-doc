@@ -214,5 +214,26 @@ Against `wrangler pages dev` with a real local D1, and in a real browser:
   `CLOUDFLARE_ACCOUNT_ID`, and a D1-scoped `CLOUDFLARE_API_TOKEN`.
 - `/guestbook` is not in `sitemap__xml.ts`. `/store` isn't either, so I matched the
   existing pattern rather than changing it — worth revisiting for SEO.
-<!-- agent:boundary:d4b98dcf -->
+Please use my local hermes agent for moderation. And fallback to OpenAI.
+<!-- agent:boundary:6506ab4f -->
 <!-- /agent:exchange -->
+
+## Queue
+
+<!-- agent:queue -->
+<!-- /agent:queue -->
+
+## Notes
+
+<!-- agent:notes -->
+<!-- /agent:notes -->
+
+## Backlog
+
+<!-- agent:backlog -->
+<!-- /agent:backlog -->
+
+## Icebox
+
+<!-- agent:icebox -->
+<!-- /agent:icebox -->

@@ -1235,26 +1235,53 @@ fn retained_pending_write_message(
             )
         })
         .unwrap_or_default();
+
+    // `#retainednoeditor`: "resumes automatically after editor/controller delivery
+    // converges" is only true while an editor replica can still ACK. When the
+    // editor is GONE (IDE closed or restarted), there is nothing to converge
+    // with, and "retry only `agent-doc session-check`" becomes an instruction
+    // that can never succeed — the operator retries forever against a precondition
+    // that will not arrive on its own.
+    //
+    // Two independent sessions hit exactly this on 2026-07-18: retained
+    // `crdt_delivery_ack_pending` with zero live editor replicas, escalating
+    // through session-check retries, `admin recycle`, and `repair-projection`
+    // before stopping. The capture is genuinely durable and force-disk is
+    // genuinely wrong, so the fix is not to weaken the guard — it is to name the
+    // precondition that is actually missing.
+    let editor_live = agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
+    let convergence_detail = if !editor_live {
+        " NOTE: zero live editor replicas are registered for this document, so \
+         there is currently nothing for the delivery to converge WITH — it will \
+         stay retained rather than drain on its own. Reopen the document in the \
+         editor so its replica re-registers; the retained capture then drains \
+         automatically. The capture is durable in CRDT/Lazily state, so it is not \
+         at risk while you do that."
+    } else {
+        ""
+    };
     if captured_closeout {
         format!(
-            "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same capture will resume automatically after editor/controller delivery converges.{} Do not issue another closeout payload and do not force disk; retry only `agent-doc session-check {}`.",
+            "[session-check] INTERRUPTED: binary-owned response delivery `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same capture will resume automatically after editor/controller delivery converges.{}{} Do not issue another closeout payload and do not force disk; retry only `agent-doc session-check {}`.",
             intent_id,
             file.display(),
             reason,
             source,
             target_hash,
             resume_detail,
+            convergence_detail,
             file.display(),
         )
     } else {
         format!(
-            "[session-check] INTERRUPTED: binary-owned document projection `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same intent will resume automatically after editor/controller delivery converges.{} Do not issue a closeout payload and do not force disk; retry only `agent-doc session-check {}`.",
+            "[session-check] INTERRUPTED: binary-owned document projection `{}` is retained for `{}` (reason={}, source={}, target_hash={}); the same intent will resume automatically after editor/controller delivery converges.{}{} Do not issue a closeout payload and do not force disk; retry only `agent-doc session-check {}`.",
             intent_id,
             file.display(),
             reason,
             source,
             target_hash,
             resume_detail,
+            convergence_detail,
             file.display(),
         )
     }

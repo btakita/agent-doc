@@ -1147,6 +1147,42 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
         .max(free_text_prefix_count)
         .max(1);
     let consumed_texts = first_n_queue_prompt_texts(&entries, consume_count);
+    // `#queuedrainednoop`: distinguish a DRAINED queue from a malformed one.
+    //
+    // The fail-closed guard below is right for an active component that never had
+    // a prompt. But a queue whose heads are all already `Completed` (struck) is
+    // the normal END STATE of a successful drain, not corruption — and with
+    // `queue: go` still in frontmatter it kept reaching this error, so
+    // `agent-doc write --commit` refused with "queue_active is true but document
+    // queue has no prompt to consume" while `agent-doc commit` silently no-opped.
+    // That left ordinary bookkeeping (a queue-head strike) impossible to commit
+    // through the binary at all: frontmatter is not a patchable component, so the
+    // only escape was writing `queue: go` off under a live editor — the exact
+    // disk-vs-authority divergence the write path exists to prevent.
+    //
+    // A drained queue consumes nothing and succeeds, so the cycle can commit
+    // whatever else it carries.
+    if consumed_texts.is_empty()
+        && entries
+            .iter()
+            .any(|entry| matches!(entry, agent_doc_queue::document_queue::QueueEntry::Completed(_)))
+        && !entries.iter().any(|entry| {
+            matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::Prompt(_)
+            )
+        })
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_consume_drained_noop file={} reason=all_heads_struck (#queuedrainednoop)",
+                file.display()
+            ),
+        );
+        return Ok(None);
+    }
+
     let consumed_text = consumed_texts.first().cloned().ok_or_else(|| {
         anyhow::anyhow!(
             "queue consume: queue_active is true but document queue has no prompt to consume"

@@ -37,40 +37,55 @@ complete
 Compacted content:
 - Archived 7 response topic(s): Dedicated URL for Reconcile with TMO; What TMO API endpoint the dropdown acts on; Jeff Blake and Lucas Huang; 4 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): Production Cloudflare environment; Brief Cloudflare account in...
-<!-- agent:boundary:4e52f94c -->
+
+### Re: do [#tmo-sandbox-orphan-loans] — opus-4-8
+
+Built the teardown path and made the purge decision. Held the actual deletion — see the question at the end.
+
+**Live sandbox state (LOS.svc/GetLoans, 2026-07-18):** 18 loans.
+
+- `1010` — created 5/19/2026, `Unassigned`, $0, no borrower. TMO-seeded demo loan, predates the EFS integration. **Keep**, permanently — it is in `SANDBOX_PROTECTED_LOAN_NUMBERS`.
+- The other 17 are EFS test debris created 6/6–7/1/2026 with synthetic borrowers (`Brian Takita`, `Test2 Borrower`, `Tester4 Borrower`, `Borrower 11`, `James Blake`, …).
+- `GQI751` — **pinned, not purged**. It is the only live repro fixture for `#dealtab500` (loan-tab `Internal Error`) and `#5q7z` (duplicate-loan writeback on approve). Deleting it would destroy the evidence both review items depend on. Purge it with `--apply --only GQI751` once those close.
+- The remaining **16 are purgeable**.
+
+**Teardown path shipped** (EFS `a56b1b8b`, pushed):
+
+- `app/equityfundingsource/lib/tmo-api/sandbox_purge.ts` — pure, keep-list-driven planner. No network, so the destructive decision is unit-testable.
+- `bin/tmo-sandbox-purge.ts` — CLI over `LOS.svc/DeleteLoan`.
+- `docs/TMO/delete-loan.md` — endpoint reference (it was missing from `docs/TMO/`), teardown recipe, and the purge decision above.
+- `tests/tmo-sandbox-purge.test.ts` — 14 tests. Full suite green: 1801 pass / 0 fail; `build` + `build:worker` OK.
+
+Safety properties, all enforced in code rather than by the caller's flags:
+
+- Dry run is the default; deletion needs `--apply`.
+- `--apply` is refused unless the `Database` header contains `Sandbox`. This matters more than it looks: **the TMO token is identical for the sandbox and live databases** — the environment is selected *only* by the `Database` header — so this guard is the one thing standing between a teardown pass and production.
+- Protected and pinned loans are enforced by the planner. `--only` can narrow the purge set but can never select `1010` or `GQI751`.
+- The token is read from `TMO_API_TOKEN`; nothing is committed or echoed.
+
+Dry run against the live sandbox: `purge=16 keep=2`, matching the decision above.
+
+Two things worth knowing about `DeleteLoan`, both now in the doc:
+
+- It is keyed on `LoanNumber`, unlike `DeleteBorrower` which needs the borrower `RecId`.
+- Deleting a loan does **not** delete its borrowers, and does **not** touch EFS state. The 18 orphan `tmo_cache_entities` rows are a separate problem (`#tmo-orphan-cache`) — several of those cached loan numbers (TST042, TST217, TST254, TST374, TST723, TST762, TST999) do not exist in TMO at all, so purging TMO will not clear them.
+
+**Question before I run it:** `--apply` permanently deletes those 16 loans with no TMO-side undo, and your note says you are in TMO tonight after 20:30 for the sync work. Do you want them gone now, or would you rather look at the sandbox first? Queued as `#tmo-sandbox-purge-apply`; one command when you say go.
+
+On the other queue head — `#tmo-prod-seat-not-provisioned` is operator-gated (April has to confirm which account/serial the new seat landed on and provision `app.themortgageoffice.com`). Nothing I can drain there.
+<!-- agent:boundary:5b22d7fc -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
+- do [#tmo-prod-seat-not-provisioned]
+- ~~do [#tmo-sandbox-orphan-loans]~~
+- Instead of doing [#tmo-orphan-cache], the loans should be added as fundings into the tmo database. The admin may need to reconcile the funder/lender/vesting. We can use this to drive out the reconciliation process. We should also have an automated tool to attempt a reconciliation. We also should do work on lender portal vestings, with a banner to ask the lender to add their vestings. Also the admin should be able to add lender vestings. A lender may not have any vestings but we should have admin banners to ensure vestings are added.
 <!-- /agent:queue -->
-
-## Notes
-
-<!-- agent:notes -->
-How can I instruct Judith to create a Cloudflare account for EFS? She does not have much time today so please make brief instructions for her to follow.
----
-- Admin loan delete: /api/admin/loans/:id
-- Admin bulk loan delete: /api/admin/loans/bulk-delete
-- Admin TMO loan delete: /api/admin/tmo-loans/:loan_number
-- Admin TMO bulk delete: /api/admin/tmo-loans/bulk-delete
-- Borrower self-delete: /api/borrower/loans/:id
-- Admin user delete: /api/admin/users/:id, because loans.user_id cascades from users, then investment_deals.loan_id
-  cascades from loans
----
-Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
----
-After 20:30
-- login to TMO. Make sure we are using the correct credentials.
-- TMO Syncs
-
-We have not cut over the DNS today. The current CF environment will be staging. Please setup another CF environment for production. At some point, we will have EFS have custody of the CF account, possibly today. But I want to have a production environment ready to go in case it is needed.
-<!-- /agent:notes -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#tmo-prod-seat-not-provisioned] [operator-verify] The 2026-07-17 20:19 "Welcome to The Mortgage Office" credentials are for the SANDBOX host: the email's own Login link is https://app2.themortgageoffice.com/Login, not app.themortgageoffice.com (which is what the 2026-05-15 welcome email linked). So April's "added you to the production account" has not landed as a production seat yet — app2 still offers exactly one company, Equity Funding - Sandbox. Ask April to confirm which account/serial the new seat was created on and to provision app.themortgageoffice.com access. Credentials stored at passage equityfundingsource/tmo_login_2026_07_17.
-- [ ] [#tmo-sandbox-orphan-loans] Sandbox cleanup: TST113 still exists in the TMO sandbox with ZERO borrowers after Lucas Huang was deleted 2026-07-18 (borrower RecID 21DE900006AC4EEBB40856D09FB0E7D3, DELETE /LOS.svc/DeleteBorrower, HTTP 200, verified). The sandbox holds 18 loans, most of which are EFS test debris (554466, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). Decide which to purge and whether EFS should grow a test-data teardown path so integration runs stop accreting orphans in a shared sandbox.
-- [ ] [#tmo-db-target-audit] [operator-verify] Confirm which TMO database EFS should read/write. Verified 2026-07-18: the app2 UI session is in database "001-8553-000-Equity Funding - Sandbox" (Sandbox Mode banner, company switcher offers that ONE company, its own apiServer is appsecondary.themortgageoffice.com), but EFS calls api.themortgageoffice.com with the database in passage equityfundingsource/TMO_API_DATABASE, which is the separate "001-8553-000-Equity Funding Source Inc." company database. They are different datasets: GetLoans over the EFS-configured database returns 24 loans with real-looking borrower names (Gallego, Quiroz, Hollon, Cupery Family Trust), while sandbox-created records such as TST113/Lucas Huang return "Loan not found". So EFS staging is reading the live company database, and the currently-gated #dzmm/#7a4d writeback would write there too. Decide the intended target per environment and pin TMO_API_DATABASE explicitly for staging vs production before any writeback ships.
 - [ ] [#tmo-orphan-cache] Prune/reconcile orphan tmo_cache_entities rows: 18 of 19 cached TMO 'loan' rows (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) do not exist in the TMO database EFS is pointed at — GetLoans returns 24 loans and only '1010' overlaps. They are EFS test debris that renders as if it were TMO data (this is where 'Lucas Huang' shows up). Add an admin prune action or a sync tombstone pass so a cached row whose source_id is absent from GetLoans is marked deleted instead of shown as a live TMO record. Note admin_tmo_loans_by_loan_number_DELETE_ does NOT cover this — it only disables EFS 'loans' rows and never touches tmo_cache_entities.
 - [ ] [#tmo-contact-enumeration] TMO exposes no borrower/business-contact enumeration API (LOS.svc/GetBorrowers and LSS.svc/GetBorrowers both 404; LSS.svc/GetLenders returns an empty list for the EFS company database), so EFS cannot answer 'who is in TMO' or resolve a contact to the RecId that DELETE /LOS.svc/DeleteBorrower/:borrowerRecId requires. Add the enumeration question to the ABS support thread (rides #k2xg), and until then wire an operator-supplied-RecId delete path rather than guessing record ids.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
@@ -118,6 +133,28 @@ We have not cut over the DNS today. The current CF environment will be staging. 
 - [/] [#dzmm] TMO webhooks UNAVAILABLE per operator (2026-06-13). Read-side tightened polling is shipped (scheduled tmo-sync with configurable interval + due-gating + tmo_cache read mirror). Remaining gated: EFS to TMO writeback (tmo_cache_outbox replay) needs the #7a4d write field map + #k2xg support answers before it can replay.
 - [/] [#dropbox-sync-adapter] Dropbox sync adapter: #dropbox-sync-contract shipped the shared documents Dropbox metadata, document_sync_logs idempotency schema, pure sync planner, and mocked adapter tests. Remaining: after Dropbox access is available, wire the real credential-backed worker to push/pull R2_DOCUMENTS with retries, backfill, tombstone replay, and per-document sync logs.
 <!-- /agent:review -->
+
+## Notes
+
+<!-- agent:notes -->
+How can I instruct Judith to create a Cloudflare account for EFS? She does not have much time today so please make brief instructions for her to follow.
+---
+- Admin loan delete: /api/admin/loans/:id
+- Admin bulk loan delete: /api/admin/loans/bulk-delete
+- Admin TMO loan delete: /api/admin/tmo-loans/:loan_number
+- Admin TMO bulk delete: /api/admin/tmo-loans/bulk-delete
+- Borrower self-delete: /api/borrower/loans/:id
+- Admin user delete: /api/admin/users/:id, because loans.user_id cascades from users, then investment_deals.loan_id
+  cascades from loans
+---
+Is there an admin for the borrower portal messages? Can we have an email notification whenever a borrow sends a message? Can we support an email response back into the chat? Can the borrower receive emails whenever an admin responds with a message?
+---
+After 20:30
+- login to TMO. Make sure we are using the correct credentials.
+- TMO Syncs
+
+We have not cut over the DNS today. The current CF environment will be staging. Please setup another CF environment for production. At some point, we will have EFS have custody of the CF account, possibly today. But I want to have a production environment ready to go in case it is needed.
+<!-- /agent:notes -->
 
 ## Completed / Reaped
 

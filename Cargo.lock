@@ -2371,6 +2371,7 @@ dependencies = [
  "agent-doc-workflow-io",
  "anyhow",
  "fs2",
+ "lazily 0.41.0",
  "libc",
  "serde",
  "serde_json",
@@ -2474,6 +2475,7 @@ dependencies = [
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "anyhow",
+ "lazily 0.41.0",
  "tmux-router",
 ]
 

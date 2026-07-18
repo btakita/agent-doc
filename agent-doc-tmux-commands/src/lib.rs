@@ -24,6 +24,34 @@ impl TmuxCommand {
     pub fn into_args(self) -> Vec<String> {
         self.args
     }
+
+    /// Whether this command only *observes* tmux state and never mutates it.
+    ///
+    /// `#syncobscache`: a command-scoped observation cache may memoize read-only
+    /// results for the duration of one run, but must never serve a stale answer
+    /// across a mutation. This is the allowlist that draws that line — an
+    /// unrecognized subcommand is treated as mutating, so a new tmux verb fails
+    /// safe (uncached + cache-invalidating) rather than silently becoming
+    /// cacheable.
+    ///
+    /// This is deliberately narrower than "does not mutate tmux". `capture-pane`
+    /// is non-mutating but its output is *live pane content* that changes on its
+    /// own, and `route` polls it to detect a dispatch-ready prompt — memoizing it
+    /// would spin such a loop forever on a stale capture. Only structural
+    /// metadata that is stable across a single reconciliation pass is listed
+    /// here; anything observing live content stays uncached.
+    pub fn is_read_only(&self) -> bool {
+        matches!(
+            self.args.first().map(String::as_str),
+            Some(
+                "display-message"
+                    | "list-panes"
+                    | "list-windows"
+                    | "list-sessions"
+                    | "has-session"
+            )
+        )
+    }
 }
 
 pub fn display_message(target: Option<&str>, format: &str) -> TmuxCommand {

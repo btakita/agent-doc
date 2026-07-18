@@ -3,6 +3,13 @@
 //! This crate owns subprocess effects for tmux commands. It does not own
 //! document authority, merge behavior, queue projection, or turn commits.
 
+pub mod observation_cache;
+
+pub use observation_cache::{
+    ObservationScopeStats, TmuxObservationScope, begin_observation_scope,
+    observation_scope_stats,
+};
+
 use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
@@ -101,30 +108,34 @@ impl ProcessTmuxRunner {
 
 impl TmuxCommandRunner for ProcessTmuxRunner {
     fn run(&self, command: &TmuxCommand) -> Result<String, TmuxIoError> {
-        let output = Command::new(&self.config.binary)
-            .args(command.args())
-            .output()
-            .map_err(|err| TmuxIoError::Spawn {
-                binary: self.config.binary.clone(),
-                message: err.to_string(),
-            })?;
+        observation_cache::run_with_observation_cache(command, || {
+            let output = Command::new(&self.config.binary)
+                .args(command.args())
+                .output()
+                .map_err(|err| TmuxIoError::Spawn {
+                    binary: self.config.binary.clone(),
+                    message: err.to_string(),
+                })?;
 
-        tmux_output_to_string(output)
+            tmux_output_to_string(output)
+        })
     }
 }
 
 impl TmuxCommandRunner for tmux_router::Tmux {
     fn run(&self, command: &TmuxCommand) -> Result<String, TmuxIoError> {
-        let output =
-            self.cmd()
-                .args(command.args())
-                .output()
-                .map_err(|err| TmuxIoError::Spawn {
-                    binary: "tmux".to_string(),
-                    message: err.to_string(),
-                })?;
+        observation_cache::run_with_observation_cache(command, || {
+            let output =
+                self.cmd()
+                    .args(command.args())
+                    .output()
+                    .map_err(|err| TmuxIoError::Spawn {
+                        binary: "tmux".to_string(),
+                        message: err.to_string(),
+                    })?;
 
-        tmux_output_to_string(output)
+            tmux_output_to_string(output)
+        })
     }
 }
 

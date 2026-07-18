@@ -15,4 +15,5 @@ agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.6" }
 agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.35.6" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.6" }
 anyhow = "1"
+lazily = "0.41.0"
 tmux-router = { path = "../../tmux-router", version = "0.3.14" }

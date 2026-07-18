@@ -2013,6 +2013,15 @@ fn run_with_options_internal_at_root(
         sync_log(&message);
         return Ok(());
     }
+
+    // `#syncobscache`: with the sync lock held we own the layout, so tmux's
+    // structural answers are coherent for the rest of this pass. Reconciliation
+    // re-asks the same questions once per tracked document while resolving
+    // panes; memoizing the read-only ones for the run collapsed a measured 109
+    // subprocess spawns to 35 distinct commands. Any mutation we perform
+    // invalidates the memo, and the guard drops it at the end of the run so the
+    // next sync always re-observes.
+    let _tmux_observations = agent_doc_tmux_io::begin_observation_scope();
     let _lock_guard = lock_guard;
 
     // Check for new build and clear stale caches
@@ -4287,7 +4296,33 @@ fn reject_cross_document_owner_pane(
 fn document_git_repo(file: &Path) -> Option<PathBuf> {
     let absolute = agent_doc_git_io::dirs::resolve_absolute_file_path(file);
     let dir = absolute.parent().filter(|p| !p.as_os_str().is_empty())?;
-    agent_doc_git_io::dirs::git_toplevel_at(dir)
+    git_toplevel_memoized(dir)
+}
+
+thread_local! {
+    /// `#syncobscache`: directory → git toplevel, memoized for the process.
+    ///
+    /// `pane_in_foreign_git_repo` recomputes the *document's* repo for every
+    /// candidate pane, so a sync pass issued 12 `git rev-parse --show-toplevel`
+    /// spawns that were all the identical command. Unlike a pane's working
+    /// directory, a directory's owning repository is immutable for our purposes,
+    /// so this memo needs no invalidation — which is why it is a plain lazily
+    /// `SlotMap` rather than part of the mutation-invalidated tmux scope.
+    static GIT_TOPLEVEL_MEMO: (lazily::Context, lazily::SlotMap<PathBuf, Option<PathBuf>>) = {
+        let ctx = lazily::Context::new();
+        let map = lazily::SlotMap::new(&ctx);
+        (ctx, map)
+    };
+}
+
+fn git_toplevel_memoized(dir: &Path) -> Option<PathBuf> {
+    GIT_TOPLEVEL_MEMO.with(|(ctx, map)| {
+        let key = dir.to_path_buf();
+        let probe = key.clone();
+        map.get_or_insert_with(ctx, key, move |_| {
+            agent_doc_git_io::dirs::git_toplevel_at(&probe)
+        })
+    })
 }
 
 /// True only when `pane_id`'s working directory and `file` resolve to

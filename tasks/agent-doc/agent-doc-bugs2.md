@@ -34,38 +34,17 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260717-225039.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260718-033104.md`*
 
 Compacted content:
-- Archived 17 response topic(s): editor save-flush authority and agent-doc churn; interrupted Claude turn and Compact Exchange; Compact Exchange, closeout churn, and plugin-generation drift; 14 more
-- Prior summary/context: prior compacted content: Archived 4 response topic(s): #z5ar; IPC proof diagnostic (interrupted-cycle recovery); IPC ...
-
-❯ 🚧 JB `Compact Exchange` error as I was deleting iterms from the queue while the compact was running:
-```
-agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [compact] INTERRUPTED: compaction dropped item(s) from non-exchange component(s) [queue 44→32] in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md (stage=post_write). Compaction must only archive/truncate the exchange; a singleton list component lost a whole tracked item (#compactdropitem — worse sibling of #compactqattr). The compact output was NOT committed. Re-run compaction; if it recurs, a concurrent stale-supervisor CRDT merge is interleaving over the written file — refresh the stale supervisor without discarding the live turn (`agent-doc admin recycle` or `agent-doc session restart-supervisor /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`) before retrying.
-```
-❯ 🚧 #spec-test-build-install-commit-push
-
-### Re: Compact Exchange concurrent queue edits and recovered closeout — gpt-5
-
-Recovered the response that the interrupted cycle failed to add. The Compact Exchange data-loss class is fixed and packaged as agent-doc 0.35.3.
-
-The load-bearing invariant is now explicit: compaction owns only the archiveable exchange prefix. Queue, backlog, review, icebox, and the post-boundary exchange prompt tail remain operator-authoritative sibling cells. `CompactDocumentTargets::rebase_onto_authoritative_siblings` owns the compact-side rebase, while compact-projection supersession predicates in `agent-doc-document::compact_projection`, applied by `agent-doc-document-realtime-io`, own retirement of stale projections.
-
-The regression matrix covers sibling queue deletion rebased into both live and committed output; post-boundary prompt survival in the live document while remaining outside the compact snapshot; same-cell drift failing closed; and retirement of a stale compact composition only when a newer valid binary compact plus exact canonical/disk/editor authority proves supersession. Unrelated sources and malformed or custom summaries remain fail-closed. Those fixes landed in `fac884217` (independent-cell preservation), `fc7450d99` (transient prompt-marker cleanup), and `a48212daa` (exact stale-projection retirement).
-
-The required full-suite run initially exposed a separate fast-startup race: concurrent controller/status processes could collide while switching `state.db` to WAL mode, leaving a newly captured response unprojected. Version 0.35.3 retries only SQLite `BUSY`/`LOCKED` schema initialization against the same authoritative database within the existing timeout; every other error still fails closed, and a 16-worker test proves convergence without replacing the ledger. The obsolete force-disk rollback tests were also removed from the generic ignored-test sweep, and deterministic SimWorld coverage now asserts captured authority survives every injected closeout interruption.
-
-Verification is green: focused compact/state tests; the CI regression pair; `make tmux-ci`; and `make check` with 7,581/7,581 tests passed, 240 intentionally skipped, plus the formal model checks. `make install-full` installed agent-doc 0.35.3 and JetBrains plugin 0.2.276. The public-repo private-name scan and `git diff --check` are clean.
-
-Commits are `373e241a9` in `src/agent-doc` and `56f5998cf` in the workspace. Per the compound closeout contract, their remote push follows this binary-owned session-document commit. Unrelated staged and working-tree changes were left untouched.
-<!-- agent:boundary:e71225cc -->
+- Archived 1 response topic(s): Compact Exchange concurrent queue edits and recovered closeout
+- Prior summary/context: prior compacted content: Archived 17 response topic(s): editor save-flush authority and agent-doc churn; interrupted ...
+<!-- agent:boundary:ea16509a -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 - ⏭️ 📌 do [#jblocalhistverify]
-- ~~📌 do [#compactcrdtretry]~~
 - ⏭️ 📌 do [#capturebacklogatomic]
 - ⏭️ 📌 do [#opcapturelazily]
 - ⏭️ 📌 do [#jbtsiftnosub2verify]
@@ -81,25 +60,8 @@ Commits are `373e241a9` in `src/agent-doc` and `56f5998cf` in the workspace. Per
 - 📌 do [#ipcverhandshake]
 - 📌 do [#ipcpostcommitinv]
 - 📌 do [#staleplugindeploy]
-~~~done
-📍 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
-```
-agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
-```
-~~~
-~~~done
-📍 In haiven.md, I interrupted a turn in the Claude console.  I then ran JB `Compact Exchange` and it hangs. 2 issues. agent-doc does not seem to detect that I cancelled the Claude turn. Compact exchange should work even when a turn is active. I also lost my prompt somehow. I want away from my file, the agent-doc: Compacting Exchange banner disappeared and my prompt also disappeared. Another attempt to JB `Compact Exchange` errorred:
-```
-agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/recruit/haiven.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
-```
-~~~
 - 📌 do [#5qjj]
 - ⏭️ 📌 do [#jblocalhistverify]
-- ~~📌 do [#compactcrdtretry]~~
-- ⏭️ 📌 do [#jblocalhistverify]
-- ~~📌 do [#compactcrdtretry]~~
-- ⏭️ 📌 do [#jblocalhistverify]
-- ~~📌 do [#compactcrdtretry]~~
 - ⏭️ 📌 do [#capturebacklogatomic]
 - ⏭️ 📌 do [#opcapturelazily]
 <!-- /agent:queue -->

@@ -309,12 +309,21 @@ long-document editing. Add **`bench/crdt.bench.*`** in each port before/after
 
 #### lazily-rs (substrate)
 
-- [ ] **`#lzrsdeppool`** — Pool the per-spawn `Arc::new(Mutex::new(HashSet::new()))`
-      deps tracker in `spawn_async_compute` (currently 2 heap allocations per
-      async compute spawn). Either reuse a thread-local `HashSet` cleared
-      between spawns, or store the deps tracker inline on the slot node.
-      Citations: `src/lazily-rs/src/async_context.rs:539, 1254`.
-      Risk: low if scoped to thread-local with explicit clear.
+- [x] **`#lzrsdeppool`** ✅ lazily-rs `3b6d7d5` — Pool the per-spawn
+      `Arc::new(Mutex::new(HashSet::new()))` deps tracker in
+      `spawn_async_compute` (currently 2 heap allocations per async compute
+      spawn). Citations: `src/lazily-rs/src/async_context.rs:539, 1254`.
+      **Status:** free-list on `AsyncContextInner` (cap 32) reusing the `Arc`
+      *and* the set's table capacity; extraction switched from `.clone()` to
+      `mem::take`, removing a `HashSet` clone per run. Thread-local was rejected
+      — the tracker is moved into a `tokio::spawn`ed task that can complete on
+      any worker. Recycling gates on `Arc::get_mut` (a leaked
+      `AsyncComputeContext` keeps its tracker out of the pool) which also avoids
+      the deps→inner lock-order inversion `get_cell` would deadlock against.
+      **No measurable throughput change**: `async_invalidation_throughput` is
+      dominated by tokio scheduling and the bench host's run-to-run drift
+      (±10–27% on unmodified code) swamps it. The win is allocation-side, proven
+      by `dependency_trackers_are_pooled_and_reused` rather than by a benchmark.
 
 - [ ] **`#lzrsgetarc`** — Expose a `Send + Sync` analog to `get_rc` so
       `ThreadSafeContext` callers can read without cloning. Today
@@ -448,6 +457,18 @@ in wire size, per-node memory, and compute latency.
    refactors gated on real workload evidence (do not start speculatively).
 
 ## Notes & caveats
+
+- **lazily-rs `make check` is red on HEAD, independent of this plan** (found
+  2026-07-18 while landing `#lzrsdeppool`). Two separate pre-existing breaks:
+  (a) `--all-features` failed to compile — the `#lzspecdeltacrdt` variant missed
+  two feature-gated `IpcMessage` matches, which is what CI run 29627260527 was
+  failing on; fixed in `3b6d7d5`. (b) `BENCHMARKS.md` is still stamped
+  `version 0.40.1` against a `0.44.0` package, so
+  `readme_benchmark_results_track_package_version` (`#lzbenchver`) fails — the
+  v0.41–v0.44 releases never ran `make benchmark-update`. **Still open.** The
+  per-item wire/latency numbers claimed in Phases 3–4 above are therefore not
+  reflected in `BENCHMARKS.md`. Regenerate on a quiet host: the async benches
+  drift ±10–27% run-to-run on a busy one, which would bake noise into the doc.
 
 - **lazily-go audit is summary-only** — the dispatched agent returned the
   top finding (`reflect.DeepEqual` at three sites) but not the full

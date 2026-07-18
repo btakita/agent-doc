@@ -154,14 +154,36 @@ Files:
 Verification: `make check` exit 0 — 48 tests passed, 0 failed, across 16 suites; rustfmt and clippy clean. Committed as `a916f1c` (not pushed; superproject gitlink not bumped).
 
 **Not wired up yet, and deliberately so:** no `PluginSpec` for this plugin ships in a config, because a working spec needs decisions I should not make silently — `egress_hosts` for whichever model the agent CLI reaches, the `env_allow` list carrying `FREEHOLD_AGENT_ARGV` plus any credential, and a `budget_ms` that suits an agent round-trip rather than a rules match. Queued as `#fhagentspec`.
-<!-- agent:boundary:ede8fbd1 -->
+
+### Re: #gpupol — blocked on #p0rw, so I built #p0rw — opus-4-8
+
+> **Queue prompt:** do [#gpupol]
+
+`#gpupol` says outright that it depends on `#p0rw` — "the proxy must exist first" — and `#p0rw` was still queued behind it. Starting an inference server that nothing can reach would have been motion, not progress, so I pulled the blocker forward and built it.
+
+**#p0rw done — `freehold-egress`, an allowlisting CONNECT proxy.** `sandbox_argv` already routes a plugin with non-empty `egress_hosts` into a namespace whose only route out is this proxy, so for a networked plugin this is not one filter among several — it is the entire network. The code is shaped by that:
+
+- **Default deny everywhere.** Unset, empty, or unparseable allowlist permits nothing. The binary *refuses to start* on an empty allowlist, because from inside the sandbox a proxy allowing nothing and a proxy misparsing its config look identical; exiting nonzero is the difference an operator can see.
+- **Exact `host:port`, no suffix matching.** `evil-googleapis.com` and `googleapis.com.evil.test` are why. A bare hostname is *dropped*, not defaulted to 443 — a silent default widens the allowlist past what the operator wrote.
+- **CONNECT only.** Proxying plaintext would put this process in the business of handling request bodies for a plugin: a parsing surface, and somewhere credentials land in logs. A tunnel carries neither, and it does not inspect what crosses it — TLS makes that a fiction anyway, and pretending otherwise invites someone to rely on it.
+- Refusal reasons are not returned to the client beyond the status code. A compromised plugin learning *why* a target failed (no such host / refused / not on the list) is a scanning oracle.
+
+Files: `crates/freehold-egress/{Cargo.toml,src/lib.rs,src/main.rs,tests/tunnel.rs}`, workspace members, `README.md` crate table, `docs/plugin-isolation.md` §"What each plugin container gets". Tests are 8 allowlist/parser units plus 5 end-to-end against the spawned binary — including a refused target whose upstream is live and reachable, so if that ever returns 200 the boundary is gone. Committed `0fc0ca6`.
+
+**#gpupol gated, one operator command from done.** Its code dependency is now satisfied. What is left is a host-level action I cannot take: ollama is installed but `inactive`/`disabled`, and `sudo -n systemctl enable --now ollama` needs a password. Run that, and the remaining wiring is `FREEHOLD_EGRESS_ALLOW=127.0.0.1:11434` plus `egress_hosts: ["127.0.0.1:11434"]` on the model plugin's spec — no new mechanism, and `/dev/nvidia*` never enters the sandbox, as the item asks.
+
+Verification: `make check` exit 0 — 61 tests passed, 0 failed; rustfmt and clippy clean.
+
+**Session note:** the `#fhoneshot` closeout hit an `editor_attached_model_missing` wedge — the backlog-add landed in the buffer but its commit did not, leaving snapshot, disk, and HEAD three-ways apart, and preflight and `write --commit` each refused pending the other. Recovered with `admin recycle` → commit the session doc → `reset --from-current --preserve-session`. The queue-maintenance warning is still firing every preflight.
+<!-- agent:boundary:cde2476d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
+<!-- agent:queue priority go -->
 - ~~do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.~~
 - ~~do [#fhoneshot]~~
+- do [#fhagentspec]
 - do [#gpupol]
 - do [#gpulease]
 - do [#rak9]

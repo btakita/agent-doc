@@ -2679,6 +2679,63 @@ fn finalize_pending_add_back_appends_to_active_go_queue() {
     );
 }
 
+/// `#queueatcreate`: a `--backlog-only` write must enqueue what it creates.
+///
+/// This path returned before the same-cycle queue sync, so tracked-work-only
+/// writes grew `agent:backlog` while `agent:queue` silently stayed put — items
+/// filed this way were never picked up by any drain.
+#[test]
+fn backlog_only_write_enqueues_created_items_at_go_queue_head() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
+    let doc = tmp.path().join("session.md");
+    let content = "---\nagent_doc_session: test-session\nagent_doc_format: template\nagent_doc_write: crdt\nagent: codex\nmodel: gpt-5\nqueue: start\n---\n\n<!-- agent:exchange -->\n❯ earlier prompt\n\n### Re: earlier prompt — gpt-5\n\nDone.\n<!-- agent:boundary:1234abcd -->\n<!-- /agent:exchange -->\n\n<!-- agent:queue priority go -->\n- do [#tail]\n<!-- /agent:queue -->\n\n<!-- agent:backlog priority queue -->\n- [ ] [#tail] existing queue head\n<!-- /agent:backlog -->\n";
+    fs::write(&doc, content).unwrap();
+    init_git_repo(tmp.path(), &doc);
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["preflight", doc.to_str().unwrap()])
+        .assert()
+        .success();
+    let baseline_content = fs::read_to_string(&doc).unwrap();
+    checkpoint_baseline(tmp.path(), &baseline_content);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            doc.to_str().unwrap(),
+            "--commit",
+            "--force-disk",
+            "--backlog-only",
+            "--backlog-add",
+            "id=freshonly follow-up filed by a backlog-only write",
+        ])
+        .assert()
+        .success();
+
+    let updated = fs::read_to_string(&doc).unwrap();
+    assert!(
+        updated.contains("[#freshonly] follow-up filed by a backlog-only write"),
+        "backlog-only write must create the backlog item:\n{updated}"
+    );
+    let queue = updated
+        .split("<!-- agent:queue priority go -->\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n<!-- /agent:queue -->").next())
+        .unwrap();
+    assert!(
+        queue.contains("do [#freshonly]"),
+        "a backlog-only write must also enqueue what it created:\n{queue}"
+    );
+    let fresh = queue.find("do [#freshonly]").unwrap();
+    let tail = queue.find("do [#tail]").unwrap();
+    assert!(
+        fresh < tail,
+        "the follow-up belongs at the queue head:\n{queue}"
+    );
+}
+
 #[test]
 fn finalize_icebox_add_back_does_not_append_to_active_go_queue() {
     let tmp = TempDir::new().unwrap();

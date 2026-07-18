@@ -1288,6 +1288,26 @@ fn run_command_inner(
                 )?;
             }
         }
+        // `#queueatcreate`: the `--backlog-only` path used to return here, so a
+        // tracked-work-only write NEVER enqueued the items it had just created —
+        // the backlog grew and `agent:queue` silently did not, even with the
+        // backlog's `queue` attribute set. That is the "backlog items are not
+        // being added to the queue at all" report: agents that file follow-ups
+        // through `--backlog-only` (the natural call when there is no response to
+        // write) produced items nothing would ever pick up. Run the same
+        // same-cycle sync the full write path runs, with the same placement
+        // rules, so both paths keep backlog and queue in step.
+        if commit_mode != CommitMode::None {
+            let placement = follow_up_queue_placement(&options)?;
+            if let Err(e) =
+                agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(file, placement)
+            {
+                eprintln!(
+                    "[queue] warning: same-cycle pending-add queue sync failed: {}",
+                    e
+                );
+            }
+        }
         return finalize_commit(file, commit_mode, options.force_disk);
     }
 

@@ -3644,7 +3644,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             );
                             continue;
                         }
-                        match auto_trigger_submit_queue_command(&shared, &stop, &drain_payload) {
+                        match auto_trigger_submit_queue_command(&shared, &stop, &drain_payload, &harness) {
                             AutoTriggerOutcome::Sent => {
                                 if paused_failsafe_active {
                                     log_event(

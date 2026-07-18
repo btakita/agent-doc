@@ -147,7 +147,27 @@ pub struct DeferToBoundaryRestartRecoveryFacts<'a> {
     pub supervisor_health: SupervisorHealth,
     pub actor_state: RouteActorState,
     pub queue_paused: bool,
+    /// True when the actor's own in-flight restart is what made the pane busy
+    /// (`#actorswitchdeferbusyself`). A harness switch necessarily transitions the
+    /// actor to `busy` while it tears down the old child and spawns the new one, so
+    /// a bare `busy` reading during that window says nothing about operator action.
+    /// Telling the operator to "Interrupt and restart to force the harness switch"
+    /// right after they successfully restarted is both wrong and destructive advice —
+    /// it asks them to interrupt the very restart that is completing the switch.
+    pub restart_in_flight: bool,
     pub recovery_command: &'a str,
+}
+
+/// Lifecycle transition reasons that mean "this actor is busy because it is
+/// restarting itself", not "the operator left a turn running".
+pub fn actor_busy_is_self_induced_restart(last_transition_reason: &str) -> bool {
+    const SELF_RESTART_REASONS: [&str; 4] = [
+        "restart_continue_spawn",
+        "ipc_restart_requested",
+        "restart_fresh_spawn",
+        "agent_harness_switch_writeback",
+    ];
+    SELF_RESTART_REASONS.contains(&last_transition_reason.trim())
 }
 
 /// Build the operator-actionable recovery suffix for a route defer to the
@@ -168,6 +188,13 @@ pub fn defer_to_boundary_restart_recovery_hint(
             ". {} — the boundary restart will not fire until it is healthy and resumed. Run: {}",
             blocker, facts.recovery_command
         )
+    } else if facts.restart_in_flight
+        && (facts.actor_state == RouteActorState::Busy
+            || facts.actor_state == RouteActorState::Starting)
+    {
+        // `#actorswitchdeferbusyself`: the busy window belongs to the restart that is
+        // already switching the harness. Never point the operator at `--force` here.
+        ". the harness restart is already in flight — the switch completes at that boundary, so wait for it and run Agent Doc again. No interrupt or forced restart is needed.".to_string()
     } else if facts.actor_state == RouteActorState::Busy
         || facts.actor_state == RouteActorState::Starting
     {
@@ -349,6 +376,7 @@ mod tests {
             supervisor_health: SupervisorHealth::Healthy,
             actor_state: RouteActorState::Ready,
             queue_paused: true,
+            restart_in_flight: false,
             recovery_command: command,
         });
         assert!(paused.contains("queue is paused"));
@@ -359,6 +387,7 @@ mod tests {
                 supervisor_health: SupervisorHealth::NoSocket,
                 actor_state: RouteActorState::Ready,
                 queue_paused: false,
+                restart_in_flight: false,
                 recovery_command: command,
             });
         assert!(unreachable.contains("supervisor is unreachable"));
@@ -373,6 +402,7 @@ mod tests {
             supervisor_health: SupervisorHealth::Healthy,
             actor_state: RouteActorState::Busy,
             queue_paused: false,
+            restart_in_flight: false,
             recovery_command: command,
         });
         assert!(busy.contains("pane is busy"));
@@ -382,9 +412,93 @@ mod tests {
             supervisor_health: SupervisorHealth::Healthy,
             actor_state: RouteActorState::Ready,
             queue_paused: false,
+            restart_in_flight: false,
             recovery_command: command,
         });
         assert!(ready.contains("idle-watch will restart"));
         assert!(ready.contains(command));
+    }
+
+    #[test]
+    fn defer_to_boundary_restart_never_tells_operator_to_force_its_own_restart() {
+        // `#actorswitchdeferbusyself`: the live repro. The operator ran JB
+        // `Restart Agent`, the supervisor spawned the new harness, and the actor was
+        // busy doing exactly that when route checked. The old hint said "pane is not
+        // at a dispatch-ready boundary. Use Interrupt and restart to force the harness
+        // switch" — telling the operator to interrupt the restart that was completing
+        // their switch.
+        let command = "agent-doc session restart-supervisor doc.md";
+
+        for state in [RouteActorState::Busy, RouteActorState::Starting] {
+            let hint = defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
+                supervisor_health: SupervisorHealth::Healthy,
+                actor_state: state,
+                queue_paused: false,
+                restart_in_flight: true,
+                recovery_command: command,
+            });
+            assert!(
+                hint.contains("already in flight"),
+                "expected wait-for-boundary guidance, got: {hint}"
+            );
+            assert!(
+                !hint.contains("--force"),
+                "must never suggest forcing an in-flight restart, got: {hint}"
+            );
+            assert!(
+                !hint.contains("Interrupt"),
+                "must never suggest interrupting an in-flight restart, got: {hint}"
+            );
+        }
+
+        // A genuinely operator-blocked busy pane keeps the forceful guidance.
+        let operator_busy =
+            defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
+                supervisor_health: SupervisorHealth::Healthy,
+                actor_state: RouteActorState::Busy,
+                queue_paused: false,
+                restart_in_flight: false,
+                recovery_command: command,
+            });
+        assert!(operator_busy.contains("--force"));
+
+        // A paused queue / unreachable supervisor still outranks the restart window:
+        // the boundary restart genuinely will not fire, so waiting would hang.
+        let paused = defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
+            supervisor_health: SupervisorHealth::Healthy,
+            actor_state: RouteActorState::Busy,
+            queue_paused: true,
+            restart_in_flight: true,
+            recovery_command: command,
+        });
+        assert!(paused.contains("queue is paused"));
+    }
+
+    #[test]
+    fn self_induced_restart_reasons_are_recognized() {
+        // Reasons the supervisor itself writes while swapping harnesses.
+        for reason in [
+            "restart_continue_spawn",
+            "ipc_restart_requested",
+            "restart_fresh_spawn",
+            "agent_harness_switch_writeback",
+        ] {
+            assert!(
+                actor_busy_is_self_induced_restart(reason),
+                "{reason} should count as a self-induced restart"
+            );
+        }
+        // Reasons that mean a real turn is running — the operator IS blocked.
+        for reason in [
+            "auto_trigger_inject",
+            "dispatch_submit",
+            "prompt_ready",
+            "",
+        ] {
+            assert!(
+                !actor_busy_is_self_induced_restart(reason),
+                "{reason} must not be mistaken for a self-induced restart"
+            );
+        }
     }
 }

@@ -303,6 +303,69 @@ pub fn record_session_start(
     record_session_start_direct(file, session_id, pane_id, window_id, generation)
 }
 
+/// Rewrite the harness identity on the authoritative actor record after an in-loop
+/// `agent:` switch spawned a fresh harness (`#actorharnessrecordwriteback`).
+///
+/// `transition_state_in` deliberately CARRIES FORWARD `current.harness` on every
+/// lifecycle transition, so once a record says `codex` it keeps saying `codex` for
+/// the life of the generation — even after the supervisor tore that child down and
+/// spawned `claude` in its place. Route then compares the stale stored harness
+/// against the frontmatter-resolved one and defers to a boundary restart that has
+/// already run. Only the supervisor knows which harness is ACTUALLY live, so it
+/// calls this at the moment of the swap; the document's frontmatter is not a safe
+/// substitute (it flips the instant the operator edits `agent:`, before any restart).
+///
+/// Pane/generation/state are preserved — this is an identity correction on the
+/// existing generation, not a rebind.
+pub fn set_record_harness_in(
+    base_dir: &Path,
+    document_id: &str,
+    session_id: &str,
+    pane_id: &str,
+    harness: &str,
+) -> Result<ActorRecord> {
+    let Some(current) = load_record_in(base_dir, document_id)? else {
+        anyhow::bail!("missing authoritative actor record for {}", document_id);
+    };
+    if current.session_id != session_id {
+        anyhow::bail!(
+            "stale actor harness writeback for {}: session {} no longer owns generation {} (current session {})",
+            document_id,
+            session_id,
+            current.generation,
+            current.session_id
+        );
+    }
+    if current.pane_id != pane_id {
+        anyhow::bail!(
+            "stale actor harness writeback for {}: pane {} no longer owns generation {} (current pane {})",
+            document_id,
+            pane_id,
+            current.generation,
+            current.pane_id
+        );
+    }
+    let normalized = normalize_harness_name(harness);
+    if normalized == current.harness {
+        return Ok(current);
+    }
+    store_record_in(
+        base_dir,
+        document_id,
+        ActorRecordUpdate {
+            session_id,
+            pane_id,
+            window_id: &current.window_id,
+            harness: &normalized,
+            state: current.state,
+            caller: "supervisor",
+            reason: "agent_harness_switch_writeback",
+            generation: current.generation,
+            expected_prior_generation: Some(current.generation),
+        },
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn transition_state_in(
     base_dir: &Path,
@@ -397,6 +460,24 @@ pub fn transition_state_direct(
         caller,
         reason,
     )
+}
+
+/// Path-based wrapper for [`set_record_harness_in`] (`#actorharnessrecordwriteback`).
+pub fn set_record_harness_direct(
+    file: &Path,
+    session_id: &str,
+    pane_id: &str,
+    harness: &str,
+) -> Result<ActorRecord> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let Some(base_dir) = agent_doc_project_root_io::project_root_containing(&canonical) else {
+        anyhow::bail!(
+            "failed to locate project root for actor record {}",
+            canonical.display()
+        );
+    };
+    let file_key = canonical.to_string_lossy().to_string();
+    set_record_harness_in(&base_dir, &file_key, session_id, pane_id, harness)
 }
 
 #[allow(dead_code)] // Compatibility API for direct callers; supervisor path uses controller IPC.
@@ -945,6 +1026,71 @@ mod tests {
             "unexpected transition: {:?}",
             a_after.last_transition
         );
+    }
+
+    #[test]
+    fn set_record_harness_persists_switch_and_survives_later_transitions() {
+        // `#actorharnessrecordwriteback`: the live repro. The operator flips
+        // `agent: codex` -> `agent: claude`, the supervisor spawns claude fresh, and
+        // route must stop reading `codex` off the persisted record. Before the fix the
+        // record kept saying `codex` forever, because `transition_state_*` carries the
+        // stored harness forward on every later lifecycle transition.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/test.md",
+            "---\nagent_doc_session: session-hsw\nagent: codex\n---\nBody\n",
+        );
+
+        let started = record_session_start(&file, "session-hsw", "%30", "@8", 1).unwrap();
+        assert_eq!(started.harness, "codex");
+
+        let switched =
+            set_record_harness_direct(&file, "session-hsw", "%30", "claude").unwrap();
+        // Stored normalized, so route's normalized `expected_harness` compares equal.
+        assert_eq!(switched.harness, "claude-code");
+        // An identity correction, never a rebind.
+        assert_eq!(switched.generation, 1);
+        assert_eq!(switched.pane_id, "%30");
+        assert_eq!(switched.state, started.state);
+
+        // The regression that actually bit: a later lifecycle transition must carry
+        // the NEW harness forward, not resurrect the old one.
+        let after = transition_state(
+            &file,
+            "session-hsw",
+            "%30",
+            ActorState::Ready,
+            "supervisor",
+            "idle_pane_reconcile",
+        )
+        .unwrap();
+        assert_eq!(after.harness, "claude-code");
+        assert_eq!(after.generation, 1);
+    }
+
+    #[test]
+    fn set_record_harness_is_a_noop_for_the_same_harness_and_rejects_stale_owners() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let file = seed_project_file(
+            &tmp,
+            "tasks/test.md",
+            "---\nagent_doc_session: session-hsw2\nagent: codex\n---\nBody\n",
+        );
+        record_session_start(&file, "session-hsw2", "%30", "@8", 1).unwrap();
+
+        // Same harness (raw vs normalized spelling) must not churn the record.
+        let unchanged = set_record_harness_direct(&file, "session-hsw2", "%30", "codex").unwrap();
+        assert_eq!(unchanged.harness, "codex");
+        assert_eq!(
+            unchanged.last_transition.reason, "session_start",
+            "no-op writeback must not rewrite the transition record"
+        );
+
+        // A pane or session that no longer owns the generation must not be able to
+        // rewrite the harness out from under the real owner.
+        assert!(set_record_harness_direct(&file, "session-hsw2", "%99", "claude").is_err());
+        assert!(set_record_harness_direct(&file, "other-session", "%30", "claude").is_err());
     }
 
     #[test]

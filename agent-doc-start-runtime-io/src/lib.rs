@@ -645,6 +645,7 @@ fn auto_trigger_inject_command(
     shared: &SupervisorShared,
     stop: &AtomicBool,
     trigger_cmd: &str,
+    harness_cfg: &agent_doc_harness::HarnessConfig,
 ) -> AutoTriggerOutcome {
     if stop.load(Ordering::Relaxed) {
         return AutoTriggerOutcome::Cancelled;
@@ -666,6 +667,13 @@ fn auto_trigger_inject_command(
         "dispatch",
         "auto_trigger_inject",
     );
+    // `#restartfreshtriggerstranded`: snapshot the cycle state BEFORE the send so the
+    // post-submit check can tell "this inject started a turn" from "some earlier turn
+    // was already open".
+    let cycle_baseline = shared
+        .actor_runtime
+        .as_ref()
+        .and_then(|runtime| agent_doc_cycle_state_io::load(&runtime.file).ok().flatten());
     let submitted_text =
         agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(trigger_cmd)
             .to_string();
@@ -683,7 +691,13 @@ fn auto_trigger_inject_command(
         );
         let outcome = match dispatch_submit_text_to_pane(pane_id, &submitted_text, &current_harness)
         {
-            Ok(()) => AutoTriggerOutcome::Sent,
+            Ok(()) => verify_auto_trigger_submitted(
+                shared,
+                pane_id,
+                &submitted_text,
+                harness_cfg,
+                cycle_baseline,
+            ),
             Err(_) => AutoTriggerOutcome::SendFailed,
         };
         if outcome != AutoTriggerOutcome::Sent
@@ -816,11 +830,12 @@ fn auto_trigger_submit_queue_command(
     shared: &SupervisorShared,
     stop: &AtomicBool,
     command: &str,
+    harness_cfg: &agent_doc_harness::HarnessConfig,
 ) -> AutoTriggerOutcome {
     if agent_doc_queue::queue_command::is_context_clear_command(command) {
         auto_trigger_clear_command(shared, stop, command)
     } else {
-        auto_trigger_inject_command(shared, stop, command)
+        auto_trigger_inject_command(shared, stop, command, harness_cfg)
     }
 }
 
@@ -844,6 +859,158 @@ fn dispatch_submit_text_to_tmux(
 fn dispatch_submit_text_to_pane(pane: &str, text: &str, harness: &str) -> Result<()> {
     let tmux = tmux_router::Tmux::default_server();
     dispatch_submit_text_to_tmux(&tmux, pane, text, harness)
+}
+
+/// How long a supervisor auto-trigger inject waits for the harness to acknowledge the
+/// prompt with a document cycle before it inspects the composer
+/// (`#restartfreshtriggerstranded`).
+fn auto_trigger_submit_ack_timeout() -> Duration {
+    if cfg!(test) {
+        Duration::from_millis(200)
+    } else {
+        Duration::from_secs(25)
+    }
+}
+
+/// Whether the document has opened a NEW cycle since `baseline` — i.e. the harness
+/// actually consumed the injected trigger.
+fn auto_trigger_cycle_acknowledged(
+    file: &Path,
+    baseline: Option<&agent_doc_cycle_state_io::CycleState>,
+    timeout: Duration,
+) -> bool {
+    let start = Instant::now();
+    loop {
+        if let Ok(Some(state)) = agent_doc_cycle_state_io::load_with_closeout_projection(file)
+            && agent_doc_turn::cycle_ack::cycle_state_advances_start_ack(
+                agent_doc_turn::cycle_ack::CycleAckState {
+                    cycle_id: &state.cycle_id,
+                    phase: state.phase,
+                    updated_at: state.updated_at,
+                    last_event: &state.last_event,
+                },
+                baseline.map(|base| agent_doc_turn::cycle_ack::CycleAckState {
+                    cycle_id: &base.cycle_id,
+                    phase: base.phase,
+                    updated_at: base.updated_at,
+                    last_event: &base.last_event,
+                }),
+            )
+        {
+            return true;
+        }
+        if start.elapsed() >= timeout {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// (`#restartfreshtriggerstranded`) Prove that a supervisor auto-trigger inject was
+/// actually SUBMITTED, not just typed.
+///
+/// The live failure: a harness-switch restart spawned a fresh `claude` pane, the pane
+/// reconciled `ready` one second before the inject fired, and the submit key raced the
+/// still-initializing composer. The trigger sat in the composer forever and the
+/// supervisor reported `Sent` — the operator-visible "the prompt was sent but not
+/// submitted". `route`'s fresh-start path already resubmits a stranded trigger
+/// (`#jbtsiftnosub2`), but a restart-fresh spawn is a different entry point that never
+/// reaches it, so the guarantee has to exist here too.
+///
+/// A dispatch-ready composer that STILL shows the trigger after the ack window is the
+/// stranded shape: resend one bare submit key and re-check. A busy pane is a running
+/// turn (the trigger landed, the turn is just slow) and is left alone.
+fn verify_auto_trigger_submitted(
+    shared: &SupervisorShared,
+    pane_id: &str,
+    submitted_text: &str,
+    harness_cfg: &agent_doc_harness::HarnessConfig,
+    cycle_baseline: Option<agent_doc_cycle_state_io::CycleState>,
+) -> AutoTriggerOutcome {
+    let Some(runtime) = shared.actor_runtime.as_ref() else {
+        // No document binding to verify against; the caller's send already succeeded.
+        return AutoTriggerOutcome::Sent;
+    };
+    let file = runtime.file.clone();
+    let timeout = auto_trigger_submit_ack_timeout();
+    if auto_trigger_cycle_acknowledged(&file, cycle_baseline.as_ref(), timeout) {
+        return AutoTriggerOutcome::Sent;
+    }
+
+    let tmux = tmux_router::Tmux::default_server();
+    let mut already_resubmitted = false;
+    loop {
+        let capture = agent_doc_tmux_io::capture_pane(&tmux, pane_id).ok();
+        let facts = agent_doc_supervisor::auto_trigger::AutoTriggerSubmitFacts {
+            pane_captured: capture.is_some(),
+            trigger_pending_in_composer: capture.as_deref().is_some_and(|content| {
+                agent_doc_harness::ready_prompt_candidate(content, harness_cfg).is_some()
+                    && agent_doc_controller::dispatch::pane_composer_has_pending_trigger(
+                        content,
+                        submitted_text,
+                    )
+            }),
+            already_resubmitted,
+        };
+        match agent_doc_supervisor::auto_trigger::auto_trigger_submit_follow_up(facts) {
+            agent_doc_supervisor::auto_trigger::AutoTriggerSubmitFollowUp::Accepted => {
+                return AutoTriggerOutcome::Sent;
+            }
+            agent_doc_supervisor::auto_trigger::AutoTriggerSubmitFollowUp::FailClosed => {
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!(
+                        "auto_trigger_submit_stranded file={} pane={} harness={} resubmitted={} #restartfreshtriggerstranded note=trigger typed into composer but never submitted",
+                        file.display(),
+                        pane_id,
+                        harness_cfg.binary,
+                        already_resubmitted
+                    ),
+                );
+                eprintln!(
+                    "[agent-doc] auto-trigger for {} left the prompt unsubmitted in the {} composer on pane {}",
+                    file.display(),
+                    harness_cfg.binary,
+                    pane_id
+                );
+                return AutoTriggerOutcome::SendFailed;
+            }
+            agent_doc_supervisor::auto_trigger::AutoTriggerSubmitFollowUp::ResubmitSubmitKey => {
+                let submit_key =
+                    agent_doc_tmux_commands::tmux_submit_key_for_harness(&harness_cfg.binary);
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!(
+                        "auto_trigger_stranded_trigger_resubmit file={} pane={} harness={} submit_key={} #restartfreshtriggerstranded note=restart-fresh pane took the trigger but not the submit key; resending",
+                        file.display(),
+                        pane_id,
+                        harness_cfg.binary,
+                        submit_key
+                    ),
+                );
+                if let Err(e) = agent_doc_tmux_io::send_key_logged(
+                    &tmux,
+                    pane_id,
+                    submit_key,
+                    agent_doc_tmux_io::input_diag::InputDiagSink::new(
+                        Some(&file),
+                        agent_doc_ops_log_io::log_op,
+                    ),
+                    "supervisor.auto_trigger_stranded_resubmit",
+                ) {
+                    eprintln!(
+                        "[agent-doc] warning: failed to resend submit key to stranded pane {}: {}",
+                        pane_id, e
+                    );
+                    return AutoTriggerOutcome::SendFailed;
+                }
+                already_resubmitted = true;
+                if auto_trigger_cycle_acknowledged(&file, cycle_baseline.as_ref(), timeout) {
+                    return AutoTriggerOutcome::Sent;
+                }
+            }
+        }
+    }
 }
 
 fn spawn_auto_trigger_thread(
@@ -935,7 +1102,7 @@ fn spawn_auto_trigger_thread(
                         .suppress_stale_ctrl_d_until_prompt
                         .store(false, Ordering::Relaxed);
                     let trigger_cmd = harness.trigger_command(&file);
-                    match auto_trigger_inject_command(&shared, &stop, &trigger_cmd) {
+                    match auto_trigger_inject_command(&shared, &stop, &trigger_cmd, &harness) {
                         AutoTriggerOutcome::Sent => {
                             shared
                                 .auto_trigger_outcome
@@ -1700,9 +1867,50 @@ impl SupervisorShared {
 
     /// Update the harness identity after an in-loop `agent:` switch spawned a fresh
     /// harness, so the persisted authoritative actor record stops reading the old
-    /// harness (`#actor-harness-switch-writeback`).
+    /// harness (`#actor-harness-switch-writeback` / `#actorharnessrecordwriteback`).
+    ///
+    /// Two stores must move together, and the second one is the whole point:
+    ///   1. the in-memory identity, read by IPC `state` and the tmux submit profile;
+    ///   2. the PERSISTED authoritative actor record, read by `route`.
+    ///
+    /// Updating only (1) is what let a completed codex->claude switch keep deferring:
+    /// the record still said `codex`, and `transition_state_*` carries the stored
+    /// harness forward on every later lifecycle transition, so nothing ever corrected
+    /// it. The record write is best-effort — a failure here must not abort a restart
+    /// that already spawned the new harness — but it is logged loudly rather than
+    /// swallowed, since a silent failure reintroduces exactly this bug.
     fn set_current_harness(&self, harness_binary: &str) {
         *self.harness_binary.lock().unwrap() = harness_binary.to_string();
+        let Some(runtime) = self.actor_runtime.as_ref() else {
+            return;
+        };
+        match agent_doc_session_actor_io::set_record_harness_direct(
+            &runtime.file,
+            &runtime.session_id,
+            &runtime.pane_id,
+            harness_binary,
+        ) {
+            Ok(record) => {
+                agent_doc_ops_log_io::log_op(
+                    &runtime.file,
+                    &format!(
+                        "actor_harness_record_writeback file={} pane={} harness={} generation={}",
+                        runtime.file.display(),
+                        runtime.pane_id,
+                        record.harness,
+                        record.generation
+                    ),
+                );
+            }
+            Err(err) => {
+                eprintln!(
+                    "[session-actor] warning: failed to persist harness switch to {} for {}: {}",
+                    harness_binary,
+                    runtime.file.display(),
+                    err
+                );
+            }
+        }
     }
 
     fn capability_proof_gate(&self) -> CapabilityProofGate {
@@ -2970,12 +3178,22 @@ mod tests {
         // Operator switches `agent:` back to claude → fresh spawn writes it back.
         shared.set_current_harness("claude");
         assert_eq!(shared.current_harness(), "claude");
-        // IPC `state` (which feeds the persisted actor record) reports the switch now,
-        // not after an unrelated later reconcile.
+        // IPC `state` and the tmux submit profile see the switch immediately.
         assert_eq!(
             SupervisorInjectDeliveryState::harness_binary(&shared),
             "claude"
         );
+        // NOTE (`#actorharnessswitchcoverage`): this test covers ONLY the in-memory
+        // half. It used to claim IPC `state` "feeds the persisted actor record",
+        // which was false — nothing wrote the record, so route kept reading the old
+        // harness and deferred a switch that had already completed. This
+        // `SupervisorShared` has no `actor_runtime`, so the persisted writeback is
+        // deliberately a no-op here. The persisted half is covered by
+        // `agent-doc-session-actor-io`'s
+        // `set_record_harness_persists_switch_and_survives_later_transitions`, and
+        // end-to-end (restart → persisted record → route dispatch that does NOT
+        // defer, with a stale-record negative control) by the SimWorld scenario
+        // `route_sim_harness_switch_persists_record_so_post_restart_dispatch_does_not_defer`.
     }
     #[test]
     fn auto_trigger_thread_cancels_cleanly_before_prompt_poll() {
@@ -3007,7 +3225,12 @@ mod tests {
         let stop = AtomicBool::new(false);
 
         assert_eq!(
-            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            auto_trigger_inject_command(
+                &shared,
+                &stop,
+                "agent-doc tasks/software/tsift.md",
+                &agent_doc_harness::HarnessConfig::claude(),
+            ),
             AutoTriggerOutcome::Sent
         );
         assert_eq!(
@@ -3025,7 +3248,12 @@ mod tests {
         let stop = AtomicBool::new(false);
 
         assert_eq!(
-            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            auto_trigger_inject_command(
+                &shared,
+                &stop,
+                "agent-doc tasks/software/tsift.md",
+                &agent_doc_harness::HarnessConfig::claude(),
+            ),
             AutoTriggerOutcome::SendFailed
         );
     }
@@ -3127,7 +3355,12 @@ mod tests {
         let stop = AtomicBool::new(false);
 
         assert_eq!(
-            auto_trigger_submit_queue_command(&shared, &stop, "/clear"),
+            auto_trigger_submit_queue_command(
+                &shared,
+                &stop,
+                "/clear",
+                &agent_doc_harness::HarnessConfig::claude(),
+            ),
             AutoTriggerOutcome::Sent
         );
         assert_eq!(written.lock().unwrap().as_slice(), b"/clear\r");
@@ -3142,7 +3375,12 @@ mod tests {
         let stop = AtomicBool::new(true);
 
         assert_eq!(
-            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            auto_trigger_inject_command(
+                &shared,
+                &stop,
+                "agent-doc tasks/software/tsift.md",
+                &agent_doc_harness::HarnessConfig::claude(),
+            ),
             AutoTriggerOutcome::Cancelled
         );
         assert!(written.lock().unwrap().is_empty());
@@ -3165,6 +3403,7 @@ mod tests {
                 &shared_for_thread,
                 stop_for_thread.as_ref(),
                 "agent-doc tasks/software/tsift.md",
+                &agent_doc_harness::HarnessConfig::claude(),
             )
         });
 
@@ -3184,7 +3423,12 @@ mod tests {
         let stop = AtomicBool::new(false);
 
         assert_eq!(
-            auto_trigger_inject_command(&shared, &stop, "agent-doc tasks/software/tsift.md"),
+            auto_trigger_inject_command(
+                &shared,
+                &stop,
+                "agent-doc tasks/software/tsift.md",
+                &agent_doc_harness::HarnessConfig::claude(),
+            ),
             AutoTriggerOutcome::SendFailed
         );
     }

@@ -140,9 +140,123 @@ pub fn auto_trigger_no_prompt_action(
     }
 }
 
+/// What to do after a supervisor auto-trigger inject typed its trigger into a
+/// tmux pane (`#restartfreshtriggerstranded`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoTriggerSubmitFollowUp {
+    /// The composer cleared (or the harness already started the turn): nothing to do.
+    Accepted,
+    /// The trigger is still sitting unsubmitted in the composer. Resend the bare
+    /// harness submit key once.
+    ResubmitSubmitKey,
+    /// The trigger survived a resubmit, or the pane could not be captured. The
+    /// caller must fail closed rather than report a delivered prompt.
+    FailClosed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutoTriggerSubmitFacts {
+    /// Whether the pane capture succeeded. A failed capture is NOT evidence of
+    /// delivery — it is an unverified submit.
+    pub pane_captured: bool,
+    /// Whether the injected trigger text is still visible in the composer.
+    pub trigger_pending_in_composer: bool,
+    /// Whether the caller has already resent the submit key once for this inject.
+    pub already_resubmitted: bool,
+}
+
+/// Decide the follow-up for a supervisor auto-trigger pane inject
+/// (`#restartfreshtriggerstranded`).
+///
+/// The live failure this exists for: after a harness-switch restart spawned a
+/// fresh `claude` pane, the pane reconciled `ready` a second before the inject
+/// fired, so the submit key raced a still-initializing composer. The trigger was
+/// typed and then sat there unsubmitted — the operator-visible "the prompt was
+/// sent but not submitted". `route`'s fresh-start path already resubmits a
+/// stranded trigger (`#jbtsiftnosub2`), but a restart-fresh spawn never goes
+/// through it, so the supervisor inject needs the same guarantee at its own
+/// entry point.
+///
+/// A failed capture deliberately fails closed instead of optimistically
+/// reporting `Sent`: silently claiming delivery is exactly what stranded the
+/// operator's request.
+pub const fn auto_trigger_submit_follow_up(
+    facts: AutoTriggerSubmitFacts,
+) -> AutoTriggerSubmitFollowUp {
+    if !facts.pane_captured {
+        return AutoTriggerSubmitFollowUp::FailClosed;
+    }
+    if !facts.trigger_pending_in_composer {
+        return AutoTriggerSubmitFollowUp::Accepted;
+    }
+    if facts.already_resubmitted {
+        AutoTriggerSubmitFollowUp::FailClosed
+    } else {
+        AutoTriggerSubmitFollowUp::ResubmitSubmitKey
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stranded_auto_trigger_resubmits_once_then_fails_closed() {
+        // `#restartfreshtriggerstranded`: the live repro. The restart-fresh claude
+        // pane reconciled `ready`, the inject typed the trigger, and the submit key
+        // was swallowed by the still-initializing composer.
+        let stranded = AutoTriggerSubmitFacts {
+            pane_captured: true,
+            trigger_pending_in_composer: true,
+            already_resubmitted: false,
+        };
+        assert_eq!(
+            auto_trigger_submit_follow_up(stranded),
+            AutoTriggerSubmitFollowUp::ResubmitSubmitKey
+        );
+
+        // One resubmit only — a trigger that survives it is a real failure, and
+        // retrying forever would hammer the composer with Enter keys.
+        assert_eq!(
+            auto_trigger_submit_follow_up(AutoTriggerSubmitFacts {
+                already_resubmitted: true,
+                ..stranded
+            }),
+            AutoTriggerSubmitFollowUp::FailClosed
+        );
+    }
+
+    #[test]
+    fn cleared_composer_is_accepted_and_failed_capture_is_never_optimistic() {
+        assert_eq!(
+            auto_trigger_submit_follow_up(AutoTriggerSubmitFacts {
+                pane_captured: true,
+                trigger_pending_in_composer: false,
+                already_resubmitted: false,
+            }),
+            AutoTriggerSubmitFollowUp::Accepted
+        );
+        // A submitted turn stays accepted even on the post-resubmit re-check.
+        assert_eq!(
+            auto_trigger_submit_follow_up(AutoTriggerSubmitFacts {
+                pane_captured: true,
+                trigger_pending_in_composer: false,
+                already_resubmitted: true,
+            }),
+            AutoTriggerSubmitFollowUp::Accepted
+        );
+        // Capture failure must not be read as delivery.
+        for already_resubmitted in [false, true] {
+            assert_eq!(
+                auto_trigger_submit_follow_up(AutoTriggerSubmitFacts {
+                    pane_captured: false,
+                    trigger_pending_in_composer: false,
+                    already_resubmitted,
+                }),
+                AutoTriggerSubmitFollowUp::FailClosed
+            );
+        }
+    }
 
     #[test]
     fn auto_trigger_outcome_round_trips_stable_wire_values() {

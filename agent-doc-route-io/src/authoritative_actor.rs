@@ -241,9 +241,16 @@ pub fn load_authoritative_actor_binding(
         return Ok(None);
     }
     let expected_harness = agent_doc_harness::normalize_harness_name(&harness.binary);
-    if !record.harness.trim().is_empty()
-        && record.harness != "default"
-        && record.harness != expected_harness
+    // `#actorharnessnormcompare`: normalize BOTH sides. The record stores whatever
+    // the writer had on hand — the restart path (`start-runtime-io`) records the raw
+    // launch binary (`claude`), while `expected_harness` is always normalized
+    // (`claude-code`). Comparing raw-vs-normalized reports a harness MISMATCH for two
+    // spellings of the same harness, which is what made a completed codex->claude
+    // switch defer forever to a boundary restart that had already run.
+    let record_harness = agent_doc_harness::normalize_harness_name(&record.harness);
+    if !record_harness.trim().is_empty()
+        && record_harness != "default"
+        && record_harness != expected_harness
     {
         let runtime = query_supervisor_runtime(file, session_id);
         let effective_state = effective_authoritative_actor_state(
@@ -324,11 +331,17 @@ pub fn load_authoritative_actor_binding(
                 ),
             );
             let recovery_cmd = format!("agent-doc session restart-supervisor {}", file.display());
+            // `#actorswitchdeferbusyself`: a harness switch drives the actor busy while
+            // it respawns. Read the reason off the last transition so a self-induced
+            // busy window does not masquerade as an operator-blocked pane.
+            let restart_in_flight = agent_doc_supervisor::route_runtime::
+                actor_busy_is_self_induced_restart(&record.last_transition.reason);
             let recovery_hint =
                 defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
                     supervisor_health: runtime.health,
                     actor_state: effective_state,
                     queue_paused,
+                    restart_in_flight,
                     recovery_command: &recovery_cmd,
                 });
             anyhow::bail!(

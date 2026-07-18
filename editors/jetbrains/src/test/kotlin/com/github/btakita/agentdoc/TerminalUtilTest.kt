@@ -473,6 +473,31 @@ class TerminalUtilTest {
     }
 
     @Test
+    fun `actor-switch defer during its own restart never tells operator to interrupt`() {
+        // `#actorswitchdeferbusyself`: the live repro — operator ran JB `Restart Agent`
+        // (codex -> claude), the supervisor spawned claude, and Run Agent Doc landed
+        // inside that restart's busy window. The old message told them to interrupt
+        // and restart, i.e. to abort the restart that was completing their switch.
+        val relativePath = "tasks/agent-doc/agent-doc-bugs2.md"
+        val output = """
+            Error: authoritative actor record for $relativePath is running harness codex, but frontmatter now resolves to claude-code; deferring to boundary agent restart instead of replacing live pane. the harness restart is already in flight — the switch completes at that boundary, so wait for it and run Agent Doc again. No interrupt or forced restart is needed.
+        """.trimIndent()
+
+        val deferred = TerminalUtil.parseRunAgentDocAgentSwitchDeferred(output)
+        val message = TerminalUtil.buildRunAgentDocAgentSwitchDeferredMessage(relativePath, deferred!!)
+
+        assertEquals(TerminalUtil.RunAgentDocRouteFailureKind.AGENT_SWITCH_DEFERRED, TerminalUtil.classifyRunAgentDocRouteFailure(output))
+        assertEquals("codex", deferred.previousHarness)
+        assertEquals("claude-code", deferred.targetHarness)
+        assertTrue(deferred.restartInFlight)
+        assertFalse(deferred.forceRequired)
+        assertFalse(deferred.queuePaused)
+        assertTrue(message.contains("already in flight"))
+        assertFalse(message.contains("Interrupt and restart"))
+        assertFalse(message.contains("not at a dispatch-ready boundary"))
+    }
+
+    @Test
     fun `paused queue resume action command carries observed generation and json receipt`() {
         assertEquals(
             listOf(

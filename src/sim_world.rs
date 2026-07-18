@@ -2495,6 +2495,16 @@ enum SimCommand {
     /// frontmatter, re-resolved the harness, and respawned the new harness FRESH
     /// (`agent_restart_performed`), completing the deferred switch.
     PerformDeferredHarnessRestart,
+    /// `#actorharnessrecordwriteback`: turn OFF the persisted-record half of the
+    /// harness-switch writeback, reproducing the shipped regression where the restart
+    /// updated only the supervisor's in-memory harness identity.
+    DisableActorHarnessRecordWriteback,
+    /// `#actorharnessswitchcoverage`: a `route` dispatch landing AFTER the
+    /// harness-switch restart already completed. With the persisted record corrected
+    /// (and both sides of the comparison normalized) this must be ACCEPTED; with the
+    /// stale record it reproduces the "defers forever to a restart that already ran"
+    /// bug.
+    DispatchRouteAfterHarnessRestart,
     /// `#supdead-coldstart-fallback`: the supervisor PROCESS dies abruptly (crash /
     /// OOM / host reboot) leaving a stale socket FILE on disk. Drives the actor to
     /// `Dead` and the socket to `StaleRefused` (`connect()` → ECONNREFUSED), the
@@ -2982,6 +2992,18 @@ struct RecycleClearModel {
     /// false the idle-watch never restarts on a harness change, so the route defer
     /// would never self-heal — route must bail explicitly. Default ON.
     agent_change_restart_enabled: bool,
+    /// `#actorharnessrecordwriteback`: the harness stored on the PERSISTED
+    /// authoritative actor record — the value `route` actually reads. Deliberately
+    /// separate from `launch_harness` (the supervisor's in-memory identity), because
+    /// the live bug was exactly that the two diverged: the restart swapped the child
+    /// and updated only the in-memory half, so the record kept saying `codex` and
+    /// route deferred a switch that had already completed. `transition_state_*`
+    /// carries the stored harness forward, so nothing else corrects it.
+    persisted_actor_harness: String,
+    /// `#actorharnessrecordwriteback`: whether the restart path writes the switched
+    /// harness back to the persisted record. Always ON in production; a test can turn
+    /// it off to re-prove the original defer-forever regression.
+    actor_harness_record_writeback_enabled: bool,
 }
 
 #[derive(Debug, Default)]
@@ -3198,6 +3220,14 @@ struct Coverage {
     /// `#actorswitchdefer` Part B: route bailed EXPLICITLY because
     /// `agent_change_restart` was disabled (the defer would never self-heal).
     actor_switch_restart_disabled_bails: usize,
+    /// `#actorharnessrecordwriteback`: a completed harness-switch restart persisted
+    /// the new harness onto the authoritative actor record.
+    actor_harness_record_writebacks: usize,
+    /// `#actorharnessswitchcoverage`: a `route` dispatch AFTER a completed
+    /// harness-switch restart was accepted — no harness-mismatch defer. This is the
+    /// half that used to fail silently: the in-memory writeback test passed while
+    /// route kept deferring off the stale persisted record.
+    actor_switch_post_restart_dispatches: usize,
     /// `#supdead-coldstart-fallback`: the supervisor process was abandoned, leaving
     /// a stale socket (`Dead` lifecycle + `StaleRefused` socket).
     supervisor_deaths: usize,
@@ -3373,6 +3403,8 @@ impl Coverage {
         self.actor_switch_changes_detected += other.actor_switch_changes_detected;
         self.actor_switch_restarts_triggered += other.actor_switch_restarts_triggered;
         self.actor_switch_restarts_performed += other.actor_switch_restarts_performed;
+        self.actor_harness_record_writebacks += other.actor_harness_record_writebacks;
+        self.actor_switch_post_restart_dispatches += other.actor_switch_post_restart_dispatches;
         self.actor_switch_defer_bail_recoveries += other.actor_switch_defer_bail_recoveries;
         self.actor_switch_restart_disabled_bails += other.actor_switch_restart_disabled_bails;
         self.supervisor_deaths += other.supervisor_deaths;
@@ -4410,6 +4442,113 @@ fn route_sim_restart_drain_waits_for_dispatch_ready_prompt_before_send() {
     assert!(
         !ops_log.contains("attempt=2"),
         "a correct restart drain must never log a second dispatch_inject attempt:\n{ops_log}"
+    );
+}
+
+#[test]
+fn route_sim_harness_switch_persists_record_so_post_restart_dispatch_does_not_defer() {
+    // `#actorharnessswitchcoverage`: the live 2026-07-18 repro, end to end. ops.log
+    // showed `agent_restart_performed old_harness=codex new_harness=claude
+    // action=spawn_fresh_harness` at 04:12:09 and then, five seconds later,
+    // `route_authoritative_actor_harness_mismatch_deferred stored_harness=codex
+    // expected_harness=claude-code` — route deferring to a boundary restart that had
+    // already run.
+    //
+    // The pre-existing in-memory coverage
+    // (`set_current_harness_updates_state_backbone_harness_identity`) passed
+    // throughout, because it only asserted the getter round-trip. This scenario
+    // covers the half that actually failed: the PERSISTED record route reads.
+    //
+    // codex→claude specifically, not codex→opencode: `claude` is the harness whose
+    // raw launch binary (`claude`) differs from its normalized name (`claude-code`),
+    // so it also pins `#actorharnessnormcompare`.
+    let mut world = SimWorld::new(7_104);
+    world.apply(SimCommand::BindRouteOwner).unwrap();
+    world.apply(SimCommand::SupervisorReady).unwrap();
+
+    world
+        .apply(SimCommand::SwitchFrontmatterHarness {
+            from: "codex",
+            to: "claude",
+        })
+        .unwrap();
+    world
+        .apply(SimCommand::SupervisorHarnessSwitchTick)
+        .unwrap();
+    world
+        .apply(SimCommand::PerformDeferredHarnessRestart)
+        .unwrap();
+    assert_eq!(
+        world.coverage.actor_switch_restarts_performed, 1,
+        "the deferred codex→claude restart must complete"
+    );
+    assert_eq!(
+        world.coverage.actor_harness_record_writebacks, 1,
+        "the completed restart must persist the new harness onto the actor record"
+    );
+    // Stored NORMALIZED, so route's normalized `expected_harness` compares equal.
+    assert_eq!(world.recycle_clear.persisted_actor_harness, "claude-code");
+
+    // The dispatch that used to defer forever.
+    world
+        .apply(SimCommand::DispatchRouteAfterHarnessRestart)
+        .unwrap();
+    assert_eq!(
+        world.coverage.actor_switch_post_restart_dispatches, 1,
+        "a dispatch after the completed switch must be ACCEPTED"
+    );
+    assert_eq!(
+        world.coverage.actor_switch_route_defers, 0,
+        "route must not defer to a boundary restart that already ran"
+    );
+    let ops_log = world.ops_log.join("\n");
+    assert!(
+        ops_log.contains("actor_harness_record_writeback harness=claude-code"),
+        "ops log must record the persisted writeback:\n{ops_log}"
+    );
+    assert!(
+        !ops_log.contains("route_authoritative_actor_harness_mismatch_deferred"),
+        "no harness-mismatch defer may follow a completed restart:\n{ops_log}"
+    );
+
+    // Negative control: without the persisted writeback the record keeps saying
+    // `codex` and the exact reported symptom comes back. This is what makes the
+    // assertions above meaningful rather than vacuous.
+    let mut stale = SimWorld::new(7_105);
+    stale.apply(SimCommand::BindRouteOwner).unwrap();
+    stale.apply(SimCommand::SupervisorReady).unwrap();
+    stale
+        .apply(SimCommand::DisableActorHarnessRecordWriteback)
+        .unwrap();
+    stale
+        .apply(SimCommand::SwitchFrontmatterHarness {
+            from: "codex",
+            to: "claude",
+        })
+        .unwrap();
+    stale
+        .apply(SimCommand::SupervisorHarnessSwitchTick)
+        .unwrap();
+    stale
+        .apply(SimCommand::PerformDeferredHarnessRestart)
+        .unwrap();
+    stale
+        .apply(SimCommand::DispatchRouteAfterHarnessRestart)
+        .unwrap();
+    assert_eq!(
+        stale.coverage.actor_harness_record_writebacks, 0,
+        "the regression control must not persist the switch"
+    );
+    assert_eq!(
+        stale.coverage.actor_switch_post_restart_dispatches, 0,
+        "the stale record must block the dispatch (the reported bug)"
+    );
+    let stale_log = stale.ops_log.join("\n");
+    assert!(
+        stale_log.contains(
+            "route_authoritative_actor_harness_mismatch_deferred stored_harness=codex expected_harness=claude-code"
+        ),
+        "the control must reproduce the exact reported defer marker:\n{stale_log}"
     );
 }
 

@@ -21,6 +21,10 @@ impl SimWorld {
                 // (`resolve_agent_change_restart`). Opt out via
                 // `DisableAgentChangeRestart`.
                 agent_change_restart_enabled: true,
+                // `#actorharnessrecordwriteback`: the persisted-record half of the
+                // harness-switch writeback ships ON. Opt out via
+                // `DisableActorHarnessRecordWriteback` to re-prove the regression.
+                actor_harness_record_writeback_enabled: true,
                 ..RecycleClearModel::default()
             },
             sync: SyncProjection::default(),
@@ -570,6 +574,12 @@ impl SimWorld {
             SimCommand::PerformDeferredHarnessRestart => {
                 self.perform_deferred_harness_restart();
             }
+            SimCommand::DisableActorHarnessRecordWriteback => {
+                self.recycle_clear.actor_harness_record_writeback_enabled = false;
+            }
+            SimCommand::DispatchRouteAfterHarnessRestart => {
+                self.dispatch_route_after_harness_restart();
+            }
             SimCommand::AbandonSupervisorToDeadSocket => {
                 self.abandon_supervisor_to_dead_socket();
             }
@@ -921,6 +931,8 @@ impl SimWorld {
     fn switch_frontmatter_harness(&mut self, from: &str, to: &str) {
         self.recycle_clear.launch_harness = from.to_string();
         self.recycle_clear.frontmatter_harness = to.to_string();
+        // The persisted actor record was written when the OLD harness launched.
+        self.recycle_clear.persisted_actor_harness = from.to_string();
     }
 
     /// `#actorswitchdefer`: model a `route` dispatch (JB `Run Agent Doc`) landing
@@ -1079,6 +1091,55 @@ impl SimWorld {
         self.coverage.actor_switch_restarts_performed += 1;
         self.record_ops_proof(format!(
             "agent_restart_performed old_harness={old} new_harness={new} action=spawn_fresh_harness"
+        ));
+        // `#actorharnessrecordwriteback`: the in-memory identity above is only half
+        // the swap. Route reads the PERSISTED record, and `transition_state_*` carries
+        // its stored harness forward on every later transition — so unless the restart
+        // writes the record here, nothing ever corrects it and route defers forever to
+        // a boundary restart that already ran. Mirrors
+        // `SupervisorShared::set_current_harness` →
+        // `session_actor_io::set_record_harness_direct`, which stores the NORMALIZED
+        // name so route's normalized `expected_harness` compares equal.
+        if self.recycle_clear.actor_harness_record_writeback_enabled {
+            let normalized = agent_doc_harness::normalize_harness_name(&new);
+            self.recycle_clear.persisted_actor_harness = normalized.clone();
+            self.coverage.actor_harness_record_writebacks += 1;
+            self.record_ops_proof(format!(
+                "actor_harness_record_writeback harness={normalized} generation={}",
+                self.route.durable.generation
+            ));
+        }
+    }
+
+    /// `#actorharnessswitchcoverage`: a `route` dispatch landing AFTER the
+    /// harness-switch restart completed.
+    ///
+    /// This is the arm the live bug escaped through. The restart had already spawned
+    /// `claude`, but route compares its normalized `expected_harness` against the
+    /// PERSISTED record, so two independent defects each kept the dispatch deferring:
+    ///   1. `#actorharnessrecordwriteback` — nothing wrote the record, so it still
+    ///      said `codex`;
+    ///   2. `#actorharnessnormcompare` — the record stores the raw launch binary
+    ///      `claude` while `expected_harness` is `claude-code`, so even a written-back
+    ///      record compared unequal.
+    ///
+    /// Both sides are normalized here exactly as
+    /// `route/authoritative_actor.rs::load_authoritative_actor_binding` does.
+    fn dispatch_route_after_harness_restart(&mut self) {
+        let expected =
+            agent_doc_harness::normalize_harness_name(&self.recycle_clear.frontmatter_harness);
+        let stored =
+            agent_doc_harness::normalize_harness_name(&self.recycle_clear.persisted_actor_harness);
+        if !stored.is_empty() && stored != "default" && stored != expected {
+            self.coverage.actor_switch_route_defers += 1;
+            self.record_ops_proof(format!(
+                "route_authoritative_actor_harness_mismatch_deferred stored_harness={stored} expected_harness={expected} action=defer_to_boundary_restart recovery=agent-doc_session_restart-supervisor"
+            ));
+            return;
+        }
+        self.coverage.actor_switch_post_restart_dispatches += 1;
+        self.record_ops_proof(format!(
+            "route_dispatch_accepted stored_harness={stored} expected_harness={expected} action=dispatch"
         ));
     }
 

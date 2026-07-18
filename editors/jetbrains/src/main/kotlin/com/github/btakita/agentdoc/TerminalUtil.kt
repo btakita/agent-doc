@@ -228,6 +228,12 @@ object TerminalUtil {
         val queuePaused: Boolean,
         val forceRequired: Boolean,
         val supervisorUnavailable: Boolean,
+        /**
+         * The supervisor is already restarting to complete this switch
+         * (`#actorswitchdeferbusyself`). The operator must NOT be told to interrupt
+         * or force — that would abort the restart that is finishing their switch.
+         */
+        val restartInFlight: Boolean = false,
     )
 
     internal enum class RunAgentDocRouteFailureKind {
@@ -1763,12 +1769,17 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
     internal fun parseRunAgentDocAgentSwitchDeferred(output: String): RunAgentDocAgentSwitchDeferred? {
         val match = ROUTE_AGENT_SWITCH_DEFERRED_REGEX.find(output) ?: return null
         val lower = output.lowercase()
-        val forceRequired = lower.contains("restart-supervisor") && lower.contains("--force")
+        val restartInFlight = lower.contains("harness restart is already in flight")
+        // `#actorswitchdeferbusyself`: an in-flight restart never asks for `--force`,
+        // so it can never be reported as force-required.
+        val forceRequired =
+            !restartInFlight && lower.contains("restart-supervisor") && lower.contains("--force")
         return RunAgentDocAgentSwitchDeferred(
             previousHarness = match.groupValues.getOrNull(2).orEmpty(),
             targetHarness = match.groupValues.getOrNull(3).orEmpty(),
             queuePaused = lower.contains("queue is paused"),
             forceRequired = forceRequired,
+            restartInFlight = restartInFlight,
             supervisorUnavailable = lower.contains("supervisor is unreachable") ||
                 lower.contains("supervisor is unhealthy") ||
                 lower.contains("supervisor is paused"),
@@ -2084,6 +2095,9 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
             deferred.queuePaused -> {
                 append("The queue is paused, so the boundary restart will not fire. Restart Supervisor and resume the queue, then run Agent Doc again.")
             }
+            deferred.restartInFlight -> {
+                append("The harness restart is already in flight and completes the switch at the next boundary. Wait for it, then run Agent Doc again — do not interrupt or force a restart.")
+            }
             deferred.forceRequired -> {
                 append("The pane is not at a dispatch-ready boundary. Use Interrupt and restart to force the harness switch.")
             }
@@ -2263,6 +2277,10 @@ private fun isDispatchOnlyActiveTurnBlocked(output: String): Boolean {
                         restartSupervisorAndResumePausedQueue(project, file)
                     })
                 }
+                // `#actorswitchdeferbusyself`: the restart completing this switch is
+                // already running. Offer no restart action at all — every restart
+                // action here would abort the switch the operator asked for.
+                deferred.restartInFlight -> {}
                 deferred.forceRequired -> {
                     notification.addAction(NotificationAction.createSimple("Interrupt and restart") {
                         interruptAndRestartSession(project, file)

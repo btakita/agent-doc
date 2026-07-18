@@ -349,13 +349,77 @@ outside it.
 
 The WebSocket transport is `#gbdispatch2` and is deliberately unwritten rather
 than stubbed with something that looks finished.
-<!-- agent:boundary:6293975f -->
+
+### Re: bwrap vs Podman — which is actually better — opus-4-8
+
+> **Queue prompt:** Please create a github project for this service. I want to run each plugin in a separate docker container or some lightweight alternative to firewall any prompt injection risks.
+
+**Podman is the better sandbox. `bwrap` is the better fit here.** Both are true,
+and they're not in conflict — so I've made `bwrap` the default and written down
+exactly what that costs.
+
+**Why Podman wins on paper:** three things it gives you for free — a default
+seccomp profile, native cgroup limits, and an OCI image that pins the plugin's
+dependency tree.
+
+**Why that's narrower than it sounds:** rootless Podman's isolation *is* user
+namespaces + seccomp + cgroups. Same kernel primitives `bwrap` uses, just more
+turned on by default. It isn't a categorical difference, and each item is
+closable:
+
+| Podman advantage | Closable under bwrap? |
+|---|---|
+| seccomp by default | **Yes** — `bwrap --seccomp <fd>` takes a BPF filter |
+| cgroup limits | **Yes** — transient `systemd-run --user --scope` |
+| dependency pinning | **Mostly** — ship plugins as static binaries |
+
+`bwrap`'s 2 ms vs 139 ms is **not** closable in the other direction.
+
+So the deciding question is which gap you'd rather live with, and your plugin
+shape makes that easy: one-shot, no persistent state, no filesystem needs, and
+`plugin-rules` is already a static binary with no network at all. That's about
+as friendly to `bwrap` as a workload gets.
+
+**The honest caveat, and I don't want it buried:** seccomp isn't implemented
+yet. Right now a compromised plugin under `bwrap` has no network, no filesystem,
+no capabilities and no environment — but it *does* have the kernel's full
+syscall surface. That's the one real thing Podman would be giving you today.
+Queued, with the specific mechanism (bwrap has no `--seccomp-path`, so the fd
+has to be passed through `Command`).
+
+My one standing recommendation: reach for Podman for any plugin that carries a
+real dependency tree — an HTTP client, TLS, a vendor SDK. That's where
+supply-chain surface starts to dominate injection surface, and it's exactly the
+shape a hermes/Gemini plugin will have. `plugin-rules` should stay on `bwrap`.
+
+### A bug this flush-out caught
+
+Making `bwrap` the default exposed something the Podman default was hiding:
+**`env_allow` was ignored entirely on the bwrap path.** The host clears the
+child environment, so an allowlisted credential would have arrived *empty*. The
+plugin fails, that reads as "no opinion", and it silently drops out of every
+quorum — a plugin disappearing from the quorum without anyone noticing is
+precisely the failure this design can't have. Now `--clearenv` plus an explicit
+`--setenv` per allowlisted name, with tests asserting non-allowlisted vars don't
+cross the boundary.
+
+Also queued: cgroup limits for the bwrap path. `mem_limit_mb` and the pids cap
+are currently applied on the OCI paths only, so the default profile has no
+ceiling on a runaway plugin.
+
+**21 tests, `make check` clean**, pushed to
+[btakita/brookebrodack-dispatch](https://github.com/btakita/brookebrodack-dispatch).
+The original queue ask is done: repo created, submodule registered at
+`src/brookebrodack-dispatch`, per-plugin sandbox isolation implemented — with
+the caveat from my last response still standing, that the sandbox is one of
+three defences and not the one doing the most work.
+<!-- agent:boundary:9fc544f7 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- 📌 Please create a github project for this service. I want to run each plugin in a separate docker container or some lightweight alternative to firewall any prompt injection risks.
+- ~~📌 Please create a github project for this service. I want to run each plugin in a separate docker container or some lightweight alternative to firewall any prompt injection risks.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Notes
@@ -370,7 +434,7 @@ than stubbed with something that looks finished.
 - [ ] [#p0rw] Write the allowlisting egress proxy for dispatch_plugin_egress — model plugins are routed to it by sandbox_argv but it does not exist yet, so a model plugin currently has no working network path (~50-line CONNECT proxy, allowlist generativelanguage.googleapis.com)
 - [ ] [#k0ye] #gbdispatch2: Durable Object + WebSocket transport + auth for brookebrodack-dispatch — the sandbox/aggregation half is done and pushed; the edge half is unwritten
 - [ ] [#50fc] Confirm the truncated dispatch requirement — the queued prompt ends mid-sentence at "It will automatically", which leaves the plugin aggregation/automation policy (§6 of tasks/software/plan-brookebrodack-guestbook-dispatch-service.md) unspecified; blocks #gbdispatch2
-- [ ] [#wqr2] Design done: local moderation dispatch service — tasks/software/plan-brookebrodack-guestbook-dispatch-service.md (#gbdispatch1). Phases #gbdispatch2 (Durable Object + wire protocol + auth), #gbdispatch3 (local service + plugin host), #gbdispatch4 (edge integration + fail-closed), #gbdispatch5 (tests)
+- [ ] [#wqr2] Design done + scaffold shipped: local moderation dispatch service — github.com/btakita/brookebrodack-dispatch (Rust workspace, submodule at src/brookebrodack-dispatch). Plan tasks/software/plan-brookebrodack-guestbook-dispatch-service.md (#gbdispatch1 DONE). Remaining phases #gbdispatch2 (DO + wire + auth), #gbdispatch3 (plugin host), #gbdispatch4 (edge integration), #gbdispatch5 (tests)
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
 - [ ] [#cy58] Add credit/billing to the OpenAI project holding brookebrodack/guestbook/OPENAI_API_KEY — the key authenticates and is scoped correctly, but every chat-completions call returns 429 `insufficient_quota`, so moderation cannot run
 - [ ] [#gggp] Re-auth wrangler (`bunx wrangler login`) — the stored OAuth token has the right scopes and has not expired, but the API rejects it with "Invalid format for Authorization header [code: 6111]", blocking secret-put and deploy

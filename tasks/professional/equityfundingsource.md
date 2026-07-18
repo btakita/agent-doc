@@ -193,7 +193,35 @@ Binds go through the existing `tmo_unmatched_funding_bind_()` rather than a reim
 - the four new `0142` columns are queryable.
 
 **What is not done, and it's the honest gap:** nothing reads these columns yet. `tmo_unmatched_fundings_R_` doesn't select them and no route or cron calls `tmo_unmatched_fundings_reconcile_()`, so today the pass only runs from a test. The persistence layer and the safety gate are real and verified; the admin queue does not yet show the ranking. Filed as `#tmo-reconcile-binder-ui` at the top of the backlog rather than claiming the queue is pre-ranked in the UI.
-<!-- agent:boundary:a36df813 -->
+
+### Re: do [#efs-do-hibernation] — opus-4-8
+
+Shipped and pushed as `b75f92ca`. `bun run check` green: 1960 tests, build, worker build.
+
+All three room classes — `BorrowerChatRoom`, `AdminEventsRoom`, `PortalMessagesRoom` — now use `state.acceptWebSocket()` plus `webSocketMessage` / `webSocketClose` / `webSocketError` handlers instead of `server.accept()` with `addEventListener`.
+
+The part that made this more than a mechanical swap: the runtime may evict the object and construct a **fresh instance over the same state**, so anything held per-connection on the instance is gone. Two things had to move:
+
+- the socket set → `state.getWebSockets()` instead of a `Set<WebSocket>` instance field;
+- `BorrowerChatRoom`'s per-socket identity → `serializeAttachment()` instead of a `WeakMap`.
+
+Leaving either in place gives you a room that passes every warm-object test and then silently stops broadcasting once evicted — and for the chat room, throws `chat socket is not registered` on every inbound message after the first hibernation. I also had to make `broadcast_()` stop routing send failures through `close_()`, which broadcasts, since that path would now recurse.
+
+**On verification, because the green suite was misleading here.** The three pre-existing realtime tests never instantiate these classes — they assert `typeof PortalMessagesRoom === 'function'` and exercise the `notify_*` helpers. So the suite was green before and after and proved nothing about the conversion.
+
+I wrote `tests/do-hibernation.test.ts` to actually drive the rooms: a fake state that models the two things that matter (the runtime owns the socket list; `serializeAttachment` survives), and an `eviction` step that builds a new room instance over the same state exactly as the runtime does. Then I checked the tests are worth having by stashing the source changes and re-running against the old code:
+
+```
+--- old code ---   1 pass, 16 fail
+--- restored ---  17 pass,  0 fail
+```
+
+Only the "does the class expose the handlers" assertion is trivially satisfiable; the other 16 genuinely pin the regression class.
+
+Updated `docs/deploy.md` — the cost section now reads as resolved rather than pending, and the bill table drops the "up to ~$5" DO row. The open-tab scaling that made a single always-on room ~82% of the included 400,000 GB-s is gone.
+
+No new backlog items: this one is complete, and there is no follow-up it created.
+<!-- agent:boundary:475e0f68 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

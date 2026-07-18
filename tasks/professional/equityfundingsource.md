@@ -37,7 +37,44 @@ complete
 Compacted content:
 - Archived 5 response topic(s): Binding a deal to a vesting; Funding-linking items deferred (⏭️); Bi-directional lender/vesting ↔ TMO linking; 2 more
 - Prior summary/context: prior compacted content: Archived 14 response topic(s): Is a TMO lender ID absolutely necessary?; Searchable dropdown...
-<!-- agent:boundary:00be925c -->
+❯ 🚧 https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?tab=pipeline&dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=interests should have a button to reconcile each lender with TMO. #spec-test-commit-push-deploy
+
+### Re: Reconcile each lender with TMO from the deal interests tab — opus-4-8
+
+Shipped and deployed. The interests tab now has a **Reconcile with TMO** button in the tab bar, beside *Add an interested lender*.
+
+**What was actually missing.** The per-lender TMO link flow already existed on each `InterestedLenderCard` — Sync with TMO → `TmoLenderPicker` → Link. But it renders only when `needs_account` is true, so the moment a lender has an account the affordance disappears. There was no way to re-check the whole tab against TMO, and no single action covering *each* lender. That's the gap this closes.
+
+**What the button does** (one click, `data-tmo-reconcile-lenders`):
+
+1. `admin_tmo_sync_request_()` — pulls the TMO cache (`LOS.svc/GetLoanFundings`) so lender/funding accounts added in TMO since the last sync resolve. Same primitive the per-card sync and the lender-record vesting card already use, so there's one sync path, not a second one.
+2. `load_interests_({ quiet: true })` — reloads the tab.
+3. `tmo_reconcile_summary_(rows)` — reports linked/unlinked counts and points unlinked lenders at the per-card *Link TMO Account* flow.
+
+**Two things worth flagging in the implementation:**
+
+- `load_interests_` now **resolves with the fetched rows**. Reading `interests` right after the reload would have summarized the stale closure captured before `set_interests` landed — the counts would lag one click behind. The summary reads the returned rows instead.
+- **Read-side only.** No `AddLoanFunding`/`UpdateLoanFunding` — the EFS→TMO push stays behind the #dzmm/#7a4d gate. So this button cannot create a duplicate TMO funding, which keeps it clear of the #5q7z duplicate-loan class. A test asserts the function body contains no POST/PUT.
+
+Reconciled = a non-blank `lender_account` (`interest_tmo_linked_`, mirroring `vesting_linked_`). Whitespace-only does not count — a funding keyed to blanks reaches no TMO account. An empty tab reports a warning, never a false all-clear.
+
+**Verification**
+
+| Gate | Result |
+|---|---|
+| `tests/deal-tmo-reconcile.test.ts` | 10 pass (6 pure-unit on the summary, 4 source-assertion on the wiring) |
+| `make check` | **1670 pass / 0 fail**, 160 files, exit 0 |
+| Deploy | version `b4d105a0-bbb2-43e5-bd24-1227bb733977` |
+| Live bundle grep | `data-tmo-reconcile-lenders`, `Reconcile with TMO`, `Lenders reconciled with TMO` all present in the bundle fetched from workers.dev |
+
+The unit tests caught two grammar bugs in my own toast copy ("All 1 interested lender **are** linked", "1 lender still **need**") before they shipped.
+
+EFS has no CI workflow, so `make check` plus the verified live deploy are the gates here.
+
+Spec: `prds/funding-lender-linking.md` gains a `#deal-tmo-reconcile` section under the two-entry-points heading — this is the deal-centric surface the operator asked for on 2026-07-15 ("sync a lender with TMO from the lender record **and from a deal**"). Commit `2be39f3`, pushed.
+
+**One follow-up queued (#deal-tmo-reconcile-vesting).** The reconcile counts the single-valued `users.lender_account` the card already displays — not `lender_vestings.tmo_lender_account`, which #lender-vesting-tmo added. Since TMO models one account *per vesting* (Mark Leonard = MARKDBPP / MARKL / MARKPERSON / MARKROTHIR), a lender whose vesting is linked but whose `users.lender_account` is blank will read as unlinked. That's the correct next increment once the deal↔vesting binding is the selectable unit end-to-end; changing it now would have gotten ahead of that migration.
+<!-- agent:boundary:116bb93a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -64,6 +101,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#deal-tmo-reconcile-vesting] [recommended] Count vesting-level TMO linkage in the deal interests reconcile: #deal-tmo-reconcile summarizes the single-valued users.lender_account the card already displays, not lender_vestings.tmo_lender_account (added by #lender-vesting-tmo). TMO models one lender ACCOUNT PER VESTING, so a lender whose vesting is linked but whose users.lender_account is blank reads as unlinked. Switch interest_tmo_linked_/tmo_reconcile_summary_ to vesting-level linkage once the deal<->vesting binding is the selectable unit end-to-end. Spec: src/equityfundingsource-dev/prds/funding-lender-linking.md (#deal-tmo-reconcile follow-up).
 <!-- /agent:backlog -->
 
 ## Review

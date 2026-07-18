@@ -73,19 +73,52 @@ Two things worth knowing about `DeleteLoan`, both now in the doc:
 **Question before I run it:** `--apply` permanently deletes those 16 loans with no TMO-side undo, and your note says you are in TMO tonight after 20:30 for the sync work. Do you want them gone now, or would you rather look at the sandbox first? Queued as `#tmo-sandbox-purge-apply`; one command when you say go.
 
 On the other queue head — `#tmo-prod-seat-not-provisioned` is operator-gated (April has to confirm which account/serial the new seat landed on and provision `app.themortgageoffice.com`). Nothing I can drain there.
-<!-- agent:boundary:5b22d7fc -->
+
+### Re: vestings, fundings, and the reconciliation process — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#tmo-prod-seat-not-provisioned]: I was not able to login to the live system. I don't need to though. Just need api access and I believe you confirmed the live key is working.
+
+
+Agreed on the reframe, and I think it is the right call for a reason worth stating: tombstoning the orphan cache rows throws away the only realistic reconciliation corpus EFS has. Pushing them into TMO as fundings turns dead rows into a live exercise of the path that actually has to work at launch.
+
+Wrote the whole thing up as `prds/vesting-and-tmo-reconciliation.md` and shipped Phase 1 (EFS `18f06c17`, pushed).
+
+**Why vestings are the bottleneck.** TMO models one lender *account per vesting* (Mark Leonard = MARKDBPP / MARKL / MARKPERSON / MARKROTHIR); EFS models one `users` row with many `lender_vestings`. A TMO funding can only reach an EFS lender through `lender_vestings.tmo_lender_account`. So a lender with **no vesting** is unreconcilable, and a lender whose vestings carry **no TMO account** is equally unreconcilable. Both were completely silent — the lender saw a passive empty state, the admin saw nothing at all.
+
+**Phase 1, shipped:**
+
+- **`vesting_gap.ts`** — one pure derivation of the gap (`no_vestings` / `unlinked` / `partial_link` / `none`) that every surface renders from, so the lender prompt and the admin warning cannot disagree.
+- **`vesting_input.ts`** — one shared validator. The lender portal and the admin card now write vestings through the same code; previously only the portal path existed, and a second one would have drifted immediately.
+- **`#admin-add-vesting`** — `POST` / `PATCH` / `DELETE /api/admin/lenders/:id/vestings`, plus add / edit / remove in the admin Lender Vestings card. This was the real gap: most vestings arrive by phone or email during onboarding, and there was no way to record one without the lender logging in and filling out their portal profile. `DELETE` archives rather than hard-deletes, since a vesting may already carry a TMO mapping or back a funding.
+- **`#vesting-gap-banner`** — lender prompt on the portal **dashboard** (next to the requirements alert, so it is seen without navigating to Vestings) and on the Vestings page; admin warning on the Lender Vestings card, red when it blocks reconciliation, amber when it is partial.
+
+One deliberate asymmetry: the lender surfaces never mention TMO account linking. That is back-office state a lender cannot act on, so `vesting_gap_` returns lender-facing copy only for `no_vestings`. There is a test pinning that the lender components never render `admin_message`.
+
+24 new tests; full suite 1826 pass / 0 fail; `build` + `build:worker` clean.
+
+**Queued the rest as three phases** rather than one parent item:
+
+- `#tmo-orphan-as-fundings` — per-row decision over the 18 orphans: reconcile if the loan exists in TMO, `AddLoanFunding` + adopt the RecID if it does not, tombstone only pure debris with no EFS deal. Gated on the EFS→TMO push gate (`#dzmm`/`#7a4d`) — that gate is real, not me deferring.
+- `#tmo-reconcile-auto` — the automated attempt you asked for, over `tmo_unmatched_fundings`: RecID → `Account` → email, with a confidence score and recorded evidence, auto-binding above a threshold and queueing the rest with candidates pre-ranked. Per the existing PRD D4 a bind reconciles EFS *to* TMO (the TMO funding wins) and records what it overrode. The matcher will be pure, like `vesting_gap_`, so it is testable without TMO.
+- `#vesting-gap-admin-queue` — Phase 1 warns per lender on that lender's card; an admin still has to visit each one. A roster-level queue closes that, and both counts it needs (`investor_vesting_count`, `investor_vesting_linked_count`) are already in the lender-pipeline query.
+
+Also moved `#tmo-prod-seat-not-provisioned` to review — it is blocked on April confirming which account/serial the new seat landed on, which is not something I can drain, and it was holding the queue head.
+<!-- agent:boundary:66399405 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- do [#tmo-prod-seat-not-provisioned]
-- ~~do [#tmo-sandbox-orphan-loans]~~
+- ~~do [#tmo-prod-seat-not-provisioned]: I was not able to login to the live system. I don't need to though. Just need api access and I believe you confirmed the live key is working.~~
 - Instead of doing [#tmo-orphan-cache], the loans should be added as fundings into the tmo database. The admin may need to reconcile the funder/lender/vesting. We can use this to drive out the reconciliation process. We should also have an automated tool to attempt a reconciliation. We also should do work on lender portal vestings, with a banner to ask the lender to add their vestings. Also the admin should be able to add lender vestings. A lender may not have any vestings but we should have admin banners to ensure vestings are added.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-prod-seat-not-provisioned] [operator-verify] The 2026-07-17 20:19 "Welcome to The Mortgage Office" credentials are for the SANDBOX host: the email's own Login link is https://app2.themortgageoffice.com/Login, not app.themortgageoffice.com (which is what the 2026-05-15 welcome email linked). So April's "added you to the production account" has not landed as a production seat yet — app2 still offers exactly one company, Equity Funding - Sandbox. Ask April to confirm which account/serial the new seat was created on and to provision app.themortgageoffice.com access. Credentials stored at passage equityfundingsource/tmo_login_2026_07_17.
+- [ ] [#tmo-orphan-as-fundings] Replace #tmo-orphan-cache's tombstone plan per the operator directive: for each of the 18 orphan tmo_cache_entities 'loan' rows, reconcile against TMO if the loan exists, push the EFS-side funding into TMO via LOS.svc/AddLoanFunding (LOS-embed lender, PRD D1) and adopt the returned RecID if it does not, and tombstone only pure debris with no EFS deal. Gated on the EFS->TMO push gate (#dzmm/#7a4d). Phase 2 of src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
+- [ ] [#tmo-reconcile-auto] Automated reconciliation attempt over tmo_unmatched_fundings: for each unmatched TMO funding try RecID -> Account against lender_vestings.tmo_lender_account -> lender email, record confidence plus evidence, auto-bind above a threshold and queue the rest with the candidate ranking pre-computed. Per PRD D4 a bind reconciles EFS to TMO (TMO funding wins) and must record what it overrode. The matcher must be a pure function over pulled fundings + the lender/vesting roster so it is testable without TMO, mirroring vesting_gap_. Phase 3 of src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
+- [ ] [#vesting-gap-admin-queue] Roster-level vesting-gap queue: list lenders with investor_vesting_count = 0 or investor_vesting_linked_count = 0 (both counts already exist in the lender-pipeline query) with a nav count, so onboarding gaps are worked as a list instead of discovered one lender card at a time. Phase 4 of src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#tmo-orphan-cache] Prune/reconcile orphan tmo_cache_entities rows: 18 of 19 cached TMO 'loan' rows (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) do not exist in the TMO database EFS is pointed at — GetLoans returns 24 loans and only '1010' overlaps. They are EFS test debris that renders as if it were TMO data (this is where 'Lucas Huang' shows up). Add an admin prune action or a sync tombstone pass so a cached row whose source_id is absent from GetLoans is marked deleted instead of shown as a live TMO record. Note admin_tmo_loans_by_loan_number_DELETE_ does NOT cover this — it only disables EFS 'loans' rows and never touches tmo_cache_entities.
 - [ ] [#tmo-contact-enumeration] TMO exposes no borrower/business-contact enumeration API (LOS.svc/GetBorrowers and LSS.svc/GetBorrowers both 404; LSS.svc/GetLenders returns an empty list for the EFS company database), so EFS cannot answer 'who is in TMO' or resolve a contact to the RecId that DELETE /LOS.svc/DeleteBorrower/:borrowerRecId requires. Add the enumeration question to the ABS support thread (rides #k2xg), and until then wire an operator-supplied-RecId delete path rather than guessing record ids.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
@@ -99,6 +132,7 @@ On the other queue head — `#tmo-prod-seat-not-provisioned` is operator-gated (
 ## Review
 
 <!-- agent:review -->
+- [/] [#tmo-prod-seat-not-provisioned] [operator-verify] The 2026-07-17 20:19 "Welcome to The Mortgage Office" credentials are for the SANDBOX host: the email's own Login link is https://app2.themortgageoffice.com/Login, not app.themortgageoffice.com (which is what the 2026-05-15 welcome email linked). So April's "added you to the production account" has not landed as a production seat yet — app2 still offers exactly one company, Equity Funding - Sandbox. Ask April to confirm which account/serial the new seat was created on and to provision app.themortgageoffice.com access. Credentials stored at passage equityfundingsource/tmo_login_2026_07_17.
 - [/] [#mam7] Fractionalized loans (future): support up to ~10 lenders/loan with siloed per-lender info in the shared loan view. [followups: Fractionalized loans]
 - [/] [#jzqj] Bidirectional TMO conditions sync (TMO as source of truth for conditions) + LOS lender-ID / deep-link into TMO pages. (gated on the Tue TMO screen-share + API access) [followups: TMO]
 - [/] [#1067] Accreditation/suitability questionnaire: full form in the lender portal, income/net-worth options only, not a hard funding gate, admin-fillable, editable PDF + investigate DocuSign. Needs the DRE form + a DocuSign account. [followups: Accreditation]

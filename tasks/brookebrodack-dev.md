@@ -1,8 +1,11 @@
 ---
 agent_doc_session: d2691213-7160-4943-9751-c954341df959
-tmux_session: '0'
+agent: claude
 agent_doc_format: template
 agent_doc_write: crdt
+claude_args: --dangerously-skip-permissions
+codex_args: -s danger-full-access
+agent_doc_model_tier: high
 ---
 
 # brookebrodack-dev — Session Summary
@@ -80,8 +83,15 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 - [x] 23 automated tests
 - [x] CI yalc→npm fallback for GitHub Actions
 - [ ] `ANTHROPIC_API_KEY` GitHub secret (optional, for CI post generation)
+- [x] Guestbook rebuilt: page + admin dashboard + Pages Functions API on D1
+- [x] Hold-for-approval moderation; existing entries approved
+- [x] Deploy guards: content-asserting smoke test + guestbook API check
+- [ ] Set `GUESTBOOK_ADMIN_PASSWORD` / `GUESTBOOK_ADMIN_SECRET` Pages secrets
+- [ ] Deploy the guestbook (nothing committed or deployed yet)
+- [ ] Valid `ANTHROPIC_API_KEY` — moderation script's model call is untested
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
 
+<!-- agent:boundary:d4b98dcf -->
 <!-- /agent:exchange -->

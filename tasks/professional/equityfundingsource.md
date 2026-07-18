@@ -116,7 +116,31 @@ On your note about the seat — you are right that the portal login is not the b
 That is worth sitting with, because it cuts both ways: nothing but a header string separates a sandbox call from a production one. It is exactly why `bin/tmo-sandbox-purge.ts` refuses `--apply` unless the `Database` value contains `Sandbox` — a fat-fingered header on a delete pass would otherwise hit live records with no undo.
 
 I re-gated `#tmo-prod-seat-not-provisioned` to review rather than closing it. The portal seat still matters for anything you or April need to do by hand in the TMO UI on the production company, and it was blocking the queue head where it was.
-<!-- agent:boundary:075cd214 -->
+
+### Re: do [#tmo-orphan-as-fundings] — opus-4-8
+
+Planner shipped (EFS `9908ed1c`, pushed). `lib/tmo-api/orphan_reconcile.ts` takes the three sides — the cached rows, what TMO actually returns from `GetLoans`/`GetLoanFundings`, and what EFS has behind each row — and emits one action per row with its evidence:
+
+| Action | When |
+| --- | --- |
+| `reconcile_cache` | TMO has the loan (stale row, not an orphan), or TMO already has the funding |
+| `push_funding` | TMO has the loan, EFS has an unfunded vesting-linked funding → `AddLoanFunding` |
+| `create_loan_then_funding` | TMO lacks the loan but EFS has a fundable deal → `NewLoan`, **then** `AddLoanFunding` |
+| `blocked_no_vesting` | EFS has a fundable deal but the lender has no linked vesting |
+| `tombstone` | Nothing behind the row on either side |
+
+Three things I want to flag, because they changed the shape of the thing:
+
+**`AddLoanFunding` cannot create a loan.** Your directive said add the loans as fundings, but a funding attaches to an existing TMO loan. For the 17 rows TMO does not have, it is `NewLoan` then `AddLoanFunding` — two calls, and the plan says so per row rather than failing at execution time.
+
+**The planner refuses to push a funding with no TMO lender account.** That is Phase 1's vesting gap arriving on the reconciliation side. Pushing anyway would put an unattributable funding into TMO — worse than the orphan row we started with, because now it is TMO's problem too. So the reconciliation run *surfaces* vesting gaps as `blocked_no_vesting` rather than papering over them. That is the loop you were after: the orphan corpus drives out exactly the reconciliation work that has to exist.
+
+**It never duplicates a funding TMO already has**, checked both by `tmo_funding_rec_id` and by `GetLoanFundings` — the same class of bug as `#5q7z` (approve re-sending `NewLoan` for a loan already in TMO and getting `Duplicate loan number`).
+
+12 tests; full suite 1838 pass / 0 fail; builds clean.
+
+Gated the parent and queued `#tmo-orphan-reconcile-exec` for the executor. To be precise about what is actually blocked: `reconcile_cache` and `tombstone` are EFS-local and not gated at all, and **sandbox execution of the writes is not gated either** — only production writes ride `#dzmm`/`#7a4d`. So the next cycle can run this end-to-end in the sandbox against the clean slate `bin/tmo-sandbox-purge.ts` leaves, which is the right place to prove it before anything touches live.
+<!-- agent:boundary:257cec95 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

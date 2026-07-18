@@ -50,7 +50,42 @@ Two things worth your attention when you next steer this doc:
 
 - Top of backlog is the real actionable item: `crash_resilience::tests::log_panic_to_file_appends_without_panicking` writes to a fixed panic-log path that concurrent crate test binaries share, so it fails under `cargo test --workspace` and passes in isolation. Say the word and I'll fix it rather than leave it filed.
 - Preflight is flagging five semantic-completion candidates — `#jblocalhistverify`↔`#jblocalhistcrash` (1.892), `#kj5flive`↔`#6b5h` (1.866), `#qftlossdelta`↔`#qftlossproof` (1.863), `#gd88`↔`#restartstderrbleed` (1.792), `#qeditrace`↔`#qdedupsync` (1.777). Several of those live-proof items may already be satisfied by work archived in `agent-doc-bugs2.done.md`; a sweep would shrink the operator-verify backlog.
-<!-- agent:boundary:03c206ef -->
+
+### Re: repeated no-op invocations were a supervisor resubmit flood — opus-4-8
+
+You invoked `/agent-doc` four times against an unchanged document. Preflight returned `no_changes: true` every time. That was not you re-triggering — the supervisor was, and the cause is a defect I shipped last cycle. Fixed, tested, installed, pushed (`e6d9131dd`), supervisor recycled.
+
+**What the log showed.** Injections at 05:55:55, 05:59:07, 06:00:40, 06:02:48, each followed by:
+
+```
+auto_trigger_stranded_trigger_resubmit ... note=restart-fresh pane took the trigger but not the submit key; resending
+tmux_input_event source=supervisor.auto_trigger_stranded_resubmit key=Enter
+auto_trigger_submit_stranded ... resubmitted=true
+```
+
+The supervisor decided each trigger was typed-but-not-submitted and resent `Enter`. Every trigger had in fact been submitted — I was serving them.
+
+**Root cause.** `verify_auto_trigger_submitted` (the `#restartfreshtriggerstranded` guard from last cycle) gathers its facts with `pane_composer_has_pending_trigger`, which substring-matches the **entire pane capture**. That function's own doc comment states the assumption it rests on: *"on a brand-new fresh pane the only way the trigger literal can appear is the just-injected, not-yet-submitted draft."* True for `#jbtsiftnosub2`, which runs on a pane with empty scrollback. False for the supervisor entry point, which runs on a long-lived pane.
+
+I captured pane `%30` live. The literal appears twice, and neither is a draft:
+
+- as **consumed transcript history** — the prompt I already answered, sitting above a later `❯`;
+- inside Claude Code's **queued-input region**, above `❯ Press up to edit queued messages`. That shape means the trigger was *accepted and queued*. Resending `Enter` there submits it a second time — the guard was manufacturing the duplicates it thought it was repairing.
+
+The second half is what made it a livelock rather than a one-off: `auto_trigger_cycle_acknowledged` proves submission by watching cycle state advance, and a `no_changes` turn never advances cycle state. So a no-op turn falls through the ack check into the pane check, which then false-fires. Inject → no-op → false "stranded" → resubmit → inject.
+
+**Fix.** Switched the fact-gathering to `route_trigger_visible_in_current_draft`, which already exists and is what `route`'s direct-pane dispatch uses: it requires that **no later prompt line follows** the match, so consumed history and queued input both read as accepted. This is a reuse, not a new heuristic — the correct policy was already in `agent-doc-controller`; the guard I added simply reached for the wrong helper.
+
+**Coverage.** Four tests in `agent-doc-controller/src/dispatch.rs`, built from the real capture: the scrollback-echo shape, the queued-message shape, a test pinning that the whole-capture matcher *does* false-fire on the same input (so the scope limit has a stated reason and can't be quietly undone), and a negative control asserting a genuinely stranded draft is still detected — without that control, a verifier that never reports stranded would pass the first three and silently regress `#restartfreshtriggerstranded` back to the bug you originally reported.
+
+Also documented the scope limit on `pane_composer_has_pending_trigger` so the next caller doesn't repeat this.
+
+**Verification.** `make check` green (clippy + full suite + TLC). `make install-full` clean, `agent-doc admin recycle` requested a supervisor replacement (receipt 156), so the next idle tick runs the fixed binary.
+
+One honest gap: this was diagnosed and fixed from log and capture evidence, not from watching a fresh flood stop. Filed `#autotriggerscrollbackechoverify` as the live proof — it needs an idle-watch cycle on the recycled supervisor showing no `auto_trigger_*_stranded` markers for a consumed trigger.
+
+Unrelated and still open: the top backlog item, `crash_resilience::tests::log_panic_to_file_appends_without_panicking`, which shares a fixed panic-log path across concurrent test binaries and so fails under `cargo test --workspace` while passing in isolation.
+<!-- agent:boundary:d7a68b98 -->
 <!-- /agent:exchange -->
 ## Queue
 

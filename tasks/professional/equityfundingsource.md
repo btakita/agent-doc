@@ -105,7 +105,39 @@ Three notes for you, not her.
 **One thing I could not confirm.** Cloudflare's own docs do not state whether activating R2 requires a card on file even for the free 10 GB tier. Community reports consistently say yes, and the billing docs describe card preauthorization, so I told her to have one ready rather than have that surface as a surprise mid-setup. Everything else above is from the official docs — signup takes no payment method, D1 is free-plan included, and SQLite-backed Durable Objects (what EFS uses) have been on the free Workers plan since April 2025, so the platform itself costs nothing to stand up.
 
 Once she has done this and you have accepted the invite, `#efs-cf-account-custody` is unblocked: create the D1 database and R2 buckets in the new account, update the ids under `[env.production]`, migrate the data, re-push the secrets, and then point DNS at it. Doing custody before `#efs-prod-seed` means moving the data once instead of twice.
-<!-- agent:boundary:4ef6aeba -->
+❯ 🚧 Will the $5/month account be sufficient for EFS? Please write the CF instructions in a markdown file.
+
+### Re: Is $5/month enough, and the CF instructions as a file — opus-4-8
+
+Both done — commit `7194c8f8`. Judith's guide is `src/equityfundingsource-dev/docs/cloudflare-account-setup.md`; the cost analysis is `docs/deploy.md` § "C — What this costs".
+
+**Yes, $5/month covers EFS — with one caveat that is worth two minutes of your attention.**
+
+I measured the live staging environment against the included allowances rather than guessing at the scale:
+
+| Resource | Actual | Included in $5 | Headroom |
+|---|---|---|---|
+| D1 storage | 2.55 MB | 5 GB | ~2,000× |
+| D1 rows read | 1.54 M/day | 25 B/month | ~540× |
+| D1 rows written | 2,372/day | 50 M/month | ~700× |
+| R2 storage (3 buckets) | ~17 MB | 10 GB | ~600× |
+
+Two to three orders of magnitude of headroom on everything. Static asset requests, R2 egress, the rate limiters, cron, and the custom domain are all free and unmetered.
+
+**The free plan is not an option**, and not for a reason that goes away with low traffic. Cloudflare Email Sending is simply unavailable on Free — EFS sends application-lead, contact, invite, secure-message, and login-link mail, so that alone decides it. Separately, Free caps CPU at 10 ms per request, which is a poor fit for server-rendering pages (`/` is ~73 KB of HTML). Worth noting too: D1 rows-read is already at 31% of the *free* daily cap with essentially no real users on the system.
+
+**The caveat.** Durable Object duration bills wall-clock time the object is *active*, not CPU time. All three of your WebSocket room classes — `BorrowerChatRoom`, `AdminEventsRoom`, `PortalMessagesRoom` — call `server.accept()`, the non-hibernating API, and none sets an idle alarm (`lib/messages/realtime.ts:35`, `lib/borrower/messages/realtime.ts:76`, `lib/admin/events/realtime.ts:50`). So an open browser tab pins its room and accrues billing for as long as the socket is held, whether or not anyone is typing.
+
+The consequence is that this line item scales with **concurrent open tabs**, not with business volume — the wrong axis. A single always-on room is about 328,500 GB-s against the 400,000 GB-s included, so one of them eats 82% of the monthly allowance by itself. Ten rooms open eight hours a day, twenty-two days a month, lands around $10 rather than $5.
+
+That is not a launch blocker and not a large number, but the fix is cheap and removes the scaling problem entirely: switch the three classes to the WebSocket Hibernation API (`state.acceptWebSocket()` plus `webSocketMessage`/`webSocketClose` handlers). Cloudflare does not bill duration while a hibernatable socket sits idle. Queued as `#efs-do-hibernation` — say the word and I will do it.
+
+So: **$5/month today, $5–10 in a busy month until hibernation lands, and $5 flat after.** Watch email volume as you grow — 3,000/month included, then $0.35 per 1,000, and per-event notifications creep up faster than you would expect. Mail to verified destination addresses in your own account is free and does not count against that quota.
+
+One more thing for launch week: new accounts start with a conservative, undocumented daily email quota that scales with sending reputation. If day one needs volume, ask support to raise it *before* the cutover rather than discovering the ceiling live.
+
+**On the instructions file** — I kept Judith's copy deliberately short and free of anything she does not need. Five steps, no jargon, an explicit "do not touch DNS," and a note that she will not be asked for a card during her part. The one thing I made unmissable is that email verification has to happen before she invites you: Cloudflare blocks both the member invite and 2FA until the address is verified, so running the steps back to back without clicking the link just fails confusingly.
+<!-- agent:boundary:5e77cac6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -136,6 +168,7 @@ We have not cut over the DNS today. The current CF environment will be staging. 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'.
 - [ ] [#efs-prod-seed] [operator-verify] Decide whether the production Cloudflare environment should be seeded from staging before launch. Production D1 (equityfundingsource-production) is schema-complete and empty; staging holds 33 users / 7 loans / 7 deals. If that is real business data it must be exported+imported once, immediately before cutover (a second import collides on primary keys), and R2_DOCUMENTS must be copied separately or uploaded documents 404 in production despite their D1 rows existing. Recipe: src/equityfundingsource-dev/docs/deploy.md 'Seeding production from staging'. Blocked on the operator confirming real-vs-test data. See #efs-cf-account-custody — if custody moves first, seed once after the move.
 - [ ] [#efs-cf-account-custody] [operator-verify] Move EFS to its own Cloudflare account. Both environments currently live in Brian's personal account (1e7e194ff8da4ad9e40ce041aea84f76), which also hosts unrelated projects. STEP 1 (Judith, instructions drafted 2026-07-18): sign up at dash.cloudflare.com/sign-up with a SHARED EFS address (becomes billing + recovery contact), verify the email (hard prerequisite — invites and 2FA both fail without it), invite Brian as Super Administrator via Manage Account -> Members -> Invite, enable 2FA, have a company card ready for the R2 checkout. Super Administrator is required, not just Workers Platform Admin, because R2 activation is a purchase and the deploy pipeline needs an account-owned API token. STEP 2 (Brian): D1 databases and R2 buckets cannot move between accounts — create them in the new account, update the ids under [env.production] in wrangler.toml, export+import D1, copy R2, re-push secrets (per-account AND per-environment), then repoint DNS. Sequencing: do this before #efs-prod-seed to migrate the data once instead of twice. Advances #efs-dns-cutover.
 - [ ] [#efs-prod-secret-parity] Production is missing secrets staging has and .dev.vars cannot supply (values are only in Cloudflare and cannot be read back out): DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN gate document sync. AUTH_SECRET, ADMIN_GLOBAL_PASSWORD, CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ACCOUNT_ID are already set (2026-07-18); TMO_API_TOKEN / TMO_DATABASE are intentionally unset so production runs split (#tmo-split-launch). AWS_*/S3_BUCKET_NAME are local bin/assets-*.sh only and are NOT needed in the worker. Compare with 'bun run cf:secrets:list' vs 'bun run cf:secrets:list:production'.

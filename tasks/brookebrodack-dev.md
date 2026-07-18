@@ -111,13 +111,20 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 Compacted content:
 - Archived 8 response topic(s): GPU policy for local model plugins; #teah; a worker pool of Codex / Claude Code / opencode sessions; 5 more
 - Prior summary/context: prior compacted content: Archived 15 response topic(s): Lazily for the state layer; local moderation dispatch service...
-<!-- agent:boundary:e4a59125 -->
+
+### Re: queue strike of #gbmig3 — opus-4-8
+
+Acknowledged — the completed `~~do [#gbmig3]~~` head is removed from the queue. That was the only edit this cycle; no repo work was requested and none was performed.
+
+**Queue state:** the binary reports `queue_drainable_head_count: 0` / `queue_continuation_required: false`, so no in-session auto-loop. The remaining heads (`#fhquorum2`, `#fhoneshot`, `#gpupol`, `#gpulease`, `#rak9`, `#p0rw`, `#sbv9`, `#nd8n`, `#k0ye`, `#fhmig`, `#50fc`, `#y457`, `#j0ee`, `#2amm`) are not in-session drainable from here — the freehold items in particular belong to `tasks/software/freehold.md`, which preflight reports as foreign-owned by pane `%27` (also `%3` for equityfundingsource, `%23` for agent-doc-bugs2). Those drain in their own sessions.
+
+**Editor authority wedge (recorded, non-blocking for this response):** preflight computed the backlog→queue mirror (15 active ids) but could not persist it — `editor_attached_model_missing`, `recovery=retry_without_disk_write`. A typed `agent-doc admin reload-lib` delivered cdylib v0.35.6 to 1/1 editor endpoints and unwedged the read path (`agent-doc plan` now resolves), but the mutation path still reports the same state, so the queue text on record is the pre-maintenance text. Binary-owned replica re-registration and retained-intent replay continue asynchronously; `operator_action=none`, so I did not force-disk or repair.
+<!-- agent:boundary:be342fb3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~do [#gbmig3]~~
 - do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.
 - do [#fhoneshot]
 - do [#gpupol]

@@ -37,7 +37,7 @@ complete
 Compacted content:
 - Archived 5 response topic(s): Binding a deal to a vesting; Funding-linking items deferred (⏭️); Bi-directional lender/vesting ↔ TMO linking; 2 more
 - Prior summary/context: prior compacted content: Archived 14 response topic(s): Is a TMO lender ID absolutely necessary?; Searchable dropdown...
-❯ 🚧 https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?tab=pipeline&dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=interests should have a button to reconcile each lender with TMO. #spec-test-commit-push-deploy
+❯ https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?tab=pipeline&dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=interests should have a button to reconcile each lender with TMO. #spec-test-commit-push-deploy
 
 ### Re: Reconcile each lender with TMO from the deal interests tab — opus-4-8
 
@@ -74,7 +74,7 @@ EFS has no CI workflow, so `make check` plus the verified live deploy are the ga
 Spec: `prds/funding-lender-linking.md` gains a `#deal-tmo-reconcile` section under the two-entry-points heading — this is the deal-centric surface the operator asked for on 2026-07-15 ("sync a lender with TMO from the lender record **and from a deal**"). Commit `2be39f3`, pushed.
 
 **One follow-up queued (#deal-tmo-reconcile-vesting).** The reconcile counts the single-valued `users.lender_account` the card already displays — not `lender_vestings.tmo_lender_account`, which #lender-vesting-tmo added. Since TMO models one account *per vesting* (Mark Leonard = MARKDBPP / MARKL / MARKPERSON / MARKROTHIR), a lender whose vesting is linked but whose `users.lender_account` is blank will read as unlinked. That's the correct next increment once the deal↔vesting binding is the selectable unit end-to-end; changing it now would have gotten ahead of that migration.
-<!-- agent:boundary:116bb93a -->
+<!-- agent:boundary:90571947 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

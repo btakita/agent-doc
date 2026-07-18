@@ -4,6 +4,13 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## Unreleased
+
+_JetBrains plugin 0.2.278. No binary version bump — the release freeze stands; this ships via local install + recycle only._
+
+- **Compact Exchange (and every editor-attached write) no longer pays a fixed ~2s stall waiting for the ACK-recovery escalation (`#crdtpushdrain`).** The plugin's `requestRemoteDrain` gated *controller-published* CRDT remote events behind the speculative no-op drain backoff — a gate that exists to stop a self-driven drain spin when there is nothing to pull, and that escalates toward its 30s ceiling on an idle document. That is exactly the state a document sits in when the operator triggers Compact Exchange, so the published frontier was suppressed and nothing moved until the binary escalated to `ack_recovery_force_refresh` after `CRDT_ACK_FORCE_REFRESH_AFTER_MS` (2000ms) — the only path that called the backoff-bypassing `requestUrgentRemoteDrain`. Measured against `ops.log`: compact `wait_ms` sat at 2646–8695ms with a ~4.5s floor that did **not** scale with `update_bytes` (46KB→6007ms, 130KB→2646ms), confirming fixed overhead rather than payload cost. Every controller push now drains urgently; `request_full_state` remains exempt because it owns the text-adopt path. Controller pushes are externally rate-limited (one per ACK-replay signal interval, only while a write awaits ACK), so eager draining cannot reintroduce the no-op spin the backoff was added to prevent. The binary-side 2s escalation is retained as a backstop for older plugin builds.
+- **A successful urgent drain now resets the escalated no-op backoff counter (`#crdtpushdrain`).** `requestUrgentRemoteDrain` never cleared `consecutiveNoOpReschedules`, so even after it applied useful work the gate stayed parked at its previous (up to 30s) delay and re-suppressed the *next* controller push — compounding the stall across successive writes.
+
 ## 0.35.6
 
 - **A completed `agent:` harness switch is now persisted to the authoritative actor record (`#actorharnessrecordwriteback`).** `SupervisorShared::set_current_harness` previously updated only the in-memory identity used by the tmux submit profile; nothing wrote the record `route` reads, and `transition_state_*` carries the stored harness forward on every later lifecycle transition. A codex→claude switch therefore left the record reading `codex` forever, so `Run Agent Doc` kept deferring to a boundary restart that had already run. The supervisor now also writes the switched harness through `agent_doc_session_actor_io::set_record_harness_direct`, preserving pane/generation/state.

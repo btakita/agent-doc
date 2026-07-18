@@ -1081,11 +1081,26 @@ publication without file-IPC fallback;
   timing window retains its full target
 as a Lazily deferred-write intent, returns promptly, and does not project to
 disk; the central stale-recycle operation emits an
-`ack_recovery_force_refresh` event for every turn-stage caller, editor
-ACK recovery bypasses only the background no-op drain timer for a targeted pull
-on the existing replica, editor reload/controller-replacement handlers rebuild
+`ack_recovery_force_refresh` event for every turn-stage caller, every
+controller-published CRDT remote event bypasses the background no-op drain
+backoff for a targeted pull on the existing replica, editor
+reload/controller-replacement handlers rebuild
 cached open-document forwarders, and later replica bootstrap/publication
 restores and proves that target;
+- `#crdtpushdrain`: the editor's no-op drain backoff gates only *speculative*
+  polling (file-watcher, editor-event, and self-rescheduled drains that have no
+  evidence of pending work). A controller-published CRDT remote event is positive
+  evidence that the CPC already holds a frontier, so it must drain urgently
+  instead of being suppressed. Suppressing it stalled every write on an idle
+  document — where the backoff has escalated toward its 30s ceiling — until the
+  binary escalated to `ack_recovery_force_refresh`, costing a fixed ~2s on the
+  Compact Exchange and finalize hot paths. Controller pushes are externally rate
+  limited (one per ACK-replay signal interval, only while a write awaits ACK), so
+  draining them eagerly cannot reintroduce the no-op spin the backoff exists to
+  prevent. A urgent drain that applies useful work also resets the escalated
+  backoff counter, so the next push is not re-suppressed by a stale gate. The
+  binary-side `ack_recovery_force_refresh` escalation remains as a backstop for
+  older plugin builds;
 - response-cell retry materialization normalizes transient ` (HEAD)` and
   boundary annotations, and a latest complete response supersedes only
   uncommitted assistant-response nodes after the last unchanged committed

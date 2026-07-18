@@ -193,7 +193,7 @@ class RefreshBeforeApplyConflictTest {
             "CRDT event protocol states must be parsed into an enum instead of compared as free text",
             patchWatcher.contains("enum class CrdtReplicaEventReason") &&
                 patchWatcher.contains("CrdtReplicaEventReason.fromToken") &&
-                patchWatcher.contains("CrdtReplicaEventReason.AckRecoveryForceRefresh"),
+                patchWatcher.contains("CrdtReplicaEventReason.RequestFullState"),
         )
         assertFalse("layout detector must not run a fallback polling thread", layoutDetector.contains("startFallbackPoll"))
         assertFalse("layout detector must not define a polling interval", layoutDetector.contains("POLL_INTERVAL_MS"))

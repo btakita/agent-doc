@@ -445,18 +445,25 @@ class PatchWatcher(private val project: Project) : Disposable {
                 val file = extractStringField(json, "file") ?: return APPLY_FAILED
                 val editorId = extractStringField(json, "editor_id")
                 if (!targetsThisEditorId(editorId)) return APPLY_FAILED
-                when (CrdtReplicaEventReason.fromToken(extractStringField(json, "reason"))) {
+                val reasonToken = extractStringField(json, "reason")
+                when (CrdtReplicaEventReason.fromToken(reasonToken)) {
                     CrdtReplicaEventReason.RequestFullState ->
                         CrdtReplicaManager.requestTextAdopt(project, file)
-                    CrdtReplicaEventReason.AckRecoveryForceRefresh ->
-                        CrdtReplicaManager.requestUrgentRemoteDrain(
-                            project,
-                            file,
-                            "delivery-ack-recovery",
-                        )
                     else -> Unit
                 }
-                CrdtReplicaManager.requestRemoteDrain(project, file, "crdt-remote")
+                // #crdtpushdrain: every controller-published frontier drains urgently.
+                // Only `request_full_state` (handled above by the text-adopt path) is
+                // exempt. The urgent path falls back to the gated drain when it finds
+                // no work, so the no-op backoff still governs speculative polling.
+                if (shouldUrgentDrainForRemoteEventUtil(reasonToken)) {
+                    CrdtReplicaManager.requestUrgentRemoteDrain(
+                        project,
+                        file,
+                        "crdt-remote-${reasonToken ?: "event"}",
+                    )
+                } else {
+                    CrdtReplicaManager.requestRemoteDrain(project, file, "crdt-remote")
+                }
                 recordDocumentActivity(file, "socket-crdt-remote")
                 APPLY_APPLIED
             }

@@ -49,19 +49,63 @@ class CrdtReplicaAckFrontierTest {
         assertTrue(shouldStartRemoteDrainUtil(backoffScheduled = false))
     }
 
+    /**
+     * #crdtpushdrain: a controller-published frontier is positive evidence of pending
+     * work, so it must drain urgently rather than sit behind the speculative no-op
+     * backoff. Only `request_full_state` is exempt — it owns the text-adopt path.
+     */
     @Test
-    fun `ack recovery urgently drains retained delivery without replacing editor authority`() {
+    fun `controller published crdt frontiers bypass the speculative no-op drain backoff`() {
+        assertTrue(shouldUrgentDrainForRemoteEventUtil("cpc_write"))
+        assertTrue(shouldUrgentDrainForRemoteEventUtil("ack_replay"))
+        assertTrue(shouldUrgentDrainForRemoteEventUtil("ack_recovery_force_refresh"))
+        assertTrue(shouldUrgentDrainForRemoteEventUtil("fanout"))
+        assertTrue(shouldUrgentDrainForRemoteEventUtil("response_cell_add"))
+        assertTrue(shouldUrgentDrainForRemoteEventUtil("rebootstrap"))
+        assertTrue(shouldUrgentDrainForRemoteEventUtil(null))
+        assertFalse(shouldUrgentDrainForRemoteEventUtil("request_full_state"))
+    }
+
+    @Test
+    fun `crdt remote delivery urgently drains without replacing editor authority`() {
         val watcherPath = listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
         ).first { Files.exists(it) }
         val watcher = Files.readString(watcherPath)
-        val recoveryBranch = watcher
-            .substringAfter("CrdtReplicaEventReason.AckRecoveryForceRefresh ->")
-            .substringBefore("else -> Unit")
+        val deliveryBranch = watcher
+            .substringAfter("EditorIntent.DeliverCrdtRemote.token ->")
+            .substringBefore("EditorIntent.RefreshVcs.token ->")
 
-        assertTrue(recoveryBranch.contains("CrdtReplicaManager.requestUrgentRemoteDrain("))
-        assertFalse(recoveryBranch.contains("forceRefreshOpenDocumentReplica("))
+        assertTrue(
+            "controller pushes must route through the backoff-bypassing urgent drain",
+            deliveryBranch.contains("shouldUrgentDrainForRemoteEventUtil(reasonToken)") &&
+                deliveryBranch.contains("CrdtReplicaManager.requestUrgentRemoteDrain("),
+        )
+        assertFalse(deliveryBranch.contains("forceRefreshOpenDocumentReplica("))
+    }
+
+    /**
+     * #crdtpushdrain: a successful urgent drain proves the document is live again, so
+     * the escalated no-op backoff must be reset. Leaving it parked at its previous
+     * (up to 30s) delay re-suppresses the *next* controller push.
+     */
+    @Test
+    fun `useful urgent drain work resets the escalated no-op backoff`() {
+        val managerPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val manager = Files.readString(managerPath)
+        val urgentBody = manager
+            .substringAfter("fun requestUrgentRemoteDrain(")
+            .substringBefore("fun requestTextAdopt(")
+
+        assertTrue(
+            "a useful urgent drain must clear the escalated no-op backoff counter",
+            urgentBody.contains("applied > 0") &&
+                urgentBody.contains("consecutiveNoOpReschedules.set(0)"),
+        )
     }
 
     @Test

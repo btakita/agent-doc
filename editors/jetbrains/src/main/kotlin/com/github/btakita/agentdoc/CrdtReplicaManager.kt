@@ -88,6 +88,26 @@ internal fun shouldPullRemoteDeliveryAfterAckReplayUtil(pendingAckCount: Int): B
  * and hammer the controller with the same rejected ACK. */
 internal fun shouldStartRemoteDrainUtil(backoffScheduled: Boolean): Boolean = !backoffScheduled
 
+/**
+ * `#crdtpushdrain`: a controller-published CRDT remote event is positive evidence
+ * that the CPC already holds a frontier for this document, so it must bypass the
+ * speculative no-op drain backoff instead of being suppressed by it.
+ *
+ * The no-op backoff (see [scheduleRemoteDrainAfterBackoff]) exists to stop a
+ * *self-driven* drain spin when there is nothing to pull; on an idle document it
+ * climbs to [CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS]. That is exactly the state a
+ * document sits in when the operator triggers Compact Exchange, so gating the
+ * push event behind it stalled every compact/finalize until the binary escalated
+ * to `ack_recovery_force_refresh` after `CRDT_ACK_FORCE_REFRESH_AFTER_MS` — a fixed
+ * ~2s toll on the hot path. Controller pushes are externally rate-limited (one per
+ * `CRDT_ACK_REPLAY_SIGNAL_INTERVAL_MS`, only while a write awaits ACK), so draining
+ * them eagerly cannot reintroduce the spin.
+ *
+ * `request_full_state` is excluded because it owns the separate text-adopt path.
+ */
+internal fun shouldUrgentDrainForRemoteEventUtil(reasonToken: String?): Boolean =
+    reasonToken != "request_full_state"
+
 @Suppress("UNUSED_PARAMETER")
 internal fun shouldAcknowledgeVisibleRemoteDeliveryUtil(
     editorText: String?,
@@ -562,6 +582,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 )
                 if (applied == 0 && !disposed.get()) {
                     requestRemoteDrain(filePath, "$reason-follow-up")
+                } else if (applied > 0) {
+                    // #crdtpushdrain: useful work proves the document is live again,
+                    // so the escalated no-op backoff is stale. Without this reset the
+                    // gate stays parked at its previous (up to 30s) delay and the
+                    // *next* controller push is suppressed all over again.
+                    consecutiveNoOpReschedules.set(0)
                 }
             }
         }

@@ -197,7 +197,21 @@ Fixed the root cause. Context was cleared, but agent-doc had in fact remembered:
 **What is NOT fixed.** `tasks/brookebrodack-dev.md` now reports `go-mode active queue` where it previously went inactive, but `queue_maintenance_not_persisted` still fires: `editor_attached_model_missing`, disk correctly not read as fallback. That is the separate `#5d9f` editor-authority defect, not this one. I did not force-disk or otherwise bypass it — the binary is failing closed correctly, and the newly installed plugin build needs an IDE restart to take effect. Filed as an `[operator-verify]` item.
 
 One scope note: `start` (supervisor drain) vs `go` (in-session loop) is a deliberate distinction. My first test asserted the wrong scope; I corrected the test to the design rather than widening the design to the test.
-<!-- agent:boundary:c5ceeb83 -->
+
+### Re: continuing — two more links in the `#qstartinert` chain — opus-4-8
+
+Continued from the queue-arming fix. The chain had three links, not one; all three were the same defect wearing different clothes.
+
+**Link 3 (fixed, `fd782413f`).** `active_queue_for_supervisor_start` hard-gated on `fm.queue_active != Some(true)` before even looking at the explicit control. Same contradiction as link 2: `control_binding` made `queue:` canonical and stopped writing `queue_active`, so drainability depended on a field nothing emits anymore. This was the *live* blocker — after the first fix, brookebrodack converged to `&lt;!-- agent:queue go --&gt;` with no `queue_active` key and still reported 0 drainable heads. The explicit-control gate below it is the real authority, so `queue_active` now participates only as an explicit halt. I kept both halts and covered them: `queue_active: false` (written by the drain/clear path) and `queue: stop` — the latter is a *new* gate here, since the old flag check happened to mask it.
+
+`make check` green (real exit 0, zero `result: FAILED`), installed, pushed.
+
+**On `#5d9f` — it is intermittent, not a hard outage.** Back-to-back preflights on brookebrodack alternate FAIL/OK/FAIL/OK, and a contended run errors differently: `Lazily current authority remained delivery_pending for 3000ms`. That reads as a race against a concurrently-live editor/turn, not a dead authority. Worth noting the amplifier: on failure, queue maintenance discards the computed queue and returns `QueueState::default()` — which is precisely what zeroes `queue_drainable_head_count` and silently disarms the loop. Retrying the bounded observation would likely be a better failure mode than dropping the whole computation. Filed.
+
+**Found while digging: a stale fix branch for this exact blocker.** `fix/editor-authority-no-disk-repair` (worktree `src/agent-doc-editor-authority-fix`) has 2 unmerged commits aimed at editor authority — but it is 5 days and 50 commits behind main, and still carries the old error wording (`publish-live-buffer`, "reload or save the editor buffer") where main now says `Lazily-current observation ... operator_action=none`. Main has already reworked that area, so merging it as-is would be a regression. Filed as a decision item — rebase-and-salvage or delete — rather than acting on someone else's in-flight branch unilaterally.
+
+**What I did not do.** I stopped preflighting brookebrodack-dev.md: it is foreign-owned by pane %9, which is mid-turn on `#teah`, and my probes were contending with its session (that is what produced the `delivery_pending` deferral). The three fixes are proven by unit tests and `make check`; live end-to-end confirmation on that document stays the `[operator-verify]` item. I also did not auto-loop the `/goal complete the entire queue` head — with the queue arming path only just fixed and unverified live, drainage should start from a state you have eyes on.
+<!-- agent:boundary:60447d95 -->
 <!-- /agent:exchange -->
 ## Queue
 

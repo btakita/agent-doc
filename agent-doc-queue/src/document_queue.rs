@@ -32,7 +32,7 @@
 //! This module is I/O-free. Callers handle reading/writing files.
 
 use agent_doc_document::queue_projection::{
-    AGENT_PRIORITIZED_MARKER, AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKER, PRIORITIZED_MARKERS,
+    AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKER, PRIORITIZED_MARKERS,
     apply_in_progress_marker, strip_in_progress_marker, strip_in_progress_marker_for_display,
     strip_priority_markers,
 };
@@ -964,67 +964,6 @@ fn apply_operator_pin(text: &str) -> String {
     format!("{} {}", PRIORITIZED_MARKER, strip_priority_markers(text))
 }
 
-/// Prefix auto-promoted queue prompts with the canonical agent-priority marker.
-///
-/// Sorting by backlog priority / auto-DAG is binary-owned priority, not an
-/// operator pin. When a prompt moves earlier during that sort, annotate it with
-/// `:round_pushpin:` so the visible queue explains why it jumped. Existing
-/// operator/agent markers are preserved.
-pub fn annotate_agent_priority_promotions(
-    before: &[QueueEntry],
-    after: &[QueueEntry],
-) -> Option<Vec<QueueEntry>> {
-    let before_prompts: Vec<String> = before
-        .iter()
-        .filter_map(|entry| match entry {
-            QueueEntry::Prompt(prompt) => Some(strip_priority_markers(&prompt.text)),
-            _ => None,
-        })
-        .collect();
-    if before_prompts.is_empty() {
-        return None;
-    }
-
-    let mut used = vec![false; before_prompts.len()];
-    let mut prompt_slot = 0usize;
-    let mut changed = false;
-    let mut out = after.to_vec();
-
-    for entry in &mut out {
-        let QueueEntry::Prompt(prompt) = entry else {
-            continue;
-        };
-        let identity = strip_priority_markers(&prompt.text);
-        let original_slot =
-            before_prompts
-                .iter()
-                .enumerate()
-                .find_map(|(slot, before_identity)| {
-                    (!used[slot] && before_identity == &identity).then_some(slot)
-                });
-        if let Some(slot) = original_slot {
-            used[slot] = true;
-            if slot > prompt_slot
-                && !is_prioritized(&prompt.text)
-                && !is_agent_prioritized(&prompt.text)
-            {
-                prompt.text = format!("{} {}", AGENT_PRIORITIZED_MARKER, prompt.text.trim_start());
-                changed = true;
-            }
-        }
-        prompt_slot += 1;
-    }
-
-    changed.then_some(out)
-}
-
-/// Prefix operator-moved queue prompts with the canonical operator-priority marker.
-///
-/// A manually reordered priority queue should not be undone by the next
-/// binary-owned priority recompute. When an existing prompt appears earlier in
-/// the live queue than it did in the snapshot, annotate it with `:pushpin:` so
-/// the authored priority is sticky. New prompts and prompts that only moved
-/// later are ignored; existing operator pins are preserved.
 pub fn annotate_operator_priority_reorders(
     snapshot: &[QueueEntry],
     current: &[QueueEntry],
@@ -2784,15 +2723,6 @@ mod tests {
         assert!(queue_counts_have_deletion(&disk_counts, &live_counts));
         assert!(queue_counts_are_subset(&live_counts, &disk_counts));
         assert!(!queue_counts_are_subset(&expanded_counts, &disk_counts));
-    }
-
-    #[test]
-    fn annotate_agent_priority_promotions_marks_promoted_prompt() {
-        let before = parse("- do [#low]\n- do [#high]\n").unwrap();
-        let after = parse("- do [#high]\n- do [#low]\n").unwrap();
-        let marked =
-            annotate_agent_priority_promotions(&before, &after).expect("promotion should annotate");
-        assert_eq!(render(&marked), "- 📍 do [#high]\n- do [#low]\n");
     }
 
     #[test]

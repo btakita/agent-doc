@@ -2296,7 +2296,9 @@ mod tests {
 
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 📍 do [#blocker]\n- do [#active] after=#blocker"),
+            updated.contains("- 🚧 do [#blocker]\n- do [#active] after=#blocker"),
+            // `#pinoperatoronly`: auto-DAG expresses order by POSITION; it no
+            // longer injects an agent pin marker onto the promoted head.
             "auto-DAG must reselect the blocker as the active head:\n{updated}"
         );
         let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();

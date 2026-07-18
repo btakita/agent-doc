@@ -2827,10 +2827,14 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             .map(|s| ("backlog priority (operator pins position-locked)", s))
         });
         if let Some((how, sorted)) = sorted {
-            let sorted = agent_doc_queue::document_queue::annotate_agent_priority_promotions(
-                &entries, &sorted,
-            )
-            .unwrap_or(sorted);
+            // `#pinoperatoronly`: do NOT annotate sort promotions with the agent
+            // pin marker. Ordering is expressed by POSITION, which is already
+            // deterministic and already visible; injecting `:round_pushpin:` on
+            // every promoted head mutates operator-visible text to restate what
+            // the position says, accumulates markers across passes, and makes an
+            // agent-ordered head look pinned. A pin now means exactly one thing:
+            // the operator pinned it. Matches `#qauthorder` — holding a slot must
+            // not rewrite the line.
             let new_body = agent_doc_queue::document_queue::render(&sorted);
             current_content = {
                 let comps = agent_doc_element::element::parse(&current_content)?;
@@ -5409,7 +5413,7 @@ mod tests {
             "queue fallback must opt into the existing priority/auto-DAG path:\n{updated}"
         );
         assert!(
-            queue.contains("- 🚧 📍 do [#setup]\n- do [#ship]"),
+            queue.contains("- 🚧 do [#setup]\n- do [#ship]"),
             "auto-DAG fallback must run prerequisites before dependents:\n{updated}"
         );
         assert!(!queue.contains("/goal"), "{updated}");
@@ -7098,7 +7102,7 @@ mod tests {
         assert_eq!(result, vec!["worked".to_string()]);
     }
     #[test]
-    fn run_queue_maintenance_backlog_queue_priority_sorts_and_marks_promoted_item() {
+    fn run_queue_maintenance_backlog_queue_priority_sorts_without_marking_promoted_item() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -7127,8 +7131,11 @@ mod tests {
         assert_eq!(state.queue_active, Some(true));
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 📍 do [#fast]\n- do [#slow]"),
-            "backlog `queue priority` must sort synced queue prompts and mark the promoted item:\n{updated}"
+            updated.contains("- 🚧 do [#fast]\n- do [#slow]"),
+            // `#pinoperatoronly`: priority sorting reorders; it does not pin.
+            // A marker in the queue now means the operator put it there.
+            "backlog `queue priority` must sort synced queue prompts by position, \
+             without injecting an agent pin marker:\n{updated}"
         );
     }
 
@@ -7335,11 +7342,11 @@ mod tests {
         assert_eq!(state.queue_active, Some(true));
         assert_eq!(
             state.selected_queue_prompts,
-            vec!["📍 do [#setup]".to_string(), "do [#ship]".to_string()]
+            vec!["do [#setup]".to_string(), "do [#ship]".to_string()]
         );
         let updated = std::fs::read_to_string(&doc).unwrap();
         assert!(
-            updated.contains("- 🚧 📍 do [#setup]\n- 🚧 do [#ship]\n- do [#ops]"),
+            updated.contains("- 🚧 do [#setup]\n- 🚧 do [#ship]\n- do [#ops]"),
             "operator retarget must project the selected head and its auto-DAG prerequisite as active:\n{updated}"
         );
         assert!(updated.contains("- [ ] 🚧 [#setup] priority=1 prerequisite work"));
@@ -9098,9 +9105,10 @@ mod tests {
         let queue_region = &updated[q..qend];
         let high = queue_region.find("do [#high]").unwrap();
         let low = queue_region.find("do [#low]").unwrap();
+        // `#pinoperatoronly`: promotion is expressed by ORDER, not by a marker.
         assert!(
-            queue_region.contains("📍 do [#high]"),
-            "auto-promoted queue item should carry an agent-priority marker:\n{queue_region}"
+            !queue_region.contains("📍 do [#high]"),
+            "priority sorting must not inject an agent pin marker:\n{queue_region}"
         );
         assert!(
             high < low,

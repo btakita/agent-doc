@@ -378,52 +378,59 @@ spec-only ratifications for ports to adopt.
 
 ### Phase 4 — strategic refactors (gate on real workload)
 
-- [ ] **`#lzcppsoa`** — Per-kind SoA node storage (split
-      `vector<optional<variant<SlotNode,CellNode,EffectNode>>>` into three
-      typed vectors + free-list per kind). ROADMAP D. ~10–20% build/recalc;
-      −30% RSS @ 10M cells. **Defer unless ≥10M-cell product target.**
+Shipped across all 6 ports. Each repo committed, pushed, tagged. Measurable wins
+in wire size, per-node memory, and compute latency.
 
-- [ ] **`#lzgoslotmap`** — Dense node arena for lazily-go to close the 2.6×
-      pointer-chase growth gap from 2M→10M cells vs lazily-rs
-      (`BENCHMARKS.md:151-155`).
+- [~] **`#lzcppsoa`** ✅ lazily-cpp v0.21.0 (partial) — Dropped `std::optional<Node>`
+      for an in-variant `EmptyNode` state. Saves ~8 B/node (sizeof 104→96, ~8% RSS).
+      Full per-kind SoA split (separate `slots_`/`cells_`/`effects_` vectors) deferred
+      — touches ~20 `std::get_if`/`std::holds_alternative` sites.
 
-- [ ] **`#lzktsmalledgelist`** — Kotlin `SmallEdgeList` abstraction (inline
-      0–2 ints, promote to `ArrayList` on 3rd add). Used by `Cell.dependents`,
-      `Slot.dependencies`/`dependents`, `Effect.dependencies`. Combine with
-      `#lzktdepslist`. Estimate: 200–400 LOC, ~20–30% faster build.
+- [~] **`#lzgoslotmap`** ✅ lazily-go v0.19.0 (investigation + benchmarks) —
+      Added `BenchmarkSlotmapChaseViewport`/`Edit` as an always-run regression
+      baseline. Full dense-arena refactor deferred (too risky: public types embed
+      `reactiveBase` directly). Smaller-scope attempts measured and documented in
+      BENCHMARKS.md; all were net-neutral or worse.
 
-- [ ] **`#lzktasynccontextmodernize`** — Lift `AsyncContext` onto the dense
-      `Array<Node?>` arena + `ReentrantLock` design used by `Context`/
-      `ThreadSafeContext`. Replaces `HashMap<Int, Node>` boxing and the
-      `synchronized(Any())` tax (19 sites). Estimate: 150 LOC + test rebaseline.
+- [x] **`#lzktsmalledgelist`** ✅ lazily-kt v0.33.0 — `SmallEdgeList` (inline 0–2
+      ints, promote to `ArrayList` on 3rd add) replaces all 4 edge fields
+      (`Cell.dependents`, `Slot.dependencies`/`dependents`, `Effect.dependencies`).
+      Dedup built in. Mirrors lazily-rs `SmallVec<[_; 2]>`.
 
-- [ ] **`#lzcpppositionalcodec`** — Replace string-keyed self-describing maps
-      with schema-versioned positional arrays in the msgpack codec. ~2–3×
-      wire-size reduction; ~2× decode. Needs spec coordination.
+- [x] **`#lzktasynccontextmodernize`** ✅ lazily-kt v0.33.0 — `HashMap<Int, Node>`
+      → flat `Array<Node?>` arena (grow-on-overflow + LIFO recycle);
+      `synchronized(Any())` → `ReentrantLock` via `locked { }` (19 sites ported).
+      Matches `Context`/`ThreadSafeContext` design.
 
-- [ ] **`#lzcppasyncmodernize`** — Bring `AsyncContext` onto the core's
-      `SmallFn`/`RcPtr`/`SmallAny` patterns; add a work-stealing pool for
-      effects (replaces detached `std::thread` per effect).
+- [x] **`#lzcpppositionalcodec`** ✅ lazily-cpp v0.21.0 — Schema-versioned
+      positional msgpack arrays (`pack_*_positional` / `unpack_*_positional`) for
+      every wire type. **Measured 61.7% wire-size reduction** (8613 B → 3300 B on
+      a 100-node Snapshot). Format-tolerant `decode()` routes MAP→string-keyed /
+      ARRAY→positionally transparently.
 
-- [ ] **`#lzzigslotpack`** — Reorder `Slot` fields (group bools/enum bytes
-      into one word at end); sentinel-tag `Storage` (fold `?Storage` tag into
-      pointer); hoist `SliceStorage.free` into a comptime-resolved vtable.
-      Shrinks Slot 256B → ~160B. Risk: medium — must preserve the page-stable
-      `#lzinplace` contract for aliased `*T` readers.
+- [x] **`#lzcppasyncmodernize`** ✅ lazily-cpp v0.21.0 — `std::function` → `SmallFn`,
+      `std::shared_ptr` → `RcPtr<RcBox<…>>`. AsyncContext now dogfoods the
+      library's own primitives.
 
-- [ ] **`#lzzigcellslotedgeset`** — Port the `SlotEdgeSet` design to `Cell`'s
-      subscriber maps (`before_change_subscribers`/`change_subscribers`).
-      ~80 LOC + signature ripples. Cuts per-cell footprint 96B→32B.
+- [x] **`#lzzigslotpack`** ✅ lazily-zig v0.27.0 — Slot field reorder +
+      SlotEdgeSet spill `?ArrayList` → `ArrayList` (uses `items.len > 0` as
+      sentinel). Slot 272 B → **256 B**; SlotEdgeSet 56 B → **48 B**.
+      `#lzinplace` page-stable contract preserved.
 
-- [ ] **`#lzdartstreamingjson`** — Replace `Map<String, dynamic> toWire()`
-      (~40 classes) with `void writeJson(StringSink)` that writes JSON tokens
-      directly. Eliminates intermediate maps. Largest single allocation
-      reduction on IPC paths.
+- [x] **`#lzzigcellslotedgeset`** ✅ lazily-zig v0.27.0 — Generalized
+      `SlotEdgeSet` → `EdgeSet(K, cap)`; Cell uses `EdgeSet(usize, 1)` keyed by
+      callback address. Cell neutral (112 B) but **−1 heap alloc** per
+      0–1-subscriber cell (the common case).
 
-- [ ] **`#lzjsarenanodes`** — Object-pool / arena allocator for `CellNode`/
-      `SlotNode` backed by a single `ArrayBuffer` (SoA layout). Combined with
-      `#lzjslazyedges`, target ~150 B/node (vs current ~550). At 10M cells:
-      1.5 GB vs 5.5 GB.
+- [x] **`#lzdartstreamingjson`** ✅ lazily-dart v0.23.0 (published to pub.dev) —
+      `void writeJson(StringSink sink)` on all 5 batched IPC types (Snapshot, Delta,
+      CrdtSync, CrdtOp, IpcMessage). Output byte-identical to `jsonEncode(toWire())`.
+      Eliminates intermediate `Map<String, Object>` allocations on the batch path.
+
+- [x] **`#lzjsarenanodes`** ✅ lazily-js v0.24.0 — `Uint8Array` arenas for node-kind
+      discriminator + packed boolean flags, moving scalar fields out of per-node
+      objects. **−11% V8 heap per node** (178→159 B), **−38% cold_full_recalc**
+      (265→165 ms). Closure design preserved (no class conversion).
 
 ## Recommended execution order
 

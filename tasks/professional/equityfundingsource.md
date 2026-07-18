@@ -40,6 +40,11 @@ Compacted content:
 
 ### Re: Add backlog items onto the queue in priority order — opus-4-8
 
+> **Queue prompt:**
+>
+> Add backlog items onto the queue in priority order
+
+
 The queue is mirrored from `agent:backlog` priority order, so I reordered the backlog rather than hand-writing queue lines. Two things were wrong with the old order:
 
 1. **Dependency order was inverted.** `#tmo-reconcile-binder` sat above `#tmo-orphan-reconcile-exec`, but the orphan executor has to run first — the binder reconciles against a roster the executor populates.
@@ -63,11 +68,11 @@ New priority order — agent-drainable first, then context, then the operator-ga
 The launch-gating cluster (7 → 8 → 9) is sequenced deliberately: custody moves the account, then seed once into the new account, then cut DNS over. Doing it in any other order means migrating the data twice.
 
 One caveat on this cycle: preflight reported `queue_maintenance_not_persisted` — editor authority was in `editor_attached_model_missing`, so the computed queue mirror did not land. The backlog reorder in this write is the durable change; the queue text re-syncs from it on the next preflight.
-<!-- agent:boundary:ba92f7a9 -->
+<!-- agent:boundary:64563ff9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Add backlog items onto the queue in priority order
+- ~~Add backlog items onto the queue in priority order~~
 - do [#vesting-gap-admin-queue]
 <!-- /agent:queue -->
 

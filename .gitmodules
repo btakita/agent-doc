@@ -187,6 +187,6 @@
 [submodule "src/lazily-react"]
 	path = src/lazily-react
 	url = git@github.com:lazily-hub/lazily-react.git
-[submodule "src/brookebrodack-dispatch"]
-	path = src/brookebrodack-dispatch
-	url = git@github.com:btakita/brookebrodack-dispatch.git
+[submodule "src/freehold"]
+	path = src/freehold
+	url = git@github.com:btakita/freehold.git

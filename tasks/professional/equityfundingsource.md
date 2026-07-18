@@ -32,144 +32,15 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260718-171839.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260718-204742.md`*
 
-Compacted content: 
-- Archived 4 response topic(s): Production Cloudflare environment; Brief Cloudflare account instructions for Judith; Is $5/month enough, and the CF instructions as a file; 1 more
-- Prior summary/context: prior compacted content: Archived 3 response topic(s): Remove the single TMO lender id; map vestings to TMO lenders; ...
-❯ In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?tab=pipeline&dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=interests, please give the Reconcile with TMO a dedicated url. What TMO api endpoint the dropdown list act on?
-
-### Re: Dedicated URL for Reconcile with TMO — opus-4-8
-
-Shipped (`#deal-tmo-reconcile-url`, commit `7d43c61d`, pushed). There were **two** "Reconcile with TMO" surfaces on that tab, so both are now addressable.
-
-**1. The tab-header pass** (reconciles every interested lender in one go):
-
-```
-/admin/pipeline?dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=interests&deal_tmo_reconcile=all
-```
-
-The link **is** the action — it runs the pass once on arrival, then drops its own param from the URL so a refresh doesn't silently re-sync. Only the exact value `all` arms it, so a mangled link can never fire an unexpected TMO sync.
-
-**2. The per-lender vesting modal** (the one with the account dropdown):
-
-```
-/admin/pipeline?dialog=deal&dialog_deal_id=<deal_id>&deal_tab=interests&deal_tmo_reconcile_interest_id=<interest_id>
-```
-
-Both triggers are real `<a href>` links now, so right-click to copy link works, and opening/closing the modal in place keeps the URL in sync. Closing the deal dialog clears both params.
-
-### Re: What TMO API endpoint the dropdown acts on — opus-4-8
-
-The dropdown fetches `GET /api/admin/tmo-lenders` (`admin_tmo_lenders_GET_`). That is **not** a live TMO lender list — EFS is LOS-only. The roster is assembled EFS-side from three sources:
-
-1. **EFS lender vestings** already mapped to a TMO account (`lender_vesting_tmo_lenders_R_`) — surfaces lenders with no funding yet.
-2. **Cached `loan_funding` rows** in `tmo_cache`, populated by TMO sync from **`GET /LOS.svc/GetLoanFundings`**. This is the only real TMO call behind the list, and it is indirect (cache, not live).
-3. The two are unioned and deduped by account (`tmo_lender_roster_`), then the **unfunded tail only** (`in_los === false`) is confirmed one account at a time against read-only **`GET /LSS.svc/GetLender/:Account`** (`#tmo-getlender-confirm`) — that is what distinguishes "confirmed in TMO, never funded" from "nothing in TMO".
-
-`POST /api/admin/tmo-sync` is what the header reconcile calls to refresh (1)/(2) before re-reading. Everything here is read-side; no EFS to TMO push (still gated on `#dzmm`/`#7a4d`).
-
-One correction landed with this: the `TmoLenderPicker` comment claimed the dropdown was a live `LSS.svc/GetLenders` list. It never was — `GetLenders` is unwired. The comment now describes the actual path above.
-
-**Verification:** `make check` green — 1787 pass, 0 fail. Not deployed; say the word and I'll push it to the worker.
-❯ I do have access to https://app2.themortgageoffice.com/default#BusinessContacts?type=F8260DDD13AB4CB399B0808CABCDCB20&LockDD= in the sandbox mode, which gives me full LOS access in the sandbox.
-
-Please investigate why Jeff Blake is in the system. Please remove Lucas Huang from the sandbox.
-
-### Re: Jeff Blake and Lucas Huang — opus-4-8
-
-Investigated both against EFS D1 (staging + production) and the live TMO API. Nothing deleted — read-only so far, because what I found changes what the right delete is.
-
-**Jeff Blake is not in EFS at all.** Zero rows in `users` (staging *and* production), `loans`, `application_leads`, `contact_messages`, `tmo_cache_entities`, or `tmo_cache_outbox`. He also isn't reachable as a TMO lender (`LSS.svc/GetLender` → "Lender not found"). EFS could not have created him either: the outbox holds only 40 rows, all `select_lender` / `update_loan_status`, all still `pending` — no borrower or contact create has ever been pushed. So Jeff Blake is a TMO-native record, not something EFS put there.
-
-**Lucas Huang is EFS test debris, and he is *not* in TMO.** He appears in exactly one place: the cached TMO loan `TST113` in `tmo_cache_entities` (loan RecID `89B3B9CD0A6E47DF81161AD805897B5C`, cached 2026-06-08). Asking TMO for it directly returns **`Loan not found`**.
-
-That turned out to be the bigger finding:
-
-| | |
-|---|---|
-| Loans in the TMO database EFS queries | 24 |
-| Loans cached in `tmo_cache_entities` | 19 |
-| Overlap | **1** (`1010`) |
-
-The other 18 — `TST042`, `TST113`, `TST217`, `TST254`, `TST374`, `TST388`, `TST723`, `TST762`, `TST766`, `TST999`, `AVW580`, `FTM631`, `GQI751`, `ICL909`, `MBQ435`, `PIP038`, `SRV532`, `554466` — are EFS-generated test rows that render in the admin TMO views as though TMO vouched for them. `Lucas Huang` sits right among `Test Q Borrower` / `Test A Borrower222`. Worth noting `GQI751` is in that list, which is the loan behind the `#dealtab500` review item.
-
-**Why I did not delete anything yet — two blockers, one question**
-
-1. *Which "sandbox"?* If you mean the TMO record you can see in BusinessContacts, EFS cannot reach it. `DELETE /LOS.svc/DeleteBorrower/:borrowerRecId` needs the **borrower** RecId; what EFS cached is the **loan** RecId, and there is no enumeration endpoint to resolve one (`LOS.svc/GetBorrowers` and `LSS.svc/GetBorrowers` both 404). Since you have full LOS access, deleting him from the BusinessContacts screen is one click and zero risk; or paste me his RecId and I'll do it via the API.
-2. *Which database?* The API token points EFS at the EFS company database (value in passage `equityfundingsource/TMO_API_DATABASE`), **not** `API Sandbox`. Please confirm that is the same database you're looking at in app2 — if it isn't, that alone explains why TST113/Lucas Huang is invisible to the API, and it changes where the writeback work lands.
-
-If instead you meant "get Lucas Huang out of EFS", that's the orphan cache row and I can prune it — but I'd rather fix the class than the row, which is `#tmo-orphan-cache` below.
-
-**Queued** (no code changed this cycle, so nothing to spec/test/commit):
-
-- `#tmo-orphan-cache` — prune/tombstone cached TMO rows whose `source_id` is absent from `GetLoans`, so stale test data stops masquerading as TMO records. The existing `DELETE /api/admin/tmo-loans/:loan_number` does **not** cover this: it only disables EFS `loans` rows and never touches `tmo_cache_entities` (and `TST113` has no `loans` row, so it would be a silent no-op).
-- `#tmo-contact-enumeration` — no contact-enumeration API; add it to the ABS support thread (rides `#k2xg`) and wire an operator-supplied-RecId delete path in the meantime.
-
-### Re: TMO production vs sandbox access, and the account email — opus-4-8
-
-> **Queue prompt:** Please use chromium-bridge to look at https://app2.themortgageoffice.com/default#Options?&modal=true&activeTab=General. Do I have access to the TMO production account or only the sandbox? April said she added me to the production account. Please also look at my gmails using Corky or chromium-bridge to see if EFS sent me an email about account access.
-
-**In that app2 session: sandbox only.** The Options page reports a `Sandbox Mode` banner, Account **"Equity Funding - Sandbox"**, selected database `001-8553-000-Equity Funding - Sandbox`, logged in as Brian Takita / brian.takita@gmail.com on serial `001-8553-000`. The company switcher offers exactly **one** entry — that sandbox. There is no production company to switch to from there.
-
-Production is a different host, `app.themortgageoffice.com`. I opened it: login screen, no session. So sandbox yes, production not-signed-in — which is not the same as not-provisioned.
-
-**The email exists, and it is from yesterday.** `no-reply@themortgageoffice.com` → **"Welcome to The Mortgage Office"**, **Fri 2026-07-17 8:19 PM**, to brian.takita@gmail.com, carrying a username, a password, and a Login link. Same provisioning template as the 2026-05-15 one, whose Login link pointed at `app.themortgageoffice.com/Login`. That is almost certainly April's production add landing. Credentials not reproduced here — livestream.
-
-So: sign in at `app.themortgageoffice.com` with the 2026-07-17 credentials. If that lands you in a sandbox-only company list again, the seat went to the wrong account and April needs to re-check. Also in the thread: rwaldman100@gmail.com replied on "Equity Funding Source | Sandbox Database Needed" today 11:33 AM.
-
-**What this turned up — queued as `#tmo-db-target-audit`**
-
-EFS's API integration is **not** pointed at the sandbox. Your UI is in `Equity Funding - Sandbox`, but EFS calls `api.themortgageoffice.com` with the database from passage `equityfundingsource/TMO_API_DATABASE`, which is the separate **`001-8553-000-Equity Funding Source Inc.`** company database. (The sandbox UI's own API server is a third host, `appsecondary.themortgageoffice.com`.)
-
-They are different datasets:
-
-- `GetLoans` against the EFS-configured database returns 24 loans with real-looking borrowers — Gallego, Quiroz, Hollon, Cupery Family Trust.
-- Sandbox-created records like `TST113` / Lucas Huang return `Loan not found`.
-
-EFS *staging* is therefore reading the live company database, and the `#dzmm`/`#7a4d` writeback would write there too. Nothing has been pushed — the outbox holds 40 rows, all `select_lender` / `update_loan_status`, all still `pending` — but `TMO_API_DATABASE` should be pinned per environment before that gate opens.
-
-This also resolves last cycle's puzzle: Lucas Huang is not missing from TMO, he is in the sandbox database EFS never queries. Removing him is a click in your BusinessContacts screen; EFS has no path to him.
-
-Preset note: `#spec-test-commit-push` was requested, but this cycle was read-only investigation across the TMO UI, the TMO API, EFS D1 (staging + production), and Gmail. No source changed, so there is nothing to spec, test, or commit beyond the backlog capture above. Exchange is getting long (76 lines, 6 cycles in 30 min) — worth a `compact` when convenient.
-hSo I have access to the company database?
-Staging should use the sandbox.
-
-### Re: So I have access to the company database? — opus-4-8
-
-Yes — **through the API token, not through your login.** Two different answers, and checking this turned up an error in what I told you last cycle. Correcting that first.
-
-**Correction: EFS does not sync from the company database.** I claimed last cycle that EFS staging reads the live company book. That was wrong. The decisive test:
-
-| Database header | `GET /LOS.svc/GetLoan/TST113` |
-|---|---|
-| `001-8553-000-Equity Funding - Sandbox` | **returns the loan** (Lucas Huang) |
-| `001-8553-000-Equity Funding Source Inc.` | `Loan not found` |
-
-TST113 is in EFS's cache, so the deployed worker syncs from the **sandbox**, which is the safe answer. What is actually true is narrower: passage `equityfundingsource/TMO_API_DATABASE` holds the *company* database name, which is **not** what the worker uses. That is config drift in the credential store, not a live-data exposure. I have corrected `#tmo-db-target-audit` accordingly. Sorry for the false alarm.
-
-**Your actual access:**
-
-- **API token** — reads **both** databases. It answered for the company database (24 loans: Gallego, Quiroz, Hollon, Cupery Family Trust, Laws Trust) and for the sandbox (18 loans, nearly all EFS test debris). So yes, you have company-database access at the API layer.
-- **Your app2 login** — sandbox only. One company in the switcher, `Sandbox Mode` banner.
-- **Production worker** — has no TMO connection at all: `wrangler secret list --env production` shows only `ADMIN_GLOBAL_PASSWORD`, `AUTH_SECRET`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`. `TMO_API_TOKEN` and `TMO_DATABASE` exist in staging only. That is `#efs-prod-secret-parity` territory.
-
-### Re: Credentials — saved, and they are not what we assumed — opus-4-8
-
-Stored at **`passage equityfundingsource/tmo_login_2026_07_17`** (password on line 1, then user, url, host, provenance). Extraction went to a file and straight into passage — the value never crossed visible output — and the cleartext scratch copies were `shred`ed.
-
-**But the credentials are for the sandbox, not production.** The email's own Login link is `https://app2.themortgageoffice.com/Login`. The 2026-05-15 welcome email linked `app.themortgageoffice.com/Login`. So the 2026-07-17 provisioning was another **app2/sandbox** seat — April's production add has not landed. Queued as `#tmo-prod-seat-not-provisioned`; she needs to confirm which account/serial the seat went to.
-
-### Re: Lucas Huang — removed — opus-4-8
-
-Done, now that the right database identified the record. `GET /LOS.svc/GetLoan/TST113` against the sandbox exposed borrower RecID `21DE900006AC4EEBB40856D09FB0E7D3`; `DELETE /LOS.svc/DeleteBorrower/21DE900006AC4EEBB40856D09FB0E7D3` returned HTTP 200. Verified: TST113 now reports **zero borrowers**. The loan shell itself remains — queued as `#tmo-sandbox-orphan-loans` along with the other 17 sandbox test loans.
-
-**Jeff Blake: there is no Jeff Blake — there is a `James Blake`.** Sandbox loan `TST775`, status Application Received. My earlier "not in the system anywhere" was a wrong-database artifact, same root cause as above. Tell me if James Blake is the record you meant and I will remove him the same way; the rest of that sandbox list is `Brian Takita` / `Test Q Borrower` style debris.
-<!-- agent:boundary:c0a5fb44 -->
+Compacted content:
+- Archived 7 response topic(s): Dedicated URL for Reconcile with TMO; What TMO API endpoint the dropdown acts on; Jeff Blake and Lucas Huang; 4 more
+- Prior summary/context: prior compacted content: Archived 4 response topic(s): Production Cloudflare environment; Brief Cloudflare account in...
+<!-- agent:boundary:4e52f94c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~Please use chromium-bridge to look at https://app2.themortgageoffice.com/default#Options?&modal=true&activeTab=General. Do I have access to the TMO production account or only the sandbox? April said she added me to the production account. Please also look at my gmails using Corky or chromium-bridge to see if EFS sent me an email about account access.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Notes

@@ -54,7 +54,7 @@ thread_local! {
 
 struct LedgerScopeState {
     ctx: lazily::Context,
-    ledgers: lazily::SlotMap<PathBuf, Option<std::rc::Rc<EventLedger>>>,
+    ledgers: lazily::SlotMap<(PathBuf, String), Option<std::rc::Rc<EventLedger>>>,
     depth: usize,
 }
 
@@ -123,10 +123,22 @@ fn invalidate_ledger_cache() {
     });
 }
 
-fn load_ledger_uncached(project_root: &Path) -> Result<EventLedger> {
+/// `#ledgerdocscope`: load only ONE document's events.
+///
+/// The whole-project read is O(entire project history). Measured on this repo:
+/// 12,482 events totalling ~512MB of `payload_json` — read, JSON-parsed, and
+/// replayed in full just to answer a single-document question like "does this
+/// document have a startup miss?". `load_state_events_from_db` already accepts a
+/// `document_hash` filter (indexed in SQL); the callers simply passed `None`.
+///
+/// Scoping the query is strictly better than caching or re-encoding the
+/// full-history read, because it removes the work instead of amortizing it — and
+/// unlike the run-scoped cache it also helps the first read in every fresh
+/// process.
+fn load_document_ledger_uncached(project_root: &Path, document_hash: &str) -> Result<EventLedger> {
     let conn = open_state_db(project_root)?;
     let mut ledger = EventLedger::new();
-    for row in load_state_events_from_db(&conn, None)? {
+    for row in load_state_events_from_db(&conn, Some(document_hash))? {
         let event: StateEvent = serde_json::from_str(&row.payload_json).with_context(|| {
             format!(
                 "parse supervisor state event {} from state.db",
@@ -138,16 +150,23 @@ fn load_ledger_uncached(project_root: &Path) -> Result<EventLedger> {
     Ok(ledger)
 }
 
-/// Shared ledger read. Inside a scope the project's ledger is loaded once and
-/// every later read returns the same `Rc`, so per-document projections cost a
-/// map lookup instead of a full `state.db` read + JSON replay.
-pub(crate) fn load_ledger_shared(project_root: &Path) -> Result<std::rc::Rc<EventLedger>> {
+/// Shared per-document ledger read. Inside a scope a document's events are
+/// loaded once and later reads return the same `Rc`, so the repeated reads in
+/// one pass (`take_superseded_startup_miss` calls `load_startup_miss` again)
+/// cost a map lookup instead of another query.
+pub(crate) fn load_document_ledger_shared(
+    project_root: &Path,
+    document_hash: &str,
+) -> Result<std::rc::Rc<EventLedger>> {
     let active = LEDGER_SCOPE.with(|scope| scope.borrow().is_some());
     if !active {
-        return Ok(std::rc::Rc::new(load_ledger_uncached(project_root)?));
+        return Ok(std::rc::Rc::new(load_document_ledger_uncached(
+            project_root,
+            document_hash,
+        )?));
     }
 
-    let key = project_root.to_path_buf();
+    let key = (project_root.to_path_buf(), document_hash.to_string());
     let cached = LEDGER_SCOPE.with(|scope| {
         let scope = scope.borrow();
         let state = scope.as_ref()?;
@@ -158,8 +177,8 @@ pub(crate) fn load_ledger_shared(project_root: &Path) -> Result<std::rc::Rc<Even
     }
 
     // A load failure is never cached — a transient `state.db` error must not be
-    // remembered as "this project has no events".
-    let loaded = std::rc::Rc::new(load_ledger_uncached(project_root)?);
+    // remembered as "this document has no events".
+    let loaded = std::rc::Rc::new(load_document_ledger_uncached(project_root, document_hash)?);
     LEDGER_SCOPE.with(|scope| {
         let mut scope = scope.borrow_mut();
         if let Some(state) = scope.as_mut() {

@@ -506,7 +506,42 @@ That last one is the failure mode worth remembering: `repair` recovering a
 response does **not** imply the same cycle's tracked-work mutations landed. I
 had reported it as queued when it wasn't. Worth verifying the backlog directly
 after any repair-path closeout rather than trusting the earlier flags.
-<!-- agent:boundary:015eda45 -->
+
+### Re: #dj8c — OCI path verified, Podman itself blocked — opus-4-8
+
+You were right to have the binary reject my status-only answer. I did the work
+instead.
+
+**Verified:** added an OCI twin of the bwrap live test, and **Docker round-trips
+a real verdict through the sandbox** — stdin in, parsed verdict out. That
+exercises the same sandbox_argv construction Podman uses; the two branches
+differ only in the binary name. So the OCI path is genuinely verified end to
+end now, not argv-asserted. It uses stock alpine with a shell one-liner as the
+stub plugin, so no image build is needed to run it.
+
+**Blocked, concretely:** Podman itself is still unverified. It isn't installed,
+and installing it needs an interactive sudo password I don't have. That's the
+entire blocker — podman 6.0.1-1.1 is sitting in cachyos-extra-znver4.
+
+The test skips loudly per runtime, so it starts covering Podman the moment it's
+installed. After installing, run:
+
+    cargo test -p dispatch-host --test sandbox_live -- --nocapture
+
+Expect "OK: podman round-tripped a verdict" where it currently prints
+"SKIP: podman unavailable". **Gated, not closed** — the OCI family is proven,
+Podman specifically is not, and those aren't the same claim.
+
+### A mistake worth flagging
+
+My previous invocation of this response embedded shell backticks inside a
+double-quoted argument, so they were command-substituted before `agent-doc` ever
+saw them — it actually executed `sudo pacman -S podman` and a `cargo test` from
+the wrong directory. Both failed harmlessly, but that was my error, and the same
+shape could just as easily have run something destructive. Single-quoted now.
+
+**22 tests, `make check` clean**, pushed.
+<!-- agent:boundary:7cee67d1 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -523,11 +558,10 @@ after any repair-path closeout rather than trusting the earlier flags.
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#teah] UNANSWERED PROMPT — evaluate AI harness candidates for the dispatch actor plugins (5090 for local models; tmux-router drives Claude/Codex/opencode; hermes available) AND search for the 'newish agent that creates a custom harness that learns'. Asked in the exchange and never addressed; the turn went to the repo/sandbox work. Needs real web research — do NOT answer from recall, the agent-name recall is exactly what would be hallucinated
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> — outstanding condition on bwrap being the default sandbox in brookebrodack-dispatch. Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
 - [ ] [#nd8n] Add cgroup limits for the bwrap sandbox path via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin
-- [ ] [#64r6] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> — this is the outstanding condition on bwrap being the default sandbox in brookebrodack-dispatch. Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec or CommandExt), since bwrap has no --seccomp-path variant
-- [ ] [#j262] Add cgroup resource limits for the bwrap sandbox path via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids limits are currently applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin
-- [ ] [#dj8c] Verify the Podman sandbox path end-to-end — it is now the declared default in brookebrodack-dispatch but only argv-verified; Podman is not installed on this machine, so no plugin has executed under it. Install podman, run cargo test, and add a live Podman twin of tests/sandbox_live.rs
+- [ ] [#dj8c] Verify the Podman sandbox path end-to-end in brookebrodack-dispatch — argv-verified only, and Podman is not installed on this machine so no plugin has executed under it. NOTE: bwrap is now the default (not Podman); this matters for any plugin carrying a real dependency tree, where OCI pinning beats bwrap's host-/usr sharing. Install podman, run cargo test, add a live Podman twin of tests/sandbox_live.rs
 - [ ] [#p0rw] Write the allowlisting egress proxy for dispatch_plugin_egress — model plugins are routed to it by sandbox_argv but it does not exist yet, so a model plugin currently has no working network path (~50-line CONNECT proxy, allowlist generativelanguage.googleapis.com)
 - [ ] [#k0ye] #gbdispatch2: Durable Object + WebSocket transport + auth for brookebrodack-dispatch — the sandbox/aggregation half is done and pushed; the edge half is unwritten
 - [ ] [#50fc] Confirm the truncated dispatch requirement — the queued prompt ends mid-sentence at "It will automatically", which leaves the plugin aggregation/automation policy (§6 of tasks/software/plan-brookebrodack-guestbook-dispatch-service.md) unspecified; blocks #gbdispatch2
@@ -546,3 +580,10 @@ after any repair-path closeout rather than trusting the earlier flags.
 <!-- agent:icebox -->
 - [ ] [#53z1] Distilled embedding+MLP classifier as a reject-or-abstain plugin (never approves). Value is failure-mode diversity, not speed: an MLP over embeddings has no instruction-following channel, so it is structurally far harder to prompt-inject than an LLM — a second non-injectable voter alongside plugin-rules. GATED ON DATA: needs low-thousands of human-labelled entries; a personal guestbook will not produce that for a long time. Revisit once /guestbook/admin has accumulated real review history
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-07-18 [#64r6] Duplicate of #sbv9 (closeout-retry artifact) — seccomp BPF filter for bwrap
+- 2026-07-18 [#j262] Duplicate of #nd8n (closeout-retry artifact) — cgroup limits for the bwrap sandbox path
+<!-- /agent:done -->

@@ -207,7 +207,27 @@ One shipped test parses `freehold.example.toml` itself and asserts a non-model p
 Files: `crates/freehold-host/src/config.rs` (10 tests), `freehold.example.toml`, `sandbox.rs` (`deny_unknown_fields` + rationale), `lib.rs`, both `Cargo.toml`s (`toml 0.9`), `README.md`. Verification: `make check` exit 0 — 71 tests passed, 0 failed; rustfmt and clippy clean. Committed `52d1182`.
 
 Still unverified end-to-end for one reason only: nothing has run this panel, because `#gpupol` is gated on `sudo systemctl enable --now ollama`. Once ollama is up, `cargo test -p freehold-host` plus a real `judge` call against the example config is the proof.
-<!-- agent:boundary:940606cd -->
+
+### Re: #k0ye — the edge pushes now — opus-4-8
+
+Done, both halves. Moderation was a 15-minute cron sweep of D1; an entry is now pushed to the freehold host the moment it lands.
+
+**Host (`freehold` @ `5db406b`).** The state machine already described push — `Dispatch` is documented "edge → host, work offered", capacity is advertised in `Hello` so the edge can place work, and there is no poll frame in the protocol. Only the IO shell was missing, and `main.rs` said so. `transport.rs` connects, hands frames to `on_frame`, and performs the returned `Action`s; it owns no invariants, because claiming, capacity, deadlines, and dropping late results stay in `client.rs` as a total function over `(state, frame, now)`. Jobs run off the socket loop so a slow plugin cannot stall pings, ticks, or another job's expiry. Reconnect is the normal path, not error handling — a home connection loses its socket to sleeping laptops and router reboots — so backoff doubles and caps at 30s, since nothing publishes while the host is away. `main.rs` is now the real host: load panel, dial edge, serve. It reads `FREEHOLD_DISPATCH_KEY` itself and never forwards it to a plugin.
+
+**Edge (`brookebrodack-dev` @ `35d047a`).** `workers/guestbook-dispatch` — a Durable Object, because it is the only thing on Cloudflare that can hold a WebSocket between requests, in a separate Worker because a Pages Function cannot export a DO class. That is the same structural reason `guestbook-moderate` is separate, and the repo already knew it. It uses the **hibernation API**, so an idle host connection is not billed — for this traffic, nearly always. Lease expiry runs on a DO alarm, so a host that dies mid-job returns its work to the pool without anyone polling for that either.
+
+**Duplicate work is refused at both ends.** The edge excludes entries inside a live claim; the host declines a job already in flight. Either alone would suffice, which is exactly why both are there. And a decision naming an entry that was not in the job is dropped — a host answering a question it was not asked must not move an unrelated entry, the same rule the host already applies to its plugins.
+
+**Additive and fail-closed.** The service binding is optional everywhere. Unbound or with no host connected, entries stay `pending` and the cron sweep and admin dashboard behave exactly as before. Losing the freehold costs latency, not correctness — keep the cron Worker deployed as the backstop.
+
+Also folded `decision_a1__apply` into the shared lib, so "escalate writes nothing" and `WHERE status = 'pending'` exist once instead of three times across the cron Worker, the local script, and the hub.
+
+Verification: freehold `make check` exit 0, 77 tests; brookebrodack `bun run test` 62 pass / 0 fail across 4 files, including 12 new edge tests and the refactored cron path.
+
+**Not deployed** — this needs, in order: deploy `workers/guestbook-dispatch` with `FREEHOLD_DISPATCH_KEY`, then add the `[[services]]` binding to Pages (a Pages deploy against a service that does not exist yet fails), then run `freehold` with `FREEHOLD_EDGE_URL` + the same key. Queued as `#fhdeploy`.
+
+**On `#rak9`:** I fixed it locally to typecheck my own work and reverted it. The one-line `module: nodenext` change is correct in isolation, but `tsc` currently fails at config validation and therefore checks nothing — fix it and 455 pre-existing errors appear, nearly all from `@cloudflare/workers-types` missing from `types` so `D1Database`/`PagesFunction`/`Fetcher` are unresolved across every existing `functions/` file. So `#rak9` as written understates the work; it is not a one-liner, and I did not want to land a change that turns one error into 455 inside an unrelated cycle. No CI runs `tsc`.
+<!-- agent:boundary:8cbff80b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -215,14 +235,14 @@ Still unverified end-to-end for one reason only: nothing has run this panel, bec
 <!-- agent:queue priority go -->
 - ~~do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.~~
 - ~~do [#fhoneshot]~~
-- do [#fhagentspec]
+- ~~do [#fhagentspec]~~
 - ~~do [#gpupol]~~
 - do [#gpulease]
 - do [#rak9]
 - ~~do [#p0rw]~~
 - do [#sbv9]
 - do [#nd8n]
-- do [#k0ye]
+- ~~do [#k0ye]~~
 - do [#fhmig]
 - do [#50fc]
 - do [#y457]
@@ -238,13 +258,11 @@ Still unverified end-to-end for one reason only: nothing has run this panel, bec
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fhagentspec] Ship a PluginSpec for freehold-agent so it actually joins the panel: egress_hosts for whichever model the configured agent CLI reaches, env_allow carrying FREEHOLD_AGENT_ARGV plus any credential the CLI needs, and a budget_ms sized for an agent round-trip rather than a rules match. The crate and its one-shot enforcement landed in a916f1c; nothing dispatches to it until a spec exists
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
 - [ ] [#nd8n] Add cgroup limits for the bwrap sandbox path in src/freehold via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin. Confirmed still absent: mem_limit_mb exists on PluginSpec but no systemd-run/cgroup call site
-- [ ] [#k0ye] #gbdispatch2: Durable Object + WebSocket transport + auth for the moderation dispatch edge (now freehold-hub/freehold, submodule src/freehold) — the sandbox/aggregation half is done and pushed; the edge half is unwritten
 - [ ] [#fhmig] Migrate the freehold-scoped items (#sbv9, #nd8n, #dj8c, #p0rw, #k0ye, #50fc) out of tasks/brookebrodack-dev.md into tasks/software/freehold.md, whose agent:backlog is currently EMPTY. The dispatch repo was renamed + transferred to freehold-hub/freehold (submodule src/freehold); this document should keep only brookebrodack-dev site/guestbook scope. Deferred this cycle: tasks/software/freehold.md is foreign-owned by pane %27
 - [ ] [#50fc] Confirm the truncated dispatch requirement — the queued prompt ends mid-sentence at "It will automatically", which leaves the plugin aggregation/automation policy (§6 of tasks/software/plan-brookebrodack-guestbook-dispatch-service.md) unspecified; blocks #k0ye. Operator input required
 - [ ] [#y457] Set OPENAI_API_KEY on BOTH surfaces — `bunx wrangler pages secret put OPENAI_API_KEY --project-name=brookebrodack` (inline submit-time judging) and `cd workers/guestbook-moderate && bunx wrangler secret put OPENAI_API_KEY && bunx wrangler deploy` (cron sweeper). Without it entries just stay pending.
@@ -279,4 +297,6 @@ Still unverified end-to-end for one reason only: nothing has run this panel, bec
 - 2026-07-18 [#fhquorum2] Approval is currently UNREACHABLE in freehold: APPROVE_QUORUM_MIN = 2 (freehold-tribunal/src/lib.rs) but freehold-rules is the only plugin binary in the workspace, so at most one plugin can ever answer and every entry escalates to a human. A second answering verdict plugin is required before auto-approve can fire at all — and a third if you want approval to survive the local model being down (freehold-rules abstains unless it matches a deterministic spam rule, so it cannot be relied on as one of the two)
 - 2026-07-18 [#fhoneshot] When adding a CLI-agent-backed verdict plugin, invoke it ONE-SHOT per request (claude -p / codex exec, non-interactive) under the existing PluginSpec budget_ms + OCI sandbox contract. Do NOT pool or reuse sessions: retained conversation state breaks per-entry verdict independence and makes a successful prompt injection persist across future verdicts, which is the exact threat the sandbox exists to contain
 - 2026-07-18 [#p0rw] Write the allowlisting egress proxy for the plugin egress hostport in src/freehold — model plugins are routed to it by sandbox_argv but it does not exist yet, so a model plugin currently has no working network path (~50-line CONNECT proxy, allowlist generativelanguage.googleapis.com). Confirmed still absent: egress_hosts appears only on PluginSpec and in tests, with no proxy binary or call site
+- 2026-07-18 [#fhagentspec] Ship a PluginSpec for freehold-agent so it actually joins the panel: egress_hosts for whichever model the configured agent CLI reaches, env_allow carrying FREEHOLD_AGENT_ARGV plus any credential the CLI needs, and a budget_ms sized for an agent round-trip rather than a rules match. The crate and its one-shot enforcement landed in a916f1c; nothing dispatches to it until a spec exists
+- 2026-07-18 [#k0ye] #gbdispatch2: Durable Object + WebSocket transport + auth for the moderation dispatch edge (now freehold-hub/freehold, submodule src/freehold) — the sandbox/aggregation half is done and pushed; the edge half is unwritten
 <!-- /agent:done -->

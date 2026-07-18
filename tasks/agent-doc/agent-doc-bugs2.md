@@ -39,7 +39,30 @@ done
 Compacted content:
 - Archived 3 response topic(s): cycle with no new prompt; repeated no-op invocations were a supervisor resubmit flood; stale verification-item sweep and the queue auto-strike fix
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): JB harness switch deferred against a stale actor record; agent...
-<!-- agent:boundary:c0723d78 -->
+❯ 🚧 Can we speed up compact exchange? #spec-test-build-install-commit-push
+
+JB `Run Agent Doc` on equityfundingsource.md + this document has an error: `route deferred for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md: Lazily current transition remained delivery_pending for 5000ms; retry after it settles`
+
+### Re: Can we speed up compact exchange? — opus-4-8
+
+Yes. Found a fixed ~2s stall on the hot path, fixed it, shipped as JetBrains plugin 0.2.278.
+
+**Measurement first.** From `ops.log`, compact `wait_ms` sat at 2646–8695ms with a ~4.5s floor that did *not* scale with payload — 46KB→6007ms, 130KB→2646ms. Fixed overhead, not encoding or document size, so tuning the CRDT payload was the wrong target.
+
+**Root cause.** The plugin's `requestRemoteDrain` gated *controller-published* CRDT remote events behind the speculative no-op drain backoff (`shouldStartRemoteDrainUtil`). That backoff exists to stop a self-driven drain spin when there is nothing to pull, and it doubles from 100ms toward a 30s ceiling on an idle document. I confirmed the escalation in the measured pull cadence: 1s, 1s, 2s, 4s, 7s, 13s, 27s, 30s.
+
+An idle document is exactly the state you're in when you hit Compact Exchange. So the published frontier got suppressed and nothing moved until the binary escalated to `ack_recovery_force_refresh` at `CRDT_ACK_FORCE_REFRESH_AFTER_MS` (2000ms) — the only path that called the backoff-bypassing `requestUrgentRemoteDrain`. That 2s toll was paid on **every** compact and finalize against a live editor, not just compact.
+
+**Fix.** A controller push is positive evidence the CPC already holds a frontier, so it now drains urgently instead of being suppressed. `request_full_state` stays exempt (it owns the text-adopt path). This cannot reintroduce the spin the backoff was added for: controller pushes are externally rate-limited to one per ACK-replay interval and only while a write awaits ACK, and the urgent path still falls back to the *gated* drain when it finds no work — so speculative polling stays governed.
+
+Second, compounding half: `requestUrgentRemoteDrain` never reset `consecutiveNoOpReschedules`, so even after applying useful work the gate stayed parked at its previous (up to 30s) delay and re-suppressed the *next* push. Now reset on useful work.
+
+The binary-side 2s escalation is retained as a backstop for older plugin builds — no Rust change needed.
+
+**Shipped.** 3 new regression tests (all green), `make check` green (exit 0), spec updated in `specs/14-realtime-workflow.md`, plugin built + signed + installed to all 4 IDE roots, committed and pushed as `5b648f338`. CI run 29650379566 is pending — recorded, not blocking.
+
+One thing I cannot verify from here: the Kotlin plugin change needs an IDE restart to load (`reload-lib` only swaps the cdylib). Queued as `#crdtpushdrainverify` so you can eyeball the actual compact latency after restart — I expect the ~4.5s floor to drop to roughly the pull/apply round trip.
+<!-- agent:boundary:3c11f024 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -129,6 +152,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
 - [ ] [#supboundarylivelock] #agent-doc-bug Supervisor idle-boundary recycle can livelock, leaving a stale binary mapped indefinitely. supervisor_recycle_action (agent-doc-supervisor/src/lifecycle.rs:124) returns None on `!turn_boundary` for everything except write_wedged/editor_delivery_stale, and turn_boundary = prompt_visible && !turn_active (idle_watch.rs:1898) never holds for a continuously-active pane. The only bypass, stale_recycle_safe_checkpoint (idle_watch.rs:136) = supervisor_stale && inflight_handlers == 0, is gated on staleness, so an explicit `admin recycle` on a NON-stale busy supervisor can never be consumed and silently expires at DEFAULT_RECYCLE_REQUEST_TTL_SECS=900 (recycle_request.rs:17) with the ledger phase left Requested. --force does not help: rpc.rs:5905 only changes the reason string, and idle_watch.rs:2403 collapses the request to a plain bool. MAX_CYCLE_OPEN_DEFER_TICKS escalation cannot rescue it either (idle_watch.rs:2253 only accrues the streak AT a boundary). OBSERVED 2026-07-18: supervisor pid 2040014 stayed stale across this whole session even though it IS stale (so the checkpoint bypass should apply and inflight_connection_handlers is an in-process RAII-guarded atomic that cannot leak) - the stale-side path needs its own trace. Fixing the non-stale side means a mid-turn execve, which is exactly what the boundary gate exists to prevent, so this needs a design decision (manufacture a boundary via the recycle-yield path? bound the defer? re-arm instead of expiring?), not a quick patch. Related shipped fixes: #dispatchgateleak + #authorityfactretention (submodule 566a72f6d).
 - [ ] [#statedbvacuum] [recommended] #agent-doc-feature One-time reclaim + ongoing compaction for .agent-doc/state.db. #authorityfactretention (566a72f6d) bounds future growth (170,215 -> 5,000 document_authority_observed rows on the live db), but SQLite reuses freed pages rather than shrinking: agent-loop state.db is still 477MB on disk with ~47,000 free pages and state_events holding 288MB across 73,822 pages for only 11,056 rows. Reclaiming needs a VACUUM, which takes an exclusive lock and must not run under a live controller. Add a bounded maintenance path (an `agent-doc admin vacuum` gated on no live controller/supervisor, or PRAGMA incremental_vacuum wired into an idle boundary) instead of leaving operators to run sqlite3 by hand.
 - [ ] [#qdonestrikeverify] #agent-doc-bug #qdonestrike-durable follow-up: confirm resolved queue heads actually clear once the project controller runs a build containing agent-doc submodule 4faed5b01. Fix shipped: persist_queue_maintenance_doc now drives the bounded ensure_document_model and re-observes before failing closed, so a missing/pending replica no longer discards the whole queue-maintenance plan (the auto-strike of agent:done heads was recomputed and thrown away every preflight). NOT yet provable live: controller serve pid 1501201 + route-owned supervisor pid 2040014 still map the pre-fix binary, and preflight now reports the honest underlying state (editor authority stayed in editor_attached_model_missing after a bounded observation; recovery=retry_without_disk_write). Controller kill was deliberately NOT done because it is project-scoped and tasks/professional/equityfundingsource.md is foreign-owned by a concurrent pane %31. Verify after an idle-boundary recycle: preflight should log queue_maintenance_model_ensure and the struck heads (📌 do [#jblocalhistverify], 📌 do [#5bzd]) should disappear from agent:queue instead of being re-logged as auto-struck every run.

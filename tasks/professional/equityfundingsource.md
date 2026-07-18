@@ -213,7 +213,7 @@ Wired end to end — section id, URL, portal route, nav item, icon, and the badg
 - `#tmo-sandbox-purge-apply` — waiting on you, since it is 16 permanent deletions.
 
 The order matters: the executor generates the fundings the binder then resolves, so running them out of order means the binder has nothing to work on.
-<!-- agent:boundary:66655887 -->
+<!-- agent:boundary:9ae6d4fd -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

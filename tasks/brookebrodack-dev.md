@@ -7,6 +7,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
+queue: go
 ---
 
 # brookebrodack-dev — Session Summary
@@ -102,12 +103,19 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 Compacted content:
 - Archived 10 response topic(s): hermes for moderation, OpenAI fallback; cron on Cloudflare or OpenAI; judge at submission time; 7 more
 - Prior summary/context: ❯ https://brookebrodack.net/guestbook/ does not show the guestbook. ❯ brookebrodack.net is served on cloudflare ❯ Ple...
-<!-- agent:boundary:1d616b78 -->
+
+Please plan to create a dispatch service that runs on my local machine. This service will have a websocket connection via api key to the brookebrodack.net backend. The service will allow actor plugins receive guestbook moderation requests and will approve or deny. It will automatically 
+
+Please write the local service in Rust. I will have many actor plugins to run AI on various websites. Please evaluate candidates for the AI harness. I have a 5090 so I can run local models. I also have a tmux router so I can run Claude, Codex, opencode. I can also run hermes. I believe there is a newish agent that creates a custom harness that learns. Please search for that newish agent harness as well.
+
+I want to use Lazily for the state layer.
+<!-- agent:boundary:246bf103 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- 📌 Please plan to create a dispatch service that runs on my local machine. This service will have a websocket connection via api key to the brookebrodack.net backend. The service will allow actor plugins receive guestbook moderation requests and will approve or deny. It will automatically
 <!-- /agent:queue -->
 
 ## Notes

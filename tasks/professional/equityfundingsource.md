@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -105,11 +105,38 @@ If instead you meant "get Lucas Huang out of EFS", that's the orphan cache row a
 
 - `#tmo-orphan-cache` — prune/tombstone cached TMO rows whose `source_id` is absent from `GetLoans`, so stale test data stops masquerading as TMO records. The existing `DELETE /api/admin/tmo-loans/:loan_number` does **not** cover this: it only disables EFS `loans` rows and never touches `tmo_cache_entities` (and `TST113` has no `loans` row, so it would be a silent no-op).
 - `#tmo-contact-enumeration` — no contact-enumeration API; add it to the ABS support thread (rides `#k2xg`) and wire an operator-supplied-RecId delete path in the meantime.
-<!-- agent:boundary:41a8b1dd -->
+
+### Re: TMO production vs sandbox access, and the account email — opus-4-8
+
+> **Queue prompt:** Please use chromium-bridge to look at https://app2.themortgageoffice.com/default#Options?&modal=true&activeTab=General. Do I have access to the TMO production account or only the sandbox? April said she added me to the production account. Please also look at my gmails using Corky or chromium-bridge to see if EFS sent me an email about account access.
+
+**In that app2 session: sandbox only.** The Options page reports a `Sandbox Mode` banner, Account **"Equity Funding - Sandbox"**, selected database `001-8553-000-Equity Funding - Sandbox`, logged in as Brian Takita / brian.takita@gmail.com on serial `001-8553-000`. The company switcher offers exactly **one** entry — that sandbox. There is no production company to switch to from there.
+
+Production is a different host, `app.themortgageoffice.com`. I opened it: login screen, no session. So sandbox yes, production not-signed-in — which is not the same as not-provisioned.
+
+**The email exists, and it is from yesterday.** `no-reply@themortgageoffice.com` → **"Welcome to The Mortgage Office"**, **Fri 2026-07-17 8:19 PM**, to brian.takita@gmail.com, carrying a username, a password, and a Login link. Same provisioning template as the 2026-05-15 one, whose Login link pointed at `app.themortgageoffice.com/Login`. That is almost certainly April's production add landing. Credentials not reproduced here — livestream.
+
+So: sign in at `app.themortgageoffice.com` with the 2026-07-17 credentials. If that lands you in a sandbox-only company list again, the seat went to the wrong account and April needs to re-check. Also in the thread: rwaldman100@gmail.com replied on "Equity Funding Source | Sandbox Database Needed" today 11:33 AM.
+
+**What this turned up — queued as `#tmo-db-target-audit`**
+
+EFS's API integration is **not** pointed at the sandbox. Your UI is in `Equity Funding - Sandbox`, but EFS calls `api.themortgageoffice.com` with the database from passage `equityfundingsource/TMO_API_DATABASE`, which is the separate **`001-8553-000-Equity Funding Source Inc.`** company database. (The sandbox UI's own API server is a third host, `appsecondary.themortgageoffice.com`.)
+
+They are different datasets:
+
+- `GetLoans` against the EFS-configured database returns 24 loans with real-looking borrowers — Gallego, Quiroz, Hollon, Cupery Family Trust.
+- Sandbox-created records like `TST113` / Lucas Huang return `Loan not found`.
+
+EFS *staging* is therefore reading the live company database, and the `#dzmm`/`#7a4d` writeback would write there too. Nothing has been pushed — the outbox holds 40 rows, all `select_lender` / `update_loan_status`, all still `pending` — but `TMO_API_DATABASE` should be pinned per environment before that gate opens.
+
+This also resolves last cycle's puzzle: Lucas Huang is not missing from TMO, he is in the sandbox database EFS never queries. Removing him is a click in your BusinessContacts screen; EFS has no path to him.
+
+Preset note: `#spec-test-commit-push` was requested, but this cycle was read-only investigation across the TMO UI, the TMO API, EFS D1 (staging + production), and Gmail. No source changed, so there is nothing to spec, test, or commit beyond the backlog capture above. Exchange is getting long (76 lines, 6 cycles in 30 min) — worth a `compact` when convenient.
+<!-- agent:boundary:92936573 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
-- Please use chromium-bridge to look at https://app2.themortgageoffice.com/default#Options?&modal=true&activeTab=General. Do I have access to the TMO production account or only the sandbox? April said she added me to the production account. Please also look at my gmails using Corky or chromium-bridge to see if EFS sent me an email about account access.
+- ~~Please use chromium-bridge to look at https://app2.themortgageoffice.com/default#Options?&modal=true&activeTab=General. Do I have access to the TMO production account or only the sandbox? April said she added me to the production account. Please also look at my gmails using Corky or chromium-bridge to see if EFS sent me an email about account access.~~ — auto-struck: answered this cycle (#ftstrike)
 <!-- /agent:queue -->
 
 ## Notes
@@ -137,6 +164,7 @@ We have not cut over the DNS today. The current CF environment will be staging. 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmo-db-target-audit] [operator-verify] Confirm which TMO database EFS should read/write. Verified 2026-07-18: the app2 UI session is in database "001-8553-000-Equity Funding - Sandbox" (Sandbox Mode banner, company switcher offers that ONE company, its own apiServer is appsecondary.themortgageoffice.com), but EFS calls api.themortgageoffice.com with the database in passage equityfundingsource/TMO_API_DATABASE, which is the separate "001-8553-000-Equity Funding Source Inc." company database. They are different datasets: GetLoans over the EFS-configured database returns 24 loans with real-looking borrower names (Gallego, Quiroz, Hollon, Cupery Family Trust), while sandbox-created records such as TST113/Lucas Huang return "Loan not found". So EFS staging is reading the live company database, and the currently-gated #dzmm/#7a4d writeback would write there too. Decide the intended target per environment and pin TMO_API_DATABASE explicitly for staging vs production before any writeback ships.
 - [ ] [#tmo-orphan-cache] Prune/reconcile orphan tmo_cache_entities rows: 18 of 19 cached TMO 'loan' rows (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) do not exist in the TMO database EFS is pointed at — GetLoans returns 24 loans and only '1010' overlaps. They are EFS test debris that renders as if it were TMO data (this is where 'Lucas Huang' shows up). Add an admin prune action or a sync tombstone pass so a cached row whose source_id is absent from GetLoans is marked deleted instead of shown as a live TMO record. Note admin_tmo_loans_by_loan_number_DELETE_ does NOT cover this — it only disables EFS 'loans' rows and never touches tmo_cache_entities.
 - [ ] [#tmo-contact-enumeration] TMO exposes no borrower/business-contact enumeration API (LOS.svc/GetBorrowers and LSS.svc/GetBorrowers both 404; LSS.svc/GetLenders returns an empty list for the EFS company database), so EFS cannot answer 'who is in TMO' or resolve a contact to the RecId that DELETE /LOS.svc/DeleteBorrower/:borrowerRecId requires. Add the enumeration question to the ABS support thread (rides #k2xg), and until then wire an operator-supplied-RecId delete path rather than guessing record ids.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.

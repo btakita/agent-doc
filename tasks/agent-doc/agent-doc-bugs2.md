@@ -34,193 +34,32 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260718-190605.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260718-221258.md`*
 
 Compacted content:
-- Archived 4 response topic(s): Can we speed up compact exchange?; JB `Run Agent Doc` route deferred; fix all issues identified this session; 1 more
-- Prior summary/context: prior compacted content: Archived 3 response topic(s): cycle with no new prompt; repeated no-op invocations were a su...
-
-### Re: #jbsteerinterrupt — JB Run Agent Doc interrupting a live Claude turn — opus-4-8
-
-Mechanism verified against live captures, then fixed. Not a guess — the item said don't guess, so here is the evidence chain.
-
-**What was actually happening**
-
-`route_eager_busy_cue_recovery` (`authoritative_dispatch.rs`) promotes a `Busy` actor to `Ready` when the pane shows no busy cue, then dispatches the trigger. On a Claude pane the busy cue was being missed, so the trigger was submitted **into the running turn** — and Claude Code renders a mid-turn submission as "Interrupted".
-
-You were right that `attempt_busy_existing_pane_interrupt_recovery` is codex/opencode-only and could not be the source. Nothing sent an interrupt key. The dispatch *was* the interrupt.
-
-Proof from `ops.log`, 14:42:13, pane `%2`, harness=claude — two events in the same second:
-
-- `route_dispatch_only_busy_active_turn_skip_wait` … `cue="* Envisioning… (24s · ↓ 255 tokens)"`
-- `route_eager_busy_cue_recovery` … `busy_cue=false`
-
-Two functions disagreeing about the same pane. `busy_proof_line` saw the cue; `has_busy_cue` did not.
-
-**Three defects behind that disagreement**
-
-1. **The elapsed-timer scanner only matched `(<digits>s`.** Claude Code switches to `(3m 43s` past a minute, so **every turn running longer than 60 seconds lost its busy cue.** This is the big one — it is deterministic, not racy.
-2. **The spinner glyph was matched against a hardcoded frame list.** A live pane rendered `✽` (U+273D), absent from the old `· ✶ ✳ ✻ ● *` set.
-3. **The `#jb-stale-busy-idle-footer` part-2 override cancelled live cues.** I instrumented it: the only thing it ever matched on a Claude pane was `has_dispatch_ready_prompt` — the bare `❯` composer and the `⏵⏵ … (shift+tab to cycle)` hint. A live capture proves Claude renders **both of those during an active turn** (it accepts type-ahead while working). That is static chrome, not idle evidence. The existing `CLAUDE_BUSY_PANE` fixture only escaped because its permissions row happened to read `· 1 shell`.
-
-Also widened the Claude bottom-scan window 8 → 16: a live capture put the spinner at *exactly* row 8, so one transient row (rotating `Tip:` hint, `⎿` tool-result line) dropped it.
-
-**Live before/after**, captured from a real busy pane:
-
-```
-busy_proof_line  = Some("✶ Cooking… (11m 57s · ↓ 34.4k tokens)")
-has_busy_cue     = true
-blocker          = Some("active claude turn")
-```
-
-At `11m 57s` the old scanner could not possibly have matched. That capture is now a regression fixture.
-
-**Defense in depth.** The eager recovery no longer promotes on a single frame. A live turn re-renders its spinner every frame, so a second confirming capture separates a genuinely stale projection from a torn/mid-redraw one; it fails closed on capture error. Unlike OpenCode's lingering `Working` banner, Claude replaces the spinner with the final response when a turn ends, so there is no stale shape left to suppress — and if a cue ever does linger, the result is a *deferred* dispatch, which is the correct direction under `#realtime-steering-verbatim`.
-
-**Verification:** `make check` green — 7627/7627, clean clippy. Committed `6ef6dd056`, pushed, `make install` done (0.35.6, JB package installed to 4 IDEs — restart them to pick it up).
-
-**CI note:** latest CI is red, but on `b7e17f4d5` (#queuedrainednoop), which predates this push, and the failure is `finalize_skips_ignored_untracked_session_doc` — a gitignore/finalize test with no relationship to busy-cue detection. It passes locally. Filed as its own backlog item rather than folded in here.
-
-One follow-up is genuinely operator-gated: the live JB `Run Agent Doc` eyeball against a busy pane. Let the turn run past a minute first — that is the case that was hard-broken.
-
-### Re: /goal complete the entire queue — opus-4-8
-
-I can't drain it, and the reason is worth more than a partial attempt: **the queue machinery itself is wedged.**
-
-`preflight` reports `queue_drainable_head_count: 0`, `queue_continuation_required: false`, and `queue_prompts: null` — while the document visibly holds `#promptselect`, `#realtimesalient`, `#syncobscache2` and ~50 more. `plan` sees no prompt targets at all. That mismatch is not the queue being empty; it is `queue_maintenance_not_persisted` firing for the third time this session, so the recomputed queue never lands and the binary hands me nothing to drain.
-
-**Root cause, from this document's `ops.log`** — two observers of the same document disagreeing:
-
-- `19:32:45` — `controller_crdt_current_text source=preflight_queue_maintenance` → `status=current live_editors=1 delivery_converged=true`
-- `19:32:47` — same queue_maintenance path → `document_model_ensure_start initial_state=editor_attached_model_missing`
-- `19:32:47` — `crdt_replica_register` succeeds: `data_kind=ok generation_fenced=true bootstrap_bytes=1312802`
-- `19:32:48` — `document_model_ensure_republish_observer_not_ready` → `document_model_ensure_failed`
-
-A replica registers successfully carrying 1.3 MB of bootstrap, and the ensure-path observer still reports no replica. Every `document_model_ensure_start` this session says missing — across `queue_maintenance`, `pending_add_sync`, and `controller_recycle_request` — while the controller says current throughout. The ensure path is not seeing a model the controller demonstrably has.
-
-I checked a plausible culprit (`recover_current_text_from_local_projection_after_controller_error`, which hardcodes `EditorAttachedMissingReplica` as its starting state) and **ruled it out** — no `projection_recovery` lines appear in the log. Saying so because I'd rather report a ruled-out lead than a confident wrong one.
-
-**I stopped before fixing it.** `src/agent-doc-editor-authority-fix` is a live worktree whose last three commits are `preserve attached editor authority during retry`, `bound idle authority replay`, and `repair empty duplicate document scaffold`. Another session already owns this exact defect. Landing a competing fix in `src/agent-doc` would collide with it. My diagnosis is filed so that session can use it.
-
-**Also found:** the queue and backlog opening tags are accumulating duplicate attributes — `priority` now appears twice in both. I verified this is *not* `ensure_queue_priority_attr` (reproduced against the real tag; its guard is correctly idempotent). The tag-rebuild helpers normalize `key=true`→`key` but never dedup boolean tokens, so once a duplicate appears it is permanent and can keep growing. Filed with the fix direction.
-
-**On the goal itself:** even with the wedge cleared, "complete the entire queue" is not a single turn. 31 of the mirrored heads are `[operator-verify]` — they need a human at a live editor/pane and no agent can close them. Of the agent-drainable remainder, `#promptselect` and `#realtimesalient` both say "design pass needed before implementation" in their own text. Tell me to start with a specific one and I'll take it properly; I'd rather do one of those well than half-do four.
-
-Unblock order I'd suggest: editor authority (other session) → then this queue drains on its own.
-
-### Re: Fix the contributing causes of the queue wedge — opus-4-8
-
-Partial fix. Two causes fixed and verified, one root cause quantified but **not** closed, and one attempted fix reverted because the test suite proved it dangerous. Being precise about which is which.
-
-**First, a correction to my last turn.** I told you the `agent-doc-editor-authority-fix` worktree was an active concurrent session and declined to touch this. Its last commit is 2026-07-13 — five days stale — and one of its three commits is already merged. It was not a live session, and I was wrong to treat it as a reason to stop.
-
-**Fixed and verified**
-
-The `document_model_ensure_failed` log printed `timeout_ms=5000` unconditionally, but a missing-replica ensure is only granted 400ms. It logged the long-form constant instead of the deadline actually used, so the diagnosis was chasing a phantom 5-second stall. Also, `queue_maintenance_model_ensure` sat *after* the `?`, so it only logged on success — the failure path recorded nothing. Both fixed; live telemetry now reads:
-
-```
-timeout_ms=400 window_extended=false
-```
-
-That single line is what made the real cause measurable.
-
-**Root cause, now quantified**
-
-A 400ms budget is fixed, while CRDT bootstrap time scales with document size. On this document the register carries **1,312,802 bytes**. Earlier registers this session were 358–437 KB and succeeded; the failures began when bootstrap crossed ~1.3 MB. A live editor cannot deliver 1.3 MB in 400 ms, so it is judged stale on every attempt — and the 400 ms exists deliberately, to stop a stale editor wedging the single-threaded controller.
-
-I made a completed `crdt_replica_register` count as liveness proof and extend the window to the full timeout, keeping fail-closed behaviour for an editor that never registers.
-
-**What I did not fix — and I want this to land, not be buried**
-
-That extension does not work on the path that matters. The counter is process-global; the register happens in the **controller** while the ensure runs in the **CLI**, so the CLI never sees it. Live telemetry still says `window_extended=false` and **the wedge is still present**. I documented the gap at the definition and filed it rather than leaving it to look fixed. Closing it needs the proof carried across IPC, or the ensure run controller-side.
-
-**The wrong turn, and what caught it**
-
-I also routed preflight's initial current-doc resolve through the ensure path. `make check` failed two tests — `preflight_missing_editor_model_pauses_without_reading_disk_authority` ("preflight current-doc reads must not enter document-model ensure") and the delayed-registration test, which showed my change made preflight resolve to **disk content** instead of waiting for the attached editor. That is the clobber hazard the whole design exists to prevent. Reverted. Those tests earned their keep, and the invariant is now recorded in the commit so the next attempt doesn't repeat it.
-
-**Verification:** `make check` green — 7628/7628 with the new regression test, clean clippy. Committed `bbc50c26e`, pushed, installed.
-
-**My read on the durable fix:** 1.3 MB of bootstrap for a 47 KB document is ~28x the text in accumulated CRDT history. Widening timeouts only buys time against that growth. I'd rather attack the bootstrap size — filed as the second backlog item. Say the word and I'll take it next.
-
-### Re: optimize the bootstrap size — opus-4-8
-
-Done and shipped, and it did **not** fix the wedge. The optimization is real; the theory behind it was wrong. Both halves matter.
-
-**The measurement overturned the premise before I wrote any code**
-
-The backlog item I filed — and you approved — proposed compaction/GC of accumulated CRDT history. I measured the real 815,754-byte projection first:
-
-```
-total_ops    = 88,630
-tombstones   = 0   (0.0%)
-distinct_clients = 1
-```
-
-**Zero tombstones.** Tombstone GC would have reclaimed nothing. `lazily`'s `gc_with` exists and agent-doc never calls it, which looked like the smoking gun — it wasn't. The cost is entirely per-op envelope: 88,630 *live* ops at ~9.2 bytes each.
-
-**What actually shrank it**
-
-The ops are extremely regular — counters near-sequential, `peer` constant, `origin` almost always the preceding character (**2 distinct** origin deltas across 88,630 ops). Array-of-structs interleaves those fields per character, so zstd never sees the regularity. New `ADCR2` columnar envelope groups each field into a column and delta-encodes counters.
-
-Measured on the real payload: **815,754 → 417,950 bytes (1.95x)**, exact round-trip. On the live wire the register bootstrap went **1,312,802 → 261,174 bytes — 5.0x**.
-
-Two things I checked rather than assumed: a plain struct-of-arrays regrouping that keeps `OpId` opaque gives only **1.2x** — the win needs `OpId` decomposed into scalar columns. And `OpId` has no public constructor, but it serializes as a `(counter, peer)` pair, so the decoder rebuilds ids in one bulk conversion with no `lazily` API change or release. A test pins that assumption so a `lazily` upgrade fails loudly instead of corrupting payloads. The encoder also self-verifies every payload by decoding and comparing before returning it, falling back to `ADCR1` on any mismatch.
-
-**The negative result, stated plainly**
-
-5x less data on the wire and `queue_maintenance_not_persisted` is **completely unchanged**. So the 400ms window is not failing on transfer size, and the hypothesis that sent me here — mine — is falsified. I filed that explicitly so nobody re-runs it. The next probe belongs on why the ensure-path observer never sees a replica the controller already reports as `current live_editors=1 delivery_converged=true`; generation fencing on re-register is the better suspect.
-
-**On your two reports**
-
-The uncommitted `crdt_sync.rs` on `bbc50c26e` was mine — this work in progress. You were right not to build it. It is now `d131457ab`, suite green at 7632, installed.
-
-Your finalize observation is the more useful finding, and it matches what I saw here: my own closeouts only landed via `write --commit` retry loops. Two persistence paths with different reachability is its own bug — filed.
-
-The frontmatter revert is the one that worries me most, because it is **destructive**. I traced it: `agent-doc-preflight-io/src/lib.rs:3485` computes `queue_has_prompts` / `drained_residue` from a queue body a *previous* cycle failed to persist, then feeds `need_clear_active`. A transient persistence failure makes the queue look drained, and preflight deletes your explicit `queue: start`. It is acting on known-stale data. I did **not** fix it — activation logic is safety-critical and I don't have the failing document's state to verify against, and guessing there is exactly the failure mode you warned about on `#jbsteerinterrupt`. Filed with the code path.
-
-### Re: brookebrodack-dev.md queue never arms — `#qstartinert` — opus-4-8
-
-Fixed the root cause. Context was cleared, but agent-doc had in fact remembered: the prior investigation was in this document (`#5d9f`), not the chat.
-
-**Symptom.** `tasks/brookebrodack-dev.md` had 11 queued heads and `queue: start`, yet `queue_drainable_head_count: 0` / `queue_continuation_required: false` forever. The pane %9 session correctly refused to auto-loop and noted "the binding is down."
-
-**Root cause — two defects in one chain.**
-
-1. `queue_binding_target` (`agent-doc-queue/src/control_binding.rs`) converged an *unchanged* frontmatter control to `stop` whenever the marker carried no token. That branch was written for the post-drain shape (token consumed off the marker) — but that transition is a marker *change*, already handled by the `marker_changed` arm above it. Reaching the unchanged branch means the marker never carried the token at all, which is the ordinary shape for `queue: start` in frontmatter with a bare marker. So every single pass rewrote the operator's `start` into `stop`.
-
-2. `persisted_activation` still required the legacy `queue_active: true` flag that the control-binding migration had *stopped writing* — `control_binding` made `queue:` canonical and reads `queue_active` only when `queue:` is absent. The two halves contradicted each other, so the canonical control alone could never activate.
-
-**Fix.** Honor an explicitly authored frontmatter control in the unchanged branch; key activation off the explicit control via a new `queue_control_activation`. Strictly a widening — `queue_active: true` was only ever honored alongside a `start`/`go` token, so legacy-flag-only documents stay inactive exactly as before, and `stop` still dominates both spellings.
-
-**Verification.** Reproduced as a failing test first (`queue_active: Some(false)` on a populated `queue: start` doc), then four regression tests: unchanged `start` stays started, a consumed marker token still stops, `queue: start` arms supervisor scope, `queue: go` arms the in-session loop. `make check` green (real exit 0, zero `result: FAILED`). Committed + pushed as `9111a3381`, `make install` done, `admin reload-lib` delivered to 1/1 editor endpoints.
-
-**What is NOT fixed.** `tasks/brookebrodack-dev.md` now reports `go-mode active queue` where it previously went inactive, but `queue_maintenance_not_persisted` still fires: `editor_attached_model_missing`, disk correctly not read as fallback. That is the separate `#5d9f` editor-authority defect, not this one. I did not force-disk or otherwise bypass it — the binary is failing closed correctly, and the newly installed plugin build needs an IDE restart to take effect. Filed as an `[operator-verify]` item.
-
-One scope note: `start` (supervisor drain) vs `go` (in-session loop) is a deliberate distinction. My first test asserted the wrong scope; I corrected the test to the design rather than widening the design to the test.
-
-### Re: continuing — two more links in the `#qstartinert` chain — opus-4-8
-
-Continued from the queue-arming fix. The chain had three links, not one; all three were the same defect wearing different clothes.
-
-**Link 3 (fixed, `fd782413f`).** `active_queue_for_supervisor_start` hard-gated on `fm.queue_active != Some(true)` before even looking at the explicit control. Same contradiction as link 2: `control_binding` made `queue:` canonical and stopped writing `queue_active`, so drainability depended on a field nothing emits anymore. This was the *live* blocker — after the first fix, brookebrodack converged to `&lt;!-- agent:queue go --&gt;` with no `queue_active` key and still reported 0 drainable heads. The explicit-control gate below it is the real authority, so `queue_active` now participates only as an explicit halt. I kept both halts and covered them: `queue_active: false` (written by the drain/clear path) and `queue: stop` — the latter is a *new* gate here, since the old flag check happened to mask it.
-
-`make check` green (real exit 0, zero `result: FAILED`), installed, pushed.
-
-**On `#5d9f` — it is intermittent, not a hard outage.** Back-to-back preflights on brookebrodack alternate FAIL/OK/FAIL/OK, and a contended run errors differently: `Lazily current authority remained delivery_pending for 3000ms`. That reads as a race against a concurrently-live editor/turn, not a dead authority. Worth noting the amplifier: on failure, queue maintenance discards the computed queue and returns `QueueState::default()` — which is precisely what zeroes `queue_drainable_head_count` and silently disarms the loop. Retrying the bounded observation would likely be a better failure mode than dropping the whole computation. Filed.
-
-**Found while digging: a stale fix branch for this exact blocker.** `fix/editor-authority-no-disk-repair` (worktree `src/agent-doc-editor-authority-fix`) has 2 unmerged commits aimed at editor authority — but it is 5 days and 50 commits behind main, and still carries the old error wording (`publish-live-buffer`, "reload or save the editor buffer") where main now says `Lazily-current observation ... operator_action=none`. Main has already reworked that area, so merging it as-is would be a regression. Filed as a decision item — rebase-and-salvage or delete — rather than acting on someone else's in-flight branch unilaterally.
-
-**What I did not do.** I stopped preflighting brookebrodack-dev.md: it is foreign-owned by pane %9, which is mid-turn on `#teah`, and my probes were contending with its session (that is what produced the `delivery_pending` deferral). The three fixes are proven by unit tests and `make check`; live end-to-end confirmation on that document stays the `[operator-verify]` item. I also did not auto-loop the `/goal complete the entire queue` head — with the queue arming path only just fixed and unverified live, drainage should start from a state you have eyes on.
-<!-- agent:boundary:2bcfdbd1 -->
+- Archived 6 response topic(s): #jbsteerinterrupt; /goal complete the entire queue; Fix the contributing causes of the queue wedge; 3 more
+- Prior summary/context: prior compacted content: Archived 4 response topic(s): Can we speed up compact exchange?; JB `Run Agent Doc` route de...
+<!-- agent:boundary:b6a87b21 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#eqmv]
+- do [#0dsr]
+- do [#17jk]
+- do [#f1s3]
+- do [#fr79]
+- do [#05r0]
+- do [#a45a]
+- do [#30p6]
+- do [#n39j]
+- do [#bn41]
+- do [#px82]
+- do [#f6j3]
 - /goal complete the entire queue
 - Fix the contributing causes of the queue wedge.
 - do [#promptselect]
 - do [#realtimesalient]
-- ~~do [#jbsteerinterrupt]~~
 - do [#syncobscache2]
 - ⏭️ do [#jblocalhistverify]
 - ⏭️ do [#capturebacklogatomic]

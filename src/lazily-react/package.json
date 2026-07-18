@@ -1,0 +1,58 @@
+{
+  "name": "@lazily-hub/lazily-react",
+  "version": "0.1.0",
+  "description": "React/Preact bindings for @lazily-hub/lazily-js: drive React state from lazily reactive Cell/Slot/Memo/Signal handles via useSyncExternalStore. Glitch-free, equality-guarded re-renders.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lazily-hub/lazily-react.git"
+  },
+  "type": "module",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./bridge": {
+      "types": "./src/bridge.d.ts",
+      "default": "./src/bridge.js"
+    },
+    "./hooks": {
+      "types": "./src/hooks.d.ts",
+      "default": "./src/hooks.js"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node --check src/index.js && node --check src/bridge.js && node --check src/hooks.js",
+    "test": "node --test test/*.test.js"
+  },
+  "peerDependencies": {
+    "@lazily-hub/lazily-js": "^0.23.0",
+    "react": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true }
+  },
+  "devDependencies": {
+    "@lazily-hub/lazily-js": "file:../lazily-js",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-test-renderer": "^18.3.1"
+  },
+  "keywords": [
+    "react",
+    "preact",
+    "reactive",
+    "signals",
+    "lazily",
+    "useSyncExternalStore",
+    "state"
+  ]
+}

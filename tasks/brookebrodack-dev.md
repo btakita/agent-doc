@@ -735,7 +735,7 @@ would ship a concurrent session's in-progress merge code to every live editor.
 **Next step is yours.** `#teah` is at the head and I can work it directly from the
 backlog on your word — that needs no queue binding at all. Or once the other
 session's fix lands, the arming pass should complete on its own.
-<!-- agent:boundary:776dd540 -->
+<!-- agent:boundary:bb7b5120 -->
 <!-- /agent:exchange -->
 
 ## Queue

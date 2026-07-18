@@ -103,13 +103,137 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 Compacted content:
 - Archived 15 response topic(s): Lazily for the state layer; local moderation dispatch service; GitHub project + container-isolated plugins; 12 more
 - Prior summary/context: prior compacted content: Archived 10 response topic(s): hermes for moderation, OpenAI fallback; cron on Cloudflare or...
-<!-- agent:boundary:c1fc680d -->
+
+### Re: GPU policy for local model plugins — opus-4-8
+
+> **Queue prompt:** If we run a local model, GPU usage is restricted. Can we have a
+> machine policy on the gpu usage? Should we have a custom service? Ray is a
+> candidate that I'm familiar with, but I hesitate to use Ray due to overhead.
+
+**The honest answer to the literal question first: there is no kernel-enforced
+GPU policy available to you on this machine.** I checked rather than assumed:
+
+```
+NVIDIA GeForce RTX 5090, 32607 MiB, driver 610.43.03
+MIG Mode: Current: N/A    Pending: N/A
+```
+
+`N/A` is not "off" — MIG is an A100/H100/A30 feature and does not exist on
+GeForce silicon. There is also no VRAM controller in cgroup v2; the DRM cgroup
+work upstream does not cover the NVIDIA proprietary stack. MPS will give you an
+SM-percentage cap, but no memory cap, which is the resource that actually kills
+you.
+
+So every "machine policy" available here is **cooperative** — enforced by whoever
+holds the GPU, in userspace. That single fact should drive the design, because a
+cooperative policy is only as good as the number of processes you have to trust.
+Minimise that number to one.
+
+**On Ray: your hesitation is right, and the overhead is not the strongest reason.**
+Ray is a distributed-computing framework — cluster scheduler, object store, actor
+supervision. You have one node and one GPU, and what you actually need is a
+mutex. You would be adding a Python control plane to a Rust service to get it.
+
+The deeper mismatch is that Ray wants to own process lifecycle: its actors are
+processes *it* spawns, schedules, and restarts. freehold's whole isolation model
+is that plugin processes are spawned by `bwrap` with `--unshare-all`,
+`--cap-drop ALL`, no host filesystem, and no network unless `egress_hosts` says
+otherwise. Ray and that sandbox want to be the same thing, so you would be
+fighting it continuously. Skip it.
+
+**The GPU should never enter the sandbox — and today it structurally cannot.**
+`sandbox_argv` passes `--dev /dev`, which gives the plugin a minimal devtmpfs:
+`null`, `zero`, `random`, `tty`. No `/dev/nvidia0`, no `/dev/nvidiactl`, no
+`/dev/nvidia-uvm`. A plugin cannot touch the GPU as written.
+
+Granting it would mean explicitly binding those device nodes into a sandbox
+running untrusted third-party plugin code, which hands it the CUDA IPC surface
+and a large closed-source kernel-driver attack surface. That is a direct
+contradiction of the containment claim in `docs/manifesto.md` §"Contain the
+untrusted thing". I would treat "no nvidia device nodes in the sandbox" as an
+invariant, not a default.
+
+**Recommendation: one inference server owns the GPU; plugins talk to it over the
+proxy you are already building.**
+
+You have both `ollama` and `vllm` installed already, and the GPU is currently
+idle (no compute apps). So:
+
+- One persistent server holds the GPU and the loaded weights.
+- Model plugins get `egress_hosts: ["127.0.0.1:<port>"]` and reach it through the
+  allowlisting CONNECT proxy from `#p0rw`. **This needs no new mechanism** — it is
+  the remote-model path pointed at loopback.
+- GPU policy becomes that server's queue and batching, which is a solved problem
+  that someone else tunes for you.
+- Weights load once. The alternative — a plugin process loading a 20GB model per
+  guestbook entry — is unworkable, and that alone rules out
+  model-inside-the-plugin regardless of the security argument.
+
+**Which server.** At your load, `ollama`. The published 2026 concurrency numbers
+put the two within single digits at batch size 1, with ollama often ahead on
+first-token latency because it has no scheduler queueing; vLLM's PagedAttention
+and continuous batching only start paying at roughly 4–8 sustained concurrent
+requests, where it pulls 2.2–4× ahead. A personal guestbook is nowhere near
+that line. ollama also unloads idle models, which hands the 32GB back to you when
+nothing is moderating — worth more here than throughput you will never use.
+
+Filed as `#gpupol`. I also filed `#gpulease` as a *recommendation only*: a
+declared `gpu` field on `PluginSpec` plus a host-held semaphore across spawn, so
+several model plugins cannot stampede the server. It is about 100 lines and no
+framework, but it is not worth building until you actually have two concurrent
+local-model plugins.
+
+### Re: #teah — harness candidates and the self-improving harness — opus-4-8
+
+Closing this out; it has been open three cycles.
+
+**The agent you were thinking of is real, and there are two.** The June 2026 arXiv
+paper *Self-Harness: Harnesses That Improve Themselves* is the closest match to
+your description — agents that optimise their own operating framework with no
+human engineer and no stronger external model, via a Weakness Mining → Harness
+Proposal → Proposal Validation loop, reported to take MiniMax M2.5 from 40.5% to
+61.9% on Terminal-Bench 2.0. The other is **AutoAgent**, a meta-agent that tunes
+prompts, tools, and orchestration for a task-specific agent, behind the Stanford/MIT
+Meta-Harness paper.
+
+**But neither is a dependency you should take**, and the reason is the same
+constraint that put `#53z1` in the icebox: both optimise a harness *against an
+eval set with ground truth*. You do not have labelled moderation data. Self-Harness
+mines weaknesses from measured failures — with no benchmark it has nothing to
+mine. It becomes interesting at exactly the same data threshold as the distilled
+classifier, which is a tidy coincidence worth remembering.
+
+**On harness candidates for the plugins themselves — I think the framing needs
+correcting.** A moderation verdict is one prompt in, one structured verdict out.
+It is a classification call, not an agentic task. Claude Code, Codex, opencode,
+and hermes are all multi-turn tool-using loops; wrapping one around a
+single-shot classification buys latency, nondeterminism, and a much larger
+sandbox surface, in exchange for nothing.
+
+So: **verdict plugins should be plain model calls**, local via the server above or
+remote via the proxy. No harness.
+
+Where a harness genuinely fits is the other thing you described — actor plugins
+that *investigate* (does this link go somewhere real, has this poster shown up
+before). That is agentic, and it is where tmux-router driving Claude/Codex earns
+its keep. It is also a different trust tier: an investigating plugin needs real
+egress, so it wants the OCI runtime rather than the bwrap default. Worth keeping
+those two plugin classes distinct in the spec rather than letting one grow into
+the other. `hermes` stays out of both until `#2amm` is fixed upstream.
+
+Sources: [Self-Harness (arXiv writeup)](https://explainx.ai/blog/self-harness-agents-improve-themselves-arxiv-2026) ·
+[Self-Harness (VentureBeat)](https://venturebeat.com/orchestration/researchers-introduce-self-harness-a-framework-that-lets-ai-agents-rewrite-their-own-rules-boosting-performance-up-to-60) ·
+[AutoAgent / Meta-Harness](https://decodethefuture.org/en/autoagent-self-improving-ai-agents-meta-harness/) ·
+[Harness Engineering for Self-Improvement — Lil'Log](https://lilianweng.github.io/posts/2026-07-04-harness/) ·
+[vLLM vs Ollama concurrency](https://runaihome.com/blog/vllm-vs-ollama-when-each-wins-2026/) ·
+[Ollama vs vLLM 2026](https://particula.tech/blog/ollama-vs-vllm-comparison)
+<!-- agent:boundary:9fad7ea3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
-- do [#teah]
+- do [#teah]: If we run a local model, GPU usage is restricted. Can we have a machine policy on the gpu usage? Should we have a custom service? Ray is a candidate that I'm familiar with, but I hesitate to use Ray due to overhead.
 - do [#rak9]
 - do [#p0rw]
 - do [#sbv9]

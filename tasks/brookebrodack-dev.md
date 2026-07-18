@@ -515,7 +515,67 @@ Two things to watch:
    benchmark script will surface that immediately as an error row rather than a
    score. If that happens, tell me and I'll add a Responses-API provider; it's a
    small change against the existing provider interface.
-<!-- agent:boundary:5d41cd94 -->
+❯ Does including images + audio + video inclease engagement with guestbooks?
+
+### Re: does rich media increase guestbook engagement — opus-4-8
+
+**I couldn't find credible evidence either way, and I'd rather say that than quote a
+number at you.** I searched twice. What exists falls into two useless piles:
+
+1. **Rich-media *advertising* metrics** — "16.85% vs 2.14% for banners", "video CTR
+   59.3% vs 29.6% for images". Real studies, wrong context. Those measure whether an
+   ad grabs a passing eye. A guestbook measures whether someone who already likes you
+   bothers to write something. Nothing transfers.
+2. **Wedding-guestbook vendor marketing** — every result was a company selling a
+   digital guestbook app. "A verbal prompt doubles participation", "multimedia
+   creates high levels of joyful participation." No methodology, no sample, no
+   format-vs-format comparison. It's copy, not data.
+
+The only non-vendor datapoint I found was Brooklyn Museum reporting digital
+guestbooks at roughly a **2% use rate** — and that's about museum kiosks, and says
+nothing about media types.
+
+**And the vendor evidence wouldn't transfer even if it were rigorous.** Those are
+invite-only events: known guests, a QR code, a shared occasion, social pressure to
+participate. brookebrodack.net is anonymous strangers on the open internet. That
+difference is the whole ballgame, because it's exactly where rich media stops being
+an engagement question and becomes a liability question.
+
+### The part I'd actually weigh
+
+Adding images/audio/video would break what we just built, in a way worth being blunt
+about:
+
+- **It defeats the moderation pipeline.** The model judges *text*. Uploaded media
+  would sail through unjudged — you'd be auto-publishing anonymous files with no
+  review at all. Fixing that means a vision model, audio transcription, and video
+  frame sampling: a different system, not a feature flag.
+- **The abuse exposure is categorically different.** Anonymous image upload on a
+  public form means CSAM and illegal-content risk, with legal obligations attached.
+  Text spam is an annoyance; this is not the same kind of problem.
+- **Real infrastructure follows** — R2 storage, bandwidth, size and format
+  validation, transcoding, and EXIF stripping (uploaded photos carry GPS
+  coordinates).
+
+**My recommendation: don't take anonymous rich media.** The evidence that it would
+help is absent, and the cost is concrete and mostly legal.
+
+If you want the upside without the exposure, two options:
+
+- **Let Brooke post media, not submitters.** Owner-authored images or video on the
+  guestbook page, or in replies to entries. All the richness, zero anonymous-upload
+  risk, and you already have the admin dashboard to do it from.
+- **Reduce friction instead.** For a text guestbook the lever is latency, and we just
+  pulled it: inline moderation means a message appears *immediately* rather than
+  after a delay. Watch what that does before adding media types — you now have a
+  before/after worth measuring.
+
+Sources: [Marketing Dive on rich media ad rates](https://www.marketingdive.com/news/mobile-rich-media-ads-top-completion-and-engagement-rates-study/414056/),
+[Popular Pays photos vs. video](https://popularpays.com/blog/boost-social-media-engagement),
+[GUESTPIX](https://guestpix.com/blog/why-choose-a-digital-guestbook-for-your-wedding/) and
+[GuestCam](https://guestcam.co/blog/top-digital-wedding-guestbooks) as representative
+vendor claims.
+<!-- agent:boundary:7dae247d -->
 <!-- /agent:exchange -->
 
 ## Queue

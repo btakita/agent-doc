@@ -105,12 +105,27 @@ One deliberate asymmetry: the lender surfaces never mention TMO account linking.
 - `#vesting-gap-admin-queue` — Phase 1 warns per lender on that lender's card; an admin still has to visit each one. A roster-level queue closes that, and both counts it needs (`investor_vesting_count`, `investor_vesting_linked_count`) are already in the lender-pipeline query.
 
 Also moved `#tmo-prod-seat-not-provisioned` to review — it is blocked on April confirming which account/serial the new seat landed on, which is not something I can drain, and it was holding the queue head.
-<!-- agent:boundary:66399405 -->
+### Re: TMO live API access — opus-4-8
+
+> **Queue prompt:** Instead of doing [#tmo-orphan-cache], the loans should be added as fundings into the tmo database. The admin may need to reconcile the funder/lender/vesting. We can use this to drive out the reconciliation process. We should also have an automated tool to attempt a reconciliation. We also should do work on lender portal vestings, with a banner to ask the lender to add their vestings. Also the admin should be able to add lender vestings. A lender may not have any vestings but we should have admin banners to ensure vestings are added.
+
+Answered in full in the previous response — `prds/vesting-and-tmo-reconciliation.md`, Phase 1 shipped as EFS `18f06c17`, Phases 2–4 queued as `#tmo-orphan-as-fundings` / `#tmo-reconcile-auto` / `#vesting-gap-admin-queue`. This entry is the queue echo so the head clears.
+
+On your note about the seat — you are right that the portal login is not the blocker, and I want to correct one thing I said. **The TMO token is not environment-scoped at all.** There is one token, it is byte-identical in `passage equityfundingsource/tmo/live/api` and `equityfundingsource/tmo/sandbox/api`, and the environment is selected *only* by the `Database` header. So API access to production was never gated on the seat; it was already there.
+
+That is worth sitting with, because it cuts both ways: nothing but a header string separates a sandbox call from a production one. It is exactly why `bin/tmo-sandbox-purge.ts` refuses `--apply` unless the `Database` value contains `Sandbox` — a fat-fingered header on a delete pass would otherwise hit live records with no undo.
+
+I re-gated `#tmo-prod-seat-not-provisioned` to review rather than closing it. The portal seat still matters for anything you or April need to do by hand in the TMO UI on the production company, and it was blocking the queue head where it was.
+<!-- agent:boundary:c2b713f4 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~do [#tmo-prod-seat-not-provisioned]: I was not able to login to the live system. I don't need to though. Just need api access and I believe you confirmed the live key is working.~~
 - Instead of doing [#tmo-orphan-cache], the loans should be added as fundings into the tmo database. The admin may need to reconcile the funder/lender/vesting. We can use this to drive out the reconciliation process. We should also have an automated tool to attempt a reconciliation. We also should do work on lender portal vestings, with a banner to ask the lender to add their vestings. Also the admin should be able to add lender vestings. A lender may not have any vestings but we should have admin banners to ensure vestings are added.
+- do [#tmo-orphan-as-fundings]
+- do [#tmo-reconcile-auto]
+- do [#vesting-gap-admin-queue]
+- do [#tmo-contact-enumeration]
 <!-- /agent:queue -->
 
 ## Backlog

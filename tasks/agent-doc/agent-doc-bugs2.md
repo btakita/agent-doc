@@ -34,81 +34,12 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260718-054950.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260718-144129.md`*
 
 Compacted content:
-- Archived 2 response topic(s): JB harness switch deferred against a stale actor record; agent-doc did not submit the prompt
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): JetBrains route deferred on retained delivery
-
-### Re: cycle with no new prompt — opus-4-8
-
-Nothing to answer this cycle. The only document change since the last commit is the compaction bookkeeping itself — the archive pointer moved to `...-20260718-054950.md` and the two response topics from the harness-switch cycle (JB harness switch deferred against a stale actor record; agent-doc did not submit the prompt) collapsed into the summary line. All five `#actorharness*` / `#restartfreshtriggerstranded` queue heads are struck, as expected.
-
-Queue state: `queue_drainable_head_count: 0`, `queue_continuation_required: false`. Every remaining head is `[operator-verify]` (`#jblocalhistverify`, `#capturebacklogatomic`, `#opcapturelazily`, `#jbtsiftnosub2verify`) plus the gated `#5bzd` — nothing an in-session drain can take, so no loop.
-
-Two things worth your attention when you next steer this doc:
-
-- Top of backlog is the real actionable item: `crash_resilience::tests::log_panic_to_file_appends_without_panicking` writes to a fixed panic-log path that concurrent crate test binaries share, so it fails under `cargo test --workspace` and passes in isolation. Say the word and I'll fix it rather than leave it filed.
-- Preflight is flagging five semantic-completion candidates — `#jblocalhistverify`↔`#jblocalhistcrash` (1.892), `#kj5flive`↔`#6b5h` (1.866), `#qftlossdelta`↔`#qftlossproof` (1.863), `#gd88`↔`#restartstderrbleed` (1.792), `#qeditrace`↔`#qdedupsync` (1.777). Several of those live-proof items may already be satisfied by work archived in `agent-doc-bugs2.done.md`; a sweep would shrink the operator-verify backlog.
-
-### Re: repeated no-op invocations were a supervisor resubmit flood — opus-4-8
-
-You invoked `/agent-doc` four times against an unchanged document. Preflight returned `no_changes: true` every time. That was not you re-triggering — the supervisor was, and the cause is a defect I shipped last cycle. Fixed, tested, installed, pushed (`e6d9131dd`), supervisor recycled.
-
-**What the log showed.** Injections at 05:55:55, 05:59:07, 06:00:40, 06:02:48, each followed by:
-
-```
-auto_trigger_stranded_trigger_resubmit ... note=restart-fresh pane took the trigger but not the submit key; resending
-tmux_input_event source=supervisor.auto_trigger_stranded_resubmit key=Enter
-auto_trigger_submit_stranded ... resubmitted=true
-```
-
-The supervisor decided each trigger was typed-but-not-submitted and resent `Enter`. Every trigger had in fact been submitted — I was serving them.
-
-**Root cause.** `verify_auto_trigger_submitted` (the `#restartfreshtriggerstranded` guard from last cycle) gathers its facts with `pane_composer_has_pending_trigger`, which substring-matches the **entire pane capture**. That function's own doc comment states the assumption it rests on: *"on a brand-new fresh pane the only way the trigger literal can appear is the just-injected, not-yet-submitted draft."* True for `#jbtsiftnosub2`, which runs on a pane with empty scrollback. False for the supervisor entry point, which runs on a long-lived pane.
-
-I captured pane `%30` live. The literal appears twice, and neither is a draft:
-
-- as **consumed transcript history** — the prompt I already answered, sitting above a later `❯`;
-- inside Claude Code's **queued-input region**, above `❯ Press up to edit queued messages`. That shape means the trigger was *accepted and queued*. Resending `Enter` there submits it a second time — the guard was manufacturing the duplicates it thought it was repairing.
-
-The second half is what made it a livelock rather than a one-off: `auto_trigger_cycle_acknowledged` proves submission by watching cycle state advance, and a `no_changes` turn never advances cycle state. So a no-op turn falls through the ack check into the pane check, which then false-fires. Inject → no-op → false "stranded" → resubmit → inject.
-
-**Fix.** Switched the fact-gathering to `route_trigger_visible_in_current_draft`, which already exists and is what `route`'s direct-pane dispatch uses: it requires that **no later prompt line follows** the match, so consumed history and queued input both read as accepted. This is a reuse, not a new heuristic — the correct policy was already in `agent-doc-controller`; the guard I added simply reached for the wrong helper.
-
-**Coverage.** Four tests in `agent-doc-controller/src/dispatch.rs`, built from the real capture: the scrollback-echo shape, the queued-message shape, a test pinning that the whole-capture matcher *does* false-fire on the same input (so the scope limit has a stated reason and can't be quietly undone), and a negative control asserting a genuinely stranded draft is still detected — without that control, a verifier that never reports stranded would pass the first three and silently regress `#restartfreshtriggerstranded` back to the bug you originally reported.
-
-Also documented the scope limit on `pane_composer_has_pending_trigger` so the next caller doesn't repeat this.
-
-**Verification.** `make check` green (clippy + full suite + TLC). `make install-full` clean, `agent-doc admin recycle` requested a supervisor replacement (receipt 156), so the next idle tick runs the fixed binary.
-
-One honest gap: this was diagnosed and fixed from log and capture evidence, not from watching a fresh flood stop. Filed `#autotriggerscrollbackechoverify` as the live proof — it needs an idle-watch cycle on the recycled supervisor showing no `auto_trigger_*_stranded` markers for a consumed trigger.
-
-Unrelated and still open: the top backlog item, `crash_resilience::tests::log_panic_to_file_appends_without_panicking`, which shares a fixed panic-log path across concurrent test binaries and so fails under `cargo test --workspace` while passing in isolation.
-
-### Re: stale verification-item sweep and the queue auto-strike fix — opus-4-8
-
-Recovering the rationale for three directive heads that were archived into `agent:done` in cycle `cycle-1784355960603` without a response record (`#compact-reap-no-response-record`). The removals were operator-directed; only the write path was wrong — `--backlog-only` skips exchange synthesis, so the reasoning never landed in the document.
-
-**Removed as stale (operator directive: "just remove the items that require verification — these are stale, we removed the sidecars"):**
-
-- `#jblocalhistverify` — live proof gate for `#jblocalhistcrash`. Also pinned `agent-doc-jetbrains-0.2.232.zip` while the live registration is 0.2.277, so the proof would have run against a 45-version-old install.
-- `#gd88` — live re-proof for `#restartstderrbleed` on a fixed binary.
-- `#kj5flive` — `#mergestatemachine3` live proof (JB+VSCode attach/detach, File Cache Conflict, `#6b5h` repro).
-- `#qftlossdelta` — removed from `agent:review` via `--review-remove`.
-
-`#qeditrace` was explicitly **kept**: it is `[focused-cycle]`, not verification-gated, and does not depend on sidecars. It tracks a live defect (multi-line pre-run queue additions revert to all-but-first) that is distinct from `#qdedupsync`'s duplication class. `#sidecarstate` and `#opcapturelazily` were also kept — they *are* the sidecar-retirement work, not casualties of it.
-
-`#ipcauthority` was corrected rather than removed. Its text credited a landed "durable recovery sidecar" (`write_policy::content_ours_drops_operator_text` + `agent_doc_fs::preserve_dropped_operator_buffer` → `.agent-doc/recovery/`, commit `317a336f`) as closing the `#qftlossdelta` artifact gap. With the sidecars removed that reads as a safety net someone would rely on, so it now carries a `SUPERSEDED PREMISE` marker and the remaining goal: make the CRDT/reliable-sync plane the single closeout authority and demote `content_ours`/snapshot to audit-only.
-
-**Queue auto-strike defect found and fixed while verifying the removals (`#qdonestrike-durable`, agent-doc submodule `4faed5b01`).**
-
-Resolved heads were not clearing from `agent:queue`. The strike logic was never the problem — it computed correctly on every run, logging `auto-struck already-resolved head prompt "📌 do [#jblocalhistverify]" source=done`. The loss was in persistence: `persist_queue_maintenance_doc` applies maintenance as one compare-and-swap against the Lazily head, and on `EditorAttachedMissingReplica` / `EditorSyncPending` it bailed with no retry, discarding the entire plan. Because maintenance is recomputed each preflight, the strike was calculated and thrown away every single cycle — which is also why the `#mirrorall` backlog→queue sync kept re-appending the same heads (the duplicate `📌 do [#jblocalhistverify]` pair was that re-mirror, not a `#qdedupsync` variant bug).
-
-Fix: drive the bounded `ensure_document_model` transition and re-observe before failing closed. That helper reads relay state only and never elects a disk/sidecar projection while an editor is attached, so it stays fail-closed against clobbering a live buffer; a head still not ready after the ensure bails as before, now with a diagnostic reason instead of an opaque "not ready". The head decision is extracted as the pure `queue_maintenance_head_action(current, already_ensured)` so the not-ready → ensure → re-observe → fail-closed transition is unit-provable without a relay, editor, or controller. `make check`: 7599 passed, 0 failed.
-
-**Not yet provable live.** Controller `serve` pid 1501201 and route-owned supervisor pid 2040014 still map the pre-fix binary (new build installed 02:47:36), and the requested recycle is deferred to an idle boundary that does not arrive while this session is active. Preflight now reports the honest underlying state instead of the opaque bail: `editor authority stayed in editor_attached_model_missing after a bounded Lazily-current observation request; recovery=retry_without_disk_write`. The controller was deliberately **not** killed: it is project-scoped (`--project-root .../agent-loop`) and `tasks/professional/equityfundingsource.md` is foreign-owned by concurrent pane `%31`, so a kill would hit that session too. Tracked by `#qdonestrikeverify`.
-<!-- agent:boundary:d49ac76a -->
+- Archived 3 response topic(s): cycle with no new prompt; repeated no-op invocations were a supervisor resubmit flood; stale verification-item sweep and the queue auto-strike fix
+- Prior summary/context: prior compacted content: Archived 2 response topic(s): JB harness switch deferred against a stale actor record; agent...
+<!-- agent:boundary:c0723d78 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -198,6 +129,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#supboundarylivelock] #agent-doc-bug Supervisor idle-boundary recycle can livelock, leaving a stale binary mapped indefinitely. supervisor_recycle_action (agent-doc-supervisor/src/lifecycle.rs:124) returns None on `!turn_boundary` for everything except write_wedged/editor_delivery_stale, and turn_boundary = prompt_visible && !turn_active (idle_watch.rs:1898) never holds for a continuously-active pane. The only bypass, stale_recycle_safe_checkpoint (idle_watch.rs:136) = supervisor_stale && inflight_handlers == 0, is gated on staleness, so an explicit `admin recycle` on a NON-stale busy supervisor can never be consumed and silently expires at DEFAULT_RECYCLE_REQUEST_TTL_SECS=900 (recycle_request.rs:17) with the ledger phase left Requested. --force does not help: rpc.rs:5905 only changes the reason string, and idle_watch.rs:2403 collapses the request to a plain bool. MAX_CYCLE_OPEN_DEFER_TICKS escalation cannot rescue it either (idle_watch.rs:2253 only accrues the streak AT a boundary). OBSERVED 2026-07-18: supervisor pid 2040014 stayed stale across this whole session even though it IS stale (so the checkpoint bypass should apply and inflight_connection_handlers is an in-process RAII-guarded atomic that cannot leak) - the stale-side path needs its own trace. Fixing the non-stale side means a mid-turn execve, which is exactly what the boundary gate exists to prevent, so this needs a design decision (manufacture a boundary via the recycle-yield path? bound the defer? re-arm instead of expiring?), not a quick patch. Related shipped fixes: #dispatchgateleak + #authorityfactretention (submodule 566a72f6d).
+- [ ] [#statedbvacuum] [recommended] #agent-doc-feature One-time reclaim + ongoing compaction for .agent-doc/state.db. #authorityfactretention (566a72f6d) bounds future growth (170,215 -> 5,000 document_authority_observed rows on the live db), but SQLite reuses freed pages rather than shrinking: agent-loop state.db is still 477MB on disk with ~47,000 free pages and state_events holding 288MB across 73,822 pages for only 11,056 rows. Reclaiming needs a VACUUM, which takes an exclusive lock and must not run under a live controller. Add a bounded maintenance path (an `agent-doc admin vacuum` gated on no live controller/supervisor, or PRAGMA incremental_vacuum wired into an idle boundary) instead of leaving operators to run sqlite3 by hand.
 - [ ] [#qdonestrikeverify] #agent-doc-bug #qdonestrike-durable follow-up: confirm resolved queue heads actually clear once the project controller runs a build containing agent-doc submodule 4faed5b01. Fix shipped: persist_queue_maintenance_doc now drives the bounded ensure_document_model and re-observes before failing closed, so a missing/pending replica no longer discards the whole queue-maintenance plan (the auto-strike of agent:done heads was recomputed and thrown away every preflight). NOT yet provable live: controller serve pid 1501201 + route-owned supervisor pid 2040014 still map the pre-fix binary, and preflight now reports the honest underlying state (editor authority stayed in editor_attached_model_missing after a bounded observation; recovery=retry_without_disk_write). Controller kill was deliberately NOT done because it is project-scoped and tasks/professional/equityfundingsource.md is foreign-owned by a concurrent pane %31. Verify after an idle-boundary recycle: preflight should log queue_maintenance_model_ensure and the struck heads (📌 do [#jblocalhistverify], 📌 do [#5bzd]) should disappear from agent:queue instead of being re-logged as auto-struck every run.
 - [ ] [#crashresiliencelograce] test-hygiene: crash_resilience::tests::log_panic_to_file_appends_without_panicking fails under a parallel workspace run (cargo test --workspace) at src/crash_resilience.rs:173 but passes in isolation and under make check. The panic-log append test shares a fixed path across concurrently-running crate test binaries. Give it a per-test temp path so the suite is order-independent.
 - [ ] [#compacttombgc] [recommended] Add a fenced Compact Exchange CRDT epoch: rebootstrap attached replicas from the compacted snapshot, reject or component-rebase older-epoch deltas, expose the all-replica stability frontier, then run TextCrdt tombstone GC.

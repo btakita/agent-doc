@@ -101,7 +101,54 @@ I also reverted two speculative fixes rather than ship them: a response-path loo
 **Not fixed — `#jbsteerinterrupt`.** `attempt_busy_existing_pane_interrupt_recovery` is codex/opencode-only, so it cannot be what interrupted your Claude pane. Something else injected it and I don't know what. I won't edit safety-critical routing code on an unverified hypothesis, having already made and reverted that mistake twice today. I need `ops.log` plus route diagnostics captured at the moment of the interrupt on a Claude pane.
 
 CI run 29653355392 was in progress at closeout. The pre-existing `finalize_skips_ignored_untracked_session_doc` failure is still red and still not reproducible locally after four attempts.
-<!-- agent:boundary:d520485c -->
+❯ 🚧 Please add support for selecting text in an editor and `Run Agent Doc` which will be capable of sending only the selected prompt to the agent. This should also support real-time steering. Should we have a dedicated `agent-doc prompt "<text>"` command or name steer to something else like `run` or `steer`? The command should be able to also handle multiple lines...perhaps using `cat`? Please hook this command up to the plugins' `Run Agent Doc` command...so if there is a text select, only the text selection is sent via `prompt`. If the user sends a `prompt` via selection, agent-doc should "acknowledge" the prompt by adding the prompt prefix and any saliant responses into the prompt. Please also have agent-doc dedicate responses to specific prompts under the prompt. This may mean creating an additional layer in the Document Tree for each prompt + response. This should be like a threaded chat.
+
+❯ 🚧 Please also make the agent write salient responses into the document in real-time, rather then waiting until the finalize step.
+
+❯ 🚧 The agent-doc binary should handle the queue being drained:
+```
+  One loose end I could not close, and I'd rather flag than force
+
+  The only pending change on tasks/brookebrodack-dev.md is a single line — the queue-head strike I applied last turn.
+  It won't commit through the binary:
+
+  - agent-doc write --commit fails with queue consume: queue_active is true but document queue has no prompt to consume
+  — queue: go is set in frontmatter, but its only head is already struck, so consume finds nothing
+  - agent-doc commit silently no-ops on it
+  - Frontmatter isn't a patchable component, so flipping queue: go means writing to disk under the live editor — which
+  is precisely what diverged authority from disk twice earlier this turn
+
+  So I stopped. session-check is green and nothing is blocked; the cost is one uncommitted line of bookkeeping.
+
+  To clear it: remove queue: go from the frontmatter (the queue is genuinely drained), or add a new queue item. Either
+  way the next cycle's preflight will absorb the strike.
+
+  This was self-inflicted, and worth naming: after my response quoted the queue head, the #ftstrike echo had already
+  satisfied the residue guard. My manual agent-doc patch strike on top of that was redundant, and it's what left the
+  ❯ 🚧 document in a state the consume path can't reconcile.
+
+  Standing blockers are unchanged — OpenAI project credit (insufficient_quota) and wrangler login — and the guestbook
+  code across four submodules is still uncommitted and undeployed, pending your go-ahead.
+```
+
+### Re: session crash + agent-doc contributing factors — opus-4-8
+
+Crash was OOM (SIGKILL/137). Two contributing factors, both in agent-doc rather than the machine, plus your drained-queue bug. Fixed and pushed; nothing was lost (tree clean, all commits pushed, binary current).
+
+**`#installfulloom` — the crash cause, and it was a documented-workflow bug.** `make install-full` builds `[profile.release]` = `lto = "fat"` + `codegen-units = 1` across a **144-crate workspace**. Fat LTO collapses that into one enormous LLVM process. It is a *pre-release parity* step — the `release` target uses it — but AGENTS.md listed it as the install to run after every fix, so I called it ~10 times while iterating and eventually OOMed the machine.
+
+`make install` already existed for this loop: `release-local` (`lto = off`, `codegen-units = 256`, incremental), same binary + cdylib + editor packages. Measured difference: **3 seconds vs 3–4.5 minutes** per install, with none of the memory spike. Makefile and AGENTS.md now say which is which and why — any agent following the old wording would repeat the crash, so this is a packagable fix, not a note to myself.
+
+**`#ledgerdocscope` (second site).** `agent-doc-repair-io`'s `load_state_event_ledger` loaded **every** event in the project on the repair/closeout path — all rows into a `Vec` with full `payload_json`, then each parsed into a `StateEvent`, so peak memory was roughly 2x the whole ledger. The caller projects exactly one document out of it and already had `document_hash` in hand. Same one-argument fix as the supervisor-io site. Left the `agent-doc-controller-io` whole-project loads alone — some callers genuinely need a project-wide projection, and this session's `#crdtcheckpointretention` GC already cut what they load by ~79%.
+
+**`#queuedrainednoop` — your queue bug.** `write --commit` refused with "queue_active is true but document queue has no prompt to consume" while `commit` silently no-opped. The queue had `go` set and its only head already struck — the normal end state of a drain, not corruption. The guard treated "no consumable prompt" as malformed regardless of cause, leaving one line of bookkeeping impossible to commit through the binary at all; the only escape left was writing `queue: go` off under a live editor, which is the exact disk-vs-authority divergence the write path exists to prevent. You were right to stop rather than take it. A queue whose heads are all `Completed` with no remaining `Prompt` now consumes nothing and succeeds. The malformed case still fails closed.
+
+Same principle as `#steernoblock`: when there is nothing to do, the answer is a no-op, not a hard failure that strands the operator.
+
+Sync is now **334ms** from a 2207ms baseline (-85%), with `safe_passive_total` inside budget.
+
+Queued `#promptselect` and `#realtimesalient` for the two features — both need a design pass, so I am flagging them as substantial rather than quietly deferring them.
+<!-- agent:boundary:d3148aa9 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -192,6 +239,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#promptselect] #agent-doc-feature Selection-scoped `Run Agent Doc`: send ONLY the editor text selection as the prompt. Needs (a) a dedicated CLI verb — `agent-doc prompt "<text>"` (or `steer`; `run` is taken) accepting multi-line via stdin/cat, (b) JB+VSCode `Run Agent Doc` hooked to it so a non-empty selection routes through `prompt` instead of the whole-document trigger, (c) acknowledgement: agent-doc echoes the prompt into the document with the prompt prefix plus salient response, (d) responses attached UNDER their originating prompt — a threaded prompt->response layer in the Document Tree rather than a flat exchange tail. Must compose with realtime steering (#realtime-steering-verbatim) since a selection sent mid-turn IS steering. Design pass needed before implementation.
+- [ ] [#realtimesalient] #agent-doc-feature Write salient responses into the document in REAL TIME rather than buffering until finalize. Today only complete `### Re:` sections cross response-checkpoint and partial output is console-only (SKILL.md: "stream incomplete progress only to the console"). Requires deciding what counts as salient mid-turn, and preserving the invariant that incomplete token prefixes never become authoritative document text — so likely a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it. Pairs with #promptselect threading.
 - [ ] [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.
 - [ ] [#jbsteerinterrupt] #agent-doc-bug JB `Run Agent Doc` mid-turn showed Claude Code "Interrupted". MECHANISM UNVERIFIED — do not guess. attempt_busy_existing_pane_interrupt_recovery (agent-doc-route-io/src/busy_pane.rs:225) is codex/opencode-ONLY, so it cannot be the source for a Claude pane; something else injected it. NEEDED: ops.log + route diagnostics captured at the moment of interrupt on a CLAUDE pane before touching safety-critical routing code. Contract #realtime-steering-verbatim: the prompt is already in the document and the running turn should consume it as steering, so interrupting to deliver it is wrong by design.
 - [ ] [#syncobscache2] #syncobscache follow-up (the rest of the focus-sync win): extend the command-scoped observation cache into ../tmux-router. After the agent-doc-side cache: 109 -> 80 subprocess spawns, 2225 -> 2031ms (~9% only). list-panes barely moved (35 -> 34) because tmux-router spawns from 47 sites directly via its own Command builder, bypassing TmuxCommandRunner. Dominant remainder: `list-panes -a -F #{pane_id} #{pane_dead}` run 18x identically — pane_dead_flag lists ALL panes and scans for one, once per pane. Fix: move the scope into tmux-router and/or batch pane_dead_flag into one map fetch. Re-measure with the PATH-shim spawn counter.

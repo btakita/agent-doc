@@ -642,6 +642,7 @@ ON queue_document_state(state_kind);
     ensure_queue_head_columns(conn)?;
     ensure_crash_recovery_marker_columns(conn)?;
     prune_document_authority_observations_once(conn);
+    prune_superseded_crdt_recovery_checkpoints_once(conn);
     retire_removed_state_event_variants(conn)?;
     Ok(())
 }
@@ -728,6 +729,96 @@ fn prune_document_authority_observations_to(conn: &Connection, max_rows: i64) ->
                 [cutoff],
             )
             .context("failed to prune stale document_authority_observed events")?;
+        if deleted == 0 {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// How many `crdt_recovery_projection_checkpointed` events to keep per document
+/// (`#crdtcheckpointretention`).
+///
+/// This fact is a **superseding snapshot**, not an accumulating one:
+/// `DocumentStateProjection::apply_fact` assigns `crdt_recovery_projection =
+/// Some(..)` wholesale, so replaying only the newest checkpoint for a document
+/// yields a byte-identical projection to replaying all of them. Every older
+/// checkpoint is dead weight the ledger replays and pays for forever.
+///
+/// It is also the single largest consumer of the ledger. Live measurement
+/// 2026-07-18 (agent-loop): 564 rows holding **405MB of the 512MB** total
+/// `payload_json` — 79% of the database — at ~736KB per row, because each row
+/// embeds a full base64 CRDT projection. One document alone held 4,494 events /
+/// 251MB. That bloat is what made per-document ledger reads expensive even after
+/// the read was correctly scoped by `document_hash` (`#ledgerdocscope`).
+///
+/// Same failure class and same remedy shape as
+/// [`DOCUMENT_AUTHORITY_OBSERVED_MAX_ROWS`], but the cap must be **per document**
+/// rather than global: a global row cap would evict a quiet document's only
+/// recovery checkpoint as soon as a busy document produced enough newer ones.
+///
+/// Keeping more than one is deliberate headroom — the newest is what recovery
+/// elects, and a spare bounds the blast radius if the newest is unreadable.
+const CRDT_RECOVERY_CHECKPOINTS_KEPT_PER_DOCUMENT: i64 = 2;
+
+/// Guards the once-per-process checkpoint prune so the per-request
+/// `open_state_db` path does not rescan `state_events` on every RPC.
+static CRDT_RECOVERY_CHECKPOINTS_PRUNED: AtomicBool = AtomicBool::new(false);
+
+/// Prune superseded CRDT recovery checkpoints once per process, best-effort.
+///
+/// Retention is maintenance, never a reason to fail state-db open; a failure
+/// unlatches the guard so a later open retries instead of giving up for the
+/// lifetime of the process.
+fn prune_superseded_crdt_recovery_checkpoints_once(conn: &Connection) {
+    if CRDT_RECOVERY_CHECKPOINTS_PRUNED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    if let Err(err) = prune_superseded_crdt_recovery_checkpoints_to(
+        conn,
+        CRDT_RECOVERY_CHECKPOINTS_KEPT_PER_DOCUMENT,
+    ) {
+        CRDT_RECOVERY_CHECKPOINTS_PRUNED.store(false, Ordering::Relaxed);
+        eprintln!(
+            "[agent-doc] warning: failed to prune superseded crdt_recovery_projection_checkpointed events: {err:#}"
+        );
+    }
+}
+
+fn prune_superseded_crdt_recovery_checkpoints_to(
+    conn: &Connection,
+    keep_per_document: i64,
+) -> Result<()> {
+    if keep_per_document < 1 {
+        return Ok(());
+    }
+    // A row is superseded when at least `keep_per_document` NEWER checkpoints
+    // exist for the same document. The correlated count is driven by
+    // `state_events_document_hash_fact_type_id`, which already orders by id
+    // within (document_hash, fact_type), so this needs no additional index.
+    //
+    // Bounded batches so a one-time cleanup of a legacy backlog cannot balloon a
+    // single WAL frame or hold the write lock for the whole scan.
+    loop {
+        let deleted = conn
+            .execute(
+                r#"
+                DELETE FROM state_events
+                WHERE rowid IN (
+                    SELECT e.rowid FROM state_events e
+                    WHERE e.fact_type = 'crdt_recovery_projection_checkpointed'
+                      AND (
+                        SELECT COUNT(*) FROM state_events n
+                        WHERE n.fact_type = 'crdt_recovery_projection_checkpointed'
+                          AND n.document_hash = e.document_hash
+                          AND n.id > e.id
+                      ) >= ?1
+                    LIMIT 2000
+                )
+                "#,
+                [keep_per_document],
+            )
+            .context("failed to prune superseded crdt recovery checkpoints")?;
         if deleted == 0 {
             break;
         }
@@ -3747,4 +3838,92 @@ mod tests {
         assert_eq!(projected[0].event_id, "closeout-1");
         Ok(())
     }
+
+    /// `#crdtcheckpointretention`: superseded CRDT recovery checkpoints are the
+    /// largest consumer of the ledger (measured: 564 rows / 405MB of a 512MB
+    /// database, ~736KB each). They are safe to drop because
+    /// `apply_fact` ASSIGNS `crdt_recovery_projection` wholesale rather than
+    /// accumulating, so replaying the newest per document is equivalent.
+    #[test]
+    fn superseded_crdt_recovery_checkpoints_are_pruned_per_document() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+
+        // Two documents with different checkpoint counts, plus an interleaved
+        // durable fact that must survive untouched.
+        for i in 0..6 {
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, 'docA', 'document', 'crdt_recovery_projection_checkpointed', '{}', 0)",
+                [format!("a-ckpt-{i}")],
+            )?;
+        }
+        for i in 0..3 {
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, 'docB', 'document', 'crdt_recovery_projection_checkpointed', '{}', 0)",
+                [format!("b-ckpt-{i}")],
+            )?;
+        }
+        conn.execute(
+            "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+             VALUES ('keep-me', 'docA', 'document', 'response_captured', '{}', 0)",
+            [],
+        )?;
+
+        prune_superseded_crdt_recovery_checkpoints_to(&conn, 2)?;
+
+        let count_for = |doc: &str| -> Result<i64> {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM state_events \
+                 WHERE fact_type = 'crdt_recovery_projection_checkpointed' AND document_hash = ?1",
+                [doc],
+                |row| row.get(0),
+            )?)
+        };
+        assert_eq!(count_for("docA")?, 2, "each document keeps its own newest N");
+        assert_eq!(
+            count_for("docB")?,
+            2,
+            "a quiet document must not be evicted by a busy one — the cap is per document"
+        );
+
+        // The survivors must be the NEWEST, since recovery elects the latest.
+        let newest: String = conn.query_row(
+            "SELECT event_id FROM state_events \
+             WHERE fact_type = 'crdt_recovery_projection_checkpointed' AND document_hash = 'docA' \
+             ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(newest, "a-ckpt-5", "the newest checkpoint must survive");
+
+        let durable: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM state_events WHERE fact_type = 'response_captured'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(durable, 1, "durable lifecycle facts must survive untouched");
+        Ok(())
+    }
+
+    #[test]
+    fn crdt_recovery_checkpoint_prune_is_a_no_op_below_the_cap() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        conn.execute(
+            "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+             VALUES ('only', 'docA', 'document', 'crdt_recovery_projection_checkpointed', '{}', 0)",
+            [],
+        )?;
+        prune_superseded_crdt_recovery_checkpoints_to(&conn, 2)?;
+        let remaining: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM state_events WHERE fact_type = 'crdt_recovery_projection_checkpointed'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(remaining, 1, "a lone checkpoint must never be pruned");
+        Ok(())
+    }
+
 }

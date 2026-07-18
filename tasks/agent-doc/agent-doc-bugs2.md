@@ -141,7 +141,43 @@ I also routed preflight's initial current-doc resolve through the ensure path. `
 **Verification:** `make check` green — 7628/7628 with the new regression test, clean clippy. Committed `bbc50c26e`, pushed, installed.
 
 **My read on the durable fix:** 1.3 MB of bootstrap for a 47 KB document is ~28x the text in accumulated CRDT history. Widening timeouts only buys time against that growth. I'd rather attack the bootstrap size — filed as the second backlog item. Say the word and I'll take it next.
-<!-- agent:boundary:3aeac364 -->
+
+### Re: optimize the bootstrap size — opus-4-8
+
+Done and shipped, and it did **not** fix the wedge. The optimization is real; the theory behind it was wrong. Both halves matter.
+
+**The measurement overturned the premise before I wrote any code**
+
+The backlog item I filed — and you approved — proposed compaction/GC of accumulated CRDT history. I measured the real 815,754-byte projection first:
+
+```
+total_ops    = 88,630
+tombstones   = 0   (0.0%)
+distinct_clients = 1
+```
+
+**Zero tombstones.** Tombstone GC would have reclaimed nothing. `lazily`'s `gc_with` exists and agent-doc never calls it, which looked like the smoking gun — it wasn't. The cost is entirely per-op envelope: 88,630 *live* ops at ~9.2 bytes each.
+
+**What actually shrank it**
+
+The ops are extremely regular — counters near-sequential, `peer` constant, `origin` almost always the preceding character (**2 distinct** origin deltas across 88,630 ops). Array-of-structs interleaves those fields per character, so zstd never sees the regularity. New `ADCR2` columnar envelope groups each field into a column and delta-encodes counters.
+
+Measured on the real payload: **815,754 → 417,950 bytes (1.95x)**, exact round-trip. On the live wire the register bootstrap went **1,312,802 → 261,174 bytes — 5.0x**.
+
+Two things I checked rather than assumed: a plain struct-of-arrays regrouping that keeps `OpId` opaque gives only **1.2x** — the win needs `OpId` decomposed into scalar columns. And `OpId` has no public constructor, but it serializes as a `(counter, peer)` pair, so the decoder rebuilds ids in one bulk conversion with no `lazily` API change or release. A test pins that assumption so a `lazily` upgrade fails loudly instead of corrupting payloads. The encoder also self-verifies every payload by decoding and comparing before returning it, falling back to `ADCR1` on any mismatch.
+
+**The negative result, stated plainly**
+
+5x less data on the wire and `queue_maintenance_not_persisted` is **completely unchanged**. So the 400ms window is not failing on transfer size, and the hypothesis that sent me here — mine — is falsified. I filed that explicitly so nobody re-runs it. The next probe belongs on why the ensure-path observer never sees a replica the controller already reports as `current live_editors=1 delivery_converged=true`; generation fencing on re-register is the better suspect.
+
+**On your two reports**
+
+The uncommitted `crdt_sync.rs` on `bbc50c26e` was mine — this work in progress. You were right not to build it. It is now `d131457ab`, suite green at 7632, installed.
+
+Your finalize observation is the more useful finding, and it matches what I saw here: my own closeouts only landed via `write --commit` retry loops. Two persistence paths with different reachability is its own bug — filed.
+
+The frontmatter revert is the one that worries me most, because it is **destructive**. I traced it: `agent-doc-preflight-io/src/lib.rs:3485` computes `queue_has_prompts` / `drained_residue` from a queue body a *previous* cycle failed to persist, then feeds `need_clear_active`. A transient persistence failure makes the queue look drained, and preflight deletes your explicit `queue: start`. It is acting on known-stale data. I did **not** fix it — activation logic is safety-critical and I don't have the failing document's state to verify against, and guessing there is exactly the failure mode you warned about on `#jbsteerinterrupt`. Filed with the code path.
+<!-- agent:boundary:32dc4f4d -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -237,6 +273,9 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#mrnh] Bootstrap size is NOT the cause of the ensure wedge — hypothesis falsified, do not re-run it. `d131457ab` cut the live `crdt_replica_register` bootstrap from 1,312,802 to 261,174 bytes (5.0x) and `queue_maintenance_not_persisted` is COMPLETELY UNCHANGED. The 400ms missing-replica window is therefore not failing on transfer size. Next probe should target why the ensure-path observer never sees a replica the controller already reports as `current live_editors=1 delivery_converged=true` — likely generation fencing on re-register, not payload volume.
+- [ ] [#f4d5] Destructive cascade: a queue-maintenance persist failure erases the operator's queue activation. Reported live from a second session on brookebrodack-dev.md: operator flips frontmatter to `queue: start`, preflight reads the (unpersisted, therefore empty) queue body as drained and strips the activation back to `queue: stop`. Path: `agent-doc-preflight-io/src/lib.rs:3485` — `queue_has_prompts`/`drained_residue` feed `need_clear_active` and `need_clear_drained_body`, all computed from a queue body that a PREVIOUS cycle failed to persist. Deactivating on known-stale data is unsafe: when this cycle could not persist queue maintenance, preflight must preserve operator activation rather than infer 'drained'. Not fixed here — activation logic is safety-critical and I did not have the failing document's state to verify against.
+- [ ] [#5d9f] Second session observed that finalize's commit boundary persists queue maintenance through a path standalone `agent-doc queue sync` never reaches — the queue landed on the next write after three straight sync failures plus an `admin reload-lib`. Two persistence paths with different reachability is itself the bug surface. Determine why the commit path succeeds where queue sync fails, and route queue sync through whatever the commit boundary does. Result: queue text populates but stays UNARMED (`queue_drainable_head_count: 0`, `queue_continuation_required: false`), so the auto-loop still never gets the head.
 - [ ] [#7n20] Finish the ensure-window liveness fix across the CLI/controller process boundary. `bbc50c26e` extends the 400ms missing-replica ensure window when a `crdt_replica_register` proves the editor is alive, but the counter is process-global: on the split path the register lands controller-side while `ensure_document_model` runs CLI-side, so live telemetry still shows `window_extended=false` and the wedge persists. Two options: carry the liveness proof across IPC, or run the ensure controller-side where the registration already is. Do NOT route preflight's initial current-doc resolve through the ensure path — tried in this cycle and reverted; it violates `preflight_missing_editor_model_pauses_without_reading_disk_authority` and made preflight resolve to DISK content instead of waiting for the attached editor.
 - [ ] [#42xb] Bootstrap size is the wedge's real driver — investigate shrinking it. Live `crdt_replica_register` on agent-doc-bugs2.md carries 1,312,802 bytes for a 47KB document, i.e. ~28x the text in accumulated CRDT history, and the failures began when bootstrap crossed ~1.3MB (earlier registers at 358-437KB succeeded). Even a corrected ensure window only buys time; compaction/GC of replica history would remove the pressure. Check whether `agent-doc compact` reduces the register bootstrap, and whether superseded-generation pruning actually reclaims history.
 - [ ] [#zq8e] Editor-authority wedge blocks ALL queue maintenance (root of the #goal drain stall). Evidence in ops.log for this doc: at 19:32:45 `controller_crdt_current_text source=preflight_queue_maintenance` returns `status=current live_editors=1 delivery_converged=true`; 2s later the SAME queue_maintenance path logs `document_model_ensure_start initial_state=editor_attached_model_missing`, a `crdt_replica_register` succeeds (`data_kind=ok generation_fenced=true bootstrap_bytes=1312802`), then `document_model_ensure_republish_observer_not_ready` -> `document_model_ensure_failed` after 5s. EVERY `document_model_ensure_start` this session reports missing-replica across unrelated sources (queue_maintenance, pending_add_sync, controller_recycle_request) while the controller consistently reports current. Two observers of one document disagree; the ensure-path observer does not see a replica the controller demonstrably has. NOTE: likely already owned by the `src/agent-doc-editor-authority-fix` worktree (commits `preserve attached editor authority during retry`, `bound idle authority replay`) — coordinate before landing a rival fix in src/agent-doc.

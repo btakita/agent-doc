@@ -4,6 +4,10 @@ agent-doc is alpha software. Expect breaking changes between minor versions.
 
 Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
+## 0.35.5
+
+- **Route startup actively wakes a retained editor delivery before waiting for convergence.** When Lazily reports an attached document with a pending delivery frontier, the route gate sends one urgent ACK-recovery drain signal and then continues polling the canonical current state. This lets an already-batched retained update cross an editor's ordinary background backoff within the route deadline while preserving fail-closed dispatch if convergence still cannot be proved.
+
 ## 0.35.4
 
 - **JetBrains Compact Exchange ACK recovery no longer replays the pre-compact editor buffer.** When a retained CRDT delivery is waiting behind the plugin's background no-op drain backoff, the two-second recovery event now performs one immediate targeted pull on the existing replica. It does not re-register from stale visible text, so controller-owned compaction reaches the editor and the compact same-cell guard remains reserved for genuine operator edits.

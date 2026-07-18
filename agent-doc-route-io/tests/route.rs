@@ -71,12 +71,12 @@
 //!   Once that acceptance is observed, editor dispatch-only returns immediately instead of
 //!   paying the optional Codex/OpenCode dispatch-start proof timeout; unobserved acceptance
 //!   may still wait for stronger proof before failing closed.
-//! - **`await_idle(file, debounce)`**: Polls every 100ms. When an editor typing
-//!   indicator is present it is authoritative — an idle indicator dispatches
-//!   immediately (the editor already debounced; its pre-route save bumps mtime),
-//!   an active one keeps waiting. With no indicator (CLI/direct-disk caller) it
-//!   falls back to the file mtime settle. Fails closed after the `10 × debounce`
-//!   safety cap expires.
+//! - **`await_idle(file, debounce)`**: Polls Lazily's current-document authority every
+//!   100ms. Detached documents dispatch immediately; attached documents wait for the
+//!   canonical delivery frontier to converge. The first retained delivery observation
+//!   requests one urgent editor drain so route startup does not depend on a background
+//!   retry timer. Missing, pending, or unavailable authority fails closed after the
+//!   `10 × debounce` safety cap expires.
 //! - **`wait_for_agent_ready(tmux, pane_id, timeout, harness)`**: Polls pane content every
 //!   `AGENT_READY_POLL_INTERVAL`
 //!   looking for the agent's idle prompt (per `harness.prompt_patterns`). Returns true when

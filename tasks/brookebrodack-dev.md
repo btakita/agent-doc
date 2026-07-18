@@ -87,9 +87,11 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 - [x] Guestbook rebuilt: page + admin dashboard + Pages Functions API on D1
 - [x] Hold-for-approval moderation; existing entries approved
 - [x] Deploy guards: content-asserting smoke test + guestbook API check
+- [x] Moderation switched to local hermes agent, OpenAI fallback (14/14 verified)
 - [ ] Set `GUESTBOOK_ADMIN_PASSWORD` / `GUESTBOOK_ADMIN_SECRET` Pages secrets
 - [ ] Deploy the guestbook (nothing committed or deployed yet)
-- [ ] Valid `ANTHROPIC_API_KEY` — moderation script's model call is untested
+- [ ] `OPENAI_API_KEY` for the moderation fallback — none is scoped to this project
+- [ ] `hermes -z` is broken upstream (0.18.2), so the primary path cannot run yet
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -215,7 +217,75 @@ Against `wrangler pages dev` with a real local D1, and in a real browser:
 - `/guestbook` is not in `sitemap__xml.ts`. `/store` isn't either, so I matched the
   existing pattern rather than changing it — worth revisiting for SEO.
 Please use my local hermes agent for moderation. And fallback to OpenAI.
-<!-- agent:boundary:6506ab4f -->
+
+
+### Re: hermes for moderation, OpenAI fallback — opus-4-8
+
+Done in `scripts/guestbook-moderate.ts`. The Anthropic SDK call is gone; judging now
+runs through a small provider list — local `hermes` first, OpenAI second — and the
+batch escalates if the list is exhausted.
+
+**How hermes is invoked.** One-shot mode (`-z`), which prints only the final response
+text, with tools and project rules switched off (`-t ''`, `--ignore-rules`). That is a
+security requirement, not tidiness: the prompt embeds untrusted visitor text, and a
+moderation pass has no business holding shell, browser, or filesystem tools while it
+reads that. `HERMES_BIN`, `HERMES_MODEL`, and `HERMES_TIMEOUT_MS` override the
+defaults.
+
+**A trap worth naming:** `hermes -z` exits **0 even when the run fails**, printing
+`hermes -z: agent failed: …`. Trusting the exit code would have read a failure as a
+successful empty judgement. Success is decided by inspecting the output instead, and
+the real binary turned out to write that line to *stderr* while the failure text can
+also land on stdout — both shapes are handled.
+
+**Fallback.** OpenAI chat completions via plain `fetch` under the same JSON schema
+(`strict: true`), so no new dependency. `@anthropic-ai/sdk` stays in `package.json`
+because `generate-posts.ts` still uses it.
+
+Failure never publishes. Unparseable output, empty output, a missing id, an unknown
+decision value, or every provider failing all resolve to `escalate`, which leaves the
+entry in the queue for `/guestbook/admin`.
+
+### Verified
+
+14/14 checks pass against the real module, plus a live run of the real binary:
+
+- hermes clean JSON, fence-wrapped JSON, and prose-wrapped JSON all parse
+- failure-on-stdout-with-exit-0 is correctly detected as a failure
+- **the OpenAI fallback genuinely fires** — one check makes a real call to
+  `api.openai.com` and comes back 401, so the chain is proven, not assumed
+- empty output, and an entry omitted from the response, both escalate rather than
+  approve
+- `tsc --noEmit -p tsconfig.json` clean
+
+To make that testable I guarded the CLI entry with `import.meta.main` and moved the
+two `CLOUDFLARE_*` reads from import time to query time. Both still fail loudly on a
+real run; they just no longer fire on import.
+
+### Two things block an actual moderation run
+
+Neither is in the script, and I did not paper over either:
+
+1. **`hermes -z` is broken on this machine.** Every one-shot run fails with an httpx
+   `ResponseNotRead` raised inside hermes's own Gemini provider — reproduced on
+   `gemini-2.5-flash`, `gemini-2.0-flash`, and `google/gemini-2.5-pro`, with and
+   without `--ignore-user-config`. It is hermes-agent 0.18.2 (pacman-owned, in
+   `/opt`), not your config and not this script. I stopped at diagnosis rather than
+   patching a system package you did not ask me to touch. `hermes update` is the
+   cheap first move.
+2. **There is no OpenAI credential for this project.** passage has four
+   `OPENAI_API_KEY` entries — `buildparty-investor-demo`, `claudescore`,
+   `velvet-thunder`, `mooch` — all scoped to other projects, and `brookebrodack/`
+   holds only `GOOGLE_API_KEY`. I did not borrow one.
+
+So today the script would escalate everything: correct fail-closed behavior, but it
+will not actually moderate until one of those is resolved. Fixing hermes unblocks the
+primary path; a project-scoped OpenAI key unblocks the fallback.
+
+Unchanged from before: the guestbook is still uncommitted and undeployed across four
+submodules, so production `/guestbook` is still the fallback home page. Say the word
+and I will commit and deploy it.
+<!-- agent:boundary:25dfd022 -->
 <!-- /agent:exchange -->
 
 ## Queue

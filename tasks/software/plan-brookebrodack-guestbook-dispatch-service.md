@@ -106,8 +106,41 @@ Rules:
 
 ## 5. Local service and actor plugins
 
-- Bun process. Plugin = a module exporting `judge(entry) → verdict | null`,
-  where `null` means "no opinion" and is **not** an approval.
+> **Revised 2026-07-18** by two operator decisions: the service is **Rust**, and
+> each plugin runs in its own container (or lightweight equivalent) to firewall
+> prompt injection. Implemented at
+> [`btakita/brookebrodack-dispatch`](https://github.com/btakita/brookebrodack-dispatch);
+> full threat model in that repo's `docs/plugin-isolation.md`.
+
+- Rust workspace, single static binary. `dispatch-protocol` (wire + plugin
+  types), `dispatch-host` (sandbox runner + aggregation), `plugin-rules`.
+- Plugin = **any executable**: reads one JSON request on stdin, writes one JSON
+  response on stdout, exits 0. Not a module, not a language. `null` — meaning a
+  crash, a timeout, or unparseable output — is "no opinion" and is **not** an
+  approval.
+- **One sandbox per request, not per plugin.** The process is ephemeral, so an
+  injection carried by entry *n* has nothing to survive into entry *n+1*. This
+  is the property a per-plugin long-lived process would lose.
+- **Rootless Podman is the default runtime**, with bwrap as an opt-in
+  low-latency profile and Docker for parity only. Measured startup: bwrap 2 ms,
+  Docker 139 ms — but plugins run *concurrently*, so that is paid once per
+  request, not per plugin (~5% of a 3 s deadline). Podman buys a default seccomp
+  profile (bwrap has none unless authored) and OCI-pinned dependencies (a bwrap
+  plugin runs against the host `/usr`, putting host libraries in the trust
+  boundary). bwrap remains right for `plugin-rules`. Network denial verified
+  empirically: without `--share-net` the sandbox resolves nothing.
+- **The host is deliberately NOT containerized.** It spawns the sandboxes, so
+  nesting it under Podman needs a privileged container or a mounted container
+  socket — both hand the outer container escape-equivalent power and weaken the
+  boundary this design exists to create. Run it as a systemd *user* unit; it
+  holds the dispatch API key, which must never be inside a plugin sandbox.
+- **Containers are not the injection defence.** They bound blast radius only.
+  The real firewall is the verdict schema — a plugin's whole output surface is
+  `{id, decision, reason}`, strictly parsed, everything else discarded — so a
+  fully compromised plugin can only vote, never publish content. `reason` is
+  operator-facing, hostile-by-assumption text, bounded at 280 chars.
+- The dispatch API key lives in the **host** and is never present in any plugin
+  sandbox, so a compromised plugin cannot impersonate the service.
 - Concurrency and backpressure via lazily `/relay` (RelayCell) — a **bounded**
   queue. A submission flood must shed load or park it, never OOM the laptop. On
   overflow, decline explicitly so the edge escalates immediately instead of

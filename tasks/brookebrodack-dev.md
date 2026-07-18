@@ -249,13 +249,48 @@ Pushed, key generated and stored, hub deployed and verified live.
 - `/notify` → 204, `/connect` without an upgrade header → 426, `wrangler secret list` shows `FREEHOLD_DISPATCH_KEY`.
 
 ❯ **Deliberately not done: the Pages `[[services]]` binding.** That is the step that changes the live site, and it is separate from what you asked for. Until it lands, the hub is deployed and reachable but nothing calls `/notify`, so the guestbook still behaves exactly as before — inline moderation at submit, cron sweep behind it. `#fhdeploy` now covers only that binding plus running the host with `FREEHOLD_EDGE_URL` and the same key.
-<!-- agent:boundary:ec616539 -->
+
+### Re: #fhdeploy — the push path is live and proven — opus-4-8
+
+> **Queue prompt:** do [#fhdeploy]
+
+Done, all three steps, and verified end to end against production: a link-spam entry submitted to `brookebrodack.net` was rejected by the rules plugin running under bwrap on this machine, in seconds, with the reason recorded — `AI moderation: rules: more than two links`.
+
+**Two real defects surfaced on the way, and both are fixed and pushed** rather than filed. Neither would have been visible from tests, because both are failures of *silence*.
+
+**1. The host panicked before it ever dialed.** rustls 0.23 will not pick a crypto provider for you, and `rustls-tls-webpki-roots` supplies roots, not a provider — so the first `wss://` handshake panicked. That is worse than an error: the host died at the exact moment it connected, which from the edge is indistinguishable from a freehold nobody started. `transport::install_tls_provider` now names `ring` explicitly before the connect loop, idempotently. The tests assert on `CryptoProvider::get_default()` rather than opening a socket — a test needing a live TLS endpoint would be flaky precisely when the network is down, which is the one situation where the host's own behaviour is unremarkable. (freehold `a4601be`)
+
+**2. Both halves declined work in total silence.** With TLS fixed the host connected, claimed nothing, and logged nothing; the edge dispatched nothing and logged nothing. `on_dispatch` has five decline branches and all five returned an empty action list without a word, and every early return in the DO's `#dispatch_pending` leaves entries pending — correct, and invisible. This is exactly the property `docs/plugin-isolation.md` demands one level down ("a plugin falling out of the quorum must never be a silent event") going unenforced one level up: a host that declines everything looks the same as a host that is not there. Both now say which rule refused and with what numbers. (freehold `f2bb6cd`, brookebrodack-dev `83b80d9`)
+
+That instrumentation is what closed it — the first `dispatch: sending 2 entry(s) to 1 host(s)` line is where guessing stopped.
+
+**What is deployed:**
+
+| Step | State |
+|---|---|
+| `brookebrodack-guestbook-dispatch` Worker | deployed, `FREEHOLD_DISPATCH_KEY` set (minted, stored at `btak/brookebrodack/FREEHOLD_DISPATCH_KEY`) |
+| Pages `[[services]] FREEHOLD_HUB_SVC` | live on production, redeployed green after the Worker existed |
+| freehold host | running, connected, claiming and answering jobs |
+| `workers/guestbook-moderate` cron | untouched, still the offline backstop |
+
+**Ordering note for the record:** the binding was already on the Pages project before the Worker existed, and Cloudflare had accepted it — so the warning in `wrangler.toml` about deploying the Worker first is describing a hazard that did not bite here. I redeployed Pages afterwards anyway so the binding resolves against a Worker that exists rather than one that happens to have appeared later.
+
+**The guestbook was closed and is now open.** `POST /guestbook/api/entries` was returning `503 The guestbook is not accepting messages right now` — `GUESTBOOK_ADMIN_SECRET` gates submission, not just the admin dashboard, and neither Pages secret had ever been set. Both are minted, stored under `btak/brookebrodack/`, set on the project, and live after a redeploy. That was two unchecked items in this document's status, and it was blocking any proof of the push path at all.
+
+**The panel is rules-only today, so ordinary messages escalate rather than publish.** Entries 9 and 10 (plain friendly messages) came back `Escalate` and stayed `pending` for the admin dashboard; only the link-spam entry got a verdict. That is correct for this panel — the rules plugin is the deterministic floor and never approves on its own — and it stays that way until `#gpupol` lets the agent plugin reach a model. The three probe entries are soft-deleted.
+
+**Not durable yet:** the host is a `nohup` process, so the push path dies with this login session. Queued as `#fhsystemd`. Also queued `#fhescalate` — an escalated entry is re-offered on every notify and every alarm, so the panel re-judges it forever; I saw two identical jobs 8s apart. Fixing that is a real tradeoff (never re-judge vs. back off), so I left the decision rather than making it silently.
+
+**Freehold CI was red before this and is not any more.** `rules_plugin_runs_under_bwrap` had been failing on every run: the skip guard asked `bwrap --version`, which only proves the binary is on PATH, and GitHub's runners ship bwrap while forbidding unprivileged user namespaces. Every sandbox failed to start, `judge` read that as "no opinion", and the assertion saw `Escalate`. It now probes with a real `--unshare-all` sandbox, so the guard fails exactly when the thing under test cannot run. (`2e2ffa1`) Local `make check` is green in both repos; the brookebrodack Pages deploy is green.
+<!-- agent:boundary:626cb114 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#fhdeploy]
+- do [#fhsystemd]
+- do [#fhescalate]
+- ~~do [#fhdeploy]~~
 - ~~do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.~~
 - ~~do [#fhoneshot]~~
 - ~~do [#fhagentspec]~~
@@ -281,7 +316,8 @@ Pushed, key generated and stored, hub deployed and verified live.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#fhdeploy] Deploy the freehold push path in order: (1) cd workers/guestbook-dispatch && bunx wrangler secret put FREEHOLD_DISPATCH_KEY && bunx wrangler deploy; (2) add the [[services]] FREEHOLD_HUB_SVC binding to the Pages project and deploy (a Pages deploy against a service that does not exist yet fails); (3) run freehold with FREEHOLD_EDGE_URL + the same key. Keep workers/guestbook-moderate deployed as the offline backstop
+- [ ] [#fhsystemd] supervise the freehold host instead of running it under nohup — a systemd user unit plus a credential source it can read without an interactive gpg unlock (passage cannot be read from a unit). Until this lands the push path dies with the login session, and the 15-minute cron in workers/guestbook-moderate is the only backstop
+- [ ] [#fhescalate] an escalated entry stays 'pending' and is re-dispatched on every notify and every alarm, so the panel re-judges it forever. Decide between marking it escalated (edge stops offering it; a later, better panel never gets a second look) and a backoff on re-offer, then implement. Seen live: two identical jobs for the same two entries 8s apart
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
@@ -323,4 +359,5 @@ Pushed, key generated and stored, hub deployed and verified live.
 - 2026-07-18 [#p0rw] Write the allowlisting egress proxy for the plugin egress hostport in src/freehold — model plugins are routed to it by sandbox_argv but it does not exist yet, so a model plugin currently has no working network path (~50-line CONNECT proxy, allowlist generativelanguage.googleapis.com). Confirmed still absent: egress_hosts appears only on PluginSpec and in tests, with no proxy binary or call site
 - 2026-07-18 [#fhagentspec] Ship a PluginSpec for freehold-agent so it actually joins the panel: egress_hosts for whichever model the configured agent CLI reaches, env_allow carrying FREEHOLD_AGENT_ARGV plus any credential the CLI needs, and a budget_ms sized for an agent round-trip rather than a rules match. The crate and its one-shot enforcement landed in a916f1c; nothing dispatches to it until a spec exists
 - 2026-07-18 [#k0ye] #gbdispatch2: Durable Object + WebSocket transport + auth for the moderation dispatch edge (now freehold-hub/freehold, submodule src/freehold) — the sandbox/aggregation half is done and pushed; the edge half is unwritten
+- 2026-07-18 [#fhdeploy] Deploy the freehold push path in order: (1) cd workers/guestbook-dispatch && bunx wrangler secret put FREEHOLD_DISPATCH_KEY && bunx wrangler deploy; (2) add the [[services]] FREEHOLD_HUB_SVC binding to the Pages project and deploy (a Pages deploy against a service that does not exist yet fails); (3) run freehold with FREEHOLD_EDGE_URL + the same key. Keep workers/guestbook-moderate deployed as the offline backstop
 <!-- /agent:done -->

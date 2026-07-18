@@ -227,13 +227,94 @@ Sources: [Self-Harness (arXiv writeup)](https://explainx.ai/blog/self-harness-ag
 [Harness Engineering for Self-Improvement — Lil'Log](https://lilianweng.github.io/posts/2026-07-04-harness/) ·
 [vLLM vs Ollama concurrency](https://runaihome.com/blog/vllm-vs-ollama-when-each-wins-2026/) ·
 [Ollama vs vLLM 2026](https://particula.tech/blog/ollama-vs-vllm-comparison)
-<!-- agent:boundary:123b02b8 -->
+I may not always be running the local model. Should we have a pool of Codex, Claude Code, or Opencode sessions in a worker pool?
+
+### Re: a worker pool of Codex / Claude Code / opencode sessions — opus-4-8
+
+> **Queue prompt:** I may not always be running the local model. Should we have a
+> pool of Codex, Claude Code, or Opencode sessions in a worker pool?
+
+**No — and the availability problem you are actually describing is already solved
+in the code you have.**
+
+Taking the underlying worry first, because it is the real one. "I may not always
+be running the local model" is a question about what happens when a voter is
+missing, and `freehold-tribunal` already answers it:
+
+```rust
+/// every plugin approves  ⇒ approve
+/// any plugin rejects     ⇒ reject
+/// anything else          ⇒ escalate
+///
+/// "Anything else" covers abstention, disagreement, a missing plugin, an empty
+/// quorum, and a plugin that returned nothing. All of them leave the item
+/// pending for a human — failure never publishes.
+```
+
+And in `freehold-host`: *"Each is bounded by its own `budget_ms`; a slow plugin
+abstains rather than holding up the job."* A local model that is not running does
+not need a standby fleet behind it. It abstains, the remaining voters decide, and
+if they cannot, the entry waits for you. That is the design working as intended,
+not a gap to be filled with capacity.
+
+**Now the pool itself. Three arguments against, in increasing order of weight.**
+
+*Latency does not justify it.* A pool exists to amortise startup across a high
+request rate. Yours is a personal guestbook, and moderation is hold-for-approval —
+asynchronous by construction. Nothing is blocking on a verdict; the entry sits
+pending. Your latency budget is minutes. Cold-starting a CLI is comfortably
+inside it.
+
+*These CLIs are not a worker protocol.* Claude Code, Codex, and opencode are
+harnesses built for a human in the loop: no structured-output guarantee, no
+concurrency model, auth tied to an interactive login, and tmux pane scraping as
+the transport. tmux-router is genuinely good at driving interactive sessions —
+that is not the same thing as being an RPC backend, and every CLI version bump
+becomes your parser's problem.
+
+*The decisive one: a pooled session is shared state, and shared state is exactly
+what this architecture forbids.* `run_plugins` says it plainly — *"Plugins are
+independent sandboxes with no shared state, so there is nothing to serialise."*
+A warm session that has handled fifty entries carries fifty entries of context.
+That breaks two things at once:
+
+- **Verdict independence.** Entry N is judged in the presence of entries 1..N-1.
+  One spammer's submission gets to influence the ruling on someone else's.
+- **Injection containment.** Guestbook text is untrusted input — firewalling
+  prompt injection is why you asked for this service in the first place. In a
+  one-shot process, a successful injection corrupts exactly one verdict and dies
+  with the process. In a pooled session it *persists*, and every subsequent
+  verdict from that worker is tainted. A pool converts the best-case failure
+  into the worst-case one.
+
+**What to do instead.** If you want a CLI agent as a voter, run it one-shot and
+non-interactive per request — `claude -p`, `codex exec` — inside the existing
+`PluginSpec` contract with its `budget_ms` and the OCI runtime (it needs real
+egress, so not the bwrap default). Cold start is affordable, and fresh context
+comes free rather than being something you have to engineer around. Filed as
+`#fhoneshot`. If cold start ever does become intolerable, the fix is a warm
+*process* holding no conversation state — not a warm session.
+
+**One thing I found while checking this, and it is more urgent than the pool
+question.** `APPROVE_QUORUM_MIN = 2`, but `freehold-rules` is the only plugin
+binary in the workspace. At most one plugin can answer, so approval is
+**currently unreachable** — every entry escalates to a human regardless of
+content. Worse, `freehold-rules` abstains unless a deterministic spam rule
+matches, so it cannot reliably be counted as one of the two even once a second
+plugin exists. You need a second answering plugin for auto-approve to fire at
+all, and a third if you want it to keep working while the local model is down.
+Filed as `#fhquorum2` at the top of the backlog.
+
+That is the availability answer, incidentally: redundancy across *independent
+voters*, which the quorum already knows how to reason about — not redundancy
+across warm sessions, which it explicitly cannot.
+<!-- agent:boundary:a477cae4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
-- do [#teah]: If we run a local model, GPU usage is restricted. Can we have a machine policy on the gpu usage? Should we have a custom service? Ray is a candidate that I'm familiar with, but I hesitate to use Ray due to overhead.
+- ~~do [#teah]: If we run a local model, GPU usage is restricted. Can we have a machine policy on the gpu usage? Should we have a custom service? Ray is a candidate that I'm familiar with, but I hesitate to use Ray due to overhead.~~
 - do [#rak9]
 - do [#p0rw]
 - do [#sbv9]
@@ -254,6 +335,8 @@ Sources: [Self-Harness (arXiv writeup)](https://explainx.ai/blog/self-harness-ag
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#fhquorum2] Approval is currently UNREACHABLE in freehold: APPROVE_QUORUM_MIN = 2 (freehold-tribunal/src/lib.rs) but freehold-rules is the only plugin binary in the workspace, so at most one plugin can ever answer and every entry escalates to a human. A second answering verdict plugin is required before auto-approve can fire at all — and a third if you want approval to survive the local model being down (freehold-rules abstains unless it matches a deterministic spam rule, so it cannot be relied on as one of the two)
+- [ ] [#fhoneshot] When adding a CLI-agent-backed verdict plugin, invoke it ONE-SHOT per request (claude -p / codex exec, non-interactive) under the existing PluginSpec budget_ms + OCI sandbox contract. Do NOT pool or reuse sessions: retained conversation state breaks per-entry verdict independence and makes a successful prompt injection persist across future verdicts, which is the exact threat the sandbox exists to contain
 - [ ] [#gpupol] Run ONE persistent local-inference server (vllm or ollama, both already installed) as the sole GPU owner, outside the sandbox. Model plugins reach it over the existing egress-proxy path with egress_hosts: ["127.0.0.1:<port>"] — no new mechanism, and /dev/nvidia* never enters the sandbox. Depends on #p0rw (the proxy must exist first). Start with ollama for its idle-unload behaviour; switch to vLLM only if sustained concurrency exceeds ~4-8 requests
 - [ ] [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
@@ -289,4 +372,5 @@ Sources: [Self-Harness (arXiv writeup)](https://explainx.ai/blog/self-harness-ag
 - 2026-07-18 [#j262] Duplicate of #nd8n (closeout-retry artifact) — cgroup limits for the bwrap sandbox path
 - 2026-07-18 [#wqr2] Design done + scaffold shipped: local moderation dispatch service — github.com/btakita/brookebrodack-dispatch (Rust workspace, submodule at src/brookebrodack-dispatch). Plan tasks/software/plan-brookebrodack-guestbook-dispatch-service.md (#gbdispatch1 DONE). Remaining phases #gbdispatch2 (DO + wire + auth), #gbdispatch3 (plugin host), #gbdispatch4 (edge integration), #gbdispatch5 (tests)
 - 2026-07-18 [#acnd] Commit + deploy the guestbook — the whole feature (functions/, scripts/, workers/, wrangler.toml, d1/ + 4 submodules) is still uncommitted, so prod /guestbook is still the fallback home page
+- 2026-07-18 [#teah] UNANSWERED PROMPT — evaluate AI harness candidates for the dispatch actor plugins (5090 for local models; tmux-router drives Claude/Codex/opencode; hermes available) AND search for the 'newish agent that creates a custom harness that learns'. Asked in the exchange and never addressed; the turn went to the repo/sandbox work. Needs real web research — do NOT answer from recall, the agent-name recall is exactly what would be hallucinated
 <!-- /agent:done -->

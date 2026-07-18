@@ -4176,6 +4176,58 @@ fn resolve_free_text_execution(
 /// which the maintenance plan was derived. A concurrent operator edit makes the
 /// transition stale and retryable; it is never overwritten from a disk/snapshot
 /// projection, which makes editor queue deletions monotonic.
+/// What queue maintenance should do with an observed Lazily head (`#qdonestrike-durable`).
+///
+/// Pure so the not-ready → ensure → re-observe transition is unit-provable without
+/// a live relay, editor, or controller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum QueueMaintenanceHeadAction {
+    /// Head is live: compare-and-swap the maintenance plan onto it.
+    CompareAndSwap,
+    /// No editor owns the document: project straight to disk.
+    DiskWrite,
+    /// Replica missing / sync pending: drive the bounded model-ensure and re-observe.
+    EnsureThenReobserve,
+    /// Still not ready after the ensure: fail closed rather than clobber a live buffer.
+    FailClosed,
+}
+
+/// Decide the queue-maintenance action for an observed head.
+///
+/// `already_ensured` records whether the bounded model-ensure has already run this
+/// call, which is what keeps a persistently-not-ready head from looping forever.
+pub(crate) fn queue_maintenance_head_action(
+    current: &agent_doc_crdt_relay_io::CurrentText,
+    already_ensured: bool,
+) -> QueueMaintenanceHeadAction {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Current { .. } => {
+            QueueMaintenanceHeadAction::CompareAndSwap
+        }
+        agent_doc_crdt_relay_io::CurrentText::Detached => QueueMaintenanceHeadAction::DiskWrite,
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+        | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
+            if already_ensured {
+                QueueMaintenanceHeadAction::FailClosed
+            } else {
+                QueueMaintenanceHeadAction::EnsureThenReobserve
+            }
+        }
+    }
+}
+
+/// Stable ops-log label for a Lazily head state observed by queue maintenance.
+fn queue_maintenance_head_label(current: &agent_doc_crdt_relay_io::CurrentText) -> &'static str {
+    match current {
+        agent_doc_crdt_relay_io::CurrentText::Current { .. } => "current",
+        agent_doc_crdt_relay_io::CurrentText::Detached => "detached",
+        agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+            "editor_attached_model_missing"
+        }
+        agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => "editor_sync_pending",
+    }
+}
+
 pub(crate) fn persist_queue_maintenance_doc(
     file: &Path,
     content: &str,
@@ -4184,7 +4236,35 @@ pub(crate) fn persist_queue_maintenance_doc(
     source: &str,
 ) -> Result<()> {
     let _ = project_root;
-    match agent_doc_crdt_relay_io::current_text_for_file(file)? {
+    // `#qdonestrike-durable`: a not-ready editor head must not silently discard the
+    // maintenance plan. Queue maintenance is idempotent and recomputed every
+    // preflight, so a missing/pending replica used to mean the auto-strike of
+    // already-`agent:done` heads was computed and thrown away on EVERY run — the
+    // queue kept re-mirroring the same resolved items forever and never cleared.
+    // Drive the bounded model-ensure transition first and re-observe; only bail if
+    // the head is still not ready. `ensure_document_model` observes relay state
+    // only and never elects a disk/sidecar projection while an editor is attached,
+    // so this stays fail-closed against clobbering a live buffer.
+    let observed = agent_doc_crdt_relay_io::current_text_for_file(file)?;
+    let current = match queue_maintenance_head_action(&observed, false) {
+        QueueMaintenanceHeadAction::EnsureThenReobserve => {
+            let ensured = agent_doc_crdt_relay_io::ensure_document_model(file, source)?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_maintenance_model_ensure source={source} before={} after={}",
+                    queue_maintenance_head_label(&observed),
+                    queue_maintenance_head_label(&ensured),
+                ),
+            );
+            ensured
+        }
+        _ => observed,
+    };
+    if queue_maintenance_head_action(&current, true) == QueueMaintenanceHeadAction::FailClosed {
+        anyhow::bail!("{source}: Lazily editor head is not ready for queue maintenance")
+    }
+    match current {
         agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
             anyhow::ensure!(
                 text == expected_current,
@@ -4274,6 +4354,75 @@ mod tests {
     use std::path::PathBuf;
     use std::process::Command;
     use tempfile::TempDir;
+
+    // `#qdonestrike-durable`: a not-ready Lazily head used to discard the whole
+    // queue-maintenance plan, so the auto-strike of heads already in `agent:done`
+    // was recomputed and thrown away on every preflight and resolved queue items
+    // never cleared. Maintenance must now drive the bounded model-ensure and
+    // re-observe before failing closed.
+    #[test]
+    fn queue_maintenance_missing_replica_ensures_before_failing_closed() {
+        assert_eq!(
+            queue_maintenance_head_action(
+                &agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+                false,
+            ),
+            QueueMaintenanceHeadAction::EnsureThenReobserve,
+        );
+        assert_eq!(
+            queue_maintenance_head_action(
+                &agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+                false,
+            ),
+            QueueMaintenanceHeadAction::EnsureThenReobserve,
+        );
+    }
+
+    // The ensure is bounded: a head that is STILL not ready afterwards fails
+    // closed rather than looping or clobbering a live editor buffer.
+    #[test]
+    fn queue_maintenance_still_not_ready_after_ensure_fails_closed() {
+        assert_eq!(
+            queue_maintenance_head_action(
+                &agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+                true,
+            ),
+            QueueMaintenanceHeadAction::FailClosed,
+        );
+        assert_eq!(
+            queue_maintenance_head_action(
+                &agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
+                true,
+            ),
+            QueueMaintenanceHeadAction::FailClosed,
+        );
+    }
+
+    // A head that becomes ready after the ensure persists through the normal
+    // authority path — CAS against a live editor, disk only when detached.
+    #[test]
+    fn queue_maintenance_ready_head_persists_through_normal_authority() {
+        for already_ensured in [false, true] {
+            assert_eq!(
+                queue_maintenance_head_action(
+                    &agent_doc_crdt_relay_io::CurrentText::Current {
+                        text: "doc".to_string(),
+                        live_editors: 1,
+                        delivery_converged: true,
+                    },
+                    already_ensured,
+                ),
+                QueueMaintenanceHeadAction::CompareAndSwap,
+            );
+            assert_eq!(
+                queue_maintenance_head_action(
+                    &agent_doc_crdt_relay_io::CurrentText::Detached,
+                    already_ensured,
+                ),
+                QueueMaintenanceHeadAction::DiskWrite,
+            );
+        }
+    }
 
     struct TestPreflightMaintenanceWriteEffects;
 

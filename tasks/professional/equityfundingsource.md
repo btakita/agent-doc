@@ -190,10 +190,30 @@ The design choice worth naming: the endpoint calls the same `vesting_gap_` deriv
 Queued `#vesting-gap-queue-ui` for the screen itself — the API and count ship, the portal worklist is the follow-up.
 
 **Where the four phases leave things.** The reconciliation path now exists end to end as decision logic: vestings are authorable from both sides and their absence is visible (Phase 1), the orphan corpus has a per-row plan (Phase 2), unmatched fundings score themselves against the roster (Phase 3), and the gaps that block all of it are a worklist (Phase 4). What is *not* built is execution — three items, all wiring rather than design: `#tmo-orphan-reconcile-exec`, `#tmo-reconcile-binder`, `#vesting-gap-queue-ui`. Worth doing in the sandbox first, in that order, since the executor is what generates the unmatched fundings the binder then has to resolve.
+
+### Re: do [#vesting-gap-queue-ui] — opus-4-8
+
+Shipped (EFS `073e466e`, pushed). **Vesting Gaps** is now a left-nav section at `/admin/vesting-gaps`: blocked/warning counts up top, one row per lender with the gap kind, and a per-row deep link into that lender's Lender Vestings card — where the gap is actually fixable, rather than making an admin navigate there themselves.
+
+Each row renders the API's `admin_message` rather than restating the rule in the UI. That keeps the property the whole feature rests on: the lender prompt, the admin card, and this queue all trace back to a single `vesting_gap_` call, so none of them can start disagreeing about who is blocked.
+
+Wired end to end — section id, URL, portal route, nav item, icon, and the badge. The badge is worth a note: it binds by name (`counts[item.id]`), so a nav id that does not match the `nav-counts` key renders nothing at all, silently. There is a test pinning that they match, because a missing badge is exactly the kind of bug nobody files.
+
+4 tests; full suite 1868 pass / 0 fail; builds clean.
+
+**All four phases plus both UI surfaces are done.** What is left is three execution items, and only one of them is genuinely gated:
+
+- `#tmo-orphan-reconcile-exec` — run the Phase 2 planner for real. **Not blocked in the sandbox**; only production writes ride `#dzmm`/`#7a4d`.
+- `#tmo-reconcile-binder` — apply Phase 3's `auto_bind` decisions and persist the rankings. Not blocked.
+- `#tmo-sandbox-purge-apply` — waiting on you, since it is 16 permanent deletions.
+
+The order matters: the executor generates the fundings the binder then resolves, so running them out of order means the binder has nothing to work on.
 <!-- agent:boundary:f3062f3f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+
+- do [#vesting-gap-queue-ui]
 - ~~do [#tmo-reconcile-auto]~~
 - do [#vesting-gap-admin-queue]
 - do [#tmo-contact-enumeration]

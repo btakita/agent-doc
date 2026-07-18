@@ -390,12 +390,77 @@ this on its own — and is blocked on your decision:
 2. **Keep always-escalate** — document as intended, close `#fhquorum2`.
 3. **Rules approves when clean** — smallest diff; I argue against it, the guard
    becomes a rubber stamp for whatever its regexes miss.
-<!-- agent:boundary:865ee2ff -->
+
+### Re: #gbmig3 — migration applied, and #gggp was never what it said — opus-4-8
+
+`#gbmig3` is done, and it unblocked itself: the thing it was "blocked on" was a
+misreading I had already half-corrected last cycle.
+
+**`#gggp` is resolved, and the OAuth token was innocent all along.** The stored
+session expires `2026-07-19T10:43:02Z` — tomorrow — and its scopes include
+`d1:write` and `pages:write`. It was valid the entire time. The failure was
+`.env` alone: wrangler auto-loads it as dotenv, dotenv does no command
+substitution, so `CLOUDFLARE_API_TOKEN="$(passage btak/CLOUDFLARE_API_TOKEN)"`
+was sent as that literal text — and an env token *overrides* the stored OAuth
+session, so a perfectly good login never got used.
+
+Keeping `.env` out of the way fixes it outright:
+
+```
+bunx wrangler d1 execute brookebrodack --remote --env-file /dev/null ...
+```
+
+That is now committed in `wrangler.toml` (`f9c310d`) next to the migration
+command, with the reasoning, so the next reader does not re-derive it. `#y457`
+and `#j0ee` were both blocked on `#gggp` and are no longer blocked.
+
+**Migration `0003` is applied and verified on the remote database:**
+`deleted_at` exists, both covering indexes were created, one entry, live. I
+checked the column list before and after rather than trusting the exit code.
+
+### Re: I broke prod briefly, and it was an ordering mistake — opus-4-8
+
+Worth stating plainly rather than burying in a status line.
+
+Pages deploys on push. Last cycle I pushed `24bec1a` — code whose every read
+path selects `deleted_at` — while the column did not yet exist remotely, because
+I had recorded the migration as blocked and moved on. The deploy went out, the
+function failed closed on the missing column, and the post-deploy smoke test
+caught it:
+
+```
+FAIL (api): https://brookebrodack.net/guestbook/api/entries
+            returned 'text/plain; charset=UTF-8' — Function not deployed?
+```
+
+So the guestbook API served an error page from roughly 20:34 until I applied the
+migration a few minutes ago. The static pages stayed up throughout — every route
+in the smoke test passed; it was the API alone.
+
+It is healthy now, verified directly rather than inferred:
+`GET /guestbook/api/entries` → `200 application/json` with the entry. The
+schema and the deployed code are consistent again.
+
+**The lesson is ordering, and I put it in the repo rather than only here:**
+migration first, then push. I had that backwards, and treating "blocked on
+`#gggp`" as a reason to defer the migration while still shipping the code that
+depended on it is what turned a paper blocker into a real outage. `wrangler.toml`
+now carries that rule at the point of use.
+
+The re-run deploy (`29660239368`) was still in progress at closeout, so I have
+recorded it as pending rather than claiming green — filed as `#gbdeploy1`. That
+is a confirmation task, not a suspected problem; prod is verified by hand.
+
+**Still yours:** the quorum decision on `#fhquorum2` (veto role / keep
+always-escalate / rules approves when clean), and `#cy58`, which is unaffected by
+any of this — it needs credit on the OpenAI project.
+<!-- agent:boundary:e932b7cf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- do [#gbmig3]
 - do [#fhquorum2]
 - do [#fhoneshot]
 - do [#gpupol]

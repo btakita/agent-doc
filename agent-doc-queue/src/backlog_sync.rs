@@ -173,9 +173,24 @@ pub fn collect_backlog_queue_sync(
         let Some(value) = comp.attrs.get("queue") else {
             continue;
         };
-        priority |= comp.attrs.contains_key("priority");
+        let comp_priority = comp.attrs.contains_key("priority");
+        priority |= comp_priority;
         let Some(comp_mode) = BacklogQueueSyncMode::parse(value) else {
             continue;
+        };
+        // `#backlogqueueprepend`: a `priority` backlog with a *bare* `queue`
+        // token mirrors in backlog order, and the backlog-capture contract puts
+        // new follow-up items at the FRONT ("what you read is what you get").
+        // Appending them to the queue tail contradicts that — a freshly filed
+        // follow-up landed behind dozens of older heads and never surfaced, so
+        // operators re-added `do [#id]` by hand.
+        //
+        // Only the bare token is reinterpreted: an explicit `queue="append"`
+        // remains an operator override and still appends.
+        let comp_mode = if comp_priority && value.trim().is_empty() {
+            BacklogQueueSyncMode::Prepend
+        } else {
+            comp_mode
         };
         if mode.is_none() {
             mode = Some(comp_mode);
@@ -508,6 +523,68 @@ mod tests {
         assert_eq!(request.mode, BacklogQueueSyncMode::Append);
         assert_eq!(request.ids, vec!["a".to_string(), "c".to_string()]);
         assert_eq!(request.enqueue_ids, vec!["a".to_string(), "c".to_string()]);
+    }
+
+    /// `#backlogqueueprepend`: `<!-- agent:backlog priority queue -->` is the
+    /// live shape operators use. The backlog-capture contract files new
+    /// follow-ups at the FRONT, so the queue mirror must prepend them too —
+    /// appending buried a freshly filed item behind dozens of older heads, and
+    /// operators re-added `do [#id]` by hand.
+    #[test]
+    fn priority_backlog_with_bare_queue_token_prepends() {
+        let content = concat!(
+            "<!-- agent:queue priority go -->\n",
+            "- 📌 do [#old]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#fresh] newly filed follow-up\n",
+            "- [ ] [#old] older item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let request = collect_backlog_queue_sync(&components, content)
+            .expect("priority backlog with bare queue attr should produce a sync request");
+        assert_eq!(
+            request.mode,
+            BacklogQueueSyncMode::Prepend,
+            "a priority backlog must mirror new items to the queue head"
+        );
+        assert!(request.priority);
+    }
+
+    /// The reinterpretation is scoped to the bare token: an explicit
+    /// `queue=append` stays an operator override.
+    #[test]
+    fn priority_backlog_with_explicit_append_still_appends() {
+        let content = concat!(
+            "<!-- agent:queue priority go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue=append -->\n",
+            "- [ ] [#fresh] newly filed follow-up\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let request = collect_backlog_queue_sync(&components, content)
+            .expect("explicit append should produce a sync request");
+        assert_eq!(request.mode, BacklogQueueSyncMode::Append);
+    }
+
+    /// A bare `queue` token WITHOUT `priority` keeps its documented append
+    /// default, so non-priority backlogs are unaffected.
+    #[test]
+    fn non_priority_backlog_with_bare_queue_token_still_appends() {
+        let content = concat!(
+            "<!-- agent:queue go -->\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog queue -->\n",
+            "- [ ] [#fresh] newly filed follow-up\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let components = element::parse(content).unwrap();
+        let request = collect_backlog_queue_sync(&components, content)
+            .expect("bare queue attr should produce a sync request");
+        assert_eq!(request.mode, BacklogQueueSyncMode::Append);
+        assert!(!request.priority);
     }
 
     #[test]

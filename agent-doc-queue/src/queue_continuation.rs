@@ -399,6 +399,7 @@ pub fn drainable_head_prompt_for_scope(content: &str, scope: DrainScope) -> Opti
         &activation.entries_after,
         open_backlog.as_ref(),
         &deferred_ids,
+        &after_deps_from_content(content),
         queue_facts.preset_supplies_directive,
     )
     .cloned()
@@ -418,6 +419,7 @@ pub fn drainable_head_count(content: &str) -> usize {
     };
     let open_backlog = open_backlog_ids_from_content(content);
     let deferred_ids = deferred_backlog_ids(content);
+    let after_deps = after_deps_from_content(content);
     activation
         .entries_after
         .iter()
@@ -426,6 +428,7 @@ pub fn drainable_head_count(content: &str) -> usize {
                 &prompt.text,
                 open_backlog.as_ref(),
                 &deferred_ids,
+                &after_deps,
                 queue_facts.preset_supplies_directive,
             ),
             _ => false,
@@ -544,6 +547,7 @@ fn first_drainable_head<'a>(
     entries_after: &'a [QueueEntry],
     open_backlog_ids: Option<&HashSet<String>>,
     deferred_ids: &HashSet<String>,
+    after_deps: &HashMap<String, Vec<String>>,
     preset_supplies_directive: bool,
 ) -> Option<&'a QueuePrompt> {
     entries_after.iter().find_map(|entry| match entry {
@@ -552,6 +556,7 @@ fn first_drainable_head<'a>(
                 &prompt.text,
                 open_backlog_ids,
                 deferred_ids,
+                after_deps,
                 preset_supplies_directive,
             ) {
                 Some(prompt)
@@ -567,6 +572,7 @@ fn head_is_drainable(
     text: &str,
     open_backlog_ids: Option<&HashSet<String>>,
     deferred_ids: &HashSet<String>,
+    after_deps: &HashMap<String, Vec<String>>,
     preset_supplies_directive: bool,
 ) -> bool {
     let drainable = if preset_supplies_directive {
@@ -584,12 +590,42 @@ fn head_is_drainable(
                 return false;
             }
             match open_backlog_ids {
-                Some(open) => open.contains(&norm),
+                Some(open) => {
+                    if !open.contains(&norm) {
+                        return false;
+                    }
+                    // `#dagdraingate`: a head with an UNMET declared prerequisite
+                    // is not drainable. Without this, `after=` was enforced only
+                    // by queue ORDER — and order is not enforcement: head
+                    // selection takes the first *drainable* prompt, so a deferred
+                    // or skipped prerequisite simply got stepped over and its
+                    // dependent ran first. A prerequisite counts as met once it
+                    // is no longer an open backlog item (i.e. it was completed).
+                    !after_deps.get(&norm).is_some_and(|deps| {
+                        deps.iter().any(|dep| {
+                            let dep = dep.trim().trim_start_matches('#').to_ascii_lowercase();
+                            dep != norm && open.contains(&dep)
+                        })
+                    })
+                }
+                // Without a backlog component we cannot tell whether a
+                // prerequisite is outstanding; fail open rather than stalling.
                 None => true,
             }
         }
         None => true,
     }
+}
+
+/// `#dagdraingate`: declared `after=` edges, keyed by dependent id.
+fn after_deps_from_content(content: &str) -> HashMap<String, Vec<String>> {
+    let Ok(components) = element::parse(content) else {
+        return HashMap::new();
+    };
+    crate::backlog_sync::collect_after_deps(&components, content)
+        .into_iter()
+        .map(|(k, v)| (k.trim().trim_start_matches('#').to_ascii_lowercase(), v))
+        .collect()
 }
 
 fn open_backlog_ids_from_content(content: &str) -> Option<HashSet<String>> {
@@ -1266,6 +1302,48 @@ mod tests {
     /// `drainable_head_count: 0` forever. Live repro on
     /// `tasks/brookebrodack-dev.md` after convergence produced
     /// `<!-- agent:queue go -->` with no `queue_active` key.
+    /// `#dagdraingate`: a head whose declared prerequisite is still OPEN must
+    /// not be drainable.
+    ///
+    /// Order was never enforcement. Head selection takes the first *drainable*
+    /// prompt, so with `#dep after=#pre` and `#pre` deferred, the iterator simply
+    /// stepped over `#pre` and ran `#dep` first — the dependent before its
+    /// prerequisite, regardless of queue order.
+    #[test]
+    fn dependent_head_is_not_drainable_while_prerequisite_is_open() {
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#dep]\n",
+            "- do [#pre]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#dep] after=#pre dependent work\n",
+            "- [ ] [#pre] [operator-verify] prerequisite a human must clear\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        // `#pre` is operator-verify (deferred) and `#dep` is blocked behind it,
+        // so nothing is agent-drainable — previously `#dep` counted.
+        assert_eq!(
+            drainable_head_count(content),
+            0,
+            "a dependent must not become drainable by stepping over its prerequisite"
+        );
+
+        // Once the prerequisite is completed (no longer an open backlog item),
+        // the dependent unblocks.
+        let done = content.replace(
+            "- [ ] [#pre] [operator-verify] prerequisite a human must clear\n",
+            "",
+        );
+        assert_eq!(
+            drainable_head_count(&done),
+            1,
+            "a met prerequisite must unblock the dependent"
+        );
+    }
+
     #[test]
     fn drainable_head_count_honors_explicit_go_without_legacy_active_flag() {
         let content = concat!(

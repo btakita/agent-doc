@@ -193,13 +193,14 @@ Binds go through the existing `tmo_unmatched_funding_bind_()` rather than a reim
 - the four new `0142` columns are queryable.
 
 **What is not done, and it's the honest gap:** nothing reads these columns yet. `tmo_unmatched_fundings_R_` doesn't select them and no route or cron calls `tmo_unmatched_fundings_reconcile_()`, so today the pass only runs from a test. The persistence layer and the safety gate are real and verified; the admin queue does not yet show the ranking. Filed as `#tmo-reconcile-binder-ui` at the top of the backlog rather than claiming the queue is pre-ranked in the UI.
-<!-- agent:boundary:a9235aea -->
+<!-- agent:boundary:a36df813 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#tmo-reconcile-binder-ui]
 - ~~do [#vesting-gap-admin-queue]~~
 - ~~do [#tmo-orphan-reconcile-exec]~~
-- do [#tmo-reconcile-binder]
+- ~~do [#tmo-reconcile-binder]~~
 - do [#efs-do-hibernation]
 - do [#efs-prod-secret-parity]
 - do [#tmo-orphan-cache]

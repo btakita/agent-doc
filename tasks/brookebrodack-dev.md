@@ -227,7 +227,7 @@ Sources: [Self-Harness (arXiv writeup)](https://explainx.ai/blog/self-harness-ag
 [Harness Engineering for Self-Improvement — Lil'Log](https://lilianweng.github.io/posts/2026-07-04-harness/) ·
 [vLLM vs Ollama concurrency](https://runaihome.com/blog/vllm-vs-ollama-when-each-wins-2026/) ·
 [Ollama vs vLLM 2026](https://particula.tech/blog/ollama-vs-vllm-comparison)
-<!-- agent:boundary:9fad7ea3 -->
+<!-- agent:boundary:123b02b8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -254,7 +254,8 @@ Sources: [Self-Harness (arXiv writeup)](https://explainx.ai/blog/self-harness-ag
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#teah] UNANSWERED PROMPT — evaluate AI harness candidates for the dispatch actor plugins (5090 for local models; tmux-router drives Claude/Codex/opencode; hermes available) AND search for the 'newish agent that creates a custom harness that learns'. Asked in the exchange and never addressed; the turn went to the repo/sandbox work. Needs real web research — do NOT answer from recall, the agent-name recall is exactly what would be hallucinated
+- [ ] [#gpupol] Run ONE persistent local-inference server (vllm or ollama, both already installed) as the sole GPU owner, outside the sandbox. Model plugins reach it over the existing egress-proxy path with egress_hosts: ["127.0.0.1:<port>"] — no new mechanism, and /dev/nvidia* never enters the sandbox. Depends on #p0rw (the proxy must exist first). Start with ollama for its idle-unload behaviour; switch to vLLM only if sustained concurrency exceeds ~4-8 requests
+- [ ] [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
 - [ ] [#p0rw] Write the allowlisting egress proxy for the plugin egress hostport in src/freehold — model plugins are routed to it by sandbox_argv but it does not exist yet, so a model plugin currently has no working network path (~50-line CONNECT proxy, allowlist generativelanguage.googleapis.com). Confirmed still absent: egress_hosts appears only on PluginSpec and in tests, with no proxy binary or call site
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant

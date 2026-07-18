@@ -193,7 +193,25 @@ fn queue_binding_target(
             })
         });
     }
-    if current.frontmatter_mode.is_some() || current.legacy_queue_active.is_some() {
+    // `#qstartinert`: nothing changed on either side this cycle, and the marker
+    // carries no control token. An explicitly authored frontmatter control is
+    // still the operator's standing instruction, so honor it rather than
+    // converging to `stop`.
+    //
+    // Collapsing to `stop` here was aimed at the post-drain shape (the token was
+    // consumed off the marker), but that transition is a marker CHANGE and is
+    // already handled above by `marker_changed`. Reaching this branch means the
+    // marker never carried the token at all — the ordinary shape for a document
+    // whose operator wrote `queue: start` in frontmatter and left the marker bare,
+    // or one whose marker projection failed to persist. Forcing `stop` there
+    // silently disarmed the queue on every pass: entries mirrored in, but
+    // activation resolved inactive forever and the auto-loop never got a head.
+    if let Some(frontmatter_mode) = current.frontmatter_mode {
+        return Some(frontmatter_mode);
+    }
+    // A bare legacy `queue_active` flag with no explicit control is not a standing
+    // instruction; keep the pre-existing conservative stop.
+    if current.legacy_queue_active.is_some() {
         return Some(QueueBindingMode::Stop);
     }
     None
@@ -304,6 +322,67 @@ mod tests {
         let components = agent_doc_element::element::parse(&updated).unwrap();
         let queue = components.iter().find(|c| c.name == "queue").unwrap();
         assert!(!explicit_queue_go_mode(&queue.attrs, Some("stop")));
+    }
+
+    /// `#qstartinert`: a steady-state frontmatter `queue: start` with a bare
+    /// marker must stay `start` — convergence must not silently disarm it.
+    ///
+    /// Live repro (`tasks/brookebrodack-dev.md`): 11 queued heads, `queue: start`,
+    /// bare `<!-- agent:queue -->`, snapshot identical. Every pass converged the
+    /// operator's `start` to `stop`, so the queue populated but never armed.
+    #[test]
+    fn unchanged_frontmatter_start_with_bare_marker_stays_started() {
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#work]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        // Snapshot identical to content: nothing changed on either side.
+        let (updated, _) = converge_queue_control_binding_content(content, Some(content)).unwrap();
+
+        assert!(
+            updated.contains("queue: start\n"),
+            "operator's standing `queue: start` must survive convergence:\n{updated}"
+        );
+        assert!(
+            !updated.contains("queue: stop"),
+            "convergence must not disarm an unchanged operator control:\n{updated}"
+        );
+        assert!(
+            updated.contains("<!-- agent:queue start -->"),
+            "the frontmatter control must project onto the marker:\n{updated}"
+        );
+    }
+
+    /// `#qstartinert` guard: the post-drain shape (marker token consumed, so the
+    /// marker CHANGED) must still converge to `stop`.
+    #[test]
+    fn consumed_marker_token_still_converges_to_stop() {
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:queue start -->\n",
+            "- do [#work]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        // Drain stripped the control token off the marker.
+        let content = snapshot.replacen("<!-- agent:queue start -->", "<!-- agent:queue -->", 1);
+
+        let (updated, changed) =
+            converge_queue_control_binding_content(&content, Some(snapshot)).unwrap();
+
+        assert!(changed);
+        assert!(
+            updated.contains("queue: stop\n"),
+            "a consumed marker token is a real stop transition:\n{updated}"
+        );
     }
 
     #[test]

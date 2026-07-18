@@ -2103,9 +2103,7 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
     let (fm, _) = frontmatter::parse(&content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
     let explicit_stop = explicit_queue_stop_mode(&comp.attrs, fm.queue.as_deref());
-    let persisted_activation = persisted_active
-        && (explicit_queue_go_mode(&comp.attrs, fm.queue.as_deref())
-            || explicit_queue_start_mode(&comp.attrs, fm.queue.as_deref()));
+    let persisted_activation = queue_control_activation(&comp.attrs, fm.queue.as_deref());
 
     let mut activation = agent_doc_queue::document_queue::resolve_activation(
         &entries,
@@ -2240,6 +2238,28 @@ pub fn inspect_queue_state(file: &Path, diff: Option<&str>) -> Result<QueueState
         synced_queue_ids: vec![],
         warnings: vec![],
     })
+}
+
+/// `#qstartinert`: resolve queue activation from the operator's explicit control.
+///
+/// `queue:` (frontmatter) and the `start`/`go` marker tokens are the canonical
+/// activation control — `control_binding` converges the two and writes only
+/// `queue: <mode>`, treating `queue_active:` as a legacy field it reads solely
+/// when `queue:` is absent. Activation must therefore key off that control alone.
+/// Requiring a persisted `queue_active: true` in addition left every document
+/// whose only control was `queue: start` permanently unarmed: entries mirrored in,
+/// but `queue_drainable_head_count` stayed `0` and the auto-loop never got a head.
+///
+/// This is a strict widening of the old predicate. `queue_active: true` was only
+/// ever honored *alongside* a `start`/`go` token, so a legacy-flag-only document
+/// stays inactive exactly as before, and `stop` still dominates both spellings.
+fn queue_control_activation(
+    attrs: &std::collections::HashMap<String, String>,
+    frontmatter_queue: Option<&str>,
+) -> bool {
+    !explicit_queue_stop_mode(attrs, frontmatter_queue)
+        && (explicit_queue_go_mode(attrs, frontmatter_queue)
+            || explicit_queue_start_mode(attrs, frontmatter_queue))
 }
 
 pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueState> {
@@ -2846,9 +2866,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     let (fm, _) = frontmatter::parse(&current_content).unwrap_or_default();
     let persisted_active = fm.queue_active.unwrap_or(false);
     let explicit_stop = explicit_queue_stop_mode(&comp.attrs, fm.queue.as_deref());
-    let persisted_activation = persisted_active
-        && (explicit_queue_go_mode(&comp.attrs, fm.queue.as_deref())
-            || explicit_queue_start_mode(&comp.attrs, fm.queue.as_deref()));
+    let persisted_activation = queue_control_activation(&comp.attrs, fm.queue.as_deref());
 
     let mut activation = agent_doc_queue::document_queue::resolve_activation(
         &entries,
@@ -4975,6 +4993,152 @@ mod tests {
             state.selected_queue_prompts.first(),
             Some(&format!("/goal Implement backlog item(s): #{id}"))
         );
+    }
+
+    /// `#qstartinert`: canonical frontmatter `queue: start` must arm the queue on
+    /// its own.
+    ///
+    /// The control-binding migration made `queue:` the canonical activation
+    /// control and made `queue_active` legacy — `control_binding::queue_binding_state`
+    /// deliberately ignores `queue_active` whenever `queue:` is present, and
+    /// `converge_queue_control_binding_content` writes only `queue: <mode>`. But
+    /// `persisted_activation` still required the legacy `queue_active: true` flag
+    /// it had stopped writing, so a document whose only control was `queue: start`
+    /// could never activate: the queue populated but stayed permanently UNARMED
+    /// (`queue_drainable_head_count: 0`, `queue_continuation_required: false`) and
+    /// the auto-loop never got a head. Observed live on
+    /// `tasks/brookebrodack-dev.md` (11 queued heads, `queue: start`, bare marker).
+    #[test]
+    fn run_queue_maintenance_arms_queue_from_canonical_frontmatter_start_control() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: claude\n",
+            // Canonical control only — no legacy `queue_active:` flag, exactly the
+            // shape `converge_queue_control_binding_content` produces.
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            // Bare marker: the operator set the control in frontmatter.
+            "<!-- agent:queue -->\n",
+            "- do [#armme]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#armme] an ordinary agent-drainable item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(
+            state.queue_active,
+            Some(true),
+            "`queue: start` is the canonical activation control and must activate \
+             the queue without a legacy `queue_active: true` flag"
+        );
+        // `start` is the supervisor-scope activation gesture (`go` is the
+        // in-session drain control), so the head must be drainable in the scope
+        // that owns it. Before the fix this was `false`: convergence rewrote the
+        // operator's `start` to `stop` and nothing could ever pick the queue up.
+        assert!(
+            state.queue_supervisor_drainable,
+            "an armed `queue: start` head must be drainable by the supervisor"
+        );
+    }
+
+    /// `#qstartinert`: the same shape under the in-session drain control (`go`)
+    /// must arm the in-session loop.
+    #[test]
+    fn run_queue_maintenance_arms_in_session_loop_from_canonical_frontmatter_go_control() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: claude\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#armme]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#armme] an ordinary agent-drainable item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_active, Some(true));
+        assert_eq!(
+            state.queue_drainable_head_count, 1,
+            "an ordinary (non-operator-verify) head under `queue: go` must be \
+             agent-drainable, not left unarmed"
+        );
+        assert!(
+            state.queue_continuation_required,
+            "an armed queue with a drainable head must request continuation"
+        );
+    }
+
+    /// `#qstartinert` guard: `queue: stop` still dominates, and a legacy-only
+    /// `queue_active: true` with no control token stays inactive exactly as before.
+    #[test]
+    fn run_queue_maintenance_frontmatter_stop_control_still_dominates() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "agent: claude\n",
+            "queue_active: true\n",
+            "queue: stop\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#nope]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#nope] must not run\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(state.queue_drainable_head_count, 0);
+        assert!(!state.queue_continuation_required);
     }
 
     #[test]

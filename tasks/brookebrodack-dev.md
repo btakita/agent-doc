@@ -7,7 +7,6 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: start
 prompt_presets:
   '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
@@ -16,6 +15,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
+queue: start
 ---
 
 # brookebrodack-dev — Session Summary
@@ -454,14 +454,15 @@ is a confirmation task, not a suspected problem; prod is verified by hand.
 **Still yours:** the quorum decision on `#fhquorum2` (veto role / keep
 always-escalate / rules approves when clean), and `#cy58`, which is unaffected by
 any of this — it needs credit on the OpenAI project.
-<!-- agent:boundary:e932b7cf -->
+<!-- agent:boundary:920e3e4e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- do [#gbmig3]
-- do [#fhquorum2]
+- do [#gbdeploy1]
+- ~~do [#gbmig3]~~
+- do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 LL
 - do [#fhoneshot]
 - do [#gpupol]
 - do [#gpulease]

@@ -72,6 +72,11 @@ Please add the backlog items into the queue in priority order
 
 ### Re: add the backlog items into the queue in priority order — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#vesting-gap-admin-queue]
+
+
 Done — all 10 backlog items are now queue heads in backlog priority order. There were no actionable follow-up items to capture this cycle: this was a queue-ordering request, not implementation work, and the 10 items already in the backlog *are* the follow-up.
 
 The automatic backlog→queue mirror was not going to do this on its own. Two things were blocking it:
@@ -109,11 +114,11 @@ Two things to flag rather than silently absorb:
 
 - **Stale install.** Preflight reports `~/.cargo/bin/agent-doc`, the cdylib, and both built artifacts predate the latest local `src/agent-doc` source edit. That is a concurrent session's tree, not mine — I did not rebuild it, so live tmux/JetBrains sessions may be running pre-edit code at an unchanged version.
 - **The editor-authority wedge is not fixed**, only worked around for this write. If `queue_maintenance_not_persisted` keeps recurring the mirror will stay unreliable and queue state will need `queue sync` each time. That is an agent-doc-repo defect, so it does not belong in this document's EFS backlog.
-<!-- agent:boundary:848ff84c -->
+<!-- agent:boundary:5182131f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#vesting-gap-admin-queue]
+- ~~do [#vesting-gap-admin-queue]~~
 - do [#tmo-orphan-reconcile-exec]
 - do [#tmo-reconcile-binder]
 - do [#efs-do-hibernation]

@@ -575,7 +575,68 @@ Sources: [Marketing Dive on rich media ad rates](https://www.marketingdive.com/n
 [GUESTPIX](https://guestpix.com/blog/why-choose-a-digital-guestbook-for-your-wedding/) and
 [GuestCam](https://guestcam.co/blog/top-digital-wedding-guestbooks) as representative
 vendor claims.
-<!-- agent:boundary:7dae247d -->
+❯ Here are the OpenAI api key Model Capabilities permissions ![img.png](img.png). Should I only allow /v1/moderation?
+
+### Re: should the key only allow /v1/moderations — opus-4-8
+
+**No — that would break it.** Set **Chat completions (`/v1/chat/completions`) → Write**
+and leave everything else `None`.
+
+The naming is genuinely misleading, so the instinct is a good one. But `/v1/moderations`
+and "our moderation script" are different things:
+
+| | `/v1/moderations` | what this code does |
+|---|---|---|
+| Cost | Free | Paid, per token |
+| Detects | Fixed safety categories: hate, harassment, self-harm, sexual, violence | Anything you describe in the prompt |
+| Catches spam / ads / SEO soup | **No** | Yes |
+| Catches gibberish | **No** | Yes |
+| Catches prompt injection | **No** | Yes |
+| Catches doxxing / phone numbers | **No** | Yes |
+
+The safety classifier would sail right past the entries you'll actually get. A
+guestbook's problem isn't mostly violent speech — it's `CHEAP MEDS >> http://spam...`,
+keyword soup, and someone posting a stranger's phone number. Those need a model
+reading your rules, which means chat completions.
+
+### I was wrong earlier — your screenshot corrects me
+
+I told you "Model capabilities" was a broad bucket covering chat, embeddings, images,
+audio, and moderations together, and that OpenAI wouldn't let you scope to a single
+endpoint. **Your screenshot shows that's not true.** It expands into per-endpoint
+rows:
+
+```
+Responses         (/v1/responses)         None
+Text-to-speech    (/v1/audio/speech)      None
+Realtime          (/v1/realtime)          None
+Chat completions  (/v1/chat/completions)  Write   ← the only one you need
+Embeddings        (/v1/embeddings)        None
+Images            (/v1/images)            None
+Moderations       (/v1/moderations)       None
+```
+
+That's genuinely tight scoping, and it's better than I described. It also means the
+"a leaked key could still call image or audio endpoints" worry I raised doesn't apply
+if you set it this way. The budget cap is still worth setting, but it's no longer
+carrying the whole load.
+
+`List models → None` is correct — nothing in the code lists models.
+
+### One thing to change in that dialog
+
+The Project dropdown reads **Default project**. Point it at a dedicated
+brookebrodack project instead, so usage, limits, and the blast radius belong to this
+site alone. That's the part that makes a budget cap meaningful.
+
+### If you later want the free classifier too
+
+There's a reasonable hybrid: run `/v1/moderations` first as a free pre-filter for the
+egregious categories, then only spend a chat-completions call on what survives. It
+would cut cost and add a second opinion on the worst content. Not needed now, and it
+adds a call to every submission — but if you want it, grant **Moderations → Write**
+as well and say so; it slots into the existing provider interface.
+<!-- agent:boundary:f680d8b2 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -483,7 +483,24 @@ fn active_queue_for_supervisor_start(
     allow_supervisor_start: bool,
 ) -> Option<(QueueFacts, document_queue::QueueActivation)> {
     let (fm, _) = frontmatter::parse(content).ok()?;
-    if fm.queue_active != Some(true) {
+    // `#qstartinert`: `queue_active` is the LEGACY activation flag. `control_binding`
+    // made `queue:` (and its marker spelling) canonical and writes only that, so
+    // requiring a persisted `queue_active: true` here made drainability depend on a
+    // field the current writers no longer emit: a document could carry an explicit
+    // `go`/`start` control, activate, mirror its entries in, and still report
+    // `drainable_head_count: 0` forever. The explicit-control gate below is the real
+    // authority; `queue_active` now only participates as an explicit halt.
+    //
+    // `queue_active: false` IS meaningful — the drain/clear path writes it when a
+    // queue finishes — so it still stops drainability, as does `queue: stop`.
+    if fm.queue_active == Some(false) {
+        return None;
+    }
+    if fm
+        .queue
+        .as_deref()
+        .is_some_and(|raw| raw.trim().eq_ignore_ascii_case("stop"))
+    {
         return None;
     }
     let (queue_facts, entries) = queue_component_entries(content)?;
@@ -1238,6 +1255,60 @@ mod tests {
             ],
         );
         assert_eq!(drainable_head_count(&content), 2);
+    }
+
+    /// `#qstartinert`: an explicit `go` control must make heads drainable without
+    /// a legacy `queue_active: true` flag.
+    ///
+    /// `control_binding` made `queue:`/the marker token canonical and stopped
+    /// writing `queue_active`, so gating drainability on that flag stranded any
+    /// document using the canonical control: activated, entries mirrored in, and
+    /// `drainable_head_count: 0` forever. Live repro on
+    /// `tasks/brookebrodack-dev.md` after convergence produced
+    /// `<!-- agent:queue go -->` with no `queue_active` key.
+    #[test]
+    fn drainable_head_count_honors_explicit_go_without_legacy_active_flag() {
+        let content = concat!(
+            "---\nsession: sid\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#c]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#c] plain drainable\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert_eq!(
+            drainable_head_count(content),
+            1,
+            "an explicit `go` control is the canonical activation authority"
+        );
+    }
+
+    /// `#qstartinert` guard: the explicit halts must still stop drainability.
+    #[test]
+    fn drainable_head_count_respects_explicit_halts_without_legacy_flag() {
+        let stopped = concat!(
+            "---\nsession: sid\nagent_doc_format: template\nqueue: stop\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#c]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#c] plain drainable\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        assert_eq!(
+            drainable_head_count(stopped),
+            0,
+            "`queue: stop` must dominate a stale marker `go`"
+        );
+
+        // A drained queue writes `queue_active: false`; that remains an explicit halt.
+        let cleared = stopped.replace("queue: stop", "queue_active: false");
+        assert_eq!(
+            drainable_head_count(&cleared),
+            0,
+            "a persisted `queue_active: false` must still halt the drain"
+        );
     }
 
     #[test]

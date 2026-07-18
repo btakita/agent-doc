@@ -688,7 +688,54 @@ was unrecognized. That was wrong — lint-gate flags `mode` on `agent:status` an
 `agent:exchange` but says nothing about your backlog marker, and `priority` is a
 real attribute on `agent:queue` in the bugs2 document. Your syntax was fine; my
 claim that it risked parser drift was not.
-<!-- agent:boundary:6d12412f -->
+
+### Re: correction — the queue did populate — opus-4-8
+
+My previous response is wrong and I am correcting it rather than leaving it in
+the record. **The queue is populated.** It landed on the `finalize` commit path,
+which is the one route I had not tried — I reported failure while still holding
+the tool that would succeed.
+
+```
+&lt;!-- agent:queue --&gt;
+- do [#teah]
+- do [#rak9]
+- do [#p0rw]
+...11 items, backlog order preserved
+&lt;!-- /agent:queue --&gt;
+```
+
+Frontmatter reads `queue: start`, and finalize confirmed the head explicitly:
+`[queue] kept head 'do #teah' because the response did not record a completion
+outcome for #teah`.
+
+**What was accurate:** standalone `agent-doc queue sync` genuinely cannot persist
+here — three attempts, `admin reload-lib` in between, same
+`queue_maintenance_not_persisted` every time. The distinction I missed is that
+finalize's commit boundary persists queue maintenance through a path that
+`queue sync` does not reach.
+
+**The wedge is not gone, and this matters for what happens next.** Preflight still
+reports `queue maintenance FAILED` with `editor_attached_model_missing`, and:
+
+```
+queue_drainable_head_count: 0
+queue_continuation_required: false
+```
+
+So the queue is **populated but not armed**. The text is there; the binding that
+would hand `#teah` to the auto-loop still cannot persist. I am not looping on it —
+`queue_continuation_required: false` is an explicit stop condition, and looping
+past it would be churn.
+
+Everything I said about not escalating stands: `src/agent-doc` has an uncommitted
+`crdt_sync.rs` on top of a commit fixing this exact wedge, so `make install`
+would ship a concurrent session's in-progress merge code to every live editor.
+
+**Next step is yours.** `#teah` is at the head and I can work it directly from the
+backlog on your word — that needs no queue binding at all. Or once the other
+session's fix lands, the arming pass should complete on its own.
+<!-- agent:boundary:6abaf5f7 -->
 <!-- /agent:exchange -->
 
 ## Queue

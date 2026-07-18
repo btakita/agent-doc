@@ -11,6 +11,25 @@ use std::time::{Duration, Instant};
 /// instead of one, while staying far coarser than the 100ms observe poll.
 const URGENT_DRAIN_RETRY_INTERVAL: Duration = Duration::from_millis(750);
 
+/// `#routeprogresswait`: how much longer route may wait when the Lazily frontier
+/// is *actively advancing*, as a multiple of the no-progress budget.
+///
+/// `max_wait` is the right deadline for a **wedged** transition, but it was also
+/// being applied to a healthy one. The JetBrains `Run Agent Doc` action writes
+/// its prompt marker into the document *first* (`active_exchange_prompt_marker
+/// ... status=applied_ack_pending`), so route then waits for the convergence of
+/// a write the same action just issued. Under load that ACK round trip can
+/// exceed a flat `debounce * 10` (5000ms), and route deferred with "Lazily
+/// current transition remained delivery_pending for 5000ms" even though the
+/// frontier was converging normally and reached `delivery_converged=true`
+/// moments later.
+///
+/// Observed text changing between polls is positive evidence of progress, so the
+/// no-progress timer resets on every change and only genuine stalls hit the
+/// deadline. This ceiling bounds the pathological case where the document is
+/// edited continuously and never quiesces.
+const PROGRESS_WAIT_CEILING_MULTIPLIER: u32 = 6;
+
 /// Wait for Lazily's current-document transition to settle.
 ///
 /// Route fails closed instead of dispatching through an incomplete current
@@ -48,9 +67,19 @@ where
     let start = Instant::now();
     let _ = debounce;
     let mut last_urgent_drain: Option<Instant> = None;
+    // `#routeprogresswait`: the no-progress deadline restarts whenever the
+    // observed frontier advances, so a converging transition is not deferred on
+    // wall-clock alone.
+    let mut last_progress = Instant::now();
+    let mut last_observed: Option<String> = None;
+    let progress_ceiling = max_wait.saturating_mul(PROGRESS_WAIT_CEILING_MULTIPLIER);
 
     loop {
         let current = observe(file, "route_startup_current_transition");
+        let observed_text = match &current {
+            Ok(Some(CurrentText::Current { text, .. })) => Some(text.clone()),
+            _ => None,
+        };
         let (ready, state, drain_targets) = match current {
             Ok(None | Some(CurrentText::Detached)) => (true, "detached", None),
             Ok(Some(CurrentText::Current {
@@ -69,6 +98,13 @@ where
         if ready {
             eprintln!("[route] Lazily current transition settled ({state})");
             return Ok(());
+        }
+
+        if observed_text.is_some() && observed_text != last_observed {
+            if last_observed.is_some() {
+                last_progress = Instant::now();
+            }
+            last_observed = observed_text;
         }
 
         // #crdtpushdrain: re-request on a bounded cadence rather than once. A single
@@ -95,12 +131,25 @@ where
             }
         }
 
-        if start.elapsed() >= max_wait {
+        // `#routeprogresswait`: defer only on a genuinely stalled transition. A
+        // frontier that keeps advancing is converging — deferring it discards a
+        // healthy dispatch and makes `Run Agent Doc` fail against its own
+        // just-written prompt marker. The absolute ceiling still bounds a
+        // document that never quiesces.
+        let stalled_for = last_progress.elapsed();
+        if stalled_for >= max_wait || start.elapsed() >= progress_ceiling {
+            let detail = if start.elapsed() >= progress_ceiling && stalled_for < max_wait {
+                format!(
+                    "kept advancing without converging for {}ms (progress ceiling)",
+                    start.elapsed().as_millis()
+                )
+            } else {
+                format!("remained {} for {}ms", state, stalled_for.as_millis())
+            };
             anyhow::bail!(
-                "route deferred for {}: Lazily current transition remained {} for {}ms; retry after it settles",
+                "route deferred for {}: Lazily current transition {}; retry after it settles",
                 file.display(),
-                state,
-                max_wait.as_millis()
+                detail
             );
         }
 
@@ -170,6 +219,86 @@ mod tests {
             vec![(CrdtReplicaEventReason::AckRecoveryForceRefresh, 1)]
         );
         assert!(observations.get() >= 4);
+    }
+
+    /// `#routeprogresswait`: regression for the recurring
+    /// `route deferred ...: Lazily current transition remained delivery_pending for
+    /// 5000ms`. The JetBrains `Run Agent Doc` action writes its prompt marker into
+    /// the document first, so route waits on the convergence of a write that same
+    /// action just issued. Under load that ACK round trip can outlast a flat
+    /// `debounce * 10`, and route deferred a transition that was converging
+    /// normally. An advancing frontier must reset the no-progress deadline.
+    #[test]
+    fn route_startup_does_not_defer_a_frontier_that_keeps_advancing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+        let observations = Cell::new(0usize);
+
+        let started = Instant::now();
+        let outcome = await_idle_with_max_wait_and_effects(
+            &doc,
+            Duration::from_millis(10),
+            // A no-progress budget far shorter than the total time this
+            // transition takes: without progress tracking it would defer.
+            Duration::from_millis(300),
+            |_file, _source| {
+                let n = observations.get();
+                observations.set(n + 1);
+                if n < 12 {
+                    // Text advances on every poll — actively converging.
+                    Ok(Some(CurrentText::Current {
+                        text: format!("prompt {n}"),
+                        live_editors: 1,
+                        delivery_converged: false,
+                    }))
+                } else {
+                    Ok(Some(CurrentText::Current {
+                        text: "prompt final".to_owned(),
+                        live_editors: 1,
+                        delivery_converged: true,
+                    }))
+                }
+            },
+            |_file, _reason, _targets| Ok(()),
+        );
+
+        assert!(
+            outcome.is_ok(),
+            "an advancing frontier must not be deferred: {outcome:?}"
+        );
+        assert!(
+            started.elapsed() >= Duration::from_millis(300),
+            "the fixture must actually outlast the no-progress budget"
+        );
+    }
+
+    /// The progress reset is not a blank cheque: a frontier that is genuinely
+    /// stuck (identical text every poll) still defers at the no-progress budget.
+    #[test]
+    fn route_startup_still_defers_a_stalled_frontier() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("session.md");
+
+        let outcome = await_idle_with_max_wait_and_effects(
+            &doc,
+            Duration::from_millis(10),
+            Duration::from_millis(300),
+            |_file, _source| {
+                Ok(Some(CurrentText::Current {
+                    text: "frozen".to_owned(),
+                    live_editors: 1,
+                    delivery_converged: false,
+                }))
+            },
+            |_file, _reason, _targets| Ok(()),
+        );
+
+        assert!(outcome.is_err(), "a stalled frontier must still fail closed");
+        let message = format!("{:#}", outcome.unwrap_err());
+        assert!(
+            message.contains("delivery_pending"),
+            "the stall reason should still be reported: {message}"
+        );
     }
 
     /// `#crdtpushdrain`: regression for the reported

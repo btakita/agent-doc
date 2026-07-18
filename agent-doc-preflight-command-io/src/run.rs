@@ -745,10 +745,37 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             QueueState::default()
         })
     } else {
-        run_queue_maintenance(file, diff_result.as_deref()).unwrap_or_else(|e| {
-            eprintln!("[preflight] queue maintenance warning: {}", e);
-            QueueState::default()
-        })
+        match run_queue_maintenance(file, diff_result.as_deref()) {
+            Ok(state) => state,
+            Err(e) => {
+                // `#queuepersistloud`: the mirror/sync progress lines above are
+                // printed while the new queue is being *computed*, before it is
+                // persisted. When persistence then fails the computed queue is
+                // discarded and the previous queue text survives — but the run
+                // still reads as success ("mirrored 31 ... / synced backlog →
+                // queue (Prepend, 49 active id(s))"), so a freshly filed backlog
+                // item silently never appears in the queue and operators re-add
+                // `do [#id]` by hand. Say plainly that nothing was applied, and
+                // surface it as a structured warning so agents and skills see it
+                // in the preflight contract rather than only on stderr.
+                eprintln!(
+                    "[preflight] queue maintenance FAILED — the recomputed queue was NOT applied; \
+                     the previous queue text is still in effect (any backlog→queue mirror, \
+                     auto-strike, or reorder reported above did not land): {e}"
+                );
+                warnings.push(PreflightWarning {
+                    code: "queue_maintenance_not_persisted".to_string(),
+                    message: format!(
+                        "queue maintenance was computed but NOT persisted, so the previous queue \
+                         text is still in effect and newly added backlog ids may be absent from \
+                         the queue: {e}"
+                    ),
+                    document_agent: None,
+                    active_harness: None,
+                });
+                QueueState::default()
+            }
+        }
     };
     warnings.extend(queue_state.warnings.clone());
     // #qconvbaseline: the queue maintenance above may converge the live editor

@@ -1973,6 +1973,7 @@ fn run_with_options_internal_at_root(
         "sync::run_with_options start"
     );
     let sync_total_start = Instant::now();
+    let pre_window_start = Instant::now();
 
     // `#panefocussteal`: no pre-lock actor focus. A passive sync must not select
     // the document pane — that is what stole the operator's focus on every poll.
@@ -2155,6 +2156,13 @@ fn run_with_options_internal_at_root(
     // Resolve the target session/window. Full/manual sync delegates repair to
     // the same file-scoped doctor path that operators can run explicitly;
     // passive editor sync keeps layout repair explicit.
+    log_sync_latency(
+        focus,
+        "gap_pre_window",
+        pre_window_start.elapsed(),
+        SYNC_WINDOW_RESOLUTION_BUDGET,
+        auto_start_mode,
+    );
     let window_resolution_start = Instant::now();
     let target_session = resolve_sync_target_session(tmux, window, &col_args, focus);
     let full_sync = matches!(auto_start_mode, AutoStartMode::Full);
@@ -2267,6 +2275,7 @@ fn run_with_options_internal_at_root(
         SYNC_WINDOW_RESOLUTION_BUDGET,
         auto_start_mode,
     );
+    let mid_gap_start = Instant::now();
     // `#panefocussteal`: passive sync is focus-neutral — it never selects a pane.
     // Deliberate focus movement is the `agent-doc focus <file>` command, which the
     // plugin invokes on a real editor doc switch. Following focus from here is
@@ -2525,6 +2534,13 @@ fn run_with_options_internal_at_root(
         let context_session: Option<String> = target_session
             .clone()
             .or_else(|| window.and_then(|w| session_name_for_target_window(tmux, w)));
+        log_sync_latency(
+            focus,
+            "gap_window_to_ownership",
+            mid_gap_start.elapsed(),
+            SYNC_OWNERSHIP_PROOF_BUDGET,
+            auto_start_mode,
+        );
         let (mut sa, mut sb, mut sc, mut sd) = (Duration::ZERO, Duration::ZERO, Duration::ZERO, Duration::ZERO);
         let per_file_loop_start = Instant::now();
         for file_path in &all_files {
@@ -3519,6 +3535,7 @@ fn run_with_options_internal_at_root(
         SYNC_ROUTER_BUDGET,
         auto_start_mode,
     );
+    let post_router_start = Instant::now();
 
     // Log pane count after tmux_router::sync
     if let Some(w) = window {
@@ -3628,7 +3645,20 @@ fn run_with_options_internal_at_root(
     // Post-sync: validate session state (report only, no kill).
     // Disabled --fix because auto_start with context_session intentionally places
     // cross-session panes — resync --fix would kill them (lesson: context_session override).
-    if let Err(e) = resync::run(false, None, None) {
+    //
+    // `#passiveresyncdefer`: this pass is REPORT-ONLY — it mutates nothing — but it
+    // was the single largest remaining cost on the editor-follow hot path: 956ms
+    // of a 1456ms `safe_passive_total`, measured as `gap_post_router`. Passive
+    // sync runs on every editor file switch, so paying ~1s for diagnostics that
+    // change no state is exactly the work to keep off the hot path.
+    //
+    // Full `agent-doc sync` (the deliberate layout reconcile, and the doctor
+    // repair path below) still runs it, so the validation is not lost — it is
+    // deferred to the passes that are allowed to be slow and that actually act on
+    // the result.
+    if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        sync_log("post_sync_resync_skipped mode=safe-passive reason=report_only_off_hot_path (#passiveresyncdefer)");
+    } else if let Err(e) = resync::run(false, None, None) {
         eprintln!("[sync] warning: post-sync resync failed: {}", e);
     }
     if run_doctor_repair {
@@ -3647,6 +3677,13 @@ fn run_with_options_internal_at_root(
     }
 
     if matches!(auto_start_mode, AutoStartMode::SafePassive) {
+        log_sync_latency(
+            focus,
+            "gap_post_router",
+            post_router_start.elapsed(),
+            SYNC_SAFE_PASSIVE_TOTAL_BUDGET,
+            auto_start_mode,
+        );
         log_sync_latency(
             focus,
             "safe_passive_total",

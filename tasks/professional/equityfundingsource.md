@@ -34,10 +34,45 @@ complete
 
 *Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260718-171839.md`*
 
-Compacted content:
+Compacted content: 
 - Archived 4 response topic(s): Production Cloudflare environment; Brief Cloudflare account instructions for Judith; Is $5/month enough, and the CF instructions as a file; 1 more
 - Prior summary/context: prior compacted content: Archived 3 response topic(s): Remove the single TMO lender id; map vestings to TMO lenders; ...
-<!-- agent:boundary:ace87005 -->
+In https://equityfundingsource.brian-takita.workers.dev/admin/pipeline?tab=pipeline&dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=interests, please give the Reconcile with TMO a dedicated url. What TMO api endpoint the dropdown list act on?
+
+### Re: Dedicated URL for Reconcile with TMO — opus-4-8
+
+Shipped (`#deal-tmo-reconcile-url`, commit `7d43c61d`, pushed). There were **two** "Reconcile with TMO" surfaces on that tab, so both are now addressable.
+
+**1. The tab-header pass** (reconciles every interested lender in one go):
+
+```
+/admin/pipeline?dialog=deal&dialog_deal_id=070770ae-0e0e-4962-9c63-1e08dfc8b0b4&deal_tab=interests&deal_tmo_reconcile=all
+```
+
+The link **is** the action — it runs the pass once on arrival, then drops its own param from the URL so a refresh doesn't silently re-sync. Only the exact value `all` arms it, so a mangled link can never fire an unexpected TMO sync.
+
+**2. The per-lender vesting modal** (the one with the account dropdown):
+
+```
+/admin/pipeline?dialog=deal&dialog_deal_id=<deal_id>&deal_tab=interests&deal_tmo_reconcile_interest_id=<interest_id>
+```
+
+Both triggers are real `<a href>` links now, so right-click to copy link works, and opening/closing the modal in place keeps the URL in sync. Closing the deal dialog clears both params.
+
+### Re: What TMO API endpoint the dropdown acts on — opus-4-8
+
+The dropdown fetches `GET /api/admin/tmo-lenders` (`admin_tmo_lenders_GET_`). That is **not** a live TMO lender list — EFS is LOS-only. The roster is assembled EFS-side from three sources:
+
+1. **EFS lender vestings** already mapped to a TMO account (`lender_vesting_tmo_lenders_R_`) — surfaces lenders with no funding yet.
+2. **Cached `loan_funding` rows** in `tmo_cache`, populated by TMO sync from **`GET /LOS.svc/GetLoanFundings`**. This is the only real TMO call behind the list, and it is indirect (cache, not live).
+3. The two are unioned and deduped by account (`tmo_lender_roster_`), then the **unfunded tail only** (`in_los === false`) is confirmed one account at a time against read-only **`GET /LSS.svc/GetLender/:Account`** (`#tmo-getlender-confirm`) — that is what distinguishes "confirmed in TMO, never funded" from "nothing in TMO".
+
+`POST /api/admin/tmo-sync` is what the header reconcile calls to refresh (1)/(2) before re-reading. Everything here is read-side; no EFS to TMO push (still gated on `#dzmm`/`#7a4d`).
+
+One correction landed with this: the `TmoLenderPicker` comment claimed the dropdown was a live `LSS.svc/GetLenders` list. It never was — `GetLenders` is unwired. The comment now describes the actual path above.
+
+**Verification:** `make check` green — 1787 pass, 0 fail. Not deployed; say the word and I'll push it to the worker.
+<!-- agent:boundary:4b7c800f -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

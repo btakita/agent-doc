@@ -37,7 +37,41 @@ complete
 Compacted content:
 - Archived 3 response topic(s): Remove the single TMO lender id; map vestings to TMO lenders; do #lender-account-drop-column, #tmo-lender-vesting-doc, #tmo-getlender-confirm; Launch without the TMO production key
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): Reconcile each lender with TMO from the deal interests tab; Pe...
-<!-- agent:boundary:c475469e -->
+
+### Re: Production Cloudflare environment — opus-4-8
+
+Done. Production is live and isolated — worker `equityfundingsource-production`, version `d5b42115`, commit `1253f6b6`.
+
+| | Staging (was the only env) | Production (new) |
+|---|---|---|
+| Worker | `equityfundingsource` | `equityfundingsource-production` |
+| URL | `equityfundingsource.brian-takita.workers.dev` | `equityfundingsource-production.brian-takita.workers.dev` |
+| D1 | `equityfundingsource` (33 users, 7 loans, 7 deals) | `equityfundingsource-production` (95 tables, 0 rows) |
+| R2 | `equityfundingsource-{assets,documents,tmo-cache}` | same, `-production` suffixed |
+| TMO | connected | not set — runs split |
+
+Deploy with `bun run deploy:worker:production`; every `cf:` script has a `:production` twin. Staging deploys are unchanged.
+
+I proved the isolation rather than asserting it: submitted the contact form against production, got a 303, confirmed the row landed in the production D1 and that staging's `contact_messages` was untouched, then deleted the test row.
+
+**The trap I designed around.** Wrangler environments do *not* inherit top-level bindings — only `name`, `main`, `account_id`, and `compatibility_*`. Vars, assets, R2, D1, Durable Objects, rate limiters, triggers, and observability all have to be redeclared, and a binding you add to the top level and forget under `[env.production]` deploys cleanly and then throws on the first production request that touches it, which staging can never reproduce. `tests/efs-production-environment.test.ts` diffs the two environments and fails the suite the moment they drift.
+
+Secrets are per-environment too, which is the same trap with worse consequences. Production had no `AUTH_SECRET` until I pushed it — a worker that cannot sign session cookies means nobody can log in. It was also missing `CLOUDFLARE_API_TOKEN`, which gates **all** outbound email, so contact forms, application leads, invites, and login links would have silently failed. Both are set now, and I verified the contact submission end to end after pushing them.
+
+**A correction to what I told you last cycle.** I said TMO was definitively unset in production. That was wrong, and I should have checked rather than inferred it from the absence of a TMO reference in the secrets-push script. Staging has `TMO_API_TOKEN` and `TMO_DATABASE` set, and I confirmed those credentials actually work — `LOS.svc/GetLoans` returns 200 with real loan data. So staging is genuinely connected to a TMO instance; presumably the sandbox, since the production key is what you are waiting on. The split-system work still stands and is exactly right for the new production environment, which has no TMO secrets and therefore takes the local-first path by design. That matches what you asked for: production works without sync.
+
+**I also closed the remaining hole in that work.** Last cycle handled TMO being *unconfigured*, but a TMO that is configured and *unreachable* — expired key, vendor outage, timeout — still 502'd the approval and left the application `failed`. That is a real weekend risk given staging runs on a sandbox key. TMO failures are now classified by whether TMO actually reached a verdict: network errors, 401/403/408/429, any 5xx, and a non-JSON 200 are `unavailable` and degrade to the same local-first path as an unconfigured TMO; 400/404/409/422 and a non-zero `Status`/`ErrorNumber` (duplicate loan number, validation) are `rejected`, stay a loud 502, and are never papered over by quietly creating the loan locally.
+
+**Verification:** 1775 pass / 0 fail, typecheck + build clean. Both environments deployed and smoke-checked (`/`, `/apply`, `/contact`, `/login`, `/admin/login` all 200). Production bundle string-checked for the split-mode markers. Documented in `docs/deploy.md` § "S — Staging and production".
+
+**Two decisions that are yours, not mine.**
+
+Production starts empty. That is deliberate — an environment sharing staging's database is not a production environment — but it means if the 33 users, 7 loans, and 7 deals currently in staging are real business data rather than test data, they need to be carried over at cutover. The export/import recipe is in `docs/deploy.md`; the wrinkle is that documents live in R2, not D1, so `R2_DOCUMENTS` has to be copied separately or uploaded documents will 404 in production even though their rows exist. Queued as `#efs-prod-seed`. Tell me which it is and I will do it.
+
+On custody: both environments are in your personal Cloudflare account, which also hosts unrelated projects. D1 databases and R2 buckets cannot move between accounts, so when EFS takes custody the production resources have to be recreated there and the data migrated again. If custody is likely to land before launch, it is cheaper to do the seeding once, after the move, rather than twice. Queued as `#efs-cf-account-custody`.
+
+`#efs-dns-cutover` is unchanged and still the gate on the public launch — `equityfundingsource.com` has no A record and its nameservers are still DreamHost. When it cuts over, bind the domain under `[env.production]` only so staging stays on workers.dev; the exact TOML block is in the deploy doc.
+<!-- agent:boundary:6d268f31 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

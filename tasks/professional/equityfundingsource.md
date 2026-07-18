@@ -221,7 +221,7 @@ Only the "does the class expose the handlers" assertion is trivially satisfiable
 Updated `docs/deploy.md` — the cost section now reads as resolved rather than pending, and the bill table drops the "up to ~$5" DO row. The open-tab scaling that made a single always-on room ~82% of the included 400,000 GB-s is gone.
 
 No new backlog items: this one is complete, and there is no follow-up it created.
-<!-- agent:boundary:475e0f68 -->
+<!-- agent:boundary:53407453 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
@@ -229,7 +229,7 @@ No new backlog items: this one is complete, and there is no follow-up it created
 - ~~do [#vesting-gap-admin-queue]~~
 - ~~do [#tmo-orphan-reconcile-exec]~~
 - ~~do [#tmo-reconcile-binder]~~
-- do [#efs-do-hibernation]
+- ~~do [#efs-do-hibernation]~~
 - do [#efs-prod-secret-parity]
 - do [#tmo-orphan-cache]
 - ~~do [#tmo-sandbox-purge-apply]~~

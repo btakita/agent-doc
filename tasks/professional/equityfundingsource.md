@@ -71,7 +71,41 @@ Production starts empty. That is deliberate — an environment sharing staging's
 On custody: both environments are in your personal Cloudflare account, which also hosts unrelated projects. D1 databases and R2 buckets cannot move between accounts, so when EFS takes custody the production resources have to be recreated there and the data migrated again. If custody is likely to land before launch, it is cheaper to do the seeding once, after the move, rather than twice. Queued as `#efs-cf-account-custody`.
 
 `#efs-dns-cutover` is unchanged and still the gate on the public launch — `equityfundingsource.com` has no A record and its nameservers are still DreamHost. When it cuts over, bind the domain under `[env.production]` only so staging stays on workers.dev; the exact TOML block is in the deploy doc.
-<!-- agent:boundary:6d268f31 -->
+
+### Re: Brief Cloudflare account instructions for Judith — opus-4-8
+
+Here is a message you can send her as-is. It is five steps, about five minutes, and needs no technical knowledge. Swap in your preferred email on step 3.
+
+---
+
+**Setting up the EFS Cloudflare account**
+
+1. Go to **dash.cloudflare.com/sign-up**. Enter an email and password, then click **Create Account**. No credit card is asked for.
+
+   Please use a **shared EFS address** (something like `admin@equityfundingsource.com` or a distribution list), not your personal email. This address becomes the account's billing and recovery contact, so it needs to outlive any one person's mailbox.
+
+2. **Check that inbox and click the verification link.** Cloudflare sends it right after signup. Nothing else on this list works until the email is verified.
+
+3. Invite Brian: **Manage Account → Members → Invite**. Enter `brian.takita@gmail.com`, choose the role **Super Administrator**, then **Continue to summary → Invite**.
+
+4. Turn on two-factor: **My Profile** (top-right menu) → **Authentication** → enable an authenticator app, and save the backup codes somewhere safe. This account will hold the live website, so it is worth the extra minute.
+
+5. Have a **company card ready** — not needed today, but Cloudflare asks for one when the file-storage service is switched on, which is Brian's next step.
+
+That is everything. Do not change any domain or DNS settings — Brian will handle that part.
+
+---
+
+Three notes for you, not her.
+
+**Step 2 is a hard blocker, not a formality.** Cloudflare will not let her send the invite in step 3, or enable 2FA in step 4, until the email is verified. If she does steps 1 → 3 back to back it will just fail, so it is worth her clicking the link before moving on.
+
+**Super Administrator is the right role for you, not a shortcut.** The narrower "Workers Platform Admin" role covers Workers, D1, R2, and Durable Objects, but it cannot purchase subscriptions or create account-owned API tokens — and you need both: R2 requires a checkout step, and the deploy pipeline authenticates with an account-owned token. Anything less means going back to her for each of those.
+
+**One thing I could not confirm.** Cloudflare's own docs do not state whether activating R2 requires a card on file even for the free 10 GB tier. Community reports consistently say yes, and the billing docs describe card preauthorization, so I told her to have one ready rather than have that surface as a surprise mid-setup. Everything else above is from the official docs — signup takes no payment method, D1 is free-plan included, and SQLite-backed Durable Objects (what EFS uses) have been on the free Workers plan since April 2025, so the platform itself costs nothing to stand up.
+
+Once she has done this and you have accepted the invite, `#efs-cf-account-custody` is unblocked: create the D1 database and R2 buckets in the new account, update the ids under `[env.production]`, migrate the data, re-push the secrets, and then point DNS at it. Doing custody before `#efs-prod-seed` means moving the data once instead of twice.
+<!-- agent:boundary:4ef6aeba -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -80,6 +114,8 @@ On custody: both environments are in your personal Cloudflare account, which als
 ## Notes
 
 <!-- agent:notes -->
+How can I instruct Judith to create a Cloudflare account for EFS? She does not have much time today so please make brief instructions for her to follow.
+---
 - Admin loan delete: /api/admin/loans/:id
 - Admin bulk loan delete: /api/admin/loans/bulk-delete
 - Admin TMO loan delete: /api/admin/tmo-loans/:loan_number
@@ -100,6 +136,9 @@ We have not cut over the DNS today. The current CF environment will be staging. 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#efs-prod-seed] [operator-verify] Decide whether the production Cloudflare environment should be seeded from staging before launch. Production D1 (equityfundingsource-production) is schema-complete and empty; staging holds 33 users / 7 loans / 7 deals. If that is real business data it must be exported+imported once, immediately before cutover (a second import collides on primary keys), and R2_DOCUMENTS must be copied separately or uploaded documents 404 in production despite their D1 rows existing. Recipe: src/equityfundingsource-dev/docs/deploy.md 'Seeding production from staging'. Blocked on the operator confirming real-vs-test data. See #efs-cf-account-custody — if custody moves first, seed once after the move.
+- [ ] [#efs-cf-account-custody] [operator-verify] Move EFS to its own Cloudflare account. Both environments currently live in Brian's personal account (1e7e194ff8da4ad9e40ce041aea84f76), which also hosts unrelated projects. STEP 1 (Judith, instructions drafted 2026-07-18): sign up at dash.cloudflare.com/sign-up with a SHARED EFS address (becomes billing + recovery contact), verify the email (hard prerequisite — invites and 2FA both fail without it), invite Brian as Super Administrator via Manage Account -> Members -> Invite, enable 2FA, have a company card ready for the R2 checkout. Super Administrator is required, not just Workers Platform Admin, because R2 activation is a purchase and the deploy pipeline needs an account-owned API token. STEP 2 (Brian): D1 databases and R2 buckets cannot move between accounts — create them in the new account, update the ids under [env.production] in wrangler.toml, export+import D1, copy R2, re-push secrets (per-account AND per-environment), then repoint DNS. Sequencing: do this before #efs-prod-seed to migrate the data once instead of twice. Advances #efs-dns-cutover.
+- [ ] [#efs-prod-secret-parity] Production is missing secrets staging has and .dev.vars cannot supply (values are only in Cloudflare and cannot be read back out): DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN gate document sync. AUTH_SECRET, ADMIN_GLOBAL_PASSWORD, CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ACCOUNT_ID are already set (2026-07-18); TMO_API_TOKEN / TMO_DATABASE are intentionally unset so production runs split (#tmo-split-launch). AWS_*/S3_BUCKET_NAME are local bin/assets-*.sh only and are NOT needed in the worker. Compare with 'bun run cf:secrets:list' vs 'bun run cf:secrets:list:production'.
 - [ ] [#efs-dns-cutover] [operator-verify] equityfundingsource.com does not resolve: no A/AAAA record, nameservers still ns1/2/3.dreamhost.com, and wrangler.toml declares no route or custom_domain. The worker is live and correct at equityfundingsource.brian-takita.workers.dev. Needs registrar + Cloudflare access: move the zone to Cloudflare (or add a CNAME at the registrar), add the custom domain / route to wrangler.toml, verify /login/access-callback still works, and allow for NS propagation. This is the remaining gate on the weekend launch. Advances #tcb0 / #efs-cutover-sso-plan.
 - [ ] [#tmo-getlender-verify] [operator-verify] Confirm the #tmo-getlender-confirm LSS path against real TMO data: nothing in production is currently in_lss && !in_los, so GET /LSS.svc/GetLender/:Account has never returned a record in prod — the confirmed_no_funding state is covered by tests and degrades safely on failure, but its success path is unobserved. Needs an operator to name a TMO lender account created but never funded; map a vesting to it, open the reconcile modal, and confirm it reads 'In TMO · no funding yet' rather than 'Unconfirmed in TMO'. Spec: src/equityfundingsource-dev/docs/TMO/get-lender.md.
 <!-- /agent:backlog -->

@@ -193,6 +193,11 @@ Queued `#vesting-gap-queue-ui` for the screen itself — the API and count ship,
 
 ### Re: do [#vesting-gap-queue-ui] — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#vesting-gap-queue-ui]
+
+
 Shipped (EFS `073e466e`, pushed). **Vesting Gaps** is now a left-nav section at `/admin/vesting-gaps`: blocked/warning counts up top, one row per lender with the gap kind, and a per-row deep link into that lender's Lender Vestings card — where the gap is actually fixable, rather than making an admin navigate there themselves.
 
 Each row renders the API's `admin_message` rather than restating the rule in the UI. That keeps the property the whole feature rests on: the lender prompt, the admin card, and this queue all trace back to a single `vesting_gap_` call, so none of them can start disagreeing about who is blocked.
@@ -208,12 +213,12 @@ Wired end to end — section id, URL, portal route, nav item, icon, and the badg
 - `#tmo-sandbox-purge-apply` — waiting on you, since it is 16 permanent deletions.
 
 The order matters: the executor generates the fundings the binder then resolves, so running them out of order means the binder has nothing to work on.
-<!-- agent:boundary:f3062f3f -->
+<!-- agent:boundary:66655887 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 
-- do [#vesting-gap-queue-ui]
+- ~~do [#vesting-gap-queue-ui]~~
 - ~~do [#tmo-reconcile-auto]~~
 - do [#vesting-gap-admin-queue]
 - do [#tmo-contact-enumeration]
@@ -222,7 +227,6 @@ The order matters: the executor generates the fundings the binder then resolves,
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#vesting-gap-queue-ui] Admin portal screen for the #vesting-gap-admin-queue API: render GET /api/admin/lender-vesting-gaps as a worklist (lender, gap kind, blocked vs warning, link straight into that lender's Lender Vestings card), wired to the vesting-gaps nav badge. The API and count shipped 2026-07-18; only the screen is missing. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#tmo-reconcile-binder] Binder for the #tmo-reconcile-auto matcher: read tmo_unmatched_fundings + the lender/vesting roster (users.lender_account, lender_vestings.tmo_lender_account, funds.tmo_funding_rec_id), run funding_match_all_, apply auto_bind decisions through the existing admin_tmo_unmatched_funding_bind_POST_ path, and persist review/ambiguous candidate rankings so the admin queue opens pre-ranked instead of blank. Per PRD D4 the bind reconciles EFS to TMO (the TMO funding wins on conflict) and must record what it overrode. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#tmo-orphan-reconcile-exec] Executor for the #tmo-orphan-as-fundings planner: read the orphan tmo_cache_entities rows + LOS.svc/GetLoans + GetLoanFundings + the EFS funds/vesting roster, run orphan_reconcile_plan_, and apply it. reconcile_cache and tombstone are EFS-local and unguarded; push_funding and create_loan_then_funding (isolated by orphan_plan_writes_) need explicit opt-in and, in production, the EFS->TMO push gate (#dzmm/#7a4d). Sandbox execution is NOT gated — run it there first against the clean slate bin/tmo-sandbox-purge.ts leaves. Mirror the sandbox guard from bin/tmo-sandbox-purge.ts: the TMO token is identical across environments and only the Database header selects one. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#tmo-orphan-cache] Prune/reconcile orphan tmo_cache_entities rows: 18 of 19 cached TMO 'loan' rows (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) do not exist in the TMO database EFS is pointed at — GetLoans returns 24 loans and only '1010' overlaps. They are EFS test debris that renders as if it were TMO data (this is where 'Lucas Huang' shows up). Add an admin prune action or a sync tombstone pass so a cached row whose source_id is absent from GetLoans is marked deleted instead of shown as a live TMO record. Note admin_tmo_loans_by_loan_number_DELETE_ does NOT cover this — it only disables EFS 'loans' rows and never touches tmo_cache_entities.

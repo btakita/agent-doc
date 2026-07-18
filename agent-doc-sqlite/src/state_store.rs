@@ -641,7 +641,97 @@ ON queue_document_state(state_kind);
     ensure_projection_diagnostic_columns(conn)?;
     ensure_queue_head_columns(conn)?;
     ensure_crash_recovery_marker_columns(conn)?;
+    prune_document_authority_observations_once(conn);
     retire_removed_state_event_variants(conn)?;
+    Ok(())
+}
+
+/// Retention cap for `document_authority_observed` rows in `state_events`
+/// (`#authorityfactretention`).
+///
+/// This fact is pure high-frequency telemetry: it only ever updates
+/// `DocumentProjection::latest_authority`, which is why the cycle-projection
+/// reader and the hot replay index both already exclude it (see
+/// `load_state_events_for_cycle_projection_from_db` and
+/// `state_events_cycle_projection_document_hash_id`). Those exclusions bound the
+/// hot READ paths but never bounded the TABLE, so the ledger still grows without
+/// limit and inflates every whole-database operation — WAL growth, page-cache
+/// pressure, backup/copy, `VACUUM`, and any scan not covered by a partial index.
+///
+/// Live repro 2026-07-18 (agent-loop): 170,215 of 176,268 `state_events` rows
+/// (96.6%) were `document_authority_observed`, giving a 416MB table inside a
+/// 477MB `state.db`, alongside multi-second closeout phases
+/// (`git_commit:18031ms`, `session_check:12231ms`). Same failure class as
+/// [`CRASH_RECOVERY_MARKER_MAX_ROWS`] (`#crashmarkerretention`).
+///
+/// Only the newest observation per document is ever read, so this cap is
+/// generous by orders of magnitude and exists purely to stop unbounded growth.
+const DOCUMENT_AUTHORITY_OBSERVED_MAX_ROWS: i64 = 5_000;
+
+/// Guards the once-per-process authority-observation prune so the per-request
+/// `open_state_db` path does not rescan `state_events` on every RPC.
+static DOCUMENT_AUTHORITY_OBSERVATIONS_PRUNED: AtomicBool = AtomicBool::new(false);
+
+/// Prune the authority-observation ledger once per process, best-effort.
+///
+/// Retention is maintenance, never a reason to fail state-db open; a failure
+/// unlatches the guard so a later open retries instead of giving up for the
+/// lifetime of the process.
+fn prune_document_authority_observations_once(conn: &Connection) {
+    if DOCUMENT_AUTHORITY_OBSERVATIONS_PRUNED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    if let Err(err) =
+        prune_document_authority_observations_to(conn, DOCUMENT_AUTHORITY_OBSERVED_MAX_ROWS)
+    {
+        DOCUMENT_AUTHORITY_OBSERVATIONS_PRUNED.store(false, Ordering::Relaxed);
+        eprintln!("[agent-doc] warning: failed to prune document_authority_observed events: {err:#}");
+    }
+}
+
+fn prune_document_authority_observations_to(conn: &Connection, max_rows: i64) -> Result<()> {
+    if max_rows < 1 {
+        return Ok(());
+    }
+    // Cutoff is the id of the `max_rows`-th newest observation; strictly-older
+    // rows are dropped. `id` is the primary key, so both the cutoff lookup and
+    // the batched delete are index-driven without adding another index.
+    let cutoff: Option<i64> = conn
+        .query_row(
+            r#"
+            SELECT id FROM state_events
+            WHERE fact_type = 'document_authority_observed'
+            ORDER BY id DESC LIMIT 1 OFFSET ?1
+            "#,
+            [max_rows - 1],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("failed to resolve document_authority_observed retention cutoff")?;
+    let Some(cutoff) = cutoff else {
+        return Ok(());
+    };
+    // Bounded batches so a one-time cleanup of a legacy backlog cannot balloon a
+    // single WAL frame or hold the write lock for the whole scan.
+    loop {
+        let deleted = conn
+            .execute(
+                r#"
+                DELETE FROM state_events
+                WHERE rowid IN (
+                    SELECT rowid FROM state_events
+                    WHERE fact_type = 'document_authority_observed'
+                      AND id < ?1
+                    LIMIT 50000
+                )
+                "#,
+                [cutoff],
+            )
+            .context("failed to prune stale document_authority_observed events")?;
+        if deleted == 0 {
+            break;
+        }
+    }
     Ok(())
 }
 
@@ -2209,12 +2299,38 @@ pub fn has_open_in_flight_dispatch(
     Ok(count > 0)
 }
 
+/// How long an unproven dispatch may pin the controller's idle self-recycle gate
+/// (`#dispatchgateleak`).
+///
+/// An unproven row is only cleared by `mark_open_dispatches_consumed` on an actor
+/// `Ready` transition. A dispatch that never reached `Ready` — a killed pane, a
+/// crashed harness, a supervisor that died mid-turn — leaves its row open forever,
+/// and because [`has_any_open_in_flight_dispatch`] is project-wide, ONE such row
+/// pins the recycle gate false for every document in the project, permanently.
+///
+/// Live repro 2026-07-18: 18 unproven rows aged 34-50h kept a stale `controller
+/// serve` alive across two days of cycles, so the freshly-installed binary could
+/// never be promoted. No real dispatch stays in flight for hours; anything past
+/// this horizon is leaked state, not in-flight work.
+pub const OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS: i64 = 30 * 60;
+
 /// `#ctlrecycle`: is ANY dispatch in flight across every document/generation? The
 /// controller's idle self-recycle (R1) uses this as its idle proof — it must never
 /// exit while a turn is mid-dispatch for any session it coordinates. Same open-set
 /// definition as [`has_open_in_flight_dispatch`] without the document/generation
 /// filter.
+///
+/// Bounded by [`OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS`] (`#dispatchgateleak`) so a
+/// leaked unproven row cannot wedge the recycle gate forever. This only ever makes
+/// the gate MORE permissive for provably-stale rows; a genuinely in-flight dispatch
+/// is minutes old at most and still pins the gate exactly as before.
 pub fn has_any_open_in_flight_dispatch(conn: &Connection) -> Result<bool> {
+    has_any_open_in_flight_dispatch_as_of(conn, timestamp_secs() as i64)
+}
+
+/// [`has_any_open_in_flight_dispatch`] with an injectable clock so the staleness
+/// horizon is testable without sleeping.
+pub fn has_any_open_in_flight_dispatch_as_of(conn: &Connection, now_secs: i64) -> Result<bool> {
     let count: i64 = conn.query_row(
         r#"
         SELECT COUNT(*)
@@ -2222,8 +2338,9 @@ pub fn has_any_open_in_flight_dispatch(conn: &Connection) -> Result<bool> {
         WHERE failed_stage IS NULL
           AND COALESCE(result_status, '') IN ('accepted', 'queued', 'running')
           AND dispatch_start_proven = 0
+          AND timestamp > ?1
         "#,
-        [],
+        params![now_secs - OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS],
         |row| row.get(0),
     )?;
     Ok(count > 0)
@@ -3170,6 +3287,132 @@ mod tests {
                 },
             ]
         );
+    }
+
+    // `#dispatchgateleak`: an unproven dispatch row is only cleared by
+    // `mark_open_dispatches_consumed` on an actor `Ready` transition, so a killed
+    // pane / crashed harness leaves it open forever. Because the gate is
+    // project-wide, ONE leaked row pinned the controller's idle self-recycle false
+    // for every document — live repro 2026-07-18: 18 rows aged 34-50h kept a stale
+    // `controller serve` alive across two days, so a freshly-installed binary could
+    // never be promoted.
+    #[test]
+    fn stale_unproven_dispatch_does_not_pin_the_recycle_gate() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE dispatch_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_id TEXT NOT NULL,
+                generation INTEGER NOT NULL,
+                command_kind TEXT NOT NULL,
+                accepted_stage TEXT,
+                failed_stage TEXT,
+                diagnostic_payload TEXT,
+                result_status TEXT,
+                proof_scope TEXT,
+                dispatch_start_proven INTEGER NOT NULL DEFAULT 0,
+                timestamp INTEGER NOT NULL
+            );
+            "#,
+        )?;
+        let now = 1_000_000i64;
+        let insert = |ts: i64| -> Result<()> {
+            conn.execute(
+                "INSERT INTO dispatch_attempts \
+                 (document_id, generation, command_kind, result_status, dispatch_start_proven, timestamp) \
+                 VALUES ('doc', 1, 'run', 'accepted', 0, ?1)",
+                [ts],
+            )?;
+            Ok(())
+        };
+
+        // Leaked row well past the horizon must NOT pin the gate.
+        insert(now - OPEN_DISPATCH_IN_FLIGHT_HORIZON_SECS - 1)?;
+        assert!(
+            !has_any_open_in_flight_dispatch_as_of(&conn, now)?,
+            "a dispatch older than the in-flight horizon is leaked state, not in-flight work"
+        );
+
+        // A genuinely in-flight dispatch inside the horizon still pins it.
+        insert(now - 5)?;
+        assert!(
+            has_any_open_in_flight_dispatch_as_of(&conn, now)?,
+            "a recent unproven dispatch must still block the controller idle self-recycle"
+        );
+        Ok(())
+    }
+
+    // `#authorityfactretention`: `document_authority_observed` is pure telemetry
+    // that only updates `latest_authority`. The hot read paths already exclude it,
+    // but nothing bounded the TABLE — live repro 2026-07-18 had 170,215 of 176,268
+    // rows (96.6%) as this fact, a 416MB table in a 477MB state.db.
+    #[test]
+    fn authority_observation_prune_caps_telemetry_and_keeps_durable_facts() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE state_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL,
+                document_hash TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                fact_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                timestamp INTEGER NOT NULL
+            );
+            "#,
+        )?;
+        for i in 0..50 {
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, 'doc', 'document', 'document_authority_observed', '{}', 0)",
+                [format!("authority-{i}")],
+            )?;
+        }
+        // Durable lifecycle facts are interleaved and must survive untouched.
+        for i in 0..3 {
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, 'doc', 'document', 'response_captured', '{}', 0)",
+                [format!("captured-{i}")],
+            )?;
+        }
+
+        prune_document_authority_observations_to(&conn, 10)?;
+
+        let observations: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM state_events WHERE fact_type = 'document_authority_observed'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(observations, 10, "telemetry must be capped to the retention limit");
+
+        let durable: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM state_events WHERE fact_type = 'response_captured'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(durable, 3, "retention must never drop durable lifecycle facts");
+
+        // The NEWEST observations are the ones kept — `latest_authority` reads the tail.
+        let newest: String = conn.query_row(
+            "SELECT event_id FROM state_events \
+             WHERE fact_type = 'document_authority_observed' ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(newest, "authority-49");
+
+        // Idempotent: a second pass over an already-capped table is a no-op.
+        prune_document_authority_observations_to(&conn, 10)?;
+        let after: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM state_events WHERE fact_type = 'document_authority_observed'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(after, 10);
+        Ok(())
     }
 
     #[test]

@@ -4149,13 +4149,62 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(
         let q = comps.iter().find(|c| c.name == "queue").unwrap();
         q.replace_content(&content, &new_body)
     };
-    persist_queue_maintenance_doc(
+    // `#queueatcreate` / `#5d9f`: two persistence paths with different
+    // reachability is the bug surface. `persist_queue_maintenance_doc` requires a
+    // ready editor model and discards its work otherwise, but the backlog add
+    // that produced these very ids persisted through the tracked-work path
+    // (`converge_or_disk_write`), which succeeds under the same conditions. So a
+    // single write grew `agent:backlog` while the matching `agent:queue` head was
+    // silently dropped — the operator-reported "backlog items were not prepended
+    // onto the queue", reproduced here as
+    // `editor authority stayed in editor_attached_model_missing`.
+    //
+    // Prefer the queue-maintenance path (it carries the snapshot/head handling),
+    // but fall back to the same converging write the backlog half used rather
+    // than discarding the enqueue. This is not a force-disk escape hatch: it is
+    // the identical helper the accompanying backlog mutation already ran, so it
+    // converges against a live buffer exactly as that write does.
+    if let Err(primary_err) = persist_queue_maintenance_doc(
         file,
         &current_content,
         &content,
         project_root.as_deref(),
         "pending_add_sync",
-    )?;
+    ) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_pending_add_sync_persist_fallback file={} reason={} (#queueatcreate)",
+                file.display(),
+                primary_err
+            ),
+        );
+        // NOTE: this uses the tracked-work write path, which reads its IO
+        // through a thread-local effects scope. Callers must run this function
+        // inside `with_backlog_command_effects` (the write runtime does), or the
+        // fallback fails with "backlog command write effects are not installed"
+        // — which reads like an authority failure but is purely structural.
+        agent_doc_element_backlog_io::backlog_cmd::apply_document_rewrite(
+            file,
+            "pending_add_sync_fallback",
+            |live| {
+                // Recompute against the live document: the primary attempt may
+                // have observed a different image, and the backlog write that
+                // created these ids already landed there.
+                agent_doc_queue::backlog_sync::enqueue_created_ids_in_content(
+                    live,
+                    &backlog_ids,
+                    placement,
+                )
+            },
+        )
+        .with_context(|| {
+            format!(
+                "same-cycle queue enqueue failed on both the queue-maintenance path ({primary_err}) \
+                 and the tracked-work fallback"
+            )
+        })?;
+    }
     adopt_edited_queue_head_into_snapshot(file, &current_content);
     eprintln!(
         "[write] queue: {} {} same-cycle pending-add id(s) into active go queue",

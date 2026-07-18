@@ -1299,9 +1299,9 @@ fn run_command_inner(
         // rules, so both paths keep backlog and queue in step.
         if commit_mode != CommitMode::None {
             let placement = follow_up_queue_placement(&options)?;
-            if let Err(e) =
+            if let Err(e) = with_backlog_effects(|| {
                 agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(file, placement)
-            {
+            }) {
                 eprintln!(
                     "[queue] warning: same-cycle pending-add queue sync failed: {}",
                     e
@@ -1737,11 +1737,11 @@ fn run_command_inner(
         match commit_mode {
             CommitMode::None => {}
             CommitMode::BestEffort => {
-                if let Err(e) =
+                if let Err(e) = with_backlog_effects(|| {
                     agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(
                         file, placement,
                     )
-                {
+                }) {
                     eprintln!(
                         "[queue] warning: same-cycle pending-add queue sync failed: {}",
                         e
@@ -1749,9 +1749,11 @@ fn run_command_inner(
                 }
             }
             CommitMode::Required => {
-                agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(
-                    file, placement,
-                )?;
+                with_backlog_effects(|| {
+                    agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(
+                        file, placement,
+                    )
+                })?;
             }
         }
     }
@@ -1814,6 +1816,22 @@ fn follow_up_queue_placement(
     } else {
         FollowUpQueuePlacement::Prepend
     })
+}
+
+/// Run `f` with the tracked-work write effects installed.
+///
+/// `#queueatcreate`: the same-cycle queue enqueue falls back to the tracked-work
+/// write path (the one the accompanying backlog mutation used) when the
+/// queue-maintenance path cannot reach a ready editor model. That path resolves
+/// its IO through a thread-local effects scope, which the write runtime installs
+/// around its backlog mutations but which is NOT in place at closeout — so
+/// calling it bare failed with "backlog command write effects are not installed",
+/// a structural error that reads like an authority failure.
+fn with_backlog_effects<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
+    agent_doc_element_backlog_io::with_backlog_command_effects(
+        &agent_doc_element_backlog_runtime_io::RUNTIME_BACKLOG_COMMAND_EFFECTS,
+        f,
+    )
 }
 
 fn active_capture_response_body_for_write(file: &Path) -> Result<String> {

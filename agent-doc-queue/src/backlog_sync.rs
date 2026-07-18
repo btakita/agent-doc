@@ -394,6 +394,97 @@ impl FollowUpQueuePlacement {
     }
 }
 
+/// `#queueatcreate`: enqueue backlog ids created THIS cycle, from content.
+///
+/// Companion to `sync_same_cycle_pending_adds_into_go_queue`, but pure: the
+/// caller owns persistence, so the enqueue can ride the SAME write path as the
+/// backlog mutation that created the ids. That matters because the queue
+/// maintenance persistence path hard-requires a ready editor model and discards
+/// its work otherwise, while the backlog write path converges and succeeds — so
+/// sharing the backlog's path is what keeps the two components in step.
+///
+/// Opt-in is unchanged: the backlog component must carry the `queue` attribute.
+/// `agent:icebox` never participates — parked work is not auto-promoted, matching
+/// `collect_backlog_queue_sync`.
+///
+/// Returns `None` when nothing changes (no opt-in, no queue component, or every
+/// id is already queued).
+pub fn enqueue_created_ids_in_content(
+    content: &str,
+    created_ids: &[String],
+    placement: FollowUpQueuePlacement,
+) -> anyhow::Result<Option<String>> {
+    if created_ids.is_empty() {
+        return Ok(None);
+    }
+    let components = element::parse(content)?;
+
+    let backlog_opts_in = components
+        .iter()
+        .filter(|comp| matches!(comp.name.as_str(), "backlog" | "pending"))
+        .any(|comp| comp.attrs.contains_key("queue"));
+    if !backlog_opts_in {
+        return Ok(None);
+    }
+
+    let Some(queue_comp) = components.iter().find(|comp| comp.name == "queue") else {
+        return Ok(None);
+    };
+
+    // Only ids that are actually open BACKLOG items may be queued: an icebox id,
+    // or an id that deduped into an existing item, must not become a queue head.
+    let open_backlog: HashSet<String> = components
+        .iter()
+        .filter(|comp| matches!(comp.name.as_str(), "backlog" | "pending"))
+        .flat_map(|comp| backlog::active_item_ids(&content[comp.open_end..comp.close_start]))
+        .map(|id| id.trim().to_ascii_lowercase())
+        .collect();
+    let queueable: Vec<String> = created_ids
+        .iter()
+        .map(|id| id.trim().trim_start_matches('#').to_ascii_lowercase())
+        .filter(|id| !id.is_empty() && open_backlog.contains(id))
+        .collect();
+    if queueable.is_empty() {
+        return Ok(None);
+    }
+
+    let body = &content[queue_comp.open_end..queue_comp.close_start];
+
+    // Read-only parse: only to learn which ids are already queued. We must NOT
+    // render the parsed entries back over the body — a parse/render round-trip
+    // normalizes operator-authored lines (observed: `- /goal ...` came back as
+    // `/goal ...`, silently dropping the list marker). Operator-visible document
+    // text is authoritative, and this is an insert-only operation, so splice the
+    // new lines in textually and leave every existing byte untouched.
+    let entries = document_queue::parse(body)?;
+    let existing: HashSet<String> = entries
+        .iter()
+        .flat_map(document_queue::queue_entry_reference_ids)
+        .collect();
+
+    let mut seen = HashSet::new();
+    let new_lines: Vec<String> = queueable
+        .iter()
+        .filter(|id| !existing.contains(*id) && seen.insert((*id).clone()))
+        .map(|id| format!("- do [#{id}]"))
+        .collect();
+    if new_lines.is_empty() {
+        return Ok(None);
+    }
+    let block = new_lines.join("\n");
+
+    let trimmed = body.trim_matches('\n');
+    let new_body = if trimmed.is_empty() {
+        format!("\n{block}\n")
+    } else {
+        match placement {
+            FollowUpQueuePlacement::Prepend => format!("\n{block}\n{trimmed}\n"),
+            FollowUpQueuePlacement::Append => format!("\n{trimmed}\n{block}\n"),
+        }
+    };
+    Ok(Some(queue_comp.replace_content(content, &new_body)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -762,6 +853,55 @@ mod tests {
         assert_eq!(deps.get("a"), Some(&vec!["root".to_string()]));
         assert_eq!(deps.get("c"), Some(&vec!["a".to_string()]));
         assert!(!deps.contains_key("b"));
+    }
+
+    /// `#queueatcreate`: enqueueing must not rewrite operator-authored lines.
+    ///
+    /// The first implementation round-tripped the queue body through
+    /// parse -> render, which normalized `- /goal complete the entire queue`
+    /// into `/goal complete the entire queue`, silently dropping the operator's
+    /// list marker. Operator-visible document text is authoritative, and this is
+    /// an insert-only operation, so every pre-existing byte must survive.
+    #[test]
+    fn enqueue_preserves_operator_authored_lines_verbatim() {
+        let content = concat!(
+            "---\nagent_doc_session: test\n---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- /goal complete the entire queue\n",
+            "- Fix the contributing causes of the queue wedge.\n",
+            "- ~~do [#struck]~~\n",
+            "- \u{23ed}\u{fe0f} do [#skipped]\n",
+            "- do [#old]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#fresh] a new follow-up\n",
+            "- [ ] [#old] older item\n",
+            "<!-- /agent:backlog -->\n",
+        );
+
+        let updated = enqueue_created_ids_in_content(
+            content,
+            &["fresh".into()],
+            FollowUpQueuePlacement::Prepend,
+        )
+        .unwrap()
+        .expect("the fresh id must enqueue");
+
+        for preserved in [
+            "- /goal complete the entire queue",
+            "- Fix the contributing causes of the queue wedge.",
+            "- ~~do [#struck]~~",
+            "- \u{23ed}\u{fe0f} do [#skipped]",
+            "- do [#old]",
+        ] {
+            assert!(
+                updated.contains(preserved),
+                "existing queue line must survive byte-for-byte: {preserved:?}\n{updated}"
+            );
+        }
+        let fresh = updated.find("- do [#fresh]").expect("fresh head present");
+        let goal = updated.find("- /goal").unwrap();
+        assert!(fresh < goal, "the follow-up goes to the head:\n{updated}");
     }
 
     #[test]

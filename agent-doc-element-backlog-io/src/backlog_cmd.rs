@@ -67,6 +67,37 @@ fn persist_pending_write(file: &Path, current: &str, target: &str) -> Result<()>
     crate::converge_or_disk_write(file, current, target, "pending_write")
 }
 
+/// Apply a caller-supplied pure document rewrite through the tracked-work write
+/// path, so it lands with exactly the same reachability as the backlog mutation
+/// it accompanies.
+///
+/// `#queueatcreate` / `#5d9f`: the same-cycle queue enqueue used to persist via
+/// `persist_queue_maintenance_doc`, which hard-requires a ready editor model and
+/// discards its work otherwise. A backlog add in the SAME write persists via
+/// `persist_pending_write` -> `converge_or_disk_write`, which succeeds. So one
+/// write could grow `agent:backlog` while silently dropping the matching
+/// `agent:queue` head — two persistence paths with different reachability, which
+/// is the bug surface itself. Routing the enqueue through here makes backlog and
+/// queue move together or not at all.
+///
+/// `rewrite` receives the current document and returns the new document, or
+/// `None` to leave it untouched. Returns whether a write happened.
+pub fn apply_document_rewrite(
+    file: &Path,
+    source: &str,
+    rewrite: impl FnOnce(&str) -> Result<Option<String>>,
+) -> Result<bool> {
+    let current = read_command_document(file, source)?;
+    let Some(target) = rewrite(&current)? else {
+        return Ok(false);
+    };
+    if target == current {
+        return Ok(false);
+    }
+    persist_pending_write(file, &current, &target)?;
+    Ok(true)
+}
+
 fn read_command_document(file: &Path, source: &str) -> Result<String> {
     let force_disk = FORCE_DISK_PENDING_WRITE.with(Cell::get);
     if force_disk {

@@ -175,7 +175,6 @@ Files: `crates/freehold-egress/{Cargo.toml,src/lib.rs,src/main.rs,tests/tunnel.r
 Verification: `make check` exit 0 — 61 tests passed, 0 failed; rustfmt and clippy clean.
 
 **Session note:** the `#fhoneshot` closeout hit an `editor_attached_model_missing` wedge — the backlog-add landed in the buffer but its commit did not, leaving snapshot, disk, and HEAD three-ways apart, and preflight and `write --commit` each refused pending the other. Recovered with `admin recycle` → commit the session doc → `reset --from-current --preserve-session`. The queue-maintenance warning is still firing every preflight.
-
 ### Re: #gpupol reconciliation — opus-4-8
 
 
@@ -227,12 +226,54 @@ Verification: freehold `make check` exit 0, 77 tests; brookebrodack `bun run tes
 **Not deployed** — this needs, in order: deploy `workers/guestbook-dispatch` with `FREEHOLD_DISPATCH_KEY`, then add the `[[services]]` binding to Pages (a Pages deploy against a service that does not exist yet fails), then run `freehold` with `FREEHOLD_EDGE_URL` + the same key. Queued as `#fhdeploy`.
 
 **On `#rak9`:** I fixed it locally to typecheck my own work and reverted it. The one-line `module: nodenext` change is correct in isolation, but `tsc` currently fails at config validation and therefore checks nothing — fix it and 455 pre-existing errors appear, nearly all from `@cloudflare/workers-types` missing from `types` so `D1Database`/`PagesFunction`/`Fetcher` are unresolved across every existing `functions/` file. So `#rak9` as written understates the work; it is not a one-liner, and I did not want to land a change that turns one error into 455 inside an unrelated cycle. No CI runs `tsc`.
-<!-- agent:boundary:8cbff80b -->
+
+❯ Pushed, key generated and stored, hub deployed and verified live.
+
+❯ **Pushed:** freehold `52d1182..5db406b`, brookebrodack-dev `f9c310d..186ca72`, agent-loop gitlinks `d5e5710df..79dee73ad`.
+
+❯ **Key:** 32 bytes from `openssl rand -hex 32`, generated straight into `passage brookebrodack/guestbook/FREEHOLD_DISPATCH_KEY` and piped from there into Cloudflare — never printed, never written to a file, never in a shell argument. Hex rather than base64 so there is nothing to escape in an env var, a TOML file, or an `Authorization` header. Path follows the existing `brookebrodack/guestbook/OPENAI_API_KEY` convention rather than `btak/`.
+
+❯ **`#gggp` is not a real blocker for this.** `bunx wrangler whoami --env-file /dev/null` authenticates fine — the stored OAuth session is healthy. The `code: 6111` failure is exactly the `.env` dotenv-substitution trap already documented in the root `wrangler.toml`; `--env-file /dev/null` sidesteps it for every wrangler command, not just `d1 execute`.
+
+❯ **One real bug, caught only by deploying.** Cloudflare refused the first deploy: key-value backed Durable Object namespaces can no longer be created on this account (API `code: 10099`). The `v1` migration now declares `new_sqlite_classes` instead of `new_classes`. Review would not have found this — it is an account-level policy, not a code smell.
+
+❯ **Live verification** against `wss://brookebrodack-guestbook-dispatch.brian-takita.workers.dev/connect`, with a real WebSocket client rather than curl (curl cannot complete the handshake through the CF edge, and returns misleading 426/500 either way):
+
+- wrong key → refused, close code `1002`
+- right key → connects, `hello` → `{"type":"ready","resume_token":"..."}`
+- no `dispatch` frame followed, which is correct rather than a fault: D1 currently holds one approved entry and nothing pending, so there was no work to push. No stale claim was created.
+- `/notify` → 204, `/connect` without an upgrade header → 426, `wrangler secret list` shows `FREEHOLD_DISPATCH_KEY`.
+
+❯ **Deliberately not done: the Pages `[[services]]` binding.** That is the step that changes the live site, and it is separate from what you asked for. Until it lands, the hub is deployed and reachable but nothing calls `/notify`, so the guestbook still behaves exactly as before — inline moderation at submit, cron sweep behind it. `#fhdeploy` now covers only that binding plus running the host with `FREEHOLD_EDGE_URL` and the same key.
+
+### Re: push + FREEHOLD_DISPATCH_KEY — opus-4-8
+
+
+❯ Pushed, key generated and stored, hub deployed and verified live.
+
+❯ **Pushed:** freehold `52d1182..5db406b`, brookebrodack-dev `f9c310d..186ca72`, agent-loop gitlinks `d5e5710df..79dee73ad`.
+
+❯ **Key:** 32 bytes from `openssl rand -hex 32`, generated straight into `passage brookebrodack/guestbook/FREEHOLD_DISPATCH_KEY` and piped from there into Cloudflare — never printed, never written to a file, never in a shell argument. Hex rather than base64 so there is nothing to escape in an env var, a TOML file, or an `Authorization` header. Path follows the existing `brookebrodack/guestbook/OPENAI_API_KEY` convention rather than `btak/`.
+
+❯ **`#gggp` is not a real blocker for this.** `bunx wrangler whoami --env-file /dev/null` authenticates fine — the stored OAuth session is healthy. The `code: 6111` failure is exactly the `.env` dotenv-substitution trap already documented in the root `wrangler.toml`; `--env-file /dev/null` sidesteps it for every wrangler command, not just `d1 execute`.
+
+❯ **One real bug, caught only by deploying.** Cloudflare refused the first deploy: key-value backed Durable Object namespaces can no longer be created on this account (API `code: 10099`). The `v1` migration now declares `new_sqlite_classes` instead of `new_classes`. Review would not have found this — it is an account-level policy, not a code smell.
+
+❯ **Live verification** against `wss://brookebrodack-guestbook-dispatch.brian-takita.workers.dev/connect`, with a real WebSocket client rather than curl (curl cannot complete the handshake through the CF edge, and returns misleading 426/500 either way):
+
+- wrong key → refused, close code `1002`
+- right key → connects, `hello` → `{"type":"ready","resume_token":"..."}`
+- no `dispatch` frame followed, which is correct rather than a fault: D1 currently holds one approved entry and nothing pending, so there was no work to push. No stale claim was created.
+- `/notify` → 204, `/connect` without an upgrade header → 426, `wrangler secret list` shows `FREEHOLD_DISPATCH_KEY`.
+
+❯ **Deliberately not done: the Pages `[[services]]` binding.** That is the step that changes the live site, and it is separate from what you asked for. Until it lands, the hub is deployed and reachable but nothing calls `/notify`, so the guestbook still behaves exactly as before — inline moderation at submit, cron sweep behind it. `#fhdeploy` now covers only that binding plus running the host with `FREEHOLD_EDGE_URL` and the same key.
+<!-- agent:boundary:d9ec8e98 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- do [#fhdeploy]
 - ~~do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.~~
 - ~~do [#fhoneshot]~~
 - ~~do [#fhagentspec]~~
@@ -258,6 +299,7 @@ Verification: freehold `make check` exit 0, 77 tests; brookebrodack `bun run tes
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#fhdeploy] Deploy the freehold push path in order: (1) cd workers/guestbook-dispatch && bunx wrangler secret put FREEHOLD_DISPATCH_KEY && bunx wrangler deploy; (2) add the [[services]] FREEHOLD_HUB_SVC binding to the Pages project and deploy (a Pages deploy against a service that does not exist yet fails); (3) run freehold with FREEHOLD_EDGE_URL + the same key. Keep workers/guestbook-moderate deployed as the offline backstop
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean

@@ -7,7 +7,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: start
 ---
 
 # brookebrodack-dev — Session Summary
@@ -625,12 +625,23 @@ three gated items — `#gggp`, `#cy58`, `#dj8c` — as operator steering. They a
 the gates I set, and the reasons stand: interactive browser login, a human on the
 billing page, and an interactive sudo password respectively. Nothing to act on;
 this cycle just lets the snapshot absorb the new component.
-<!-- agent:boundary:25e88c03 -->
+<!-- agent:boundary:8862ca09 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
+- do [#teah]
+- do [#rak9]
+- do [#p0rw]
+- do [#sbv9]
+- do [#nd8n]
+- do [#k0ye]
+- do [#fhmig]
+- do [#50fc]
+- do [#y457]
+- do [#j0ee]
+- do [#2amm]
 <!-- /agent:queue -->
 
 ## Notes

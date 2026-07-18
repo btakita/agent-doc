@@ -625,7 +625,70 @@ three gated items — `#gggp`, `#cy58`, `#dj8c` — as operator steering. They a
 the gates I set, and the reasons stand: interactive browser login, a human on the
 billing page, and an interactive sudo password respectively. Nothing to act on;
 this cycle just lets the snapshot absorb the new component.
-<!-- agent:boundary:8862ca09 -->
+
+### Re: populate the queue — opus-4-8
+
+**I could not populate it, and the reason is not something I should force past.**
+
+The intended answer is `#teah` — the harness-evaluation prompt you asked in the
+exchange and that has gone unanswered for three cycles. The backlog order is
+already correct for this, so the queue needs no authoring: `queue sync` computes
+the right thing every time.
+
+What fails is persisting it. Three attempts:
+
+1. `queue: stop` → `start` in frontmatter, then `agent-doc queue sync` — reported
+   `synced 11 backlog id(s) → 11 queue prompt(s)`, materialized `#teah` at the
+   head. The `agent:queue` component stayed empty on disk *and* in
+   `agent-doc read`.
+2. Retried on the theory that freshly-added ids sync at the *next* activation
+   (`#backlog-queue-sync-pending-add-amplification`). Identical result.
+3. `agent-doc admin reload-lib` — delivered cleanly, `cdylib v0.35.6` to 1/1
+   editor endpoints. Wedge unchanged. `queue sync` now reports "already in sync",
+   which is worse: the sync state believes it landed while the document model
+   cannot materialize it.
+
+Every attempt ends in the same warning:
+
+```
+queue_maintenance_not_persisted
+  editor authority stayed in editor_attached_model_missing after a bounded
+  Lazily-current observation request; disk remained non-authoritative and was
+  not read as a fallback; recovery=retry_without_disk_write
+```
+
+Preflight then reads the still-empty queue as drained, strips the activation
+token, and sets `queue: stop` back. That is the loop: activate → mirror computed
+→ mirror not persisted → read as drained → deactivate.
+
+**Why I stopped there.** The next escalation would be `make install` in
+`src/agent-doc`. Its working tree has exactly one uncommitted file —
+`agent-doc-merge/src/crdt_sync.rs` — on top of `bbc50c26e`, *"fix(relay): make
+the queue-wedge diagnosable and extend the ensure window on proven editor
+liveness."* A concurrent session is mid-fix on this precise bug. Building their
+in-progress merge code would push an untested cdylib to every live editor
+endpoint on this machine, including theirs. I also did not use `--force-disk`:
+with a live editor attached and the model missing, that clobbers rather than
+repairs.
+
+This is the same failure documented at `tasks/agent-doc/agent-doc-bugs2.md`
+(`queue_maintenance_not_persisted`, third occurrence in that session) — it is an
+agent-doc defect, not a brookebrodack one, so I filed nothing in this document's
+backlog for it.
+
+**Where that leaves you.** The backlog is ordered correctly and `#teah` is the
+head. Once the wedge clears — that session's fix landing, or a JetBrains restart
+re-attaching a live model — a single `agent-doc queue sync` populates the queue
+with no further work from me. If you want `#teah` worked *now*, say so and I will
+do it directly from the backlog; the queue is a dispatch mechanism, not a
+prerequisite.
+
+**One correction to last cycle.** I said `&lt;!-- agent:backlog priority queue --&gt;`
+was unrecognized. That was wrong — lint-gate flags `mode` on `agent:status` and
+`agent:exchange` but says nothing about your backlog marker, and `priority` is a
+real attribute on `agent:queue` in the bugs2 document. Your syntax was fine; my
+claim that it risked parser drift was not.
+<!-- agent:boundary:6d12412f -->
 <!-- /agent:exchange -->
 
 ## Queue

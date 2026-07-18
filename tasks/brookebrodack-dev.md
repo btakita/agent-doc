@@ -636,7 +636,76 @@ egregious categories, then only spend a chat-completions call on what survives. 
 would cut cost and add a second opinion on the worst content. Not needed now, and it
 adds a call to every submission — but if you want it, grant **Moderations → Write**
 as well and say so; it slots into the existing provider interface.
-<!-- agent:boundary:f680d8b2 -->
+❯ 🚧 Key set in passage brookebrodack/guestbook/OPENAI_API_KEY
+
+### Re: key set in passage — opus-4-8
+
+Picked it up and tested it. **Your scoping is right, and I can prove it — but the
+project has no credit, so nothing can run yet.**
+
+**What the key proves:**
+
+- `GET /v1/models` → **403**. Exactly right: you set `List models → None`, and the
+  restriction is live.
+- `POST /v1/chat/completions` → **429 `insufficient_quota`**, not 401 or 403. It got
+  past authentication and authorization and died on billing. That's the good failure —
+  the key is valid and the chat-completions permission is doing its job.
+
+**The blocker:**
+
+```
+type: insufficient_quota
+code: insufficient_quota
+"You exceeded your current quota, please check your plan and billing details."
+```
+
+Despite the 429 status this is **not** a rate limit. `insufficient_quota` means the
+project/org has **no credit balance**. Every candidate model failed identically —
+`gpt-4o-mini`, `gpt-5-nano`, `gpt-5.4-nano`, `gpt-5.4-mini` — which is the signature
+of a billing state, not a model problem. Add credit and the benchmark runs.
+
+The model question is still open, but it is now one command away:
+
+```bash
+OPENAI_API_KEY=$(passage show brookebrodack/guestbook/OPENAI_API_KEY) \
+  bun scripts/guestbook-model-bench.ts \
+  gpt-4o-mini gpt-5-nano gpt-5.4-nano gpt-5.4-mini gpt-5.6-luna
+```
+
+### A second blocker, hit trying to set the Cloudflare secrets
+
+I went to push the key into the Pages and Worker secret stores and couldn't —
+`wrangler whoami` fails:
+
+```
+Invalid format for Authorization header [code: 6111]
+```
+
+The stored OAuth token is **not expired** (good until 18:16Z, checked at 17:30Z) and
+carries the right scopes — `pages:write`, `workers:write`, `d1:write`. The API
+rejects it anyway, so it reads as corrupt rather than stale. A re-login should clear
+it, and that's interactive:
+
+```
+! bunx wrangler login
+```
+
+I deliberately did not work around this by hunting for an API token elsewhere. This
+is your Cloudflare account, and a stale-credential guess is how the wrong project
+gets written to.
+
+### Where that leaves things
+
+Nothing else is in my way. Once credit is on the OpenAI project and wrangler is
+re-authed, the rest is short and I can do all of it:
+
+1. Benchmark the models, take `UNSAFE=0` with the best latency
+2. `wrangler pages secret put OPENAI_API_KEY` + `wrangler secret put` on the Worker
+3. Commit the guestbook across the four submodules
+4. Deploy Pages + the cron Worker, then verify against the live site
+
+Step 3 onward still waits on your go-ahead.
+<!-- agent:boundary:653eb9c9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -652,6 +721,8 @@ as well and say so; it slots into the existing provider interface.
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#cy58] Add credit/billing to the OpenAI project holding brookebrodack/guestbook/OPENAI_API_KEY — the key authenticates and is scoped correctly, but every chat-completions call returns 429 `insufficient_quota`, so moderation cannot run
+- [ ] [#gggp] Re-auth wrangler (`bunx wrangler login`) — the stored OAuth token has the right scopes and has not expired, but the API rejects it with "Invalid format for Authorization header [code: 6111]", blocking secret-put and deploy
 - [ ] [#j0ee] Pick the moderation model empirically once the key exists: `OPENAI_API_KEY=... bun scripts/guestbook-model-bench.ts gpt-4o-mini gpt-5-nano gpt-5.4-nano gpt-5.4-mini gpt-5.6-luna` and take the cheapest/fastest with UNSAFE=0, then set OPENAI_MODEL on both surfaces
 - [ ] [#y457] Set OPENAI_API_KEY on BOTH surfaces — `bunx wrangler pages secret put OPENAI_API_KEY --project-name=brookebrodack` (inline submit-time judging) and `cd workers/guestbook-moderate && bunx wrangler secret put OPENAI_API_KEY && bunx wrangler deploy` (cron sweeper). Without it entries just stay pending.
 - [ ] [#2amm] `hermes -z` is broken in hermes-agent 0.18.2 — every one-shot run dies with an httpx ResponseNotRead inside the Gemini provider, so the local primary path always falls through. Try `hermes update` or file upstream

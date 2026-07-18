@@ -175,7 +175,16 @@ Files: `crates/freehold-egress/{Cargo.toml,src/lib.rs,src/main.rs,tests/tunnel.r
 Verification: `make check` exit 0 — 61 tests passed, 0 failed; rustfmt and clippy clean.
 
 **Session note:** the `#fhoneshot` closeout hit an `editor_attached_model_missing` wedge — the backlog-add landed in the buffer but its commit did not, leaving snapshot, disk, and HEAD three-ways apart, and preflight and `write --commit` each refused pending the other. Recovered with `admin recycle` → commit the session doc → `reset --from-current --preserve-session`. The queue-maintenance warning is still firing every preflight.
-<!-- agent:boundary:cde2476d -->
+
+### Re: #gpupol reconciliation — opus-4-8
+
+
+No new operator prompt here — this cycle's diff is my own previous mutations reconciling back into the live buffer (`#gpupol` and `#p0rw` struck in the queue, `#p0rw` moved to done, `#gpupol` moved to `agent:review` as `[/]`). Session-check read that gated review item as a prompt target; it is not one, and `#gpupol` is not done — it was gated last cycle and stays gated.
+
+State is as intended: `#p0rw` done and committed (`0fc0ca6`), `#gpupol` gated on the one thing this session cannot do — `sudo systemctl enable --now ollama` needs an interactive password.
+
+Stopping the drain here rather than continuing to `#fhagentspec`: this document hit the `editor_attached_model_missing` wedge on three separate closeouts this session, each needing manual recovery, and the supervisor is still reported as mapping a stale binary (`agent-doc admin recycle` requested, deferred to the next idle boundary). A session-check interruption is an explicit stop condition, and looping into a fresh item through a write path that keeps half-landing risks a worse three-way split than the one I just repaired.
+<!-- agent:boundary:bdee81d0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -184,10 +193,10 @@ Verification: `make check` exit 0 — 61 tests passed, 0 failed; rustfmt and cli
 - ~~do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.~~
 - ~~do [#fhoneshot]~~
 - do [#fhagentspec]
-- do [#gpupol]
+- ~~do [#gpupol]~~
 - do [#gpulease]
 - do [#rak9]
-- do [#p0rw]
+- ~~do [#p0rw]~~
 - do [#sbv9]
 - do [#nd8n]
 - do [#k0ye]
@@ -208,10 +217,8 @@ Verification: `make check` exit 0 — 61 tests passed, 0 failed; rustfmt and cli
 <!-- agent:backlog priority queue -->
 - [ ] [#fhagentspec] Ship a PluginSpec for freehold-agent so it actually joins the panel: egress_hosts for whichever model the configured agent CLI reaches, env_allow carrying FREEHOLD_AGENT_ARGV plus any credential the CLI needs, and a budget_ms sized for an agent round-trip rather than a rules match. The crate and its one-shot enforcement landed in a916f1c; nothing dispatches to it until a spec exists
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
-- [ ] [#gpupol] Run ONE persistent local-inference server (vllm or ollama, both already installed) as the sole GPU owner, outside the sandbox. Model plugins reach it over the existing egress-proxy path with egress_hosts: ["127.0.0.1:<port>"] — no new mechanism, and /dev/nvidia* never enters the sandbox. Depends on #p0rw (the proxy must exist first). Start with ollama for its idle-unload behaviour; switch to vLLM only if sustained concurrency exceeds ~4-8 requests
 - [ ] [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
-- [ ] [#p0rw] Write the allowlisting egress proxy for the plugin egress hostport in src/freehold — model plugins are routed to it by sandbox_argv but it does not exist yet, so a model plugin currently has no working network path (~50-line CONNECT proxy, allowlist generativelanguage.googleapis.com). Confirmed still absent: egress_hosts appears only on PluginSpec and in tests, with no proxy binary or call site
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
 - [ ] [#nd8n] Add cgroup limits for the bwrap sandbox path in src/freehold via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin. Confirmed still absent: mem_limit_mb exists on PluginSpec but no systemd-run/cgroup call site
 - [ ] [#k0ye] #gbdispatch2: Durable Object + WebSocket transport + auth for the moderation dispatch edge (now freehold-hub/freehold, submodule src/freehold) — the sandbox/aggregation half is done and pushed; the edge half is unwritten
@@ -225,6 +232,7 @@ Verification: `make check` exit 0 — 61 tests passed, 0 failed; rustfmt and cli
 ## Review
 
 <!-- agent:review -->
+- [/] [#gpupol] Run ONE persistent local-inference server (vllm or ollama, both already installed) as the sole GPU owner, outside the sandbox. Model plugins reach it over the existing egress-proxy path with egress_hosts: ["127.0.0.1:<port>"] — no new mechanism, and /dev/nvidia* never enters the sandbox. Depends on #p0rw (the proxy must exist first). Start with ollama for its idle-unload behaviour; switch to vLLM only if sustained concurrency exceeds ~4-8 requests
 - [/] [#cy58] Add credit/billing to the OpenAI project holding brookebrodack/guestbook/OPENAI_API_KEY — the key authenticates and is scoped correctly, but every chat-completions call returns 429 `insufficient_quota`, so moderation cannot run
 - [/] [#dj8c] Verify Podman specifically end-to-end in src/freehold. OCI path IS verified: crates/freehold-host/tests/sandbox_live.rs round-trips a real verdict through Docker, which uses the identical sandbox_argv construction (branches differ only in binary name). BLOCKED: podman not installed; installing needs an interactive sudo password. The test skips per-runtime and covers Podman automatically once installed — then run: cargo test -p freehold-host --test sandbox_live -- --nocapture
 <!-- /agent:review -->
@@ -247,4 +255,5 @@ Verification: `make check` exit 0 — 61 tests passed, 0 failed; rustfmt and cli
 - 2026-07-18 [#gbmig3] Apply d1/migrations/0003_guestbook_soft_delete.sql to the remote D1: bunx wrangler d1 execute brookebrodack --remote --file d1/migrations/0003_guestbook_soft_delete.sql (migrations are applied by hand — wrangler.toml sets no migrations_dir). Code is committed and pushed (24bec1a) but the column does not exist remotely yet, so guestbook read paths will error against prod until this runs. BLOCKED on #gggp
 - 2026-07-18 [#fhquorum2] Approval is currently UNREACHABLE in freehold: APPROVE_QUORUM_MIN = 2 (freehold-tribunal/src/lib.rs) but freehold-rules is the only plugin binary in the workspace, so at most one plugin can ever answer and every entry escalates to a human. A second answering verdict plugin is required before auto-approve can fire at all — and a third if you want approval to survive the local model being down (freehold-rules abstains unless it matches a deterministic spam rule, so it cannot be relied on as one of the two)
 - 2026-07-18 [#fhoneshot] When adding a CLI-agent-backed verdict plugin, invoke it ONE-SHOT per request (claude -p / codex exec, non-interactive) under the existing PluginSpec budget_ms + OCI sandbox contract. Do NOT pool or reuse sessions: retained conversation state breaks per-entry verdict independence and makes a successful prompt injection persist across future verdicts, which is the exact threat the sandbox exists to contain
+- 2026-07-18 [#p0rw] Write the allowlisting egress proxy for the plugin egress hostport in src/freehold — model plugins are routed to it by sandbox_argv but it does not exist yet, so a model plugin currently has no working network path (~50-line CONNECT proxy, allowlist generativelanguage.googleapis.com). Confirmed still absent: egress_hosts appears only on PluginSpec and in tests, with no proxy binary or call site
 <!-- /agent:done -->

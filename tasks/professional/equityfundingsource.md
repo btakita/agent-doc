@@ -74,7 +74,44 @@ EFS has no CI workflow, so `make check` plus the verified live deploy are the ga
 Spec: `prds/funding-lender-linking.md` gains a `#deal-tmo-reconcile` section under the two-entry-points heading — this is the deal-centric surface the operator asked for on 2026-07-15 ("sync a lender with TMO from the lender record **and from a deal**"). Commit `2be39f3`, pushed.
 
 **One follow-up queued (#deal-tmo-reconcile-vesting).** The reconcile counts the single-valued `users.lender_account` the card already displays — not `lender_vestings.tmo_lender_account`, which #lender-vesting-tmo added. Since TMO models one account *per vesting* (Mark Leonard = MARKDBPP / MARKL / MARKPERSON / MARKROTHIR), a lender whose vesting is linked but whose `users.lender_account` is blank will read as unlinked. That's the correct next increment once the deal↔vesting binding is the selectable unit end-to-end; changing it now would have gotten ahead of that migration.
-<!-- agent:boundary:90571947 -->
+
+Yes, there should be a button to open the modal to reconcile a deal's lender with TMO when the lender is selected. If the lender is reconciled with TMO by way of a Vesting, we should be able to see/edit the TMO data.
+
+### Re: Per-lender reconcile modal, vesting granularity — opus-4-8
+
+Built. The **Reconcile with TMO** button now appears on an interested-lender card once that lender is **selected**, and opens a modal that reconciles them vesting by vesting. Committed `61096d3`, pushed. Not deployed — you tagged deploy last cycle but not this one, so say the word and it's one command.
+
+**Three states, not two.** This is the part worth your attention. I started with linked/not-linked and it hides the case that actually breaks funding:
+
+| State | Meaning |
+|---|---|
+| `unlinked` | No TMO account mapped yet. |
+| `unknown_to_tmo` | Mapped, but **nothing in LOS confirms the account exists** — a typo'd account, or a TMO lender with no funding yet. |
+| `reconciled` | Mapped **and** confirmed present in LOS. |
+
+An admin who typos an account gets a green "linked" badge today and discovers the problem at funding time. Now it reads *Unconfirmed in TMO*.
+
+**That required a backend change I want to flag.** `GET /api/admin/tmo-lenders` unions vesting-mapped accounts with funding-derived ones — so a mapped account *always* appeared in the union, which made a mis-mapping literally indistinguishable from a real TMO account. Provenance had to exist before the state could. I moved the union into a shared pure helper `tmo_lender_roster_` that tags each entry `in_los` / `in_efs`. The #fundpick-roster picker consumes it unchanged.
+
+While in there: the roster now matches accounts **case-insensitively**. A vesting mapped to `markdbpp` and a LOS funding on `MARKDBPP` are the same account, and splitting them would have produced exactly the false "unconfirmed" the feature exists to catch. Name/email prefer the EFS side; the account *spelling* prefers LOS, since TMO owns the account itself (D4).
+
+**See vs. edit — I split these deliberately.** Editable is the EFS-owned mapping (`lender_vestings.tmo_lender_account`), through the existing per-vesting `PUT`. The TMO record's own fields — account, legal vesting name, RecID, email, LOS-confirmed — are **read-only**, because TMO is the system of record for them (D4) and writing them back is an EFS→TMO push still gated on #dzmm/#7a4d. Editing them happens in TMO LOS, one click away, then Sync with TMO to pull the change.
+
+I could have put those fields in inputs, but they'd either silently do nothing or fake a write that the gate forbids. A test asserts the modal's only mutation is that single `PUT`.
+
+**Verification**
+
+| Gate | Result |
+|---|---|
+| `tests/deal-lender-tmo-reconcile.test.ts` | 21 pass |
+| `make check` | **1691 pass / 0 fail**, 161 files, exit 0 (includes build + worker build) |
+
+The suite caught two real defects mid-change: my modal violated the `.modal-body` scroll-region contract (restructured to header / body / footer), and I'd added the roster helper to `loan_management` without re-exporting it from the `shared.ts` barrel — three files failed to import. Both fixed before commit.
+
+I also updated `tests/tmo-lender-picker.test.ts`, which pinned the old inline union source. Its intent (picker unions both sources, deduped by account) is unchanged; the assertions now point at the shared helper.
+
+**One judgment call to confirm.** I gated the button on `selected` because you said "when the lender is selected," and it matches the funding lifecycle. But an admin might want to fix a mapping *before* selecting — during diligence, when the tab-level reconcile flags someone as unlinked. The tab-level button covers that case coarsely. If you want the per-lender modal on every interested lender rather than only the selected one, that's a one-line change to the gate.
+<!-- agent:boundary:e61907df -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -101,7 +138,6 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#deal-tmo-reconcile-vesting] [recommended] Count vesting-level TMO linkage in the deal interests reconcile: #deal-tmo-reconcile summarizes the single-valued users.lender_account the card already displays, not lender_vestings.tmo_lender_account (added by #lender-vesting-tmo). TMO models one lender ACCOUNT PER VESTING, so a lender whose vesting is linked but whose users.lender_account is blank reads as unlinked. Switch interest_tmo_linked_/tmo_reconcile_summary_ to vesting-level linkage once the deal<->vesting binding is the selectable unit end-to-end. Spec: src/equityfundingsource-dev/prds/funding-lender-linking.md (#deal-tmo-reconcile follow-up).
 <!-- /agent:backlog -->
 
 ## Review

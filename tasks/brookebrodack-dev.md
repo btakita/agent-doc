@@ -7,6 +7,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
+queue: start
 prompt_presets:
   '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
@@ -15,7 +16,6 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
 ---
 
 # brookebrodack-dev — Session Summary
@@ -106,363 +106,19 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/5ed9ebdbe4a2edb795318ea94faf66a77813df7180cde01350e66214e980296b-20260718-201219.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/5ed9ebdbe4a2edb795318ea94faf66a77813df7180cde01350e66214e980296b-20260718-205427.md`*
 
 Compacted content:
-- Archived 15 response topic(s): Lazily for the state layer; local moderation dispatch service; GitHub project + container-isolated plugins; 12 more
-- Prior summary/context: prior compacted content: Archived 10 response topic(s): hermes for moderation, OpenAI fallback; cron on Cloudflare or...
-
-### Re: GPU policy for local model plugins — opus-4-8
-
-> **Queue prompt:** If we run a local model, GPU usage is restricted. Can we have a
-> machine policy on the gpu usage? Should we have a custom service? Ray is a
-> candidate that I'm familiar with, but I hesitate to use Ray due to overhead.
-
-**The honest answer to the literal question first: there is no kernel-enforced
-GPU policy available to you on this machine.** I checked rather than assumed:
-
-```
-NVIDIA GeForce RTX 5090, 32607 MiB, driver 610.43.03
-MIG Mode: Current: N/A    Pending: N/A
-```
-
-`N/A` is not "off" — MIG is an A100/H100/A30 feature and does not exist on
-GeForce silicon. There is also no VRAM controller in cgroup v2; the DRM cgroup
-work upstream does not cover the NVIDIA proprietary stack. MPS will give you an
-SM-percentage cap, but no memory cap, which is the resource that actually kills
-you.
-
-So every "machine policy" available here is **cooperative** — enforced by whoever
-holds the GPU, in userspace. That single fact should drive the design, because a
-cooperative policy is only as good as the number of processes you have to trust.
-Minimise that number to one.
-
-**On Ray: your hesitation is right, and the overhead is not the strongest reason.**
-Ray is a distributed-computing framework — cluster scheduler, object store, actor
-supervision. You have one node and one GPU, and what you actually need is a
-mutex. You would be adding a Python control plane to a Rust service to get it.
-
-The deeper mismatch is that Ray wants to own process lifecycle: its actors are
-processes *it* spawns, schedules, and restarts. freehold's whole isolation model
-is that plugin processes are spawned by `bwrap` with `--unshare-all`,
-`--cap-drop ALL`, no host filesystem, and no network unless `egress_hosts` says
-otherwise. Ray and that sandbox want to be the same thing, so you would be
-fighting it continuously. Skip it.
-
-**The GPU should never enter the sandbox — and today it structurally cannot.**
-`sandbox_argv` passes `--dev /dev`, which gives the plugin a minimal devtmpfs:
-`null`, `zero`, `random`, `tty`. No `/dev/nvidia0`, no `/dev/nvidiactl`, no
-`/dev/nvidia-uvm`. A plugin cannot touch the GPU as written.
-
-Granting it would mean explicitly binding those device nodes into a sandbox
-running untrusted third-party plugin code, which hands it the CUDA IPC surface
-and a large closed-source kernel-driver attack surface. That is a direct
-contradiction of the containment claim in `docs/manifesto.md` §"Contain the
-untrusted thing". I would treat "no nvidia device nodes in the sandbox" as an
-invariant, not a default.
-
-**Recommendation: one inference server owns the GPU; plugins talk to it over the
-proxy you are already building.**
-
-You have both `ollama` and `vllm` installed already, and the GPU is currently
-idle (no compute apps). So:
-
-- One persistent server holds the GPU and the loaded weights.
-- Model plugins get `egress_hosts: ["127.0.0.1:<port>"]` and reach it through the
-  allowlisting CONNECT proxy from `#p0rw`. **This needs no new mechanism** — it is
-  the remote-model path pointed at loopback.
-- GPU policy becomes that server's queue and batching, which is a solved problem
-  that someone else tunes for you.
-- Weights load once. The alternative — a plugin process loading a 20GB model per
-  guestbook entry — is unworkable, and that alone rules out
-  model-inside-the-plugin regardless of the security argument.
-
-**Which server.** At your load, `ollama`. The published 2026 concurrency numbers
-put the two within single digits at batch size 1, with ollama often ahead on
-first-token latency because it has no scheduler queueing; vLLM's PagedAttention
-and continuous batching only start paying at roughly 4–8 sustained concurrent
-requests, where it pulls 2.2–4× ahead. A personal guestbook is nowhere near
-that line. ollama also unloads idle models, which hands the 32GB back to you when
-nothing is moderating — worth more here than throughput you will never use.
-
-Filed as `#gpupol`. I also filed `#gpulease` as a *recommendation only*: a
-declared `gpu` field on `PluginSpec` plus a host-held semaphore across spawn, so
-several model plugins cannot stampede the server. It is about 100 lines and no
-framework, but it is not worth building until you actually have two concurrent
-local-model plugins.
-
-### Re: #teah — harness candidates and the self-improving harness — opus-4-8
-
-Closing this out; it has been open three cycles.
-
-**The agent you were thinking of is real, and there are two.** The June 2026 arXiv
-paper *Self-Harness: Harnesses That Improve Themselves* is the closest match to
-your description — agents that optimise their own operating framework with no
-human engineer and no stronger external model, via a Weakness Mining → Harness
-Proposal → Proposal Validation loop, reported to take MiniMax M2.5 from 40.5% to
-61.9% on Terminal-Bench 2.0. The other is **AutoAgent**, a meta-agent that tunes
-prompts, tools, and orchestration for a task-specific agent, behind the Stanford/MIT
-Meta-Harness paper.
-
-**But neither is a dependency you should take**, and the reason is the same
-constraint that put `#53z1` in the icebox: both optimise a harness *against an
-eval set with ground truth*. You do not have labelled moderation data. Self-Harness
-mines weaknesses from measured failures — with no benchmark it has nothing to
-mine. It becomes interesting at exactly the same data threshold as the distilled
-classifier, which is a tidy coincidence worth remembering.
-
-**On harness candidates for the plugins themselves — I think the framing needs
-correcting.** A moderation verdict is one prompt in, one structured verdict out.
-It is a classification call, not an agentic task. Claude Code, Codex, opencode,
-and hermes are all multi-turn tool-using loops; wrapping one around a
-single-shot classification buys latency, nondeterminism, and a much larger
-sandbox surface, in exchange for nothing.
-
-So: **verdict plugins should be plain model calls**, local via the server above or
-remote via the proxy. No harness.
-
-Where a harness genuinely fits is the other thing you described — actor plugins
-that *investigate* (does this link go somewhere real, has this poster shown up
-before). That is agentic, and it is where tmux-router driving Claude/Codex earns
-its keep. It is also a different trust tier: an investigating plugin needs real
-egress, so it wants the OCI runtime rather than the bwrap default. Worth keeping
-those two plugin classes distinct in the spec rather than letting one grow into
-the other. `hermes` stays out of both until `#2amm` is fixed upstream.
-
-Sources: [Self-Harness (arXiv writeup)](https://explainx.ai/blog/self-harness-agents-improve-themselves-arxiv-2026) ·
-[Self-Harness (VentureBeat)](https://venturebeat.com/orchestration/researchers-introduce-self-harness-a-framework-that-lets-ai-agents-rewrite-their-own-rules-boosting-performance-up-to-60) ·
-[AutoAgent / Meta-Harness](https://decodethefuture.org/en/autoagent-self-improving-ai-agents-meta-harness/) ·
-[Harness Engineering for Self-Improvement — Lil'Log](https://lilianweng.github.io/posts/2026-07-04-harness/) ·
-[vLLM vs Ollama concurrency](https://runaihome.com/blog/vllm-vs-ollama-when-each-wins-2026/) ·
-[Ollama vs vLLM 2026](https://particula.tech/blog/ollama-vs-vllm-comparison)
-I may not always be running the local model. Should we have a pool of Codex, Claude Code, or Opencode sessions in a worker pool?
-
-### Re: a worker pool of Codex / Claude Code / opencode sessions — opus-4-8
-
-> **Queue prompt:** I may not always be running the local model. Should we have a
-> pool of Codex, Claude Code, or Opencode sessions in a worker pool?
-
-**No — and the availability problem you are actually describing is already solved
-in the code you have.**
-
-Taking the underlying worry first, because it is the real one. "I may not always
-be running the local model" is a question about what happens when a voter is
-missing, and `freehold-tribunal` already answers it:
-
-```rust
-/// every plugin approves  ⇒ approve
-/// any plugin rejects     ⇒ reject
-/// anything else          ⇒ escalate
-///
-/// "Anything else" covers abstention, disagreement, a missing plugin, an empty
-/// quorum, and a plugin that returned nothing. All of them leave the item
-/// pending for a human — failure never publishes.
-```
-
-And in `freehold-host`: *"Each is bounded by its own `budget_ms`; a slow plugin
-abstains rather than holding up the job."* A local model that is not running does
-not need a standby fleet behind it. It abstains, the remaining voters decide, and
-if they cannot, the entry waits for you. That is the design working as intended,
-not a gap to be filled with capacity.
-
-**Now the pool itself. Three arguments against, in increasing order of weight.**
-
-*Latency does not justify it.* A pool exists to amortise startup across a high
-request rate. Yours is a personal guestbook, and moderation is hold-for-approval —
-asynchronous by construction. Nothing is blocking on a verdict; the entry sits
-pending. Your latency budget is minutes. Cold-starting a CLI is comfortably
-inside it.
-
-*These CLIs are not a worker protocol.* Claude Code, Codex, and opencode are
-harnesses built for a human in the loop: no structured-output guarantee, no
-concurrency model, auth tied to an interactive login, and tmux pane scraping as
-the transport. tmux-router is genuinely good at driving interactive sessions —
-that is not the same thing as being an RPC backend, and every CLI version bump
-becomes your parser's problem.
-
-*The decisive one: a pooled session is shared state, and shared state is exactly
-what this architecture forbids.* `run_plugins` says it plainly — *"Plugins are
-independent sandboxes with no shared state, so there is nothing to serialise."*
-A warm session that has handled fifty entries carries fifty entries of context.
-That breaks two things at once:
-
-- **Verdict independence.** Entry N is judged in the presence of entries 1..N-1.
-  One spammer's submission gets to influence the ruling on someone else's.
-- **Injection containment.** Guestbook text is untrusted input — firewalling
-  prompt injection is why you asked for this service in the first place. In a
-  one-shot process, a successful injection corrupts exactly one verdict and dies
-  with the process. In a pooled session it *persists*, and every subsequent
-  verdict from that worker is tainted. A pool converts the best-case failure
-  into the worst-case one.
-
-**What to do instead.** If you want a CLI agent as a voter, run it one-shot and
-non-interactive per request — `claude -p`, `codex exec` — inside the existing
-`PluginSpec` contract with its `budget_ms` and the OCI runtime (it needs real
-egress, so not the bwrap default). Cold start is affordable, and fresh context
-comes free rather than being something you have to engineer around. Filed as
-`#fhoneshot`. If cold start ever does become intolerable, the fix is a warm
-*process* holding no conversation state — not a warm session.
-
-**One thing I found while checking this, and it is more urgent than the pool
-question.** `APPROVE_QUORUM_MIN = 2`, but `freehold-rules` is the only plugin
-binary in the workspace. At most one plugin can answer, so approval is
-**currently unreachable** — every entry escalates to a human regardless of
-content. Worse, `freehold-rules` abstains unless a deterministic spam rule
-matches, so it cannot reliably be counted as one of the two even once a second
-plugin exists. You need a second answering plugin for auto-approve to fire at
-all, and a third if you want it to keep working while the local model is down.
-Filed as `#fhquorum2` at the top of the backlog.
-
-That is the availability answer, incidentally: redundancy across *independent
-voters*, which the quorum already knows how to reason about — not redundancy
-across warm sessions, which it explicitly cannot.
-
-### Re: admin override + keep all messages — opus-4-8
-
-You did not pick a quorum option, so I have not touched tribunal semantics. I
-took the two requirements in your note instead, because both were checkable
-against what is actually built.
-
-**"The admin should be able to override decisions" — already true.**
-`POST /guestbook/api/admin/entries/:id` accepts `approved`, `rejected`, *and*
-`pending`, behind `admin__guard`. Any decision reverses in any direction,
-including back into the queue. Nothing to do.
-
-**"Keep all messages in the db" — was false. Fixed.** `onRequestDelete` ran
-`DELETE FROM guestbook_entry WHERE id = ?` — a hard delete that destroyed the
-message with no record. Now a soft delete, committed and pushed as `24bec1a`:
-
-- Migration `0003` adds `deleted_at` plus two covering indexes.
-- Public page and admin queue filter `deleted_at IS NULL`; `?status=deleted`
-  keeps retained entries reachable.
-- Setting a status clears `deleted_at` — an accidental delete undoes exactly the
-  way an accidental decision does.
-- A repeat delete keeps the *first* removal timestamp rather than moving it.
-- Both moderation sweeps skip deleted entries, so a deleted message cannot be
-  flipped back to approved behind you.
-
-`deleted_at` is deliberately separate from `status`, so a deleted entry still
-records the verdict it carried when removed.
-
-**Verification.** `test/guestbook-retention.test.ts` asserts on the SQL each
-handler issues, because the property is "no statement destroys a row" — a claim
-about the query, not a return value. All 7 **fail against the previous code**; I
-checked rather than trusting that a green new test means anything. Suite: 50
-pass / 0 fail (was 43), plus 9 DOM tests.
-
-### Re: #gggp was misdiagnosed — opus-4-8
-
-Trying to apply the migration turned up something better than the migration.
-`#gggp` recorded an expired OAuth token. It is not that. `.env` sets
-`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` to literal
-`$(passage ...)` command substitutions, and wrangler reads `.env` as dotenv —
-**no substitution**. It was sending those literal strings, which is precisely
-why the API said *"Invalid format for Authorization header [code: 6111]"*.
-
-Expanding both properly in the shell moves it on: the account id resolves, and
-the error becomes *"The given account is not valid or is not authorized to
-access this service [code: 7403]"*. So the second, real problem is that the
-token is not authorized for D1 on that account — mint one with D1-Edit, the way
-the EFS token is scoped. `#gggp` now carries both findings.
-
-Consequence: `0003` is **committed but not applied remotely**, so prod reads
-will error on the missing column until it runs. Filed as `#gbmig3`, blocked on
-`#gggp`. I did not deploy.
-
-### Re: the quorum decision is still open — opus-4-8
-
-Your note changes the calculus but does not settle it, so I am asking again
-rather than guessing.
-
-Full admin override plus full retention makes a wrong auto-decision cheap:
-nothing is destroyed, everything reverses. That is a real argument for letting
-auto-approve work at all — the reason to fear it has shrunk. It is not an
-argument for any particular option, and "keep always-escalate" stays coherent:
-a few entries a day, the tribunal auto-rejects spam, you grant approvals by hand.
-
-`#fhquorum2` now carries the corrected premise — a second plugin does not fix
-this on its own — and is blocked on your decision:
-
-1. **Veto role for rules** *(recommended)* — rules may Reject or stay silent,
-   excluded from the unanimity test; voters must all Approve, minimum two.
-   Keeps the injection-immune guard in every quorum, keeps one compromised
-   plugin from approving anything.
-2. **Keep always-escalate** — document as intended, close `#fhquorum2`.
-3. **Rules approves when clean** — smallest diff; I argue against it, the guard
-   becomes a rubber stamp for whatever its regexes miss.
-
-### Re: #gbmig3 — migration applied, and #gggp was never what it said — opus-4-8
-
-`#gbmig3` is done, and it unblocked itself: the thing it was "blocked on" was a
-misreading I had already half-corrected last cycle.
-
-**`#gggp` is resolved, and the OAuth token was innocent all along.** The stored
-session expires `2026-07-19T10:43:02Z` — tomorrow — and its scopes include
-`d1:write` and `pages:write`. It was valid the entire time. The failure was
-`.env` alone: wrangler auto-loads it as dotenv, dotenv does no command
-substitution, so `CLOUDFLARE_API_TOKEN="$(passage btak/CLOUDFLARE_API_TOKEN)"`
-was sent as that literal text — and an env token *overrides* the stored OAuth
-session, so a perfectly good login never got used.
-
-Keeping `.env` out of the way fixes it outright:
-
-```
-bunx wrangler d1 execute brookebrodack --remote --env-file /dev/null ...
-```
-
-That is now committed in `wrangler.toml` (`f9c310d`) next to the migration
-command, with the reasoning, so the next reader does not re-derive it. `#y457`
-and `#j0ee` were both blocked on `#gggp` and are no longer blocked.
-
-**Migration `0003` is applied and verified on the remote database:**
-`deleted_at` exists, both covering indexes were created, one entry, live. I
-checked the column list before and after rather than trusting the exit code.
-
-### Re: I broke prod briefly, and it was an ordering mistake — opus-4-8
-
-Worth stating plainly rather than burying in a status line.
-
-Pages deploys on push. Last cycle I pushed `24bec1a` — code whose every read
-path selects `deleted_at` — while the column did not yet exist remotely, because
-I had recorded the migration as blocked and moved on. The deploy went out, the
-function failed closed on the missing column, and the post-deploy smoke test
-caught it:
-
-```
-FAIL (api): https://brookebrodack.net/guestbook/api/entries
-            returned 'text/plain; charset=UTF-8' — Function not deployed?
-```
-
-So the guestbook API served an error page from roughly 20:34 until I applied the
-migration a few minutes ago. The static pages stayed up throughout — every route
-in the smoke test passed; it was the API alone.
-
-It is healthy now, verified directly rather than inferred:
-`GET /guestbook/api/entries` → `200 application/json` with the entry. The
-schema and the deployed code are consistent again.
-
-**The lesson is ordering, and I put it in the repo rather than only here:**
-migration first, then push. I had that backwards, and treating "blocked on
-`#gggp`" as a reason to defer the migration while still shipping the code that
-depended on it is what turned a paper blocker into a real outage. `wrangler.toml`
-now carries that rule at the point of use.
-
-The re-run deploy (`29660239368`) was still in progress at closeout, so I have
-recorded it as pending rather than claiming green — filed as `#gbdeploy1`. That
-is a confirmation task, not a suspected problem; prod is verified by hand.
-
-**Still yours:** the quorum decision on `#fhquorum2` (veto role / keep
-always-escalate / rules approves when clean), and `#cy58`, which is unaffected by
-any of this — it needs credit on the OpenAI project.
-<!-- agent:boundary:920e3e4e -->
+- Archived 8 response topic(s): GPU policy for local model plugins; #teah; a worker pool of Codex / Claude Code / opencode sessions; 5 more
+- Prior summary/context: prior compacted content: Archived 15 response topic(s): Lazily for the state layer; local moderation dispatch service...
+<!-- agent:boundary:e4a59125 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- do [#gbdeploy1]
 - ~~do [#gbmig3]~~
-- do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 LL
+- do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.
 - do [#fhoneshot]
 - do [#gpupol]
 - do [#gpulease]
@@ -486,7 +142,7 @@ any of this — it needs credit on the OpenAI project.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#gbmig3] Apply d1/migrations/0003_guestbook_soft_delete.sql to the remote D1: bunx wrangler d1 execute brookebrodack --remote --file d1/migrations/0003_guestbook_soft_delete.sql (migrations are applied by hand — wrangler.toml sets no migrations_dir). Code is committed and pushed (24bec1a) but the column does not exist remotely yet, so guestbook read paths will error against prod until this runs. BLOCKED on #gggp
+- [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#fhquorum2] Approval is currently UNREACHABLE in freehold: APPROVE_QUORUM_MIN = 2 (freehold-tribunal/src/lib.rs) but freehold-rules is the only plugin binary in the workspace, so at most one plugin can ever answer and every entry escalates to a human. A second answering verdict plugin is required before auto-approve can fire at all — and a third if you want approval to survive the local model being down (freehold-rules abstains unless it matches a deterministic spam rule, so it cannot be relied on as one of the two)
 - [ ] [#fhoneshot] When adding a CLI-agent-backed verdict plugin, invoke it ONE-SHOT per request (claude -p / codex exec, non-interactive) under the existing PluginSpec budget_ms + OCI sandbox contract. Do NOT pool or reuse sessions: retained conversation state breaks per-entry verdict independence and makes a successful prompt injection persist across future verdicts, which is the exact threat the sandbox exists to contain
 - [ ] [#gpupol] Run ONE persistent local-inference server (vllm or ollama, both already installed) as the sole GPU owner, outside the sandbox. Model plugins reach it over the existing egress-proxy path with egress_hosts: ["127.0.0.1:<port>"] — no new mechanism, and /dev/nvidia* never enters the sandbox. Depends on #p0rw (the proxy must exist first). Start with ollama for its idle-unload behaviour; switch to vLLM only if sustained concurrency exceeds ~4-8 requests
@@ -506,7 +162,6 @@ any of this — it needs credit on the OpenAI project.
 ## Review
 
 <!-- agent:review -->
-- [/] [#gggp] Re-auth wrangler (`bunx wrangler login`) — the stored OAuth token has the right scopes and has not expired, but the API rejects it with "Invalid format for Authorization header [code: 6111]", blocking secret-put and deploy
 - [/] [#cy58] Add credit/billing to the OpenAI project holding brookebrodack/guestbook/OPENAI_API_KEY — the key authenticates and is scoped correctly, but every chat-completions call returns 429 `insufficient_quota`, so moderation cannot run
 - [/] [#dj8c] Verify Podman specifically end-to-end in src/freehold. OCI path IS verified: crates/freehold-host/tests/sandbox_live.rs round-trips a real verdict through Docker, which uses the identical sandbox_argv construction (branches differ only in binary name). BLOCKED: podman not installed; installing needs an interactive sudo password. The test skips per-runtime and covers Podman automatically once installed — then run: cargo test -p freehold-host --test sandbox_live -- --nocapture
 <!-- /agent:review -->
@@ -525,4 +180,6 @@ any of this — it needs credit on the OpenAI project.
 - 2026-07-18 [#wqr2] Design done + scaffold shipped: local moderation dispatch service — github.com/btakita/brookebrodack-dispatch (Rust workspace, submodule at src/brookebrodack-dispatch). Plan tasks/software/plan-brookebrodack-guestbook-dispatch-service.md (#gbdispatch1 DONE). Remaining phases #gbdispatch2 (DO + wire + auth), #gbdispatch3 (plugin host), #gbdispatch4 (edge integration), #gbdispatch5 (tests)
 - 2026-07-18 [#acnd] Commit + deploy the guestbook — the whole feature (functions/, scripts/, workers/, wrangler.toml, d1/ + 4 submodules) is still uncommitted, so prod /guestbook is still the fallback home page
 - 2026-07-18 [#teah] UNANSWERED PROMPT — evaluate AI harness candidates for the dispatch actor plugins (5090 for local models; tmux-router drives Claude/Codex/opencode; hermes available) AND search for the 'newish agent that creates a custom harness that learns'. Asked in the exchange and never addressed; the turn went to the repo/sandbox work. Needs real web research — do NOT answer from recall, the agent-name recall is exactly what would be hallucinated
+- 2026-07-18 [#gggp] Re-auth wrangler (`bunx wrangler login`) — the stored OAuth token has the right scopes and has not expired, but the API rejects it with "Invalid format for Authorization header [code: 6111]", blocking secret-put and deploy
+- 2026-07-18 [#gbmig3] Apply d1/migrations/0003_guestbook_soft_delete.sql to the remote D1: bunx wrangler d1 execute brookebrodack --remote --file d1/migrations/0003_guestbook_soft_delete.sql (migrations are applied by hand — wrangler.toml sets no migrations_dir). Code is committed and pushed (24bec1a) but the column does not exist remotely yet, so guestbook read paths will error against prod until this runs. BLOCKED on #gggp
 <!-- /agent:done -->

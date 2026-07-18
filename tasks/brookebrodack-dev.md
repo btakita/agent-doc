@@ -90,8 +90,8 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 - [x] Moderation switched to local hermes agent, OpenAI fallback (14/14 verified)
 - [ ] Set `GUESTBOOK_ADMIN_PASSWORD` / `GUESTBOOK_ADMIN_SECRET` Pages secrets
 - [ ] Deploy the guestbook (nothing committed or deployed yet)
-- [ ] `OPENAI_API_KEY` for the moderation fallback — none is scoped to this project
 - [ ] `hermes -z` is broken upstream (0.18.2), so the primary path cannot run yet
+- [ ] `OPENAI_API_KEY` for the moderation fallback — none is scoped to this project
 <!-- /agent:status -->
 
 <!-- agent:exchange mode=append -->
@@ -285,7 +285,72 @@ primary path; a project-scoped OpenAI key unblocks the fallback.
 Unchanged from before: the guestbook is still uncommitted and undeployed across four
 submodules, so production `/guestbook` is still the fallback home page. Say the word
 and I will commit and deploy it.
-<!-- agent:boundary:25dfd022 -->
+❯ 🚧 Is it possible to run the moderation as a CRON on openai or cloudflare with the OpenAI api key?
+
+### Re: cron on Cloudflare or OpenAI — opus-4-8
+
+**Cloudflare: yes, and it's built.** OpenAI: no — there's no scheduler in the API
+you could run this from, only the consumer ChatGPT "tasks" feature, which can't
+reach your D1. So Cloudflare is the answer, and you no longer need to host the cron.
+
+One constraint shaped the design: **a Pages project can't carry a cron trigger** —
+scheduled handlers are a Workers feature, and the guestbook API lives in Pages
+Functions. So this is a *separate* Worker bound to the same `brookebrodack` D1
+database. Both moderation paths now drive the same queue, and you can use either.
+
+```
+workers/guestbook-moderate/
+  index.ts        scheduled() handler
+  wrangler.toml   */15 * * * * + D1 binding
+```
+
+To avoid two copies of the judging logic drifting apart, I pulled the portable
+parts — prompt, schema, provider fallthrough, JSON extraction, decision mapping —
+into `scripts/_lib/guestbook-moderation.ts`. The CLI keeps the hermes provider
+(a local binary can't run on the edge); the Worker is OpenAI-only. The fail-closed
+contract is shared, so it can't drift between them either.
+
+The Worker also batches its writes into one `DB.batch()` round-trip rather than a
+query per entry, which matters more on the edge than it did locally.
+
+### Verified
+
+- **37/37 tests pass** — the full suite, so the 23 pre-existing route tests are green
+  too, not just my 14
+- `bunx wrangler deploy --dry-run` builds the Worker and resolves the D1 binding;
+  the cron config parses
+- `tsc --noEmit -p tsconfig.json` clean
+- Worker tests stub D1 and OpenAI, so they run offline: approve/reject write back
+  correctly; an OpenAI 500 escalates and writes **nothing**; a missing key does
+  nothing at all rather than publishing
+
+The one claim I did *not* prove empirically is the Pages-can't-cron limitation — I
+couldn't get wrangler to state it from its bundled build. It's the documented
+behavior and the separate-Worker design is correct regardless, but treat it as
+established Cloudflare behavior rather than something I demonstrated here.
+
+### What's still needed
+
+Same single blocker as before, now narrowed to one thing:
+
+```bash
+cd workers/guestbook-moderate
+bunx wrangler secret put OPENAI_API_KEY
+bunx wrangler deploy
+```
+
+There is still no OpenAI key scoped to this project — the four in passage belong to
+`buildparty-investor-demo`, `claudescore`, `velvet-thunder`, and `mooch`, and I did
+not borrow one. Until that's set the Worker logs an error and moderates nothing,
+which is the correct fail-closed behavior but does mean the queue won't move.
+
+Fixing hermes (still broken upstream) is now optional rather than blocking — it only
+affects the local CLI path. Cloudflare cron plus an OpenAI key is a complete answer
+on its own.
+
+Everything remains uncommitted and undeployed across four submodules. Say the word
+and I'll commit and deploy the whole guestbook, Worker included.
+<!-- agent:boundary:6175b4a0 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -301,6 +366,9 @@ and I will commit and deploy it.
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#y457] Set OPENAI_API_KEY on the moderation Worker (`cd workers/guestbook-moderate && bunx wrangler secret put OPENAI_API_KEY`) then `bunx wrangler deploy` — the cron Worker is written and builds, but has no credential and is not deployed
+- [ ] [#2amm] `hermes -z` is broken in hermes-agent 0.18.2 — every one-shot run dies with an httpx ResponseNotRead inside the Gemini provider, so the local primary path always falls through. Try `hermes update` or file upstream
+- [ ] [#acnd] Commit + deploy the guestbook — the whole feature (functions/, scripts/, workers/, wrangler.toml, d1/ + 4 submodules) is still uncommitted, so prod /guestbook is still the fallback home page
 <!-- /agent:backlog -->
 
 ## Icebox

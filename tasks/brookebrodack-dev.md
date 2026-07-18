@@ -285,7 +285,7 @@ primary path; a project-scoped OpenAI key unblocks the fallback.
 Unchanged from before: the guestbook is still uncommitted and undeployed across four
 submodules, so production `/guestbook` is still the fallback home page. Say the word
 and I will commit and deploy it.
-❯ 🚧 Is it possible to run the moderation as a CRON on openai or cloudflare with the OpenAI api key?
+❯ Is it possible to run the moderation as a CRON on openai or cloudflare with the OpenAI api key?
 
 ### Re: cron on Cloudflare or OpenAI — opus-4-8
 
@@ -350,7 +350,63 @@ on its own.
 
 Everything remains uncommitted and undeployed across four submodules. Say the word
 and I'll commit and deploy the whole guestbook, Worker included.
-<!-- agent:boundary:6175b4a0 -->
+❯ Can we have the agent instead judge when a guestbook entry is submitted instead?
+
+### Re: judge at submission time — opus-4-8
+
+Yes, and it's the better design — done. A visitor's message is now judged inline in
+`POST /guestbook/api/entries` and appears on the page while they're still looking at
+it, instead of waiting up to 15 minutes for a tick.
+
+**Ordering matters here.** The row is inserted as `pending` and committed *first*
+(via `RETURNING id`), then judged. So moderation is strictly best-effort layered on
+top of a submission that already succeeded — a model outage can never turn into a
+failed submission or a lost message. The whole judge block is wrapped in a `try`, and
+every failure path leaves the row `pending`.
+
+**Bounded so it can't hang the form.** The OpenAI call gets an 8s `AbortSignal.timeout`.
+A timeout is just another provider failure: the entry stays pending, the visitor gets
+the normal "will appear once reviewed" message, and the sweeper picks it up later.
+
+**The cron Worker stays, with a clearer job.** It's no longer the primary path — it's
+the sweeper for whatever inline judging couldn't decide: timeouts, outages, and
+genuine `escalate` verdicts. The two paths share the same core, so they can't drift.
+
+**One deliberate UX choice:** `rejected` and `pending` return the *same* message to
+the submitter. A spammer learns nothing from the difference, and a false positive
+still reads as a normal outcome to a real visitor.
+
+I also fixed a gap this exposed on the browser side: the form previously just reset
+and refetched, so a held message silently vanished — form cleared, list unchanged.
+It now shows the server's actual message (in grey, distinct from the red error line).
+An approved entry needed no change; the existing refetch already surfaces it.
+
+### Verified
+
+- **43/43 tests pass** — full suite, including the 23 pre-existing route tests
+- 6 new inline-moderation tests: approve publishes, reject marks without publishing,
+  escalate leaves it untouched, a 503 leaves it pending, a **real abort-signal
+  timeout** leaves it pending, and no-key is a clean no-op
+- `wrangler pages functions build` compiles, and I confirmed the moderation core is
+  genuinely bundled into the Pages output — that cross-directory import was the one
+  thing most likely to break silently
+- `tsc --noEmit` clean
+
+### Still the same single blocker
+
+The key is now needed on **both** surfaces:
+
+```bash
+bunx wrangler pages secret put OPENAI_API_KEY --project-name=brookebrodack   # inline
+cd workers/guestbook-moderate && bunx wrangler secret put OPENAI_API_KEY     # sweeper
+```
+
+Until then inline judging is a no-op and everything stays pending for the admin
+dashboard — correct fail-closed behavior, but the queue won't move on its own. Still
+no OpenAI key scoped to this project, and I haven't borrowed another one.
+
+Everything remains uncommitted and undeployed. Say the word and I'll ship it.
+<!-- agent:boundary:9d5ed70d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -366,7 +422,7 @@ and I'll commit and deploy the whole guestbook, Worker included.
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#y457] Set OPENAI_API_KEY on the moderation Worker (`cd workers/guestbook-moderate && bunx wrangler secret put OPENAI_API_KEY`) then `bunx wrangler deploy` — the cron Worker is written and builds, but has no credential and is not deployed
+- [ ] [#y457] Set OPENAI_API_KEY on BOTH surfaces — `bunx wrangler pages secret put OPENAI_API_KEY --project-name=brookebrodack` (inline submit-time judging) and `cd workers/guestbook-moderate && bunx wrangler secret put OPENAI_API_KEY && bunx wrangler deploy` (cron sweeper). Without it entries just stay pending.
 - [ ] [#2amm] `hermes -z` is broken in hermes-agent 0.18.2 — every one-shot run dies with an httpx ResponseNotRead inside the Gemini provider, so the local primary path always falls through. Try `hermes update` or file upstream
 - [ ] [#acnd] Commit + deploy the guestbook — the whole feature (functions/, scripts/, workers/, wrangler.toml, d1/ + 4 submodules) is still uncommitted, so prod /guestbook is still the fallback home page
 <!-- /agent:backlog -->

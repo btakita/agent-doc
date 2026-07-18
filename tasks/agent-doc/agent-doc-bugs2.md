@@ -177,7 +177,27 @@ The uncommitted `crdt_sync.rs` on `bbc50c26e` was mine — this work in progress
 Your finalize observation is the more useful finding, and it matches what I saw here: my own closeouts only landed via `write --commit` retry loops. Two persistence paths with different reachability is its own bug — filed.
 
 The frontmatter revert is the one that worries me most, because it is **destructive**. I traced it: `agent-doc-preflight-io/src/lib.rs:3485` computes `queue_has_prompts` / `drained_residue` from a queue body a *previous* cycle failed to persist, then feeds `need_clear_active`. A transient persistence failure makes the queue look drained, and preflight deletes your explicit `queue: start`. It is acting on known-stale data. I did **not** fix it — activation logic is safety-critical and I don't have the failing document's state to verify against, and guessing there is exactly the failure mode you warned about on `#jbsteerinterrupt`. Filed with the code path.
-<!-- agent:boundary:32dc4f4d -->
+
+### Re: brookebrodack-dev.md queue never arms — `#qstartinert` — opus-4-8
+
+Fixed the root cause. Context was cleared, but agent-doc had in fact remembered: the prior investigation was in this document (`#5d9f`), not the chat.
+
+**Symptom.** `tasks/brookebrodack-dev.md` had 11 queued heads and `queue: start`, yet `queue_drainable_head_count: 0` / `queue_continuation_required: false` forever. The pane %9 session correctly refused to auto-loop and noted "the binding is down."
+
+**Root cause — two defects in one chain.**
+
+1. `queue_binding_target` (`agent-doc-queue/src/control_binding.rs`) converged an *unchanged* frontmatter control to `stop` whenever the marker carried no token. That branch was written for the post-drain shape (token consumed off the marker) — but that transition is a marker *change*, already handled by the `marker_changed` arm above it. Reaching the unchanged branch means the marker never carried the token at all, which is the ordinary shape for `queue: start` in frontmatter with a bare marker. So every single pass rewrote the operator's `start` into `stop`.
+
+2. `persisted_activation` still required the legacy `queue_active: true` flag that the control-binding migration had *stopped writing* — `control_binding` made `queue:` canonical and reads `queue_active` only when `queue:` is absent. The two halves contradicted each other, so the canonical control alone could never activate.
+
+**Fix.** Honor an explicitly authored frontmatter control in the unchanged branch; key activation off the explicit control via a new `queue_control_activation`. Strictly a widening — `queue_active: true` was only ever honored alongside a `start`/`go` token, so legacy-flag-only documents stay inactive exactly as before, and `stop` still dominates both spellings.
+
+**Verification.** Reproduced as a failing test first (`queue_active: Some(false)` on a populated `queue: start` doc), then four regression tests: unchanged `start` stays started, a consumed marker token still stops, `queue: start` arms supervisor scope, `queue: go` arms the in-session loop. `make check` green (real exit 0, zero `result: FAILED`). Committed + pushed as `9111a3381`, `make install` done, `admin reload-lib` delivered to 1/1 editor endpoints.
+
+**What is NOT fixed.** `tasks/brookebrodack-dev.md` now reports `go-mode active queue` where it previously went inactive, but `queue_maintenance_not_persisted` still fires: `editor_attached_model_missing`, disk correctly not read as fallback. That is the separate `#5d9f` editor-authority defect, not this one. I did not force-disk or otherwise bypass it — the binary is failing closed correctly, and the newly installed plugin build needs an IDE restart to take effect. Filed as an `[operator-verify]` item.
+
+One scope note: `start` (supervisor drain) vs `go` (in-session loop) is a deliberate distinction. My first test asserted the wrong scope; I corrected the test to the design rather than widening the design to the test.
+<!-- agent:boundary:c5ceeb83 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -273,6 +293,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
 - [ ] [#mrnh] Bootstrap size is NOT the cause of the ensure wedge — hypothesis falsified, do not re-run it. `d131457ab` cut the live `crdt_replica_register` bootstrap from 1,312,802 to 261,174 bytes (5.0x) and `queue_maintenance_not_persisted` is COMPLETELY UNCHANGED. The 400ms missing-replica window is therefore not failing on transfer size. Next probe should target why the ensure-path observer never sees a replica the controller already reports as `current live_editors=1 delivery_converged=true` — likely generation fencing on re-register, not payload volume.
 - [ ] [#f4d5] Destructive cascade: a queue-maintenance persist failure erases the operator's queue activation. Reported live from a second session on brookebrodack-dev.md: operator flips frontmatter to `queue: start`, preflight reads the (unpersisted, therefore empty) queue body as drained and strips the activation back to `queue: stop`. Path: `agent-doc-preflight-io/src/lib.rs:3485` — `queue_has_prompts`/`drained_residue` feed `need_clear_active` and `need_clear_drained_body`, all computed from a queue body that a PREVIOUS cycle failed to persist. Deactivating on known-stale data is unsafe: when this cycle could not persist queue maintenance, preflight must preserve operator activation rather than infer 'drained'. Not fixed here — activation logic is safety-critical and I did not have the failing document's state to verify against.
 - [ ] [#5d9f] Second session observed that finalize's commit boundary persists queue maintenance through a path standalone `agent-doc queue sync` never reaches — the queue landed on the next write after three straight sync failures plus an `admin reload-lib`. Two persistence paths with different reachability is itself the bug surface. Determine why the commit path succeeds where queue sync fails, and route queue sync through whatever the commit boundary does. Result: queue text populates but stays UNARMED (`queue_drainable_head_count: 0`, `queue_continuation_required: false`), so the auto-loop still never gets the head.

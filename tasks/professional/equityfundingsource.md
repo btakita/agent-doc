@@ -68,12 +68,62 @@ New priority order — agent-drainable first, then context, then the operator-ga
 The launch-gating cluster (7 → 8 → 9) is sequenced deliberately: custody moves the account, then seed once into the new account, then cut DNS over. Doing it in any other order means migrating the data twice.
 
 One caveat on this cycle: preflight reported `queue_maintenance_not_persisted` — editor authority was in `editor_attached_model_missing`, so the computed queue mirror did not land. The backlog reorder in this write is the durable change; the queue text re-syncs from it on the next preflight.
-<!-- agent:boundary:64563ff9 -->
+Please add the backlog items into the queue in priority order
+
+### Re: add the backlog items into the queue in priority order — opus-4-8
+
+Done — all 10 backlog items are now queue heads in backlog priority order. There were no actionable follow-up items to capture this cycle: this was a queue-ordering request, not implementation work, and the 10 items already in the backlog *are* the follow-up.
+
+The automatic backlog→queue mirror was not going to do this on its own. Two things were blocking it:
+
+1. **`queue_maintenance_not_persisted`** — editor authority sat in `editor_attached_model_missing`, so the recomputed queue never landed. This is the same wedge reported on the prior cycle.
+2. **Tombstone suppression** — preflight was reporting `suppressed 10 operator-deleted id(s) from backlog→queue mirror (#provauth2 tombstone)`. Those 10 suppressed ids are exactly the 10 backlog items you wanted queued, so even with a healthy editor the mirror would have recomputed an *empty* queue and then set `queue: stop`.
+
+So instead of waiting on the mirror I ran the explicit one-shot `agent-doc queue sync`, which materialized all 10 ids past the tombstone suppression:
+
+```
+synced 10 backlog id(s) → 11 queue prompt(s) (Append mode)
+materialized: #tmo-orphan-reconcile-exec, #tmo-reconcile-binder, #efs-do-hibernation,
+              #efs-prod-secret-parity, #tmo-orphan-cache, #tmo-sandbox-purge-apply,
+              #efs-cf-account-custody, #efs-prod-seed, #efs-dns-cutover, #tmo-getlender-verify
+```
+
+Resulting queue:
+
+| # | Head | Gate |
+|---|------|------|
+| 1 | `#tmo-orphan-reconcile-exec` | agent |
+| 2 | `#tmo-reconcile-binder` | agent |
+| 3 | `#efs-do-hibernation` | agent |
+| 4 | `#efs-prod-secret-parity` | agent |
+| 5 | `#tmo-orphan-cache` | agent |
+| 6 | `#tmo-sandbox-purge-apply` | operator |
+| 7 | `#efs-cf-account-custody` | operator |
+| 8 | `#efs-prod-seed` | operator |
+| 9 | `#efs-dns-cutover` | operator |
+| 10 | `#tmo-getlender-verify` | operator |
+
+The stale `do [#vesting-gap-admin-queue]` head is still sitting above them; it is already in `done`, and preflight's auto-strike will reap it on the next clean cycle.
+
+Two things to flag rather than silently absorb:
+
+- **Stale install.** Preflight reports `~/.cargo/bin/agent-doc`, the cdylib, and both built artifacts predate the latest local `src/agent-doc` source edit. That is a concurrent session's tree, not mine — I did not rebuild it, so live tmux/JetBrains sessions may be running pre-edit code at an unchanged version.
+- **The editor-authority wedge is not fixed**, only worked around for this write. If `queue_maintenance_not_persisted` keeps recurring the mirror will stay unreliable and queue state will need `queue sync` each time. That is an agent-doc-repo defect, so it does not belong in this document's EFS backlog.
+<!-- agent:boundary:848ff84c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Add backlog items onto the queue in priority order~~
 - do [#vesting-gap-admin-queue]
+- do [#tmo-orphan-reconcile-exec]
+- do [#tmo-reconcile-binder]
+- do [#efs-do-hibernation]
+- do [#efs-prod-secret-parity]
+- do [#tmo-orphan-cache]
+- do [#tmo-sandbox-purge-apply]
+- do [#efs-cf-account-custody]
+- do [#efs-prod-seed]
+- do [#efs-dns-cutover]
+- do [#tmo-getlender-verify]
 <!-- /agent:queue -->
 
 ## Backlog

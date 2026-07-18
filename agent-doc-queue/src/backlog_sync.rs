@@ -530,13 +530,26 @@ pub fn enqueue_created_ids_in_content(
     }
     let block = new_lines.join("\n");
 
-    let trimmed = body.trim_matches('\n');
-    let new_body = if trimmed.is_empty() {
-        format!("\n{block}\n")
+    // Strictly insert-only: splice the block at the boundary and copy the
+    // existing body through byte-for-byte.
+    //
+    // The component body does NOT carry a leading newline — `open_end` sits past
+    // it. An earlier version prefixed one, which produced exactly the reported
+    // regression: a blank first line in the queue, and the spliced block running
+    // straight into the first existing entry. Trimming the body instead (an even
+    // earlier version used `trim_matches('\n')`) silently normalized the
+    // operator's own blank lines — the same class of damage as the `- /goal`
+    // marker regression this splice exists to avoid. So: touch nothing, insert
+    // at the edge.
+    let new_body = if body.trim().is_empty() {
+        format!("{block}\n")
     } else {
         match placement {
-            FollowUpQueuePlacement::Prepend => format!("\n{block}\n{trimmed}\n"),
-            FollowUpQueuePlacement::Append => format!("\n{trimmed}\n{block}\n"),
+            FollowUpQueuePlacement::Prepend => format!("{block}\n{body}"),
+            FollowUpQueuePlacement::Append => {
+                let sep = if body.ends_with('\n') { "" } else { "\n" };
+                format!("{body}{sep}{block}\n")
+            }
         }
     };
     Ok(Some(queue_comp.replace_content(content, &new_body)))
@@ -999,6 +1012,59 @@ mod tests {
             "a declared `after=` edge is a hard constraint and must beat a better \
              priority= rank and the filed order:\n{updated}"
         );
+    }
+
+    /// Splicing must never introduce a blank line or disturb existing spacing.
+    #[test]
+    fn enqueue_never_introduces_blank_lines() {
+        let cases = [
+            ("normal", "- do [#old]\n"),
+            ("empty", ""),
+            ("operator trailing blank", "- do [#old]\n\n"),
+        ];
+        for (label, queue_body) in cases {
+            let mut content = String::new();
+            content.push_str("---\nagent_doc_session: test\n---\n\n");
+            content.push_str("<!-- agent:queue go -->\n");
+            content.push_str(queue_body);
+            content.push_str("<!-- /agent:queue -->\n\n");
+            content.push_str("<!-- agent:backlog priority queue -->\n");
+            content.push_str("- [ ] [#fresh] new\n- [ ] [#old] old\n");
+            content.push_str("<!-- /agent:backlog -->\n");
+
+            for placement in [
+                FollowUpQueuePlacement::Prepend,
+                FollowUpQueuePlacement::Append,
+            ] {
+                let updated =
+                    enqueue_created_ids_in_content(&content, &["fresh".into()], placement)
+                        .unwrap()
+                        .unwrap_or_else(|| panic!("{label}/{placement:?}: expected an enqueue"));
+                let queue: Vec<&str> = updated
+                    .lines()
+                    .skip_while(|l| !l.starts_with("<!-- agent:queue"))
+                    .skip(1)
+                    .take_while(|l| !l.starts_with("<!-- /agent:queue"))
+                    .collect();
+                // Byte-preservation cuts both ways: a blank line the OPERATOR
+                // authored must survive. Assert we INTRODUCE none, and never at
+                // the head (the reported regression).
+                let before_blanks = queue_body.lines().filter(|l| l.trim().is_empty()).count();
+                let after_blanks = queue.iter().filter(|l| l.trim().is_empty()).count();
+                assert_eq!(
+                    after_blanks, before_blanks,
+                    "{label}/{placement:?}: blank-line count changed: {queue:?}"
+                );
+                assert!(
+                    !queue.first().is_some_and(|l| l.trim().is_empty()),
+                    "{label}/{placement:?}: blank line at queue head: {queue:?}"
+                );
+                assert!(
+                    queue.contains(&"- do [#fresh]"),
+                    "{label}/{placement:?}: missing head: {queue:?}"
+                );
+            }
+        }
     }
 
     #[test]

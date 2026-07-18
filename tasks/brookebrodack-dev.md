@@ -8,6 +8,14 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
 queue: start
+prompt_presets:
+  '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
+  '#commit-push': commit all uncommitted files
+  '#commit-push-deploy': commit all uncommitted files + deploy
+  '#mermaid': Include explanatory mermaid diagram(s).
+  '#spec-test-commit-push': update spec + tests. commit + push
+  '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
 ---
 
 # brookebrodack-dev — Session Summary
@@ -308,13 +316,90 @@ Filed as `#fhquorum2` at the top of the backlog.
 That is the availability answer, incidentally: redundancy across *independent
 voters*, which the quorum already knows how to reason about — not redundancy
 across warm sessions, which it explicitly cannot.
-<!-- agent:boundary:a477cae4 -->
+
+### Re: admin override + keep all messages — opus-4-8
+
+You did not pick a quorum option, so I have not touched tribunal semantics. I
+took the two requirements in your note instead, because both were checkable
+against what is actually built.
+
+**"The admin should be able to override decisions" — already true.**
+`POST /guestbook/api/admin/entries/:id` accepts `approved`, `rejected`, *and*
+`pending`, behind `admin__guard`. Any decision reverses in any direction,
+including back into the queue. Nothing to do.
+
+**"Keep all messages in the db" — was false. Fixed.** `onRequestDelete` ran
+`DELETE FROM guestbook_entry WHERE id = ?` — a hard delete that destroyed the
+message with no record. Now a soft delete, committed and pushed as `24bec1a`:
+
+- Migration `0003` adds `deleted_at` plus two covering indexes.
+- Public page and admin queue filter `deleted_at IS NULL`; `?status=deleted`
+  keeps retained entries reachable.
+- Setting a status clears `deleted_at` — an accidental delete undoes exactly the
+  way an accidental decision does.
+- A repeat delete keeps the *first* removal timestamp rather than moving it.
+- Both moderation sweeps skip deleted entries, so a deleted message cannot be
+  flipped back to approved behind you.
+
+`deleted_at` is deliberately separate from `status`, so a deleted entry still
+records the verdict it carried when removed.
+
+**Verification.** `test/guestbook-retention.test.ts` asserts on the SQL each
+handler issues, because the property is "no statement destroys a row" — a claim
+about the query, not a return value. All 7 **fail against the previous code**; I
+checked rather than trusting that a green new test means anything. Suite: 50
+pass / 0 fail (was 43), plus 9 DOM tests.
+
+### Re: #gggp was misdiagnosed — opus-4-8
+
+Trying to apply the migration turned up something better than the migration.
+`#gggp` recorded an expired OAuth token. It is not that. `.env` sets
+`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` to literal
+`$(passage ...)` command substitutions, and wrangler reads `.env` as dotenv —
+**no substitution**. It was sending those literal strings, which is precisely
+why the API said *"Invalid format for Authorization header [code: 6111]"*.
+
+Expanding both properly in the shell moves it on: the account id resolves, and
+the error becomes *"The given account is not valid or is not authorized to
+access this service [code: 7403]"*. So the second, real problem is that the
+token is not authorized for D1 on that account — mint one with D1-Edit, the way
+the EFS token is scoped. `#gggp` now carries both findings.
+
+Consequence: `0003` is **committed but not applied remotely**, so prod reads
+will error on the missing column until it runs. Filed as `#gbmig3`, blocked on
+`#gggp`. I did not deploy.
+
+### Re: the quorum decision is still open — opus-4-8
+
+Your note changes the calculus but does not settle it, so I am asking again
+rather than guessing.
+
+Full admin override plus full retention makes a wrong auto-decision cheap:
+nothing is destroyed, everything reverses. That is a real argument for letting
+auto-approve work at all — the reason to fear it has shrunk. It is not an
+argument for any particular option, and "keep always-escalate" stays coherent:
+a few entries a day, the tribunal auto-rejects spam, you grant approvals by hand.
+
+`#fhquorum2` now carries the corrected premise — a second plugin does not fix
+this on its own — and is blocked on your decision:
+
+1. **Veto role for rules** *(recommended)* — rules may Reject or stay silent,
+   excluded from the unanimity test; voters must all Approve, minimum two.
+   Keeps the injection-immune guard in every quorum, keeps one compromised
+   plugin from approving anything.
+2. **Keep always-escalate** — document as intended, close `#fhquorum2`.
+3. **Rules approves when clean** — smallest diff; I argue against it, the guard
+   becomes a rubber stamp for whatever its regexes miss.
+<!-- agent:boundary:865ee2ff -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
-- ~~do [#teah]: If we run a local model, GPU usage is restricted. Can we have a machine policy on the gpu usage? Should we have a custom service? Ray is a candidate that I'm familiar with, but I hesitate to use Ray due to overhead.~~
+<!-- agent:queue go -->
+- do [#fhquorum2]
+- do [#fhoneshot]
+- do [#gpupol]
+- do [#gpulease]
 - do [#rak9]
 - do [#p0rw]
 - do [#sbv9]
@@ -335,6 +420,7 @@ across warm sessions, which it explicitly cannot.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#gbmig3] Apply d1/migrations/0003_guestbook_soft_delete.sql to the remote D1: bunx wrangler d1 execute brookebrodack --remote --file d1/migrations/0003_guestbook_soft_delete.sql (migrations are applied by hand — wrangler.toml sets no migrations_dir). Code is committed and pushed (24bec1a) but the column does not exist remotely yet, so guestbook read paths will error against prod until this runs. BLOCKED on #gggp
 - [ ] [#fhquorum2] Approval is currently UNREACHABLE in freehold: APPROVE_QUORUM_MIN = 2 (freehold-tribunal/src/lib.rs) but freehold-rules is the only plugin binary in the workspace, so at most one plugin can ever answer and every entry escalates to a human. A second answering verdict plugin is required before auto-approve can fire at all — and a third if you want approval to survive the local model being down (freehold-rules abstains unless it matches a deterministic spam rule, so it cannot be relied on as one of the two)
 - [ ] [#fhoneshot] When adding a CLI-agent-backed verdict plugin, invoke it ONE-SHOT per request (claude -p / codex exec, non-interactive) under the existing PluginSpec budget_ms + OCI sandbox contract. Do NOT pool or reuse sessions: retained conversation state breaks per-entry verdict independence and makes a successful prompt injection persist across future verdicts, which is the exact threat the sandbox exists to contain
 - [ ] [#gpupol] Run ONE persistent local-inference server (vllm or ollama, both already installed) as the sole GPU owner, outside the sandbox. Model plugins reach it over the existing egress-proxy path with egress_hosts: ["127.0.0.1:<port>"] — no new mechanism, and /dev/nvidia* never enters the sandbox. Depends on #p0rw (the proxy must exist first). Start with ollama for its idle-unload behaviour; switch to vLLM only if sustained concurrency exceeds ~4-8 requests

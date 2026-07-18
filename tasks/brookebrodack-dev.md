@@ -541,7 +541,13 @@ the wrong directory. Both failed harmlessly, but that was my error, and the same
 shape could just as easily have run something destructive. Single-quoted now.
 
 **22 tests, `make check` clean**, pushed.
-<!-- agent:boundary:7cee67d1 -->
+
+### Re: #dj8c gate — opus-4-8
+
+Gating #dj8c: the OCI sandbox path is verified (Docker round-trips a real
+verdict through the identical argv construction), but Podman specifically is
+not — it is not installed and installing it needs an interactive sudo password.
+<!-- agent:boundary:f9753a33 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -561,7 +567,7 @@ shape could just as easily have run something destructive. Single-quoted now.
 - [ ] [#teah] UNANSWERED PROMPT — evaluate AI harness candidates for the dispatch actor plugins (5090 for local models; tmux-router drives Claude/Codex/opencode; hermes available) AND search for the 'newish agent that creates a custom harness that learns'. Asked in the exchange and never addressed; the turn went to the repo/sandbox work. Needs real web research — do NOT answer from recall, the agent-name recall is exactly what would be hallucinated
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> — outstanding condition on bwrap being the default sandbox in brookebrodack-dispatch. Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
 - [ ] [#nd8n] Add cgroup limits for the bwrap sandbox path via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin
-- [ ] [#dj8c] Verify the Podman sandbox path end-to-end in brookebrodack-dispatch — argv-verified only, and Podman is not installed on this machine so no plugin has executed under it. NOTE: bwrap is now the default (not Podman); this matters for any plugin carrying a real dependency tree, where OCI pinning beats bwrap's host-/usr sharing. Install podman, run cargo test, add a live Podman twin of tests/sandbox_live.rs
+- [ ] [#dj8c] Verify Podman specifically end-to-end in brookebrodack-dispatch. OCI path IS verified: tests/sandbox_live.rs round-trips a real verdict through Docker, which uses the identical sandbox_argv construction (branches differ only in binary name). BLOCKED: podman not installed; installing needs an interactive sudo password. The test skips per-runtime and covers Podman automatically once installed — then run: cargo test -p dispatch-host --test sandbox_live -- --nocapture
 - [ ] [#p0rw] Write the allowlisting egress proxy for dispatch_plugin_egress — model plugins are routed to it by sandbox_argv but it does not exist yet, so a model plugin currently has no working network path (~50-line CONNECT proxy, allowlist generativelanguage.googleapis.com)
 - [ ] [#k0ye] #gbdispatch2: Durable Object + WebSocket transport + auth for brookebrodack-dispatch — the sandbox/aggregation half is done and pushed; the edge half is unwritten
 - [ ] [#50fc] Confirm the truncated dispatch requirement — the queued prompt ends mid-sentence at "It will automatically", which leaves the plugin aggregation/automation policy (§6 of tasks/software/plan-brookebrodack-guestbook-dispatch-service.md) unspecified; blocks #gbdispatch2

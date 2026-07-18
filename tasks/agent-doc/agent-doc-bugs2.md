@@ -39,7 +39,32 @@ done
 Compacted content:
 - Archived 1 response topic(s): Compact Exchange concurrent queue edits and recovered closeout
 - Prior summary/context: prior compacted content: Archived 17 response topic(s): editor save-flush authority and agent-doc churn; interrupted ...
-<!-- agent:boundary:ea16509a -->
+❯ 🚧 JB `Run Agent Doc` error on equityfundingsource.md. #spec-test-build-install-commit-push
+```
+route deferred for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md: Lazily current transition remained delivery_pending for 5000ms; retry after it settles
+```
+
+### Re: JetBrains route deferred on retained delivery — gpt-5
+
+You did not change the compact-owned content. The trace shows route startup reached a valid attached canonical document at delivery generation 11 with ACK generation 0, then passively polled `delivery_pending` for five seconds. The fixed JetBrains replica eventually pulled all 11 retained generations about nine seconds later, after the route had already failed. The failure was therefore a route-startup wake-up race, not an operator edit or same-cell rebase.
+
+I shipped agent-doc 0.35.5 so the route gate sends exactly one urgent `ack_recovery_force_refresh` drain signal on its first retained-delivery observation, then continues polling Lazily's canonical convergence state. It still fails closed at the existing deadline if convergence cannot be proved. The regression test first failed because that wake-up path did not exist, then passed with three consecutive pending observations proving the signal is emitted only once.
+
+The 11 generations are already coalesced operationally: the relay returns them in one pull, the JetBrains native replica folds the causal updates, and the plugin schedules one final editor-text apply. Further wire-level squashing might reduce decode work, but it would not improve this incident materially; the delay was the background-drain backoff before that single batch pull.
+
+Compact Exchange can garbage-collect its deleted-text tombstones immediately only after a safe compaction epoch boundary. Lazily's `TextCrdt::gc_with` already supports collecting causally stable, unreferenced tombstones, but agent-doc does not yet fence older offline replicas or expose an all-replica stability frontier. Calling GC now could let an older replica reintroduce discarded exchange lineage. The safe design is: commit the compacted snapshot, increment a document/component epoch, rebootstrap attached replicas, reject or component-rebase older-epoch deltas, and only then collect stable tombstones. I captured that as recommended backlog item `#compacttombgc`; it is intentionally separate from this correctness fix.
+
+Changed public paths include `agent-doc-route-io/src/startup_debounce.rs`, its route contract documentation, `specs/11-debounce.md`, and the 0.35.5 release metadata. Verification passed:
+
+- focused red/green regression test
+- complete `agent-doc-route-io` test suite
+- full `make check`
+- `git diff --check` and the public private-name denylist
+- optimized binary/native-library/editor-package build and install
+- installed CLI reports `agent-doc 0.35.5`; JetBrains package 0.2.276 is installed in all four detected IDEs
+
+The latest pre-existing main CI run was red in `finalize_skips_ignored_untracked_session_doc`; the exact test and the full suite both pass locally, and that failure is outside this route path. The public fix is committed and pushed to `main` as `932884861` (`fix: actively drain retained deliveries before route dispatch`). The superproject pointer and Codex skill update are committed as `cfe2bbaab`; the session document remains exclusively on this binary-owned closeout path before the final superproject push. Confidence is high. No privilege escalation was needed.
+<!-- agent:boundary:3cec0682 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -129,6 +154,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#compacttombgc] [recommended] Add a fenced Compact Exchange CRDT epoch: rebootstrap attached replicas from the compacted snapshot, reject or component-rebase older-epoch deltas, expose the all-replica stability frontier, then run TextCrdt tombstone GC.
 - [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
 - [ ] [#5qjj] steeringmirrorverify|[operator-verify] Restart IntelliJ IDEA 2026.1 to activate plugin 0.2.258 (if stale bytecode appears, uninstall, restart, reinstall the signed local zip, and restart); during an active turn, make multiple exchange edits and verify the JetBrains banner and VS Code status item report the aggregate count/full hover, then run agent-doc once after editing and confirm the handoff queues without submitting a partial edit.
 - [ ] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.

@@ -25,7 +25,7 @@
 
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use lazily::{TextCrdt, TextOp, TextVersionVector};
+use lazily::{OpId, TextCrdt, TextOp, TextVersionVector};
 use std::cell::RefCell;
 
 /// A durable per-replica CRDT state — one participant (an editor's FFI node, or
@@ -44,6 +44,194 @@ pub struct ReplicaState {
 }
 
 const COMPACT_TEXT_OPS_MAGIC: &[u8] = b"ADCR1:";
+/// Columnar/delta envelope (`#bootstrapsize`). See [`encode_columnar_ops`].
+const COLUMNAR_TEXT_OPS_MAGIC: &[u8] = b"ADCR2:";
+
+/// Struct-of-arrays projection of a `TextOp` batch, with the two integer columns
+/// that dominate the payload delta-encoded.
+///
+/// `#bootstrapsize`: measured on a real 57KB session document whose bootstrap had
+/// grown to 815,754 bytes (88,630 ops, ZERO tombstones, ONE peer). Array-of-structs
+/// interleaves `id`/`origin`/`deleted` per character, so zstd never sees the
+/// regularity: counters are near-sequential, `peer` is usually constant, and
+/// `origin` is nearly always the preceding character (that document had just
+/// **2 distinct** origin deltas across 88,630 ops). Grouping each field into its
+/// own column and storing counters as deltas exposes all of it. Measured on that
+/// same real payload: 815,754 -> 416,392 bytes, a 2.0x reduction.
+///
+/// Note a plain struct-of-arrays regrouping that keeps `OpId` opaque is NOT
+/// enough — measured at only 1.2x. The win requires decomposing `OpId` into
+/// scalar columns so the deltas are visible.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ColumnarOps {
+    /// Every op's character, concatenated. Compresses as ordinary text.
+    chars: String,
+    /// `id.counter`, delta-encoded against the previous op's counter.
+    id_counter_delta: Vec<i64>,
+    /// `id.peer` per op. Usually one repeated value.
+    id_peer: Vec<u64>,
+    /// Per op: 1 when `origin` is `Some`, 0 for `None` (document start).
+    origin_present: Vec<u8>,
+    /// For present origins only: `id.counter - origin.counter`.
+    origin_counter_delta: Vec<i64>,
+    /// For present origins only: `origin.peer`.
+    origin_peer: Vec<u64>,
+    /// Sparse tombstones: index into the op sequence, plus the delete's own OpId.
+    del_idx: Vec<u32>,
+    del_counter: Vec<u64>,
+    del_peer: Vec<u64>,
+}
+
+/// Rebuild `OpId`s from scalar columns.
+///
+/// `OpId`'s fields are private and it exposes no constructor, but it derives
+/// serde and encodes as a 2-element array, so a `(counter, peer)` tuple has a
+/// byte-identical MessagePack representation. Done in one bulk conversion rather
+/// than per-op. `opid_serde_shape_is_a_counter_peer_pair` pins this assumption so
+/// a lazily upgrade that changes the representation fails loudly here instead of
+/// silently corrupting a payload.
+fn opids_from_pairs(pairs: &[(u64, u64)]) -> Result<Vec<OpId>> {
+    let bytes = rmp_serde::to_vec(pairs).context("encode OpId scalar pairs")?;
+    rmp_serde::from_slice(&bytes).context("rebuild OpIds from scalar pairs")
+}
+
+fn encode_columnar_ops(ops: &[TextOp]) -> Result<Vec<u8>> {
+    let mut columns = ColumnarOps {
+        chars: String::with_capacity(ops.len()),
+        id_counter_delta: Vec::with_capacity(ops.len()),
+        id_peer: Vec::with_capacity(ops.len()),
+        origin_present: Vec::with_capacity(ops.len()),
+        origin_counter_delta: Vec::new(),
+        origin_peer: Vec::new(),
+        del_idx: Vec::new(),
+        del_counter: Vec::new(),
+        del_peer: Vec::new(),
+    };
+    let mut previous_counter: i64 = 0;
+    for (index, op) in ops.iter().enumerate() {
+        columns.chars.push(op.ch);
+        let counter = i64::try_from(op.id.counter()).context("op counter exceeds i64")?;
+        columns.id_counter_delta.push(counter - previous_counter);
+        previous_counter = counter;
+        columns.id_peer.push(op.id.peer());
+        match op.origin {
+            Some(origin) => {
+                columns.origin_present.push(1);
+                let origin_counter =
+                    i64::try_from(origin.counter()).context("origin counter exceeds i64")?;
+                columns
+                    .origin_counter_delta
+                    .push(counter - origin_counter);
+                columns.origin_peer.push(origin.peer());
+            }
+            None => columns.origin_present.push(0),
+        }
+        if let Some(deleted) = op.deleted {
+            columns
+                .del_idx
+                .push(u32::try_from(index).context("op index exceeds u32")?);
+            columns.del_counter.push(deleted.counter());
+            columns.del_peer.push(deleted.peer());
+        }
+    }
+    let packed = rmp_serde::to_vec(&columns).context("encode columnar text ops as MessagePack")?;
+    let compressed =
+        zstd::stream::encode_all(packed.as_slice(), 3).context("compress columnar text ops")?;
+    let compressed = BASE64_STANDARD.encode(compressed);
+    let mut encoded = Vec::with_capacity(COLUMNAR_TEXT_OPS_MAGIC.len() + compressed.len());
+    encoded.extend_from_slice(COLUMNAR_TEXT_OPS_MAGIC);
+    encoded.extend_from_slice(compressed.as_bytes());
+    Ok(encoded)
+}
+
+fn decode_columnar_ops(compressed: &[u8]) -> Result<Vec<TextOp>> {
+    let compressed = BASE64_STANDARD
+        .decode(compressed)
+        .context("decode columnar text-op base64")?;
+    let packed = zstd::stream::decode_all(compressed.as_slice())
+        .context("decompress columnar text ops")?;
+    let columns: ColumnarOps =
+        rmp_serde::from_slice(&packed).context("decode columnar text ops")?;
+
+    let count = columns.id_counter_delta.len();
+    let mut absolute_counters = Vec::with_capacity(count);
+    let mut previous_counter: i64 = 0;
+    for delta in &columns.id_counter_delta {
+        previous_counter += *delta;
+        absolute_counters.push(previous_counter);
+    }
+    let id_pairs = absolute_counters
+        .iter()
+        .zip(columns.id_peer.iter())
+        .map(|(counter, peer)| Ok((u64::try_from(*counter).context("negative op counter")?, *peer)))
+        .collect::<Result<Vec<_>>>()?;
+    let ids = opids_from_pairs(&id_pairs)?;
+
+    let origin_pairs = {
+        let mut cursor = 0usize;
+        let mut pairs = Vec::with_capacity(columns.origin_counter_delta.len());
+        for (index, present) in columns.origin_present.iter().enumerate() {
+            if *present == 0 {
+                continue;
+            }
+            let counter = *absolute_counters
+                .get(index)
+                .context("origin column longer than op column")?;
+            let delta = *columns
+                .origin_counter_delta
+                .get(cursor)
+                .context("missing origin counter delta")?;
+            let peer = *columns
+                .origin_peer
+                .get(cursor)
+                .context("missing origin peer")?;
+            pairs.push((
+                u64::try_from(counter - delta).context("negative origin counter")?,
+                peer,
+            ));
+            cursor += 1;
+        }
+        pairs
+    };
+    let origins = opids_from_pairs(&origin_pairs)?;
+
+    let del_pairs = columns
+        .del_counter
+        .iter()
+        .zip(columns.del_peer.iter())
+        .map(|(counter, peer)| (*counter, *peer))
+        .collect::<Vec<_>>();
+    let deletes = opids_from_pairs(&del_pairs)?;
+    let mut deleted_by_index = std::collections::HashMap::with_capacity(deletes.len());
+    for (slot, index) in columns.del_idx.iter().enumerate() {
+        deleted_by_index.insert(
+            *index as usize,
+            *deletes.get(slot).context("missing delete OpId")?,
+        );
+    }
+
+    let mut origin_cursor = 0usize;
+    let mut ops = Vec::with_capacity(count);
+    for (index, ch) in columns.chars.chars().enumerate() {
+        let origin = if columns.origin_present.get(index).copied().unwrap_or(0) == 1 {
+            let origin = origins
+                .get(origin_cursor)
+                .copied()
+                .context("missing rebuilt origin")?;
+            origin_cursor += 1;
+            Some(origin)
+        } else {
+            None
+        };
+        ops.push(TextOp {
+            id: *ids.get(index).context("missing rebuilt op id")?,
+            ch,
+            origin,
+            deleted: deleted_by_index.get(&index).copied(),
+        });
+    }
+    Ok(ops)
+}
 
 /// Encode a text-op batch for controller, FFI, and reliable-sync transport.
 ///
@@ -52,6 +240,17 @@ const COMPACT_TEXT_OPS_MAGIC: &[u8] = b"ADCR1:";
 /// controller reads. MessagePack removes field-name repetition and zstd makes
 /// the retained frame proportional enough for interactive closeout.
 pub fn encode_update_ops(ops: &[TextOp]) -> Result<Vec<u8>> {
+    // `#bootstrapsize`: prefer the columnar/delta envelope (measured 2.0x smaller
+    // on a real 815KB bootstrap). It is self-verified before use: a wire format
+    // that fails to round-trip must never reach a peer, so any error — or any
+    // mismatch — silently falls back to the ADCR1 envelope, which every reader
+    // still decodes.
+    if let Ok(columnar) = encode_columnar_ops(ops)
+        && let Some(body) = columnar.strip_prefix(COLUMNAR_TEXT_OPS_MAGIC)
+        && decode_columnar_ops(body).is_ok_and(|decoded| ops_equivalent(&decoded, ops))
+    {
+        return Ok(columnar);
+    }
     let packed = rmp_serde::to_vec(ops).context("encode text ops as MessagePack")?;
     let compressed =
         zstd::stream::encode_all(packed.as_slice(), 3).context("compress MessagePack text ops")?;
@@ -64,8 +263,22 @@ pub fn encode_update_ops(ops: &[TextOp]) -> Result<Vec<u8>> {
     Ok(encoded)
 }
 
-/// Decode the compact envelope or a pre-upgrade JSON `Vec<TextOp>`.
+/// True when two op batches are field-for-field identical. Used to self-verify a
+/// newly encoded envelope before it is allowed onto the wire.
+fn ops_equivalent(left: &[TextOp], right: &[TextOp]) -> bool {
+    left.len() == right.len()
+        && left.iter().zip(right.iter()).all(|(a, b)| {
+            a.id == b.id && a.ch == b.ch && a.origin == b.origin && a.deleted == b.deleted
+        })
+}
+
+/// Decode the columnar envelope, the compact envelope, or a pre-upgrade JSON
+/// `Vec<TextOp>`. Every historical format stays readable: durable pending/outbox
+/// data written by older binaries must remain replayable after an upgrade.
 pub fn decode_update_ops(update: &[u8]) -> Result<Vec<TextOp>> {
+    if let Some(compressed) = update.strip_prefix(COLUMNAR_TEXT_OPS_MAGIC) {
+        return decode_columnar_ops(compressed);
+    }
     if let Some(compressed) = update.strip_prefix(COMPACT_TEXT_OPS_MAGIC) {
         let compressed = BASE64_STANDARD
             .decode(compressed)
@@ -364,6 +577,75 @@ mod tests {
     }
 
     #[test]
+    fn opid_serde_shape_is_a_counter_peer_pair() {
+        // `#bootstrapsize`: the columnar decoder rebuilds OpIds by deserializing
+        // (counter, peer) tuples, because OpId has no public constructor. If a
+        // lazily upgrade changes OpId's serde representation this test fails
+        // loudly, instead of the codec silently producing corrupt ops.
+        let replica = ReplicaState::new(42);
+        replica.apply_local_edit(0, 0, "x");
+        let ops = decode_update_ops(&replica.encode_state()).unwrap();
+        let id = ops[0].id;
+        let via_tuple: OpId =
+            rmp_serde::from_slice(&rmp_serde::to_vec(&(id.counter(), id.peer())).unwrap()).unwrap();
+        assert_eq!(via_tuple, id, "OpId must serialize as a (counter, peer) pair");
+    }
+
+    #[test]
+    fn columnar_envelope_roundtrips_inserts_and_tombstones() {
+        let replica = ReplicaState::new(7);
+        replica.apply_local_edit(0, 0, "hello columnar world");
+        // Delete an interior run so tombstones exercise the sparse columns.
+        replica.apply_local_edit(5, 10, "");
+        replica.apply_local_edit(0, 0, "prefix ");
+        let encoded = replica.encode_state();
+        assert!(
+            encoded.starts_with(COLUMNAR_TEXT_OPS_MAGIC),
+            "encode_update_ops must prefer the columnar envelope"
+        );
+        let restored = ReplicaState::from_encoded(7, &encoded).unwrap();
+        assert_eq!(restored.text(), replica.text());
+    }
+
+    #[test]
+    fn columnar_and_compact_envelopes_decode_to_identical_ops() {
+        let replica = ReplicaState::new(3);
+        replica.apply_local_edit(0, 0, "alpha beta gamma");
+        replica.apply_local_edit(6, 11, "");
+        let ops = decode_update_ops(&replica.encode_state()).unwrap();
+
+        // The legacy ADCR1 envelope must still decode to exactly the same ops.
+        let packed = rmp_serde::to_vec(&ops).unwrap();
+        let compressed = zstd::stream::encode_all(packed.as_slice(), 3).unwrap();
+        let mut legacy = COMPACT_TEXT_OPS_MAGIC.to_vec();
+        legacy.extend_from_slice(BASE64_STANDARD.encode(compressed).as_bytes());
+        let from_legacy = decode_update_ops(&legacy).unwrap();
+
+        assert!(
+            ops_equivalent(&from_legacy, &ops),
+            "ADCR1 and ADCR2 envelopes must carry identical ops"
+        );
+    }
+
+    #[test]
+    fn columnar_envelope_is_smaller_than_the_compact_envelope() {
+        // Realistic shape: one peer, mostly sequential counters, origin almost
+        // always the preceding character — the redundancy the columns expose.
+        let replica = ReplicaState::new(1);
+        replica.apply_local_edit(0, 0, &"lorem ipsum dolor sit amet ".repeat(400));
+        let columnar = replica.encode_state();
+        let ops = decode_update_ops(&columnar).unwrap();
+        let packed = rmp_serde::to_vec(&ops).unwrap();
+        let compressed = zstd::stream::encode_all(packed.as_slice(), 3).unwrap();
+        let legacy_len = COMPACT_TEXT_OPS_MAGIC.len() + BASE64_STANDARD.encode(compressed).len();
+        assert!(
+            columnar.len() < legacy_len,
+            "columnar envelope ({}) must be smaller than ADCR1 ({legacy_len})",
+            columnar.len()
+        );
+    }
+
+    #[test]
     fn encode_state_roundtrips_text() {
         let a = ReplicaState::new(7);
         a.apply_local_edit(0, 0, "roundtrip me");
@@ -384,7 +666,10 @@ mod tests {
     fn compact_update_has_versioned_header_and_roundtrips() {
         let source = ReplicaState::from_text(7, "compact response\n");
         let encoded = source.encode_state();
-        assert!(encoded.starts_with(COMPACT_TEXT_OPS_MAGIC));
+        // `#bootstrapsize`: the encoder now emits the columnar ADCR2 envelope.
+        // The contract this test guards is unchanged — a versioned header plus a
+        // faithful round-trip — only the preferred version moved.
+        assert!(encoded.starts_with(COLUMNAR_TEXT_OPS_MAGIC));
         let restored = ReplicaState::from_encoded(8, &encoded).unwrap();
         assert_eq!(restored.text(), source.text());
     }

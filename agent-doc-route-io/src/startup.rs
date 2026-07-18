@@ -117,16 +117,75 @@ fn decide_existing_window_anchor<'a>(
 }
 
 fn pane_owner_document(tmux: &Tmux, pane: &str) -> Option<PathBuf> {
-    let pane_pid = agent_doc_tmux_io::pane_pid(tmux, pane)?;
-    let raw_document =
-        agent_doc_process_owner_io::process_tree_agent_doc_owner_document(&pane_pid.to_string())?;
-    let raw_path = PathBuf::from(raw_document);
-    let candidate = if raw_path.is_absolute() {
-        raw_path
-    } else {
-        agent_doc_tmux_io::pane_current_path(tmux, pane)?.join(raw_path)
-    };
+    if let Some(pane_pid) = agent_doc_tmux_io::pane_pid(tmux, pane)
+        && let Some(raw_document) =
+            agent_doc_process_owner_io::process_tree_agent_doc_owner_document(&pane_pid.to_string())
+    {
+        let raw_path = PathBuf::from(raw_document);
+        let candidate = if raw_path.is_absolute() {
+            raw_path
+        } else {
+            agent_doc_tmux_io::pane_current_path(tmux, pane)?.join(raw_path)
+        };
+        if let Ok(canonical) = candidate.canonicalize() {
+            return Some(canonical);
+        }
+    }
+    pane_owner_document_via_registry(tmux, pane)
+}
+
+/// `#cross-project-window-anchor` — prove pane ownership from the session
+/// registry when the process tree cannot.
+///
+/// `process_tree_agent_doc_owner_document` only proves ownership when an
+/// agent-doc document path appears in the pane's process tree. A pane running a
+/// BARE harness (`claude`, `codex`) with no `.md` in its cmdline owns its
+/// document through the registry instead, so the process-tree probe returns
+/// `None` and [`decide_existing_window_anchor`] refuses the whole window with
+/// "no provable agent-doc document owner" — even though the pane is a perfectly
+/// ordinary agent-doc session. That made a SUBMODULE document unroutable
+/// whenever a superproject-owned pane shared the target window, and the emitted
+/// remediation told the operator to `tmux kill-pane` their own live session.
+///
+/// The registry is per-project, so resolve each pane against ITS OWN project
+/// root (derived from the pane's working directory) rather than the requesting
+/// document's. That is what makes this work across the superproject/submodule
+/// boundary, which `route_startup_cross_project_window_anchor` already
+/// anticipates downstream.
+///
+/// This only ever converts `None` into `Some`, so it is a strict widening of
+/// what counts as provable: a genuinely foreign pane (a plain shell, an editor)
+/// has no registry entry, still resolves to `None`, and the window is still
+/// refused. The safety intent of the guard is preserved.
+fn pane_owner_document_via_registry(tmux: &Tmux, pane: &str) -> Option<PathBuf> {
+    let pane_cwd = agent_doc_tmux_io::pane_current_path(tmux, pane)?;
+    let project_root = agent_doc_project_root_io::project_root_containing(&pane_cwd)?;
+    let registry = agent_doc_session_registry_io::load_in(&project_root).ok()?;
+    let candidate = registry_pane_owner_document_path(&registry, &project_root, pane)?;
     candidate.canonicalize().ok()
+}
+
+/// Pure resolution half of [`pane_owner_document_via_registry`]: pick the
+/// registry entry claiming `pane` and resolve its recorded document path against
+/// the owning project root. Returns `None` when no entry claims the pane or the
+/// entry records no file, which is what keeps a genuinely foreign pane refused.
+fn registry_pane_owner_document_path(
+    registry: &tmux_router::registry::Registry,
+    project_root: &Path,
+    pane: &str,
+) -> Option<PathBuf> {
+    let entry = registry.values().find(|entry| entry.pane == pane)?;
+    let file = entry.file.trim();
+    if file.is_empty() {
+        return None;
+    }
+    let raw_path = PathBuf::from(file);
+    if raw_path.is_absolute() {
+        Some(raw_path)
+    } else {
+        // Registry paths are stored relative to the owning project root.
+        Some(project_root.join(raw_path))
+    }
 }
 
 /// Fresh-route agent dispatch-ready wait budget (`#waitmachine2`). Historically
@@ -1096,6 +1155,76 @@ mod tests {
         assert_eq!(
             decide_existing_window_anchor(requested, &panes, false),
             ExistingWindowAnchorDecision::RefuseUnknownOwner("%9")
+        );
+    }
+
+    fn registry_entry(pane: &str, file: &str) -> tmux_router::registry::RegistryEntry {
+        tmux_router::registry::RegistryEntry {
+            pane: pane.to_string(),
+            pid: 0,
+            cwd: String::new(),
+            started: String::new(),
+            session_id: String::new(),
+            file: file.to_string(),
+            window: String::new(),
+            supervisor_instance_id: String::new(),
+        }
+    }
+
+    // `#cross-project-window-anchor`: a pane running a BARE harness (`claude`)
+    // has no document in its process tree, so the process-tree probe cannot
+    // prove ownership. The registry can, and that is what stops a submodule
+    // document from being refused because a superproject pane shares the window.
+    #[test]
+    fn registry_proves_bare_harness_pane_owner_document() {
+        let mut registry = tmux_router::registry::Registry::new();
+        registry.insert(
+            "session-a".to_string(),
+            registry_entry("%23", "tasks/agent-doc/agent-doc-bugs2.md"),
+        );
+
+        assert_eq!(
+            registry_pane_owner_document_path(&registry, Path::new("/repo"), "%23"),
+            Some(PathBuf::from("/repo/tasks/agent-doc/agent-doc-bugs2.md"))
+        );
+    }
+
+    #[test]
+    fn registry_pane_owner_resolves_absolute_entry_path_as_is() {
+        let mut registry = tmux_router::registry::Registry::new();
+        registry.insert(
+            "session-a".to_string(),
+            registry_entry("%23", "/elsewhere/tasks/doc.md"),
+        );
+
+        assert_eq!(
+            registry_pane_owner_document_path(&registry, Path::new("/repo"), "%23"),
+            Some(PathBuf::from("/elsewhere/tasks/doc.md"))
+        );
+    }
+
+    // The widening must stay strict: a pane no registry entry claims is still
+    // unprovable, so `decide_existing_window_anchor` still refuses the window.
+    // Without this, the guard would happily split into a plain shell or editor.
+    #[test]
+    fn registry_does_not_prove_unclaimed_pane() {
+        let mut registry = tmux_router::registry::Registry::new();
+        registry.insert("session-a".to_string(), registry_entry("%14", "tasks/a.md"));
+
+        assert_eq!(
+            registry_pane_owner_document_path(&registry, Path::new("/repo"), "%99"),
+            None
+        );
+    }
+
+    #[test]
+    fn registry_does_not_prove_entry_without_file() {
+        let mut registry = tmux_router::registry::Registry::new();
+        registry.insert("session-a".to_string(), registry_entry("%23", "   "));
+
+        assert_eq!(
+            registry_pane_owner_document_path(&registry, Path::new("/repo"), "%23"),
+            None
         );
     }
 }

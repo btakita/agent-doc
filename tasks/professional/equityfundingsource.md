@@ -32,291 +32,56 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260718-204742.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260718-214413.md`*
 
 Compacted content:
-- Archived 7 response topic(s): Dedicated URL for Reconcile with TMO; What TMO API endpoint the dropdown acts on; Jeff Blake and Lucas Huang; 4 more
-- Prior summary/context: prior compacted content: Archived 4 response topic(s): Production Cloudflare environment; Brief Cloudflare account in...
-
-### Re: do [#tmo-sandbox-orphan-loans] — opus-4-8
-
-Built the teardown path and made the purge decision. Held the actual deletion — see the question at the end.
-
-**Live sandbox state (LOS.svc/GetLoans, 2026-07-18):** 18 loans.
-
-- `1010` — created 5/19/2026, `Unassigned`, $0, no borrower. TMO-seeded demo loan, predates the EFS integration. **Keep**, permanently — it is in `SANDBOX_PROTECTED_LOAN_NUMBERS`.
-- The other 17 are EFS test debris created 6/6–7/1/2026 with synthetic borrowers (`Brian Takita`, `Test2 Borrower`, `Tester4 Borrower`, `Borrower 11`, `James Blake`, …).
-- `GQI751` — **pinned, not purged**. It is the only live repro fixture for `#dealtab500` (loan-tab `Internal Error`) and `#5q7z` (duplicate-loan writeback on approve). Deleting it would destroy the evidence both review items depend on. Purge it with `--apply --only GQI751` once those close.
-- The remaining **16 are purgeable**.
-
-**Teardown path shipped** (EFS `a56b1b8b`, pushed):
-
-- `app/equityfundingsource/lib/tmo-api/sandbox_purge.ts` — pure, keep-list-driven planner. No network, so the destructive decision is unit-testable.
-- `bin/tmo-sandbox-purge.ts` — CLI over `LOS.svc/DeleteLoan`.
-- `docs/TMO/delete-loan.md` — endpoint reference (it was missing from `docs/TMO/`), teardown recipe, and the purge decision above.
-- `tests/tmo-sandbox-purge.test.ts` — 14 tests. Full suite green: 1801 pass / 0 fail; `build` + `build:worker` OK.
-
-Safety properties, all enforced in code rather than by the caller's flags:
-
-- Dry run is the default; deletion needs `--apply`.
-- `--apply` is refused unless the `Database` header contains `Sandbox`. This matters more than it looks: **the TMO token is identical for the sandbox and live databases** — the environment is selected *only* by the `Database` header — so this guard is the one thing standing between a teardown pass and production.
-- Protected and pinned loans are enforced by the planner. `--only` can narrow the purge set but can never select `1010` or `GQI751`.
-- The token is read from `TMO_API_TOKEN`; nothing is committed or echoed.
-
-Dry run against the live sandbox: `purge=16 keep=2`, matching the decision above.
-
-Two things worth knowing about `DeleteLoan`, both now in the doc:
-
-- It is keyed on `LoanNumber`, unlike `DeleteBorrower` which needs the borrower `RecId`.
-- Deleting a loan does **not** delete its borrowers, and does **not** touch EFS state. The 18 orphan `tmo_cache_entities` rows are a separate problem (`#tmo-orphan-cache`) — several of those cached loan numbers (TST042, TST217, TST254, TST374, TST723, TST762, TST999) do not exist in TMO at all, so purging TMO will not clear them.
-
-**Question before I run it:** `--apply` permanently deletes those 16 loans with no TMO-side undo, and your note says you are in TMO tonight after 20:30 for the sync work. Do you want them gone now, or would you rather look at the sandbox first? Queued as `#tmo-sandbox-purge-apply`; one command when you say go.
-
-On the other queue head — `#tmo-prod-seat-not-provisioned` is operator-gated (April has to confirm which account/serial the new seat landed on and provision `app.themortgageoffice.com`). Nothing I can drain there.
-
-### Re: vestings, fundings, and the reconciliation process — opus-4-8
-
-> **Queue prompt:**
->
-> do [#tmo-prod-seat-not-provisioned]: I was not able to login to the live system. I don't need to though. Just need api access and I believe you confirmed the live key is working.
-
-
-Agreed on the reframe, and I think it is the right call for a reason worth stating: tombstoning the orphan cache rows throws away the only realistic reconciliation corpus EFS has. Pushing them into TMO as fundings turns dead rows into a live exercise of the path that actually has to work at launch.
-
-Wrote the whole thing up as `prds/vesting-and-tmo-reconciliation.md` and shipped Phase 1 (EFS `18f06c17`, pushed).
-
-**Why vestings are the bottleneck.** TMO models one lender *account per vesting* (Mark Leonard = MARKDBPP / MARKL / MARKPERSON / MARKROTHIR); EFS models one `users` row with many `lender_vestings`. A TMO funding can only reach an EFS lender through `lender_vestings.tmo_lender_account`. So a lender with **no vesting** is unreconcilable, and a lender whose vestings carry **no TMO account** is equally unreconcilable. Both were completely silent — the lender saw a passive empty state, the admin saw nothing at all.
-
-**Phase 1, shipped:**
-
-- **`vesting_gap.ts`** — one pure derivation of the gap (`no_vestings` / `unlinked` / `partial_link` / `none`) that every surface renders from, so the lender prompt and the admin warning cannot disagree.
-- **`vesting_input.ts`** — one shared validator. The lender portal and the admin card now write vestings through the same code; previously only the portal path existed, and a second one would have drifted immediately.
-- **`#admin-add-vesting`** — `POST` / `PATCH` / `DELETE /api/admin/lenders/:id/vestings`, plus add / edit / remove in the admin Lender Vestings card. This was the real gap: most vestings arrive by phone or email during onboarding, and there was no way to record one without the lender logging in and filling out their portal profile. `DELETE` archives rather than hard-deletes, since a vesting may already carry a TMO mapping or back a funding.
-- **`#vesting-gap-banner`** — lender prompt on the portal **dashboard** (next to the requirements alert, so it is seen without navigating to Vestings) and on the Vestings page; admin warning on the Lender Vestings card, red when it blocks reconciliation, amber when it is partial.
-
-One deliberate asymmetry: the lender surfaces never mention TMO account linking. That is back-office state a lender cannot act on, so `vesting_gap_` returns lender-facing copy only for `no_vestings`. There is a test pinning that the lender components never render `admin_message`.
-
-24 new tests; full suite 1826 pass / 0 fail; `build` + `build:worker` clean.
-
-**Queued the rest as three phases** rather than one parent item:
-
-- `#tmo-orphan-as-fundings` — per-row decision over the 18 orphans: reconcile if the loan exists in TMO, `AddLoanFunding` + adopt the RecID if it does not, tombstone only pure debris with no EFS deal. Gated on the EFS→TMO push gate (`#dzmm`/`#7a4d`) — that gate is real, not me deferring.
-- `#tmo-reconcile-auto` — the automated attempt you asked for, over `tmo_unmatched_fundings`: RecID → `Account` → email, with a confidence score and recorded evidence, auto-binding above a threshold and queueing the rest with candidates pre-ranked. Per the existing PRD D4 a bind reconciles EFS *to* TMO (the TMO funding wins) and records what it overrode. The matcher will be pure, like `vesting_gap_`, so it is testable without TMO.
-- `#vesting-gap-admin-queue` — Phase 1 warns per lender on that lender's card; an admin still has to visit each one. A roster-level queue closes that, and both counts it needs (`investor_vesting_count`, `investor_vesting_linked_count`) are already in the lender-pipeline query.
-
-Also moved `#tmo-prod-seat-not-provisioned` to review — it is blocked on April confirming which account/serial the new seat landed on, which is not something I can drain, and it was holding the queue head.
-### Re: TMO live API access — opus-4-8
-
-> **Queue prompt:** Instead of doing [#tmo-orphan-cache], the loans should be added as fundings into the tmo database. The admin may need to reconcile the funder/lender/vesting. We can use this to drive out the reconciliation process. We should also have an automated tool to attempt a reconciliation. We also should do work on lender portal vestings, with a banner to ask the lender to add their vestings. Also the admin should be able to add lender vestings. A lender may not have any vestings but we should have admin banners to ensure vestings are added.
-
-Answered in full in the previous response — `prds/vesting-and-tmo-reconciliation.md`, Phase 1 shipped as EFS `18f06c17`, Phases 2–4 queued as `#tmo-orphan-as-fundings` / `#tmo-reconcile-auto` / `#vesting-gap-admin-queue`. This entry is the queue echo so the head clears.
-
-On your note about the seat — you are right that the portal login is not the blocker, and I want to correct one thing I said. **The TMO token is not environment-scoped at all.** There is one token, it is byte-identical in `passage equityfundingsource/tmo/live/api` and `equityfundingsource/tmo/sandbox/api`, and the environment is selected *only* by the `Database` header. So API access to production was never gated on the seat; it was already there.
-
-That is worth sitting with, because it cuts both ways: nothing but a header string separates a sandbox call from a production one. It is exactly why `bin/tmo-sandbox-purge.ts` refuses `--apply` unless the `Database` value contains `Sandbox` — a fat-fingered header on a delete pass would otherwise hit live records with no undo.
-
-I re-gated `#tmo-prod-seat-not-provisioned` to review rather than closing it. The portal seat still matters for anything you or April need to do by hand in the TMO UI on the production company, and it was blocking the queue head where it was.
-
-### Re: do [#tmo-orphan-as-fundings] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#tmo-orphan-as-fundings]
-
-
-Planner shipped (EFS `9908ed1c`, pushed). `lib/tmo-api/orphan_reconcile.ts` takes the three sides — the cached rows, what TMO actually returns from `GetLoans`/`GetLoanFundings`, and what EFS has behind each row — and emits one action per row with its evidence:
-
-| Action | When |
-| --- | --- |
-| `reconcile_cache` | TMO has the loan (stale row, not an orphan), or TMO already has the funding |
-| `push_funding` | TMO has the loan, EFS has an unfunded vesting-linked funding → `AddLoanFunding` |
-| `create_loan_then_funding` | TMO lacks the loan but EFS has a fundable deal → `NewLoan`, **then** `AddLoanFunding` |
-| `blocked_no_vesting` | EFS has a fundable deal but the lender has no linked vesting |
-| `tombstone` | Nothing behind the row on either side |
-
-Three things I want to flag, because they changed the shape of the thing:
-
-**`AddLoanFunding` cannot create a loan.** Your directive said add the loans as fundings, but a funding attaches to an existing TMO loan. For the 17 rows TMO does not have, it is `NewLoan` then `AddLoanFunding` — two calls, and the plan says so per row rather than failing at execution time.
-
-**The planner refuses to push a funding with no TMO lender account.** That is Phase 1's vesting gap arriving on the reconciliation side. Pushing anyway would put an unattributable funding into TMO — worse than the orphan row we started with, because now it is TMO's problem too. So the reconciliation run *surfaces* vesting gaps as `blocked_no_vesting` rather than papering over them. That is the loop you were after: the orphan corpus drives out exactly the reconciliation work that has to exist.
-
-**It never duplicates a funding TMO already has**, checked both by `tmo_funding_rec_id` and by `GetLoanFundings` — the same class of bug as `#5q7z` (approve re-sending `NewLoan` for a loan already in TMO and getting `Duplicate loan number`).
-
-12 tests; full suite 1838 pass / 0 fail; builds clean.
-
-Gated the parent and queued `#tmo-orphan-reconcile-exec` for the executor. To be precise about what is actually blocked: `reconcile_cache` and `tombstone` are EFS-local and not gated at all, and **sandbox execution of the writes is not gated either** — only production writes ride `#dzmm`/`#7a4d`. So the next cycle can run this end-to-end in the sandbox against the clean slate `bin/tmo-sandbox-purge.ts` leaves, which is the right place to prove it before anything touches live.
-> **Queue prompt:**
->
-> do [#tmo-orphan-as-fundings]
-
-
-
-### Re: do [#tmo-reconcile-auto] — opus-4-8
-
-Matcher shipped (EFS `9412be52`, pushed). `lib/tmo-api/funding_match.ts` scores each `tmo_unmatched_fundings` row against the lender/vesting roster and returns `auto_bind` / `review` / `ambiguous` / `no_match` with ranked candidates, a confidence, and the evidence behind each one.
-
-| Signal | Weight |
-| --- | --- |
-| `tmo_funding_rec_id` (EFS already stamped this funding) | 1.0 |
-| `vesting_account` (`Account` == `lender_vestings.tmo_lender_account`) | 1.0 |
-| `lender_account` (`Account` == `users.lender_account`, legacy single-valued) | 0.9 |
-| `email` | 0.6 |
-| `full_name` | 0.25 |
-
-The scoring rule is the part worth arguing about, so here is the reasoning:
-
-**Only an exact identifier can bind.** Corroborating signals add 10% of their weight rather than summing, so two weak signals can never reach an exact-identifier score — email + name still lands in `review`. I held email below the 0.9 threshold on purpose: lenders share household addresses, and EFS has already seen `+alias` test accounts collide. An email match is strong evidence for a human and insufficient evidence for a machine.
-
-**A tie at the top returns `ambiguous`, never a bind.** Two lenders scoring identically means a coin flip on real money. The admin gets both, ranked, rather than a 50% chance of a silently wrong attribution that later has to be unwound in TMO.
-
-That leaves auto-binding to the genuinely mechanical cases — the ones where TMO's `Account` *is* a vesting you already mapped — which is the whole point: Phase 1 made vestings mappable, and this converts each mapping into binds that stop reaching the admin queue at all.
-
-18 tests, including the household-email and duplicate-vesting collisions; full suite 1856 pass / 0 fail; builds clean.
-
-Gated the parent and queued `#tmo-reconcile-binder` for the wiring: read the roster, run `funding_match_all_`, apply `auto_bind` through the existing `admin_tmo_unmatched_funding_bind_POST_` path, and persist the `review`/`ambiguous` rankings so the admin queue opens pre-ranked instead of blank.
-
-One note on this cycle: the closeout hit an editor-authority/disk divergence after the `#tmo-orphan-as-fundings` commit and again here. Both settled through the supervisor's automatic replica re-registration — no forced write, no repair, nothing lost — but it is why the queue advanced a beat ahead of the responses.
-### Re: do [#vesting-gap-admin-queue] — opus-4-8
-
-Shipped (EFS `e4cfca4d`, pushed). Phase 4 closes the loop Phase 1 opened.
-
-- **`GET /api/admin/lender-vesting-gaps`** — every active lender who cannot be reconciled against TMO, worst gap first, with `blocked_count` (cannot be reconciled at all) separated from partial-link warnings. Lenders with nothing to fix are dropped; a fully-linked lender is not a queue item.
-- **`vesting-gaps` nav badge** in `/api/admin/nav-counts` — active lenders with zero TMO-linked vestings.
-
-The design choice worth naming: the endpoint calls the same `vesting_gap_` derivation the per-lender card renders rather than re-deriving the gap in SQL. Two implementations of "is this lender blocked" would drift the first time the rule changed, and the failure mode is quiet — a queue that disagrees with the card it links to. The badge query and the roster filter agree by construction too: `no_vestings` and `unlinked` both have zero linked vestings and both set `blocks_reconcile`; `partial_link` has neither, so it stays a warning rather than inflating the badge.
-
-8 tests; full suite 1864 pass / 0 fail; builds clean.
-
-Queued `#vesting-gap-queue-ui` for the screen itself — the API and count ship, the portal worklist is the follow-up.
-
-**Where the four phases leave things.** The reconciliation path now exists end to end as decision logic: vestings are authorable from both sides and their absence is visible (Phase 1), the orphan corpus has a per-row plan (Phase 2), unmatched fundings score themselves against the roster (Phase 3), and the gaps that block all of it are a worklist (Phase 4). What is *not* built is execution — three items, all wiring rather than design: `#tmo-orphan-reconcile-exec`, `#tmo-reconcile-binder`, `#vesting-gap-queue-ui`. Worth doing in the sandbox first, in that order, since the executor is what generates the unmatched fundings the binder then has to resolve.
-
-### Re: do [#vesting-gap-queue-ui] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#vesting-gap-queue-ui]
-
-
-Shipped (EFS `073e466e`, pushed). **Vesting Gaps** is now a left-nav section at `/admin/vesting-gaps`: blocked/warning counts up top, one row per lender with the gap kind, and a per-row deep link into that lender's Lender Vestings card — where the gap is actually fixable, rather than making an admin navigate there themselves.
-
-Each row renders the API's `admin_message` rather than restating the rule in the UI. That keeps the property the whole feature rests on: the lender prompt, the admin card, and this queue all trace back to a single `vesting_gap_` call, so none of them can start disagreeing about who is blocked.
-
-Wired end to end — section id, URL, portal route, nav item, icon, and the badge. The badge is worth a note: it binds by name (`counts[item.id]`), so a nav id that does not match the `nav-counts` key renders nothing at all, silently. There is a test pinning that they match, because a missing badge is exactly the kind of bug nobody files.
-
-4 tests; full suite 1868 pass / 0 fail; builds clean.
-
-**All four phases plus both UI surfaces are done.** What is left is three execution items, and only one of them is genuinely gated:
-
-- `#tmo-orphan-reconcile-exec` — run the Phase 2 planner for real. **Not blocked in the sandbox**; only production writes ride `#dzmm`/`#7a4d`.
-- `#tmo-reconcile-binder` — apply Phase 3's `auto_bind` decisions and persist the rankings. Not blocked.
-- `#tmo-sandbox-purge-apply` — waiting on you, since it is 16 permanent deletions.
-
-The order matters: the executor generates the fundings the binder then resolves, so running them out of order means the binder has nothing to work on.
-
-### Re: do [#tmo-contact-enumeration] — opus-4-8
-
-Re-probed the premises before building anything, and two of the three were stale. The item said TMO exposes no contact enumeration at all. Against the live sandbox today:
-
-| Endpoint | | |
-| --- | --- | --- |
-| `LOS.svc/GetBorrowers` | 404 | still true — no direct borrower endpoint |
-| `LSS.svc/GetBorrowers` | 404 | still true |
-| `LSS.svc/GetLenders` | **200** | **returns data** — it was empty when the item was filed |
-| `LOS.svc/GetLoan/:n` | **200** | **carries `Borrowers[]`, each with a `RecID`** |
-
-That last row is the one that matters. `Borrowers[].RecID` is exactly what `DELETE /LOS.svc/DeleteBorrower/:borrowerRecId` takes. So the planned workaround — "wire an operator-supplied-RecId delete path rather than guessing record ids" — is unnecessary. Borrower enumeration is available, just indirectly: walk `GetLoans`, fetch each loan, collect its borrowers.
-
-Built that instead (EFS `a990618d`, pushed):
-
-- **`contact_roster.ts`** — pure aggregation across `GetLoan` payloads into a roster deduped on `RecID`. Dedup is the point: a borrower on four loans would otherwise read as four contacts, and an admin could not tell which RecId to delete.
-- **`GET /api/admin/tmo-contacts`** — both rosters, fetched independently so a failing LSS read does not lose the borrower roster; only 502s when both fail.
-- **Bounded**: the walk is O(loans) round trips, so it is capped (default 200, max 500) and belongs behind an explicit admin action, never a page render.
-
-**Verified end to end against the sandbox: 18 loans → 16 distinct borrowers, 1 lender.** Not a mocked result.
-
-One thing I found while building it that was not in the item. There are two orphan shapes and they are inverses:
-
-- **Orphan borrower** — on no loan. Safe to delete; removing one cannot orphan a loan.
-- **Borrowerless loan** — a loan with *no borrower*. This is the one that actually bit us: TST113 became one when Lucas Huang was deleted, the loan stayed, and nothing surfaced it. It cannot be serviced or contacted against, yet TMO considers it valid. Now flagged as `borrowerless_loans`.
-
-Also had to reconcile a guard: `#tmo-getlender-confirm` had a test forbidding `LSS.svc/GetLenders` outright, from when it returned nothing and nothing called it. I narrowed it to what it actually protects — the no-LSS-*write* rule — rather than deleting it, since `GetLenders` is a read. Flagging that explicitly because loosening an existing guard deserves your eyes.
-
-19 tests; full suite 1888 pass / 0 fail; builds clean.
-
-**What is left for ABS support** shrank to one question, and it is efficiency rather than a blocker: is there a direct contact-enumeration endpoint, so the roster is not O(loans)? That still rides `#k2xg`. The delete path no longer waits on anyone.
-
-Queued `#tmo-contacts-ui` for the screen.
-
-### Re: Is the backlog prioritized? — opus-4-8
-
-Ordered sensibly, but it was wrong in three ways, and one of them is my error. Fixed all three in this cycle.
-
-**Two items I reported to you as queued were not in the document at all.** `#tmo-sandbox-purge-apply` and `#tmo-contacts-ui` existed only as prose in my responses — no backlog row, no review row, nothing. Both were added in `respond` calls whose closeout hit the CRDT/controller failures: the response cell landed, the `--backlog-add` did not. I verified two *other* items survived that same failure mode earlier tonight and then did not run the same check on these. That is a real reporting error — I told you twice the purge was "queued and waiting on your go" when nothing was tracking it. Both are restored now.
-
-**`#tmo-orphan-cache` was stale and sitting at position 3** as if it were live work. Your own directive tonight superseded it — tombstoning is now the fallback, not the plan — but the item still read as "prune these rows." Rewritten to say SUPERSEDED, keeping the parts still worth having (the loan-number list, and the note that `admin_tmo_loans_by_loan_number_DELETE_` does not touch `tmo_cache_entities`) and pointing at `#tmo-orphan-reconcile-exec` for execution.
-
-**On the ordering itself** — the list carries the `priority` attribute, so position is meaningful, and the top is right: purge (needs your go), then the two executors, then the contacts screen.
-
-Two things about that ordering you may want to change, and I did not change them unilaterally:
-
-**The execution pair is in the wrong order.** `#tmo-reconcile-binder` sits above `#tmo-orphan-reconcile-exec`, but the executor generates the unmatched fundings the binder resolves. Run as listed, the binder has nothing to work on. I left it because you may want the binder built first and exercised against existing data — say the word and I will swap them.
-
-**The operator-verify items are interleaved with actionable ones.** `#efs-prod-seed`, `#efs-cf-account-custody`, `#efs-dns-cutover`, and `#tmo-getlender-verify` are scattered through the lower half among things I can just do. Fine if you read the list as strict priority, but it means an unattended drain keeps hitting heads it has to defer.
-
-The genuinely important thing down there is `#efs-dns-cutover` — it is the remaining gate on launch, and it sits behind a Durable Object cost optimization.
-
-### Re: do [#tmo-contacts-ui] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#tmo-contacts-ui]
-
-
-Shipped (EFS `42c8cf2e`, pushed). **TMO Contacts** at `/admin/tmo-contacts`: the derived borrower roster, the LSS lender roster, and both orphan shapes — borrowerless loans in red (cannot be serviced), orphan borrowers in amber (safe to delete).
-
-Three constraints I pinned with tests rather than trusting to memory:
-
-**It loads behind a button, not on mount.** The roster walk is one `GetLoan` per loan. A `useEffect` here would fire ~18 TMO requests every time anyone opened the page, and more as the loan book grows. The test asserts on the `useEffect(` call shape rather than the word, since the rationale comment mentions it — a small thing, but the first version of that assertion failed on its own explanation.
-
-**It is deliberately not behind the `tmo_sim_enabled` flag.** That flag hides `tmo-sim` and `tmo-loans` and falls them back to the dashboard. This screen reads the *real* TMO API, so inheriting that gate would hide it exactly when it is useful — with the simulator off, in production. Also pinned, because it is the kind of thing a later refactor would sweep in for consistency.
-
-**When one roster fails, the screen says which one.** The endpoint fetches them independently, so a dead LSS read still returns borrowers. Rendering an empty lenders table in that case would read as "no lenders in TMO," which is a different and much worse claim than "we could not reach LSS."
-
-Each `RecID` is selectable text. It is the value an admin pastes into `DELETE /LOS.svc/DeleteBorrower/:recId`, so it needs to be copyable, not a tooltip.
-
-7 tests; full suite 1895 pass / 0 fail; builds clean.
-
-That clears the last of the items I could act on. What remains in the backlog is the two reconciliation executors (`#tmo-orphan-reconcile-exec` then `#tmo-reconcile-binder` — in that order), and the operator-gated set: the sandbox purge waiting on your go, plus the Cloudflare custody / DNS cutover / prod-seed cluster.
-<!-- agent:boundary:623ac0cd -->
+- Archived 10 response topic(s): do [#tmo-sandbox-orphan-loans]; vestings, fundings, and the reconciliation process; TMO live API access; 7 more
+- Prior summary/context: prior compacted content: Archived 7 response topic(s): Dedicated URL for Reconcile with TMO; What TMO API endpoint th...
+
+### Re: Add backlog items onto the queue in priority order — opus-4-8
+
+The queue is mirrored from `agent:backlog` priority order, so I reordered the backlog rather than hand-writing queue lines. Two things were wrong with the old order:
+
+1. **Dependency order was inverted.** `#tmo-reconcile-binder` sat above `#tmo-orphan-reconcile-exec`, but the orphan executor has to run first — the binder reconciles against a roster the executor populates.
+2. **Operator-gated items sat above agent-drainable ones.** `#tmo-sandbox-purge-apply` (waiting on your go, permanent TMO deletes with no undo) was the head, which stalls the drain on a human gate before any autonomous work runs.
+
+New priority order — agent-drainable first, then context, then the operator-gated cluster:
+
+| # | Item | Drainable |
+|---|------|-----------|
+| 1 | `#tmo-orphan-reconcile-exec` | yes |
+| 2 | `#tmo-reconcile-binder` | yes (after 1) |
+| 3 | `#efs-do-hibernation` | yes |
+| 4 | `#efs-prod-secret-parity` | yes |
+| 5 | `#tmo-orphan-cache` | context only (superseded by 1) |
+| 6 | `#tmo-sandbox-purge-apply` | operator go |
+| 7 | `#efs-cf-account-custody` | operator |
+| 8 | `#efs-prod-seed` | operator (after 7) |
+| 9 | `#efs-dns-cutover` | operator |
+| 10 | `#tmo-getlender-verify` | operator |
+
+The launch-gating cluster (7 → 8 → 9) is sequenced deliberately: custody moves the account, then seed once into the new account, then cut DNS over. Doing it in any other order means migrating the data twice.
+
+One caveat on this cycle: preflight reported `queue_maintenance_not_persisted` — editor authority was in `editor_attached_model_missing`, so the computed queue mirror did not land. The backlog reorder in this write is the durable change; the queue text re-syncs from it on the next preflight.
+<!-- agent:boundary:ba92f7a9 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#vesting-gap-admin-queue]~~
-- do [#tmo-sandbox-purge-apply]
-- do [#tmo-reconcile-binder]
-- do [#tmo-orphan-reconcile-exec]
-- do [#tmo-orphan-cache]
-- do [#efs-do-hibernation]
-- do [#efs-prod-seed]
-- do [#efs-cf-account-custody]
-- do [#efs-prod-secret-parity]
-- do [#efs-dns-cutover]
-/goal Implement backlog item(s): #st95
-- do [#tmo-getlender-verify]
+- Add backlog items onto the queue in priority order
+- do [#vesting-gap-admin-queue]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: `TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply` deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). Held pending operator go because DeleteLoan is permanent with no TMO-side undo. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code and cannot be selected. Dry run verified 2026-07-18: purge=16 keep=2. Recipe: src/equityfundingsource-dev/docs/TMO/delete-loan.md.
-- [ ] [#tmo-reconcile-binder] Binder for the #tmo-reconcile-auto matcher: read tmo_unmatched_fundings + the lender/vesting roster (users.lender_account, lender_vestings.tmo_lender_account, funds.tmo_funding_rec_id), run funding_match_all_, apply auto_bind decisions through the existing admin_tmo_unmatched_funding_bind_POST_ path, and persist review/ambiguous candidate rankings so the admin queue opens pre-ranked instead of blank. Per PRD D4 the bind reconciles EFS to TMO (the TMO funding wins on conflict) and must record what it overrode. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#tmo-orphan-reconcile-exec] Executor for the #tmo-orphan-as-fundings planner: read the orphan tmo_cache_entities rows + LOS.svc/GetLoans + GetLoanFundings + the EFS funds/vesting roster, run orphan_reconcile_plan_, and apply it. reconcile_cache and tombstone are EFS-local and unguarded; push_funding and create_loan_then_funding (isolated by orphan_plan_writes_) need explicit opt-in and, in production, the EFS->TMO push gate (#dzmm/#7a4d). Sandbox execution is NOT gated — run it there first against the clean slate bin/tmo-sandbox-purge.ts leaves. Mirror the sandbox guard from bin/tmo-sandbox-purge.ts: the TMO token is identical across environments and only the Database header selects one. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
-- [ ] [#tmo-orphan-cache] SUPERSEDED 2026-07-18 by #tmo-orphan-as-fundings per operator directive — do NOT prune/tombstone these rows as the default. The 18 orphan tmo_cache_entities 'loan' rows are the reconciliation corpus: push them into TMO as fundings and tombstone only pure debris with no EFS deal. Kept as context for the loan-number list (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) and for the note that admin_tmo_loans_by_loan_number_DELETE_ does NOT cover them — it only disables EFS 'loans' rows and never touches tmo_cache_entities. Execute via #tmo-orphan-reconcile-exec. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
+- [ ] [#tmo-reconcile-binder] Binder for the #tmo-reconcile-auto matcher: read tmo_unmatched_fundings + the lender/vesting roster (users.lender_account, lender_vestings.tmo_lender_account, funds.tmo_funding_rec_id), run funding_match_all_, apply auto_bind decisions through the existing admin_tmo_unmatched_funding_bind_POST_ path, and persist review/ambiguous candidate rankings so the admin queue opens pre-ranked instead of blank. Per PRD D4 the bind reconciles EFS to TMO (the TMO funding wins on conflict) and must record what it overrode. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
-- [ ] [#efs-prod-seed] [operator-verify] Decide whether the production Cloudflare environment should be seeded from staging before launch. Production D1 (equityfundingsource-production) is schema-complete and empty; staging holds 33 users / 7 loans / 7 deals. If that is real business data it must be exported+imported once, immediately before cutover (a second import collides on primary keys), and R2_DOCUMENTS must be copied separately or uploaded documents 404 in production despite their D1 rows existing. Recipe: src/equityfundingsource-dev/docs/deploy.md 'Seeding production from staging'. Blocked on the operator confirming real-vs-test data. See #efs-cf-account-custody — if custody moves first, seed once after the move. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
-- [ ] [#efs-cf-account-custody] [operator-verify] Move EFS to its own Cloudflare account. Both environments currently live in Brian's personal account (1e7e194ff8da4ad9e40ce041aea84f76), which also hosts unrelated projects. STEP 1 (Judith, instructions drafted 2026-07-18): sign up at dash.cloudflare.com/sign-up with a SHARED EFS address (becomes billing + recovery contact), verify the email (hard prerequisite — invites and 2FA both fail without it), invite Brian as Super Administrator via Manage Account -> Members -> Invite, enable 2FA, have a company card ready for the R2 checkout. Super Administrator is required, not just Workers Platform Admin, because R2 activation is a purchase and the deploy pipeline needs an account-owned API token. STEP 2 (Brian): D1 databases and R2 buckets cannot move between accounts — create them in the new account, update the ids under [env.production] in wrangler.toml, export+import D1, copy R2, re-push secrets (per-account AND per-environment), then repoint DNS. Sequencing: do this before #efs-prod-seed to migrate the data once instead of twice. Advances #efs-dns-cutover. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#efs-prod-secret-parity] Production is missing secrets staging has and .dev.vars cannot supply (values are only in Cloudflare and cannot be read back out): DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN gate document sync. AUTH_SECRET, ADMIN_GLOBAL_PASSWORD, CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ACCOUNT_ID are already set (2026-07-18); TMO_API_TOKEN / TMO_DATABASE are intentionally unset so production runs split (#tmo-split-launch). AWS_*/S3_BUCKET_NAME are local bin/assets-*.sh only and are NOT needed in the worker. Compare with 'bun run cf:secrets:list' vs 'bun run cf:secrets:list:production'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
+- [ ] [#tmo-orphan-cache] SUPERSEDED 2026-07-18 by #tmo-orphan-as-fundings per operator directive — do NOT prune/tombstone these rows as the default. The 18 orphan tmo_cache_entities 'loan' rows are the reconciliation corpus: push them into TMO as fundings and tombstone only pure debris with no EFS deal. Kept as context for the loan-number list (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) and for the note that admin_tmo_loans_by_loan_number_DELETE_ does NOT cover them — it only disables EFS 'loans' rows and never touches tmo_cache_entities. Execute via #tmo-orphan-reconcile-exec. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
+- [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: `TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply` deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). Held pending operator go because DeleteLoan is permanent with no TMO-side undo. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code and cannot be selected. Dry run verified 2026-07-18: purge=16 keep=2. Recipe: src/equityfundingsource-dev/docs/TMO/delete-loan.md.
+- [ ] [#efs-cf-account-custody] [operator-verify] Move EFS to its own Cloudflare account. Both environments currently live in Brian's personal account (1e7e194ff8da4ad9e40ce041aea84f76), which also hosts unrelated projects. STEP 1 (Judith, instructions drafted 2026-07-18): sign up at dash.cloudflare.com/sign-up with a SHARED EFS address (becomes billing + recovery contact), verify the email (hard prerequisite — invites and 2FA both fail without it), invite Brian as Super Administrator via Manage Account -> Members -> Invite, enable 2FA, have a company card ready for the R2 checkout. Super Administrator is required, not just Workers Platform Admin, because R2 activation is a purchase and the deploy pipeline needs an account-owned API token. STEP 2 (Brian): D1 databases and R2 buckets cannot move between accounts — create them in the new account, update the ids under [env.production] in wrangler.toml, export+import D1, copy R2, re-push secrets (per-account AND per-environment), then repoint DNS. Sequencing: do this before #efs-prod-seed to migrate the data once instead of twice. Advances #efs-dns-cutover. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
+- [ ] [#efs-prod-seed] [operator-verify] Decide whether the production Cloudflare environment should be seeded from staging before launch. Production D1 (equityfundingsource-production) is schema-complete and empty; staging holds 33 users / 7 loans / 7 deals. If that is real business data it must be exported+imported once, immediately before cutover (a second import collides on primary keys), and R2_DOCUMENTS must be copied separately or uploaded documents 404 in production despite their D1 rows existing. Recipe: src/equityfundingsource-dev/docs/deploy.md 'Seeding production from staging'. Blocked on the operator confirming real-vs-test data. See #efs-cf-account-custody — if custody moves first, seed once after the move. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#efs-dns-cutover] [operator-verify] equityfundingsource.com does not resolve: no A/AAAA record, nameservers still ns1/2/3.dreamhost.com, and wrangler.toml declares no route or custom_domain. The worker is live and correct at equityfundingsource.brian-takita.workers.dev. Needs registrar + Cloudflare access: move the zone to Cloudflare (or add a CNAME at the registrar), add the custom domain / route to wrangler.toml, verify /login/access-callback still works, and allow for NS propagation. This is the remaining gate on the weekend launch. Advances #tcb0 / #efs-cutover-sso-plan. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#tmo-getlender-verify] [operator-verify] Confirm the #tmo-getlender-confirm LSS path against real TMO data: nothing in production is currently in_lss && !in_los, so GET /LSS.svc/GetLender/:Account has never returned a record in prod — the confirmed_no_funding state is covered by tests and degrades safely on failure, but its success path is unobserved. Needs an operator to name a TMO lender account created but never funded; map a vesting to it, open the reconcile modal, and confirm it reads 'In TMO · no funding yet' rather than 'Unconfirmed in TMO'. Spec: src/equityfundingsource-dev/docs/TMO/get-lender.md. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 <!-- /agent:backlog -->

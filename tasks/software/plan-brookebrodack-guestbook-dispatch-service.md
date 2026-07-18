@@ -121,14 +121,16 @@ Rules:
 - **One sandbox per request, not per plugin.** The process is ephemeral, so an
   injection carried by entry *n* has nothing to survive into entry *n+1*. This
   is the property a per-plugin long-lived process would lose.
-- **Rootless Podman is the default runtime**, with bwrap as an opt-in
-  low-latency profile and Docker for parity only. Measured startup: bwrap 2 ms,
-  Docker 139 ms — but plugins run *concurrently*, so that is paid once per
-  request, not per plugin (~5% of a 3 s deadline). Podman buys a default seccomp
-  profile (bwrap has none unless authored) and OCI-pinned dependencies (a bwrap
-  plugin runs against the host `/usr`, putting host libraries in the trust
-  boundary). bwrap remains right for `plugin-rules`. Network denial verified
-  empirically: without `--share-net` the sandbox resolves nothing.
+- **bwrap is the default runtime** (operator choice), with Podman for plugins
+  carrying a real dependency tree and Docker for parity only. Measured startup:
+  bwrap 2 ms, Docker 139 ms. Podman is the stronger sandbox *as shipped* —
+  default seccomp, native cgroup limits, OCI-pinned dependencies — but the gap
+  is closable rather than categorical (bwrap takes a seccomp BPF filter; cgroups
+  come from a transient systemd scope; static plugin binaries close most of the
+  pinning gap), while bwrap's 70× startup advantage is not closable the other
+  way. **The seccomp filter is the outstanding condition on that default.**
+  Network denial verified empirically: without `--share-net` the sandbox
+  resolves nothing.
 - **The host is deliberately NOT containerized.** It spawns the sandboxes, so
   nesting it under Podman needs a privileged container or a mounted container
   socket — both hand the outer container escape-equivalent power and weaken the

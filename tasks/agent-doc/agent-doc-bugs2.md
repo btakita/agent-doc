@@ -39,13 +39,33 @@ done
 Compacted content:
 - Archived 17 response topic(s): editor save-flush authority and agent-doc churn; interrupted Claude turn and Compact Exchange; Compact Exchange, closeout churn, and plugin-generation drift; 14 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): #z5ar; IPC proof diagnostic (interrupted-cycle recovery); IPC ...
-<!-- agent:boundary:148c2cd9 -->
+
+❯ 🚧 JB `Compact Exchange` error as I was deleting iterms from the queue while the compact was running:
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: [compact] INTERRUPTED: compaction dropped item(s) from non-exchange component(s) [queue 44→32] in /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md (stage=post_write). Compaction must only archive/truncate the exchange; a singleton list component lost a whole tracked item (#compactdropitem — worse sibling of #compactqattr). The compact output was NOT committed. Re-run compaction; if it recurs, a concurrent stale-supervisor CRDT merge is interleaving over the written file — refresh the stale supervisor without discarding the live turn (`agent-doc admin recycle` or `agent-doc session restart-supervisor /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md`) before retrying.
+```
+❯ 🚧 #spec-test-build-install-commit-push
+
+### Re: Compact Exchange concurrent queue edits and recovered closeout — gpt-5
+
+Recovered the response that the interrupted cycle failed to add. The Compact Exchange data-loss class is fixed and packaged as agent-doc 0.35.3.
+
+The load-bearing invariant is now explicit: compaction owns only the archiveable exchange prefix. Queue, backlog, review, icebox, and the post-boundary exchange prompt tail remain operator-authoritative sibling cells. `CompactDocumentTargets::rebase_onto_authoritative_siblings` owns the compact-side rebase, while compact-projection supersession predicates in `agent-doc-document::compact_projection`, applied by `agent-doc-document-realtime-io`, own retirement of stale projections.
+
+The regression matrix covers sibling queue deletion rebased into both live and committed output; post-boundary prompt survival in the live document while remaining outside the compact snapshot; same-cell drift failing closed; and retirement of a stale compact composition only when a newer valid binary compact plus exact canonical/disk/editor authority proves supersession. Unrelated sources and malformed or custom summaries remain fail-closed. Those fixes landed in `fac884217` (independent-cell preservation), `fc7450d99` (transient prompt-marker cleanup), and `a48212daa` (exact stale-projection retirement).
+
+The required full-suite run initially exposed a separate fast-startup race: concurrent controller/status processes could collide while switching `state.db` to WAL mode, leaving a newly captured response unprojected. Version 0.35.3 retries only SQLite `BUSY`/`LOCKED` schema initialization against the same authoritative database within the existing timeout; every other error still fails closed, and a 16-worker test proves convergence without replacing the ledger. The obsolete force-disk rollback tests were also removed from the generic ignored-test sweep, and deterministic SimWorld coverage now asserts captured authority survives every injected closeout interruption.
+
+Verification is green: focused compact/state tests; the CI regression pair; `make tmux-ci`; and `make check` with 7,581/7,581 tests passed, 240 intentionally skipped, plus the formal model checks. `make install-full` installed agent-doc 0.35.3 and JetBrains plugin 0.2.276. The public-repo private-name scan and `git diff --check` are clean.
+
+Commits are `373e241a9` in `src/agent-doc` and `56f5998cf` in the workspace. Per the compound closeout contract, their remote push follows this binary-owned session-document commit. Unrelated staged and working-tree changes were left untouched.
+<!-- agent:boundary:e71225cc -->
 <!-- /agent:exchange -->
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" -->
 - ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#compactcrdtretry]
+- ~~📌 do [#compactcrdtretry]~~
 - ⏭️ 📌 do [#capturebacklogatomic]
 - ⏭️ 📌 do [#opcapturelazily]
 - ⏭️ 📌 do [#jbtsiftnosub2verify]
@@ -75,11 +95,11 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ~~~
 - 📌 do [#5qjj]
 - ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#compactcrdtretry]
+- ~~📌 do [#compactcrdtretry]~~
 - ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#compactcrdtretry]
+- ~~📌 do [#compactcrdtretry]~~
 - ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#compactcrdtretry]
+- ~~📌 do [#compactcrdtretry]~~
 - ⏭️ 📌 do [#capturebacklogatomic]
 - ⏭️ 📌 do [#opcapturelazily]
 <!-- /agent:queue -->
@@ -147,13 +167,13 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
 - [ ] [#5qjj] steeringmirrorverify|[operator-verify] Restart IntelliJ IDEA 2026.1 to activate plugin 0.2.258 (if stale bytecode appears, uninstall, restart, reinstall the signed local zip, and restart); during an active turn, make multiple exchange edits and verify the JetBrains banner and VS Code status item report the aggregate count/full hover, then run agent-doc once after editing and confirm the handoff queues without submitting a partial edit.
 - [ ] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.
 - [ ] [#crde] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978030079-4 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
   evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978020608-2 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof)
 - [ ] [#steeringobservableset] #agent-doc-bug Phase 6 durable graph adoption: back RealtimeSteeringSet with a lazily reactive OBSERVABLE SET (not a drain-one-head QueueCell) keyed on the body-aware identity (Phase 3.1), reconciled on the reliable-sync plane; session-check reads set-emptiness (all directives settled) instead of re-diffing HEAD↔buffer. Plan: src/agent-doc/tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md (Phase 6). [recommended]
 - [ ] [#jblocalhistverify] [operator-verify] #jblocalhistcrash live proof: install editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.232.zip (uninstall -> restart -> install -> restart), then with a corrupt Local History store trigger Run Agent Doc and confirm dispatch proceeds (no aborting AssertionError) and idea/ops log shows active_document_save_failed then normal sendToTerminal.
-- [ ] [#compactcrdtretry] [focused-cycle] #agent-doc-bug JB Compact Exchange refused (CPC relay, retry_crdt_merge). The ZERO-live-editor variant is now fixed by #stale-lease-cpc-authority (0.34.75, compact converge shares apply_cpc_write). REMAINING: the live-editor concurrent-edit case (operator typing while a real editor is attached) still needs a bounded CAS retry around compact converge with retry-idempotent archive creation; fail closed with an actionable document-changed-during-compaction message when the compacted component drifted. Distinct from #jbcompactcommit. Plan: tasks/agent-doc/plan-compact-crdt-merge-retry.md
 - [ ] [#capturebacklogatomic] [focused-cycle] #agent-doc-bug A finalize that captures the response but fails before recording backlog mutations strands in response_captured with requires_backlog_capture=true + pending_added_this_cycle=false; preflight then refuses closeout and errors "still response_captured after recovery", forcing a manual mv-aside because replaying the capture re-trips the backlog gate. Fix: capture the whole cycle intent (response + backlog mutations) atomically, and let preflight supersede an uncommittable capture instead of looping. Exposed by this turn. Plan: tasks/agent-doc/plan-capture-includes-backlog-mutations.md
 - [ ] [#opcapturelazily] [focused-cycle] #sidecarstate op-capture (.agent-doc/op-capture/<doc-hash>.json, agent-doc-op-capture-io #qnodemerge4) is a bespoke JSON sidecar source of truth: durable ordered EditorOps + base_hash that preflight repair / CRDT merge REPLAY as authority then consume+clear (base-hash-guarded so safe). Because it is a separate replay source, clearing captures/ + state/cycles/ aside did not stop the churn this turn. Migrate onto the lazily state backbone (co-located with cycle-phase state) so captured-op authority is one coherent atomically-clearable model. 96-ref cross-crate surface; folds into #sidecarstate. Plan: tasks/agent-doc/plan-op-capture-lazily-state-migration.md
 - [ ] [#jbtsiftnosub2verify] [operator-verify] #jbtsiftnosub2 live proof (0.34.74): with NO tmux pane for a doc, trigger JB Run Agent Doc and confirm the reopen trigger SUBMITS (or auto-resubmits) instead of sitting typed-but-unsubmitted; ops.log shows fresh_route_stranded_trigger_resubmit + fresh_route_start_acknowledged_after_resubmit; a stuck submit now fails closed with a visible FreshStart startup-miss.

@@ -924,6 +924,7 @@ mod th {
                     pending_add_after: Vec::new(),
                     pending_add_before: Vec::new(),
                     pending_add_back: Vec::new(),
+                    backlog_queue_placement: None,
                     icebox_add: Vec::new(),
                     icebox_add_after: Vec::new(),
                     icebox_add_before: Vec::new(),

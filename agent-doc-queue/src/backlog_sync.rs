@@ -357,6 +357,43 @@ pub fn collect_after_deps(
     deps
 }
 
+/// Where a follow-up item created this cycle lands in the queue.
+///
+/// `Prepend` is the default: a follow-up filed by the turn that just ran is the
+/// most task-relevant work in the document, so it belongs at the head rather
+/// than behind the whole existing backlog mirror.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FollowUpQueuePlacement {
+    #[default]
+    Prepend,
+    Append,
+}
+
+impl FollowUpQueuePlacement {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "prepend" | "front" | "top" => Some(Self::Prepend),
+            "append" | "back" | "tail" | "bottom" => Some(Self::Append),
+            _ => None,
+        }
+    }
+
+    pub fn sync_mode(self) -> BacklogQueueSyncMode {
+        match self {
+            Self::Prepend => BacklogQueueSyncMode::Prepend,
+            Self::Append => BacklogQueueSyncMode::Append,
+        }
+    }
+
+    /// Operator-facing verb for closeout logs.
+    pub fn log_verb(self) -> &'static str {
+        match self {
+            Self::Prepend => "prepended",
+            Self::Append => "appended",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -725,5 +762,26 @@ mod tests {
         assert_eq!(deps.get("a"), Some(&vec!["root".to_string()]));
         assert_eq!(deps.get("c"), Some(&vec!["a".to_string()]));
         assert!(!deps.contains_key("b"));
+    }
+
+    #[test]
+    fn placement_parses_operator_spellings() {
+        assert_eq!(
+            FollowUpQueuePlacement::parse("prepend"),
+            Some(FollowUpQueuePlacement::Prepend)
+        );
+        assert_eq!(
+            FollowUpQueuePlacement::parse("TOP"),
+            Some(FollowUpQueuePlacement::Prepend)
+        );
+        assert_eq!(
+            FollowUpQueuePlacement::parse("append"),
+            Some(FollowUpQueuePlacement::Append)
+        );
+        assert_eq!(FollowUpQueuePlacement::parse("sideways"), None);
+        assert_eq!(
+            FollowUpQueuePlacement::default(),
+            FollowUpQueuePlacement::Prepend
+        );
     }
 }

@@ -21,6 +21,11 @@ pub struct CommandOptions {
     pub pending_add_before: Vec<String>,
     /// `#ah0s`: tail-insert items (`--pending-add-back` / `--pending-append`).
     pub pending_add_back: Vec<String>,
+    /// `#queueatcreate`: where items created this cycle land in `agent:queue`
+    /// when the backlog opts in with a `queue` attribute — `prepend` (default,
+    /// the head) or `append`. Held as the raw operator spelling so this options
+    /// struct stays dependency-free; the runtime parses it.
+    pub backlog_queue_placement: Option<String>,
     pub icebox_add: Vec<String>,
     /// Repeated `<id> <text>` pairs - insert after the anchor id in `agent:icebox`.
     pub icebox_add_after: Vec<String>,
@@ -89,6 +94,7 @@ impl CommandOptions {
             pending_add_after: Vec::new(),
             pending_add_before: Vec::new(),
             pending_add_back: Vec::new(),
+            backlog_queue_placement: None,
             icebox_add: Vec::new(),
             icebox_add_after: Vec::new(),
             icebox_add_before: Vec::new(),

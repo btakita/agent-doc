@@ -562,6 +562,7 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
         pending_add_after,
         pending_add_before,
         pending_add_back,
+        backlog_queue_placement: optional_string_arg(args, "backlog_queue_placement")?,
         icebox_add: string_vec_arg(args, "icebox_add")?,
         icebox_add_after: string_vec_arg(args, "icebox_add_after")?,
         icebox_add_before: string_vec_arg(args, "icebox_add_before")?,

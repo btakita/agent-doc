@@ -1707,15 +1707,20 @@ fn run_command_inner(
 
     // `#pendingaddqueuesync`: `--pending-add*` mutations are applied during
     // write/finalize, after preflight's backlog→queue sync has already run.
-    // Once the current head has been consumed, append same-cycle pending adds
+    // Once the current head has been consumed, enqueue same-cycle pending adds
     // into active go-mode backlog queues so captured follow-up work is not
-    // stranded outside the drain.
+    // stranded outside the drain. `#queueatcreate`: placement defaults to the
+    // queue head so a follow-up filed by this turn is picked up next, rather
+    // than buried behind the existing queue.
     if write_result.is_ok() && commit_mode != CommitMode::None {
+        let placement = follow_up_queue_placement(&options)?;
         match commit_mode {
             CommitMode::None => {}
             CommitMode::BestEffort => {
                 if let Err(e) =
-                    agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(file)
+                    agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(
+                        file, placement,
+                    )
                 {
                     eprintln!(
                         "[queue] warning: same-cycle pending-add queue sync failed: {}",
@@ -1724,7 +1729,9 @@ fn run_command_inner(
                 }
             }
             CommitMode::Required => {
-                agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(file)?;
+                agent_doc_preflight_io::sync_same_cycle_pending_adds_into_go_queue(
+                    file, placement,
+                )?;
             }
         }
     }
@@ -1750,6 +1757,43 @@ fn run_command_inner(
         (Ok(()), Err(commit_err)) => Err(commit_err),
         (Err(write_err), Err(commit_err)) => Err(write_err.context(commit_err.to_string())),
     }
+}
+
+/// `#queueatcreate`: resolve where items created this cycle land in the queue.
+///
+/// An explicit `--backlog-queue-placement` always wins. Otherwise the queue
+/// mirrors the *backlog insertion intent* the agent already expressed:
+///
+/// - front-inserting flags (`--backlog-add`, `--backlog-add-gated`,
+///   `--backlog-add-after/-before`) mean "this is the next most relevant work",
+///   so the queue head is the matching placement. This is the common case and
+///   the one that was broken: appending buried fresh follow-ups behind the whole
+///   queue, where they were effectively never picked up.
+/// - `--backlog-add-back` explicitly means "put this at the tail". Prepending it
+///   to the queue would contradict the flag, so a back-insert-only cycle appends.
+///
+/// A mixed cycle prefers the head: the front-inserted items are the ones the
+/// agent marked as most relevant, and the queue skips ids it already holds.
+fn follow_up_queue_placement(
+    options: &CommandOptions,
+) -> Result<agent_doc_queue::backlog_sync::FollowUpQueuePlacement> {
+    use agent_doc_queue::backlog_sync::FollowUpQueuePlacement;
+    if let Some(raw) = options.backlog_queue_placement.as_deref() {
+        return FollowUpQueuePlacement::parse(raw).with_context(|| {
+            format!("--backlog-queue-placement expects `prepend` or `append`, got: {raw}")
+        });
+    }
+    let front_inserts = !options.pending_add.is_empty()
+        || !options.pending_add_gated.is_empty()
+        || !options.pending_add_after.is_empty()
+        || !options.pending_add_before.is_empty()
+        || !options.pending_add_to.is_empty();
+    let back_inserts_only = !options.pending_add_back.is_empty() && !front_inserts;
+    Ok(if back_inserts_only {
+        FollowUpQueuePlacement::Append
+    } else {
+        FollowUpQueuePlacement::Prepend
+    })
 }
 
 fn active_capture_response_body_for_write(file: &Path) -> Result<String> {

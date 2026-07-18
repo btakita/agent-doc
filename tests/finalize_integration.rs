@@ -2497,7 +2497,7 @@ fn queue_doc_content_with_dispatch() -> String {
 }
 
 #[test]
-fn finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head() {
+fn finalize_pending_add_prepends_to_active_go_backlog_queue_after_consuming_head() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
@@ -2529,7 +2529,7 @@ fn finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head(
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "[write] queue: appended 1 same-cycle pending-add id(s)",
+            "[write] queue: prepended 1 same-cycle pending-add id(s)",
         ));
 
     let committed = head_blob(tmp.path());
@@ -2539,18 +2539,20 @@ fn finalize_pending_add_appends_to_active_go_backlog_queue_after_consuming_head(
     );
     let tail = committed.find("do [#tail]").unwrap();
     let fresh = committed.find("do [#fresh]").unwrap();
+    // `#queueatcreate`: the follow-up this turn filed becomes the NEXT head, not
+    // work parked behind the existing tail where it never surfaces.
     assert!(
-        tail < fresh,
-        "same-cycle pending add must append behind existing live queue tail:\n{committed}"
+        fresh < tail,
+        "same-cycle pending add must land at the queue head:\n{committed}"
     );
     assert!(
         committed.contains("~~do [#head]~~"),
-        "current head should still be consumed before appending fresh work:\n{committed}"
+        "the consumed head must stay struck — prepending must not resurrect it:\n{committed}"
     );
 }
 
 #[test]
-fn finalize_pending_add_multiple_flags_keep_cli_order_in_active_go_queue() {
+fn finalize_pending_add_multiple_flags_keep_cli_order_at_active_go_queue_head() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".agent-doc/snapshots")).unwrap();
     let doc = tmp.path().join("session.md");
@@ -2586,7 +2588,7 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_in_active_go_queue() {
         .assert()
         .success()
         .stderr(predicates::str::contains(
-            "[write] queue: appended 3 same-cycle pending-add id(s)",
+            "[write] queue: prepended 3 same-cycle pending-add id(s)",
         ));
 
     let committed = head_blob(tmp.path());
@@ -2615,9 +2617,11 @@ fn finalize_pending_add_multiple_flags_keep_cli_order_in_active_go_queue() {
     let first = queue.find("do [#first]").unwrap();
     let second = queue.find("do [#second]").unwrap();
     let third = queue.find("do [#third]").unwrap();
+    // `#queueatcreate`: CLI order is preserved, now at the HEAD — the follow-ups
+    // this turn filed are the next work, not work queued behind everything.
     assert!(
-        tail < first && first < second && second < third,
-        "same-cycle queue mirror must preserve pending-add CLI order after the existing tail:\n{queue}"
+        first < second && second < third && third < tail,
+        "same-cycle queue mirror must preserve pending-add CLI order at the queue head:\n{queue}"
     );
 }
 

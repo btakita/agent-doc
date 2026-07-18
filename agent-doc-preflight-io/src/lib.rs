@@ -4002,10 +4002,21 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
 /// Preflight's normal backlog→queue sync runs before `finalize` / `write`
 /// applies `--pending-add*` mutations, so a go-mode document can commit a fresh
 /// backlog item without a matching queue head. This helper runs after closeout
-/// queue consumption, appending only ids that were explicitly recorded as
+/// queue consumption, enqueuing only ids that were explicitly recorded as
 /// same-cycle pending additions. It never applies a full priority/sync recompute,
 /// so it cannot move the head that the current response just consumed.
-pub fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<Vec<String>> {
+///
+/// `#queueatcreate`: placement is caller-chosen and defaults to the queue HEAD.
+/// This used to hardcode `Append`, which buried every follow-up behind the whole
+/// existing queue — observed live, where four follow-ups filed in one turn sat
+/// invisible behind a 112-line queue and the operator re-added them by hand. A
+/// follow-up filed by the turn that just ran is, by construction, the most
+/// task-relevant work in the document, so the head is the right default; agents
+/// that deliberately do not want to preempt the current drain pass `Append`.
+pub fn sync_same_cycle_pending_adds_into_go_queue(
+    file: &Path,
+    placement: agent_doc_queue::backlog_sync::FollowUpQueuePlacement,
+) -> Result<Vec<String>> {
     let added_this_cycle = agent_doc_cycle_state_io::pending_added_ids(file);
     if added_this_cycle.is_empty() {
         return Ok(Vec::new());
@@ -4117,7 +4128,7 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<Vec<Str
     let Some(synced) = agent_doc_queue::document_queue::sync_backlog_into_queue(
         &entries,
         &backlog_ids,
-        agent_doc_queue::document_queue::BacklogQueueSyncMode::Append,
+        placement.sync_mode(),
     ) else {
         return Ok(Vec::new());
     };
@@ -4147,7 +4158,8 @@ pub fn sync_same_cycle_pending_adds_into_go_queue(file: &Path) -> Result<Vec<Str
     )?;
     adopt_edited_queue_head_into_snapshot(file, &current_content);
     eprintln!(
-        "[write] queue: appended {} same-cycle pending-add id(s) into active go queue",
+        "[write] queue: {} {} same-cycle pending-add id(s) into active go queue",
+        placement.log_verb(),
         synced_ids.len()
     );
     Ok(synced_ids)
@@ -6298,10 +6310,14 @@ mod tests {
         );
     }
     #[test]
-    fn closeout_sync_appends_same_cycle_pending_add_in_go_mode() {
+    fn closeout_sync_prepends_same_cycle_pending_add_in_go_mode() {
         // #pendingaddqueuesync: pending-add writes happen after preflight queue
-        // maintenance, so closeout appends recorded same-cycle ids once the
+        // maintenance, so closeout enqueues recorded same-cycle ids once the
         // current queue head has been consumed.
+        //
+        // `#queueatcreate`: placement defaults to the HEAD. This previously
+        // appended, which buried a fresh follow-up behind the whole queue and
+        // meant it was effectively never picked up.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -6332,15 +6348,19 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
 
-        let synced = sync_same_cycle_pending_adds_into_go_queue(&doc).unwrap();
+        let synced = sync_same_cycle_pending_adds_into_go_queue(
+            &doc,
+            agent_doc_queue::backlog_sync::FollowUpQueuePlacement::default(),
+        )
+        .unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert_eq!(synced, vec!["fresh".to_string()]);
         let head = updated.find("do [#head]").unwrap();
         let fresh = updated.find("do [#fresh]").unwrap();
         assert!(
-            head < fresh,
-            "same-cycle add must append behind the current queue head:\n{updated}"
+            fresh < head,
+            "a same-cycle follow-up must land at the queue head by default:\n{updated}"
         );
         let snap = agent_doc_snapshot_io::load_document_baseline(&doc)
             .unwrap()
@@ -6350,6 +6370,56 @@ mod tests {
             "snapshot queue region must include the appended closeout head:\n{snap}"
         );
     }
+    /// `#queueatcreate`: agents that deliberately do not want a follow-up to
+    /// preempt the current drain pass `Append`.
+    #[test]
+    fn closeout_sync_appends_same_cycle_pending_add_when_placement_is_append() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue priority go -->\n",
+            "- do [#head]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog priority queue -->\n",
+            "- [ ] [#head] already running\n",
+            "- [ ] [#fresh] same-cycle follow-up\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
+
+        let synced = sync_same_cycle_pending_adds_into_go_queue(
+            &doc,
+            agent_doc_queue::backlog_sync::FollowUpQueuePlacement::Append,
+        )
+        .unwrap();
+        let updated = std::fs::read_to_string(&doc).unwrap();
+
+        assert_eq!(synced, vec!["fresh".to_string()]);
+        let head = updated.find("do [#head]").unwrap();
+        let fresh = updated.find("do [#fresh]").unwrap();
+        assert!(
+            head < fresh,
+            "explicit append placement must keep the follow-up behind the head:\n{updated}"
+        );
+    }
+
     #[test]
     fn closeout_sync_holds_same_cycle_pending_add_without_go_mode() {
         // The old amplification guard still applies to a plain persisted-active
@@ -6383,7 +6453,11 @@ mod tests {
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
         agent_doc_cycle_state_io::record_pending_added_ids(&doc, &["fresh".to_string()]).unwrap();
 
-        let synced = sync_same_cycle_pending_adds_into_go_queue(&doc).unwrap();
+        let synced = sync_same_cycle_pending_adds_into_go_queue(
+            &doc,
+            agent_doc_queue::backlog_sync::FollowUpQueuePlacement::default(),
+        )
+        .unwrap();
         let updated = std::fs::read_to_string(&doc).unwrap();
 
         assert!(synced.is_empty());

@@ -1618,6 +1618,12 @@ struct WriteArgs {
         alias = "pending-append"
     )]
     pending_add_back: Vec<String>,
+    /// Where items created this cycle land in `agent:queue` when the backlog carries a `queue`
+    /// attribute: `prepend` (default — the queue head, since a follow-up filed by the turn that
+    /// just ran is the most task-relevant work) or `append` (the tail, for work that should not
+    /// preempt the current drain).
+    #[arg(long = "backlog-queue-placement", value_name = "prepend|append")]
+    backlog_queue_placement: Option<String>,
     /// Add a new icebox item at the beginning of the list (repeatable).
     #[arg(long = "icebox-add")]
     icebox_add: Vec<String>,
@@ -4152,6 +4158,7 @@ fn try_main() -> anyhow::Result<()> {
                     pending_add_after: args.pending_add_after,
                     pending_add_before: args.pending_add_before,
                     pending_add_back: args.pending_add_back,
+                    backlog_queue_placement: args.backlog_queue_placement,
                     icebox_add: args.icebox_add,
                     icebox_add_after: args.icebox_add_after,
                     icebox_add_before: args.icebox_add_before,
@@ -4210,6 +4217,7 @@ fn try_main() -> anyhow::Result<()> {
                     pending_add_after: args.pending_add_after,
                     pending_add_before: args.pending_add_before,
                     pending_add_back: args.pending_add_back,
+                    backlog_queue_placement: args.backlog_queue_placement,
                     icebox_add: args.icebox_add,
                     icebox_add_after: args.icebox_add_after,
                     icebox_add_before: args.icebox_add_before,

@@ -365,6 +365,16 @@ pub fn run_with_options(
     codex_final_gate: bool,
     effects: &impl SessionCheckEffects,
 ) -> Result<()> {
+    // `#sccurrentpass`: one document version per sweep. See
+    // `with_current_document_pass`.
+    crate::with_current_document_pass(|| run_with_options_inner(file, codex_final_gate, effects))
+}
+
+fn run_with_options_inner(
+    file: &Path,
+    codex_final_gate: bool,
+    effects: &impl SessionCheckEffects,
+) -> Result<()> {
     if let Some(message) =
         agent_doc_controller_io::project_controller::recycle_stale_supervisor_for_turn_stage(
             file,
@@ -377,12 +387,16 @@ pub fn run_with_options(
     // protocol boundary markers. Collapse that narrow, lossless transient
     // before the generic gate so integrity does not block its own recovery.
     self_heal_response_replay_duplication(file, effects)?;
+    // Both self-heals can rewrite the document, so the pass memo must re-read
+    // afterwards instead of serving the pre-repair text (`#sccurrentpass`).
+    crate::invalidate_current_document_pass(file);
     // A retained delivery can be validly reconstructable even when a stale
     // post-replacement IPC delta duplicated the exchange. Repair that known,
     // evidence-backed overapplication before the generic integrity gate;
     // otherwise the duplicate boundary marker prevents the recovery routine
     // that knows how to remove it from ever running.
     self_heal_late_ipc_overapplication(file, effects)?;
+    crate::invalidate_current_document_pass(file);
     // `session-check` is the final proof boundary. It must not report a clean
     // cycle for a document whose component tree cannot be parsed, regardless
     // of lifecycle sidecar state.
@@ -400,11 +414,14 @@ pub fn run_with_options(
         // idempotent resume before returning the generic integrity error. This
         // breaks the former cycle: integrity blocked the only recovery capable
         // of restoring integrity.
-        if !resume_captured_finalize_for_recovery(
+        let resumed = resume_captured_finalize_for_recovery(
             file,
             effects,
             "session_check_integrity_recovered_from_retained_capture",
-        )? {
+        )?;
+        // A resume rewrites the document; the pass must re-read (`#sccurrentpass`).
+        crate::invalidate_current_document_pass(file);
+        if !resumed {
             return Err(error);
         }
         validate_integrity_after_captured_resume(
@@ -421,7 +438,10 @@ pub fn run_with_options(
     // a clean retained response visible only in canonical authority. Do not let
     // the generic authority/disk divergence guard block the exact captured
     // response that owns the lossless replay recipe.
-    if resume_captured_finalize_before_terminal_convergence(file, effects)? {
+    let resumed_before_convergence =
+        resume_captured_finalize_before_terminal_convergence(file, effects)?;
+    crate::invalidate_current_document_pass(file);
+    if resumed_before_convergence {
         authority_content = validate_integrity_after_captured_resume(
             file,
             "session_check_terminal_convergence_after_captured_resume",
@@ -434,6 +454,8 @@ pub fn run_with_options(
     }
     ensure_terminal_authority_disk_convergence(file, &authority_content, &disk_content, effects)?;
     self_heal_transiently_stale_committed_projection(file, &authority_content, effects)?;
+    // Both converge/self-heal steps can project a new document image.
+    crate::invalidate_current_document_pass(file);
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
     // local-process four-region state, logged alongside the existing ops.log
     // markers. Never gates closeout — emitted regardless of the check outcome.
@@ -751,6 +773,16 @@ pub fn inspect(file: &Path, effects: &impl SessionCheckEffects) -> Result<Sessio
 }
 
 pub fn inspect_with_warnings(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+) -> Result<SessionCheckReport> {
+    // `#sccurrentpass`: callers outside `run_with_options` (compact/write
+    // closeout) get the same one-version-per-sweep memo. Nested inside a pass
+    // this reuses the outer one.
+    crate::with_current_document_pass(|| inspect_with_warnings_inner(file, effects))
+}
+
+fn inspect_with_warnings_inner(
     file: &Path,
     effects: &impl SessionCheckEffects,
 ) -> Result<SessionCheckReport> {

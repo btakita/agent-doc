@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
-use std::cell::Cell;
-use std::path::Path;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 pub mod backlog_guards;
 pub mod closeout_guards;
@@ -53,6 +54,88 @@ fn force_disk_resolution_enabled() -> bool {
     FORCE_DISK_RESOLUTION.with(Cell::get)
 }
 
+thread_local! {
+    /// `#sccurrentpass`: pass-scoped memo of the resolved current document.
+    ///
+    /// `session-check` is a read-only sweep over one document: ~8 independent
+    /// guards each called [`resolve_current_document`], and every call was a
+    /// full controller round trip returning the whole document text. On a live
+    /// editor-attached document that cost ~0.5-1s apiece, so one sweep spent
+    /// several seconds re-fetching the same text — the dominant term in
+    /// `Compact Exchange` wall time, which runs a sweep after its writeback.
+    ///
+    /// Worse, it was not only slow but *inconsistent*: because the operator can
+    /// type mid-sweep, guards observed different document versions within a
+    /// single pass (`text_len` 38865 -> 38866 -> 38932 in one recorded run), so
+    /// two guards could disagree about the same document. A pass evaluates one
+    /// document version now: the first resolve inside the scope wins and every
+    /// later guard reads that same value.
+    ///
+    /// The memo is opened explicitly by the `session-check` entry points and is
+    /// never global ambient state: outside a scope, resolution is unchanged.
+    /// Force-disk resolution bypasses it entirely (different authority).
+    static CURRENT_DOCUMENT_PASS: RefCell<Option<HashMap<PathBuf, agent_doc_document_realtime_io::CurrentDocument>>> =
+        const { RefCell::new(None) };
+}
+
+/// Run `f` with a pass-scoped current-document memo active (`#sccurrentpass`).
+///
+/// Nested calls reuse the outer pass rather than installing a second memo, so a
+/// sweep that delegates into another entry point still sees one document
+/// version. Any document mutation performed inside a pass must call
+/// [`invalidate_current_document_pass`]; `session-check` guards are read-only
+/// over the document text, which is what makes this safe.
+pub(crate) fn with_current_document_pass<T>(f: impl FnOnce() -> T) -> T {
+    let installed = CURRENT_DOCUMENT_PASS.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_some() {
+            return false;
+        }
+        *slot = Some(HashMap::new());
+        true
+    });
+    let result = f();
+    if installed {
+        CURRENT_DOCUMENT_PASS.with(|slot| {
+            *slot.borrow_mut() = None;
+        });
+    }
+    result
+}
+
+/// Drop `file` from the active pass memo so the next resolve re-reads it.
+///
+/// Call this after any path that can change the document's current text while a
+/// pass is open.
+pub(crate) fn invalidate_current_document_pass(file: &Path) {
+    CURRENT_DOCUMENT_PASS.with(|slot| {
+        if let Some(entries) = slot.borrow_mut().as_mut() {
+            entries.remove(file);
+        }
+    });
+}
+
+fn current_document_pass_hit(
+    file: &Path,
+) -> Option<agent_doc_document_realtime_io::CurrentDocument> {
+    CURRENT_DOCUMENT_PASS.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|entries| entries.get(file).cloned())
+    })
+}
+
+fn record_current_document_pass(
+    file: &Path,
+    document: &agent_doc_document_realtime_io::CurrentDocument,
+) {
+    CURRENT_DOCUMENT_PASS.with(|slot| {
+        if let Some(entries) = slot.borrow_mut().as_mut() {
+            entries.insert(file.to_path_buf(), document.clone());
+        }
+    });
+}
+
 pub(crate) fn resolve_current_document(
     file: &Path,
     source: &str,
@@ -63,7 +146,10 @@ pub(crate) fn resolve_current_document(
             &format!("session-check {source}"),
         );
     }
-    agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+    if let Some(hit) = current_document_pass_hit(file) {
+        return Ok(hit);
+    }
+    let resolved = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
         file,
         &format!("session-check {source}"),
     )
@@ -72,7 +158,9 @@ pub(crate) fn resolve_current_document(
             "session-check {source}: resolve current document {}",
             file.display()
         )
-    })
+    })?;
+    record_current_document_pass(file, &resolved);
+    Ok(resolved)
 }
 
 pub(crate) fn resolve_current_document_with_force_disk(
@@ -159,4 +247,87 @@ pub(crate) fn operator_live_buffer_contains_heading(file: &Path, heading: &str) 
         }
     }
     false
+}
+
+#[cfg(test)]
+mod current_document_pass_tests {
+    use super::*;
+
+    /// A session-check sweep must evaluate ONE document version
+    /// (`#sccurrentpass`). Before the pass memo, each guard independently
+    /// resolved the current document, so an operator typing mid-sweep made two
+    /// guards disagree about the same document — and each resolve cost a full
+    /// controller round trip.
+    #[test]
+    fn pass_serves_one_document_version_to_every_guard() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = tmp.path().join("task.md");
+        std::fs::write(&doc, "first\n").unwrap();
+
+        let (first, second) = with_current_document_pass(|| {
+            let first = resolve_current_document_content(&doc, "guard_a").unwrap();
+            // The operator edits mid-sweep.
+            std::fs::write(&doc, "second\n").unwrap();
+            let second = resolve_current_document_content(&doc, "guard_b").unwrap();
+            (first, second)
+        });
+
+        assert_eq!(
+            first, second,
+            "guards inside one pass must observe the same document version"
+        );
+    }
+
+    /// The memo is scoped, never ambient: outside a pass every resolve reads
+    /// through, and a mutation inside a pass re-reads once invalidated.
+    #[test]
+    fn resolution_reads_through_outside_a_pass_and_after_invalidation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = tmp.path().join("task.md");
+        std::fs::write(&doc, "first\n").unwrap();
+
+        let before = resolve_current_document_content(&doc, "outside_pass").unwrap();
+        std::fs::write(&doc, "second\n").unwrap();
+        let after = resolve_current_document_content(&doc, "outside_pass").unwrap();
+        assert_ne!(
+            before, after,
+            "without a pass, resolution must not be memoized"
+        );
+
+        let (stale, fresh) = with_current_document_pass(|| {
+            let stale = resolve_current_document_content(&doc, "guard_a").unwrap();
+            // A self-heal rewrites the document mid-pass.
+            std::fs::write(&doc, "third\n").unwrap();
+            invalidate_current_document_pass(&doc);
+            let fresh = resolve_current_document_content(&doc, "guard_b").unwrap();
+            (stale, fresh)
+        });
+        assert_ne!(
+            stale, fresh,
+            "invalidation must drop the memo so a repaired document is re-read"
+        );
+    }
+
+    /// A nested entry point reuses the outer pass instead of installing a
+    /// second memo that could observe a different version.
+    #[test]
+    fn nested_pass_reuses_the_outer_document_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let doc = tmp.path().join("task.md");
+        std::fs::write(&doc, "first\n").unwrap();
+
+        let (outer, inner) = with_current_document_pass(|| {
+            let outer = resolve_current_document_content(&doc, "outer").unwrap();
+            std::fs::write(&doc, "second\n").unwrap();
+            let inner =
+                with_current_document_pass(|| resolve_current_document_content(&doc, "inner"))
+                    .unwrap();
+            (outer, inner)
+        });
+
+        assert_eq!(
+            outer, inner,
+            "a nested pass must not resolve a second document version"
+        );
+    }
 }

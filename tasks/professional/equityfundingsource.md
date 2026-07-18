@@ -32,139 +32,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260718-054926.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260718-155749.md`*
 
 Compacted content:
-- Archived 4 response topic(s): Reconcile each lender with TMO from the deal interests tab; Per-lender reconcile modal, vesting granularity; Does the EFS API support creating LOS lenders without a funding?; 1 more
-- Prior summary/context: prior compacted content: Archived 5 response topic(s): Binding a deal to a vesting; Funding-linking items deferred (⏭...
-
-❯ My understanding is that LSS.svc is a completely separate system. EFS has a lender record but the EFS lender record does not map to a TMO lender record. The EFS lender vestings do map to the TMO lender records. Please change the UI to reflect that. Remove the single TMO lender id in EFS lender and map the EFS lender vestings to TMO lenders.
-❯ #spec-test-commit-push-deploy
-
-### Re: Remove the single TMO lender id; map vestings to TMO lenders — opus-4-8
-
-Done and deployed — worker `671ff4ac`, commits `760f516` + `e988884`. The EFS lender record no longer maps to a TMO lender anywhere; every EFS↔TMO link now resolves through `lender_vestings.tmo_lender_account`.
-
-**Eleven call sites moved, not just the UI.** The UI was the visible part, but the single account was load-bearing in places that would have broken silently:
-
-| Site | Before | After |
-|---|---|---|
-| **TMO funding pull match** | `users.lender_account` | `lender_vesting_by_tmo_account_` |
-| Deal-interests payload | `investor.lender_account` | `investor.tmo_vestings {total, linked, accounts}` |
-| Deal card | "Lender account" + inline Link | "TMO vestings" + *Map vestings to TMO* → modal |
-| Tab reconcile summary | account set? | any vesting linked? |
-| Deal compliance gate | `u.lender_account` | `linked_vesting_count > 0` |
-| Lender-request approval | wrote the user column | contact on user, account on vesting |
-| `PUT /api/admin/users/:id/lender-account` | set the account | **removed** |
-| Lender portal gate | `user.lender_account` | first linked vesting |
-| Wire instructions | `user.lender_account` | the **fund's** vesting account |
-
-The funding pull was the landmine: `users.lender_account` was the *primary match key* for pulled TMO fundings. Matching the vesting instead is strictly more correct — a funding Account **is** a vesting account, so the old key could only ever resolve one of a lender's vestings and every funding on their others fell through to the email fallback or parked. The vesting match also yields the FK, so pulled funds now carry `lender_vesting_id` for free.
-
-**Three places I made it refuse to guess**, because each failure mode is money reaching the wrong TMO lender:
-
-- The pull matches only an *exact* vesting account. A funding on an unmapped account parks as unmatched rather than binding to another vesting of the same lender. New test covers this.
-- `selected_lender_tmo_account_` uses the fund's bound vesting, else the lender's *single* linked vesting, else `''`. Several linked vestings and none bound → it emits nothing.
-- Wire instructions prefer the fund's own account over any lender-level fallback.
-
-**Production migration — and why I staged the column drop.**
-
-Prod had **7 lenders with an account and 0 linked vestings**. Deploying the code without backfilling would have flipped all 7 to "not linked" and put them on compliance hold. Migration 0140 backfills them; verified after apply: **7 linked vestings, 9 active, 0 unmigrated**.
-
-I did **not** drop `users.lender_account` in this deploy. It's dormant — no reader, no writer — but dropping it in the same release leaves no recovery path if a row backfilled to the wrong vesting. Queued as `#lender-account-drop-column` once you've eyeballed the backfill.
-
-One case to look at: lender `96176122` (`L-00010`) had **2 pre-existing unlinked vestings**, so it now shows **"1 of 3 linked"**. That's honest — those two declared vestings genuinely have no TMO account. I deliberately did not auto-assign `L-00010` to one of them; picking which vesting owns an account is exactly the guess I refused everywhere else. Map them in the reconcile modal. The other 6 lenders had no vestings and read fully linked.
-
-**The migration failed on the first deploy attempt** — `NULLIF` on a blank lender name produced NULL against a `NOT NULL` `vesting_name`, and my post-hoc repair UPDATE could never run because the INSERT aborted first. It failed *before* the worker deployed, so prod was untouched; I confirmed 0 partial rows, fixed the fallback inline (name → account → email), and re-ran clean.
-
-**Verification**
-
-| Gate | Result |
-|---|---|
-| `tests/lender-account-retire.test.ts` | 15 pass |
-| `make check` | **1707 pass / 0 fail**, 162 files, exit 0 |
-| Migration | applied remote, 3 commands, `0140 ✅` |
-| Prod data | 7 linked vestings, **0 unmigrated** |
-| Live bundle | `TMO vestings`, `Map vestings to TMO`, `Some vestings unlinked` present; `Link TMO Account` **absent** |
-
-The card now distinguishes three states rather than two: fully linked (accounts listed), **partially linked** ("Some vestings unlinked" — a funding on an unmapped vesting can't reach TMO), and not linked. Partial was invisible before and is the state that actually strands a funding.
-
-I also updated four existing test contracts that pinned the old model rather than deleting them — the sync-pull fixture now seeds vestings, and the picker/link-UX contracts follow the picker into the reconcile modal.
-
-### Re: do #lender-account-drop-column, #tmo-lender-vesting-doc, #tmo-getlender-confirm — opus-4-8
-
-All three done and deployed. EFS `02af823` → `3d78a20c`, pushed; workers `a040d1a2` and `fd681583`.
-
-**#lender-account-drop-column** — the drop was the small half. `#lender-account-retire` cleared the *deal* surfaces only; three readers and two dead controls survived it, and two of them were **404 buttons**: the admin lender profile and the pipeline advance-lender dialog both still rendered "link account" forms that `PUT`/`POST` `/api/admin/users/:id/lender-account`, a route deleted in the previous cycle. An admin clicking either got nothing.
-
-Verified against production before dropping anything: 7 users with an account, **0 unmigrated**, 7 linked vestings, 0 non-lender rows. Lender 96176122 checks out exactly as the backlog described — Morgan Stanley + Price Waterhouse still unlinked, plus the backfilled `Lender Number10` carrying `L-00010`.
-
-| Site | Was | Now |
-|---|---|---|
-| Pipeline board | `input.lender_account` | `linked_vesting_count > 0` |
-| Lender profile | "TMO lender account ID" → deleted route | `AdminLenderVestings` |
-| Advance-lender dialog | "Manually Link Account" → deleted route | *Map Vestings To TMO* → reconcile modal |
-| `admin_user_row_T`, `user_T`, profile payload | carried the field | dropped |
-| Loan-detail interest row | `investor.lender_account` | `loan_interest_tmo_label_` |
-
-Two things worth flagging. The vesting aggregates are **correlated subqueries**, not joins — that pipeline query already `LEFT JOIN`s `funds` and `lender_requests`, so a joined `COUNT` would have multiplied the vesting rows and silently reported every lender as over-linked. And migration 0141 needs `DROP INDEX idx_users_lender_account` **before** the `DROP COLUMN`; SQLite refuses otherwise, which is how the first deploy attempt failed. I deployed the code first, then dropped, so no live query ever read a missing column.
-
-`lender_requests.lender_account` is untouched — that one records the account an admin *approved on a request*, an audit fact, and the approval flow already attaches it to a vesting.
-
-**#tmo-lender-vesting-doc** — `get-lender.md` was actively misleading: it still told the reader EFS stores the account in `users.lender_account`, listed the picker on surfaces that no longer have it, and told you not to wire LSS lender endpoints while omitting `NewLender` from the table entirely. Rewritten around the three facts, plus the PRD section.
-
-The Servicing Agents finding is the one I'd expect to save the most time later: **Business Contacts ▸ Servicing Agents is not a lender roster** — no `ACCOUNT` column (so it cannot express the account-per-vesting key at all), free-form with duplicate rows, 4-of-14 overlap, and it contains non-lender servicers (FCI, Note Servicing Center, Superior). Anyone reconciling against that screen would draw wrong conclusions with no error to warn them.
-
-**#tmo-getlender-confirm** — `in_los` and `in_lss` answer genuinely different questions and the code now keeps them apart:
-
-| `in_los` | `in_lss` | Meaning | State |
-|---|---|---|---|
-| ✅ | — | TMO has funded through it | `reconciled` |
-| ❌ | ✅ | TMO has the lender, no funding yet | `confirmed_no_funding` — "In TMO · no funding yet" |
-| ❌ | ❌ | Nothing in TMO knows it | `unknown_to_tmo` (the typo case, unchanged) |
-
-`tmo_lss_lender_R_` is the only LSS call EFS makes and it is a read; the write surface stays unwired. It only looks up entries with `in_los === false` (a funded account needs no second opinion), and it **never throws** — unconfigured TMO, transport error, unknown account all leave the entry as-is, degrading to the old unconfirmed state rather than failing the roster.
-
-**Verification:** `make check` 1730 pass / 0 fail. Production D1 confirms the column is gone and the new vesting query returns correctly — lender10 reads `3 vestings, 1 linked`, exactly the partial state the dropped column could never represent. Live bundles string-checked for `Map Vestings To TMO`, `LenderTmoReconcileModal`, and `In TMO · no funding yet`; `TMO lender account ID` and the dead route are absent.
-
-One thing I did **not** do: the `confirmed_no_funding` path has no live proof. Nothing in the current production data is `in_lss && !in_los`, so the LSS call has not actually returned a record against real TMO — it is covered by tests and degrades safely, but the first real confirmation is unobserved. Queued as `#tmo-getlender-verify`; it needs an operator to point at a TMO lender created but never funded.
-
-❯ I don't have access to the TMO production api key. We want to launch the website over the weekend. Until we obtain the production API key, we will operate as a split system. Please ensure the entire app will work without any blocking issues & without sync until we can obtain the TMO api key.
-
-
-### Re: Launch without the TMO production key — opus-4-8
-
-Found one hard blocker and fixed it. Shipped and deployed — worker `f6bfb70a`, commit `15c9acfe`.
-
-**The blocker: approving an application was dead without the key.** `tmo_application_create_` was the only TMO caller with no config gate. It read the credentials with a silent empty-string fallback and fired `LOS.svc/NewLoan` anyway, so the request 401'd on an empty `Token` header and threw. That throw landed *before* `application_tmo_loan_persist_`, which meant no `loans` row, so document copy, acceptance, and `admin_deal_publish_` never ran. Every approved application became `failed` with a 502 to the admin, and nothing ever reached the investor marketplace. It was also sending real requests to `api.themortgageoffice.com` with empty credentials on every attempt.
-
-**The fix.** The `NewLoan` body and the loan number are computed from local data, so with TMO unconfigured the approve flow now does everything the connected path does and skips only the network call:
-
-- creates the loan, copies application documents, accepts the application, auto-publishes the deal
-- records the writeback as `gated` — never `sent` — so nothing claims a success that did not happen
-- parks the exact `NewLoan` body plus the loan number EFS assigned in `tmo_cache_outbox` as a `pending` `create_loan_application`, so when the key arrives the replay pushes what would have been sent and nobody re-keys an approved application
-
-`tmo_application_create_` now throws `TmoUnconfiguredError` locally rather than calling the vendor, so a future caller that forgets the gate fails loudly here instead of quietly burning auth failures against your TMO account.
-
-Two smaller things fixed alongside it. `application_tmo_loan_number_tmo_exists_` re-threw anything that was not "not found" or "not configured", so a *wrong* key (as opposed to a missing one) would have broken loan-number generation — it now degrades on any TMO error, and local uniqueness against `loans` + `tmo_cache_entities` remains the binding constraint while EFS is the only writer. And `admin_tmo_lenders_GET_` hardcoded `configured: true`, so the lender picker's clean "TMO is not connected. Enter the account number manually." branch was unreachable and admins instead read the misleading "No TMO lenders returned."
-
-**Everything else was already safe.** I audited every TMO call site rather than assuming:
-
-| Flow | Without the key |
-|---|---|
-| Sign-in, borrower portal, document upload | Zero TMO references |
-| Investor marketplace, deal browsing | Reads EFS D1, never TMO |
-| `*/15` sync cron | No-op — nothing sourced from TMO to sweep; per-loan failures caught, run timestamp persisted before the sweep, so no retry loop and no log flood |
-| Lender roster confirmation, document sync, borrower/admin writebacks | Gated on `tmo_config_`, degrade to unconfirmed or return `null` |
-
-There is no startup env validation anywhere, so the worker boots clean with zero TMO vars, and `wrangler.toml` has no TMO entries to unset.
-
-**Verification:** full suite 1750 pass / 0 fail (typecheck + build clean). Three source-assertion tests in `apply4-full-application-p6` pinned the old call ordering and the old `already_in_tmo` line; the deferred branch introduces earlier occurrences of `application_tmo_loan_persist_` and `admin_deal_publish_`, so I re-anchored those to the create path rather than loosening them. Live bundle string-checked for `TMO writeback queued`, `Accepted (TMO writeback queued)`, and `TMO is not connected`; the worker bundle carries `tmo_deferred`, `create_loan_application`, `TmoUnconfiguredError`, and `writeback_status = 'gated'`. Public routes smoke-checked: `/`, `/apply`, `/contact`, `/login`, `/admin/login` all 200.
-
-Spec is `prds/tmo-split-system-launch.md`; the operator steps for when the key lands (secrets, verification, the outbox drain query) are in `docs/operator-runbook-pending-config.md`.
-
-**One thing you should know about the weekend launch that is not a code issue.** `equityfundingsource.com` has no A or AAAA record at all, and its nameservers are still DreamHost (`ns1/2/3.dreamhost.com`). `wrangler.toml` declares no route or custom domain for it. The site is live and correct on `equityfundingsource.brian-takita.workers.dev`, but the apex domain currently resolves to nothing — that DNS cutover needs registrar and Cloudflare access I do not have. Queued as `#efs-dns-cutover`; it is the real remaining gate on launching over the weekend, and it is worth starting early because NS propagation is not instant.
-<!-- agent:boundary:2826030d -->
+- Archived 3 response topic(s): Remove the single TMO lender id; map vestings to TMO lenders; do #lender-account-drop-column, #tmo-lender-vesting-doc, #tmo-getlender-confirm; Launch without the TMO production key
+- Prior summary/context: prior compacted content: Archived 4 response topic(s): Reconcile each lender with TMO from the deal interests tab; Pe...
+<!-- agent:boundary:c475469e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -186,6 +59,8 @@ Is there an admin for the borrower portal messages? Can we have an email notific
 After 20:30
 - login to TMO. Make sure we are using the correct credentials.
 - TMO Syncs
+
+We have not cut over the DNS today. The current CF environment will be staging. Please setup another CF environment for production. At some point, we will have EFS have custody of the CF account, possibly today. But I want to have a production environment ready to go in case it is needed.
 <!-- /agent:notes -->
 
 ## Backlog

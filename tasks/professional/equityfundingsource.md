@@ -268,6 +268,11 @@ The genuinely important thing down there is `#efs-dns-cutover` — it is the rem
 
 ### Re: do [#tmo-contacts-ui] — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#tmo-contacts-ui]
+
+
 Shipped (EFS `42c8cf2e`, pushed). **TMO Contacts** at `/admin/tmo-contacts`: the derived borrower roster, the LSS lender roster, and both orphan shapes — borrowerless loans in red (cannot be serviced), orphan borrowers in amber (safe to delete).
 
 Three constraints I pinned with tests rather than trusting to memory:
@@ -283,11 +288,11 @@ Each `RecID` is selectable text. It is the value an admin pastes into `DELETE /L
 7 tests; full suite 1895 pass / 0 fail; builds clean.
 
 That clears the last of the items I could act on. What remains in the backlog is the two reconciliation executors (`#tmo-orphan-reconcile-exec` then `#tmo-reconcile-binder` — in that order), and the operator-gated set: the sandbox purge waiting on your go, plus the Cloudflare custody / DNS cutover / prod-seed cluster.
-<!-- agent:boundary:8638d80b -->
+<!-- agent:boundary:af1618a3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#tmo-contacts-ui]
+- ~~do [#tmo-contacts-ui]~~
 - do [#vesting-gap-admin-queue]
 <!-- /agent:queue -->
 
@@ -297,7 +302,6 @@ That clears the last of the items I could act on. What remains in the backlog is
 - [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: `TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply` deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). Held pending operator go because DeleteLoan is permanent with no TMO-side undo. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code and cannot be selected. Dry run verified 2026-07-18: purge=16 keep=2. Recipe: src/equityfundingsource-dev/docs/TMO/delete-loan.md.
 - [ ] [#tmo-reconcile-binder] Binder for the #tmo-reconcile-auto matcher: read tmo_unmatched_fundings + the lender/vesting roster (users.lender_account, lender_vestings.tmo_lender_account, funds.tmo_funding_rec_id), run funding_match_all_, apply auto_bind decisions through the existing admin_tmo_unmatched_funding_bind_POST_ path, and persist review/ambiguous candidate rankings so the admin queue opens pre-ranked instead of blank. Per PRD D4 the bind reconciles EFS to TMO (the TMO funding wins on conflict) and must record what it overrode. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#tmo-orphan-reconcile-exec] Executor for the #tmo-orphan-as-fundings planner: read the orphan tmo_cache_entities rows + LOS.svc/GetLoans + GetLoanFundings + the EFS funds/vesting roster, run orphan_reconcile_plan_, and apply it. reconcile_cache and tombstone are EFS-local and unguarded; push_funding and create_loan_then_funding (isolated by orphan_plan_writes_) need explicit opt-in and, in production, the EFS->TMO push gate (#dzmm/#7a4d). Sandbox execution is NOT gated — run it there first against the clean slate bin/tmo-sandbox-purge.ts leaves. Mirror the sandbox guard from bin/tmo-sandbox-purge.ts: the TMO token is identical across environments and only the Database header selects one. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
-- [ ] [#tmo-contacts-ui] Admin screen for GET /api/admin/tmo-contacts (#tmo-contact-enumeration): render the derived TMO borrower roster (RecID, name, email, phone, loans) plus the LSS lender roster, with the two orphan shapes called out — orphan borrowers (on no loan; safe to delete via DELETE /LOS.svc/DeleteBorrower/:recId) and borrowerless loans (TST113). The API and docs shipped 2026-07-18; only the screen is missing. Recipe: src/equityfundingsource-dev/docs/TMO/contact-enumeration.md.
 - [ ] [#tmo-orphan-cache] SUPERSEDED 2026-07-18 by #tmo-orphan-as-fundings per operator directive — do NOT prune/tombstone these rows as the default. The 18 orphan tmo_cache_entities 'loan' rows are the reconciliation corpus: push them into TMO as fundings and tombstone only pure debris with no EFS deal. Kept as context for the loan-number list (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) and for the note that admin_tmo_loans_by_loan_number_DELETE_ does NOT cover them — it only disables EFS 'loans' rows and never touches tmo_cache_entities. Execute via #tmo-orphan-reconcile-exec. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#efs-prod-seed] [operator-verify] Decide whether the production Cloudflare environment should be seeded from staging before launch. Production D1 (equityfundingsource-production) is schema-complete and empty; staging holds 33 users / 7 loans / 7 deals. If that is real business data it must be exported+imported once, immediately before cutover (a second import collides on primary keys), and R2_DOCUMENTS must be copied separately or uploaded documents 404 in production despite their D1 rows existing. Recipe: src/equityfundingsource-dev/docs/deploy.md 'Seeding production from staging'. Blocked on the operator confirming real-vs-test data. See #efs-cf-account-custody — if custody moves first, seed once after the move. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.

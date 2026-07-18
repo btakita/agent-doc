@@ -2769,7 +2769,40 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         "[agent-doc] supervisor is running a prior agent-doc binary and turn-boundary self-recycle is opted OUT; restart this session (or clear the falsey AGENT_DOC_SUPERVISOR_AUTO_RECYCLE / frontmatter / project knob) to pick up the new build"
                     );
                 }
+                // `#recycleidleonly`: a ROUTINE stale-binary recycle must wait for a
+                // turn boundary. `execve` is supposed to preserve the live child and
+                // tmux pane, but its documented fallback is a clean exit + child
+                // restart — and that fallback tears the pane down. Observed live:
+                // pane %3 vanished mid-turn and was replaced by a fresh pane with
+                // `history_size=5` against a 50000-line limit, so the operator lost
+                // the entire visible session (`boundary=safe_intra_turn`,
+                // `via=execve_preserve_child`).
+                //
+                // `safe_intra_turn` is a truthful claim about DOCUMENT safety, not
+                // about the pane. Deferring to the boundary is exactly what the
+                // `#wd40` / `#staleloop-recycle-restart` yield protocol already asks
+                // the in-session loop to arrange, so honoring it here just closes the
+                // gap between the two.
+                //
+                // `RecycleImmediate` is NOT gated: that is the wedged-supervisor path
+                // (`#midturn-wedge-recycle`), where the alternative to recycling
+                // mid-turn is staying wedged forever.
+                let routine_recycle_deferred_intra_turn = matches!(
+                    recycle_action,
+                    SupervisorRecycleAction::RecycleDebounced
+                ) && !turn_boundary
+                    && !head_pending;
+                if routine_recycle_deferred_intra_turn {
+                    log_event(
+                        &mut session_log,
+                        &format!(
+                            "supervisor_binary_stale_recycle_deferred pane={} reason=await_turn_boundary (#recycleidleonly)",
+                            shared.inject_pane.as_deref().unwrap_or("<pty>"),
+                        ),
+                    );
+                }
                 let do_recycle = !reexec_recycle_disabled
+                    && !routine_recycle_deferred_intra_turn
                     && match recycle_action {
                         SupervisorRecycleAction::RecycleImmediate => true,
                         SupervisorRecycleAction::RecycleDebounced => recycle_debounced,

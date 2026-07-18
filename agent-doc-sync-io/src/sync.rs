@@ -1129,8 +1129,21 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                 // List panes in the secondary window
                 let panes = tmux.list_window_panes(sec_id).unwrap_or_default();
                 for pane in &panes {
-                    // Resize stash to 1000 rows before each join to prevent "too small"
-                    let _ = agent_doc_tmux_io::resize_window_height(tmux, &primary_id, "1000");
+                    // Temporarily grow the stash window so `join-pane` cannot fail
+                    // with "pane too small". `#stashresizerestore`: this MUST be
+                    // undone after the joins — see the restore below. Leaving it
+                    // set pins the window at 1000 rows for the rest of the
+                    // session, and every TUI in it then renders into a ~1000-row
+                    // viewport: content sits at the bottom under ~950 rows of
+                    // blank pane, which reads to the operator as "my history is
+                    // gone".
+                    if let Err(err) =
+                        agent_doc_tmux_io::resize_window_height(tmux, &primary_id, "1000")
+                    {
+                        eprintln!(
+                            "[repair] warning: could not grow stash window {primary_id} for join: {err}"
+                        );
+                    }
 
                     // Find the largest pane in primary stash as join target
                     let target = tmux.largest_pane_in_window(&primary_id).unwrap_or_else(|| {
@@ -1190,6 +1203,16 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                         remaining.len()
                     );
                 }
+            }
+
+            // `#stashresizerestore`: hand the window back to the client size. The
+            // 1000-row height above is a join-time workaround, not a layout
+            // choice, and tmux keeps a manual `resize-window` until it is cleared
+            // — `window-size latest` does NOT reclaim it.
+            if let Err(err) = agent_doc_tmux_io::resize_window_to_clients(tmux, &primary_id) {
+                eprintln!(
+                    "[repair] warning: could not restore stash window {primary_id} to the client size: {err}"
+                );
             }
         }
 

@@ -373,6 +373,17 @@ pub fn resize_window_height(
         .map(|_| ())
 }
 
+/// `#stashresizerestore`: re-fit a window to its clients, clearing any manual
+/// `resize-window` height left behind by the stash-consolidation join workaround.
+pub fn resize_window_to_clients(
+    runner: &(impl TmuxCommandRunner + ?Sized),
+    target: &str,
+) -> Result<(), TmuxIoError> {
+    runner
+        .run(&agent_doc_tmux_commands::resize_window_to_clients(target))
+        .map(|_| ())
+}
+
 pub fn swap_window(
     runner: &(impl TmuxCommandRunner + ?Sized),
     source: &str,

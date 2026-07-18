@@ -111,6 +111,13 @@ pub fn resize_window_height(target: &str, height: &str) -> TmuxCommand {
     TmuxCommand::new(["resize-window", "-t", target, "-y", height])
 }
 
+/// `#stashresizerestore`: clear a manual `resize-window` by re-fitting the window
+/// to the clients displaying it (`-A`). tmux keeps an explicit size until it is
+/// cleared this way; `window-size latest` does not reclaim it on its own.
+pub fn resize_window_to_clients(target: &str) -> TmuxCommand {
+    TmuxCommand::new(["resize-window", "-t", target, "-A"])
+}
+
 pub fn swap_window(source: &str, target: &str) -> TmuxCommand {
     TmuxCommand::new(["swap-window", "-s", source, "-t", target])
 }
@@ -925,6 +932,15 @@ mod tests {
         let command = rename_window("@2", "agent-doc");
 
         assert_eq!(command.args(), ["rename-window", "-t", "@2", "agent-doc"]);
+    }
+
+    #[test]
+    fn resize_window_to_clients_uses_adjust_flag() {
+        // `#stashresizerestore`: `-A` re-fits to the clients, clearing the manual
+        // 1000-row height the stash join workaround sets. Without this the window
+        // stays pinned and every TUI in it renders into a ~1000-row viewport.
+        let command = resize_window_to_clients("@2");
+        assert_eq!(command.args(), ["resize-window", "-t", "@2", "-A"]);
     }
 
     #[test]

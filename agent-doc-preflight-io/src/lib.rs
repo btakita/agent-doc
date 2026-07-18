@@ -4966,7 +4966,7 @@ mod tests {
     }
 
     #[test]
-    fn run_queue_maintenance_admits_exchange_free_text_to_native_goal() {
+    fn run_queue_maintenance_admits_exchange_free_text_as_do_directive() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let content = concat!(
@@ -4993,18 +4993,22 @@ mod tests {
         let id = backlog_id_for_text(&updated, "Build the importer");
         let queue = component_body(&updated, "queue");
 
+        // `#freetextdoid`: admitted free-text becomes a real `do [#id]` head, not
+        // a `/goal` line — so it resolves as an id, can be an `after=` target, and
+        // avoids the slash-command render shape that drops the `- ` marker.
         assert!(
-            queue.contains(&format!("/goal Implement backlog item(s): #{id}")),
-            "native goal-capable harness must queue a /goal command:\n{updated}"
+            queue.contains(&format!("do [#{id}]")),
+            "admitted free-text must queue a do-directive:\n{updated}"
         );
-        assert_eq!(
-            state.selected_queue_prompts,
-            vec![format!("/goal Implement backlog item(s): #{id}")]
+        assert!(
+            !queue.contains("/goal Implement backlog item(s)"),
+            "the /goal encoding must not be emitted by default:\n{updated}"
         );
+        assert_eq!(state.selected_queue_prompts, vec![format!("do [#{id}]")]);
     }
 
     #[test]
-    fn run_queue_maintenance_admits_new_active_queue_free_text_to_native_goal() {
+    fn run_queue_maintenance_admits_new_active_queue_free_text_as_do_directive() {
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         let snapshot_content = concat!(
@@ -5043,8 +5047,8 @@ mod tests {
         let queue = component_body(&updated, "queue");
 
         assert!(
-            queue.contains(&format!("/goal Implement backlog item(s): #{id}")),
-            "new active queue free text should become a native goal:\n{updated}"
+            queue.contains(&format!("do [#{id}]")),
+            "new active queue free text should become a do-directive:\n{updated}"
         );
         assert!(
             !queue.contains("Implement active queue addition"),
@@ -5056,7 +5060,7 @@ mod tests {
         );
         assert_eq!(
             state.selected_queue_prompts.first(),
-            Some(&format!("/goal Implement backlog item(s): #{id}"))
+            Some(&format!("do [#{id}]"))
         );
     }
 
@@ -5444,6 +5448,8 @@ mod tests {
             "agent_doc_format: template\n",
             "agent_doc_write: crdt\n",
             "agent: opencode\n",
+            // `#freetextdoid`: `/goal` is now opt-in — `Auto` emits `do [#id]`.
+            "agent_doc_free_text_execution: goal\n",
             "---\n\n",
             "<!-- agent:queue -->\n",
             "- Implement OpenCode goal extension flow\n",

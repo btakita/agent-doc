@@ -95,11 +95,28 @@ pub fn resolve_free_text_execution(
         agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Queue => {
             (ResolvedFreeTextExecution::Queue, None)
         }
-        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto
-        | agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal
-            if goal_available =>
-        {
+        // `#freetextdoid`: `Auto` now resolves to queue work (`do [#id]`), not
+        // `/goal`, even where the harness offers a native goal command.
+        //
+        // Admitted free-text has an id the moment it becomes a backlog item, and
+        // `do [#id]` is the canonical way to run one. Emitting
+        // `/goal Implement backlog item(s): #a, #b` instead cost three things:
+        //   - it is not a `do` directive, so `entry_do_id` cannot resolve it and
+        //     the item can never be an `after=` target (the auto-DAG gap),
+        //   - slash-command prompts are exactly the shape `render` re-emits
+        //     without their `- ` list marker (`document_queue.rs`), which is the
+        //     `- /goal ...` corruption seen in the wild,
+        //   - it collapses a batch onto one line, so the items cannot be ordered
+        //     or prioritized individually.
+        // A second encoding of "run this backlog item" is the same two-sources-of-
+        // truth shape that caused the queue-activation and persistence bugs.
+        //
+        // Explicit `agent_doc_free_text_execution: goal` still opts in.
+        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal if goal_available => {
             (ResolvedFreeTextExecution::Goal, None)
+        }
+        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto => {
+            (ResolvedFreeTextExecution::Queue, None)
         }
         agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal => (
             ResolvedFreeTextExecution::Queue,
@@ -114,9 +131,6 @@ pub fn resolve_free_text_execution(
                 ),
             }),
         ),
-        agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto => {
-            (ResolvedFreeTextExecution::Queue, None)
-        }
     }
 }
 
@@ -317,19 +331,32 @@ mod tests {
         assert!(warning.is_none());
     }
 
+    /// `#freetextdoid`: explicit `goal` still uses `/goal`; `Auto` no longer does.
     #[test]
-    fn resolve_free_text_execution_prefers_goal_when_available() {
-        for requested in [
-            agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto,
+    fn resolve_free_text_execution_uses_goal_only_when_explicitly_requested() {
+        let (execution, warning) = resolve_free_text_execution(
             agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Goal,
-        ] {
-            let (execution, warning) =
-                resolve_free_text_execution(requested, true, "session.md", "codex", &[]);
+            true,
+            "session.md",
+            "codex",
+            &[],
+        );
+        assert_eq!(execution, ResolvedFreeTextExecution::Goal);
+        assert_eq!(execution.label(), "goal");
+        assert!(warning.is_none());
 
-            assert_eq!(execution, ResolvedFreeTextExecution::Goal);
-            assert_eq!(execution.label(), "goal");
-            assert!(warning.is_none());
-        }
+        // Auto prefers queue work so admitted free-text becomes a real
+        // `do [#id]` head: id-resolvable, usable as an `after=` target, and free
+        // of the slash-command render shape that drops the `- ` list marker.
+        let (execution, warning) = resolve_free_text_execution(
+            agent_doc_frontmatter::frontmatter::FreeTextExecutionMode::Auto,
+            true,
+            "session.md",
+            "codex",
+            &[],
+        );
+        assert_eq!(execution, ResolvedFreeTextExecution::Queue);
+        assert!(warning.is_none(), "auto -> queue is intended, not a fallback");
     }
 
     #[test]

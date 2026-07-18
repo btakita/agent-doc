@@ -181,7 +181,68 @@ thought to measure it, and I'm not going to invent the number.
 The admin dashboard hyop still uses imperative state (tabs, counts, per-entry
 actions). It's the better showcase for this pattern and I'd port it next if you want —
 say the word.
-<!-- agent:boundary:7b226e77 -->
+
+### Re: local moderation dispatch service — opus-4-8
+
+> **Queue prompt:** Please plan to create a dispatch service that runs on my local machine. This service will have a websocket connection via api key to the brookebrodack.net backend. The service will allow actor plugins receive guestbook moderation requests and will approve or deny. It will automatically
+
+Planned: **`tasks/software/plan-brookebrodack-guestbook-dispatch-service.md`**
+(`#gbdispatch1`, with `#gbdispatch2`–`#gbdispatch5` as implementation phases).
+
+**First, the prompt is cut off.** It ends mid-sentence at *"It will automatically"*.
+I planned everything up to that point and flagged the gap rather than inventing the
+rest — the likely continuations (auto-approve on plugin consensus? auto-fall-back to
+OpenAI? auto-reconnect? auto-start on boot?) change the aggregation policy in §6
+materially. That's the one thing blocking implementation.
+
+**Why this is a genuinely good idea here:** it inverts the dependency that's
+currently stuck. Today the edge calls OpenAI and needs paid credit — the exact
+blocker the guestbook sits behind. With dispatch, **the edge asks and your laptop
+decides**: judgement runs on hermes/Gemini or any local model, no per-call cost, and
+the key never leaves your machine. It also puts the local GPU to work.
+
+**The main architectural consequence — you need a Durable Object.** Pages Functions
+are request-scoped and cannot hold a WebSocket; there is nowhere in the current stack
+to park a long-lived connection. A DO is the right primitive (single-instance, holds
+the socket and in-flight state), with WebSocket Hibernation so an idle connection
+doesn't burn duration billing. Your laptop is behind NAT, so it dials **out** — the
+backend can never initiate, and everything else follows from that.
+
+```
+visitor ──POST──▶ Pages Function ──▶ Durable Object ◀──wss── local service
+                                          │                       │
+                                          ▼                  actor plugins
+                                     D1 (verdict)      (hermes, rules, human)
+```
+
+Design points worth surfacing now:
+
+- **Dispatch is another `provider_T`, not a new pipeline.** It slots into the
+  existing provider list: `dispatch (local, free) → openai (paid) → escalate`. The
+  fail-closed contract is inherited, not rewritten.
+- **Every request carries a deadline.** A late verdict for an expired `request_id` is
+  *dropped*, not applied — otherwise a slow laptop silently publishes minutes later.
+- **Single-holder rule:** one connection at a time, last-writer-wins. Two laptops
+  answering the same request is a correctness bug, not redundancy.
+- **Bounded backpressure** via lazily `/relay` (RelayCell). A submission flood must
+  shed load explicitly so the edge escalates immediately, rather than OOMing the
+  laptop or waiting out the deadline. `/presence`, `/membership`, and `/coordination`
+  cover plugin liveness and multi-plugin agreement.
+- **Laptop offline ⇒ entries stay pending.** Never a failed submission, never an
+  auto-approve. The cron sweeper remains the safety net.
+
+**A recommendation to weigh against your own plan:** a Durable Object is real new
+infrastructure — new billing surface, new failure mode, and the first *stateful*
+component in this stack. It is worth it for the **actor-plugin capability and
+local-model routing**. It is not worth it purely to dodge a small OpenAI bill; $5 of
+credit fixes today's blocker with zero new components. And if you keep OpenAI as the
+second provider anyway — which you should, so home uptime doesn't become site
+behaviour — you need that credit regardless. Build this for what it *adds*, not as a
+billing workaround.
+
+Four open questions are listed at the end of the plan; the truncated sentence is the
+one that actually blocks starting.
+<!-- agent:boundary:345525a5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -198,6 +259,8 @@ say the word.
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#50fc] Confirm the truncated dispatch requirement — the queued prompt ends mid-sentence at "It will automatically", which leaves the plugin aggregation/automation policy (§6 of tasks/software/plan-brookebrodack-guestbook-dispatch-service.md) unspecified; blocks #gbdispatch2
+- [ ] [#wqr2] Design done: local moderation dispatch service — tasks/software/plan-brookebrodack-guestbook-dispatch-service.md (#gbdispatch1). Phases #gbdispatch2 (Durable Object + wire protocol + auth), #gbdispatch3 (local service + plugin host), #gbdispatch4 (edge integration + fail-closed), #gbdispatch5 (tests)
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
 - [ ] [#cy58] Add credit/billing to the OpenAI project holding brookebrodack/guestbook/OPENAI_API_KEY — the key authenticates and is scoped correctly, but every chat-completions call returns 429 `insufficient_quota`, so moderation cannot run
 - [ ] [#gggp] Re-auth wrangler (`bunx wrangler login`) — the stored OAuth token has the right scopes and has not expired, but the API rejects it with "Invalid format for Authorization header [code: 6111]", blocking secret-put and deploy

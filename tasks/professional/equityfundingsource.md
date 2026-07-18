@@ -153,7 +153,53 @@ The `unknown_to_tmo` state in the reconcile modal derives `in_los` *solely* from
 That label is technically honest — EFS genuinely cannot confirm the account, because fundings are the only lender-shaped thing it reads. But an operator looking at a correctly-created lender will read it as an error, and that's precisely the never-funded lender the #fundpick-roster phase existed to make first-class.
 
 The clean fix is one **read** endpoint: `GET /LSS.svc/GetLender/:Account`. It confirms an account exists without opening the LSS write surface — `NewLender`/`UpdateLender` stay unwired and lender creation stays manual. That gives a third provenance flag so "confirmed in TMO, no funding yet" is distinguishable from "nothing in TMO." Queued as **#tmo-getlender-confirm**, not implemented — wiring a new TMO service is your call, not something to slip in under a question.
-<!-- agent:boundary:67815167 -->
+❯ 🚧 This is in TMO LOS (screenshot: TMO LOS `#LoanOrigination/NewLoLender` — Business Contacts › Lenders › All Lenders, "New Lender" dialog with Account / Name / Salutation / First Name / M.I. / Last Name). Can you identify if there is a TMO LOS API to do this?
+
+❯ 🚧 April mentioned that TMO LOS "Lenders" also appear in Business Contacts > Service Agents (screenshot: `#BusinessContacts?type=F8260DDD...` — "Business Contacts: Servicing Agents", 9 rows, no ACCOUNT column).
+
+❯ 🚧 Each "Lender" is a vesting. So we need to map the EFS lender with the TMO Lenders/Vestings.
+
+### Re: TMO Lenders are vestings — mapping EFS to them — opus-4-8
+
+Confirmed, and that model is already what EFS implements. Let me separate what's built from what genuinely isn't, because I conflated those two things this morning and closed an item I shouldn't have.
+
+**The three chat questions, recorded here since they never hit the document.**
+
+**1. Is there a TMO LOS API to create a lender?** No. The public [TMO test portals](https://api.themortgageoffice.com/APITest.html) list exactly one Lender API — Create / Get / Update / Get Lenders / Get Lender History — which is the set `docs/TMO/new-lender.md` attributes to **`LSS.svc`**. No LO-side lender endpoint exists, and `NewLoLender` in that URL is a client-side SPA route, not an API method. `LOS.svc` does have `NewBorrower`, so LO isn't loan-only — there's simply no lender analogue.
+
+**2. Servicing Agents.** April's observation is an overlap, not a mirror: 14 lenders vs 9 servicing agents, with only 4 matching on name+street+ZIP (`L-AFSHIN`, `EFS`, `VIDOR`, `TGRAVES`). Servicing Agents additionally holds real third-party servicers (FCI, Note Servicing Center, Superior) that are not lenders. Two reasons it can't back a reconcile: it has **no ACCOUNT column** — and account is what every EFS join keys on — and Mark Leonard's four accounts collapse to at most one row there. Duplicate "Judith Vidor, Trustee" rows and a `(301)`/`(310)` phone discrepancy mark it as a hand-entered contact list, not a master.
+
+**3. Each "Lender" is a vesting.** This is the load-bearing fact, and it's exactly what the schema already encodes:
+
+| Layer | Status |
+|---|---|
+| `lender_vestings.tmo_lender_account` + `tmo_lender_rec_id` | shipped (migration 0138) |
+| `funds.lender_vesting_id` | shipped (migration 0139) |
+| `lender_vesting_id_for_account_` — resolve vesting from (user, account) | shipped (`repo.ts:3090`) |
+| Per-vesting mapping UI on the lender profile | shipped (`AdminLenderVestings`) |
+| Per-vesting reconcile modal from the deal | shipped this morning (#deal-tmo-reconcile-vesting) |
+
+So EFS lender → many TMO vesting accounts is modeled end to end. Your screenshot confirms the cardinality from the TMO side rather than changing it.
+
+**Where it is still wrong — and my bookkeeping error.**
+
+`users.lender_account` is **single-valued**. Given that each TMO Lender is a vesting, that column can only ever hold one of a lender's N accounts, so it is wrong by construction, not merely incomplete. It still drives four live surfaces:
+
+- `investor.lender_account` on the deal-interests payload (`admin/shared.ts:773`)
+- the `InterestedLenderCard` "Lender account" field and its `needs_account` → "Link TMO Account" flow
+- `link_lender_account_` → `PUT /api/admin/users/:id/lender-account`
+- the tab-level reconcile summary I shipped this morning — `interest_tmo_linked_` / `tmo_reconcile_summary_`
+
+That last one is the error. When I queued `#deal-tmo-reconcile-vesting` its text was specifically *"switch `interest_tmo_linked_`/`tmo_reconcile_summary_` to vesting-level linkage."* I then shipped the reconcile **modal** — a genuinely different piece — and marked the item done. The modal is correct and stands; the switch it named was never made. Re-queued as **#lender-account-retire** with the actual scope, not folded into something adjacent.
+
+Concretely, today a lender whose vesting is correctly mapped to `MARKDBPP` but whose `users.lender_account` is blank still reads **"Not linked"** on the card and counts as unlinked in the tab summary — the exact false negative your screenshot predicts.
+
+**Not implementing it in this turn** — it touches the interests payload shape, the card, and the summary together, and you asked me to write this up rather than start a refactor. Say go and I'll take it; it's well-scoped now.
+
+Also queued **#tmo-lender-vesting-doc** to write the verified model into `docs/TMO/get-lender.md` and the PRD, so the next session doesn't re-derive it from screenshots.
+
+One thing this does **not** settle: whether `LSS.svc/NewLender` writes the record shown in the LO All Lenders grid — still #04v8. Business Contacts is a third store, so the overlap is consistent with either reading, and the duplicate rows lean toward "separately entered," which makes me less confident in the shared-master theory than I was two turns ago. `GET /LSS.svc/GetLender/MARKDBPP` settles it in one read; `MARKDBPP` is the right probe precisely because it appears nowhere in Servicing Agents. Credentials are Worker secrets, not local, so that needs your go.
+<!-- agent:boundary:04ed3bb0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -180,6 +226,8 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lender-account-retire] Retire the single-valued users.lender_account from the deal surfaces in favor of vesting-level TMO linkage. Operator confirmed 2026-07-18: each TMO 'Lender' record IS a vesting (Mark Leonard = MARKDBPP/MARKL/MARKPERSON/MARKROTHIR), so users.lender_account can only ever hold ONE of a lender's N vesting accounts and is wrong by construction. Still driving: investor.lender_account in the deal-interests payload (admin/shared.ts investor_deal_interest_admin_response_ ~:773), the InterestedLenderCard 'Lender account' field + needs_account 'Link TMO Account' flow (deal_detail.tsx), link_lender_account_ -> PUT /api/admin/users/:id/lender-account, and the #deal-tmo-reconcile tab summary (interest_tmo_linked_/tmo_reconcile_summary_). Work: carry per-interest vesting linkage (lender_vestings rows + tmo_lender_account) on the interests payload, switch the card + tab summary to count vesting-level linkage, point the card's link affordance at the reconcile modal instead of the single-valued PUT, and keep users.lender_account only as a legacy read until backfilled. Reuses lender_vesting_id_for_account_ (repo.ts:3090) and funds.lender_vesting_id (mig 0139). Spec: src/equityfundingsource-dev/prds/funding-lender-linking.md.
+- [ ] [#tmo-lender-vesting-doc] Record the verified TMO lender/vesting model in src/equityfundingsource-dev/docs/TMO/get-lender.md and prds/funding-lender-linking.md: a TMO 'Lender' record IS a vesting (account-keyed, one per vesting), Business Contacts > Servicing Agents is a SEPARATE free-form contact store with no ACCOUNT column and partial overlap only (4 of 14 lenders; contains non-lender servicers FCI/Note Servicing Center/Superior; duplicate rows observed), and there is no LOS-side lender-create API — the only lender Create/Get/Update/GetLenders/GetLenderHistory surface is LSS.svc, which EFS deliberately does not wire. Prevents re-deriving this from screenshots next time.
 - [ ] [#tmo-getlender-confirm] [recommended] Wire read-only GET /LSS.svc/GetLender/:Account so EFS can confirm a TMO lender account that has never funded. Today tmo_lender_roster_ derives in_los solely from LOS.svc/GetLoanFundings, so a lender an admin legitimately created in TMO but never funded reads as 'Unconfirmed in TMO' in the #deal-tmo-reconcile-vesting modal — an accurate statement of EFS's knowledge, but it looks like an error to an operator. GetLender is a single READ endpoint; it does not open the LSS write surface (NewLender/UpdateLender stay unwired, lender creation stays manual per docs/TMO/new-lender.md). Add a third provenance flag (in_lss) so 'confirmed in TMO, no funding yet' is distinguishable from 'nothing in TMO'. Spec: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 <!-- /agent:backlog -->
 

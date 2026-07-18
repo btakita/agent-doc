@@ -773,7 +773,29 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                     document_agent: None,
                     active_harness: None,
                 });
-                QueueState::default()
+                // `#queuepersiststall`: report the queue AS IT ACTUALLY STANDS.
+                //
+                // This used to fall back to `QueueState::default()`, i.e. "no
+                // active queue, nothing drainable". That is indistinguishable
+                // from a genuinely drained queue, and preflight is the loop gate
+                // — so a *persistence* failure silently presented as *queue
+                // empty* and stalled the drain. Observed live: session-check
+                // reported `queue_continuation_required=true` with a real next
+                // head while the very next preflight reported
+                // `queue_drainable_head_count: 0`, and the loop stopped after one
+                // iteration on a queue that still had work.
+                //
+                // Only the recomputed queue was lost; the previous queue text is
+                // still in effect and its drainability is knowable. Probe it
+                // read-only so the contract stays truthful. If even the probe
+                // fails, the zeroed default is the honest answer.
+                inspect_queue_state(file, diff_result.as_deref()).unwrap_or_else(|probe_err| {
+                    eprintln!(
+                        "[preflight] queue: post-failure drainability probe also failed, \
+                         reporting an inactive queue: {probe_err}"
+                    );
+                    QueueState::default()
+                })
             }
         }
     };

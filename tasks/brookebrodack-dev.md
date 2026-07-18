@@ -705,7 +705,74 @@ re-authed, the rest is short and I can do all of it:
 4. Deploy Pages + the cron Worker, then verify against the live site
 
 Step 3 onward still waits on your go-ahead.
-<!-- agent:boundary:653eb9c9 -->
+❯ 🚧 Can I use my Codex subscription for the api calls?
+
+### Re: can a Codex subscription cover the API calls — opus-4-8
+
+**No — and the reason is structural, not just a policy technicality.**
+
+**1. A subscription isn't API credit.** ChatGPT Plus/Pro/Business and Codex bill
+separately from the API platform. The subscription pays for the ChatGPT apps and the
+Codex agent; `api.openai.com` draws on prepaid credit in a project. That's the exact
+separation you're hitting — your key authenticates fine and fails on
+`insufficient_quota`, which *is* the billing boundary between those two worlds.
+
+**2. Even setting that aside, the architecture rules it out.** Two of the three
+moderation paths run on **Cloudflare's edge**:
+
+| Path | Runs on | Can use a subscription? |
+|---|---|---|
+| Inline judging at submit | Pages Function | No — needs a real key |
+| Cron sweeper | Worker | No — needs a real key |
+| Local CLI | your machine | in principle, see below |
+
+A Pages Function has no way to present a ChatGPT session, and it can't reach anything
+on your laptop. Subscription auth is browser/device-bound and interactive by design;
+that's not a surface an edge worker can call.
+
+**3. I checked the one clever route, and it doesn't exist.** hermes ships a `proxy`
+that exposes an OpenAI-compatible local endpoint backed by an OAuth provider — which
+is exactly the shape that could launder a subscription into an API. But:
+
+```
+$ hermes proxy providers
+  nous  — Nous Portal
+  xai   — xAI Grok OAuth
+```
+
+No Codex or ChatGPT upstream. And even if there were, it binds to localhost, so the
+two edge paths still couldn't reach it.
+
+**4. Worth saying plainly:** using a subscription as a backend for an unrelated
+production service is against the spirit of how those products are licensed —
+they're sold for interactive use, not as a free API tier behind a public web form.
+I'd treat that as a real constraint, not a loophole to route around.
+
+### The practical answer
+
+**Add ~$5 of API credit.** This workload is genuinely tiny: each call is a short
+system prompt plus one guestbook entry, and a short JSON reply — call it 500–800
+tokens. On a nano/mini model that's a small fraction of a cent per message. A
+personal-site guestbook getting a handful of messages a day would take **years** to
+spend $5. The engineering effort to avoid the bill costs more than the bill.
+
+### There is already a genuinely free path — just not for the edge
+
+Worth remembering what we built: the **local CLI** runs hermes first, and your hermes
+is configured against **Google AI Studio with a Gemini key you already have**. That
+path costs nothing and needs no OpenAI credit at all.
+
+It's blocked only by the hermes bug (`#2amm` — the httpx `ResponseNotRead` crash). If
+you'd rather not put money on OpenAI at all, the coherent version is:
+
+- Fix or update hermes, then run `scripts/guestbook-moderate.ts` on your own cron
+  using Gemini — free, and it's the design we already shipped
+- Skip the Cloudflare cron Worker and inline judging entirely, or leave them
+  unconfigured so they no-op and everything waits for the local sweep
+
+That trades instant publication for zero cost. Both designs are already built and
+share the same core — it's a configuration choice, not a rewrite.
+<!-- agent:boundary:6c7dedba -->
 <!-- /agent:exchange -->
 
 ## Queue

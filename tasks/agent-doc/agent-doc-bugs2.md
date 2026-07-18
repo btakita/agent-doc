@@ -78,31 +78,55 @@ The problem is that a single urgent drain can legitimately apply nothing: `drain
 `make check` green (exit 0), new regression test asserts multiple retries while pending *and* that a never-converging delivery still fails closed. The existing one-shot test still passes unchanged, so we didn't trade correctness for retries. `make install-full` done — binary and plugin 0.2.278 installed to all 4 IDE roots.
 
 Worth noting: the route half is a Rust change and is live now, but the plugin half still needs an IDE restart to load. Until you restart, you have the weaker of the two fixes — so if you see the deferral again before restarting, that's expected rather than a regression.
-<!-- agent:boundary:17f70dc1 -->
+
+### Re: fix all issues identified this session — opus-4-8
+
+Six commits shipped, and two items I deliberately did **not** fix because I could not verify the mechanism.
+
+**Fixed and verified:**
+
+- `#crdtpushdrain` (`5b648f338`, `6a2261b96`) — controller-published CRDT frontiers were suppressed by the plugin's speculative no-op drain backoff (escalates toward 30s on an idle document, exactly the Compact Exchange state), so every compact/finalize waited for the 2000ms `ack_recovery_force_refresh` escalation. Plus the route path latched its urgent drain to a single attempt.
+- `#routeprogresswait` (`1659448e9`) — the recurring `route deferred ... delivery_pending for 5000ms`. `ops.log` shows `delivery_converged` *does* reach true moments later, and the JB action writes its prompt marker **first**, so route was deferring the convergence of a write the same action had just issued. The no-progress deadline now resets when the frontier advances; a frozen frontier still fails closed.
+- `#committedwedge` (`c91bdf692`) — the circular deadlock. Hit it three times, most clearly on a pure `--backlog-add`: no response body, document matching HEAD, nothing that could duplicate, still refused. Pending-only closeouts now reopen from HEAD. This is what made recording these very backlog items possible.
+- `#backlogqueueprepend` (`64a3e1d07`) — your queue-ordering report. The bare `queue` token hard-defaults to `Append`, and the `priority` attribute on the *same marker* never influenced the mode. Verified live: `(Append, 49)` → `(Prepend, 49)`.
+- `#queuepersistloud` (`1659448e9`) — queue maintenance printed confident progress while *computing*, then swallowed persistence failure into a bare warning. That is why a filed backlog id was absent from the queue entirely rather than mis-ordered. Now says plainly that nothing was applied, as a structured warning.
+- `#syncobscache` (`800d3c2fd`, tmux-router `7b5cedc`, `8957e619f`) — lazily `SlotMap` observation cache plus a shared pane-liveness snapshot.
+
+**Where I was wrong, in the open:**
+
+The focus-sync work did **not** fix the lag. I cut spawns 109→63 and `pane_dead` full scans 19→1, but wall clock did not move (min-of-5 2207ms vs 2031ms baseline; every run 2.0–2.4s). That falsifies my "spawn count IS the cost" premise. Instrumented phases sum to ~375ms of a ~2.5s sync, leaving ~2.1s in an unmeasured span I did not isolate. Filed as `#syncfocuslag` with the exact next step. I kept the caching because O(n) full scans → 1 is a real reduction with correct invalidation, not because it fixed anything.
+
+I also reverted two speculative fixes rather than ship them: a response-path loosening for the stale-baseline wedge (it tripped the ambiguous-patchback guard, which correctly refuses a visible response with no capture artifact), and a preflight cycle-reuse change (preflight *deliberately* rolls the cycle — asserted by an existing test).
+
+**Not fixed — `#jbsteerinterrupt`.** `attempt_busy_existing_pane_interrupt_recovery` is codex/opencode-only, so it cannot be what interrupted your Claude pane. Something else injected it and I don't know what. I won't edit safety-critical routing code on an unverified hypothesis, having already made and reverted that mistake twice today. I need `ops.log` plus route diagnostics captured at the moment of the interrupt on a Claude pane.
+
+CI run 29653355392 was in progress at closeout. The pre-existing `finalize_skips_ignored_untracked_session_doc` failure is still red and still not reproducible locally after four attempts.
+<!-- agent:boundary:d520485c -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#capturebacklogatomic]
-- ⏭️ 📌 do [#opcapturelazily]
-- ⏭️ 📌 do [#jbtsiftnosub2verify]
-- 🚧 📌 do [#5bzd]
-- 📌 do [#sidecarstate]
-- 📌 do [#64we]
-- 📌 do [#adstatechart2]
-- 📌 do [#adstatechart3]
-- 📌 do [#adstatechartkt]
-- 📌 do [#adstatechartjs]
-- 📌 do [#ipcauthority]
-- 📌 do [#ipcliveness]
-- 📌 do [#ipcverhandshake]
-- 📌 do [#ipcpostcommitinv]
-- 📌 do [#staleplugindeploy]
-- 📌 do [#5qjj]
-- ⏭️ 📌 do [#jblocalhistverify]
-- ⏭️ 📌 do [#capturebacklogatomic]
-- ⏭️ 📌 do [#opcapturelazily]
+- do [#syncobscache2]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
+- ⏭️ do [#jbtsiftnosub2verify]
+- 🚧 do [#5bzd]
+- do [#sidecarstate]
+- do [#64we]
+- do [#adstatechart2]
+- do [#adstatechart3]
+- do [#adstatechartkt]
+- do [#adstatechartjs]
+- do [#ipcauthority]
+- do [#ipcliveness]
+- do [#ipcverhandshake]
+- do [#ipcpostcommitinv]
+- do [#staleplugindeploy]
+- do [#5qjj]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
 <!-- /agent:queue -->
 
 ## Notes
@@ -168,6 +192,8 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.
+- [ ] [#jbsteerinterrupt] #agent-doc-bug JB `Run Agent Doc` mid-turn showed Claude Code "Interrupted". MECHANISM UNVERIFIED — do not guess. attempt_busy_existing_pane_interrupt_recovery (agent-doc-route-io/src/busy_pane.rs:225) is codex/opencode-ONLY, so it cannot be the source for a Claude pane; something else injected it. NEEDED: ops.log + route diagnostics captured at the moment of interrupt on a CLAUDE pane before touching safety-critical routing code. Contract #realtime-steering-verbatim: the prompt is already in the document and the running turn should consume it as steering, so interrupting to deliver it is wrong by design.
 - [ ] [#syncobscache2] #syncobscache follow-up (the rest of the focus-sync win): extend the command-scoped observation cache into ../tmux-router. After the agent-doc-side cache: 109 -> 80 subprocess spawns, 2225 -> 2031ms (~9% only). list-panes barely moved (35 -> 34) because tmux-router spawns from 47 sites directly via its own Command builder, bypassing TmuxCommandRunner. Dominant remainder: `list-panes -a -F #{pane_id} #{pane_dead}` run 18x identically — pane_dead_flag lists ALL panes and scans for one, once per pane. Fix: move the scope into tmux-router and/or batch pane_dead_flag into one map fetch. Re-measure with the PATH-shim spawn counter.
 - [ ] [#jbrunsteering] #agent-doc-bug JB `Run Agent Doc` while a turn is already running should feed the prompt in as realtime steering (#realtime-steering-verbatim / #realtime-steering-aggregate) instead of interrupting the active turn. Operator-reported: invoking it mid-turn produced "Interrupted · What should Claude do instead?" rather than surfacing the new prompt to the running turn. NOT STARTED.
 - [ ] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.

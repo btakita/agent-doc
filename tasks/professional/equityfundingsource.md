@@ -32,98 +32,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260716-072954.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260718-032058.md`*
 
 Compacted content:
-- Archived 14 response topic(s): Is a TMO lender ID absolutely necessary?; Searchable dropdown of TMO lenders for the lender-account field; LOS lenders only; 11 more
-- Prior summary/context: prior compacted content: Archived 7 response topic(s): Remove "Wiring Instructions (Secure Link)" from the deal Fundi...
-
-### Re: Binding a deal to a vesting — opus-4-8
-
-Bind through the **funding record** (`funds`), keyed by a real FK to the vesting — not through the TMO account string. Here's the model and why it feels unreliable today.
-
-**The three links, and which are reliable now**
-
-| Link | Mechanism today | Reliable? |
-|------|-----------------|-----------|
-| vesting → lender | `lender_vestings.user_id → users.id` FK | ✅ yes — one lender = one `users` row → many vestings |
-| deal → vesting | *only* implied by `funds.account_number` == `lender_vestings.tmo_lender_account` (string match) | ❌ fragile — TMO-derived, nullable, breaks for never-synced vestings |
-| vesting → TMO account | `lender_vestings.tmo_lender_account` (mig 0138, nullable) | sync attribute only |
-
-`funds` today is `(id, deal_id, user_id, loan_number, account_number, amount_funded, status, …)`. It joins a deal to a *lender* (`user_id`) and to a TMO account *string* (`account_number`), but has **no column pointing at the vesting row**. That string is the only thing tying a funding to a vesting — and it's exactly what makes the link feel unreliable.
-
-**Recommendation: add `funds.lender_vesting_id` (FK → `lender_vestings.id`).**
-
-The funding is already the per-deal + per-lender join row; make it per-deal + per-**vesting** — the correct grain, since a lender funds a deal through one specific vesting. Then:
-
-- **deal ↔ vesting** = `funds.deal_id` + `funds.lender_vesting_id` — deterministic, internal, zero TMO dependency.
-- **vesting ↔ lender** = keep `lender_vestings.user_id` as the source of truth (derive/verify `funds.user_id` from it).
-- **account_number** becomes a *derived mirror* of the vesting's `tmo_lender_account` (copied when present) for TMO wire compatibility — no longer the binding key.
-
-This slots straight into create-on-lender-select (#fundlink1): pick vesting → set `funds.lender_vesting_id`; if the vesting has a `tmo_lender_account`, copy it into `funds.account_number` for the later (gated) TMO push; if not, the binding still holds locally.
-
-**April's question — do we even need EFS↔TMO vesting linking? No, not for binding.** The deal↔vesting↔lender chain is fully FK-expressible with zero TMO involvement. `tmo_lender_account` is only needed when you actually push/pull a funding to/from TMO (`AddLoanFunding` / `GetLoanFundings` key by account), and that path is already gated behind #dzmm/#7a4d. So you can bind a deal to a vesting **today** for a vesting that has never been synced to TMO — the TMO link is an optional sync attribute, not part of the core binding. That also decouples your internal binding's reliability from TMO sync timing and sidesteps the string-match ambiguity behind the #5q7z duplicate-funding class.
-
-**Net:** one small migration (`funds.lender_vesting_id` FK) turns the deal↔vesting bind from a fragile TMO-string join into a first-class internal relationship. Queued as `#fund-vesting-fk` — say the word and I'll implement it (migration + repo + create-on-select wiring).
-### Re: Funding-linking items deferred (⏭️) — opus-4-8
-
-Noted — you've marked both `do [#fundlink2]` and `do [#lender-sync-tmo-ui]` as ⏭️ (deferred), so I'm holding off on the funding-linking UI. Nothing to run this cycle; the vesting-binding recommendation from last cycle stands and `#fund-vesting-fk` is queued.
-
-When you're ready, here's the order they should ship in (all grounded in `funding-lender-linking.md`):
-
-1. **`#fund-vesting-fk`** (migration + repo, no UI) — add `funds.lender_vesting_id` FK → `lender_vestings.id`. Foundation: turns the deal↔vesting bind into a real relationship instead of the `account_number` string join.
-2. **`#lender-sync-tmo-ui`** (vestings card) — admin lender/user detail gets a vestings card with `TmoLenderPicker` + per-vesting "Sync with TMO" (backend `PUT …/vestings/:id/tmo-account` already shipped, EFS 010a371). This is where a vesting acquires its `tmo_lender_account`.
-3. **`#fundlink2`** (link existing TMO funding) — surface `tmo_unmatched_fundings` for the loan and bind via `admin_tmo_unmatched_funding_bind_` so an accepted loan reuses a pre-wire TMO funding instead of creating a duplicate (also closes the #5q7z duplicate-funding gap).
-
-1 → 2 → 3 is the dependency order: the FK gives the binding, the card populates the per-vesting TMO mapping, and the link step reuses what TMO already tracks. Say "go" (all, or one at a time) and I'll start at the top.
-
-### Re: Bi-directional lender/vesting ↔ TMO linking — opus-4-8
-
-Shipped the per-vesting card (EFS `0ac4402`, pushed). `make check` green: **1648 pass / 0 fail**.
-
-**`#lender-sync-tmo-ui` — done.** New `AdminLenderVestings` card on the lender-role user profile: lists `lender_vestings`, and each vesting gets its own `TmoLenderPicker` + "Sync with TMO" → `PUT /api/admin/lenders/:id/vestings/:vesting_id/tmo-account` (empty clears the mapping). Plus a cache-refresh Sync and the LOS portal link, matching the lender-request page. Backend was already shipped (010a371), so this was the missing UI half. I also noted on the existing lender-level field that `users.lender_account` is only a *default* — it's single-valued and can't represent Mark Leonard = `MARKDBPP`/`MARKL`/`MARKPERSON`/`MARKROTHIR`, which is exactly why the account belongs on the vesting.
-
-**On your bi-directional requirements** — the two directions are in different states:
-
-1. **EFS-originated** (application received through EFS → create the funding by associating with a TMO lender or creating a new one): this is `#fundlink1`, already shipped. Per PRD D1 it's LOS-embed (`AddLoanFunding` carries the lender fields; no LSS lender-master call), and per D2 the funding materializes on lender-select, not at acceptance.
-2. **TMO-originated** (a TMO funding and an EFS deal both exist and must be linked): the *surface + bind* shipped last commit (`71327b0`). **The precedence rule you specified is the genuinely missing piece** — nothing in the codebase implements it today (I grepped; there's no conflict/override logic in `tmo-sync.ts`).
-
-So I recorded it as **PRD decision D4** and put the implementation on `#fundlink2`: on bind, the TMO funding is the source of truth and must **override** conflicting `funds` fields (amount, account, dates, status) from the pulled `loan_funding` cache row rather than preserving local values — and record what it overrode for audit.
-
-Worth flagging: **D4 governs the pull/bind direction only, so it is _not_ blocked by #dzmm/#7a4d.** Those gate the EFS→TMO *push* (`#fundlink3`). That means the TMO-wins bind is implementable now — it doesn't have to wait on the TMO write field map. Say go and I'll take `#fundlink2`.
-
-One caveat on scope: I verified via `make check` + the worker bundle, not against the live portal — driving the real card needs a seeded lender with vestings. If you want live confirmation before this counts as shipped, say so and I'll run the local portal recipe.
-
-### Re: Options 1 → 2 → 3 complete — opus-4-8
-
-All three shipped. EFS `1bb5c02` (pushed) closes options 1 and 3; option 2 landed last cycle (`0ac4402`). `make check` green: **1660 pass / 0 fail**.
-
-**1. `#fund-vesting-fk` — done.** Migration `0139` adds `funds.lender_vesting_id` as a real FK to `lender_vestings`. That replaces the implied deal↔vesting link (matching `funds.account_number` against `lender_vestings.tmo_lender_account` — TMO-derived, nullable, and simply absent for a never-synced vesting) with a first-class internal relationship. `account_number` is now just a derived mirror for TMO wire compat. `admin_fund_create_` takes a picked vesting (authoritative) or recovers it from the account, and the create-funding endpoint passes it through. **Nullable on purpose** — the FK is advisory and must never hard-gate deal progress, per the PRD's non-goals.
-
-**2. `#lender-sync-tmo-ui` — done last cycle** (`0ac4402`): per-vesting `TmoLenderPicker` + "Sync with TMO" card on the lender profile.
-
-**3. `#fundlink2` (PRD D4) — done.** This one turned up a real bug: `tmo_unmatched_funding_bind_` **always inserted a new fund**, so binding a TMO funding to a deal EFS already tracked produced a *second* position — exactly the `#5q7z` duplicate-funding class. It now reconciles the existing deal+lender fund to TMO: every conflicting field is overwritten from the pulled row, and an audit blob of precisely what was overridden lands in `tmo_response_json` (the bind also returns the overrides).
-
-One judgement call worth surfacing: **an absent TMO value does not blank out what EFS already knows.** "TMO is the source of truth" shouldn't mean a TMO row that merely omits a field wipes good EFS data — only a *present, differing* TMO value wins. If you'd rather TMO's silence be authoritative too, that's a one-line change in `fund_tmo_override_plan_`.
-
-Verification is stronger here than last cycle: alongside the pure `fund_tmo_override_plan_` unit tests, I added **behavioral** tests against real SQLite proving reconcile-not-duplicate, TMO winning the conflicting fields, the right vesting chosen among several, and bind still succeeding when no vesting maps. Fixing those also exposed that the test fixture was missing `lender_vestings` — now aligned to the real schema.
-
-Still not live-verified (no seeded lender with vestings on a real portal); the D1 migration `0139` also needs applying wherever you run it.
-
-### Re: Options 1 → 2 → 3 already complete — gpt-5
-
-> **Queue prompt:** go...do options 1 -> 2 -> 3
-
-No duplicate implementation was needed. The exact ordered batch is already shipped:
-
-1. `#fund-vesting-fk` — migration `0139` adds `funds.lender_vesting_id`; create-funding wiring and tests are present.
-2. `#lender-sync-tmo-ui` — `AdminLenderVestings` and its per-vesting `TmoLenderPicker` / Sync with TMO flow are present.
-3. `#fundlink2` — `fund_tmo_override_plan_` and `tmo_unmatched_funding_bind_` reconcile an existing fund to the pulled TMO record instead of inserting a duplicate, with behavioral tests.
-
-Verification: delivery commits `1bb5c02` and `0ac4402` are both ancestors of the current EFS `HEAD`; targeted tsift searches found the migration, UI, reconciliation functions, and tests. The prior completed response records the full suite at **1660 pass / 0 fail**. Changed paths this cycle: none. Confidence: high; escalation: none.
-
-The session-accretion warning is noted; queue processing continued without compaction as configured.
-<!-- agent:boundary:b575456a -->
+- Archived 5 response topic(s): Binding a deal to a vesting; Funding-linking items deferred (⏭️); Bi-directional lender/vesting ↔ TMO linking; 2 more
+- Prior summary/context: prior compacted content: Archived 14 response topic(s): Is a TMO lender ID absolutely necessary?; Searchable dropdown...
+<!-- agent:boundary:00be925c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->

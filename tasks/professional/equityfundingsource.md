@@ -288,12 +288,22 @@ Each `RecID` is selectable text. It is the value an admin pastes into `DELETE /L
 7 tests; full suite 1895 pass / 0 fail; builds clean.
 
 That clears the last of the items I could act on. What remains in the backlog is the two reconciliation executors (`#tmo-orphan-reconcile-exec` then `#tmo-reconcile-binder` — in that order), and the operator-gated set: the sandbox purge waiting on your go, plus the Cloudflare custody / DNS cutover / prod-seed cluster.
-<!-- agent:boundary:af1618a3 -->
+<!-- agent:boundary:623ac0cd -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#tmo-contacts-ui]~~
-- do [#vesting-gap-admin-queue]
+- ~~do [#vesting-gap-admin-queue]~~
+- do [#tmo-sandbox-purge-apply]
+- do [#tmo-reconcile-binder]
+- do [#tmo-orphan-reconcile-exec]
+- do [#tmo-orphan-cache]
+- do [#efs-do-hibernation]
+- do [#efs-prod-seed]
+- do [#efs-cf-account-custody]
+- do [#efs-prod-secret-parity]
+- do [#efs-dns-cutover]
+/goal Implement backlog item(s): #st95
+- do [#tmo-getlender-verify]
 <!-- /agent:queue -->
 
 ## Backlog

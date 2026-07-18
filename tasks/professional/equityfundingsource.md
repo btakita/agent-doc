@@ -145,6 +145,11 @@ Three things I want to flag, because they changed the shape of the thing:
 12 tests; full suite 1838 pass / 0 fail; builds clean.
 
 Gated the parent and queued `#tmo-orphan-reconcile-exec` for the executor. To be precise about what is actually blocked: `reconcile_cache` and `tombstone` are EFS-local and not gated at all, and **sandbox execution of the writes is not gated either** — only production writes ride `#dzmm`/`#7a4d`. So the next cycle can run this end-to-end in the sandbox against the clean slate `bin/tmo-sandbox-purge.ts` leaves, which is the right place to prove it before anything touches live.
+> **Queue prompt:**
+>
+> do [#tmo-orphan-as-fundings]
+
+
 
 ### Re: do [#tmo-reconcile-auto] — opus-4-8
 
@@ -171,11 +176,25 @@ That leaves auto-binding to the genuinely mechanical cases — the ones where TM
 Gated the parent and queued `#tmo-reconcile-binder` for the wiring: read the roster, run `funding_match_all_`, apply `auto_bind` through the existing `admin_tmo_unmatched_funding_bind_POST_` path, and persist the `review`/`ambiguous` rankings so the admin queue opens pre-ranked instead of blank.
 
 One note on this cycle: the closeout hit an editor-authority/disk divergence after the `#tmo-orphan-as-fundings` commit and again here. Both settled through the supervisor's automatic replica re-registration — no forced write, no repair, nothing lost — but it is why the queue advanced a beat ahead of the responses.
-<!-- agent:boundary:3617420e -->
+### Re: do [#vesting-gap-admin-queue] — opus-4-8
+
+Shipped (EFS `e4cfca4d`, pushed). Phase 4 closes the loop Phase 1 opened.
+
+- **`GET /api/admin/lender-vesting-gaps`** — every active lender who cannot be reconciled against TMO, worst gap first, with `blocked_count` (cannot be reconciled at all) separated from partial-link warnings. Lenders with nothing to fix are dropped; a fully-linked lender is not a queue item.
+- **`vesting-gaps` nav badge** in `/api/admin/nav-counts` — active lenders with zero TMO-linked vestings.
+
+The design choice worth naming: the endpoint calls the same `vesting_gap_` derivation the per-lender card renders rather than re-deriving the gap in SQL. Two implementations of "is this lender blocked" would drift the first time the rule changed, and the failure mode is quiet — a queue that disagrees with the card it links to. The badge query and the roster filter agree by construction too: `no_vestings` and `unlinked` both have zero linked vestings and both set `blocks_reconcile`; `partial_link` has neither, so it stays a warning rather than inflating the badge.
+
+8 tests; full suite 1864 pass / 0 fail; builds clean.
+
+Queued `#vesting-gap-queue-ui` for the screen itself — the API and count ship, the portal worklist is the follow-up.
+
+**Where the four phases leave things.** The reconciliation path now exists end to end as decision logic: vestings are authorable from both sides and their absence is visible (Phase 1), the orphan corpus has a per-row plan (Phase 2), unmatched fundings score themselves against the roster (Phase 3), and the gaps that block all of it are a worklist (Phase 4). What is *not* built is execution — three items, all wiring rather than design: `#tmo-orphan-reconcile-exec`, `#tmo-reconcile-binder`, `#vesting-gap-queue-ui`. Worth doing in the sandbox first, in that order, since the executor is what generates the unmatched fundings the binder then has to resolve.
+<!-- agent:boundary:3f87a555 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#tmo-reconcile-auto]
+- ~~do [#tmo-reconcile-auto]~~
 - do [#vesting-gap-admin-queue]
 - do [#tmo-contact-enumeration]
 <!-- /agent:queue -->
@@ -183,8 +202,8 @@ One note on this cycle: the closeout hit an editor-authority/disk divergence aft
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmo-reconcile-binder] Binder for the #tmo-reconcile-auto matcher: read tmo_unmatched_fundings + the lender/vesting roster (users.lender_account, lender_vestings.tmo_lender_account, funds.tmo_funding_rec_id), run funding_match_all_, apply auto_bind decisions through the existing admin_tmo_unmatched_funding_bind_POST_ path, and persist review/ambiguous candidate rankings so the admin queue opens pre-ranked instead of blank. Per PRD D4 the bind reconciles EFS to TMO (the TMO funding wins on conflict) and must record what it overrode. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#tmo-orphan-reconcile-exec] Executor for the #tmo-orphan-as-fundings planner: read the orphan tmo_cache_entities rows + LOS.svc/GetLoans + GetLoanFundings + the EFS funds/vesting roster, run orphan_reconcile_plan_, and apply it. reconcile_cache and tombstone are EFS-local and unguarded; push_funding and create_loan_then_funding (isolated by orphan_plan_writes_) need explicit opt-in and, in production, the EFS->TMO push gate (#dzmm/#7a4d). Sandbox execution is NOT gated — run it there first against the clean slate bin/tmo-sandbox-purge.ts leaves. Mirror the sandbox guard from bin/tmo-sandbox-purge.ts: the TMO token is identical across environments and only the Database header selects one. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
-- [ ] [#tmo-reconcile-auto] Automated reconciliation attempt over tmo_unmatched_fundings: for each unmatched TMO funding try RecID -> Account against lender_vestings.tmo_lender_account -> lender email, record confidence plus evidence, auto-bind above a threshold and queue the rest with the candidate ranking pre-computed. Per PRD D4 a bind reconciles EFS to TMO (TMO funding wins) and must record what it overrode. The matcher must be a pure function over pulled fundings + the lender/vesting roster so it is testable without TMO, mirroring vesting_gap_. Phase 3 of src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#vesting-gap-admin-queue] Roster-level vesting-gap queue: list lenders with investor_vesting_count = 0 or investor_vesting_linked_count = 0 (both counts already exist in the lender-pipeline query) with a nav count, so onboarding gaps are worked as a list instead of discovered one lender card at a time. Phase 4 of src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#tmo-orphan-cache] Prune/reconcile orphan tmo_cache_entities rows: 18 of 19 cached TMO 'loan' rows (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) do not exist in the TMO database EFS is pointed at — GetLoans returns 24 loans and only '1010' overlaps. They are EFS test debris that renders as if it were TMO data (this is where 'Lucas Huang' shows up). Add an admin prune action or a sync tombstone pass so a cached row whose source_id is absent from GetLoans is marked deleted instead of shown as a live TMO record. Note admin_tmo_loans_by_loan_number_DELETE_ does NOT cover this — it only disables EFS 'loans' rows and never touches tmo_cache_entities.
 - [ ] [#tmo-contact-enumeration] TMO exposes no borrower/business-contact enumeration API (LOS.svc/GetBorrowers and LSS.svc/GetBorrowers both 404; LSS.svc/GetLenders returns an empty list for the EFS company database), so EFS cannot answer 'who is in TMO' or resolve a contact to the RecId that DELETE /LOS.svc/DeleteBorrower/:borrowerRecId requires. Add the enumeration question to the ABS support thread (rides #k2xg), and until then wire an operator-supplied-RecId delete path rather than guessing record ids.
@@ -199,6 +218,7 @@ One note on this cycle: the closeout hit an editor-authority/disk divergence aft
 ## Review
 
 <!-- agent:review -->
+- [/] [#tmo-reconcile-auto] Automated reconciliation attempt over tmo_unmatched_fundings: for each unmatched TMO funding try RecID -> Account against lender_vestings.tmo_lender_account -> lender email, record confidence plus evidence, auto-bind above a threshold and queue the rest with the candidate ranking pre-computed. Per PRD D4 a bind reconciles EFS to TMO (TMO funding wins) and must record what it overrode. The matcher must be a pure function over pulled fundings + the lender/vesting roster so it is testable without TMO, mirroring vesting_gap_. Phase 3 of src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [/] [#tmo-orphan-as-fundings] Replace #tmo-orphan-cache's tombstone plan per the operator directive: for each of the 18 orphan tmo_cache_entities 'loan' rows, reconcile against TMO if the loan exists, push the EFS-side funding into TMO via LOS.svc/AddLoanFunding (LOS-embed lender, PRD D1) and adopt the returned RecID if it does not, and tombstone only pure debris with no EFS deal. Gated on the EFS->TMO push gate (#dzmm/#7a4d). Phase 2 of src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [/] [#tmo-prod-seat-not-provisioned] [operator-verify] The 2026-07-17 20:19 "Welcome to The Mortgage Office" credentials are for the SANDBOX host: the email's own Login link is https://app2.themortgageoffice.com/Login, not app.themortgageoffice.com (which is what the 2026-05-15 welcome email linked). So April's "added you to the production account" has not landed as a production seat yet — app2 still offers exactly one company, Equity Funding - Sandbox. Ask April to confirm which account/serial the new seat was created on and to provision app.themortgageoffice.com access. Credentials stored at passage equityfundingsource/tmo_login_2026_07_17.
 - [/] [#mam7] Fractionalized loans (future): support up to ~10 lenders/loan with siloed per-lender info in the shared loan view. [followups: Fractionalized loans]

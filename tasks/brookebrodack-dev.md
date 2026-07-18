@@ -282,14 +282,32 @@ That instrumentation is what closed it — the first `dispatch: sending 2 entry(
 **Not durable yet:** the host is a `nohup` process, so the push path dies with this login session. Queued as `#fhsystemd`. Also queued `#fhescalate` — an escalated entry is re-offered on every notify and every alarm, so the panel re-judges it forever; I saw two identical jobs 8s apart. Fixing that is a real tradeoff (never re-judge vs. back off), so I left the decision rather than making it silently.
 
 **Freehold CI was red before this and is not any more.** `rules_plugin_runs_under_bwrap` had been failing on every run: the skip guard asked `bwrap --version`, which only proves the binary is on PATH, and GitHub's runners ship bwrap while forbidding unprivileged user namespaces. Every sandbox failed to start, `judge` read that as "no opinion", and the assertion saw `Escalate`. It now probes with a real `--unshare-all` sandbox, so the guard fails exactly when the thing under test cannot run. (`2e2ffa1`) Local `make check` is green in both repos; the brookebrodack Pages deploy is green.
-<!-- agent:boundary:626cb114 -->
+
+### Re: #fhescalate — the panel gets one look, not a loop — opus-4-8
+
+> **Queue prompt:** do [#fhescalate]
+
+Done, and I made the call the item left open rather than handing it back: **record which panel escalated, and skip re-offering only to that same panel.**
+
+The either/or in the item — mark it escalated, or back off — was a false choice, and each side gives something up. A flat "escalated, never re-offer" closes the loop but hides the entry from every future panel, which is fatal here specifically: the freehold panel is rules-only today and escalates nearly everything, so a flat skip would have taken all those entries away from the cron sweep's *model* panel, the one panel that could actually decide them. A backoff keeps that door open but only makes the waste slower, and it needs a clock and a retry count to tune.
+
+Naming the panel gets both properties for one text column. A panel identifies itself by its sorted plugin ids (`rules`, later `agent+rules`), the cron sweep by its model (`cron:openai:<model>`). An entry escalated by `rules` is invisible to `rules` and still visible to everything else — including the same freehold once `#gpupol` adds the agent plugin, because that makes it a different panel and re-opens everything the rules-only panel passed on. No clock, no counter, no tuning.
+
+One deliberate refusal: a caller that cannot name its panel records nothing and keeps the old re-judging behaviour. A made-up id would exclude an entry from a panel that never saw it, and an entry nobody ever looks at is worse than an entry looked at too often.
+
+**Verified against production**, which is the only place this was observable: one job for one pending entry, then three `/notify` calls that produced no job at all, ending with `escalated_by = 'rules'`, `escalated_at` set, and `status` still `pending` for the admin dashboard. The same row still matches the cron sweep's predicate, so the cross-panel property is not just an argument. Probe row soft-deleted.
+
+Changes (brookebrodack-dev `5b14cb5`): migration `0004_guestbook_escalation.sql` — applied to the remote D1 *before* the push, per the ordering rule `wrangler.toml` documents; `decision_a1__apply` takes an optional `panel_id` and records escalations without touching status; the dispatch hub derives the panel from the `hello` advert and keeps it in a socket attachment so it survives DO hibernation; the cron sweep filters and records under its own id. Both Workers deployed.
+
+One existing test needed rewriting rather than deleting — `escalates and writes nothing when OpenAI fails` asserted zero statements, which was standing in for "publishes nothing". Its stub now separates status writes from escalation records, so the real invariant stays asserted and the new one joins it. Suite: 76 pass, 0 fail.
+<!-- agent:boundary:568bfdb6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- ~~do [#fhescalate]~~
 - do [#fhsystemd]
-- do [#fhescalate]
 - ~~do [#fhdeploy]~~
 - ~~do [#fhquorum2]: Do not require a 2nd agent. 1 is sufficient. If APPROVE_QUORUM_MIN = 2, then have 2 agent calls in parallel.~~
 - ~~do [#fhoneshot]~~
@@ -317,7 +335,6 @@ That instrumentation is what closed it — the first `dispatch: sending 2 entry(
 
 <!-- agent:backlog priority queue -->
 - [ ] [#fhsystemd] supervise the freehold host instead of running it under nohup — a systemd user unit plus a credential source it can read without an interactive gpg unlock (passage cannot be read from a unit). Until this lands the push path dies with the login session, and the 15-minute cron in workers/guestbook-moderate is the only backstop
-- [ ] [#fhescalate] an escalated entry stays 'pending' and is re-dispatched on every notify and every alarm, so the panel re-judges it forever. Decide between marking it escalated (edge stops offering it; a later, better panel never gets a second look) and a backoff on re-offer, then implement. Seen live: two identical jobs for the same two entries 8s apart
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
 - [ ] [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
@@ -360,4 +377,5 @@ That instrumentation is what closed it — the first `dispatch: sending 2 entry(
 - 2026-07-18 [#fhagentspec] Ship a PluginSpec for freehold-agent so it actually joins the panel: egress_hosts for whichever model the configured agent CLI reaches, env_allow carrying FREEHOLD_AGENT_ARGV plus any credential the CLI needs, and a budget_ms sized for an agent round-trip rather than a rules match. The crate and its one-shot enforcement landed in a916f1c; nothing dispatches to it until a spec exists
 - 2026-07-18 [#k0ye] #gbdispatch2: Durable Object + WebSocket transport + auth for the moderation dispatch edge (now freehold-hub/freehold, submodule src/freehold) — the sandbox/aggregation half is done and pushed; the edge half is unwritten
 - 2026-07-18 [#fhdeploy] Deploy the freehold push path in order: (1) cd workers/guestbook-dispatch && bunx wrangler secret put FREEHOLD_DISPATCH_KEY && bunx wrangler deploy; (2) add the [[services]] FREEHOLD_HUB_SVC binding to the Pages project and deploy (a Pages deploy against a service that does not exist yet fails); (3) run freehold with FREEHOLD_EDGE_URL + the same key. Keep workers/guestbook-moderate deployed as the offline backstop
+- 2026-07-18 [#fhescalate] an escalated entry stays 'pending' and is re-dispatched on every notify and every alarm, so the panel re-judges it forever. Decide between marking it escalated (edge stops offering it; a later, better panel never gets a second look) and a backoff on re-offer, then implement. Seen live: two identical jobs for the same two entries 8s apart
 <!-- /agent:done -->

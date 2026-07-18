@@ -93,7 +93,7 @@ pub(crate) fn load_pending_response_state(file: &Path) -> Result<PendingResponse
         return Ok(PendingResponseState::Missing);
     };
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
-    let ledger = load_state_event_ledger(&project_root).with_context(|| {
+    let ledger = load_state_event_ledger(&project_root, &document_hash).with_context(|| {
         format!(
             "failed to load pending response state for {}",
             canonical.display()
@@ -111,10 +111,26 @@ pub(crate) fn load_pending_response_state(file: &Path) -> Result<PendingResponse
     Ok(PendingResponseState::Missing)
 }
 
-fn load_state_event_ledger(project_root: &Path) -> Result<agent_doc_state_backbone::EventLedger> {
+/// `#ledgerdocscope`: load only the target document's events.
+///
+/// This ran on the repair/closeout path and loaded EVERY event in the project --
+/// all rows materialized into a `Vec` with their full `payload_json`, then each
+/// parsed into a `StateEvent`, so peak memory was roughly 2x the whole ledger.
+/// Measured on agent-loop: ~119MB of payload after retention GC (512MB before),
+/// with individual `crdt_recovery_projection_checkpointed` rows around 736KB.
+/// Several concurrent agent-doc processes each doing this is a real contributor
+/// to memory pressure, and the caller only ever projects ONE document out of the
+/// result. `load_state_events_from_db` already takes an indexed `document_hash`
+/// filter.
+fn load_state_event_ledger(
+    project_root: &Path,
+    document_hash: &str,
+) -> Result<agent_doc_state_backbone::EventLedger> {
     let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
     let mut ledger = agent_doc_state_backbone::EventLedger::new();
-    for row in agent_doc_sqlite::state_store::load_state_events_from_db(&conn, None)? {
+    for row in
+        agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(document_hash))?
+    {
         let event: agent_doc_state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
             .with_context(|| {
             format!(

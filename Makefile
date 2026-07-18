@@ -180,7 +180,18 @@ install:
 	@CARGO_TARGET_DIR="$(LOCAL_INSTALL_TARGET_DIR)" agent-doc lib-install --profile "$(LOCAL_INSTALL_PROFILE)"
 	@$(MAKE) install-editor-plugins
 
-# Full optimized local install for pre-release parity.
+# Pre-release parity install. NOT the dev-loop install -- use `make install`.
+#
+# `#installfulloom`: this builds `[profile.release]`, which is `lto = "fat"` +
+# `codegen-units = 1` across a 144-crate workspace. Fat LTO collapses that into
+# one enormous LLVM process, so peak memory is far higher than a normal build and
+# repeated runs can OOM the machine (observed 2026-07-18: a session that called
+# this ~10 times during iteration was killed with SIGKILL/137).
+#
+# `make install` builds `release-local` (lto = off, codegen-units = 256,
+# incremental) and is the correct install for the edit -> install -> recycle
+# loop. Reserve `install-full` for verifying pre-release parity, which is what
+# the `release` target uses it for.
 install-full:
 	cargo build --release --bin agent-doc
 	@target/release/agent-doc binary-install --source target/release/agent-doc

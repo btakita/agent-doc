@@ -85,7 +85,7 @@ Also documented the scope limit on `pane_composer_has_pending_trigger` so the ne
 One honest gap: this was diagnosed and fixed from log and capture evidence, not from watching a fresh flood stop. Filed `#autotriggerscrollbackechoverify` as the live proof — it needs an idle-watch cycle on the recycled supervisor showing no `auto_trigger_*_stranded` markers for a consumed trigger.
 
 Unrelated and still open: the top backlog item, `crash_resilience::tests::log_panic_to_file_appends_without_panicking`, which shares a fixed panic-log path across concurrent test binaries and so fails under `cargo test --workspace` while passing in isolation.
-<!-- agent:boundary:71522d71 -->
+<!-- agent:boundary:bcd36ca2 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -175,6 +175,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#qdonestrikeverify] #agent-doc-bug #qdonestrike-durable follow-up: confirm resolved queue heads actually clear once the project controller runs a build containing agent-doc submodule 4faed5b01. Fix shipped: persist_queue_maintenance_doc now drives the bounded ensure_document_model and re-observes before failing closed, so a missing/pending replica no longer discards the whole queue-maintenance plan (the auto-strike of agent:done heads was recomputed and thrown away every preflight). NOT yet provable live: controller serve pid 1501201 + route-owned supervisor pid 2040014 still map the pre-fix binary, and preflight now reports the honest underlying state (editor authority stayed in editor_attached_model_missing after a bounded observation; recovery=retry_without_disk_write). Controller kill was deliberately NOT done because it is project-scoped and tasks/professional/equityfundingsource.md is foreign-owned by a concurrent pane %31. Verify after an idle-boundary recycle: preflight should log queue_maintenance_model_ensure and the struck heads (📌 do [#jblocalhistverify], 📌 do [#5bzd]) should disappear from agent:queue instead of being re-logged as auto-struck every run.
 - [ ] [#crashresiliencelograce] test-hygiene: crash_resilience::tests::log_panic_to_file_appends_without_panicking fails under a parallel workspace run (cargo test --workspace) at src/crash_resilience.rs:173 but passes in isolation and under make check. The panic-log append test shares a fixed path across concurrently-running crate test binaries. Give it a per-test temp path so the suite is order-independent.
 - [ ] [#compacttombgc] [recommended] Add a fenced Compact Exchange CRDT epoch: rebootstrap attached replicas from the compacted snapshot, reject or component-rebase older-epoch deltas, expose the all-replica stability frontier, then run TextCrdt tombstone GC.
 - [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.

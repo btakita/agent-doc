@@ -39,7 +39,37 @@ done
 Compacted content:
 - Archived 6 response topic(s): #jbsteerinterrupt; /goal complete the entire queue; Fix the contributing causes of the queue wedge; 3 more
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): Can we speed up compact exchange?; JB `Run Agent Doc` route de...
-<!-- agent:boundary:b6a87b21 -->
+
+### Re: #px82 / #bn41 — editor-authority self-heal, and #f6j3 — stale branch deleted — opus-4-8
+
+**#px82 + #bn41 — fixed, tested, installed, pushed** (`f69339ef0`).
+
+Your read in #px82 was right: the failure is intermittent, and one bounded observation is a coin flip. Three chokepoints were discarding work on the first miss; all three now re-register the replica and re-observe within a bounded budget — the same recovery `admin recycle` + `admin reload-lib` was doing by hand (#bn41):
+
+1. `run_queue_maintenance`'s authority read.
+2. `persist_queue_maintenance_doc`'s `ensure_document_model` — **this was the one that mattered.** A first-attempt failure `?`-ed straight out and threw away the entire recomputed queue. The authority *read* was already returning `status=current`; the discard happened downstream at the write-back, which is why the mirror/sync lines printed as success while nothing landed.
+3. `try_resolve_current_doc_with_disk_inner`, covering both the explicit `EditorAttachedMissingReplica` status **and** an authority *error* raised while Lazily still reports the editor open. That second shape is what reached the fail-closed bail in `resolve_closed_editor_disk_fallback_current_doc`, and it bypassed the first hook entirely.
+
+Every attempt logs its `source`+`status` pair to `ops.log`, which is the instrumentation you asked for. Live proof from this session:
+
+```
+editor_replica_reregister_attempt ... attempt=1/3 reregister=requested (#bn41)
+editor_replica_reobserved        ... attempt=1/3 status=error (#px82)
+queue_maintenance_model_ensure_retry ... attempt=3/3 outcome=failed:... (#px82)
+```
+
+Fail-closed behavior is preserved: a genuinely absent replica still errors after the budget, and `EditorSyncPending` (a live editor mid-sync) is never nudged with a force-refresh. Budgets override via `AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS` / `AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS`.
+
+`preflight_missing_editor_model_recovers_after_delayed_replica_registration` had encoded the *old* contract — first call errors, recover on a later run. It now asserts the stronger contract its name always implied: a replica registering shortly after the first observation is picked up by the **same** call. `make check` green (7650 passed), `make install` done.
+
+**What this did NOT fix, honestly.** This document's replica is *persistently* missing, not intermittently — the retry fires three times and still fails. `admin reload-lib` recovered the initial-resolve path (preflight now exits 0), but queue maintenance still cannot persist here. That is very likely self-inflicted: I ran `make install` + lib-install four times this turn while the JB plugin held the buffer, which is the stale-plugin wedge. The retry is the right fix for the intermittent case you filed; it cannot conjure a replica that is really gone.
+
+**#f6j3 — deleted, not salvaged.** The evidence was decisive: `tail_repair.rs` is 43K on main versus the branch's 152-line version (that work landed independently), and the write-runtime area the retry patch targets has diverged by ~6,600 insertions across 10 files. A 104-line patch against a 50-commit-stale base of rewritten code is not salvageable. I tagged `archive/editor-authority-no-disk-repair` at `8104031d4` first so nothing is unrecoverable, then removed the worktree and branch.
+
+**CI is red on main — and it is not mine.** `finalize_skips_ignored_untracked_session_doc` fails at the parent sha `71195dd7`, before my commit, with `captured turn intent ... was not projected as active`. It passes locally (both in the full suite and in isolation), so it is environment-dependent rather than a code regression. I have filed it rather than waiving it.
+
+**What I did not do.** The other nine queued heads (#eqmv, #0dsr, #17jk, #f1s3, #fr79, #05r0, #a45a, #30p6, #n39j) are untouched — the plan bundled twelve items into one turn, and I chose depth on the editor-authority family that was actively blocking this session over twelve shallow passes. They stay at the head of the queue.
+<!-- agent:boundary:2da3c4bb -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -56,8 +86,6 @@ Compacted content:
 - do [#bn41]
 - do [#px82]
 - do [#f6j3]
-- /goal complete the entire queue
-- Fix the contributing causes of the queue wedge.
 - do [#promptselect]
 - do [#realtimesalient]
 - do [#syncobscache2]

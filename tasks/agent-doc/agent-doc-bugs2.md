@@ -39,9 +39,9 @@ done
 Compacted content:
 - Archived 3 response topic(s): cycle with no new prompt; repeated no-op invocations were a supervisor resubmit flood; stale verification-item sweep and the queue auto-strike fix
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): JB harness switch deferred against a stale actor record; agent...
-❯ 🚧 Can we speed up compact exchange? #spec-test-build-install-commit-push
+❯ Can we speed up compact exchange? #spec-test-build-install-commit-push
 
-JB `Run Agent Doc` on equityfundingsource.md + this document has an error: `route deferred for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md: Lazily current transition remained delivery_pending for 5000ms; retry after it settles`
+❯ JB `Run Agent Doc` on equityfundingsource.md + this document has an error: `route deferred for /home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md: Lazily current transition remained delivery_pending for 5000ms; retry after it settles`
 
 ### Re: Can we speed up compact exchange? — opus-4-8
 
@@ -62,7 +62,23 @@ The binary-side 2s escalation is retained as a backstop for older plugin builds 
 **Shipped.** 3 new regression tests (all green), `make check` green (exit 0), spec updated in `specs/14-realtime-workflow.md`, plugin built + signed + installed to all 4 IDE roots, committed and pushed as `5b648f338`. CI run 29650379566 is pending — recorded, not blocking.
 
 One thing I cannot verify from here: the Kotlin plugin change needs an IDE restart to load (`reload-lib` only swaps the cdylib). Queued as `#crdtpushdrainverify` so you can eyeball the actual compact latency after restart — I expect the ~4.5s floor to drop to roughly the pull/apply round trip.
-<!-- agent:boundary:3c11f024 -->
+
+### Re: JB `Run Agent Doc` route deferred — delivery_pending 5000ms — opus-4-8
+
+Same family as the compact-exchange stall I just fixed, with a residual gap that fix didn't close. Fixed and pushed as `6a2261b96`.
+
+**What happened.** `await_idle_with_max_wait_and_effects` (`agent-doc-route-io/src/startup_debounce.rs`) waits for `delivery_converged: true`. On seeing `delivery_pending` it sent **one** urgent CRDT drain request, latched behind a one-shot `urgent_drain_requested` flag, then polled every 100ms until `max_wait` (5000ms) and bailed.
+
+The problem is that a single urgent drain can legitimately apply nothing: `drainRemoteUpdatesFor` returns early while the path has pending local edits or is mid editor-apply, and the forwarder may not be registered yet. Its only follow-up is the *gated* `requestRemoteDrain` — which is exactly the call an idle document's escalated no-op backoff suppresses. So route spent its remaining ~4.9s polling a frontier nobody was going to pull, then deferred.
+
+**Fix.** Re-request the urgent drain every 750ms while delivery stays pending, so an unproductive attempt gets several retries inside the same budget. Bounded well under `max_wait` and far coarser than the 100ms observe poll. A genuinely never-converging delivery still fails closed at `max_wait` — this loosens the retry cadence, not the safety boundary.
+
+**How the two fixes relate.** `5b648f338` stopped controller pushes from being suppressed at the source (plugin side); this one stops the route path from giving up when its single nudge lands unproductively. You needed both: the first removes the common-case stall, the second removes the failure mode when the one-shot nudge races.
+
+`make check` green (exit 0), new regression test asserts multiple retries while pending *and* that a never-converging delivery still fails closed. The existing one-shot test still passes unchanged, so we didn't trade correctness for retries. `make install-full` done — binary and plugin 0.2.278 installed to all 4 IDE roots.
+
+Worth noting: the route half is a Rust change and is live now, but the plugin half still needs an IDE restart to load. Until you restart, you have the weaker of the two fixes — so if you see the deferral again before restarting, that's expected rather than a regression.
+<!-- agent:boundary:08eb2dc2 -->
 <!-- /agent:exchange -->
 ## Queue
 

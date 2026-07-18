@@ -543,6 +543,54 @@ fn read_document_baseline(file: &Path) -> Result<Option<String>> {
 fn guard_no_baseline_replay_after_committed_cycle(
     file: &Path,
     commit_mode: CommitMode,
+    has_tracked_work_mutations: bool,
+) -> Result<Option<String>> {
+    if commit_mode != CommitMode::Required {
+        return Ok(None);
+    }
+
+    let Some(cycle_id) = agent_doc_flow_io::closeout::cycle_already_committed(file) else {
+        return Ok(None);
+    };
+
+    // `#committedwedge`: a pending-only closeout (`--backlog-add`, `--done`,
+    // `--review-add`, `--status`, …) carries no response body, so the
+    // duplicate-block risk this gate exists to prevent cannot apply. Rejecting it
+    // produced a loop with no operator escape — `write --commit` said "run
+    // preflight", and preflight reported `no_changes` (or failed closed on a
+    // snapshot/HEAD mismatch) and pointed back at `write --commit`, leaving
+    // legitimate backlog bookkeeping impossible to record after a committed cycle.
+    //
+    // Reopen from HEAD so the mutation lands through the normal binary-owned
+    // snapshot/commit boundary, exactly as a manual `preflight` reopen would.
+    if has_tracked_work_mutations {
+        let Some(head) = agent_doc_git_io::revision::show_head(file).ok().flatten() else {
+            // No HEAD to re-baseline from; fall through to the normal gate so the
+            // non-git / empty-repo case keeps its existing fail-closed behavior.
+            return guard_no_baseline_replay_after_committed_cycle_inner(file, commit_mode);
+        };
+        agent_doc_cycle_state_io::start_preflight(file, Some(&head), Some(&head))?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "baseline_replay_pending_only_reopened file={} cycle_id={}",
+                file.display(),
+                cycle_id
+            ),
+        );
+        eprintln!(
+            "[finalize] cycle `{cycle_id}` was already committed; reopened a fresh cycle for a \
+             pending-only tracked-work update (#committedwedge)"
+        );
+        return Ok(Some(head));
+    }
+
+    guard_no_baseline_replay_after_committed_cycle_inner(file, commit_mode)
+}
+
+fn guard_no_baseline_replay_after_committed_cycle_inner(
+    file: &Path,
+    commit_mode: CommitMode,
 ) -> Result<Option<String>> {
     if commit_mode != CommitMode::Required {
         return Ok(None);
@@ -1301,7 +1349,37 @@ fn run_command_inner(
         }),
     };
 
-    let baseline = match guard_no_baseline_replay_after_committed_cycle(file, commit_mode)? {
+    // `#committedwedge`: a write carrying explicit tracked-work mutations is a
+    // pending-only closeout, not a response replay — there is no response body to
+    // duplicate. It must not be rejected by the committed-cycle replay gate.
+    let has_tracked_work_mutations = !options.pending_add.is_empty()
+        || !options.pending_add_to.is_empty()
+        || !options.pending_add_gated.is_empty()
+        || !options.pending_add_after.is_empty()
+        || !options.pending_add_before.is_empty()
+        || !options.pending_add_back.is_empty()
+        || !options.icebox_add.is_empty()
+        || !options.icebox_add_after.is_empty()
+        || !options.icebox_add_before.is_empty()
+        || !options.icebox_add_back.is_empty()
+        || !options.pending_done.is_empty()
+        || !options.pending_edit.is_empty()
+        || options.pending_clear
+        || options.pending_reorder.is_some()
+        || !options.pending_gate.is_empty()
+        || !options.pending_ungate.is_empty()
+        || !options.pending_resolve_gate.is_empty()
+        || !options.pending_set_gate_type.is_empty()
+        || !options.pending_set_verify.is_empty()
+        || !options.review_add.is_empty()
+        || !options.review_edit.is_empty()
+        || options.status.is_some();
+
+    let baseline = match guard_no_baseline_replay_after_committed_cycle(
+        file,
+        commit_mode,
+        has_tracked_work_mutations,
+    )? {
         // Auto-reopened a committed cycle for a genuinely new response: diff against
         // the fresh HEAD baseline, not a stale lifecycle projection.
         Some(fresh_head_baseline) => Some(fresh_head_baseline),

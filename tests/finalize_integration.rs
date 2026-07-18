@@ -1253,6 +1253,98 @@ fn finalize_stream_rejects_true_duplicate_replay_after_committed_cycle() {
         .success();
 }
 
+/// `#committedwedge`: recording tracked-work bookkeeping after a committed cycle
+/// must not be rejected as a response replay. A pending-only write carries no
+/// response body, so the duplicate-block risk the gate guards against cannot
+/// apply — and rejecting it left a loop with no operator escape: `write --commit`
+/// said "run preflight", and preflight reported `no_changes` and pointed back at
+/// `write --commit`.
+#[test]
+fn write_commit_pending_only_update_reopens_committed_cycle() {
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    let original = fs::read_to_string(&doc).unwrap();
+    checkpoint_baseline(tmp.path(), &original);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin("<!-- patch:exchange -->\n### Re: first — gpt-5\n\nFirst response.\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+
+    // The cycle is now `committed`. Recording a follow-up item is legitimate
+    // bookkeeping, not a replay.
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "write",
+            "--commit",
+            doc.to_str().unwrap(),
+            "--backlog-add",
+            "id=followup recorded after the cycle committed",
+        ])
+        .write_stdin("")
+        .assert()
+        .success();
+
+    let head = head_blob(tmp.path());
+    assert!(
+        head.contains("recorded after the cycle committed"),
+        "the pending-only update must reach HEAD:\n{head}"
+    );
+    assert_eq!(
+        head.matches("### Re: first — gpt-5").count(),
+        1,
+        "reopening for bookkeeping must not duplicate the committed response:\n{head}"
+    );
+
+    let ops_log = fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+    assert!(
+        ops_log.contains("baseline_replay_pending_only_reopened"),
+        "the pending-only reopen should be recorded:\n{ops_log}"
+    );
+}
+
+/// The `#committedwedge` escape is scoped to tracked-work mutations: a bare
+/// empty-stdin replay with no mutations is still a no-op and still fails closed.
+#[test]
+fn write_commit_without_mutations_still_rejects_replay_after_committed_cycle() {
+    let (tmp, doc) = setup_session_stream_doc();
+    init_git_repo(tmp.path(), &doc);
+
+    let original = fs::read_to_string(&doc).unwrap();
+    checkpoint_baseline(tmp.path(), &original);
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args([
+            "finalize",
+            doc.to_str().unwrap(),
+            "--stream",
+            "--origin",
+            "skill",
+        ])
+        .write_stdin("<!-- patch:exchange -->\n### Re: only — gpt-5\n\nOnly response.\n<!-- /patch:exchange -->\n")
+        .assert()
+        .success();
+
+    agent_doc()
+        .current_dir(tmp.path())
+        .args(["write", "--commit", doc.to_str().unwrap()])
+        .write_stdin("")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("already `committed`"));
+}
+
 #[test]
 fn finalize_stream_rebases_stale_exchange_baseline_to_head_after_new_preflight() {
     let (tmp, doc) = setup_session_stream_doc();

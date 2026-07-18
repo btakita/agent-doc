@@ -614,7 +614,18 @@ read it as intent and acted on it, but the marker should go back to plain
 `&lt;!-- agent:backlog --&gt;` or it risks parser drift later. And `calibration` → `calibrtion`
 in the icebox rationale above looks like a stray keystroke, not a correction —
 say the word and I will revert it.
-<!-- agent:boundary:f5069d02 -->
+
+### Re: review-component drift — opus-4-8
+
+Bookkeeping, not a new prompt. The prior cycle committed cleanly
+(`commit_success`), but it created the `agent:review` section for the first time
+via `--backlog-gate`, and the snapshot had no `review` component to diff against
+(`snapshot is missing the review component`). So session-check re-read my own
+three gated items — `#gggp`, `#cy58`, `#dj8c` — as operator steering. They are
+the gates I set, and the reasons stand: interactive browser login, a human on the
+billing page, and an interactive sudo password respectively. Nothing to act on;
+this cycle just lets the snapshot absorb the new component.
+<!-- agent:boundary:25e88c03 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -642,6 +653,14 @@ say the word and I will revert it.
 - [ ] [#j0ee] Pick the moderation model empirically once the key exists: `OPENAI_API_KEY=... bun scripts/guestbook-model-bench.ts gpt-4o-mini gpt-5-nano gpt-5.4-nano gpt-5.4-mini gpt-5.6-luna` and take the cheapest/fastest with UNSAFE=0, then set OPENAI_MODEL on both surfaces
 - [ ] [#2amm] `hermes -z` is broken in hermes-agent 0.18.2 — every one-shot run dies with an httpx ResponseNotRead inside the Gemini provider, so the local primary path always falls through. Try `hermes update` or file upstream
 <!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] [#gggp] Re-auth wrangler (`bunx wrangler login`) — the stored OAuth token has the right scopes and has not expired, but the API rejects it with "Invalid format for Authorization header [code: 6111]", blocking secret-put and deploy
+- [/] [#cy58] Add credit/billing to the OpenAI project holding brookebrodack/guestbook/OPENAI_API_KEY — the key authenticates and is scoped correctly, but every chat-completions call returns 429 `insufficient_quota`, so moderation cannot run
+- [/] [#dj8c] Verify Podman specifically end-to-end in src/freehold. OCI path IS verified: crates/freehold-host/tests/sandbox_live.rs round-trips a real verdict through Docker, which uses the identical sandbox_argv construction (branches differ only in binary name). BLOCKED: podman not installed; installing needs an interactive sudo password. The test skips per-runtime and covers Podman automatically once installed — then run: cargo test -p freehold-host --test sandbox_live -- --nocapture
+<!-- /agent:review -->
 
 ## Icebox
 

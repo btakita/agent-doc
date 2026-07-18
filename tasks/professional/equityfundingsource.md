@@ -213,7 +213,41 @@ Wired end to end — section id, URL, portal route, nav item, icon, and the badg
 - `#tmo-sandbox-purge-apply` — waiting on you, since it is 16 permanent deletions.
 
 The order matters: the executor generates the fundings the binder then resolves, so running them out of order means the binder has nothing to work on.
-<!-- agent:boundary:9ae6d4fd -->
+
+### Re: do [#tmo-contact-enumeration] — opus-4-8
+
+Re-probed the premises before building anything, and two of the three were stale. The item said TMO exposes no contact enumeration at all. Against the live sandbox today:
+
+| Endpoint | | |
+| --- | --- | --- |
+| `LOS.svc/GetBorrowers` | 404 | still true — no direct borrower endpoint |
+| `LSS.svc/GetBorrowers` | 404 | still true |
+| `LSS.svc/GetLenders` | **200** | **returns data** — it was empty when the item was filed |
+| `LOS.svc/GetLoan/:n` | **200** | **carries `Borrowers[]`, each with a `RecID`** |
+
+That last row is the one that matters. `Borrowers[].RecID` is exactly what `DELETE /LOS.svc/DeleteBorrower/:borrowerRecId` takes. So the planned workaround — "wire an operator-supplied-RecId delete path rather than guessing record ids" — is unnecessary. Borrower enumeration is available, just indirectly: walk `GetLoans`, fetch each loan, collect its borrowers.
+
+Built that instead (EFS `a990618d`, pushed):
+
+- **`contact_roster.ts`** — pure aggregation across `GetLoan` payloads into a roster deduped on `RecID`. Dedup is the point: a borrower on four loans would otherwise read as four contacts, and an admin could not tell which RecId to delete.
+- **`GET /api/admin/tmo-contacts`** — both rosters, fetched independently so a failing LSS read does not lose the borrower roster; only 502s when both fail.
+- **Bounded**: the walk is O(loans) round trips, so it is capped (default 200, max 500) and belongs behind an explicit admin action, never a page render.
+
+**Verified end to end against the sandbox: 18 loans → 16 distinct borrowers, 1 lender.** Not a mocked result.
+
+One thing I found while building it that was not in the item. There are two orphan shapes and they are inverses:
+
+- **Orphan borrower** — on no loan. Safe to delete; removing one cannot orphan a loan.
+- **Borrowerless loan** — a loan with *no borrower*. This is the one that actually bit us: TST113 became one when Lucas Huang was deleted, the loan stayed, and nothing surfaced it. It cannot be serviced or contacted against, yet TMO considers it valid. Now flagged as `borrowerless_loans`.
+
+Also had to reconcile a guard: `#tmo-getlender-confirm` had a test forbidding `LSS.svc/GetLenders` outright, from when it returned nothing and nothing called it. I narrowed it to what it actually protects — the no-LSS-*write* rule — rather than deleting it, since `GetLenders` is a read. Flagging that explicitly because loosening an existing guard deserves your eyes.
+
+19 tests; full suite 1888 pass / 0 fail; builds clean.
+
+**What is left for ABS support** shrank to one question, and it is efficiency rather than a blocker: is there a direct contact-enumeration endpoint, so the roster is not O(loans)? That still rides `#k2xg`. The delete path no longer waits on anyone.
+
+Queued `#tmo-contacts-ui` for the screen.
+<!-- agent:boundary:b4b1ffd0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

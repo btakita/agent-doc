@@ -92,6 +92,131 @@ fn current_text_via_preflight_authority(
     )
 }
 
+/// `#px82` — how many bounded authority observations queue maintenance makes
+/// before it gives up and discards the recomputed queue. Override with
+/// `AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS`.
+const DEFAULT_QUEUE_AUTHORITY_ATTEMPTS: u32 = 3;
+const QUEUE_AUTHORITY_ATTEMPTS_ENV: &str = "AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS";
+/// Backoff between authority observations. Deliberately short: the replica
+/// re-registration below is asynchronous, and a live editor typically re-attaches
+/// within a few hundred milliseconds.
+const QUEUE_AUTHORITY_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_millis(250);
+
+fn queue_authority_attempts() -> u32 {
+    std::env::var(QUEUE_AUTHORITY_ATTEMPTS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .filter(|attempts| *attempts >= 1)
+        .unwrap_or(DEFAULT_QUEUE_AUTHORITY_ATTEMPTS)
+}
+
+/// Observation status token for a single authority read, used for the per-attempt
+/// `source=<..> status=<..>` instrumentation `#px82` asks for.
+fn current_text_status_token(
+    observed: &Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
+) -> String {
+    match observed {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { .. })) => "current".to_string(),
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) => "detached".to_string(),
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)) => {
+            "editor_attached_model_missing".to_string()
+        }
+        Ok(Some(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending)) => {
+            "editor_sync_pending".to_string()
+        }
+        Ok(None) => "none".to_string(),
+        Err(err) => format!("error:{}", format!("{err:#}").replace('\n', "\\n")),
+    }
+}
+
+/// `#px82` / `#bn41` — observe the authority with bounded retry instead of
+/// discarding the recomputed queue on the first non-current status.
+///
+/// The editor-authority failure is INTERMITTENT (observed alternating FAIL/OK
+/// across back-to-back preflights), so a single bounded observation is a coin
+/// flip that silently disarms the drain. Two things change here:
+///
+/// 1. Every attempt logs the `source`+`status` pair it observed, so the retry is
+///    diagnosable from `ops.log` instead of only from the final error string.
+/// 2. When the status is `editor_attached_model_missing`, request the replica
+///    re-registration the binary already reports as
+///    `editor_replica_reregister=requested` BEFORE surfacing the error, so this
+///    self-heals instead of needing manual `admin recycle` + `admin reload-lib`.
+///
+/// A `Current`/`Detached`/`None` observation returns immediately — only the
+/// transient editor-authority statuses are retried.
+fn current_text_via_preflight_authority_retrying(
+    file: &Path,
+    source: &str,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    observe_current_text_with_bounded_retry(file, source, queue_authority_attempts(), |file| {
+        current_text_via_preflight_authority(file, source)
+    })
+}
+
+fn observe_current_text_with_bounded_retry(
+    file: &Path,
+    source: &str,
+    attempts: u32,
+    mut observe: impl FnMut(&Path) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>>,
+) -> Result<Option<agent_doc_crdt_relay_io::CurrentText>> {
+    let attempts = attempts.max(1);
+    let mut observed = observe(file);
+    for attempt in 1..=attempts {
+        let status = current_text_status_token(&observed);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_authority_observation file={} source={} attempt={}/{} status={} (#px82)",
+                file.display(),
+                source,
+                attempt,
+                attempts,
+                status
+            ),
+        );
+        let transient = matches!(
+            observed,
+            Ok(Some(
+                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+                    | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending
+            ))
+        );
+        if !transient || attempt == attempts {
+            return observed;
+        }
+        // `#bn41`: the missing piece is the editor REPLICA, not the controller.
+        // Ask for re-registration and then re-observe rather than reporting an
+        // error the operator has to clear with two manual admin commands.
+        if matches!(
+            observed,
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica))
+        ) {
+            let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
+                file,
+                agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+                0,
+            ) {
+                Ok(()) => "requested".to_string(),
+                Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
+            };
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "queue_authority_replica_reregister file={} source={} attempt={} status={} (#bn41)",
+                    file.display(),
+                    source,
+                    attempt,
+                    reregister
+                ),
+            );
+        }
+        std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
+        observed = observe(file);
+    }
+    observed
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GateVerifyResult {
     pub id: String,
@@ -2284,7 +2409,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         );
         return Ok(QueueState::default());
     }
-    let mut content = match current_text_via_preflight_authority(
+    let mut content = match current_text_via_preflight_authority_retrying(
         file,
         "preflight_queue_maintenance",
     ) {
@@ -4311,6 +4436,62 @@ fn queue_maintenance_head_label(current: &agent_doc_crdt_relay_io::CurrentText) 
     }
 }
 
+/// `#px82`/`#bn41` — retry `ensure_document_model` with an explicit replica
+/// re-registration between attempts.
+///
+/// The recomputed queue is the expensive part of maintenance and it is thrown
+/// away wholesale when this ensure fails, so the retry budget belongs here
+/// rather than at the caller. Each attempt records its observed status, and the
+/// ORIGINAL error is returned if the budget is exhausted so the operator-facing
+/// message keeps its existing diagnostic wording.
+fn ensure_document_model_with_replica_reregistration(
+    file: &Path,
+    source: &str,
+    first_err: anyhow::Error,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    let attempts = queue_authority_attempts();
+    let mut last_err = first_err;
+    for attempt in 1..=attempts {
+        let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
+            file,
+            agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+            0,
+        ) {
+            Ok(()) => "requested".to_string(),
+            Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
+        };
+        std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
+        let retried = agent_doc_crdt_relay_io::ensure_document_model(file, source);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_maintenance_model_ensure_retry file={} source={} attempt={}/{} reregister={} outcome={} (#px82)",
+                file.display(),
+                source,
+                attempt,
+                attempts,
+                reregister,
+                match &retried {
+                    Ok(current) => queue_maintenance_head_label(current).to_string(),
+                    Err(err) => format!(
+                        "failed:{}",
+                        format!("{err:#}")
+                            .replace('\n', " | ")
+                            .chars()
+                            .take(160)
+                            .collect::<String>()
+                    ),
+                }
+            ),
+        );
+        match retried {
+            Ok(current) => return Ok(current),
+            Err(err) => last_err = err,
+        }
+    }
+    Err(last_err)
+}
+
 pub(crate) fn persist_queue_maintenance_doc(
     file: &Path,
     content: &str,
@@ -4355,7 +4536,18 @@ pub(crate) fn persist_queue_maintenance_doc(
                     ),
                 ),
             }
-            ensured?
+            // `#px82`: a FAILED ensure used to `?` straight out of here, which
+            // discarded the whole recomputed queue on the FIRST failure. The
+            // failure is intermittent (observed alternating FAIL/OK across
+            // back-to-back preflights), so one attempt is a coin flip that
+            // silently disarms the drain. Re-register the replica (`#bn41`) and
+            // re-observe within a bounded budget before giving up.
+            match ensured {
+                Ok(ensured) => ensured,
+                Err(first_err) => {
+                    ensure_document_model_with_replica_reregistration(file, source, first_err)?
+                }
+            }
         }
         _ => observed,
     };
@@ -4770,6 +4962,93 @@ mod tests {
         assert!(ids.contains("archived2"));
         let ids_no_root = collect_agent_done_ids_with_root(&content, None);
         assert!(ids_no_root.is_empty());
+    }
+
+    // `#px82` — the editor-authority failure is intermittent, so queue
+    // maintenance must re-observe instead of discarding the recomputed queue on
+    // the first `editor_attached_model_missing`.
+    #[test]
+    fn queue_authority_observation_retries_transient_editor_authority_status() {
+        let file = Path::new("/tmp/agent-doc-px82-retry.md");
+        let mut calls = 0usize;
+        let observed = observe_current_text_with_bounded_retry(file, "test", 3, |_| {
+            calls += 1;
+            if calls < 3 {
+                Ok(Some(
+                    agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+                ))
+            } else {
+                Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+                    text: "recovered".to_string(),
+                    live_editors: 1,
+                    delivery_converged: true,
+                }))
+            }
+        });
+        assert_eq!(calls, 3, "expected the transient status to be re-observed");
+        match observed {
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })) => {
+                assert_eq!(text, "recovered");
+            }
+            other => panic!("expected a recovered current observation, got {other:?}"),
+        }
+    }
+
+    // A settled status must not pay the retry cost — only the transient
+    // editor-authority statuses are re-observed.
+    #[test]
+    fn queue_authority_observation_returns_immediately_on_settled_status() {
+        let file = Path::new("/tmp/agent-doc-px82-settled.md");
+        let mut calls = 0usize;
+        let observed = observe_current_text_with_bounded_retry(file, "test", 3, |_| {
+            calls += 1;
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached))
+        });
+        assert_eq!(calls, 1, "a settled status must not be retried");
+        assert!(matches!(
+            observed,
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached))
+        ));
+    }
+
+    // The retry is bounded: a permanently missing replica still surfaces the
+    // transient status after the attempt budget instead of looping forever.
+    #[test]
+    fn queue_authority_observation_gives_up_after_attempt_budget() {
+        let file = Path::new("/tmp/agent-doc-px82-budget.md");
+        let mut calls = 0usize;
+        let observed = observe_current_text_with_bounded_retry(file, "test", 2, |_| {
+            calls += 1;
+            Ok(Some(
+                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+            ))
+        });
+        assert_eq!(calls, 2, "expected exactly the configured attempt budget");
+        assert!(matches!(
+            observed,
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica))
+        ));
+    }
+
+    #[test]
+    fn queue_authority_status_token_names_each_observation() {
+        assert_eq!(
+            current_text_status_token(&Ok(Some(
+                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            ))),
+            "editor_attached_model_missing"
+        );
+        assert_eq!(
+            current_text_status_token(&Ok(Some(
+                agent_doc_crdt_relay_io::CurrentText::EditorSyncPending
+            ))),
+            "editor_sync_pending"
+        );
+        assert_eq!(current_text_status_token(&Ok(None)), "none");
+        assert!(
+            current_text_status_token(&Err(anyhow::anyhow!("boom"))).starts_with("error:"),
+            "an observation error must still be instrumented"
+        );
     }
 
     fn component_body(content: &str, name: &str) -> String {

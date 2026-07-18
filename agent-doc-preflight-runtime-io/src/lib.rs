@@ -697,9 +697,15 @@ mod tests {
             .expect("editor-attached register should allocate model");
         });
 
-        let error = resolve_current_preflight_document(&file, "test_preflight_recover")
-            .expect_err("preflight must wait for the attached editor model");
-        assert!(format!("{error:#}").contains("editor_attached_model_missing"));
+        // `#bn41`/`#px82`: the resolve now re-registers the replica and
+        // re-observes within a bounded attempt budget, so a replica that appears
+        // shortly after the first observation is picked up by the SAME call.
+        // This used to fail the first call and only recover on a later run,
+        // which is what forced the manual `admin recycle` + `admin reload-lib`
+        // pair when the failure was really just intermittent.
+        let current = resolve_current_preflight_document(&file, "test_preflight_recover")
+            .expect("preflight should self-heal once the replica registers");
+        assert_eq!(current, disk);
         register.join().unwrap();
         let current = resolve_current_preflight_document(&file, "test_preflight_recovered")
             .expect("preflight should resume after replica registration");

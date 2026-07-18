@@ -4529,17 +4529,138 @@ fn try_resolve_current_doc_with_disk_after_model_ensure(
     try_resolve_current_doc_with_disk_inner(file, disk, source, true)
 }
 
+/// `#bn41` / `#px82` — how many times the realtime resolve re-observes editor
+/// authority before surfacing `editor_attached_model_missing`. Override with
+/// `AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS`.
+const DEFAULT_EDITOR_REPLICA_REOBSERVE_ATTEMPTS: u32 = 3;
+const EDITOR_REPLICA_REOBSERVE_ATTEMPTS_ENV: &str = "AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS";
+const EDITOR_REPLICA_REOBSERVE_BACKOFF: std::time::Duration =
+    std::time::Duration::from_millis(250);
+
+fn editor_replica_reobserve_attempts() -> u32 {
+    std::env::var(EDITOR_REPLICA_REOBSERVE_ATTEMPTS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())
+        .filter(|attempts| *attempts >= 1)
+        .unwrap_or(DEFAULT_EDITOR_REPLICA_REOBSERVE_ATTEMPTS)
+}
+
+/// `#bn41` — attempt the replica re-registration the binary already *reports* as
+/// `editor_replica_reregister=requested` BEFORE surfacing the error.
+///
+/// The missing piece in this failure family is the editor REPLICA, not the
+/// controller: `admin recycle` + `admin reload-lib` clears it by hand with no
+/// data loss, which means the binary can clear it itself. `#px82` adds the other
+/// half — the failure is INTERMITTENT (observed alternating FAIL/OK across
+/// back-to-back preflights), so one bounded observation is a coin flip. Request
+/// re-registration, then re-observe within a bounded attempt budget.
+///
+/// Only `EditorAttachedMissingReplica` is re-observed here. `EditorSyncPending`
+/// is a live editor mid-sync, which settles on its own and must not be nudged
+/// with a force-refresh; every other status is already settled.
+fn observation_is_missing_replica_family(
+    file: &std::path::Path,
+    observed: &Result<agent_doc_crdt_relay_io::CurrentText>,
+) -> bool {
+    match observed {
+        Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => true,
+        // An authority *error* raised while Lazily still reports the editor open
+        // is the same family: the replica is gone but the editor is not. When
+        // the editor is genuinely closed this is an ordinary detached/idle path
+        // and must keep its existing disk-fallback behavior.
+        Err(_) => observe_editor_open(file),
+        _ => false,
+    }
+}
+
+fn reobserve_missing_editor_replica_with_reregistration(
+    file: &std::path::Path,
+    source: &str,
+    require_model_ensure: bool,
+    observed: Result<agent_doc_crdt_relay_io::CurrentText>,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    if !observation_is_missing_replica_family(file, &observed) {
+        return observed;
+    }
+    let attempts = editor_replica_reobserve_attempts();
+    let mut current = observed;
+    for attempt in 1..=attempts {
+        let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
+            file,
+            agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+            0,
+        ) {
+            Ok(()) => "requested".to_string(),
+            Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
+        };
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "editor_replica_reregister_attempt file={} source={} attempt={}/{} reregister={} (#bn41)",
+                file.display(),
+                source,
+                attempt,
+                attempts,
+                reregister
+            ),
+        );
+        std::thread::sleep(EDITOR_REPLICA_REOBSERVE_BACKOFF);
+        let reobserved = if require_model_ensure {
+            query_live_editor_authority_after_model_ensure(file, source)
+        } else {
+            query_live_editor_authority(file, source)
+        };
+        let status = match &reobserved {
+            Ok(agent_doc_crdt_relay_io::CurrentText::Current { .. }) => "current",
+            Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => "detached",
+            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+                "editor_attached_model_missing"
+            }
+            Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => "editor_sync_pending",
+            Err(_) => "error",
+        };
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "editor_replica_reobserved file={} source={} attempt={}/{} status={} (#px82)",
+                file.display(),
+                source,
+                attempt,
+                attempts,
+                status
+            ),
+        );
+        current = reobserved;
+        if !observation_is_missing_replica_family(file, &current) {
+            return current;
+        }
+    }
+    current
+}
+
 fn try_resolve_current_doc_with_disk_inner(
     file: &std::path::Path,
     disk: Option<&str>,
     source: &str,
     require_model_ensure: bool,
 ) -> Result<Reconciliation> {
-    let current = match if require_model_ensure {
+    let observed = if require_model_ensure {
         query_live_editor_authority_after_model_ensure(file, source)
     } else {
         query_live_editor_authority(file, source)
-    } {
+    };
+    // `#bn41`/`#px82`: self-heal the missing-replica family BEFORE surfacing it.
+    // Both shapes belong to it — an explicit `EditorAttachedMissingReplica`
+    // status and an authority *error* raised while Lazily still reports the
+    // editor open. The latter is what reaches
+    // `resolve_closed_editor_disk_fallback_current_doc`'s fail-closed bail.
+    let observed = reobserve_missing_editor_replica_with_reregistration(
+        file,
+        source,
+        require_model_ensure,
+        observed,
+    );
+    let current = match observed {
         Ok(current) => current,
         Err(e) => {
             let detail = format!("{e:#}");

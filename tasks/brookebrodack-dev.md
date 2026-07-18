@@ -184,7 +184,30 @@ No new operator prompt here — this cycle's diff is my own previous mutations r
 State is as intended: `#p0rw` done and committed (`0fc0ca6`), `#gpupol` gated on the one thing this session cannot do — `sudo systemctl enable --now ollama` needs an interactive password.
 
 Stopping the drain here rather than continuing to `#fhagentspec`: this document hit the `editor_attached_model_missing` wedge on three separate closeouts this session, each needing manual recovery, and the supervisor is still reported as mapping a stale binary (`agent-doc admin recycle` requested, deferred to the next idle boundary). A session-check interruption is an explicit stop condition, and looping into a fresh item through a write path that keeps half-landing risks a worse three-way split than the one I just repaired.
-<!-- agent:boundary:bdee81d0 -->
+
+### Re: #fhagentspec — the panel is declarable now — opus-4-8
+
+> **Queue prompt:** do [#fhagentspec]
+
+Done, and it turned out to be a bigger gap than the item described. `PluginSpec` was only ever *constructed in tests* — there was no config loader at all, so there was nowhere for a spec to live. Shipping one meant building the format first.
+
+**`crates/freehold-host/src/config.rs` + `freehold.example.toml`.** `freehold.toml` declares `runtime`, an `[egress]` block mirroring what `freehold-egress` is started with, and `[[plugin]]` tables in panel order. The example declares both `rules` and `agent`, with the agent spec the item asked for: `egress_hosts = ["127.0.0.1:11434"]` (the local inference server from `#gpupol`, so `/dev/nvidia*` never enters the sandbox), `env_allow = ["FREEHOLD_AGENT_ARGV"]`, `budget_ms = 30000` sized for an agent round-trip rather than a rules match.
+
+**Validation is the substance, not the format.** Each check refuses a config whose failure would otherwise be silent at runtime — and a plugin that silently fails abstains, and an abstention drops it out of the quorum, which `docs/plugin-isolation.md` says must never be a silent event. So the config refuses to load on:
+
+- an `egress_hosts` entry missing from `egress.allow` — the plugin would get a namespace whose proxy refuses every request, and read as an abstention;
+- a hostname without a port — `freehold-egress` matches `host:port` exactly and would never permit it;
+- a duplicate `plugin_id` — verdicts are attributed by id, so two plugins sharing one are indistinguishable in an audit;
+- `budget_ms = 0` (kills the plugin before it answers), `mem_limit_mb = 0`, empty argv;
+- `FREEHOLD_DISPATCH_KEY` in any `env_allow` — that credential is the host's, and a plugin holding it could impersonate the freehold to the sites it serves. The name is reserved here ahead of the WebSocket transport being written, so the invariant lands before the credential exists;
+- any unknown key. `deny_unknown_fields` is now on `PluginSpec` too: a typo'd `egres_hosts` deserialising to the default would silently give a plugin no network.
+
+One shipped test parses `freehold.example.toml` itself and asserts a non-model plugin is still in the panel, so the example cannot rot into an invalid or model-only config.
+
+Files: `crates/freehold-host/src/config.rs` (10 tests), `freehold.example.toml`, `sandbox.rs` (`deny_unknown_fields` + rationale), `lib.rs`, both `Cargo.toml`s (`toml 0.9`), `README.md`. Verification: `make check` exit 0 — 71 tests passed, 0 failed; rustfmt and clippy clean. Committed `52d1182`.
+
+Still unverified end-to-end for one reason only: nothing has run this panel, because `#gpupol` is gated on `sudo systemctl enable --now ollama`. Once ollama is up, `cargo test -p freehold-host` plus a real `judge` call against the example config is the proof.
+<!-- agent:boundary:940606cd -->
 <!-- /agent:exchange -->
 
 ## Queue

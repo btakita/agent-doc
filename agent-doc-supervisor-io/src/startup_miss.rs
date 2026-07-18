@@ -210,7 +210,7 @@ pub fn record_startup_miss(
         origin,
         cycle_baseline_id: cycle_baseline_id.map(|s| s.to_string()),
     };
-    let ledger = crate::state_events::load_ledger(&identity.project_root)?;
+    let ledger = crate::state_events::load_ledger_shared(&identity.project_root)?;
     let next_epoch = ledger
         .document_epoch(&identity.document_hash)
         .saturating_add(1);
@@ -238,7 +238,7 @@ pub fn load_startup_miss(file: &Path) -> Result<Option<StartupMiss>> {
     let Some(identity) = crate::state_events::document_state_identity(file)? else {
         return Ok(None);
     };
-    let ledger = crate::state_events::load_ledger(&identity.project_root)?;
+    let ledger = crate::state_events::load_ledger_shared(&identity.project_root)?;
     let Some(miss) = ledger
         .project_document(&identity.document_hash)
         .and_then(|projection| projection.supervisor.startup_miss)
@@ -260,7 +260,7 @@ pub fn clear_startup_miss(file: &Path) -> Result<()> {
     let Some(identity) = crate::state_events::document_state_identity(file)? else {
         return Ok(());
     };
-    let ledger = crate::state_events::load_ledger(&identity.project_root)?;
+    let ledger = crate::state_events::load_ledger_shared(&identity.project_root)?;
     let Some(miss) = ledger
         .project_document(&identity.document_hash)
         .and_then(|projection| projection.supervisor.startup_miss)

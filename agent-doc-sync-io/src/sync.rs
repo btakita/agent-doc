@@ -2029,6 +2029,14 @@ fn run_with_options_internal_at_root(
     // N identical full scans (19 in a measured focus sync). The scope shares one
     // snapshot; tmux-router's pane-mutating methods invalidate it themselves.
     let _pane_snapshot = tmux_router::begin_pane_snapshot_scope();
+    // `#ledgerscope`: the dominant hot-path cost. `load_startup_miss` (and
+    // `take_superseded_startup_miss`, which calls it again) loads the ENTIRE
+    // `state.db` event ledger and JSON-replays every event just to project one
+    // document out of it — per document. Measured here: 995ms of a 1024ms
+    // per-document ownership loop, for two documents. The ledger is one shared
+    // input per project, so this scope loads it once and lets every projection
+    // derive from that; `append_event` invalidates it.
+    let _state_ledger = agent_doc_supervisor_io::begin_state_ledger_scope();
     let _lock_guard = lock_guard;
 
     // Check for new build and clear stale caches
@@ -2517,8 +2525,10 @@ fn run_with_options_internal_at_root(
         let context_session: Option<String> = target_session
             .clone()
             .or_else(|| window.and_then(|w| session_name_for_target_window(tmux, w)));
+        let (mut sa, mut sb, mut sc, mut sd) = (Duration::ZERO, Duration::ZERO, Duration::ZERO, Duration::ZERO);
         let per_file_loop_start = Instant::now();
         for file_path in &all_files {
+            let mut seg_mark = Instant::now(); let _ = &seg_mark;
             if !file_path.exists() {
                 continue;
             }
@@ -2587,6 +2597,7 @@ fn run_with_options_internal_at_root(
                 auto_start_mode,
                 &proof_cache,
             );
+            sa += seg_mark.elapsed(); seg_mark = Instant::now();
             let registered_entry = lookup_registry_entry_for_file_session(file_path, &session_id);
             let registered_pane = authoritative_actor_pane
                 .or_else(|| registered_entry.as_ref().map(|entry| entry.pane.clone()));
@@ -2617,6 +2628,7 @@ fn run_with_options_internal_at_root(
                 agent_doc_supervisor_io::startup_miss::load_startup_miss(file_path)
                     .ok()
                     .flatten();
+            sb += seg_mark.elapsed(); seg_mark = Instant::now();
             if let Some(miss) = unresolved_startup_miss.as_ref()
                 && !tmux.pane_alive(&miss.pane_id)
             {
@@ -2691,6 +2703,7 @@ fn run_with_options_internal_at_root(
                 reserve_sync_pane(&claimed_sync_panes, pane_id, file_path);
                 continue;
             }
+            sb += seg_mark.elapsed(); seg_mark = Instant::now();
             let registered_live_owner = !skip_autostart_diagnostics
                 && registered_pane.as_ref().is_some_and(|pane| {
                     registered_pane_proves_live_owner(
@@ -2802,6 +2815,7 @@ fn run_with_options_internal_at_root(
                     ));
                 }
             }
+            sc += seg_mark.elapsed(); seg_mark = Instant::now();
             let has_alive_pane = claimed_owner.is_none()
                 && registered_pane
                     .as_ref()
@@ -3069,6 +3083,7 @@ fn run_with_options_internal_at_root(
             // alive pane in the target session is already running agent-doc
             // for this file (registry may have been pruned or stale).
             // This prevents creating duplicate panes.
+            sd += seg_mark.elapsed(); seg_mark = Instant::now();
             let associated_candidates = filter_associated_panes_for_document(
                 tmux,
                 file_path,
@@ -3369,9 +3384,10 @@ fn run_with_options_internal_at_root(
             auto_start_mode,
         );
         sync_log(&format!(
-            "ownership_per_file_loop_detail files={} elapsed_ms={}",
+            "ownership_per_file_loop_detail files={} elapsed_ms={} sa_ms={} sb_ms={} sc_ms={} sd_ms={}",
             all_files.len(),
-            per_file_loop_start.elapsed().as_millis()
+            per_file_loop_start.elapsed().as_millis(),
+            sa.as_millis(), sb.as_millis(), sc.as_millis(), sd.as_millis()
         ));
         if matches!(auto_start_mode, AutoStartMode::SafePassive) {
             let newly_blocked = block_unresolved_safe_passive_managed_files(

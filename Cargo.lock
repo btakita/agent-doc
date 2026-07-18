@@ -2278,6 +2278,7 @@ dependencies = [
  "anyhow",
  "indexmap",
  "interprocess",
+ "lazily 0.41.0",
  "libc",
  "portable-pty",
  "serde_json",

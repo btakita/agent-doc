@@ -30,7 +30,100 @@ pub(crate) fn document_state_identity(file: &Path) -> Result<Option<DocumentStat
     }))
 }
 
-pub(crate) fn load_ledger(project_root: &Path) -> Result<EventLedger> {
+// `#ledgerscope`: run-scoped state-ledger cache.
+//
+// `load_ledger` opens `state.db`, reads EVERY state event, JSON-parses each one,
+// and replays them into an `EventLedger` — and callers then project a single
+// document out of the result. `load_startup_miss` does this per document, and
+// `take_superseded_startup_miss` calls it again, so a sync pass reloaded the
+// whole ledger several times per file.
+//
+// Measured on the agent-doc focus-sync hot path: this block was 995ms of a
+// 1024ms per-document ownership loop — essentially the entire `ownership_proof`
+// phase and ~40% of a 2.5s sync, for two documents.
+//
+// The ledger is one shared input per project, so a scope loads it once and every
+// per-document projection derives from that. Same shape as the other observation
+// caches: opt-in (nothing caches without a scope, so long-lived processes are
+// unaffected), reference-counted, and invalidated by `append_event` so a writer
+// never reads its own stale view.
+thread_local! {
+    static LEDGER_SCOPE: std::cell::RefCell<Option<LedgerScopeState>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+struct LedgerScopeState {
+    ctx: lazily::Context,
+    ledgers: lazily::SlotMap<PathBuf, Option<std::rc::Rc<EventLedger>>>,
+    depth: usize,
+}
+
+impl LedgerScopeState {
+    fn new() -> Self {
+        let ctx = lazily::Context::new();
+        let ledgers = lazily::SlotMap::new(&ctx);
+        Self {
+            ctx,
+            ledgers,
+            depth: 1,
+        }
+    }
+
+    fn reset_entries(&mut self) {
+        self.ctx = lazily::Context::new();
+        self.ledgers = lazily::SlotMap::new(&self.ctx);
+    }
+}
+
+/// RAII guard for a state-ledger read scope on this thread.
+#[must_use = "the ledger is cached only while the guard is alive"]
+pub struct StateLedgerScope {
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+/// Open a command-scoped state-ledger cache. Nested calls are reference counted.
+pub fn begin_state_ledger_scope() -> StateLedgerScope {
+    LEDGER_SCOPE.with(|scope| {
+        let mut scope = scope.borrow_mut();
+        match scope.as_mut() {
+            Some(state) => state.depth += 1,
+            None => *scope = Some(LedgerScopeState::new()),
+        }
+    });
+    StateLedgerScope {
+        _not_send: std::marker::PhantomData,
+    }
+}
+
+impl Drop for StateLedgerScope {
+    fn drop(&mut self) {
+        LEDGER_SCOPE.with(|scope| {
+            let mut scope = scope.borrow_mut();
+            let finished = match scope.as_mut() {
+                Some(state) => {
+                    state.depth -= 1;
+                    state.depth == 0
+                }
+                None => false,
+            };
+            if finished {
+                *scope = None;
+            }
+        });
+    }
+}
+
+/// Drop any cached ledger. Called after a write so a reader in the same scope
+/// never sees a pre-write view.
+fn invalidate_ledger_cache() {
+    LEDGER_SCOPE.with(|scope| {
+        if let Some(state) = scope.borrow_mut().as_mut() {
+            state.reset_entries();
+        }
+    });
+}
+
+fn load_ledger_uncached(project_root: &Path) -> Result<EventLedger> {
     let conn = open_state_db(project_root)?;
     let mut ledger = EventLedger::new();
     for row in load_state_events_from_db(&conn, None)? {
@@ -45,10 +138,44 @@ pub(crate) fn load_ledger(project_root: &Path) -> Result<EventLedger> {
     Ok(ledger)
 }
 
+/// Shared ledger read. Inside a scope the project's ledger is loaded once and
+/// every later read returns the same `Rc`, so per-document projections cost a
+/// map lookup instead of a full `state.db` read + JSON replay.
+pub(crate) fn load_ledger_shared(project_root: &Path) -> Result<std::rc::Rc<EventLedger>> {
+    let active = LEDGER_SCOPE.with(|scope| scope.borrow().is_some());
+    if !active {
+        return Ok(std::rc::Rc::new(load_ledger_uncached(project_root)?));
+    }
+
+    let key = project_root.to_path_buf();
+    let cached = LEDGER_SCOPE.with(|scope| {
+        let scope = scope.borrow();
+        let state = scope.as_ref()?;
+        state.ledgers.get(&state.ctx, &key).flatten()
+    });
+    if let Some(ledger) = cached {
+        return Ok(ledger);
+    }
+
+    // A load failure is never cached — a transient `state.db` error must not be
+    // remembered as "this project has no events".
+    let loaded = std::rc::Rc::new(load_ledger_uncached(project_root)?);
+    LEDGER_SCOPE.with(|scope| {
+        let mut scope = scope.borrow_mut();
+        if let Some(state) = scope.as_mut() {
+            let value = loaded.clone();
+            state
+                .ledgers
+                .get_or_insert_with(&state.ctx, key, move |_| Some(value.clone()));
+        }
+    });
+    Ok(loaded)
+}
+
 pub(crate) fn append_event(project_root: &Path, event: &StateEvent) -> Result<bool> {
     let conn = open_state_db(project_root)?;
     let payload_json = serde_json::to_string(event).context("serialize supervisor state event")?;
-    insert_state_event_in_db(
+    let inserted = insert_state_event_in_db(
         &conn,
         &StateEventInsert {
             event_id: &event.event_id,
@@ -57,5 +184,9 @@ pub(crate) fn append_event(project_root: &Path, event: &StateEvent) -> Result<bo
             fact_type: event.fact.label(),
             payload_json: &payload_json,
         },
-    )
+    );
+    // `#ledgerscope`: a write makes any cached ledger stale. Invalidate before
+    // returning so a reader in the same scope cannot observe a pre-write view.
+    invalidate_ledger_cache();
+    inserted
 }

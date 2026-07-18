@@ -24,7 +24,7 @@ pub fn request_recycle(file: &str, reason: &str) -> Result<()> {
     let Some(identity) = crate::state_events::document_state_identity(Path::new(file))? else {
         return Ok(());
     };
-    let ledger = crate::state_events::load_ledger(&identity.project_root)?;
+    let ledger = crate::state_events::load_ledger_shared(&identity.project_root)?;
     let recycle_epoch = ledger
         .document_epoch(&identity.document_hash)
         .saturating_add(1);
@@ -53,7 +53,7 @@ pub fn request_recycle_for_doc(file: &Path, reason: &str) -> Result<()> {
 /// Read the raw recycle-request for `file` regardless of freshness.
 pub fn read_recycle_request(file: &str) -> Option<RecycleRequest> {
     let identity = crate::state_events::document_state_identity(Path::new(file)).ok()??;
-    let ledger = crate::state_events::load_ledger(&identity.project_root).ok()?;
+    let ledger = crate::state_events::load_ledger_shared(&identity.project_root).ok()?;
     let recycle = ledger
         .project_document(&identity.document_hash)?
         .supervisor
@@ -88,7 +88,7 @@ fn clear_recycle_request_inner(file: &str) -> Result<()> {
     let Some(identity) = crate::state_events::document_state_identity(Path::new(file))? else {
         return Ok(());
     };
-    let ledger = crate::state_events::load_ledger(&identity.project_root)?;
+    let ledger = crate::state_events::load_ledger_shared(&identity.project_root)?;
     let Some(recycle) = ledger
         .project_document(&identity.document_hash)
         .map(|projection| projection.supervisor.recycle)

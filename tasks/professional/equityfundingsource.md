@@ -265,7 +265,25 @@ Two things about that ordering you may want to change, and I did not change them
 **The operator-verify items are interleaved with actionable ones.** `#efs-prod-seed`, `#efs-cf-account-custody`, `#efs-dns-cutover`, and `#tmo-getlender-verify` are scattered through the lower half among things I can just do. Fine if you read the list as strict priority, but it means an unattended drain keeps hitting heads it has to defer.
 
 The genuinely important thing down there is `#efs-dns-cutover` — it is the remaining gate on launch, and it sits behind a Durable Object cost optimization.
-<!-- agent:boundary:6cac7bc9 -->
+
+### Re: do [#tmo-contacts-ui] — opus-4-8
+
+Shipped (EFS `42c8cf2e`, pushed). **TMO Contacts** at `/admin/tmo-contacts`: the derived borrower roster, the LSS lender roster, and both orphan shapes — borrowerless loans in red (cannot be serviced), orphan borrowers in amber (safe to delete).
+
+Three constraints I pinned with tests rather than trusting to memory:
+
+**It loads behind a button, not on mount.** The roster walk is one `GetLoan` per loan. A `useEffect` here would fire ~18 TMO requests every time anyone opened the page, and more as the loan book grows. The test asserts on the `useEffect(` call shape rather than the word, since the rationale comment mentions it — a small thing, but the first version of that assertion failed on its own explanation.
+
+**It is deliberately not behind the `tmo_sim_enabled` flag.** That flag hides `tmo-sim` and `tmo-loans` and falls them back to the dashboard. This screen reads the *real* TMO API, so inheriting that gate would hide it exactly when it is useful — with the simulator off, in production. Also pinned, because it is the kind of thing a later refactor would sweep in for consistency.
+
+**When one roster fails, the screen says which one.** The endpoint fetches them independently, so a dead LSS read still returns borrowers. Rendering an empty lenders table in that case would read as "no lenders in TMO," which is a different and much worse claim than "we could not reach LSS."
+
+Each `RecID` is selectable text. It is the value an admin pastes into `DELETE /LOS.svc/DeleteBorrower/:recId`, so it needs to be copyable, not a tooltip.
+
+7 tests; full suite 1895 pass / 0 fail; builds clean.
+
+That clears the last of the items I could act on. What remains in the backlog is the two reconciliation executors (`#tmo-orphan-reconcile-exec` then `#tmo-reconcile-binder` — in that order), and the operator-gated set: the sandbox purge waiting on your go, plus the Cloudflare custody / DNS cutover / prod-seed cluster.
+<!-- agent:boundary:8638d80b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

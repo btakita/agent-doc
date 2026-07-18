@@ -37,7 +37,60 @@ complete
 Compacted content:
 - Archived 4 response topic(s): Reconcile each lender with TMO from the deal interests tab; Per-lender reconcile modal, vesting granularity; Does the EFS API support creating LOS lenders without a funding?; 1 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): Binding a deal to a vesting; Funding-linking items deferred (⏭...
-<!-- agent:boundary:162bfedc -->
+
+My understanding is that LSS.svc is a completely separate system. EFS has a lender record but the EFS lender record does not map to a TMO lender record. The EFS lender vestings do map to the TMO lender records. Please change the UI to reflect that. Remove the single TMO lender id in EFS lender and map the EFS lender vestings to TMO lenders.
+#spec-test-commit-push-deploy
+
+### Re: Remove the single TMO lender id; map vestings to TMO lenders — opus-4-8
+
+Done and deployed — worker `671ff4ac`, commits `760f516` + `e988884`. The EFS lender record no longer maps to a TMO lender anywhere; every EFS↔TMO link now resolves through `lender_vestings.tmo_lender_account`.
+
+**Eleven call sites moved, not just the UI.** The UI was the visible part, but the single account was load-bearing in places that would have broken silently:
+
+| Site | Before | After |
+|---|---|---|
+| **TMO funding pull match** | `users.lender_account` | `lender_vesting_by_tmo_account_` |
+| Deal-interests payload | `investor.lender_account` | `investor.tmo_vestings {total, linked, accounts}` |
+| Deal card | "Lender account" + inline Link | "TMO vestings" + *Map vestings to TMO* → modal |
+| Tab reconcile summary | account set? | any vesting linked? |
+| Deal compliance gate | `u.lender_account` | `linked_vesting_count > 0` |
+| Lender-request approval | wrote the user column | contact on user, account on vesting |
+| `PUT /api/admin/users/:id/lender-account` | set the account | **removed** |
+| Lender portal gate | `user.lender_account` | first linked vesting |
+| Wire instructions | `user.lender_account` | the **fund's** vesting account |
+
+The funding pull was the landmine: `users.lender_account` was the *primary match key* for pulled TMO fundings. Matching the vesting instead is strictly more correct — a funding Account **is** a vesting account, so the old key could only ever resolve one of a lender's vestings and every funding on their others fell through to the email fallback or parked. The vesting match also yields the FK, so pulled funds now carry `lender_vesting_id` for free.
+
+**Three places I made it refuse to guess**, because each failure mode is money reaching the wrong TMO lender:
+
+- The pull matches only an *exact* vesting account. A funding on an unmapped account parks as unmatched rather than binding to another vesting of the same lender. New test covers this.
+- `selected_lender_tmo_account_` uses the fund's bound vesting, else the lender's *single* linked vesting, else `''`. Several linked vestings and none bound → it emits nothing.
+- Wire instructions prefer the fund's own account over any lender-level fallback.
+
+**Production migration — and why I staged the column drop.**
+
+Prod had **7 lenders with an account and 0 linked vestings**. Deploying the code without backfilling would have flipped all 7 to "not linked" and put them on compliance hold. Migration 0140 backfills them; verified after apply: **7 linked vestings, 9 active, 0 unmigrated**.
+
+I did **not** drop `users.lender_account` in this deploy. It's dormant — no reader, no writer — but dropping it in the same release leaves no recovery path if a row backfilled to the wrong vesting. Queued as `#lender-account-drop-column` once you've eyeballed the backfill.
+
+One case to look at: lender `96176122` (`L-00010`) had **2 pre-existing unlinked vestings**, so it now shows **"1 of 3 linked"**. That's honest — those two declared vestings genuinely have no TMO account. I deliberately did not auto-assign `L-00010` to one of them; picking which vesting owns an account is exactly the guess I refused everywhere else. Map them in the reconcile modal. The other 6 lenders had no vestings and read fully linked.
+
+**The migration failed on the first deploy attempt** — `NULLIF` on a blank lender name produced NULL against a `NOT NULL` `vesting_name`, and my post-hoc repair UPDATE could never run because the INSERT aborted first. It failed *before* the worker deployed, so prod was untouched; I confirmed 0 partial rows, fixed the fallback inline (name → account → email), and re-ran clean.
+
+**Verification**
+
+| Gate | Result |
+|---|---|
+| `tests/lender-account-retire.test.ts` | 15 pass |
+| `make check` | **1707 pass / 0 fail**, 162 files, exit 0 |
+| Migration | applied remote, 3 commands, `0140 ✅` |
+| Prod data | 7 linked vestings, **0 unmigrated** |
+| Live bundle | `TMO vestings`, `Map vestings to TMO`, `Some vestings unlinked` present; `Link TMO Account` **absent** |
+
+The card now distinguishes three states rather than two: fully linked (accounts listed), **partially linked** ("Some vestings unlinked" — a funding on an unmapped vesting can't reach TMO), and not linked. Partial was invisible before and is the state that actually strands a funding.
+
+I also updated four existing test contracts that pinned the old model rather than deleting them — the sync-pull fixture now seeds vestings, and the picker/link-UX contracts follow the picker into the reconcile modal.
+<!-- agent:boundary:e03debb1 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" go -->
@@ -64,7 +117,7 @@ After 20:30
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lender-account-retire] Retire the single-valued users.lender_account from the deal surfaces in favor of vesting-level TMO linkage. Operator confirmed 2026-07-18: each TMO 'Lender' record IS a vesting (Mark Leonard = MARKDBPP/MARKL/MARKPERSON/MARKROTHIR), so users.lender_account can only ever hold ONE of a lender's N vesting accounts and is wrong by construction. Still driving: investor.lender_account in the deal-interests payload (admin/shared.ts investor_deal_interest_admin_response_ ~:773), the InterestedLenderCard 'Lender account' field + needs_account 'Link TMO Account' flow (deal_detail.tsx), link_lender_account_ -> PUT /api/admin/users/:id/lender-account, and the #deal-tmo-reconcile tab summary (interest_tmo_linked_/tmo_reconcile_summary_). Work: carry per-interest vesting linkage (lender_vestings rows + tmo_lender_account) on the interests payload, switch the card + tab summary to count vesting-level linkage, point the card's link affordance at the reconcile modal instead of the single-valued PUT, and keep users.lender_account only as a legacy read until backfilled. Reuses lender_vesting_id_for_account_ (repo.ts:3090) and funds.lender_vesting_id (mig 0139). Spec: src/equityfundingsource-dev/prds/funding-lender-linking.md.
+- [ ] [#lender-account-drop-column] Drop the now-dormant users.lender_account column. #lender-account-retire retired every reader and writer and migration 0140 backfilled all 7 production accounts onto vestings (verified: 7 linked vestings, 0 unmigrated). The column was deliberately NOT dropped in the same deploy so the backfill could be verified against production first. Before dropping: confirm the 7 backfilled vestings still carry the right accounts in the reconcile modal (especially lender 96176122 / L-00010, which has 2 pre-existing unlinked vestings plus the backfilled one), then ALTER TABLE users DROP COLUMN lender_account in a new migration. Also drop lender_requests.lender_account usage if it is only feeding the retired path. Spec: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 - [ ] [#tmo-lender-vesting-doc] Record the verified TMO lender/vesting model in src/equityfundingsource-dev/docs/TMO/get-lender.md and prds/funding-lender-linking.md: a TMO 'Lender' record IS a vesting (account-keyed, one per vesting), Business Contacts > Servicing Agents is a SEPARATE free-form contact store with no ACCOUNT column and partial overlap only (4 of 14 lenders; contains non-lender servicers FCI/Note Servicing Center/Superior; duplicate rows observed), and there is no LOS-side lender-create API — the only lender Create/Get/Update/GetLenders/GetLenderHistory surface is LSS.svc, which EFS deliberately does not wire. Prevents re-deriving this from screenshots next time.
 - [ ] [#tmo-getlender-confirm] [recommended] Wire read-only GET /LSS.svc/GetLender/:Account so EFS can confirm a TMO lender account that has never funded. Today tmo_lender_roster_ derives in_los solely from LOS.svc/GetLoanFundings, so a lender an admin legitimately created in TMO but never funded reads as 'Unconfirmed in TMO' in the #deal-tmo-reconcile-vesting modal — an accurate statement of EFS's knowledge, but it looks like an error to an operator. GetLender is a single READ endpoint; it does not open the LSS write surface (NewLender/UpdateLender stay unwired, lender creation stays manual per docs/TMO/new-lender.md). Add a third provenance flag (in_lss) so 'confirmed in TMO, no funding yet' is distinguishable from 'nothing in TMO'. Spec: src/equityfundingsource-dev/prds/funding-lender-linking.md.
 <!-- /agent:backlog -->

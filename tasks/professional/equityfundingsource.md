@@ -166,7 +166,7 @@ bun ./bin/tmo-snapshot.ts --covers "$LOANS" --out tmp/before.json \
 I wired that precondition into `#tmo-sandbox-purge-apply` rather than leaving it as advice.
 
 **One caveat you should weigh before relying on this.** The tool is fully tested at the pure layer but has **never run against real TMO** — I have no token. In particular `LSS.svc/GetLenders` and `LOS.svc/GetBorrowers` are inferred from the documented API surface and are *not* covered by any file in `docs/TMO/`. If either 404s, the sweep records it as an error and correctly refuses to report `complete`, but the roster capture would be empty. Filed as `#tmo-snapshot-verify` and made a blocker on the purge.
-<!-- agent:boundary:362983a6 -->
+<!-- agent:boundary:782bd117 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
@@ -181,6 +181,7 @@ I wired that precondition into `#tmo-sandbox-purge-apply` rather than leaving it
 - do [#efs-prod-seed]
 - do [#efs-dns-cutover]
 - do [#tmo-getlender-verify]
+- do [#tmo-snapshot-verify]
 <!-- /agent:queue -->
 
 ## Backlog

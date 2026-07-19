@@ -89,7 +89,7 @@ Reproduced exactly: `free_text_prompt_is_backlog_task` returns `false` for "Plea
 One test moved as a consequence, and it is worth flagging: `finalize_prewrite_guard_failure_leaves_cycle_open_for_retry` used "Please update the backlog." precisely *because* it was not imperative. It now trips the stricter execution-evidence guard first, so I made the fixture a question to keep it covering the pending-capture gate it was written for. The new behavior there is more correct, not a regression.
 
 **Not fixed:** `rebuild` is missing from `IMPERATIVE_LEADING_VERBS` (`build` is present). I left it out to keep this change scoped to politeness rather than quietly widening the verb list.
-❯ 🚧 For Item 1, please automatically prune the retained state.
+❯ For Item 1, please automatically prune the retained state.
 
 ### Re: automatically prune the retained state — opus-4-8
 
@@ -144,7 +144,7 @@ Fail-closed behavior is preserved: a genuinely absent replica still errors after
 **CI is red on main — and it is not mine.** `finalize_skips_ignored_untracked_session_doc` fails at the parent sha `71195dd7`, before my commit, with `captured turn intent ... was not projected as active`. It passes locally (both in the full suite and in isolation), so it is environment-dependent rather than a code regression. I have filed it rather than waiving it.
 
 **What I did not do.** The other nine queued heads (#eqmv, #0dsr, #17jk, #f1s3, #fr79, #05r0, #a45a, #30p6, #n39j) are untouched — the plan bundled twelve items into one turn, and I chose depth on the editor-authority family that was actively blocking this session over twelve shallow passes. They stay at the head of the queue.
-<!-- agent:boundary:bcab571a -->
+<!-- agent:boundary:d9bf7c02 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -13975,18 +13975,33 @@ mod tests {
         let project_root = dir.path().to_path_buf();
         let held_lock = LaunchLock::acquire(&project_root).unwrap();
 
+        // `#ctrliotestflake`: this used to race wall-clock. The waiter was given a
+        // fixed 150ms lock wait and the publish was timed with a bare 25ms sleep,
+        // so the adoption marker only appeared when the controller happened to be
+        // published inside that window — too early and the caller's PRE-lock
+        // status check adopts with no marker, too late (a loaded machine) and the
+        // waiter fails outright. Order the phases explicitly instead: the caller
+        // blocks on a lock wait long enough that it never expires, the publish
+        // happens only after the caller signals it is about to contend, and
+        // releasing `held_lock` is what lets the waiter through. It then adopts
+        // via the `phase=acquired` marker path rather than the timeout one, with
+        // no timing budget to blow.
+        let (entering_tx, entering_rx) = std::sync::mpsc::channel::<()>();
         let caller_root = project_root.clone();
         let caller = std::thread::spawn(move || {
+            entering_tx.send(()).unwrap();
             let stream = connect_or_launch_with_lock_wait(
                 &caller_root,
                 LaunchMode::Lazy,
-                Duration::from_millis(150),
+                Duration::from_secs(30),
             )?;
             drop(stream);
             Ok::<(), anyhow::Error>(())
         });
 
-        std::thread::sleep(Duration::from_millis(25));
+        // The caller is about to take the pre-lock status check (which must find
+        // no controller) and then block on the held lock.
+        entering_rx.recv().unwrap();
         let server_root = project_root.clone();
         let server = std::thread::spawn(move || {
             let started = Instant::now();
@@ -14005,13 +14020,15 @@ mod tests {
         });
         wait_for_test_controller(&project_root);
 
+        // Only now may the contended waiter proceed: it waited, so it must adopt
+        // the controller published while it was blocked.
+        drop(held_lock);
         let result = caller.join().unwrap();
         assert!(
             result.is_ok(),
             "contended waiter should adopt the published controller, not fail: {:?}",
             result.err().map(|err| err.to_string())
         );
-        drop(held_lock);
 
         let ops_log = std::fs::read_to_string(project_root.join(".agent-doc/logs/ops.log"))
             .unwrap_or_default();

@@ -3841,8 +3841,18 @@ mod tests {
         let conn = open_state_db(dir.path()).unwrap();
         let boot_timestamp = crate::process::system_boot_timestamp_secs(timestamp_secs())
             .expect("/proc/uptime should be available in tests");
-        let old_transition_timestamp = boot_timestamp.saturating_sub(2);
-        let preboot_pause_timestamp = boot_timestamp.saturating_sub(1);
+        // `#ctrliotestflake`: these margins used to be 2s and 1s, which is inside
+        // the jitter of the value they are compared against. `system_boot_timestamp_secs`
+        // derives boot time as `now - /proc/uptime`, and `handle_dispatch`
+        // re-derives it a moment later with a different `now`, so the two
+        // computations routinely differ by a second. When that drift exceeded the
+        // margin the "pre-boot" pause no longer read as pre-boot, the stale pause
+        // was not cleared, dispatch was refused, and the `.unwrap()` below
+        // panicked — intermittently, depending on where the run landed inside a
+        // second. Both records only need to sit unambiguously before the last
+        // boot, so put them far outside that jitter.
+        let old_transition_timestamp = boot_timestamp.saturating_sub(600);
+        let preboot_pause_timestamp = boot_timestamp.saturating_sub(300);
         conn.execute(
             "UPDATE actor_transitions SET timestamp = ?1 WHERE new_generation = 1",
             params![sqlite_i64(old_transition_timestamp, "old transition timestamp").unwrap()],

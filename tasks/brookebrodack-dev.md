@@ -259,7 +259,7 @@ The 8 dangling gitlinks are filed as `#rappgitlink` rather than fixed — pushin
 I also left `rappstack/dev` uncommitted on purpose. `git status` shows `M bun.lockb` plus `M` on those same 8 submodules — but those 8 are *stuck at older commits* because their checkout failed, so committing them would regress `origin/main`'s gitlinks. The lockfile is likewise derived from a tree with 8 stale submodules. Both should land only after `#rappgitlink` is resolved.
 
 Note that `#rappts`'s 15-error youtube cluster lives in **brookebrodack-dev**, which was already on `^0.45.1`. This cycle fixed the upstream half it consumes; whether that clears the cluster needs a typecheck over there. I could not verify it from this side — `tsc` in `domain--server--youtube` fails first on an unrelated `tsconfig.json` error (`TS5110: 'module' must be set to 'NodeNext' when 'moduleResolution' is 'NodeNext'`) against the old `typescript@5.5.0-dev` that the root `next` pin resolved to.
-❯ 🚧 please commit + push
+❯ please commit + push
 
 ### Re: please commit + push — opus-4-8
 
@@ -284,8 +284,8 @@ I then regenerated `bun.lockb` against the corrected submodules and confirmed th
 
 Both checkouts are synced to `6201622` with clean trees. `rappstack/dev` shows only an untracked `.idea/`, which I left alone. I did not touch the `agent-loop` superproject — it has ~30 modified paths from concurrent sessions, and none of this turn's work belongs there.
 
-Two caveats carried forward unchanged. `better-sqlite3` still fails its native build against Node v26, so installs need `--ignore-scripts`; and whether this clears `#rappts`'s 15-error youtube cluster still needs a typecheck in brookebrodack-dev, which I can't run from this side.
-rappstack uses bun.
+Two caveats carried forward unchanged. `better-sqlite3` still fails its native build against Node v26, so installs need `--ignore-scripts`; and whether ths clears `#rappts`'s 15-error youtube cluster still needs a typecheck in brookebrodack-dev, which I can't run from this side.
+❯ rappstack uses bun.
 
 ### Re: rappstack uses bun — opus-4-8
 
@@ -300,7 +300,22 @@ One phrase of mine is worth disambiguating, since it reads like a contradiction.
 The pin does sharpen one open item, so I filed it as `#rappsqlite`. `better-sqlite3` fails its node-gyp native build against Node v26, which is what made `bun install` abort partway through linking and leave stale package symlinks behind — the exact mechanism that silently recreated the drizzle 0.32.2/0.45.2 split universe I spent last cycle chasing. `--ignore-scripts` is a workaround, not a fix, and it will bite again on any clean install. The real fix stays inside bun: a `better-sqlite3` release with Node 26 prebuilds, a pinned toolchain Node for installs, or dropping it if it is only a transitive dev dependency.
 
 Exchange is at 183 lines across 8 response sections; queue is active so I am not stalling to compact.
-<!-- agent:boundary:3290799a -->
+### Re: Do we use snippet--rappstack? If not, move remote. — opus-4-8
+
+**No — nothing uses it.** Zero `package.json` dependencies and zero imports, in `rappstack/dev` and in every consumer repo under `src/`. The only references anywhere were its own `package.json` self-metadata and the submodule plumbing in `.gitmodules` / `.git/config`. It is a snippets-and-templates package (`cruip-simple/`, `layout/`), not a consumed library.
+
+Given that, you chose to drop the submodule rather than move it to a new remote, which I think is the better call — moving an unused package to a fresh repo preserves the maintenance surface without buying anything.
+
+**Done and pushed** — `rappstack/dev` is at `8e67ef1`. `git submodule deinit` + `git rm` removed the `.gitmodules` entry and the gitlink, and I regenerated `bun.lockb` (it was a `workspaces: ["lib/*"]` member, so the lockfile carried it — `1 package removed`).
+
+**This is reversible.** `btakita/snippet--rappstack` is public and stays archived on GitHub, untouched, so the code is not going anywhere. The commit message records the exact gitlink SHA `94e07aa92b4dc45a9e0b7b791cb6793681315591` for restore, and `.git/modules/lib/snippet--rappstack/` remains in the local clone as a working copy. Nothing was deleted from GitHub.
+
+**Verified by fresh clone,** not by the local checkout. `git clone --recurse-submodules` from GitHub into a temp dir succeeded with no errors: 24 submodules checked out (down from 25), `lib/snippet--rappstack` correctly absent. Drizzle also still resolves to a single hoisted **0.45.2** with no split store entries, so the removal did not disturb last cycle's fix.
+
+Both checkouts — `/home/brian/work/rappstack/dev` and `agent-loop/src/rappstack-dev` — are synced to `8e67ef1` with clean trees. `rappstack/dev` shows only an untracked `.idea/`, which I continue to leave alone.
+
+That closes the archived-remote problem outright: there is no longer a submodule pointing at a read-only repo, so `#rappsnippetarchive` is resolved rather than deferred. `#rappsqlite` (better-sqlite3's node-gyp failure against Node v26, which forces `--ignore-scripts` on every install) is still the open item on this repo.
+<!-- agent:boundary:a1443c2e -->
 <!-- /agent:exchange -->
 
 ## Queue

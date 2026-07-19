@@ -354,14 +354,40 @@ So `--sync` is **additive and corrective only**. `sync_plan_` emits nothing but 
 - **The safety property, on real data:** I added a document *after* the backup was taken, then synced. It was reported `EXTRA_IN_TMO … NOT removed` and survived. Sandbox is back to its original 18 loans, no residue.
 
 **One case sync deliberately will not fix by itself:** an attachment present under the same name with a *different* digest. TMO has no attachment update, so the only moves are adding a second copy under the same name or deleting the bad one — both worse than telling you. That's reported as a `conflict` with both digests, and it's your call.
-<!-- agent:boundary:1eaf04c6 -->
+
+### Re: do [#efs-prod-secret-parity] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#efs-prod-secret-parity]
+
+
+Shipped and pushed as `e79e71a8`. `bun run check` green: 2019 tests, build, worker build. Not deployed — the queue preset is `#spec-test-commit-push`.
+
+**The parity audit found a real defect, not just a missing-secret list.** Production has 4 of staging's 13 secrets:
+
+| Secret | In prod? | Verdict |
+|---|---|---|
+| `AUTH_SECRET`, `ADMIN_GLOBAL_PASSWORD`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | yes | fine |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3`, `S3_BUCKET_NAME` | no | **correctly absent** |
+| `TMO_API_TOKEN`, `TMO_DATABASE` | no | **intentionally unset** (`#tmo-split-launch`) |
+| `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN` | no | **genuinely missing** |
+
+I verified the AWS claim rather than trusting the backlog text: those four have **0 references in worker source** and appear only in `bin/` scripts, so they are correctly not in the worker. The Dropbox three have 4/2/4 worker references — they are real.
+
+**The defect.** `dropbox_oauth_start_GET_` called `require_secret_(env.DROPBOX_APP_KEY, …)` outside any try block. `require_secret_` throws on an unset value, and the worker's `onError` turns that into a bare `c.text('Internal error', 500)`. So on production today, an admin clicking "Connect Dropbox" gets an opaque 500 — indistinguishable from the app being broken, when in fact the integration was simply never configured there. The callback route had the same exposure ahead of its try block.
+
+Both routes now check `dropbox_configured_()` first and return **503** with a message naming the exact three secrets an operator has to push. 503 rather than 500 because the deployment is healthy; the capability isn't provisioned. The guard is ordered before the throwing call and a test asserts that ordering, since moving it later would silently restore the 500.
+
+**What this does not do:** it does not obtain the Dropbox credentials. Those live only in Cloudflare, cannot be read back out, and pushing them to production needs operator access — so document sync stays unavailable in production until someone runs `bun run cf:secrets:push:production` with the real values. That is now a clean, self-describing 503 instead of a crash, which is the part I could actually close.
+<!-- agent:boundary:2a762389 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#tmo-restore-apply]~~
 - ~~do [#tmo-backup-command]~~
 - ~~do [#tmo-reconcile-binder-ui]~~
-- do [#efs-prod-secret-parity]
+- ~~do [#efs-prod-secret-parity]~~
 - do [#tmo-orphan-cache]
 - do [#efs-cf-account-custody]
 - do [#efs-prod-seed]
@@ -375,7 +401,6 @@ So `--sync` is **additive and corrective only**. `sync_plan_` emits nothing but 
 <!-- agent:backlog priority queue -->
 - [ ] [#tmo-snapshot-verify] [operator-verify] Run bin/tmo-snapshot.ts against the real TMO sandbox with the operator token (TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)") and confirm the sweep reports complete=true. The tool, its pure manifest/coverage layer, and its tests shipped 2026-07-18 (#tmo-orphan-reconcile-exec cycle) but no run has ever touched real TMO, so the endpoint set is unverified — in particular LSS.svc/GetLenders and LOS.svc/GetBorrowers are inferred from the documented API surface and are NOT covered by docs/TMO/*.md. If either 404s, drop it from the sweep or correct the path. This is the precondition for #tmo-sandbox-purge-apply. Spec: docs/TMO/snapshot.md.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
-- [ ] [#efs-prod-secret-parity] Production is missing secrets staging has and .dev.vars cannot supply (values are only in Cloudflare and cannot be read back out): DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN gate document sync. AUTH_SECRET, ADMIN_GLOBAL_PASSWORD, CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ACCOUNT_ID are already set (2026-07-18); TMO_API_TOKEN / TMO_DATABASE are intentionally unset so production runs split (#tmo-split-launch). AWS_*/S3_BUCKET_NAME are local bin/assets-*.sh only and are NOT needed in the worker. Compare with 'bun run cf:secrets:list' vs 'bun run cf:secrets:list:production'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#tmo-orphan-cache] SUPERSEDED 2026-07-18 by #tmo-orphan-as-fundings per operator directive — do NOT prune/tombstone these rows as the default. The 18 orphan tmo_cache_entities 'loan' rows are the reconciliation corpus: push them into TMO as fundings and tombstone only pure debris with no EFS deal. Kept as context for the loan-number list (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) and for the note that admin_tmo_loans_by_loan_number_DELETE_ does NOT cover them — it only disables EFS 'loans' rows and never touches tmo_cache_entities. Execute via #tmo-orphan-reconcile-exec. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: `TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply` deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). SNAPSHOT FIRST (added 2026-07-18): TMO has no backup or restore and DeleteLoan is permanent, so gate the purge on `bun ./bin/tmo-snapshot.ts --covers <the 16 loan numbers> --out tmp/tmo-before-purge.json`, which exits non-zero unless every named loan was captured cleanly. Blocked on #tmo-snapshot-verify (the snapshot tool has never run against real TMO). Held pending operator go because DeleteLoan is permanent with no TMO-side undo. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code and cannot be selected. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
 - [ ] [#efs-cf-account-custody] [operator-verify] Move EFS to its own Cloudflare account. Both environments currently live in Brian's personal account (1e7e194ff8da4ad9e40ce041aea84f76), which also hosts unrelated projects. STEP 1 (Judith, instructions drafted 2026-07-18): sign up at dash.cloudflare.com/sign-up with a SHARED EFS address (becomes billing + recovery contact), verify the email (hard prerequisite — invites and 2FA both fail without it), invite Brian as Super Administrator via Manage Account -> Members -> Invite, enable 2FA, have a company card ready for the R2 checkout. Super Administrator is required, not just Workers Platform Admin, because R2 activation is a purchase and the deploy pipeline needs an account-owned API token. STEP 2 (Brian): D1 databases and R2 buckets cannot move between accounts — create them in the new account, update the ids under [env.production] in wrangler.toml, export+import D1, copy R2, re-push secrets (per-account AND per-environment), then repoint DNS. Sequencing: do this before #efs-prod-seed to migrate the data once instead of twice. Advances #efs-dns-cutover. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.

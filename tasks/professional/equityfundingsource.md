@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -150,7 +150,7 @@ So I pinned it. `tests/tmo-getlender-confirm.test.ts` now carries the verbatim l
 Committed via the temp-index compare-and-swap — a concurrent session has `AGENTS.md` dirty, and only my two files went in.
 
 One note on the queue: `preflight` reported `queue_active: false` with 0 drainable heads even though the block is marked `go` and now holds two items. That is the same `editor_attached_model_missing` condition I flagged last cycle — queue maintenance is still being computed and discarded, so the queue text you see is stale state, not live state. `#efs-do-hibernation` is sitting in the queue behind this one and will not auto-drain until that clears. Closing and reopening this file's tab in the IDE is the fix.
-<!-- agent:boundary:4d4115b0 -->
+<!-- agent:boundary:7ecc85de -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

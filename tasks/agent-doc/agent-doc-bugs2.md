@@ -204,7 +204,32 @@ Found and fixed. The stall was visible right in preflight as a contradiction: `q
 One honest caveat: `#5pn7` — the `[operator-verify]` item I filed last turn for the JB `Run Agent Doc` fix — is still queued and still needs your live eyeball. It is not blocking the drain anymore.
 
 Continuing to the next queue item, as you asked.
-<!-- agent:boundary:8a2941c6 -->
+
+### Re: #fr79backfill — decide backfill vs manual striking — opus-4-8
+
+> **Queue prompt:**
+> /goal Fix all contributing factors to queue go mode stall in agent-doc-bugs2.md. This turn stalled despite being run with agent-doc run and queue in go mode. This turn should continue to the next queue item once this task is complete.
+
+Go-mode drain is fixed and pushed (previous turn); continuing the queue as instructed. Next drainable head was `#fr79backfill`, which asked for a deliberate decision rather than code.
+
+**Decision: accept manual striking. Do not build the git-history backfill.**
+
+The reasoning, because this is the kind of call worth being able to audit:
+
+**The gap is a closed set that cannot grow.** The mirror re-records provenance every cycle for heads it currently owns. So any legacy head whose backlog item still exists picks up a row on the next preflight automatically. The only heads that stay permanently unknown are those whose backlog item was *already* gone when `f931e1132` shipped. That set was frozen at that instant and never gains a member.
+
+**Its known member is already resolved.** `#sy71` was the motivating example. There is no `do [#sy71]` head in this document anymore — it is already struck. So the concrete instance the item was filed for is gone, and the remaining set is plausibly empty.
+
+**The backfill's cost lands on the wrong side of the risk.** Walking git history of the backlog component to infer ownership means inferring a safety-critical predicate from historical evidence, on the exact invariant whose last over-broad version deleted real work and failed 12 preflight tests. "This id once lived in the backlog" is narrower than "no tracked item", but it is still an inference, and it would be a permanent code path carrying that risk — to clean a set that is closed, non-growing, and currently empty of known members.
+
+Absence of a row means "operator-authored, never strike". That default is the safe one, and it is the right place to leave a legacy head: visible, and struck by hand if one ever surfaces.
+
+**This is cheap to reverse.** If a legacy dangling head does show up and striking it by hand is annoying, reopening this item and building the backfill loses nothing — the decision doesn't foreclose it. Say the word and I'll implement it instead.
+
+No code changed this cycle, so no build or suite run was warranted; the item is closed as decided.
+
+Still open and genuinely needing you: `#5pn7`, the live JB `Run Agent Doc` eyeball. I left it queued rather than marking it done, since I can't supply that proof myself.
+<!-- agent:boundary:bb2c742a -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -214,7 +239,7 @@ Continuing to the next queue item, as you asked.
 - ~~do [#patchretryidem]~~
 - ~~📌 do [#jbroutasync]~~
 /goal Fix all contributing factors to queue go mode stall in agent-doc-bugs2.md. This turn stalled despite being run with agent-doc run and queue in go mode. This turn should continue to the next queue item once this task is complete.
-- ⏭️ do [#fr79backfill]
+- ~~do [#fr79backfill]~~
 - ⏭️ do [#c8tb]
 - ⏭️ do [#jbrouteasyncchannel]
 - ⏭️ do [#jbedtledgerverify]
@@ -225,7 +250,7 @@ Continuing to the next queue item, as you asked.
 - ⏭️ 📌 do [#f6j3]
 - ⏭️ 📌 do [#promptselect]
 - ⏭️ 📌 do [#realtimesalient]
-- 📌 do [#syncobscache2]
+- ⏭️ 📌 do [#syncobscache2]
 - 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
 - 📌 do [#jbtsiftnosub2verify]
@@ -251,7 +276,6 @@ Continuing to the next queue item, as you asked.
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#5pn7] [operator-verify] Live #preflightsettleparity proof: trigger JB `Run Agent Doc` on tasks/agent-doc/agent-doc-bugs2.md while an editor holds the buffer. Expect the cycle to start (preflight past step 1) instead of aborting with `preflight deferred ... Lazily current authority remained delivery_pending`. Fixed + shipped in agent-doc; only the live human eyeball remains.
-- [ ] [#fr79backfill] [recommended] #fr79 retroactive cleanup: heads that were ALREADY dangling before f931e1132 have no provenance row, so the orphan strike (51206d10b) never fires for them — the mechanism is forward-looking. #sy71 is the known example. Either accept that they need manual striking, or add a one-time backfill that walks git history of the document's backlog component and records provenance for ids that once existed there. Decide deliberately; do not widen the strike rule to cover them, since 'no tracked item' cannot mean 'orphaned' (that is exactly what deleted real work and failed 12 preflight tests).
 - [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.
 - [ ] [#jbrouteasyncchannel] [focused-cycle] #agent-doc-bug Move editor_route onto the async accept-on-admission endpoint — BLOCKED on a completion channel, do NOT just add it to the whitelist. Tagged [focused-cycle] because it needs a clean design cycle, not an in-loop drain: it surfaced as the drain head 3x and was correctly declined each time. Split from #jbroutasync. The mechanical change is small: validate_async_editor_command_payload (rpc.rs:5465) whitelists only sync_tmux_layout/focus_document_pane, so adding an editor_route arm would route it through handle_editor_command_submit_async_rpc. DO NOT DO THAT ALONE — it silently destroys every Run Agent Doc failure notification. resolveCommandSubmitAcceptedData (CpcRouteClient.kt:431) returns CpcEditorRouteResult(0, output) — exit code 0 = SUCCESS — for status submitted/accepted/running/applied. The entire classification chain in TerminalUtil keys off a NON-ZERO exit: BUSY_RUNNING -> notifyRunAgentDocStillRunning, QUEUED_PENDING -> notifyRunAgentDocQueued, RETRYABLE_STARTING retries, DISPATCH_START_UNPROVEN, and the catch-all notifyPersistentRouteFailure (TerminalUtil.kt:490-566). Accept-on-admission returns 0 immediately so none can fire, and every click would report success. This is the exact feedback path verified working 2026-07-19 when a busy pane correctly refused to inject on brookebrodack-dev.md. PREREQUISITE: a completion channel so the plugin learns the real outcome after acceptance (poll the command projection by command_id — the accept response already carries a projection with per-command status/terminal fields — or a controller->plugin completion event), with the classification chain running against THAT rather than the submit response. Only then is the latency win safe.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.

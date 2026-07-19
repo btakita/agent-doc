@@ -46,7 +46,7 @@ Done.
 Note: the repo name is `acadian-take-home`, not the `mag7-returns` name the plan file proposed — I followed your queue item. `tasks/recruit/acadian/plan.md` is gitignored under this workspace, so it stays untracked here; the plan content moves into the submodule's own README during the scaffold phase.
 
 Next queue item is `/goal do tasks/recruit/acadian/plan.md`, which drains #acad1–#acad5 into the new submodule.
-<!-- agent:boundary:c24135a4 -->
+<!-- agent:boundary:48491ad4 -->
 <!-- /agent:exchange -->
 
 ## Queue

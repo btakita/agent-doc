@@ -2279,12 +2279,86 @@ pub fn detect_exchange_compaction_request(diff: &str) -> bool {
             continue;
         };
         let lower = normalized.to_ascii_lowercase();
-        if lower.starts_with("compact exchange") || lower.starts_with("compact the exchange") {
-            return true;
+        for prefix in ["compact exchange", "compact the exchange"] {
+            if let Some(rest) = lower.strip_prefix(prefix)
+                && !continuation_reads_as_statement_about_compaction(rest)
+            {
+                return true;
+            }
         }
     }
 
     false
+}
+
+/// Does the text following a leading `compact exchange` read as a *statement
+/// about* compaction rather than a request to compact?
+///
+/// `#compactfp-prose`: the directive check is prefix-based, so an operator
+/// reporting a compaction bug in exchange prose — "Compact exchange commits but
+/// then deletes the agent:boundary tag" — was classified as a same-turn compact
+/// request and hard-failed the write. That is worse than the inverse error: a
+/// missed directive just means the turn answers normally, while a false positive
+/// makes the operator's prompt unanswerable until they reword it. Complements the
+/// list-item skip (`#qcompactfp`), which covers the same false positive when the
+/// report arrives as a queue/backlog head instead of prose.
+///
+/// A genuine directive either ends at the prefix (`compact exchange`) or
+/// continues with punctuation/flags (`compact exchange...do not add...`,
+/// `compact exchange --message ...`). A report continues with a finite verb or
+/// modal, which is what this recognizes.
+fn continuation_reads_as_statement_about_compaction(rest: &str) -> bool {
+    let Some(word) = rest.split_whitespace().next() else {
+        return false;
+    };
+    let word = word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '\'');
+    matches!(
+        word,
+        "commits"
+            | "committed"
+            | "deletes"
+            | "deleted"
+            | "leaves"
+            | "left"
+            | "drops"
+            | "dropped"
+            | "loses"
+            | "lost"
+            | "breaks"
+            | "broke"
+            | "fails"
+            | "failed"
+            | "is"
+            | "isn't"
+            | "was"
+            | "wasn't"
+            | "are"
+            | "were"
+            | "does"
+            | "doesn't"
+            | "did"
+            | "didn't"
+            | "has"
+            | "hasn't"
+            | "had"
+            | "should"
+            | "shouldn't"
+            | "must"
+            | "will"
+            | "won't"
+            | "would"
+            | "can"
+            | "can't"
+            | "cannot"
+            | "needs"
+            | "seems"
+            | "appears"
+            | "still"
+            | "no"
+            | "never"
+            | "always"
+            | "sometimes"
+    )
 }
 
 /// Render all prompt-bearing changes as a prompt-ready section.
@@ -4501,6 +4575,41 @@ Done.\n\
         // A genuine prose directive (no bullet) still matches.
         let prose = "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+compact exchange\n";
         assert!(detect_exchange_compaction_request(prose));
+    }
+
+    #[test]
+    fn detect_exchange_compaction_request_ignores_prose_bug_report() {
+        // #compactfp-prose: an operator reporting a compaction bug in exchange
+        // prose must stay answerable. Before this, the leading "Compact exchange"
+        // made the write path hard-fail and the prompt could not be answered at
+        // all without rewording it.
+        for diff in [
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+Compact exchange commits but then deletes the agent:boundary tag above...leaving the deletion in an uncommitted state.\n",
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+compact exchange still drops the boundary marker\n",
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+Compact exchange should commit the compacted content\n",
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+compact the exchange fails when the editor authority is degraded\n",
+        ] {
+            assert!(
+                !detect_exchange_compaction_request(diff),
+                "prose report about compaction must not be a directive: {diff:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn detect_exchange_compaction_request_still_matches_real_directives() {
+        for diff in [
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+compact exchange\n",
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+❯ compact exchange...do not add...summarize the content and delete the rest\n",
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+compact exchange --message \"checkpoint\"\n",
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+compact the exchange\n",
+            "--- snapshot\n+++ document\n@@ -1 +1,2 @@\n ctx\n+compact exchange and keep the last two topics\n",
+        ] {
+            assert!(
+                detect_exchange_compaction_request(diff),
+                "genuine compaction directive must still be detected: {diff:?}"
+            );
+        }
     }
 
     #[test]

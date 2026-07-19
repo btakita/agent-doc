@@ -674,6 +674,68 @@ pub fn run_in_controller(
     if commit {
         if dirty {
             commit_compacted_authoritative(file, &targets.committed, &targets.live)?;
+        } else {
+            // `#bbdcompactnocommit`: this branch used to be absent, so a
+            // `--commit` compact that could not observe committable state
+            // returned Ok having silently skipped the commit. Operator-reported
+            // on brookebrodack-dev.md: the compacted document and its archive
+            // were on disk, only the commit was missing, and it had to be
+            // noticed by hand.
+            //
+            // Reaching here means the compaction DID change something — the
+            // genuine no-op already returned above (`targets.live == content &&
+            // targets.committed == content`). So `!dirty` is a failure to
+            // OBSERVE the change, not an absence of one: with a live editor
+            // holding the buffer mid-compact the on-disk re-read still equals
+            // the pre-compact content, and the snapshot may not have converged
+            // to HEAD divergence yet either (the reported case logged
+            // `delivery_converged=false live_editors=1`).
+            //
+            // Give convergence a bounded chance, then fail loudly. Silently
+            // reporting success is the one outcome that must not survive.
+            let mut observed = dirty;
+            for attempt in 1..=COMPACT_COMMIT_OBSERVE_ATTEMPTS {
+                std::thread::sleep(COMPACT_COMMIT_OBSERVE_BACKOFF);
+                let retried_disk = effects
+                    .force_disk_document_content(file, "compact_commit_observe_retry")
+                    .unwrap_or_else(|_| content.to_string());
+                let retried_snapshot = agent_doc_snapshot_io::verify_snapshot_committed(file)?;
+                observed = compact_dirty(retried_disk != content, &retried_snapshot);
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "compact_commit_observe_retry file={} attempt={}/{} dirty={} (#bbdcompactnocommit)",
+                        file.display(),
+                        attempt,
+                        COMPACT_COMMIT_OBSERVE_ATTEMPTS,
+                        observed,
+                    ),
+                );
+                if observed {
+                    break;
+                }
+            }
+            if observed {
+                commit_compacted_authoritative(file, &targets.committed, &targets.live)?;
+            } else {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "compact_commit_unobservable file={} recovery=retry_compact_commit (#bbdcompactnocommit)",
+                        file.display()
+                    ),
+                );
+                anyhow::bail!(
+                    "{}: compaction was applied but could not be committed — the change is not \
+                     observable on disk or in the snapshot after {} attempt(s). A live editor may \
+                     still own the buffer (concurrent edits mid-compact). The compacted document and \
+                     its archive are intact; only the commit is missing. Re-run `agent-doc compact {} \
+                     --commit` once the editor has settled (#bbdcompactnocommit)",
+                    file.display(),
+                    COMPACT_COMMIT_OBSERVE_ATTEMPTS,
+                    file.display(),
+                );
+            }
         }
     } else if dirty {
         // #jb-compact-repair-left-uncommitted: a compact/repair that rewrites the
@@ -695,6 +757,19 @@ pub fn run_in_controller(
 
     Ok(())
 }
+
+/// `#bbdcompactnocommit`: how long a `--commit` compact waits for its own change
+/// to become observable before failing loudly. A live editor mid-compact can hold
+/// the buffer past the first disk re-read, so give convergence a bounded chance
+/// rather than either hanging or silently skipping the commit.
+#[cfg(test)]
+const COMPACT_COMMIT_OBSERVE_ATTEMPTS: u32 = 2;
+#[cfg(not(test))]
+const COMPACT_COMMIT_OBSERVE_ATTEMPTS: u32 = 5;
+#[cfg(test)]
+const COMPACT_COMMIT_OBSERVE_BACKOFF: std::time::Duration = std::time::Duration::from_millis(5);
+#[cfg(not(test))]
+const COMPACT_COMMIT_OBSERVE_BACKOFF: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Decide whether a compaction left committable/dirty state.
 ///
@@ -3751,6 +3826,64 @@ mod tests {
             .unwrap();
         assert!(committed.contains("Compacted summary."));
         assert!(!committed.contains("### Re: topic one"));
+    }
+
+    /// `#bbdcompactnocommit`: a `--commit` compact that cannot observe its own
+    /// change must never report success.
+    ///
+    /// Operator-reported on brookebrodack-dev.md while queue lines were being
+    /// deleted mid-compact: ops.log showed `delivery_converged=false
+    /// live_editors=1`, the compacted document and archive landed on disk, and
+    /// the commit simply never happened. The commit leg was
+    /// `if commit { if dirty { ... } }` with no else, so an unobservable change
+    /// fell through and returned Ok.
+    ///
+    /// The genuine no-op returns earlier (`targets.live == content &&
+    /// targets.committed == content`), so `!dirty` at the commit gate means the
+    /// change could not be OBSERVED, not that there was none — which is exactly
+    /// the case that must fail loudly.
+    #[test]
+    fn compact_commit_leg_has_no_silent_skip() {
+        let source = include_str!("lib.rs");
+        let commit_leg = source
+            .split("    if commit {")
+            .nth(1)
+            .expect("the commit gate must exist");
+
+        assert!(
+            commit_leg.contains("compact_commit_unobservable"),
+            "an unobservable --commit compact must be recorded, not silently skipped"
+        );
+        assert!(
+            commit_leg.contains("compact_commit_observe_retry"),
+            "an unobservable --commit compact must retry for convergence first"
+        );
+        // The load-bearing part: the failure path must actually return an error.
+        let unobservable_idx = commit_leg
+            .find("compact_commit_unobservable")
+            .expect("checked above");
+        let bail_idx = commit_leg[unobservable_idx..]
+            .find("anyhow::bail!")
+            .expect("the unobservable path must fail loudly");
+        assert!(
+            bail_idx < 800,
+            "the bail must follow the unobservable log, not be some later unrelated error"
+        );
+    }
+
+    /// The retry budget must be bounded — a compact that hangs waiting for an
+    /// editor that never settles is no better than one that silently skips.
+    #[test]
+    fn compact_commit_observe_retry_is_bounded() {
+        assert!(COMPACT_COMMIT_OBSERVE_ATTEMPTS >= 1);
+        assert!(
+            COMPACT_COMMIT_OBSERVE_ATTEMPTS <= 10,
+            "the observe retry must stay bounded"
+        );
+        assert!(
+            COMPACT_COMMIT_OBSERVE_BACKOFF <= std::time::Duration::from_millis(500),
+            "per-attempt backoff must stay small enough to bound the whole gate"
+        );
     }
 
     #[test]

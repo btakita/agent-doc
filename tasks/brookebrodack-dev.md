@@ -106,38 +106,17 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/5ed9ebdbe4a2edb795318ea94faf66a77813df7180cde01350e66214e980296b-20260719-051827.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/5ed9ebdbe4a2edb795318ea94faf66a77813df7180cde01350e66214e980296b-20260719-062127.md`*
 
 Compacted content:
-- Archived 10 response topic(s): #sweepstale; auto-rebase by default; #schemadts2; 7 more
-- Prior summary/context: prior compacted content: Archived 8 response topic(s): #rak9; #tsappsub; #tsappclean; 5 more
-
-### Re: do [#rappsqlite] — opus-4-8
-
-Fixed and pushed. `bun install` now completes with scripts enabled — `--ignore-scripts` is no longer needed anywhere.
-
-**Root cause was a missing prebuild, not broken C++.** Node 26 is ABI 147, and better-sqlite3 11.1.2 ships no prebuild for it, so node-gyp fell back to compiling from source and died on a `v8::Global` constructor arity mismatch. That is a stock upstream-lag problem, and the interesting part is the blast radius: the failure hit *during* the install script phase, after resolution but partway through linking, which is why it left stale package symlinks behind. That is the precise mechanism that silently recreated the drizzle 0.32.2/0.45.2 split universe I chased two cycles ago.
-
-`better-sqlite3` is a **devDependency** of `persontric-adapter-drizzle` and `persontric-adapter-sqlite` — test-only, not shipped runtime code.
-
-**Verified the fix before adopting it.** I installed 12.11.1 standalone and confirmed a real ABI 147 prebuild lands (`build/Release/better_sqlite3.node`) and that it opens a database and round-trips a query under Node v26.4.0 — no compile step at all. Only then did I bump.
-
-The major bump is safe here because the adapters touch nothing exotic: `new Database()`, `prepare().get/all/run()`, `exec()`. All stable across 11 → 12. `@types/better-sqlite3` needed no change — it is still on the 7.x line and `^7.6.11` already admits the current 7.6.13. The `persontric-adapter-sqlite` **test suite passes in full** against 12.11.1 on Node 26.
-
-One deliberate asymmetry. The devDependencies go to `^12.11.1`, but the *optional peerDependency* in `persontric-adapter-sqlite` was an exact pin at `11.1.2`, and I widened it to `>=11.1.2` instead of moving it to `^12`. Since that is a published library, pinning a peer forces every consumer onto one exact build, and bumping it to `^12` would push consumers still on 11.x off a version that works fine for them. The permissive range fixes our install without making that decision on their behalf.
-
-**Landed across three repos:** `persontric/adapter-drizzle` (`aafcde6`), `persontric/adapter-sqlite` (`cd8639b`), and the gitlink plus regenerated `bun.lockb` in `rappstack/dev` (`ff06980`). Both adapters were exactly in sync with their `origin/main` beforehand, so both pushes were clean fast-forwards — none of the divergence that made `#rappgitlink` messy.
-
-**Proven end to end from a virgin clone,** not from my working tree: fresh `git clone --recurse-submodules` (24 submodules, no errors) → full `bun install` **with scripts** (591 packages, zero gyp output) → `require('better-sqlite3')` opens a DB and returns a row on v12.11.1. Drizzle also still resolves to a single hoisted 0.45.2 with no split store entries, so a complete install no longer regenerates the hazard.
-
-Both checkouts are on `ff06980` with clean trees; `rappstack/dev` shows only the untracked `.idea/` I keep leaving alone. That clears the last open item on this repo.
-<!-- agent:boundary:bd8c1320 -->
+- Archived 1 response topic(s): do [#rappsqlite]
+- Prior summary/context: prior compacted content: Archived 10 response topic(s): #sweepstale; auto-rebase by default; #schemadts2; 7 more
+<!-- agent:boundary:6ccb0c72 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#rappsqlite]
 - do [#tsnextpin]
 - do [#lzeffectvoid]
 - do [#tsappclean]
@@ -223,4 +202,5 @@ Both checkouts are on `ff06980` with clean trees; `rappstack/dev` shows only the
 - 2026-07-19 [#rappdeps] rappstack is at /home/brian/work/rappstack/dev (github rappstack/dev). Run the same dependency sweep, and ALIGN DRIZZLE: 4 packages pin drizzle-orm ^0.32.0 while domain--server pins ^0.45.1, which is the whole 15-error youtube cluster in brookebrodack-dev (#rappts) — a table type and a db handle from two different drizzle universes. Also has an uncommitted working tree (bun.lockb, lib/dev-bin, lib/domain--any--blog) to resolve first
 - 2026-07-19 [#rappgitlink] rappstack/dev origin/main references 8 submodule commits never pushed to their own remotes, so a fresh clone cannot check them out: lib/dev-bin (2ec18b4), domain--browser, domain--browser--blog, snippet--rappstack, ui--any (e8e383a), ui--any--blog, ui--browser, ui--browser--semantic. Commits exist locally in agent-loop/src/rappstack-dev/lib/*. dev-bin additionally needs a real merge, not just a push: gitlink 2ec18b4 has version 0.1.0 (npm publish bump) while its origin/main 248ac1c has newer deps (marked ^17, ora ^9, clipboardy ^5, ctx-core ^7.2.32) plus typescript peerDep loosened to '*' — neither side is a superset, common ancestor e10283e. Until resolved, rappstack/dev bun.lockb + 8 gitlinks must stay uncommitted (committing would regress origin/main)
 - 2026-07-19 [#rappsnippetarchive] btakita/snippet--rappstack is ARCHIVED on GitHub (read-only), so its unpushed 'bump version to 0.1.0' commit a61f06b can never be published. rappstack/dev's gitlink now points at the existing remote main 94e07aa and the local bump is dropped (preserved as tag backup/pre-rappgitlink in agent-loop/src/rappstack-dev/lib/snippet--rappstack). Decide: unarchive the repo and re-push the bump, move the package to a new remote, or leave it pinned at 94e07aa. Note its remote main also carries a relysjs->rhonojs migration the local branch never had
+- 2026-07-19 [#rappsqlite] better-sqlite3 fails its node-gyp native build against Node v26 in rappstack/dev (v8::Global ctor arity mismatch in better_sqlite3.o), so every 'bun install' aborts mid-link and leaves stale package symlinks — that is what silently reproduced the drizzle 0.32.2/0.45.2 split universe. Workaround today is 'bun install --ignore-scripts'. Fix properly: bump better-sqlite3 to a release with Node 26 prebuilds, pin the toolchain Node version for installs, or drop it if only a transitive dev dep. Stays in bun (see pinned note: rappstack uses bun)
 <!-- /agent:done -->

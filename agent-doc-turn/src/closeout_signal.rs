@@ -940,34 +940,74 @@ pub fn directive_response_source(
     None
 }
 
-/// True when any `### Re:` heading line in `content` references `#id` / `[#id]`.
+/// True when a `### Re:` response *section* in `content` references `#id`.
 ///
-/// `do #id` responses always render under a `### Re: ... #id` heading, so a
-/// heading-scoped match avoids false matches against queue-prompt echoes or
-/// backlog lines that merely mention the id.
+/// `#reheadingidoptional`: this used to require the id in the heading LINE, on
+/// the premise that a `do #id` response always renders as `### Re: ... #id`.
+/// That premise is false — `SKILL.md` asks for `### Re: <topic> — <model>`, and
+/// a topic named after the operator's question legitimately carries no id. The
+/// heading-only match then reported a response that is plainly present in the
+/// document as silently lost, alarming on a healthy closeout.
+///
+/// Matching the whole response section (heading + body) keeps the original
+/// anti-false-match intent: the scan still cannot see queue-prompt echoes or
+/// backlog lines, because a section ends at the next heading of any level *or*
+/// at the next component marker, and `agent:queue` / `agent:backlog` live in
+/// their own components.
 pub fn content_has_re_heading_for_id(content: &str, id: &str) -> bool {
     if id.is_empty() {
         return false;
     }
     let needle = format!("#{}", id.to_ascii_lowercase());
-    content.lines().any(|line| {
+    let mut in_response_section = false;
+    for line in content.lines() {
         let trimmed = line.trim_start();
-        if !trimmed.starts_with("### Re:") && !trimmed.starts_with("###Re") {
-            return false;
+        let is_re_heading = trimmed.starts_with("### Re:") || trimmed.starts_with("###Re");
+        if is_re_heading {
+            in_response_section = true;
+        } else if is_markdown_heading(trimmed)
+            || trimmed.starts_with("<!-- agent:")
+            || trimmed.starts_with("<!-- /agent:")
+        {
+            // Any other heading, or a component boundary, ends the section —
+            // so backlog/queue text can never be read as a response body.
+            in_response_section = false;
         }
-        let lower = trimmed.to_ascii_lowercase();
-        match lower.find(&needle) {
-            None => false,
-            Some(pos) => {
-                // Reject a longer-id prefix collision (`#ab` must not match `#abc`).
-                let after = &lower[pos + needle.len()..];
-                !after
-                    .chars()
-                    .next()
-                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-            }
+        if !in_response_section {
+            continue;
         }
-    })
+        if line_references_id(trimmed, &needle) {
+            return true;
+        }
+    }
+    false
+}
+
+/// True for an ATX heading (`#` … `######` followed by a space), so a bare
+/// `#tag` inside a response body does not read as a section boundary.
+fn is_markdown_heading(line: &str) -> bool {
+    let hashes = line.chars().take_while(|c| *c == '#').count();
+    (1..=6).contains(&hashes) && line[hashes..].starts_with(' ')
+}
+
+/// True when `line` mentions `needle` (`#<id>`, lowercased) as a whole id.
+fn line_references_id(line: &str, needle: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(offset) = lower[from..].find(needle) {
+        let pos = from + offset;
+        // Reject a longer-id prefix collision (`#ab` must not match `#abc`).
+        let after = &lower[pos + needle.len()..];
+        if !after
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return true;
+        }
+        from = pos + needle.len();
+    }
+    false
 }
 
 /// Pure inputs for per-id queue directive response-loss detection.
@@ -1224,6 +1264,70 @@ mod tests {
             .is_empty(),
             "a reaped id materialized in a HEAD compact archive is not a loss"
         );
+    }
+
+    /// `#reheadingidoptional`: `SKILL.md` asks for `### Re: <topic> — <model>`,
+    /// so a header named after the operator's question carries no id. The
+    /// response is present; reporting it lost is a false positive.
+    #[test]
+    fn response_section_body_reference_counts_when_the_heading_is_topic_titled() {
+        let exchange = "\
+### Re: how should snippets be archived? — opus-4-8
+
+Archived them under the new layout. Closes #rappsnippetarchive.
+";
+        assert!(
+            content_has_re_heading_for_id(exchange, "rappsnippetarchive"),
+            "a topic-titled heading whose body cites the id is not a lost response"
+        );
+        assert_eq!(
+            directive_response_source(exchange, &[], "rappsnippetarchive"),
+            Some(ResponseSource::Exchange)
+        );
+    }
+
+    /// The loosened match must not start reading queue/backlog text as a
+    /// response body, or a genuinely lost response stops being detected.
+    #[test]
+    fn component_and_heading_boundaries_end_the_response_section() {
+        let after_component = "\
+### Re: unrelated topic — opus-4-8
+
+Nothing to do with the reaped id.
+
+<!-- agent:queue -->
+do [#lostid]
+<!-- /agent:queue -->
+";
+        assert!(
+            !content_has_re_heading_for_id(after_component, "lostid"),
+            "a queue head after the component boundary is not a response"
+        );
+
+        let after_heading = "\
+### Re: unrelated topic — opus-4-8
+
+Nothing to do with the reaped id.
+
+## Backlog
+
+- [ ] #lostid still open
+";
+        assert!(
+            !content_has_re_heading_for_id(after_heading, "lostid"),
+            "a later heading ends the response section"
+        );
+
+        // A bare `#tag` inside the body is not a heading and must not end the
+        // section before a later id reference on the same response.
+        let tagged = "\
+### Re: unrelated topic — opus-4-8
+
+#sometag context line
+
+Closes #lostid.
+";
+        assert!(content_has_re_heading_for_id(tagged, "lostid"));
     }
 
     #[test]
@@ -2027,21 +2131,25 @@ mod tests {
         );
     }
 
+    /// `#reheadingidoptional`: this used to pin the multi-directive
+    /// single-heading FALSE POSITIVE — `#b`, answered in the body of a
+    /// `### Re: do #a` response, was reported lost because only the heading was
+    /// scanned. Section-scoped matching resolves it, so neither id is a loss.
     #[test]
-    fn reaped_directive_response_loss_pins_multi_directive_single_heading_shape() {
+    fn reaped_directive_response_loss_accepts_multi_directive_single_heading() {
         let directive = vec!["a".to_string(), "b".to_string()];
         let reaped = vec!["a".to_string(), "b".to_string()];
         let single_heading = "### Re: do #a — opus-4-8\n\nFixed #a; also addressed #b inline.\n";
         let archives: Vec<String> = Vec::new();
-        assert_eq!(
+        assert!(
             reaped_directive_ids_without_response(&loss_input(
                 &directive,
                 &reaped,
                 single_heading,
                 &archives
-            )),
-            vec!["b".to_string()],
-            "documents the multi-directive-single-heading false positive"
+            ))
+            .is_empty(),
+            "both ids are answered under the one heading; neither is lost"
         );
 
         let grouped_heading = "### Re: do #a, #b — opus-4-8\n\nFixed both.\n";

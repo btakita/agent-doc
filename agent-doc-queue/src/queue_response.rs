@@ -494,11 +494,18 @@ pub fn head_carries_in_progress_marker(text: &str) -> bool {
 /// strike it -- the response blockquote can't possibly `contains` the full log.
 /// Matching on the prose prefix instead lets a code-fenced report strike when its
 /// lead is quoted. Falls back to the whole text when there is no fence.
+/// `#ftstrike-blockquote`: an embedded `>` blockquote line inside a queue head is
+/// quoted prior-response context that the operator's directive sits above, not
+/// part of the directive itself. It stops the prose prefix for the same reason a
+/// fence does. Requiring the agent to reproduce that quoted context verbatim is
+/// brittle in exactly the way the fence rule already anticipates: quoting the
+/// operator's actual instruction failed to strike the head, so the drain re-ran
+/// work that was already committed.
 pub fn free_text_head_match_prose(head_text: &str) -> String {
     let mut prose = String::new();
     for line in head_text.lines() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") || trimmed.starts_with('>') {
             break;
         }
         prose.push_str(line);
@@ -937,6 +944,47 @@ mod tests {
         let summary = summarize_consumed_prompt(&text, 5);
         assert!(summary.starts_with("héllo"));
         assert!(summary.contains("more chars"));
+    }
+
+    /// `#ftstrike-blockquote` — a head whose directive is followed by quoted
+    /// prior-response context is answered by quoting the directive. Before this,
+    /// the echo had to reproduce the embedded blockquote verbatim, so a correct
+    /// answer left the head queued and the drain re-ran committed work.
+    #[test]
+    fn free_text_head_is_answered_by_quoting_the_directive_above_embedded_context() {
+        let head = concat!(
+            "We should use lazily instead of a TTL. Prefer the realtime document model over rebuilding from disk.\n",
+            "> Descending instead of bailing means the caller *continues* — so every later read site re-paid the 3x6s self-heal.",
+        );
+        let response = concat!(
+            "### Re: replica self-heal\n\n",
+            "> **Queue prompt:** We should use lazily instead of a TTL. Prefer the realtime document model over rebuilding from disk.\n\n",
+            "Done.\n",
+        );
+        assert!(
+            free_text_head_answered_by_response(response, head),
+            "quoting the operator's directive must strike the head without \
+             reproducing the embedded blockquote context verbatim"
+        );
+    }
+
+    /// The embedded-blockquote rule must not make heads strike incidentally: a
+    /// response that quotes an unrelated directive still leaves the head queued.
+    #[test]
+    fn free_text_head_with_embedded_context_is_not_answered_by_an_unrelated_echo() {
+        let head = concat!(
+            "We should use lazily instead of a TTL. Prefer the realtime document model over rebuilding from disk.\n",
+            "> Descending instead of bailing means the caller *continues*.",
+        );
+        let response = concat!(
+            "### Re: something else\n\n",
+            "> **Queue prompt:** Please rename the guard predicate to a decision-shaped name.\n\n",
+            "Done.\n",
+        );
+        assert!(
+            !free_text_head_answered_by_response(response, head),
+            "an unrelated queue-prompt echo must not strike this head"
+        );
     }
 
     #[test]

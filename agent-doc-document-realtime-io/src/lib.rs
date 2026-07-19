@@ -4720,9 +4720,12 @@ static EDITOR_REPLICA_SELF_HEAL_EXHAUSTED: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, EditorReplicaLivenessWitness>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
-/// `true` when this file's self-heal already failed against exactly this
-/// liveness witness, so the retry loop is provably futile and resolution should
-/// fall through immediately.
+/// `true` when the retry loop should be paused for this file: the self-heal
+/// already failed against exactly this liveness witness, so another attempt is
+/// provably futile and resolution should fall through immediately.
+///
+/// Paused, not stopped — the suppression lifts the moment the witness changes,
+/// with no timer involved.
 ///
 /// Reads used to BAIL when the editor could not answer, so the self-heal was
 /// paid at most once per operation. Now that reads descend to disk and the
@@ -4738,7 +4741,7 @@ static EDITOR_REPLICA_SELF_HEAL_EXHAUSTED: std::sync::LazyLock<
 /// liveness witness answers the question that actually matters — "has anything
 /// changed since it failed?" — so recovery is immediate when a registration
 /// lands and free when it has not.
-fn editor_replica_self_heal_exhausted_for_witness(
+fn should_pause_editor_replica_self_heal(
     file: &std::path::Path,
     witness: &EditorReplicaLivenessWitness,
 ) -> bool {
@@ -4775,7 +4778,7 @@ fn reobserve_missing_editor_replica_with_reregistration(
         clear_editor_replica_self_heal_exhausted(file);
         return observed;
     }
-    if editor_replica_self_heal_exhausted_for_witness(
+    if should_pause_editor_replica_self_heal(
         file,
         &editor_replica_liveness_witness(file),
     ) {
@@ -5256,13 +5259,13 @@ mod tests {
         let observed = witness(true, &[(4242, "jetbrains-a", 1_000)]);
 
         assert!(
-            !editor_replica_self_heal_exhausted_for_witness(file, &observed),
+            !should_pause_editor_replica_self_heal(file, &observed),
             "a file with no recorded exhaustion must be allowed a full retry"
         );
 
         record_editor_replica_self_heal_exhausted(file, observed.clone());
         assert!(
-            editor_replica_self_heal_exhausted_for_witness(file, &observed),
+            should_pause_editor_replica_self_heal(file, &observed),
             "an unchanged liveness witness must keep suppressing the futile retry loop"
         );
 
@@ -5287,7 +5290,7 @@ mod tests {
             clear_editor_replica_self_heal_exhausted(file);
             record_editor_replica_self_heal_exhausted(file, exhausted_at.clone());
             assert!(
-                !editor_replica_self_heal_exhausted_for_witness(file, &current),
+                !should_pause_editor_replica_self_heal(file, &current),
                 "{label} must re-arm the self-heal immediately, not wait out a TTL"
             );
         }
@@ -5299,7 +5302,7 @@ mod tests {
         clear_editor_replica_self_heal_exhausted(file);
         record_editor_replica_self_heal_exhausted(file, stale);
         assert!(
-            !editor_replica_self_heal_exhausted_for_witness(file, &reregistered),
+            !should_pause_editor_replica_self_heal(file, &reregistered),
             "a fresh registration timestamp for the same pid must re-arm the self-heal"
         );
 
@@ -5319,7 +5322,7 @@ mod tests {
         clear_editor_replica_self_heal_exhausted(file);
         record_editor_replica_self_heal_exhausted(file, exhausted_at);
         assert!(
-            !editor_replica_self_heal_exhausted_for_witness(file, &different_editor),
+            !should_pause_editor_replica_self_heal(file, &different_editor),
             "distinct pids above u32::MAX must not collapse into one witness"
         );
 
@@ -5335,7 +5338,7 @@ mod tests {
         record_editor_replica_self_heal_exhausted(file, observed.clone());
         clear_editor_replica_self_heal_exhausted(file);
         assert!(
-            !editor_replica_self_heal_exhausted_for_witness(file, &observed),
+            !should_pause_editor_replica_self_heal(file, &observed),
             "clearing the memo must restore a full retry for the same witness"
         );
     }

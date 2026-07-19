@@ -577,6 +577,29 @@ mod tests {
     use agent_doc_session_check_io::{CapturedFinalizeResumeOutcome, SessionCheckEffects};
     use agent_doc_turn::CyclePhase;
 
+    /// `#deadlockhint` — when the recovery classifier finds nothing to recover
+    /// there is no response body pending, so prescribing `write --commit` is a
+    /// dead end: it rejects with `empty response — nothing to write` while the
+    /// drift guard keeps firing. The hint must name `agent-doc commit`, which is
+    /// the command that actually closes document-only drift.
+    #[test]
+    fn clean_classified_drift_hint_prescribes_commit_not_an_impossible_write() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "---\nagent_doc_format: template\n---\n").unwrap();
+
+        let hint = closeout_recovery_hint(&file);
+        assert!(
+            hint.contains("agent-doc commit"),
+            "a clean-classified drift hint must name the command that can run: {hint}"
+        );
+        assert!(
+            hint.contains("No response body is pending"),
+            "the hint must say why `write --commit` is not the path: {hint}"
+        );
+    }
+
     #[test]
     fn exact_retained_target_reactivates_false_stale_capture_before_commit_retry() {
         let dir = tempfile::tempdir().unwrap();
@@ -784,8 +807,18 @@ pub fn closeout_recovery_hint(file: &Path) -> String {
     );
     match agent_doc_flow_io::closeout::closeout_recovery_command_for_file(file, state) {
         Some(command) => format!("Recovery [{}]: {}.", state.as_str(), command),
+        // `#deadlockhint`: the caller saw drift but the recovery classifier found
+        // nothing to recover, so there is no captured or visible response body in
+        // play. Prescribing `write --commit` here is a DEADLOCK — it rejects with
+        // `empty response — nothing to write`, `repair --apply-recovery` reports
+        // `clean — no recovery needed`, and the guard keeps firing, so every
+        // documented path declines and the session cannot advance. Name the
+        // command that actually closes document-only drift, and mention
+        // `write --commit` only for the case that genuinely needs it.
         None => format!(
-            "Use `agent-doc write --commit {}` once the visible response body is final, then re-run `agent-doc session-check {}`.",
+            "No response body is pending, so this is document-only drift: run `agent-doc commit {}`, then re-run `agent-doc session-check {}`. \
+             Use `agent-doc write --commit {}` instead only if you still have an unwritten response body to persist.",
+            file.display(),
             file.display(),
             file.display()
         ),

@@ -587,15 +587,48 @@ pub fn queue_prompt_node_keys_for_count(
 ) -> Result<QueuePromptNodeKeys> {
     let nodes = agent_doc_markdown_ast::mutations::item_nodes(content, "queue")
         .map_err(|err| anyhow::anyhow!("queue consume: failed to derive queue node keys: {err}"))?;
-    let ast_keys = nodes
+    // `#qconsumenostrike`: taking the first `count` unstruck nodes assumed the
+    // node enumerator and `parse_spans` segment the queue identically. They do
+    // not: a multiline `---` prompt renders without a `- ` bullet, so
+    // `item_nodes` skips it while `parse_spans` sees it. The first enumerable
+    // node was then the NEIGHBOUR, and a count-only match (1 == 1) declared
+    // correspondence that did not exist — striking unrun work. Verify each
+    // selected node against the head `parse_spans` actually identifies, the way
+    // the text-driven sibling above already does, so disagreement falls through
+    // to the fail-closed caller instead of silently retargeting.
+    let unstruck = nodes
         .into_iter()
         .filter(|node| !node.item.struck)
         .take(count)
-        .map(|node| node.node_key)
         .collect::<Vec<_>>();
-    if ast_keys.len() >= count {
+    let parsed_heads = element::parse(content)
+        .ok()
+        .and_then(|components| {
+            components
+                .iter()
+                .find(|component| component.name == "queue")
+                .map(|component| component.content(content).to_string())
+        })
+        .and_then(|body| crate::document_queue::parse(&body).ok())
+        .map(|entries| {
+            crate::document_queue::prompts(&entries)
+                .into_iter()
+                .map(|prompt| prompt.text.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let corresponds = unstruck.len() >= count
+        && unstruck.iter().enumerate().take(count).all(|(index, node)| {
+            parsed_heads.get(index).is_some_and(|head| {
+                queue_prompt_texts_match_for_consumption(&node.item.text, head)
+            })
+        });
+    if corresponds {
         return Ok(QueuePromptNodeKeys {
-            keys: ast_keys,
+            keys: unstruck
+                .into_iter()
+                .map(|node| node.node_key)
+                .collect::<Vec<_>>(),
             ast_backed: true,
         });
     }

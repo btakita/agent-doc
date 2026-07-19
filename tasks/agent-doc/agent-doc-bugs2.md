@@ -199,7 +199,27 @@ It's now a lazily `Context` + `SlotMap` scoped to the turn, with a reference-cou
 ### Re: closeout bookkeeping — opus-4-8
 
 Recovery note, not new work. The previous closeout attempt hit a delivery-ACK stall, was cleared non-destructively with `admin reload-lib`, and on retry the response committed while the cycle's own mutation ledger came back empty — the `#fzmutloss` shape. Verified directly rather than assumed: `#ensurereplicagensup` is present in `agent:backlog` and mirrored into `agent:queue`, so the mutation did land on the earlier attempt. Declaring no new follow-ups for this cycle.
-<!-- agent:boundary:ae24543a -->
+
+### Re: do [#ensurereplicagensup] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#ensurereplicagensup]
+
+
+Fixed. The remaining caller was `checkpoint_durable_projection_for_file_with_mode`, reached from `spawn_durable_projection_repair` — which runs the checkpoint in **whatever process requested the recycle**, supervisors and short-lived CLIs included. Its background path calls `ensure_document_model`, so those processes read an empty `hub_registry()` and reported `editor_attached_model_missing` every time: work that could never succeed, logged as though the editor were at fault.
+
+The interesting part was that the obvious guard is wrong. My first attempt gated on `embedded_relay_is_available_for_file`, which is document-scoped — and it immediately broke `durable_checkpoint_defers_missing_model_to_background_repair`. That test was right and the guard was wrong: an empty registry means two **opposite** things depending on who is asking.
+
+- Hub owner: the editor is attached but its replica has not registered yet. A real transient, worth waiting on and repairing.
+- Anyone else: the hub is in another process. No editor behaviour can ever populate this map.
+
+`embedded_relay_is_available_for_file` sees an empty map in both cases and cannot distinguish them. The guard has to be **process-scoped**, so this adds `mark_process_as_relay_hub_owner()` / `process_serves_relay_hub()`, claimed by the controller in `serve_with_options`. Non-owners now defer with `reason=not_hub_owner`; the owner keeps its existing behaviour untouched, which is why that test passes again unmodified.
+
+Verified live rather than by inspection: **0** `document_model_ensure_failed` since install (previously recurring every few minutes across several documents) against **30** clean `not_hub_owner` deferrals. crdt-relay-io 53/53 stable over 3 runs, full workspace suite green. Pushed as `10e83fb6f`.
+
+On the test-coverage half of the item: I did **not** add `agent-doc-preflight-io` to the existing CPC-boundary forbidden-crate list, because it would false-positive — that crate now calls `ensure_document_model` legitimately, behind the embedded-relay guard, inside `ensure_document_model_via_authority`. A blanket ban there would force the guard to be deleted to make the test pass, which is backwards. Instead `test_cli` now pins the two invariants that actually matter: the durable checkpoint must carry the `process_serves_relay_hub()` guard, and **only** the controller may claim the owner role. That second one is the load-bearing assertion — if any other crate marks itself owner, every non-owner guard silently stops guarding and this whole class comes back without a single test turning red.
+<!-- agent:boundary:f8f7bd42 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -212,7 +232,7 @@ Recovery note, not new work. The previous closeout attempt hit a delivery-ACK st
 - ~~📌 do [#5bzd]~~
 - ~~📌 do [#staleplugindeploy]~~
 - ~~equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.~~
-- ⏭️ do [#ensurereplicagensup]
+- ~~⏭️ do [#ensurereplicagensup]~~
 - ⏭️ do [#crdtcasraced]
 - ⏭️ 📌 do [#jbedtledger]
 - ⏭️ 📌 do [#jbroutasync]
@@ -222,8 +242,8 @@ Recovery note, not new work. The previous closeout attempt hit a delivery-ACK st
 - ⏭️ 📌 do [#fmgc]
 - ⏭️ 📌 do [#eqmvscroll]
 - ⏭️ 📌 do [#0dsr]
-- 🚧 📌 do [#17jk]
-- 📌 do [#f1s3]
+- ⏭️ 📌 do [#17jk]
+- 🚧 📌 do [#f1s3]
 - 📌 do [#fr79]
 - 📌 do [#05r0]
 - 📌 do [#a45a]
@@ -273,8 +293,8 @@ Recovery note, not new work. The previous closeout attempt hit a delivery-ACK st
 - [ ] [#fmgc] Per-peer ack watermark for replay-state retention (#retentionwatermark). Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: `reliable_sync_outbox_cursor`/`reliable_sync_inbox_cursor` are `PRIMARY KEY (document_hash)` holding ONE scalar `acked_through` — there is no per-peer ack vector to take a MIN over, and `reliable_sync_liveness_journal.source_key` is a document hash, not a peer id. Needs: (a) a `(document_hash, peer_key)` ack table keyed by the PID-scoped editor registration; (b) retention keyed off `MIN(acked_version)` across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps stay as a backstop rather than being replaced. `PushChannel::flush` (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via `outbox.ack_through(ack)`; generalize that, do not rebuild it.
 - [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.
 - [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean
-- [ ] 🚧 [#17jk] Give free-text queue/backlog leaves stable ids so they can be after= targets (#dagdraingate/#queuenest gap found in plan review): after= targets resolve only through ids (id_to_idx built from entry_do_id, document_queue.rs:1271-1276; collect_after_deps reads only tracked items, backlog_sync.rs:341-358), so an ordered list of id-less free-text leaves cannot compile to dependency edges at all. Prefer minting ids the same way backlog items already get them over introducing HTML tags in the queue body — an HTML container would break the markdown-list model, the byte-preserving insert-only splice, and line-oriented CRDT merge
-- [ ] [#f1s3] Implement nested queue lists per tasks/agent-doc/plan-queue-nested-list-grouping.md (#queuenest): indent-aware document_queue::parse retaining depth + marker kind, leaf-only execution (parents are epic/group labels and never yield do-heads), nested ol compiles to after= edges at ingress, nested ul = related-but-unordered. Render MUST stay insert-only/byte-preserving — a parse->render round-trip already corrupted an operator line once (#queueatcreate). Key decision recorded in the plan: ol is sugar that compiles to after=, which stays the single source of truth, so reordering an ol re-derives edges and there is nothing to reject or revert
+- [ ] [#17jk] Give free-text queue/backlog leaves stable ids so they can be after= targets (#dagdraingate/#queuenest gap found in plan review): after= targets resolve only through ids (id_to_idx built from entry_do_id, document_queue.rs:1271-1276; collect_after_deps reads only tracked items, backlog_sync.rs:341-358), so an ordered list of id-less free-text leaves cannot compile to dependency edges at all. Prefer minting ids the same way backlog items already get them over introducing HTML tags in the queue body — an HTML container would break the markdown-list model, the byte-preserving insert-only splice, and line-oriented CRDT merge
+- [ ] 🚧 [#f1s3] Implement nested queue lists per tasks/agent-doc/plan-queue-nested-list-grouping.md (#queuenest): indent-aware document_queue::parse retaining depth + marker kind, leaf-only execution (parents are epic/group labels and never yield do-heads), nested ol compiles to after= edges at ingress, nested ul = related-but-unordered. Render MUST stay insert-only/byte-preserving — a parse->render round-trip already corrupted an operator line once (#queueatcreate). Key decision recorded in the plan: ol is sugar that compiles to after=, which stays the single source of truth, so reordering an ol re-derives edges and there is nothing to reject or revert
 - [ ] [#fr79] Auto-reconcile queue with backlog when the backlog carries a queue attribute: a periodic/preflight pass ensuring every open queue-attr backlog id has a queue head and vice versa, so the two cannot drift even if an individual write's enqueue is lost. Complements #queueatcreate (which covers the creating write) by making the invariant self-healing rather than write-order dependent
 - [ ] [#05r0] Second probe checking enqueue fallback persistence path
 - [ ] [#a45a] Confirm the queueatcreate persistence fallback lands a do-head under a missing editor replica
@@ -344,7 +364,6 @@ Recovery note, not new work. The previous closeout attempt hit a delivery-ACK st
 - [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
 - [ ] [#agentsignals] [future/separate] Add a realtime agent:signals element after core realtime convergence is stable. Start with deterministic built-in signals for tests, queue, supervisor, and ipc; design custom user-defined signals as plugin-backed tracked work with Rust as the first target and future multi-language support; use tasks/software/realtime-signals-patchboard.md as the GUI/semi-programmatic reference; keep MLP enhancement optional/experimental and not load-bearing for deterministic states.
 - [ ] [#elementgraphprd] [future/separate] Define the single-document element layout for both single-model sessions and multi-harness orchestration, including typed graph/workers/jobs/schedule elements plus an advisory perceptron graph that scores visible signals without directly mutating runnable work. PRD: tasks/agent-doc/prd-element-layout-perceptron-graph.md
-- [ ] [#ensurereplicagensup] #agent-doc-bug Same process-local hub_registry class as #ensurereplicagen, remaining callers. Proof: document_model_ensure_failed for equityfundingsource.md with source=controller_recycle_request:background, and crdt_current_text_unavailable reason=missing_replica from process_pid 2761972/458607/503509 — supervisor pids, NOT the controller (3811498). hub_registry() is only ever populated by the controller, so any supervisor/CLI caller of current_text_for_file* / ensure_document_model / apply_cpc_write_for_file can only miss, permanently. #ensurereplicagen fixed the preflight queue-maintenance caller (proven: queue CAS now succeeds); this covers the rest. Audit every direct caller outside the controller and route through current_text_via_controller_model_for_doc / apply_cpc_write_via_controller_model_for_doc behind the embedded_relay_is_available_for_file guard, then EXTEND the test_cli CPC-boundary forbidden-crate list to cover them (agent-doc-preflight-io was missing from it, which is how the original escaped).
 <!-- /agent:backlog -->
 
 ## Review

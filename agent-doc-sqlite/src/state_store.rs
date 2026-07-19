@@ -395,6 +395,26 @@ fn is_state_db_lock_error(error: &anyhow::Error) -> bool {
 }
 
 pub fn initialize_state_db(conn: &Connection) -> Result<()> {
+    create_canonical_tables(conn)?;
+    // One canonical declaration (`#canonicalschema`): `create_canonical_tables`
+    // states the full current shape, and these converge an existing database
+    // onto it from the same declarations.
+    converge_added_columns(conn)?;
+    ensure_canonical_indexes(conn)?;
+    converge_state_event_document_versions(conn)?;
+    run_state_event_retention_if_due(conn);
+    retire_removed_state_event_variants(conn)?;
+    Ok(())
+}
+
+/// The canonical schema: every table at its **full current shape**.
+///
+/// This is the single declaration of what the database looks like
+/// (`#canonicalschema`). It is not a historical record — when a column is added,
+/// it goes here *and* into [`CANONICAL_ADDED_COLUMNS`] so existing databases
+/// converge, and `canonical_schema_declares_every_added_column` fails if the two
+/// disagree.
+fn create_canonical_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
 PRAGMA foreign_keys = ON;
@@ -489,7 +509,8 @@ CREATE TABLE IF NOT EXISTS editor_op_captures (
             domain TEXT NOT NULL,
             fact_type TEXT NOT NULL,
             payload_json TEXT NOT NULL,
-            timestamp INTEGER NOT NULL
+            timestamp INTEGER NOT NULL,
+            document_version INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS state_schema_migrations (
@@ -532,7 +553,10 @@ WHERE fact_type <> 'document_authority_observed';
             projection TEXT NOT NULL,
             document_id TEXT NOT NULL,
             message TEXT NOT NULL,
-            timestamp INTEGER NOT NULL
+            timestamp INTEGER NOT NULL,
+            source_generation INTEGER,
+            intended_hash TEXT,
+            retry_status TEXT
         );
 
         CREATE TABLE IF NOT EXISTS queue_heads (
@@ -636,13 +660,6 @@ ON queue_document_state(state_kind);
         );
         "#,
     )?;
-    ensure_dispatch_attempt_receipt_columns(conn)?;
-    ensure_projection_diagnostic_columns(conn)?;
-    ensure_queue_head_columns(conn)?;
-    ensure_crash_recovery_marker_columns(conn)?;
-    ensure_state_event_document_version(conn)?;
-    run_state_event_retention_if_due(conn);
-    retire_removed_state_event_variants(conn)?;
     Ok(())
 }
 
@@ -1173,9 +1190,47 @@ pub fn reclaim_state_db_free_space(project_root: &Path) -> Result<u64> {
     Ok(before.saturating_sub(after))
 }
 
+/// Once-only **data** migrations, and the release each shipped in
+/// (`#migrationfloor`).
+///
+/// Schema shape is declarative and converges on every open — see
+/// [`CANONICAL_ADDED_COLUMNS`]. Nothing in that path accumulates. This ledger is
+/// the deliberately small exception: work a schema declaration *cannot* express,
+/// because it deletes or computes ROWS rather than describing a table. A schema
+/// differ, declarative or otherwise, could not generate either entry below.
+///
+/// **These are not permanent, and should not be treated as such.** Each has a
+/// support floor: once no supported release predates the version listed here, an
+/// upgrading database is guaranteed to have already applied it, so the record
+/// AND its code should be deleted. Pruning an applied migration is the intended
+/// end of its life, not a special event — that is what keeps this list from
+/// growing for the life of the project. Leaving a migration in place "just in
+/// case" is how a two-entry ledger becomes a two-hundred-entry one.
+///
+/// | migration | shipped in | removable once the supported floor is |
+/// |---|---|---|
+/// | `retire_pending_response_fact_variants_v1` | 0.34.175 | > 0.34.175 |
+///
+/// Still in force: the project supports upgrading from releases older than
+/// 0.34.175, so that floor has not been crossed yet.
+///
+/// **`backfill_state_event_document_version_v1` was already retired**, and the
+/// reason generalizes. It ran once, recorded itself, and was therefore unable to
+/// repair rows that arrived *afterwards* — a concurrently running older binary
+/// kept appending events with the column at its `DEFAULT 0` (55 such rows,
+/// observed live at ids 205755–205913, newer than the migration record itself).
+/// A watermark would have read every one of them as version 0 and deleted them.
+/// [`converge_state_event_document_versions`] replaced it with an idempotent
+/// convergence pass that repairs stragglers on any open, so there is nothing to
+/// record and nothing to accumulate. Prefer convergence to a one-shot migration
+/// whenever the invariant can be re-established from the data itself.
 const RETIRE_PENDING_RESPONSE_FACTS_MIGRATION: &str = "retire_pending_response_fact_variants_v1";
 
-const BACKFILL_DOCUMENT_VERSION_MIGRATION: &str = "backfill_state_event_document_version_v1";
+/// Ledger id of the retired one-shot document-version backfill. Retained only so
+/// [`converge_state_event_document_versions`] can delete the stale record from
+/// databases that ran it.
+const RETIRED_BACKFILL_DOCUMENT_VERSION_MIGRATION: &str =
+    "backfill_state_event_document_version_v1";
 
 /// Give `state_events` a first-class monotonic per-document version
 /// (`#retentionversion`).
@@ -1204,55 +1259,84 @@ const BACKFILL_DOCUMENT_VERSION_MIGRATION: &str = "backfill_state_event_document
 /// order the projection already replays them in, so the backfill cannot
 /// reorder history.
 ///
-/// The sequence is **monotonic and unique per document, but not gapless**, and
-/// that is by design: retention deletes superseded rows, which leaves holes
-/// (measured on the live ledger right after this migration — one document at
-/// 5,397 rows with a high-water mark of 5,408). A watermark only ever asks "is
-/// this row at or below version N", so holes are irrelevant to it. Do not
-/// "repair" the gaps by renumbering: renumbering would move rows *below* a
-/// version a peer has already acked, which is precisely the corruption this
-/// column exists to make impossible.
-fn ensure_state_event_document_version(conn: &Connection) -> Result<()> {
-    ensure_column(
-        conn,
-        "state_events",
-        "document_version",
-        "document_version INTEGER NOT NULL DEFAULT 0",
-    )?;
+/// Two invariants, and the difference between them matters to anything built on
+/// this column:
+///
+/// **Guaranteed — a row's version is assigned once and never decreases.**
+/// Convergence only ever touches rows still at the `DEFAULT 0` and numbers them
+/// *above* their document's current high-water mark. No row can be moved below a
+/// version a peer has already acked, so a watermark can never retroactively
+/// swallow a row it has not seen. This is the property the whole column exists
+/// for.
+///
+/// **NOT guaranteed — version order does not always match `id` order.** Two
+/// things break the correspondence, both deliberately:
+///
+/// - The sequence is **not gapless**. Retention deletes superseded rows, leaving
+///   holes (live ledger: one document at 5,397 rows with a high-water mark of
+///   5,408). A watermark only asks "at or below version N", so holes are
+///   irrelevant. Do not close them by renumbering — that would violate the
+///   guaranteed invariant above.
+/// - Repaired stragglers sort **after** rows with higher `id`s. A straggler is
+///   numbered above the high-water mark rather than at its `id` position,
+///   because the alternative is assigning it a version below one already
+///   handed out. Measured on the live ledger: 2 such boundary inversions after
+///   repairing 55 stragglers.
+///
+/// Replay ordering is `id`, not `document_version`, so nothing depends on the
+/// correspondence. Do not introduce a dependency on it.
+fn converge_state_event_document_versions(conn: &Connection) -> Result<()> {
+    // Cheap guard: an index seek on (document_hash, document_version). The
+    // repair below is a full per-document ranking, so it must not run on the
+    // per-RPC open path unless there is actually something to repair.
+    let needs_repair: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM state_events WHERE document_version = 0)",
+            [],
+            |row| row.get(0),
+        )
+        .context("probe for unversioned state events")?;
+    if !needs_repair {
+        return Ok(());
+    }
     let tx = conn
         .unchecked_transaction()
-        .context("begin document-version backfill migration")?;
-    let already_applied = tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM state_schema_migrations WHERE migration_id = ?1)",
-        [BACKFILL_DOCUMENT_VERSION_MIGRATION],
-        |row| row.get::<_, bool>(0),
-    )?;
-    if !already_applied {
-        let applied_at = sqlite_i64(timestamp_secs(), "state migration applied_at")?;
-        tx.execute(
-            r#"
-            UPDATE state_events SET document_version = (
-                SELECT COUNT(*) FROM state_events earlier
-                WHERE earlier.document_hash = state_events.document_hash
-                  AND earlier.id <= state_events.id
-            )
-            "#,
-            [],
-        )
-        .context("backfill state_events.document_version")?;
-        tx.execute(
-            "INSERT INTO state_schema_migrations (migration_id, applied_at) VALUES (?1, ?2)",
-            params![BACKFILL_DOCUMENT_VERSION_MIGRATION, applied_at],
-        )?;
-    }
-    tx.commit()
-        .context("commit document-version backfill migration")?;
-    conn.execute_batch(
+        .context("begin document-version convergence")?;
+    // `base` is computed before the UPDATE applies, so the high-water mark per
+    // document cannot shift underneath the ranking. Unversioned rows are then
+    // numbered in `id` order — the projection's replay order — starting above
+    // whatever that document has already issued.
+    tx.execute(
         r#"
-        CREATE INDEX IF NOT EXISTS state_events_document_hash_document_version
-        ON state_events(document_hash, document_version);
+        WITH base AS (
+            SELECT document_hash, MAX(document_version) AS high_water
+            FROM state_events GROUP BY document_hash
+        ),
+        ranked AS (
+            SELECT e.id AS id,
+                   base.high_water + ROW_NUMBER() OVER (
+                       PARTITION BY e.document_hash ORDER BY e.id
+                   ) AS assigned
+            FROM state_events e
+            JOIN base ON base.document_hash = e.document_hash
+            WHERE e.document_version = 0
+        )
+        UPDATE state_events
+        SET document_version = (SELECT assigned FROM ranked WHERE ranked.id = state_events.id)
+        WHERE id IN (SELECT id FROM ranked)
         "#,
+        [],
+    )
+    .context("converge state_events.document_version")?;
+    // The one-shot migration this convergence replaced left a record behind in
+    // databases that ran it. Drop it so the ledger keeps only migrations that
+    // still exist (`#migrationfloor`).
+    tx.execute(
+        "DELETE FROM state_schema_migrations WHERE migration_id = ?1",
+        [RETIRED_BACKFILL_DOCUMENT_VERSION_MIGRATION],
     )?;
+    tx.commit()
+        .context("commit document-version convergence")?;
     Ok(())
 }
 
@@ -1784,53 +1868,95 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
     }
 }
 
-fn ensure_dispatch_attempt_receipt_columns(conn: &Connection) -> Result<()> {
-    ensure_column(
-        conn,
-        "dispatch_attempts",
-        "result_status",
-        "result_status TEXT",
-    )?;
-    ensure_column(conn, "dispatch_attempts", "proof_scope", "proof_scope TEXT")?;
-    ensure_column(
-        conn,
+/// Columns added to a table after its original release (`#canonicalschema`).
+///
+/// Every entry is `(table, column, column definition)`. This list is the SINGLE
+/// declaration of those columns; both schema paths derive from it:
+///
+/// - a **new** database gets them because the canonical `CREATE TABLE` in
+///   [`initialize_state_db`] carries them, and
+///   `canonical_schema_declares_every_added_column` fails the build if it does
+///   not;
+/// - an **existing** database gets them because [`converge_added_columns`] walks
+///   this list and issues `ALTER TABLE ... ADD COLUMN` for whatever is missing.
+///
+/// Keeping the two in sync by hand did not work. Before this list existed, four
+/// of the twelve added columns were absent from their own canonical
+/// `CREATE TABLE` — `projection_diagnostics.{source_generation, intended_hash,
+/// retry_status}` and `state_events.document_version` — so a freshly created
+/// database only ever got them through the `ALTER` path and the declared schema
+/// did not describe reality. That is silent for as long as both paths run, and
+/// it is exactly the drift a canonical declaration is supposed to make
+/// impossible.
+///
+/// SQLite only supports `ADD COLUMN` (plus `RENAME`, and a narrow `DROP COLUMN`
+/// since 3.35), so this convergence is additive by construction. A destructive
+/// change would need the 12-step table rebuild, which is deliberately out of
+/// scope: `state.db` is the authoritative ledger and must never be rewritten on
+/// the normal open path.
+const CANONICAL_ADDED_COLUMNS: &[(&str, &str, &str)] = &[
+    ("dispatch_attempts", "result_status", "result_status TEXT"),
+    ("dispatch_attempts", "proof_scope", "proof_scope TEXT"),
+    (
         "dispatch_attempts",
         "dispatch_start_proven",
         "dispatch_start_proven INTEGER NOT NULL DEFAULT 0",
-    )?;
-    Ok(())
-}
-
-fn ensure_projection_diagnostic_columns(conn: &Connection) -> Result<()> {
-    ensure_column(
-        conn,
+    ),
+    (
         "projection_diagnostics",
         "source_generation",
         "source_generation INTEGER",
-    )?;
-    ensure_column(
-        conn,
-        "projection_diagnostics",
-        "intended_hash",
-        "intended_hash TEXT",
-    )?;
-    ensure_column(
-        conn,
-        "projection_diagnostics",
-        "retry_status",
-        "retry_status TEXT",
-    )?;
-    Ok(())
-}
-
-fn ensure_queue_head_columns(conn: &Connection) -> Result<()> {
-    ensure_column(conn, "queue_heads", "generation", "generation INTEGER")?;
-    ensure_column(
-        conn,
+    ),
+    ("projection_diagnostics", "intended_hash", "intended_hash TEXT"),
+    ("projection_diagnostics", "retry_status", "retry_status TEXT"),
+    ("queue_heads", "generation", "generation INTEGER"),
+    (
         "queue_heads",
         "priority",
         "priority INTEGER NOT NULL DEFAULT 0",
-    )?;
+    ),
+    ("crash_recovery_markers", "dedupe_key", "dedupe_key TEXT"),
+    (
+        "state_events",
+        "document_version",
+        "document_version INTEGER NOT NULL DEFAULT 0",
+    ),
+];
+
+/// Bring an existing database up to [`CANONICAL_ADDED_COLUMNS`].
+///
+/// A no-op on a database created from the current canonical `CREATE TABLE`
+/// statements, which is what the anti-drift test asserts.
+fn converge_added_columns(conn: &Connection) -> Result<()> {
+    for (table, column, definition) in CANONICAL_ADDED_COLUMNS {
+        ensure_column(conn, table, column, definition)
+            .with_context(|| format!("converge canonical column {table}.{column}"))?;
+    }
+    Ok(())
+}
+
+/// Indexes added after their table's original release (`#canonicalschema`).
+///
+/// The counterpart to [`CANONICAL_ADDED_COLUMNS`]: indexes that ship with a
+/// table live beside its `CREATE TABLE` in [`initialize_state_db`], and ones
+/// added later live here rather than being scattered through whichever function
+/// happened to introduce them. `CREATE INDEX IF NOT EXISTS` is already
+/// idempotent, so this needs no version gate.
+fn ensure_canonical_indexes(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE INDEX IF NOT EXISTS state_events_document_hash_document_version
+        ON state_events(document_hash, document_version);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS crash_recovery_markers_dedupe_key
+        ON crash_recovery_markers(marker_kind, dedupe_key)
+        WHERE dedupe_key IS NOT NULL;
+
+        CREATE INDEX IF NOT EXISTS crash_recovery_markers_timestamp
+        ON crash_recovery_markers(timestamp);
+        "#,
+    )
+    .context("ensure canonical indexes")?;
     Ok(())
 }
 
@@ -1840,28 +1966,6 @@ fn ensure_queue_head_columns(conn: &Connection) -> Result<()> {
 /// an 11.5M-row / 3.5GB table was a burst that was days, not hours, old.
 const CRASH_RECOVERY_MARKER_MAX_ROWS: i64 = 20_000;
 
-
-fn ensure_crash_recovery_marker_columns(conn: &Connection) -> Result<()> {
-    ensure_column(
-        conn,
-        "crash_recovery_markers",
-        "dedupe_key",
-        "dedupe_key TEXT",
-    )?;
-    conn.execute_batch(
-        r#"
-        CREATE UNIQUE INDEX IF NOT EXISTS crash_recovery_markers_dedupe_key
-        ON crash_recovery_markers(marker_kind, dedupe_key)
-        WHERE dedupe_key IS NOT NULL;
-        "#,
-    )?;
-    // Retention for this table runs in `run_state_event_retention_if_due`, on
-    // the same interval as the `state_events` passes (`#retentionperiodic`).
-    // It used to have its own once-per-process latch, which left exactly the gap
-    // this table's own 11.5M-row blowup came from: `controller serve` pruned at
-    // startup and then accumulated for the rest of its multi-day life.
-    Ok(())
-}
 
 /// `#crashmarkerretention`: crash-recovery markers are an append-mostly audit
 /// trail (dispatch-receipt / supervisor-lease / controller-restart reconciles).
@@ -1881,9 +1985,9 @@ fn prune_crash_recovery_markers(conn: &Connection) -> Result<()> {
 }
 
 fn prune_crash_recovery_markers_to(conn: &Connection, max_rows: i64) -> Result<()> {
-    // Index `timestamp` up front so both the cap lookup and the batched delete run
-    // against it. Building it once over a legacy backlog is a bounded one-time
-    // cost; afterwards the capped table keeps it cheap to maintain.
+    // `crash_recovery_markers_timestamp` is declared in
+    // `ensure_canonical_indexes`, but this function is also reachable from tests
+    // that build the table directly, so keep the idempotent guard here too.
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS crash_recovery_markers_timestamp ON crash_recovery_markers(timestamp);",
     )
@@ -4534,6 +4638,76 @@ mod tests {
         Ok(())
     }
 
+    /// `#canonicalschema`: the canonical `CREATE TABLE` statements must already
+    /// declare every column in `CANONICAL_ADDED_COLUMNS`, so a freshly created
+    /// database never depends on the `ALTER TABLE` convergence path to be
+    /// correct.
+    ///
+    /// This is the assertion that makes the drift unrepeatable. Before the
+    /// canonical list existed, four of the twelve added columns were missing
+    /// from their own `CREATE TABLE` and only ever arrived via `ALTER` —
+    /// silently, because both paths ran on every open.
+    #[test]
+    fn canonical_schema_declares_every_added_column() -> Result<()> {
+        // Run ONLY the `CREATE TABLE` path. Asserting against a fully
+        // initialized database would prove nothing: convergence would already
+        // have added any missing column by `ALTER`, and SQLite rewrites
+        // `sqlite_master.sql` on `ADD COLUMN`, so even the recorded DDL would
+        // look correct. The declaration is only testable in isolation.
+        let conn = Connection::open_in_memory()?;
+        create_canonical_tables(&conn)?;
+
+        for (table, column, _) in CANONICAL_ADDED_COLUMNS {
+            assert!(
+                column_exists(&conn, table, column)?,
+                "{table}.{column} is in CANONICAL_ADDED_COLUMNS but missing from the \
+                 canonical CREATE TABLE, so a fresh database would only get it through \
+                 the ALTER convergence path — exactly the drift this list exists to prevent"
+            );
+        }
+        Ok(())
+    }
+
+    /// `#canonicalschema`: convergence must be a no-op on a fresh database. A
+    /// column that only ever arrives by `ALTER` is drift even when the end state
+    /// is correct, because the declared schema stops describing reality.
+    #[test]
+    fn converging_a_fresh_canonical_database_changes_nothing() -> Result<()> {
+        let conn = Connection::open_in_memory()?;
+        create_canonical_tables(&conn)?;
+
+        let columns_of = |table: &str| -> Result<Vec<String>> {
+            Ok(conn
+                .prepare(&format!("PRAGMA table_info({table})"))?
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<std::result::Result<_, _>>()?)
+        };
+        let tables: Vec<&str> = {
+            let mut seen: Vec<&str> = CANONICAL_ADDED_COLUMNS
+                .iter()
+                .map(|(table, _, _)| *table)
+                .collect();
+            seen.dedup();
+            seen
+        };
+        let before: Vec<Vec<String>> = tables
+            .iter()
+            .map(|table| columns_of(table))
+            .collect::<Result<_>>()?;
+
+        converge_added_columns(&conn)?;
+
+        let after: Vec<Vec<String>> = tables
+            .iter()
+            .map(|table| columns_of(table))
+            .collect::<Result<_>>()?;
+        assert_eq!(
+            before, after,
+            "convergence added a column the canonical CREATE TABLE should already declare"
+        );
+        Ok(())
+    }
+
     /// `#retentionversion`: every append gets the next per-document version, and
     /// documents advance independently — a busy document must not push a quiet
     /// one's next version forward, or a peer watermark keyed on it would skip
@@ -4653,6 +4827,69 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(fresh, 4, "appends resume above the backfilled high-water mark");
+        Ok(())
+    }
+
+    /// `#retentionversion`: convergence must repair rows that arrive AFTER the
+    /// first pass. This is what a one-shot migration could not do — a still
+    /// running older binary kept appending events at the column's `DEFAULT 0`
+    /// (55 such rows observed live, newer than the migration record itself), and
+    /// a watermark would have read every one as version 0 and deleted them.
+    #[test]
+    fn document_version_convergence_repairs_stragglers_from_an_older_writer() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        for event_id in ["a-1", "a-2"] {
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id,
+                    document_hash: "docA",
+                    domain: "document",
+                    fact_type: "write_applied",
+                    payload_json: "{}",
+                },
+            )?;
+        }
+
+        // An older binary appends without knowing about the column, so it lands
+        // at the `DEFAULT 0`.
+        conn.execute(
+            "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+             VALUES ('a-legacy-1', 'docA', 'document', 'write_applied', '{}', 0)",
+            [],
+        )?;
+        conn.execute(
+            "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+             VALUES ('a-legacy-2', 'docA', 'document', 'write_applied', '{}', 0)",
+            [],
+        )?;
+
+        converge_state_event_document_versions(&conn)?;
+
+        let versions: Vec<(String, i64)> = conn
+            .prepare("SELECT event_id, document_version FROM state_events ORDER BY id")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(
+            versions,
+            vec![
+                ("a-1".to_string(), 1),
+                ("a-2".to_string(), 2),
+                ("a-legacy-1".to_string(), 3),
+                ("a-legacy-2".to_string(), 4),
+            ],
+            "stragglers are numbered in id order ABOVE the document's high-water mark, \
+             never left at 0 where a watermark would treat them as already superseded"
+        );
+
+        // Idempotent: a second pass with nothing to repair changes nothing.
+        converge_state_event_document_versions(&conn)?;
+        let after: Vec<(String, i64)> = conn
+            .prepare("SELECT event_id, document_version FROM state_events ORDER BY id")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(versions, after, "convergence is idempotent");
         Ok(())
     }
 

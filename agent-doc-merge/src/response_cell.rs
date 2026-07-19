@@ -37,6 +37,30 @@ fn parse_response_cell(response: &str) -> anyhow::Result<(Vec<ExchangeNode>, Str
     Ok((nodes, rendered))
 }
 
+/// `#crdtcaschkpt` — how many leading nodes of `incoming` are already the
+/// trailing run of `current`.
+///
+/// Anchored at the tail so only a response this cycle just published
+/// incrementally can be treated as an already-applied prefix. Returns 0 when
+/// nothing lines up, which keeps the ordinary whole-response append unchanged.
+fn trailing_prefix_len(current: &[String], incoming: &[String]) -> usize {
+    let max = current.len().min(incoming.len());
+    // Longest first: with repeated identical sections, the longest overlap is the
+    // one that leaves no duplicate behind.
+    (1..=max)
+        .rev()
+        .find(|&k| current[current.len() - k..] == incoming[..k])
+        .unwrap_or(0)
+}
+
+/// Byte-stable rendering of a node run, matching [`parse_response_cell`]'s
+/// single trailing newline so an appended suffix is indistinguishable from the
+/// same sections written in one pass.
+fn render_response_nodes(nodes: &[ExchangeNode]) -> String {
+    let joined = nodes.iter().map(ExchangeNode::render).collect::<String>();
+    format!("{}\n", joined.trim_end())
+}
+
 fn response_cell_id(nodes: &[ExchangeNode]) -> String {
     if nodes.len() == 1 {
         return nodes[0].node_id();
@@ -74,9 +98,11 @@ pub fn add_response_cell(doc: &str, response: &str) -> anyhow::Result<ResponseCe
         .iter()
         .map(ExchangeNode::node_id)
         .collect::<Vec<_>>();
-    if current_node_ids
-        .windows(node_ids.len())
-        .any(|window| window == node_ids)
+    if !node_ids.is_empty()
+        && current_node_ids.len() >= node_ids.len()
+        && current_node_ids
+            .windows(node_ids.len())
+            .any(|window| window == node_ids)
     {
         return Ok(ResponseCellAddOutcome {
             content: doc.to_string(),
@@ -84,6 +110,34 @@ pub fn add_response_cell(doc: &str, response: &str) -> anyhow::Result<ResponseCe
             applied: false,
         });
     }
+
+    // `#crdtcaschkpt`: the cell may extend a response this cycle already
+    // published incrementally via `agent-doc response-checkpoint`. The whole
+    // point of checkpointing is that finalize then has little left to converge,
+    // but the exact-sequence replay check above only recognizes the response as a
+    // whole: a checkpoint of sections 1-2 followed by a finalize of sections
+    // 1-2-3 matched nothing and appended all three, duplicating 1 and 2 in the
+    // operator's document. Append only the suffix that is not already the tail of
+    // the exchange.
+    //
+    // Anchored at the TAIL deliberately. The same heading with a different body
+    // is a genuinely distinct node (different node id), so an unanchored search
+    // could treat an older, unrelated turn as this response's prefix and silently
+    // drop sections.
+    let already = trailing_prefix_len(&current_node_ids, &node_ids);
+    let pending = &nodes[already..];
+    if pending.is_empty() {
+        return Ok(ResponseCellAddOutcome {
+            content: doc.to_string(),
+            cell_id,
+            applied: false,
+        });
+    }
+    let rendered = if already == 0 {
+        rendered
+    } else {
+        render_response_nodes(pending)
+    };
 
     let mut next = current.trim_end_matches('\n').to_string();
     if !next.trim().is_empty() {
@@ -430,6 +484,75 @@ mod tests {
     use super::*;
 
     const DOC: &str = "---\nagent_doc_format: template\n---\n\n<!-- agent:exchange patch=append -->\n\u{276f} operator prompt\n<!-- agent:boundary:abc -->\n<!-- /agent:exchange -->\n";
+
+    /// `#crdtcaschkpt` — a response published incrementally by
+    /// `agent-doc response-checkpoint` must not be duplicated when finalize
+    /// later writes the full response.
+    ///
+    /// This is the property that makes checkpointing usable at all, and it did
+    /// not hold: the replay guard only recognized the response as a whole, so a
+    /// checkpoint of sections 1-2 followed by a finalize of 1-2-3 matched nothing
+    /// and appended all three, leaving 1 and 2 twice in the operator's document.
+    #[test]
+    fn finalize_after_incremental_checkpoint_appends_only_the_new_sections() {
+        let partial = "### Re: one — gpt-5\n\nFirst.";
+        let full = "### Re: one — gpt-5\n\nFirst.\n\n### Re: two — gpt-5\n\nSecond.";
+
+        let checkpoint = add_response_cell(DOC, partial).unwrap();
+        assert!(checkpoint.applied);
+
+        let finalized = add_response_cell(&checkpoint.content, full).unwrap();
+        assert!(finalized.applied, "the new section must still be appended");
+        assert_eq!(
+            finalized.content.matches("### Re: one").count(),
+            1,
+            "the checkpointed section must not be duplicated"
+        );
+        assert_eq!(finalized.content.matches("### Re: two").count(), 1);
+        assert_eq!(finalized.content.matches("First.").count(), 1);
+
+        // Byte-identical to writing the whole response in one pass.
+        let one_pass = add_response_cell(DOC, full).unwrap();
+        assert_eq!(finalized.content, one_pass.content);
+    }
+
+    /// Checkpointing every section leaves finalize with nothing to converge —
+    /// the point of the whole exercise.
+    #[test]
+    fn finalize_after_complete_checkpointing_is_a_no_op() {
+        let full = "### Re: one — gpt-5\n\nFirst.\n\n### Re: two — gpt-5\n\nSecond.";
+        let checkpointed = add_response_cell(DOC, full).unwrap();
+        assert!(checkpointed.applied);
+
+        let finalized = add_response_cell(&checkpointed.content, full).unwrap();
+        assert!(!finalized.applied);
+        assert_eq!(finalized.content, checkpointed.content);
+    }
+
+    /// The prefix match is anchored at the tail, so an older unrelated turn that
+    /// happens to share a leading section is never mistaken for this cycle's
+    /// checkpoint — that would silently DROP sections instead of duplicating
+    /// them, which is the worse failure.
+    #[test]
+    fn an_earlier_matching_section_is_not_treated_as_this_cycles_prefix() {
+        let earlier = add_response_cell(DOC, "### Re: one — gpt-5\n\nFirst.").unwrap();
+        let intervening =
+            add_response_cell(&earlier.content, "### Re: other — gpt-5\n\nUnrelated.").unwrap();
+        assert!(intervening.applied);
+
+        let full = "### Re: one — gpt-5\n\nFirst.\n\n### Re: two — gpt-5\n\nSecond.";
+        let finalized = add_response_cell(&intervening.content, full).unwrap();
+        assert!(finalized.applied);
+        assert_eq!(
+            finalized.content.matches("### Re: two").count(),
+            1,
+            "the new section must be present exactly once"
+        );
+        assert!(
+            finalized.content.contains("### Re: other"),
+            "the intervening turn must survive"
+        );
+    }
 
     #[test]
     fn response_cell_add_preserves_live_prompt_and_is_replay_safe() {

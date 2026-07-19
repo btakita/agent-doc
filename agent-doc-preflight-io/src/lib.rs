@@ -3184,12 +3184,55 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     for id in &gated_ids {
         eligible_ids.insert(id.clone());
     }
-    let mut eligible_id_list: Vec<String> = eligible_ids.iter().cloned().collect();
-    eligible_id_list.sort();
     // `activation.entries_after` already reflects start-fence consumption and
     // the duplicate-prompt collapse above, so it is the authoritative current
     // entry set for the strike pass in every branch.
     let entries_for_strike = activation.entries_after.clone();
+
+    // `#fr79`: also strike DANGLING mirror-created heads — a head the backlog
+    // mirror created whose id has since ceased to exist entirely (operator
+    // deletion, rename, lost write). Such a head is undrainable forever:
+    // nothing can resolve it, and it holds the drain position every cycle.
+    //
+    // Gated on provenance, which is the whole reason this is safe. Striking on
+    // "no tracked item" alone previously deleted real work and failed 12
+    // preflight tests, because a queue head is NOT required to have a backlog
+    // item — operators author `do [#id]` heads directly. A head with no
+    // recorded provenance is UNKNOWN, treated as operator-authored, and never
+    // struck (`#qauthorder`).
+    let mut drift_struck_ids: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    let mirror_created_identities = agent_doc_project_root_io::project_root_containing(file)
+        .and_then(|root| agent_doc_sqlite::state_store::open_state_db(&root).ok())
+        .and_then(|conn| {
+            agent_doc_sqlite::state_store::load_mirrored_queue_head_identities_from_db(
+                &conn,
+                &file.display().to_string(),
+            )
+            .ok()
+        })
+        .unwrap_or_default();
+    if !mirror_created_identities.is_empty() {
+        let active_tracked = agent_doc_queue::queue_continuation::active_tracked_ids(&current_content);
+        for id in entries_for_strike
+            .iter()
+            .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
+        {
+            if agent_doc_queue::queue_continuation::queue_head_is_strikable_drift(
+                &id,
+                &active_tracked,
+                &done_ids,
+                &gated_ids,
+                &mirror_created_identities,
+            ) {
+                drift_struck_ids.insert(id.to_ascii_lowercase());
+                eligible_ids.insert(id);
+            }
+        }
+    }
+
+    let mut eligible_id_list: Vec<String> = eligible_ids.iter().cloned().collect();
+    eligible_id_list.sort();
     if !eligible_id_list.is_empty() {
         let (new_entries, struck) =
             agent_doc_queue::queue_consume::mark_entries_completed_by_done_ids(
@@ -3209,6 +3252,10 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
                     match agent_doc_queue::queue_response::queue_prompt_done_id(prompt_text) {
                         Some(id) if done_ids.contains(&id) => "done",
                         Some(id) if gated_ids.contains(&id) => "review_gated",
+                        // `#fr79`: mirror-created head whose backlog id vanished.
+                        Some(id) if drift_struck_ids.contains(&id.to_ascii_lowercase()) => {
+                            "orphaned_mirror_drift"
+                        }
                         _ => "unknown",
                     };
                 eprintln!(

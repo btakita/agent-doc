@@ -18,7 +18,7 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const STATE_DB_FILE: &str = "state.db";
@@ -641,11 +641,178 @@ ON queue_document_state(state_kind);
     ensure_projection_diagnostic_columns(conn)?;
     ensure_queue_head_columns(conn)?;
     ensure_crash_recovery_marker_columns(conn)?;
-    prune_document_authority_observations_once(conn);
-    prune_superseded_crdt_recovery_checkpoints_once(conn);
-    prune_superseded_document_baselines_once(conn);
-    prune_converged_document_write_intents_once(conn);
+    run_state_event_retention_if_due(conn);
     retire_removed_state_event_variants(conn)?;
+    Ok(())
+}
+
+/// How often a single process re-runs `state_events` retention
+/// (`#retentionperiodic`).
+///
+/// Retention used to be latched once per process. That is correct for a
+/// short-lived CLI invocation but wrong for the two processes that write the
+/// most: `controller serve` and the supervisor run for days, so they pruned once
+/// at startup and then accumulated unbounded until an operator noticed the
+/// database had grown again and ran `agent-doc gc` by hand. Re-running on an
+/// interval makes retention automatic for long-lived processes while keeping the
+/// per-RPC `open_state_db` path free of repeated `state_events` scans.
+///
+/// This is strictly a superset of the old behavior: the first open in any
+/// process still prunes immediately.
+const STATE_EVENT_RETENTION_INTERVAL: Duration = Duration::from_secs(900);
+
+/// Monotonic millis of the last retention pass in this process, or `u64::MAX`
+/// when no pass has run yet (so the first open is always due).
+static STATE_EVENT_RETENTION_LAST_RUN_MS: AtomicU64 = AtomicU64::new(u64::MAX);
+
+/// Process start, used as the monotonic origin for the retention interval.
+/// `Instant` is not `const`-constructible, so the origin is created lazily.
+static STATE_EVENT_RETENTION_ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+fn state_event_retention_elapsed_ms() -> u64 {
+    STATE_EVENT_RETENTION_ORIGIN
+        .get_or_init(Instant::now)
+        .elapsed()
+        .as_millis()
+        .min(u64::MAX as u128) as u64
+}
+
+/// Pure interval policy for [`run_state_event_retention_if_due`]
+/// (`#retentionperiodic`).
+///
+/// `last_run_ms == u64::MAX` is the "never ran in this process" sentinel and is
+/// always due. A non-monotonic `now_ms` (clock shim in tests) is treated as due
+/// rather than deferring forever.
+pub fn state_event_retention_due(last_run_ms: u64, now_ms: u64, interval: Duration) -> bool {
+    if last_run_ms == u64::MAX || now_ms < last_run_ms {
+        return true;
+    }
+    now_ms - last_run_ms >= interval.as_millis().min(u64::MAX as u128) as u64
+}
+
+/// Run every `state_events` retention pass, best-effort, at most once per
+/// [`STATE_EVENT_RETENTION_INTERVAL`] per process.
+///
+/// Retention is maintenance, never a reason to fail state-db open: each pass
+/// logs and continues, and the run stamp only advances on a fully clean pass so
+/// a transient failure retries at the next open instead of waiting out the
+/// whole interval.
+fn run_state_event_retention_if_due(conn: &Connection) {
+    let now_ms = state_event_retention_elapsed_ms();
+    let last_run_ms = STATE_EVENT_RETENTION_LAST_RUN_MS.load(Ordering::Relaxed);
+    if !state_event_retention_due(last_run_ms, now_ms, STATE_EVENT_RETENTION_INTERVAL) {
+        return;
+    }
+    // Claim the window before doing the work so concurrent opens in the same
+    // process do not all scan `state_events` at once.
+    if STATE_EVENT_RETENTION_LAST_RUN_MS
+        .compare_exchange(last_run_ms, now_ms, Ordering::Relaxed, Ordering::Relaxed)
+        .is_err()
+    {
+        return;
+    }
+    let mut clean = true;
+    for (label, outcome) in [
+        (
+            "document_authority_observed",
+            prune_document_authority_observations_to(conn, DOCUMENT_AUTHORITY_OBSERVED_MAX_ROWS),
+        ),
+        (
+            "crdt_recovery_projection_checkpointed",
+            prune_superseding_fact_to(
+                conn,
+                "crdt_recovery_projection_checkpointed",
+                CRDT_RECOVERY_CHECKPOINTS_KEPT_PER_DOCUMENT,
+            ),
+        ),
+        (
+            "document_baseline_checkpointed",
+            prune_superseding_fact_to(
+                conn,
+                "document_baseline_checkpointed",
+                DOCUMENT_BASELINES_KEPT_PER_DOCUMENT,
+            ),
+        ),
+        (
+            "response_captured",
+            prune_superseding_fact_to(
+                conn,
+                "response_captured",
+                RESPONSE_CAPTURES_KEPT_PER_DOCUMENT,
+            ),
+        ),
+        (
+            "turn_intent_checkpointed",
+            prune_superseding_fact_to(
+                conn,
+                "turn_intent_checkpointed",
+                TURN_INTENT_CHECKPOINTS_KEPT_PER_DOCUMENT,
+            ),
+        ),
+        (
+            "document_write_deferred",
+            prune_converged_document_write_intents(conn),
+        ),
+    ] {
+        if let Err(err) = outcome {
+            clean = false;
+            eprintln!("[agent-doc] warning: failed to prune {label} events: {err:#}");
+        }
+    }
+    if !clean {
+        STATE_EVENT_RETENTION_LAST_RUN_MS.store(last_run_ms, Ordering::Relaxed);
+    }
+}
+
+/// Drop rows of a **superseding** `state_events` fact beyond the newest
+/// `keep_per_document` for each document.
+///
+/// Shared by every fact whose `DocumentStateProjection::apply_fact` arm assigns
+/// its projection field wholesale (`= Some(..)`), which makes replaying only the
+/// newest rows byte-identical to replaying all of them. Callers must verify that
+/// property per fact type — an accumulating fact needs projection-mirroring
+/// retention instead (see [`prune_converged_document_write_intents`]).
+///
+/// `fact_type` is a static caller-supplied literal, never user input.
+fn prune_superseding_fact_to(
+    conn: &Connection,
+    fact_type: &'static str,
+    keep_per_document: i64,
+) -> Result<()> {
+    if keep_per_document < 1 {
+        return Ok(());
+    }
+    // A row is superseded when at least `keep_per_document` NEWER rows of the
+    // same fact exist for the same document. The correlated count is driven by
+    // `state_events_document_hash_fact_type_id`, which already orders by id
+    // within (document_hash, fact_type), so this needs no additional index.
+    //
+    // Bounded batches so a one-time cleanup of a legacy backlog cannot balloon a
+    // single WAL frame or hold the write lock for the whole scan.
+    loop {
+        let deleted = conn
+            .execute(
+                r#"
+                DELETE FROM state_events
+                WHERE rowid IN (
+                    SELECT e.rowid FROM state_events e
+                    WHERE e.fact_type = ?1
+                      AND (
+                        SELECT COUNT(*) FROM state_events n
+                        WHERE n.fact_type = ?1
+                          AND n.document_hash = e.document_hash
+                          AND n.id > e.id
+                      ) >= ?2
+                    LIMIT 2000
+                )
+                "#,
+                params![fact_type, keep_per_document],
+            )
+            .with_context(|| format!("failed to prune superseded {fact_type} events"))?;
+        if deleted == 0 {
+            break;
+        }
+    }
     Ok(())
 }
 
@@ -670,27 +837,6 @@ ON queue_document_state(state_kind);
 /// Only the newest observation per document is ever read, so this cap is
 /// generous by orders of magnitude and exists purely to stop unbounded growth.
 const DOCUMENT_AUTHORITY_OBSERVED_MAX_ROWS: i64 = 5_000;
-
-/// Guards the once-per-process authority-observation prune so the per-request
-/// `open_state_db` path does not rescan `state_events` on every RPC.
-static DOCUMENT_AUTHORITY_OBSERVATIONS_PRUNED: AtomicBool = AtomicBool::new(false);
-
-/// Prune the authority-observation ledger once per process, best-effort.
-///
-/// Retention is maintenance, never a reason to fail state-db open; a failure
-/// unlatches the guard so a later open retries instead of giving up for the
-/// lifetime of the process.
-fn prune_document_authority_observations_once(conn: &Connection) {
-    if DOCUMENT_AUTHORITY_OBSERVATIONS_PRUNED.swap(true, Ordering::Relaxed) {
-        return;
-    }
-    if let Err(err) =
-        prune_document_authority_observations_to(conn, DOCUMENT_AUTHORITY_OBSERVED_MAX_ROWS)
-    {
-        DOCUMENT_AUTHORITY_OBSERVATIONS_PRUNED.store(false, Ordering::Relaxed);
-        eprintln!("[agent-doc] warning: failed to prune document_authority_observed events: {err:#}");
-    }
-}
 
 fn prune_document_authority_observations_to(conn: &Connection, max_rows: i64) -> Result<()> {
     if max_rows < 1 {
@@ -763,71 +909,6 @@ fn prune_document_authority_observations_to(conn: &Connection, max_rows: i64) ->
 /// elects, and a spare bounds the blast radius if the newest is unreadable.
 const CRDT_RECOVERY_CHECKPOINTS_KEPT_PER_DOCUMENT: i64 = 2;
 
-/// Guards the once-per-process checkpoint prune so the per-request
-/// `open_state_db` path does not rescan `state_events` on every RPC.
-static CRDT_RECOVERY_CHECKPOINTS_PRUNED: AtomicBool = AtomicBool::new(false);
-
-/// Prune superseded CRDT recovery checkpoints once per process, best-effort.
-///
-/// Retention is maintenance, never a reason to fail state-db open; a failure
-/// unlatches the guard so a later open retries instead of giving up for the
-/// lifetime of the process.
-fn prune_superseded_crdt_recovery_checkpoints_once(conn: &Connection) {
-    if CRDT_RECOVERY_CHECKPOINTS_PRUNED.swap(true, Ordering::Relaxed) {
-        return;
-    }
-    if let Err(err) = prune_superseded_crdt_recovery_checkpoints_to(
-        conn,
-        CRDT_RECOVERY_CHECKPOINTS_KEPT_PER_DOCUMENT,
-    ) {
-        CRDT_RECOVERY_CHECKPOINTS_PRUNED.store(false, Ordering::Relaxed);
-        eprintln!(
-            "[agent-doc] warning: failed to prune superseded crdt_recovery_projection_checkpointed events: {err:#}"
-        );
-    }
-}
-
-fn prune_superseded_crdt_recovery_checkpoints_to(
-    conn: &Connection,
-    keep_per_document: i64,
-) -> Result<()> {
-    if keep_per_document < 1 {
-        return Ok(());
-    }
-    // A row is superseded when at least `keep_per_document` NEWER checkpoints
-    // exist for the same document. The correlated count is driven by
-    // `state_events_document_hash_fact_type_id`, which already orders by id
-    // within (document_hash, fact_type), so this needs no additional index.
-    //
-    // Bounded batches so a one-time cleanup of a legacy backlog cannot balloon a
-    // single WAL frame or hold the write lock for the whole scan.
-    loop {
-        let deleted = conn
-            .execute(
-                r#"
-                DELETE FROM state_events
-                WHERE rowid IN (
-                    SELECT e.rowid FROM state_events e
-                    WHERE e.fact_type = 'crdt_recovery_projection_checkpointed'
-                      AND (
-                        SELECT COUNT(*) FROM state_events n
-                        WHERE n.fact_type = 'crdt_recovery_projection_checkpointed'
-                          AND n.document_hash = e.document_hash
-                          AND n.id > e.id
-                      ) >= ?1
-                    LIMIT 2000
-                )
-                "#,
-                [keep_per_document],
-            )
-            .context("failed to prune superseded crdt recovery checkpoints")?;
-        if deleted == 0 {
-            break;
-        }
-    }
-    Ok(())
-}
-
 /// How many `document_baseline_checkpointed` events to keep per document
 /// (`#baselinefactretention`).
 ///
@@ -845,90 +926,40 @@ fn prune_superseded_crdt_recovery_checkpoints_to(
 /// newer ones.
 const DOCUMENT_BASELINES_KEPT_PER_DOCUMENT: i64 = 2;
 
-/// Guards the once-per-process baseline prune so the per-request
-/// `open_state_db` path does not rescan `state_events` on every RPC.
-static DOCUMENT_BASELINES_PRUNED: AtomicBool = AtomicBool::new(false);
-
-/// Prune superseded document baselines once per process, best-effort.
+/// How many `response_captured` events to keep per document
+/// (`#responsecaptureretention`).
 ///
-/// Retention is maintenance, never a reason to fail state-db open; a failure
-/// unlatches the guard so a later open retries instead of giving up for the
-/// lifetime of the process.
-fn prune_superseded_document_baselines_once(conn: &Connection) {
-    if DOCUMENT_BASELINES_PRUNED.swap(true, Ordering::Relaxed) {
-        return;
-    }
-    if let Err(err) =
-        prune_superseded_document_baselines_to(conn, DOCUMENT_BASELINES_KEPT_PER_DOCUMENT)
-    {
-        DOCUMENT_BASELINES_PRUNED.store(false, Ordering::Relaxed);
-        eprintln!(
-            "[agent-doc] warning: failed to prune superseded document_baseline_checkpointed events: {err:#}"
-        );
-    }
-}
+/// Another **superseding snapshot**: the `StateFact::ResponseCaptured` arm of
+/// `apply_fact` assigns `capture_id`, `response_sha256`, and
+/// `captured_response` wholesale, so replaying only the newest captures per
+/// document reproduces the same closeout projection. Nothing reads the rows as a
+/// list — the ledger is folded, never enumerated by this fact type.
+///
+/// Each row embeds the response body, the full replayable intent body, AND the
+/// editor-visible baseline content, so it is the heaviest remaining fact once
+/// `#deferredintentretention` and `#baselinefactretention` are in force. Live
+/// measurement 2026-07-18 (agent-loop), immediately after those two landed: 658
+/// rows holding **14MB** — the largest single consumer of the shrunken ledger.
+///
+/// Three rather than two: the open cycle's capture plus two prior cycles of
+/// headroom, because recovery may reconcile a partially materialized response
+/// against the capture that preceded it.
+const RESPONSE_CAPTURES_KEPT_PER_DOCUMENT: i64 = 3;
 
-fn prune_superseded_document_baselines_to(conn: &Connection, keep_per_document: i64) -> Result<()> {
-    if keep_per_document < 1 {
-        return Ok(());
-    }
-    // Identical shape to `prune_superseded_crdt_recovery_checkpoints_to`: a row
-    // is superseded once `keep_per_document` NEWER baselines exist for the same
-    // document. Driven by `state_events_document_hash_fact_type_id`, so this
-    // needs no additional index. Bounded batches keep a legacy backlog cleanup
-    // from ballooning one WAL frame or holding the write lock for a whole scan.
-    loop {
-        let deleted = conn
-            .execute(
-                r#"
-                DELETE FROM state_events
-                WHERE rowid IN (
-                    SELECT e.rowid FROM state_events e
-                    WHERE e.fact_type = 'document_baseline_checkpointed'
-                      AND (
-                        SELECT COUNT(*) FROM state_events n
-                        WHERE n.fact_type = 'document_baseline_checkpointed'
-                          AND n.document_hash = e.document_hash
-                          AND n.id > e.id
-                      ) >= ?1
-                    LIMIT 2000
-                )
-                "#,
-                [keep_per_document],
-            )
-            .context("failed to prune superseded document baselines")?;
-        if deleted == 0 {
-            break;
-        }
-    }
-    Ok(())
-}
+/// How many `turn_intent_checkpointed` events to keep per document
+/// (`#turnintentretention`).
+///
+/// Superseding in the same way: the `apply_fact` arm assigns
+/// `closeout.turn_intent_checkpoint = Some(..)` wholesale, and checkpoints are a
+/// mid-turn progress projection — only the newest is ever elected. Sequence
+/// numbers within a turn make this the highest-**row-count** fact after the
+/// authority observations (1,441 rows / 3MB live on 2026-07-18).
+const TURN_INTENT_CHECKPOINTS_KEPT_PER_DOCUMENT: i64 = 2;
 
 /// The one `document_write_deferred` reason that lands in an INDEPENDENT durable
 /// lineage (`DocumentStateProjection::pending_external_disk`) instead of the
 /// agent-owned `pending_write_journal`. Retention must never mix the two.
 const EXTERNAL_DISK_DEFERRAL_REASON: &str = "pending_user_decision_external_disk_vs_editor";
-
-/// Guards the once-per-process converged-write-intent prune so the per-request
-/// `open_state_db` path does not rescan `state_events` on every RPC.
-static CONVERGED_WRITE_INTENTS_PRUNED: AtomicBool = AtomicBool::new(false);
-
-/// Prune converged document write intents once per process, best-effort.
-///
-/// Retention is maintenance, never a reason to fail state-db open; a failure
-/// unlatches the guard so a later open retries instead of giving up for the
-/// lifetime of the process.
-fn prune_converged_document_write_intents_once(conn: &Connection) {
-    if CONVERGED_WRITE_INTENTS_PRUNED.swap(true, Ordering::Relaxed) {
-        return;
-    }
-    if let Err(err) = prune_converged_document_write_intents(conn) {
-        CONVERGED_WRITE_INTENTS_PRUNED.store(false, Ordering::Relaxed);
-        eprintln!(
-            "[agent-doc] warning: failed to prune converged document_write_deferred events: {err:#}"
-        );
-    }
-}
 
 /// Drop `document_write_deferred` events the projection has already drained
 /// (`#deferredintentretention`).
@@ -4092,7 +4123,7 @@ mod tests {
             [],
         )?;
 
-        prune_superseded_crdt_recovery_checkpoints_to(&conn, 2)?;
+        prune_superseding_fact_to(&conn, "crdt_recovery_projection_checkpointed", 2)?;
 
         let count_for = |doc: &str| -> Result<i64> {
             Ok(conn.query_row(
@@ -4148,7 +4179,7 @@ mod tests {
             [],
         )?;
 
-        prune_superseded_document_baselines_to(&conn, 2)?;
+        prune_superseding_fact_to(&conn, "document_baseline_checkpointed", 2)?;
 
         let count_for = |doc: &str| -> Result<i64> {
             Ok(conn.query_row(
@@ -4174,6 +4205,121 @@ mod tests {
         )?;
         assert_eq!(newest, "a-base-5", "the newest baseline must survive");
         Ok(())
+    }
+
+    /// `#responsecaptureretention`: `response_captured` embeds the response
+    /// body, the replayable intent body, and the editor-visible baseline, and
+    /// `apply_fact` assigns all of them wholesale. Only the newest few per
+    /// document can ever be elected.
+    #[test]
+    fn superseded_response_captures_are_pruned_per_document() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+
+        for i in 0..8 {
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, 'docA', 'closeout', 'response_captured', '{}', 0)",
+                [format!("a-cap-{i}")],
+            )?;
+        }
+        conn.execute(
+            "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+             VALUES ('b-cap-0', 'docB', 'closeout', 'response_captured', '{}', 0)",
+            [],
+        )?;
+
+        prune_superseding_fact_to(&conn, "response_captured", RESPONSE_CAPTURES_KEPT_PER_DOCUMENT)?;
+
+        let count_for = |doc: &str| -> Result<i64> {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM state_events \
+                 WHERE fact_type = 'response_captured' AND document_hash = ?1",
+                [doc],
+                |row| row.get(0),
+            )?)
+        };
+        assert_eq!(
+            count_for("docA")?,
+            RESPONSE_CAPTURES_KEPT_PER_DOCUMENT,
+            "the open cycle's capture plus recovery headroom survives"
+        );
+        assert_eq!(
+            count_for("docB")?,
+            1,
+            "a quiet document below the cap is untouched by a busy one"
+        );
+
+        let newest: String = conn.query_row(
+            "SELECT event_id FROM state_events \
+             WHERE fact_type = 'response_captured' AND document_hash = 'docA' \
+             ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(newest, "a-cap-7", "the newest capture must survive");
+        Ok(())
+    }
+
+    /// `#turnintentretention`: mid-turn intent checkpoints supersede each other
+    /// within a turn, so they are the highest-row-count fact after the authority
+    /// observations and only the newest is ever elected.
+    #[test]
+    fn superseded_turn_intent_checkpoints_are_pruned_per_document() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+
+        for i in 0..5 {
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, 'docA', 'closeout', 'turn_intent_checkpointed', '{}', 0)",
+                [format!("a-turn-{i}")],
+            )?;
+        }
+
+        prune_superseding_fact_to(
+            &conn,
+            "turn_intent_checkpointed",
+            TURN_INTENT_CHECKPOINTS_KEPT_PER_DOCUMENT,
+        )?;
+
+        let remaining: Vec<String> = conn
+            .prepare(
+                "SELECT event_id FROM state_events \
+                 WHERE fact_type = 'turn_intent_checkpointed' ORDER BY id",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(
+            remaining,
+            vec!["a-turn-3".to_string(), "a-turn-4".to_string()],
+            "only the newest checkpoints survive, newest last"
+        );
+        Ok(())
+    }
+
+    /// `#retentionperiodic`: retention used to latch once per process, so a
+    /// long-lived `controller serve` pruned at startup and then accumulated
+    /// forever. The first pass is always due; later passes wait out the interval.
+    #[test]
+    fn state_event_retention_is_due_first_then_only_after_the_interval() {
+        let interval = Duration::from_secs(900);
+        assert!(
+            state_event_retention_due(u64::MAX, 0, interval),
+            "the first open in a process must always prune"
+        );
+        assert!(
+            !state_event_retention_due(1_000, 1_000 + 899_999, interval),
+            "a per-RPC open inside the interval must not rescan state_events"
+        );
+        assert!(
+            state_event_retention_due(1_000, 1_000 + 900_000, interval),
+            "a long-lived process must re-prune once the interval elapses"
+        );
+        assert!(
+            state_event_retention_due(5_000, 1_000, interval),
+            "a non-monotonic clock is treated as due rather than deferring forever"
+        );
     }
 
     /// `#deferredintentretention`: the agent-owned deferral lineage ACCUMULATES
@@ -4265,7 +4411,7 @@ mod tests {
              VALUES ('only', 'docA', 'document', 'crdt_recovery_projection_checkpointed', '{}', 0)",
             [],
         )?;
-        prune_superseded_crdt_recovery_checkpoints_to(&conn, 2)?;
+        prune_superseding_fact_to(&conn, "crdt_recovery_projection_checkpointed", 2)?;
         let remaining: i64 = conn.query_row(
             "SELECT COUNT(*) FROM state_events WHERE fact_type = 'crdt_recovery_projection_checkpointed'",
             [],

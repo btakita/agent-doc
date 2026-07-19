@@ -1050,6 +1050,11 @@ fn merge_codex_hooks_json(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `#coinedid` mid-turn guard. `PreToolUse` fires before the tool runs, so a
+/// coined `#id` is refused BEFORE it reaches source or a commit message — the
+/// post-commit `session-check` warning can only report damage already done.
+const COINED_ID_PRETOOLUSE_COMMAND: &str = "agent-doc hook coined-id-pre-tool-use";
+
 const TURN_STATUS_ACTIVE_COMMAND: &str = "agent-doc turn-status active";
 const TURN_STATUS_IDLE_COMMAND: &str = "agent-doc turn-status idle";
 
@@ -1238,6 +1243,14 @@ fn merge_claude_turn_status_hooks(path: &Path) -> Result<()> {
     );
     ensure_codex_hook_command(hooks_map, "Stop", TURN_STATUS_IDLE_COMMAND, None);
     ensure_codex_hook_command(hooks_map, "SessionStart", TURN_STATUS_IDLE_COMMAND, None);
+    // No matcher: the handler filters by tool name itself and allows everything
+    // it does not recognize, so the guard cannot wedge a turn on an unknown tool.
+    ensure_codex_hook_command(
+        hooks_map,
+        "PreToolUse",
+        COINED_ID_PRETOOLUSE_COMMAND,
+        None,
+    );
 
     let rendered = serde_json::to_string_pretty(&root)?;
     std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;

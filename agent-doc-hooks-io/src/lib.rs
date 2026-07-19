@@ -1,5 +1,7 @@
 //! Hook registry and document-hook I/O adapters for agent-doc.
 
+pub mod coined_id_pretooluse;
+
 use std::path::Path;
 
 use agent_kit::hooks::{Event, HookRegistry};

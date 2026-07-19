@@ -3245,6 +3245,9 @@ enum HookAction {
     CodexUserPromptSubmit,
     /// Enforce the Codex end-of-turn `session-check` guard (stdin JSON hook payload)
     CodexStop,
+    /// Block a tool call that would write an untracked `#id` into source or a
+    /// commit message (`PreToolUse` stdin JSON hook payload)
+    CoinedIdPreToolUse,
 }
 
 #[derive(Subcommand)]
@@ -5308,6 +5311,9 @@ fn try_main() -> anyhow::Result<()> {
                 agent_doc_codex_hook_io::handle_user_prompt_submit()
             }
             HookAction::CodexStop => agent_doc_codex_stop_io::handle_stop(),
+            HookAction::CoinedIdPreToolUse => {
+                agent_doc_hooks_io::coined_id_pretooluse::handle_pretooluse()
+            }
         },
         Commands::Cleanup {
             file,

@@ -643,6 +643,8 @@ ON queue_document_state(state_kind);
     ensure_crash_recovery_marker_columns(conn)?;
     prune_document_authority_observations_once(conn);
     prune_superseded_crdt_recovery_checkpoints_once(conn);
+    prune_superseded_document_baselines_once(conn);
+    prune_converged_document_write_intents_once(conn);
     retire_removed_state_event_variants(conn)?;
     Ok(())
 }
@@ -819,6 +821,173 @@ fn prune_superseded_crdt_recovery_checkpoints_to(
                 [keep_per_document],
             )
             .context("failed to prune superseded crdt recovery checkpoints")?;
+        if deleted == 0 {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// How many `document_baseline_checkpointed` events to keep per document
+/// (`#baselinefactretention`).
+///
+/// Like [`CRDT_RECOVERY_CHECKPOINTS_KEPT_PER_DOCUMENT`] this fact is a
+/// **superseding snapshot**: `DocumentStateProjection::apply_fact` assigns
+/// `merge_baseline = Some(..)` wholesale, so replaying only the newest
+/// checkpoint per document is byte-identical to replaying all of them. Every
+/// older row embeds a full document image the ledger then carries forever.
+///
+/// Live measurement 2026-07-18 (agent-loop): 816 rows holding **30MB** inside a
+/// 200MB `state.db`, second only to `document_write_deferred` (see
+/// [`prune_converged_document_write_intents`]). Same failure class and same
+/// per-document cap shape as the CRDT checkpoints — a global row cap would evict
+/// a quiet document's only baseline as soon as a busy document produced enough
+/// newer ones.
+const DOCUMENT_BASELINES_KEPT_PER_DOCUMENT: i64 = 2;
+
+/// Guards the once-per-process baseline prune so the per-request
+/// `open_state_db` path does not rescan `state_events` on every RPC.
+static DOCUMENT_BASELINES_PRUNED: AtomicBool = AtomicBool::new(false);
+
+/// Prune superseded document baselines once per process, best-effort.
+///
+/// Retention is maintenance, never a reason to fail state-db open; a failure
+/// unlatches the guard so a later open retries instead of giving up for the
+/// lifetime of the process.
+fn prune_superseded_document_baselines_once(conn: &Connection) {
+    if DOCUMENT_BASELINES_PRUNED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    if let Err(err) =
+        prune_superseded_document_baselines_to(conn, DOCUMENT_BASELINES_KEPT_PER_DOCUMENT)
+    {
+        DOCUMENT_BASELINES_PRUNED.store(false, Ordering::Relaxed);
+        eprintln!(
+            "[agent-doc] warning: failed to prune superseded document_baseline_checkpointed events: {err:#}"
+        );
+    }
+}
+
+fn prune_superseded_document_baselines_to(conn: &Connection, keep_per_document: i64) -> Result<()> {
+    if keep_per_document < 1 {
+        return Ok(());
+    }
+    // Identical shape to `prune_superseded_crdt_recovery_checkpoints_to`: a row
+    // is superseded once `keep_per_document` NEWER baselines exist for the same
+    // document. Driven by `state_events_document_hash_fact_type_id`, so this
+    // needs no additional index. Bounded batches keep a legacy backlog cleanup
+    // from ballooning one WAL frame or holding the write lock for a whole scan.
+    loop {
+        let deleted = conn
+            .execute(
+                r#"
+                DELETE FROM state_events
+                WHERE rowid IN (
+                    SELECT e.rowid FROM state_events e
+                    WHERE e.fact_type = 'document_baseline_checkpointed'
+                      AND (
+                        SELECT COUNT(*) FROM state_events n
+                        WHERE n.fact_type = 'document_baseline_checkpointed'
+                          AND n.document_hash = e.document_hash
+                          AND n.id > e.id
+                      ) >= ?1
+                    LIMIT 2000
+                )
+                "#,
+                [keep_per_document],
+            )
+            .context("failed to prune superseded document baselines")?;
+        if deleted == 0 {
+            break;
+        }
+    }
+    Ok(())
+}
+
+/// The one `document_write_deferred` reason that lands in an INDEPENDENT durable
+/// lineage (`DocumentStateProjection::pending_external_disk`) instead of the
+/// agent-owned `pending_write_journal`. Retention must never mix the two.
+const EXTERNAL_DISK_DEFERRAL_REASON: &str = "pending_user_decision_external_disk_vs_editor";
+
+/// Guards the once-per-process converged-write-intent prune so the per-request
+/// `open_state_db` path does not rescan `state_events` on every RPC.
+static CONVERGED_WRITE_INTENTS_PRUNED: AtomicBool = AtomicBool::new(false);
+
+/// Prune converged document write intents once per process, best-effort.
+///
+/// Retention is maintenance, never a reason to fail state-db open; a failure
+/// unlatches the guard so a later open retries instead of giving up for the
+/// lifetime of the process.
+fn prune_converged_document_write_intents_once(conn: &Connection) {
+    if CONVERGED_WRITE_INTENTS_PRUNED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    if let Err(err) = prune_converged_document_write_intents(conn) {
+        CONVERGED_WRITE_INTENTS_PRUNED.store(false, Ordering::Relaxed);
+        eprintln!(
+            "[agent-doc] warning: failed to prune converged document_write_deferred events: {err:#}"
+        );
+    }
+}
+
+/// Drop `document_write_deferred` events the projection has already drained
+/// (`#deferredintentretention`).
+///
+/// This is the single largest consumer of the ledger. Live measurement
+/// 2026-07-18 (agent-loop): 1,091 rows holding **96MB of the 166MB** total
+/// `payload_json` at ~90KB per row, because each row embeds both the expected
+/// and the target document image.
+///
+/// Unlike the baseline and CRDT checkpoints this fact is **not** purely
+/// superseding, so a "keep N newest per document" cap would be WRONG: the
+/// agent-owned lineage ACCUMULATES into `pending_write_journal`, and an intent
+/// stays live until its ACK arrives. Retention therefore mirrors the projection
+/// exactly instead of approximating it:
+///
+/// - `StateFact::DocumentWriteConverged` resolves the journal entry matching
+///   `(intent_id, target_hash)` and calls `drain(..=index)` — settling that
+///   intent AND every older agent intent, because each newer deferred target is
+///   composed from the older retained ones. So every `document_write_deferred`
+///   row at or below the newest converged intent's row is provably dead.
+/// - Rows above it are unconverged retained intents that recovery still replays;
+///   they are never touched, however many accumulate.
+/// - [`EXTERNAL_DISK_DEFERRAL_REASON`] rows are an independent lineage
+///   (`pending_external_disk`, which must "never replace or clear" the other)
+///   and are excluded from the drain window on both sides.
+fn prune_converged_document_write_intents(conn: &Connection) -> Result<()> {
+    // Bounded batches so a one-time cleanup of a legacy backlog cannot balloon a
+    // single WAL frame or hold the write lock for the whole scan.
+    loop {
+        let deleted = conn
+            .execute(
+                r#"
+                DELETE FROM state_events
+                WHERE rowid IN (
+                    SELECT d.rowid FROM state_events d
+                    WHERE d.fact_type = 'document_write_deferred'
+                      AND json_extract(d.payload_json, '$.fact.reason') IS NOT ?1
+                      AND d.id <= (
+                        SELECT MAX(settled.id) FROM state_events settled
+                        WHERE settled.fact_type = 'document_write_deferred'
+                          AND settled.document_hash = d.document_hash
+                          AND json_extract(settled.payload_json, '$.fact.reason') IS NOT ?1
+                          AND EXISTS (
+                            SELECT 1 FROM state_events c
+                            WHERE c.fact_type = 'document_write_converged'
+                              AND c.document_hash = settled.document_hash
+                              AND c.id > settled.id
+                              AND json_extract(c.payload_json, '$.fact.intent_id')
+                                  IS json_extract(settled.payload_json, '$.fact.intent_id')
+                              AND json_extract(c.payload_json, '$.fact.target_hash')
+                                  IS json_extract(settled.payload_json, '$.fact.target_hash')
+                          )
+                      )
+                    LIMIT 2000
+                )
+                "#,
+                [EXTERNAL_DISK_DEFERRAL_REASON],
+            )
+            .context("failed to prune converged document write intents")?;
         if deleted == 0 {
             break;
         }
@@ -3956,6 +4125,134 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(durable, 1, "durable lifecycle facts must survive untouched");
+        Ok(())
+    }
+
+    /// `#baselinefactretention`: `document_baseline_checkpointed` assigns
+    /// `merge_baseline` wholesale, so only the newest per document is ever read.
+    #[test]
+    fn superseded_document_baselines_are_pruned_per_document() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+
+        for i in 0..6 {
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, 'docA', 'document', 'document_baseline_checkpointed', '{}', 0)",
+                [format!("a-base-{i}")],
+            )?;
+        }
+        conn.execute(
+            "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+             VALUES ('b-base-0', 'docB', 'document', 'document_baseline_checkpointed', '{}', 0)",
+            [],
+        )?;
+
+        prune_superseded_document_baselines_to(&conn, 2)?;
+
+        let count_for = |doc: &str| -> Result<i64> {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM state_events \
+                 WHERE fact_type = 'document_baseline_checkpointed' AND document_hash = ?1",
+                [doc],
+                |row| row.get(0),
+            )?)
+        };
+        assert_eq!(count_for("docA")?, 2, "each document keeps its own newest N");
+        assert_eq!(
+            count_for("docB")?,
+            1,
+            "a quiet document below the cap is untouched by a busy one"
+        );
+
+        let newest: String = conn.query_row(
+            "SELECT event_id FROM state_events \
+             WHERE fact_type = 'document_baseline_checkpointed' AND document_hash = 'docA' \
+             ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(newest, "a-base-5", "the newest baseline must survive");
+        Ok(())
+    }
+
+    /// `#deferredintentretention`: the agent-owned deferral lineage ACCUMULATES
+    /// into `pending_write_journal`, so retention must follow the projection's
+    /// own `drain(..=index)` rule rather than a keep-newest-N cap. Unconverged
+    /// intents and the independent external-disk lineage must both survive.
+    #[test]
+    fn converged_document_write_intents_are_pruned_but_live_intents_survive() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+
+        let deferred = |event_id: &str, doc: &str, intent: &str, target: &str, reason: &str| {
+            let payload = format!(
+                r#"{{"fact":{{"intent_id":"{intent}","target_hash":"{target}","reason":"{reason}"}}}}"#
+            );
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, ?2, 'document', 'document_write_deferred', ?3, 0)",
+                rusqlite::params![event_id, doc, payload],
+            )
+        };
+        let converged = |event_id: &str, doc: &str, intent: &str, target: &str| {
+            let payload =
+                format!(r#"{{"fact":{{"intent_id":"{intent}","target_hash":"{target}"}}}}"#);
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, ?2, 'document', 'document_write_converged', ?3, 0)",
+                rusqlite::params![event_id, doc, payload],
+            )
+        };
+
+        // docA: i1 and i2 both deferred; only i2 later converges. `drain(..=i2)`
+        // settles the whole prefix, so BOTH die. i3 raced ahead of the ACK and
+        // must survive.
+        deferred("a-d1", "docA", "i1", "t1", "crdt_delivery_ack_pending")?;
+        deferred("a-d2", "docA", "i2", "t2", "crdt_delivery_ack_pending")?;
+        converged("a-c2", "docA", "i2", "t2")?;
+        deferred("a-d3", "docA", "i3", "t3", "crdt_delivery_ack_pending")?;
+        // The external-disk lineage is independent — never drained by an
+        // agent-lineage convergence, even though it is older than a-c2.
+        deferred("a-ext", "docA", "iext", "text", EXTERNAL_DISK_DEFERRAL_REASON)?;
+        // docB never converges anything: a busy neighbour must not drain it.
+        deferred("b-d1", "docB", "j1", "u1", "crdt_delivery_ack_pending")?;
+
+        prune_converged_document_write_intents(&conn)?;
+
+        let mut survivors: Vec<String> = conn
+            .prepare(
+                "SELECT event_id FROM state_events \
+                 WHERE fact_type = 'document_write_deferred' ORDER BY event_id",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        survivors.sort();
+        assert_eq!(
+            survivors,
+            vec![
+                "a-d3".to_string(),
+                "a-ext".to_string(),
+                "b-d1".to_string()
+            ],
+            "converged prefix drops; unconverged, external-disk, and other documents survive"
+        );
+
+        // A converged row that matches on intent but NOT on target_hash is not
+        // the one the projection drained, so it must not license a delete.
+        deferred("c-d1", "docC", "k1", "v1", "crdt_delivery_ack_pending")?;
+        converged("c-c1", "docC", "k1", "v-other")?;
+        prune_converged_document_write_intents(&conn)?;
+        let doc_c: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM state_events \
+             WHERE fact_type = 'document_write_deferred' AND document_hash = 'docC'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(
+            doc_c, 1,
+            "convergence must match (intent_id, target_hash) exactly, as the projection does"
+        );
         Ok(())
     }
 

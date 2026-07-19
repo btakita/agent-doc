@@ -71,14 +71,16 @@ Note this is the fallback path only. `#jbrouteasyncchannel` (making the call non
 2. `crdt_checkpoint_uses_controller_document_model_directly` fails under nextest but passes under `cargo test --workspace`. That gap means it passes **only** via cross-test leakage of process-global state — nextest gives each test its own process, so nextest is right and the test is under-specified. I localized it to the two skip gates in `checkpoint_route_owned_document_crdt` but stopped short of patching: it's a concurrent session's subsystem and I'd have been guessing. Filed at the top of the backlog with the exact gates to check.
 
 Full workspace suite green at **7719 passed**; both fixes also pass their own crate suites. I did not waive the nextest failure — it reproduces on clean HEAD with my changes stashed.
-<!-- agent:boundary:340cb0b1 -->
+<!-- agent:boundary:3c2553d5 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- 🚧 do [#ctrlchkptiso]
+- do [#c8tb]
 - ~~do [#wsflake2]~~
 - ~~📌 do [#jbroutasync]~~
-- ~~JB Run Agent Doc stalls. `- ~~JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.~~` was duplicated in the queue.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~JB Run Agent Doc stalls. `- ~~JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.~~` was duplicated in the queue.~~
 - ⏭️ do [#jbrouteasyncchannel]
 - ⏭️ do [#jbedtledgerverify]
 - ⏭️ 📌 do [#fmgc]
@@ -86,7 +88,7 @@ Full workspace suite green at **7719 passed**; both fixes also pass their own cr
 - ⏭️ 📌 do [#f1s3]
 - ⏭️ 📌 do [#fr79]
 - ⏭️ 📌 do [#30p6]
-- 📌 do [#n39j]
+- ⏭️ 📌 do [#n39j]
 - 📌 do [#f6j3]
 - 📌 do [#promptselect]
 - 📌 do [#realtimesalient]
@@ -108,7 +110,6 @@ Full workspace suite green at **7719 passed**; both fixes also pass their own cr
 - ~~do [#fzmutloss]~~
 - ~~do [#patchretryidem]~~
 - ~~JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.~~
-- ~~JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.~~
 <!-- /agent:queue -->
 
 ## Notes
@@ -119,7 +120,7 @@ Full workspace suite green at **7719 passed**; both fixes also pass their own cr
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#ctrlchkptiso] #agent-doc-bug PRE-EXISTING on HEAD (913f6e7e0), blocks `make check`: `project_controller::tests::crdt_checkpoint_uses_controller_document_model_directly` (project_controller.rs:2734) asserts `summary.checkpointed == 1` but gets 0 under nextest (`make check`), while `cargo test --workspace` passes it 7719/7719. nextest gives each test its own PROCESS, so this test passes ONLY via cross-test leakage of process-global state — nextest is right and the test is under-specified. It seeds `seed_reliable_sync_editor_open` + `register_replica_for_file` but `checkpoint_route_owned_document_crdt` (rpc.rs:3498) still returns non-`checkpointed`: the two skip gates are `!authority.editor_attached()` -> "detached" and `project_root_containing().is_none()` -> None (both land in summary.skipped/detached, hence failed==0). Determine which gate trips in a fresh process and seed it in the test. NOT diagnosed further to avoid guessing in a concurrent session's subsystem.
+- [ ] 🚧 [#ctrlchkptiso] #agent-doc-bug PRE-EXISTING on HEAD (913f6e7e0), blocks `make check`: `project_controller::tests::crdt_checkpoint_uses_controller_document_model_directly` (project_controller.rs:2734) asserts `summary.checkpointed == 1` but gets 0 under nextest (`make check`), while `cargo test --workspace` passes it 7719/7719. nextest gives each test its own PROCESS, so this test passes ONLY via cross-test leakage of process-global state — nextest is right and the test is under-specified. It seeds `seed_reliable_sync_editor_open` + `register_replica_for_file` but `checkpoint_route_owned_document_crdt` (rpc.rs:3498) still returns non-`checkpointed`: the two skip gates are `!authority.editor_attached()` -> "detached" and `project_root_containing().is_none()` -> None (both land in summary.skipped/detached, hence failed==0). Determine which gate trips in a fresh process and seed it in the test. NOT diagnosed further to avoid guessing in a concurrent session's subsystem.
 - [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.
 - [ ] [#jbrouteasyncchannel] [focused-cycle] #agent-doc-bug Move editor_route onto the async accept-on-admission endpoint — BLOCKED on a completion channel, do NOT just add it to the whitelist. Tagged [focused-cycle] because it needs a clean design cycle, not an in-loop drain: it surfaced as the drain head 3x and was correctly declined each time. Split from #jbroutasync. The mechanical change is small: validate_async_editor_command_payload (rpc.rs:5465) whitelists only sync_tmux_layout/focus_document_pane, so adding an editor_route arm would route it through handle_editor_command_submit_async_rpc. DO NOT DO THAT ALONE — it silently destroys every Run Agent Doc failure notification. resolveCommandSubmitAcceptedData (CpcRouteClient.kt:431) returns CpcEditorRouteResult(0, output) — exit code 0 = SUCCESS — for status submitted/accepted/running/applied. The entire classification chain in TerminalUtil keys off a NON-ZERO exit: BUSY_RUNNING -> notifyRunAgentDocStillRunning, QUEUED_PENDING -> notifyRunAgentDocQueued, RETRYABLE_STARTING retries, DISPATCH_START_UNPROVEN, and the catch-all notifyPersistentRouteFailure (TerminalUtil.kt:490-566). Accept-on-admission returns 0 immediately so none can fire, and every click would report success. This is the exact feedback path verified working 2026-07-19 when a busy pane correctly refused to inject on brookebrodack-dev.md. PREREQUISITE: a completion channel so the plugin learns the real outcome after acceptance (poll the command projection by command_id — the accept response already carries a projection with per-command status/terminal fields — or a controller->plugin completion event), with the classification chain running against THAT rather than the submit response. Only then is the latency win safe.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.

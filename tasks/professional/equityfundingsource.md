@@ -37,16 +37,40 @@ complete
 Compacted content:
 - Archived 14 response topic(s): Add backlog items onto the queue in priority order; add the backlog items into the queue in priority order; do [#tmo-orphan-reconcile-exec]; 11 more
 - Prior summary/context: prior compacted content: Archived 10 response topic(s): do [#tmo-sandbox-orphan-loans]; vestings, fundings, and the r...
-<!-- agent:boundary:4584e250 -->
+I don't understand what I need to verify.
+
+### Re: I don't understand what I need to verify — opus-4-8
+
+Fair — "operator-verify" is doing too much work as a label. There are five gated items and each needs a different thing from you. Three need a *decision*, one needs *account access*, one needs you to *look at a screen*.
+
+**Need a decision from you (I can't make the call, but I can run it once you say go):**
+
+1. **`#tmo-orphan-apply`** — I've already done the dry run. It plans 12 cache reconciles + 6 tombstones, zero writes to TMO, EFS-local only. What I need: eyeball these 6 loan numbers and confirm they're junk, not real — **TST217, TST254, TST374, TST723, TST762, TST999**. They're absent from TMO with no EFS loan or funding behind them. I'm asking because your earlier directive said not to prune that class by default, and `--apply` mutates production D1 irreversibly. Say "go" and I run it.
+
+2. **`#efs-prod-seed`** — one question: **is the staging data real business data or test data?** Staging has 33 users / 7 loans / 7 deals; production D1 is schema-complete and empty. If it's real, it gets exported+imported exactly once immediately before cutover (a second import collides on primary keys) and R2 documents get copied separately. If it's test data, we launch empty and this item closes. That's the whole verification.
+
+**Needs access I don't have:**
+
+3. **`#efs-cf-account-custody`** — this one is on Judith, not you, for step 1: sign up for a Cloudflare account with a shared EFS address, verify the email, invite you as Super Administrator, enable 2FA, company card ready. I drafted those instructions 2026-07-18. Step 2 is mine once she's done.
+
+4. **`#efs-dns-cutover`** — needs registrar credentials (nameservers are still DreamHost). The worker is live and correct at `equityfundingsource.brian-takita.workers.dev`; the domain just doesn't resolve. This is the actual remaining gate on launch.
+
+**Needs you to look at a screen (~2 minutes):**
+
+5. **`#tmo-getlender-verify`** — I need one TMO lender account that was **created but never funded**. Nothing in production is currently in that state, so the success path of `GET /LSS.svc/GetLender/:Account` has never once returned a record in prod. It's covered by tests and it degrades safely, but it's unobserved against real data. Name me such an account, and I'll map a vesting to it — then you open the reconcile modal and confirm it reads **"In TMO · no funding yet"** and not "Unconfirmed in TMO."
+
+The fastest unblock is #2 — it's a yes/no and it also determines whether #efs-cf-account-custody has to sequence before it.
+
+Separately, the editor-side wedge is still active: the JetBrains plugin holds an attachment for this document but no CRDT model behind it, so recomputed queue text keeps getting discarded. Controller recycle and `reload-lib` both landed cleanly and didn't touch it. Closing and reopening this file's tab in the IDE should rebuild the model.
+<!-- agent:boundary:d614ac7d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#tmo-orphan-cache]
+- do [#tmo-orphan-apply]
 - do [#efs-cf-account-custody]
 - do [#efs-prod-seed]
 - do [#efs-dns-cutover]
 - do [#tmo-getlender-verify]
-- ~~do [#tmo-snapshot-verify]~~
 <!-- /agent:queue -->
 
 ## Backlog

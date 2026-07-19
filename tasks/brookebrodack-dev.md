@@ -138,7 +138,22 @@ So the blocker has gone from "39 errors across two root causes" to one action: p
 **One more thing I found:** rappstack has the same disease `#tsnextpin` just cured in ctx-core-dev — 13 packages pin `typescript: "*"`, 2 pin `"next"`, and the installed compiler is a **5.5.0-dev from April 2024** that hard-crashes `tsc` outright (`TypeError: Cannot read properties of undefined (reading 'flags')`). That is why these errors were only ever visible from downstream repos: rappstack cannot currently type-check itself. Filed separately.
 
 **Commits:** rappstack `7cde3f8`, plus two sibling package commits and superproject `9ddb68d`; brookebrodack-dev `86eef0f`. Nothing pushed.
-<!-- agent:boundary:5d323eb2 -->
+
+### Re: #yalcdrift — opus-4-8
+
+Closing this one, because the rappstack work above resolved it and the recorded diagnosis is now out of date. `session-check` flagged it as still open, so here is the measurement rather than an assertion.
+
+**What the item said:** a fresh `bun install` re-resolves marked 13.0.3 alongside 17.0.4, the two `ctx/*.ts` `Marked<string, string>` vs `Marked` errors come back, and the app type-check goes to 62 errors with 2 in its own sources. Root cause recorded as "one yalc'd @rappstack package pins marked ^13.0.2 while two pin ^17.0.4".
+
+**What is true now.** I copied the tracked tree to a scratch dir, deleted `bun.lock` entirely, and re-installed from scratch:
+
+- The dual resolution **persists** — `marked@13.0.3` and `marked@17.0.6` both land.
+- The app type-check is nonetheless **green**, exit 0. The two `ctx/*.ts` Marked errors are gone.
+
+So the symptom this item existed to track is fixed, and the stated root cause is no longer accurate. All three rappstack packages that ship marked (`ui--any`, `ui--server`, `dev-bin`) are on `^17.0.4` — the `#rappdeps` sweep aligned them. The `^13.0.2` edge that remains comes from `@btakita/dev-bin@0.1.0` on npm, which is a separate published package and only a bin-tool dependency; it no longer reaches the type program. brookebrodack's own `bun.lock` also still carries a stale metadata entry for the yalc'd `@rappstack/ui--any` claiming `^13.0.2`, which is why the split looked like a rappstack problem — the local yalc source says `^17.0.4`.
+
+Two marked majors coexisting is untidy, but it is now inert rather than a type-check blocker, and it is not something this repo can pin away. Not filing a follow-up for it.
+<!-- agent:boundary:5f513439 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -148,7 +163,7 @@ So the blocker has gone from "39 errors across two root causes" to one action: p
 - do [#nm8q]
 - ~~do [#tsappclean]~~
 - ~~⏭️ do [#ciappts]~~
-- 🚧 do [#yalcdrift]
+- ~~do [#yalcdrift]~~
 - do [#gbdeploy1]
 - do [#mc4f]
 - ⏭️ do [#lzeffectvoid]
@@ -173,7 +188,6 @@ So the blocker has gone from "39 errors across two root causes" to one action: p
 - [ ] [#nm8q] rappstack/dev has the same typescript dist-tag problem #tsnextpin fixed in ctx-core-dev: 13 packages pin `typescript: "*"` and 2 pin `"next"`, and the installed compiler is a 5.5.0-dev from April 2024 that hard-crashes tsc (TypeError: Cannot read properties of undefined reading 'flags' in getCheckFlags). Pin the repo to ^7.0.2 so rappstack can type-check itself instead of relying on downstream repos to find its errors
 - [ ] [#mc4f] Push the ctx-core-dev typescript pin sweep: 190 per-package submodule commits + superproject are committed LOCALLY and unpushed. Same ~190-public-repo motion as #pushctxcore, so it needs operator go before pushing each submodule and the superproject
 - [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit
-- [ ] 🚧 [#yalcdrift] CONFIRMED, with a measurement: a fresh bun install re-resolves marked 13.0.3 alongside 17.0.4 and the two ctx/*.ts Marked errors (Marked<string, string> vs Marked) come back, taking the app type-check to 62 with 2 in its own sources. Verified this is resolution churn and NOT caused by any version bump — reverted both package.json files to HEAD, reinstalled, measured 62/2 identically. Root cause: one yalc'd @rappstack package pins marked ^13.0.2 while two pin ^17.0.4. Fix belongs in rappstack alongside the drizzle alignment (#rappdeps)
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
 - [ ] [#nd8n] Add cgroup limits for the bwrap sandbox path in src/freehold via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin. Confirmed still absent: mem_limit_mb exists on PluginSpec but no systemd-run/cgroup call site
@@ -239,4 +253,5 @@ So the blocker has gone from "39 errors across two root causes" to one action: p
 - 2026-07-19 [#rappsqlite] better-sqlite3 fails its node-gyp native build against Node v26 in rappstack/dev (v8::Global ctor arity mismatch in better_sqlite3.o), so every 'bun install' aborts mid-link and leaves stale package symlinks — that is what silently reproduced the drizzle 0.32.2/0.45.2 split universe. Workaround today is 'bun install --ignore-scripts'. Fix properly: bump better-sqlite3 to a release with Node 26 prebuilds, pin the toolchain Node version for installs, or drop it if only a transitive dev dep. Stays in bun (see pinned note: rappstack uses bun)
 - 2026-07-19 [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface. KEPT OPEN: not started — sequence after #pushctxcore so it does not stack a second uncommitted sweep on top of the unpushed dependency sweep
 - 2026-07-19 [#4s08] lib/solid-start type-check fails on solid-start@0.3.11's node_modules .tsx sources (TS2305 for Route/useRoutes/Navigate against @solidjs/router 0.8.4). skipLibCheck cannot cover .tsx, and solid-start is dead upstream (superseded by @solidjs/start). Decide: migrate to @solidjs/start, pin a compatible @solidjs/router, or retire lib/solid-start to dormant/
+- 2026-07-19 [#yalcdrift] CONFIRMED, with a measurement: a fresh bun install re-resolves marked 13.0.3 alongside 17.0.4 and the two ctx/*.ts Marked errors (Marked<string, string> vs Marked) come back, taking the app type-check to 62 with 2 in its own sources. Verified this is resolution churn and NOT caused by any version bump — reverted both package.json files to HEAD, reinstalled, measured 62/2 identically. Root cause: one yalc'd @rappstack package pins marked ^13.0.2 while two pin ^17.0.4. Fix belongs in rappstack alongside the drizzle alignment (#rappdeps)
 <!-- /agent:done -->

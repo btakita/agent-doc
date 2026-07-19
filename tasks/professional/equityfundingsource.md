@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -37,21 +37,52 @@ complete
 Compacted content:
 - Archived 3 response topic(s): I don't understand what I need to verify; Print #tmo-orphan-apply records; #efs-prod-seed is test data; What are you defining as production?
 - Prior summary/context: prior compacted content: Archived 14 response topic(s): Add backlog items onto the queue in priority order; add the b...
-<!-- agent:boundary:a774bc7a -->
+
+### Re: What do you need me to verify for #tmo-snapshot-verify? — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#tmo-snapshot-verify]: What do you need me to verify. Add a prompt?
+
+
+Nothing, as it turns out. I have the sandbox token working from the vault this session, so I ran it instead of handing it back to you.
+
+**`#tmo-snapshot-verify` passed — closing it.**
+
+```
+[tmo-snapshot] database="001-8553-000-Equity Funding - Sandbox" loans=18
+[tmo-snapshot] loans=18 fundings=5 schedule_rows=0 attachment_metas=20 lenders=1 borrowers=16
+[tmo-snapshot] complete=true
+```
+
+The actual risk in that item was that `LSS.svc/GetLenders` and `LOS.svc/GetBorrowers` were *inferred* from the documented API surface and not covered by `docs/TMO/*.md` — if either 404'd, the sweep was wrong. Both returned real data (`lenders=1`, `borrowers=16`), `incomplete` is empty, and `errors` is empty. The endpoint set is correct as written; nothing to drop or fix.
+
+**That unblocks `#tmo-sandbox-purge-apply`.** Its gate command (`--covers <the 16> --out tmp/tmo-before-purge.json`) is now known-good. It stays gated on your go, but for the one real reason — `DeleteLoan` is permanent with no TMO-side undo — not because the snapshot tool was unproven. One thing to weigh before you say go: the snapshot captures attachment *metadata*, not bytes. There are 20 attachment metas across 554466, AVW580, MBQ435, SRV532, and TST766, all of which are on the purge list. Those documents would not be recoverable.
+
+**I also accidentally answered `#tmo-getlender-verify`.**
+
+That item was waiting on you to name a TMO lender account "created but never funded." The snapshot found it: **`L-TEST067`** (Test Investor). I probed it directly —
+
+| account | `GET /LSS.svc/GetLender/:Account` | fundings in TMO |
+|---|---|---|
+| `L-TEST067` | **HTTP 200**, full record, RecID `166F6434…` | **0** |
+| `L-TEST1` | HTTP 400 `Lender not found.` | 5 |
+
+So the `GetLender` success path is no longer unobserved against real data — `L-TEST067` is precisely the `in_lss && !in_los` state the `confirmed_no_funding` branch models. What's left is only the UI assertion: point a vesting at `L-TEST067`, open the reconcile modal, confirm it reads "In TMO · no funding yet."
+
+The inversion in that table is worth noting on its own. All 5 sandbox fundings belong to `L-TEST1`, and `L-TEST1` does **not** resolve as an LSS lender at all. A funding `Account` string is not guaranteed to be a real lender record — so a vesting pointing at `L-TEST1` would correctly fall through to the degraded "Unconfirmed in TMO" branch. Both branches now have a named real-data fixture to test against. I've recorded both on the item.
+<!-- agent:boundary:0878baff -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#efs-prod-secrets]
-- do [#tmo-snapshot-verify]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-snapshot-verify] [operator-verify] Run bin/tmo-snapshot.ts against the real TMO sandbox with the operator token (TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)") and confirm the sweep reports complete=true. The tool, its pure manifest/coverage layer, and its tests shipped 2026-07-18 (#tmo-orphan-reconcile-exec cycle) but no run has ever touched real TMO, so the endpoint set is unverified — in particular LSS.svc/GetLenders and LOS.svc/GetBorrowers are inferred from the documented API surface and are NOT covered by docs/TMO/*.md. If either 404s, drop it from the sweep or correct the path. This is the precondition for #tmo-sandbox-purge-apply. Spec: docs/TMO/snapshot.md.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
-- [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: `TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply` deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). SNAPSHOT FIRST (added 2026-07-18): TMO has no backup or restore and DeleteLoan is permanent, so gate the purge on `bun ./bin/tmo-snapshot.ts --covers <the 16 loan numbers> --out tmp/tmo-before-purge.json`, which exits non-zero unless every named loan was captured cleanly. Blocked on #tmo-snapshot-verify (the snapshot tool has never run against real TMO). Held pending operator go because DeleteLoan is permanent with no TMO-side undo. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code and cannot be selected. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
-- [ ] [#tmo-getlender-verify] [operator-verify] Confirm the #tmo-getlender-confirm LSS path against real TMO data: nothing in production is currently in_lss && !in_los, so GET /LSS.svc/GetLender/:Account has never returned a record in prod — the confirmed_no_funding state is covered by tests and degrades safely on failure, but its success path is unobserved. Needs an operator to name a TMO lender account created but never funded; map a vesting to it, open the reconcile modal, and confirm it reads 'In TMO · no funding yet' rather than 'Unconfirmed in TMO'. Spec: src/equityfundingsource-dev/docs/TMO/get-lender.md. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
+- [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). UNBLOCKED 2026-07-19: #tmo-snapshot-verify passed — the snapshot tool ran against real TMO sandbox and reported complete=true (loans=18 fundings=5 attachment_metas=20 lenders=1 borrowers=16, zero errors), so the gate command 'bun ./bin/tmo-snapshot.ts --covers <the 16> --out tmp/tmo-before-purge.json' is now known-good. Take that snapshot immediately before purging. Still held on operator go ONLY because DeleteLoan is permanent with no TMO-side undo. Note the snapshot is evidence, not a restore: attachment BYTES are not captured (20 attachment metas across 554466/AVW580/MBQ435/SRV532/TST766 would be unrecoverable), and RecIDs do not round-trip. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
+- [ ] [#tmo-getlender-verify] Confirm the #tmo-getlender-confirm LSS path end-to-end in the UI. ENDPOINT HALF DONE 2026-07-19: the success path of GET /LSS.svc/GetLender/:Account is no longer unobserved — L-TEST067 (Test Investor, RecID 166F6434380B418E8A4A9F7AADBDA10B) returns HTTP 200 with a full record and has ZERO fundings in TMO, which is exactly the in_lss && !in_los state the confirmed_no_funding branch models. That answers the 'operator must name a lender created but never funded' precondition: it is L-TEST067. REMAINING (UI only, ~2 min): map an EFS vesting's tmo_lender_account to L-TEST067, open the reconcile modal, confirm it reads 'In TMO · no funding yet' and not 'Unconfirmed in TMO'. Related finding worth checking while there: all 5 sandbox fundings belong to account L-TEST1, but GetLender/L-TEST1 returns HTTP 400 'Lender not found' — a funding Account string is NOT guaranteed to resolve as an LSS lender record, so a vesting pointing at L-TEST1 would correctly fall to the degraded 'Unconfirmed in TMO' branch. Spec: src/equityfundingsource-dev/docs/TMO/get-lender.md.
 <!-- /agent:backlog -->
 
 ## Review

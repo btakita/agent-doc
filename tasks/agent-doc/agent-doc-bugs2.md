@@ -181,12 +181,35 @@ Preflight's pre-mutation wait had **neither**. It polled every 100ms and hard-fa
 **CI.** Latest run is red, but on the known pre-existing `#ay80` failure — `finalize_skips_ignored_untracked_session_doc` (`tests/finalize_integration.rs:248`), CI-only, passes locally. Not related to this change and not introduced by it.
 
 No version bump, tag, or publish — per the standing hold on agent-doc releases until per-cell CRDT merge lands. Install + recycle are done, so this session and the JB action are already running the fixed binary. I filed the live-editor eyeball as a non-blocking `[operator-verify]` item.
-<!-- agent:boundary:a15bb28e -->
+
+### Re: Fix all contributing factors to queue go mode stall — opus-4-8
+
+Found and fixed. The stall was visible right in preflight as a contradiction: `queue_active=true`, `queue_drainable_head_count=10`, yet `queue_continuation_required=false`. Ten drainable heads, and the binary told the loop to stop.
+
+**Two independent causes, both in the "is this change fresh user intent?" path.**
+
+**1. Preemption was location-blind.** `run.rs` computed `exchange_prompt_preempts_queue = !user_intent_prompt_changes.is_empty()`, and that flag hard-forces `queue_continuation_required` to false. The intent (`#prompt-preempts-auto-queue`) is right — a prompt typed mid-turn should beat the queue — but the check never asked *where* the prompt was. Your `/goal` line went into `agent:queue`. Adding work to the queue under go mode was being treated as competing with the queue, so it halted it. Preemption now goes through a pure `session_cycle::prompt_changes_preempt_queue`, which preempts only on a prompt that is not itself an active queue head.
+
+**2. The managed-state classifier only knew one queue shape.** `line_is_managed_state_only` matched `- do ` and `- ~do `. Markdown strikethrough is `~~`, and `- ~~do [#id]~~` is what the queue actually renders — so every real strike read as fresh user intent, as did every free-text head. Tildes and priority markers now peel to a fixed point in either nesting order (`- ~~📌 do ...~~` and `- 📌 ~~do ...~~` both classify).
+
+**On your note about the `do ` prefix** — you were right, and it caught a bug I had just introduced. My first pass matched `starts_with("do ")`, which would have swallowed a genuine free-text head like `- do the refactor now` as bookkeeping. Only the item *alias* carries that prefix, so the check now requires `do [#id]`. There's a regression test pinning that free-text heads beginning with the verb "do" stay user intent.
+
+**Verification.** Beyond the suite, I verified against this document directly: same 10 drainable heads, `queue_continuation_required` flips **false → true**.
+
+- 5 new tests on `prompt_changes_preempt_queue` (queued head, marker-insensitive matching, real exchange prompt still preempts, inactive queue, mixed cycle)
+- 2 new classifier tests (double-tilde + prioritized strikes; free-text `do ...` heads stay intent)
+- `make check`: **7746 passed, 0 failed**, EXIT=0 captured directly
+- Committed + pushed, installed, supervisor recycled
+
+One honest caveat: `#5pn7` — the `[operator-verify]` item I filed last turn for the JB `Run Agent Doc` fix — is still queued and still needs your live eyeball. It is not blocking the drain anymore.
+
+Continuing to the next queue item, as you asked.
+<!-- agent:boundary:8a2941c6 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#5pn7]
+- ⏭️ do [#5pn7]
 - ~~do [#wsflake2]~~
 - ~~do [#patchretryidem]~~
 - ~~📌 do [#jbroutasync]~~

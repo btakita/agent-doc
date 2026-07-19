@@ -358,8 +358,14 @@ object TerminalUtil {
         onComplete: (() -> Unit)? = null,
         attempt: RunAgentDocAttemptLedger.Attempt? = null,
         commandPreAcquired: Boolean = false,
+        resolved: Pair<String, String>? = null,
     ) {
-        val (cwd, relativePath) = resolveProject(project, file)
+        // `#jbedtledger`: `resolveProject` crosses the FFI boundary. Callers that
+        // already resolved this exact file (SubmitAction, to open the attempt
+        // ledger) can hand the result over instead of paying for it twice per
+        // action. The re-registration side effect inside `resolveProject` is
+        // idempotent, so skipping the second call changes nothing but cost.
+        val (cwd, relativePath) = resolved ?: resolveProject(project, file)
         val routeKey = RunAgentDocAttemptLedger.routeKey(cwd, relativePath)
         val documentPath = java.io.File(cwd, relativePath).absolutePath
 

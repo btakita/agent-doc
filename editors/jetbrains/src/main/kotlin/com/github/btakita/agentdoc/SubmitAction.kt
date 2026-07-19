@@ -68,7 +68,7 @@ class SubmitAction : AnAction() {
                 attempt.recordIfCurrent("document_not_loaded")
         }
         LOG.warn("[run] invoking sendToTerminal after active document save: ${file.name}")
-        TerminalUtil.sendToTerminal(project, file, attempt = attempt)
+        TerminalUtil.sendToTerminal(project, file, attempt = attempt, resolved = cwd to relativePath)
         TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "run-agent-doc")
     }
 }

@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.diagnostic.Logger
 import java.io.File
 import java.time.Instant
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 
 internal object RunAgentDocAttemptLedger {
@@ -10,6 +11,18 @@ internal object RunAgentDocAttemptLedger {
     private const val ATTEMPT_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-attempts"
     private const val MAX_EVENT_LINES = 80
     private val sequence = AtomicLong(0)
+
+    /// `#jbedtledger`: every stage used to do mkdirs + a full readLines + a full
+    /// writeText synchronously on whatever thread called it, and five stages run
+    /// on the EDT during Run Agent Doc. That is blocking file I/O on the UI
+    /// thread, per action.
+    ///
+    /// A SINGLE worker, not a pool: the ledger is an append-ordered event log, so
+    /// concurrent writers would interleave events and corrupt the ordering the
+    /// diagnostics exist to show. Daemon so it never holds IDE shutdown.
+    private val ledgerWriter = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "agent-doc-run-attempt-ledger").apply { isDaemon = true }
+    }
     private val active = mutableMapOf<String, Attempt>()
 
     internal data class Attempt(
@@ -110,6 +123,21 @@ internal object RunAgentDocAttemptLedger {
         }
     }
 
+    /// Block until every queued ledger write has been flushed.
+    ///
+    /// `#jbedtledger`: stage writes are asynchronous so they never block the EDT,
+    /// which means a caller that writes a stage and immediately reads the file
+    /// back races the writer. Tests need a deterministic barrier rather than a
+    /// sleep (`#wsflake2` — timing-based tests are what made the suite
+    /// unreliable). Not part of the production path; nothing on the action path
+    /// waits for the ledger.
+    @JvmStatic
+    internal fun awaitPendingWrites(timeoutMillis: Long = 5_000) {
+        val latch = java.util.concurrent.CountDownLatch(1)
+        ledgerWriter.execute { latch.countDown() }
+        latch.await(timeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+
     private fun record(
         attempt: Attempt,
         stage: String,
@@ -129,9 +157,39 @@ internal object RunAgentDocAttemptLedger {
         if (onlyIfCurrent && !isCurrent(attempt)) {
             return
         }
+        // Everything that reads live state is captured HERE, on the calling
+        // thread, so offloading the I/O cannot change what gets recorded.
+        // `callerThread` especially: it is the field that reveals EDT usage in
+        // the first place, so recording the worker thread instead would destroy
+        // the diagnostic this change exists to act on.
         val updatedAtMillis = System.currentTimeMillis()
         val elapsedMillis = updatedAtMillis - attempt.startedAtMillis
         val diagnostics = attemptDiagnosticsFile(attempt.cwd, attempt.relativePath)
+        val callerThread = Thread.currentThread().name
+        ledgerWriter.execute {
+            persistStage(
+                attempt = attempt,
+                stage = stage,
+                command = command,
+                error = error,
+                updatedAtMillis = updatedAtMillis,
+                elapsedMillis = elapsedMillis,
+                diagnostics = diagnostics,
+                callerThread = callerThread,
+            )
+        }
+    }
+
+    private fun persistStage(
+        attempt: Attempt,
+        stage: String,
+        command: List<String>?,
+        error: String?,
+        updatedAtMillis: Long,
+        elapsedMillis: Long,
+        diagnostics: File,
+        callerThread: String,
+    ) {
         try {
             diagnostics.parentFile?.mkdirs()
             val previousEvents = readEventLines(diagnostics)
@@ -142,6 +200,7 @@ internal object RunAgentDocAttemptLedger {
                 elapsedMillis = elapsedMillis,
                 command = command,
                 error = error,
+                callerThread = callerThread,
             )
             val events = (previousEvents + event).takeLast(MAX_EVENT_LINES)
             diagnostics.writeText(
@@ -153,6 +212,7 @@ internal object RunAgentDocAttemptLedger {
                     command = command,
                     error = error,
                     events = events,
+                    callerThread = callerThread,
                 )
             )
         } catch (e: Exception) {
@@ -168,6 +228,7 @@ internal object RunAgentDocAttemptLedger {
         command: List<String>?,
         error: String?,
         events: List<String>,
+        callerThread: String,
     ): String = buildString {
         appendLine("attempt_id=${escape(attempt.id)}")
         appendLine("route_key=${escape(attempt.routeKey)}")
@@ -180,7 +241,7 @@ internal object RunAgentDocAttemptLedger {
         appendLine("updated_at=${Instant.ofEpochMilli(updatedAtMillis)}")
         appendLine("elapsed_ms=$elapsedMillis")
         appendLine("plugin_version=${escape(pluginVersion())}")
-        appendLine("thread=${escape(Thread.currentThread().name)}")
+        appendLine("thread=${escape(callerThread)}")
         appendLine("command=${escape(command?.joinToString(" ").orEmpty())}")
         appendLine("error=${escape(error.orEmpty())}")
         appendLine("previous_attempt_id=${escape(attempt.previousAttemptId.orEmpty())}")
@@ -197,13 +258,14 @@ internal object RunAgentDocAttemptLedger {
         elapsedMillis: Long,
         command: List<String>?,
         error: String?,
+        callerThread: String,
     ): String {
         val parts = mutableListOf(
             Instant.ofEpochMilli(updatedAtMillis).toString(),
             "attempt_id=${escape(attempt.id)}",
             "stage=${escape(stage)}",
             "elapsed_ms=$elapsedMillis",
-            "thread=${escape(Thread.currentThread().name)}",
+            "thread=${escape(callerThread)}",
         )
         if (!command.isNullOrEmpty()) {
             parts.add("command=${escape(command.joinToString(" "))}")

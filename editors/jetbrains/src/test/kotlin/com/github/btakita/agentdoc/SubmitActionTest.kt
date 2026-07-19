@@ -15,7 +15,10 @@ class SubmitActionTest {
         val currentCheckIdx = source.indexOf("if (!attempt.isCurrent())")
         val saveIdx = source.indexOf("fdm.saveDocument(document)")
         val saveRecordIdx = source.indexOf("attempt.recordIfCurrent(\"active_document_saved\")")
-        val routeIdx = source.indexOf("TerminalUtil.sendToTerminal(project, file, attempt = attempt)")
+        // Match the call, not its exact argument list — pinning the full string
+        // breaks whenever a parameter is added (it did, for `resolved =`), which
+        // tests ordering by accident rather than on purpose.
+        val routeIdx = source.indexOf("TerminalUtil.sendToTerminal(")
 
         assertTrue("SubmitAction should begin a durable Run Agent Doc attempt", ledgerIdx >= 0)
         assertTrue("SubmitAction should drop stale queued callbacks before saving", currentCheckIdx > ledgerIdx)

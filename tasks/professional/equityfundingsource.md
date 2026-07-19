@@ -380,7 +380,32 @@ I verified the AWS claim rather than trusting the backlog text: those four have 
 Both routes now check `dropbox_configured_()` first and return **503** with a message naming the exact three secrets an operator has to push. 503 rather than 500 because the deployment is healthy; the capability isn't provisioned. The guard is ordered before the throwing call and a test asserts that ordering, since moving it later would silently restore the 500.
 
 **What this does not do:** it does not obtain the Dropbox credentials. Those live only in Cloudflare, cannot be read back out, and pushing them to production needs operator access — so document sync stays unavailable in production until someone runs `bun run cf:secrets:push:production` with the real values. That is now a clean, self-describing 503 instead of a crash, which is the part I could actually close.
-<!-- agent:boundary:2a762389 -->
+
+### Re: do [#tmo-orphan-cache] — opus-4-8
+
+Shipped and pushed as `c806c0de`. `bun run check` green: 2024 tests.
+
+**The item was marked superseded with its executor "shipped" — but that executor had never once run.** `bin/tmo-orphan-reconcile.ts` landed with `#tmo-orphan-reconcile-exec` and died on every invocation:
+
+```
+SyntaxError: JSON Parse error: Unexpected identifier "cf"
+```
+
+It extracted wrangler's JSON with `stdout.indexOf('[')`. Both the `cf-wrangler` wrapper's `[cf-wrangler] account=…` log lines and wrangler's colour-escaped `[WARNING]` banner come first, so the first `[` in stdout is never the payload. The code comment even claimed it took "the first balanced JSON value rather than assuming the whole stdout parses" — the implementation did neither.
+
+`d1_rows_` now walks every `[` candidate and accepts only an array whose entries carry `results`, so bracketed log text can't be mistaken for a result set. It lives in `lib/tmo-api/d1_stdout.ts` rather than the bin script, because that script `process.exit`s at import time without `TMO_API_TOKEN` — there was nothing a test could import, which is a fair part of why this shipped broken. Five regression tests cover the real preamble shape, non-payload arrays, multi-statement flattening, and empty results.
+
+**First successful run**, against remote D1 and the real TMO sandbox:
+
+```
+cache_rows=18  tmo_loans=18  efs_fundings=0
+plan reconcile_cache=12  tombstone=6  push_funding=0  create_loan_then_funding=0  blocked_no_vesting=0
+```
+
+That plan agrees with your directive. `push_funding=0` because `efs_fundings=0` — there is nothing to push into TMO, so the "orphans as fundings" path is a no-op on current data. The 6 tombstones (`TST217`, `TST254`, `TST374`, `TST723`, `TST762`, `TST999`) all match the planner's narrow rule: absent from TMO *and* with no EFS loan or funding behind them — pure test debris, not the "don't prune by default" class you flagged.
+
+**I did not apply it.** `--apply` mutates production D1 `tmo_cache_entities` irreversibly, and tombstoning is the exact operation your directive told me not to do by default. Filed as `#tmo-orphan-apply` with the command and the six loan numbers to review. Everything gating that decision — a working tool and a real plan — is now done; the decision itself is yours.
+<!-- agent:boundary:67595f25 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
@@ -399,6 +424,7 @@ Both routes now check `dropbox_configured_()` first and return **503** with a me
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tmo-orphan-apply] [operator-verify] Apply the orphan reconcile plan against remote D1: `TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-orphan-reconcile.ts --remote --apply`. The first successful dry run (2026-07-18, after the #tmo-orphan-cache parse fix) plans reconcile_cache=12 + tombstone=6, push_funding=0, blocked_no_vesting=0 — no TMO writes at all, EFS-local only. Gated on operator go because --apply mutates PRODUCTION D1 tmo_cache_entities irreversibly and the 6 tombstones are exactly the class the operator directive said not to prune by default (they qualify: absent from TMO with no EFS loan/funding behind them). Review the 6 (TST217, TST254, TST374, TST723, TST762, TST999) before running.
 - [ ] [#tmo-snapshot-verify] [operator-verify] Run bin/tmo-snapshot.ts against the real TMO sandbox with the operator token (TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)") and confirm the sweep reports complete=true. The tool, its pure manifest/coverage layer, and its tests shipped 2026-07-18 (#tmo-orphan-reconcile-exec cycle) but no run has ever touched real TMO, so the endpoint set is unverified — in particular LSS.svc/GetLenders and LOS.svc/GetBorrowers are inferred from the documented API surface and are NOT covered by docs/TMO/*.md. If either 404s, drop it from the sweep or correct the path. This is the precondition for #tmo-sandbox-purge-apply. Spec: docs/TMO/snapshot.md.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#tmo-orphan-cache] SUPERSEDED 2026-07-18 by #tmo-orphan-as-fundings per operator directive — do NOT prune/tombstone these rows as the default. The 18 orphan tmo_cache_entities 'loan' rows are the reconciliation corpus: push them into TMO as fundings and tombstone only pure debris with no EFS deal. Kept as context for the loan-number list (TST042/TST113/TST217/TST254/TST374/TST388/TST723/TST762/TST766/TST999, AVW580, FTM631, GQI751, ICL909, MBQ435, PIP038, SRV532, 554466) and for the note that admin_tmo_loans_by_loan_number_DELETE_ does NOT cover them — it only disables EFS 'loans' rows and never touches tmo_cache_entities. Execute via #tmo-orphan-reconcile-exec. Plan: src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.

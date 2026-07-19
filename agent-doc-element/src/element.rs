@@ -1060,6 +1060,17 @@ pub fn repair_malformed_boundary_comment(doc: &str) -> Option<String> {
         out.push_str(" -->");
 
         let remainder = remainder.strip_prefix(' ').unwrap_or(remainder);
+        // Drop what is left of the eaten terminator. A merge that ate only part
+        // of ` -->` leaves `--`, `->`, or `-` behind; that is scaffolding, and
+        // "preserving" it would inject a stray `--` line into the document. Only
+        // a `-`-leading remainder is debris — a `>`-leading one is a blockquote
+        // from the welded line and is real content.
+        let remainder = match remainder.strip_prefix("--").or(remainder.strip_prefix("->")) {
+            Some(rest) => rest.strip_prefix('>').unwrap_or(rest),
+            None => remainder.strip_prefix('-').unwrap_or(remainder),
+        };
+        let remainder = remainder.strip_prefix(' ').unwrap_or(remainder);
+
         if remainder.is_empty() {
             out.push_str(newline);
         } else {
@@ -2682,6 +2693,46 @@ Fix applied to skip non-agent <!-- sequences.
         assert_eq!(
             repaired,
             "<!-- agent:boundary:deadbeef:before-compact -->\n> tail\n"
+        );
+    }
+
+    /// A partially-eaten terminator leaves debris (`--`, `->`, `-`) that is
+    /// scaffolding, not content. Preserving it "losslessly" would inject a stray
+    /// `--` line into the operator's document.
+    #[test]
+    fn repair_malformed_boundary_comment_drops_partial_terminator_debris() {
+        for (input, want) in [
+            (
+                "<!-- agent:boundary:abc123 --\n",
+                "<!-- agent:boundary:abc123 -->\n",
+            ),
+            (
+                "<!-- agent:boundary:abc123 ->\n",
+                "<!-- agent:boundary:abc123 -->\n",
+            ),
+            (
+                "<!-- agent:boundary:abc123 -\n",
+                "<!-- agent:boundary:abc123 -->\n",
+            ),
+        ] {
+            assert_eq!(
+                repair_malformed_boundary_comment(input).as_deref(),
+                Some(want),
+                "terminator debris must not survive as document content: {input:?}"
+            );
+        }
+
+        // Real content after the debris still survives, on its own line.
+        assert_eq!(
+            repair_malformed_boundary_comment("<!-- agent:boundary:abc123 -- trailing text\n")
+                .as_deref(),
+            Some("<!-- agent:boundary:abc123 -->\ntrailing text\n")
+        );
+        // A blockquote remainder starts with `>` and is content, never debris.
+        assert_eq!(
+            repair_malformed_boundary_comment("<!-- agent:boundary:abc123> **Queue prompt:**\n")
+                .as_deref(),
+            Some("<!-- agent:boundary:abc123 -->\n> **Queue prompt:**\n")
         );
     }
 

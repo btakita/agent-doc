@@ -640,6 +640,7 @@ ON queue_document_state(state_kind);
     ensure_projection_diagnostic_columns(conn)?;
     ensure_queue_head_columns(conn)?;
     ensure_crash_recovery_marker_columns(conn)?;
+    ensure_state_event_document_version(conn)?;
     run_state_event_retention_if_due(conn);
     retire_removed_state_event_variants(conn)?;
     Ok(())
@@ -1173,6 +1174,87 @@ pub fn reclaim_state_db_free_space(project_root: &Path) -> Result<u64> {
 }
 
 const RETIRE_PENDING_RESPONSE_FACTS_MIGRATION: &str = "retire_pending_response_fact_variants_v1";
+
+const BACKFILL_DOCUMENT_VERSION_MIGRATION: &str = "backfill_state_event_document_version_v1";
+
+/// Give `state_events` a first-class monotonic per-document version
+/// (`#retentionversion`).
+///
+/// Retention needs to answer "is this row below the point everyone has moved
+/// past?". Today it reconstructs that ordering from three incompatible
+/// encodings, none of which is a real version column:
+///
+/// - `id`, a per-database `AUTOINCREMENT`. It orders correctly *within one
+///   database* but is meaningless across peers, so no editor replica and
+///   controller can ever agree on "seen through N" using it.
+/// - a version smeared into `event_id` strings, in at least three ad-hoc
+///   formats: `turn-intent-checkpoint:<doc>:<cycle>:561:<hash>` (a sequence),
+///   `document-authority-<doc>-1784424488871912-<source>` (microseconds), and
+///   `crdt-recovery:<doc>:17:<hash>` (a generation).
+/// - fields inside `payload_json` (`model_revision`, `intent_id` +
+///   `target_hash`), reached via `json_extract` in the retention SQL.
+///
+/// This column is the substrate the per-peer ack watermark needs: a value type
+/// a peer can report back as "I have seen this document through version N".
+/// Assigning it is phase 1 and deliberately lands on its own — flipping the
+/// fact-specific retention rules over to a single generic delete-below-watermark
+/// is the follow-up, and it depends on an ack table that does not exist yet.
+///
+/// Existing rows are backfilled in `id` order per document, which is exactly the
+/// order the projection already replays them in, so the backfill cannot
+/// reorder history.
+///
+/// The sequence is **monotonic and unique per document, but not gapless**, and
+/// that is by design: retention deletes superseded rows, which leaves holes
+/// (measured on the live ledger right after this migration — one document at
+/// 5,397 rows with a high-water mark of 5,408). A watermark only ever asks "is
+/// this row at or below version N", so holes are irrelevant to it. Do not
+/// "repair" the gaps by renumbering: renumbering would move rows *below* a
+/// version a peer has already acked, which is precisely the corruption this
+/// column exists to make impossible.
+fn ensure_state_event_document_version(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "state_events",
+        "document_version",
+        "document_version INTEGER NOT NULL DEFAULT 0",
+    )?;
+    let tx = conn
+        .unchecked_transaction()
+        .context("begin document-version backfill migration")?;
+    let already_applied = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM state_schema_migrations WHERE migration_id = ?1)",
+        [BACKFILL_DOCUMENT_VERSION_MIGRATION],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if !already_applied {
+        let applied_at = sqlite_i64(timestamp_secs(), "state migration applied_at")?;
+        tx.execute(
+            r#"
+            UPDATE state_events SET document_version = (
+                SELECT COUNT(*) FROM state_events earlier
+                WHERE earlier.document_hash = state_events.document_hash
+                  AND earlier.id <= state_events.id
+            )
+            "#,
+            [],
+        )
+        .context("backfill state_events.document_version")?;
+        tx.execute(
+            "INSERT INTO state_schema_migrations (migration_id, applied_at) VALUES (?1, ?2)",
+            params![BACKFILL_DOCUMENT_VERSION_MIGRATION, applied_at],
+        )?;
+    }
+    tx.commit()
+        .context("commit document-version backfill migration")?;
+    conn.execute_batch(
+        r#"
+        CREATE INDEX IF NOT EXISTS state_events_document_hash_document_version
+        ON state_events(document_hash, document_version);
+        "#,
+    )?;
+    Ok(())
+}
 
 /// Remove event variants that no longer exist in the strict state-backbone ABI.
 ///
@@ -2678,6 +2760,13 @@ pub fn upsert_supervisor_lease_in_db(
 }
 
 pub fn insert_state_event_in_db(conn: &Connection, event: &StateEventInsert<'_>) -> Result<bool> {
+    // `document_version` (`#retentionversion`) is assigned inside the same
+    // statement as the insert. SQLite serializes writers, so the `MAX(..) + 1`
+    // subquery and the insert cannot interleave with another connection's
+    // append — there is no read-modify-write window to lose. It is deliberately
+    // NOT a UNIQUE constraint: `INSERT OR IGNORE` targets the `event_id`
+    // uniqueness, and a second unique index here could silently drop a
+    // legitimate event instead of the intended duplicate.
     let changed = conn.execute(
         r#"
         INSERT OR IGNORE INTO state_events (
@@ -2686,9 +2775,14 @@ pub fn insert_state_event_in_db(conn: &Connection, event: &StateEventInsert<'_>)
             domain,
             fact_type,
             payload_json,
-            timestamp
+            timestamp,
+            document_version
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, (
+            SELECT COALESCE(MAX(existing.document_version), 0) + 1
+            FROM state_events existing
+            WHERE existing.document_hash = ?2
+        ))
         "#,
         params![
             event.event_id,
@@ -4437,6 +4531,128 @@ mod tests {
             ],
             "one row survives per (document, commit_candidate_hash): highest revision, last on a tie"
         );
+        Ok(())
+    }
+
+    /// `#retentionversion`: every append gets the next per-document version, and
+    /// documents advance independently — a busy document must not push a quiet
+    /// one's next version forward, or a peer watermark keyed on it would skip
+    /// rows the quiet document never produced.
+    #[test]
+    fn document_version_is_assigned_monotonically_per_document() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+
+        let append = |event_id: &str, doc: &str| -> Result<()> {
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id,
+                    document_hash: doc,
+                    domain: "document",
+                    fact_type: "write_applied",
+                    payload_json: "{}",
+                },
+            )?;
+            Ok(())
+        };
+        append("a-1", "docA")?;
+        append("b-1", "docB")?;
+        append("a-2", "docA")?;
+        append("a-3", "docA")?;
+        append("b-2", "docB")?;
+
+        let versions: Vec<(String, i64)> = conn
+            .prepare("SELECT event_id, document_version FROM state_events ORDER BY event_id")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(
+            versions,
+            vec![
+                ("a-1".to_string(), 1),
+                ("a-2".to_string(), 2),
+                ("a-3".to_string(), 3),
+                ("b-1".to_string(), 1),
+                ("b-2".to_string(), 2),
+            ],
+            "each document numbers its own appends from 1, independently of other documents"
+        );
+
+        // `INSERT OR IGNORE` on a duplicate `event_id` must not advance the
+        // document's version — a burned version would leave a hole a watermark
+        // could never reach.
+        append("a-3", "docA")?;
+        let highest: i64 = conn.query_row(
+            "SELECT MAX(document_version) FROM state_events WHERE document_hash = 'docA'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(highest, 3, "an ignored duplicate does not burn a version");
+        Ok(())
+    }
+
+    /// `#retentionversion`: the backfill numbers pre-existing rows in `id` order
+    /// per document — the same order the projection replays them in — so
+    /// migrating an existing ledger cannot reorder history.
+    #[test]
+    fn document_version_backfill_follows_existing_replay_order() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        std::fs::create_dir_all(dir.path().join(".agent-doc"))?;
+        let legacy = Connection::open(state_db_path(dir.path()))?;
+        legacy.execute_batch(
+            r#"
+            CREATE TABLE state_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                document_hash TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                fact_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                timestamp INTEGER NOT NULL
+            );
+            INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) VALUES
+                ('a-old', 'docA', 'document', 'write_applied', '{}', 1),
+                ('b-old', 'docB', 'document', 'write_applied', '{}', 2),
+                ('a-mid', 'docA', 'document', 'write_applied', '{}', 3),
+                ('a-new', 'docA', 'document', 'write_applied', '{}', 4);
+            "#,
+        )?;
+        drop(legacy);
+
+        let conn = open_state_db(dir.path())?;
+        let versions: Vec<(String, i64)> = conn
+            .prepare("SELECT event_id, document_version FROM state_events ORDER BY id")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(
+            versions,
+            vec![
+                ("a-old".to_string(), 1),
+                ("b-old".to_string(), 1),
+                ("a-mid".to_string(), 2),
+                ("a-new".to_string(), 3),
+            ],
+            "backfilled versions follow id order within each document"
+        );
+
+        // A post-migration append continues from the backfilled high-water mark
+        // rather than restarting at 1.
+        insert_state_event_in_db(
+            &conn,
+            &StateEventInsert {
+                event_id: "a-fresh",
+                document_hash: "docA",
+                domain: "document",
+                fact_type: "write_applied",
+                payload_json: "{}",
+            },
+        )?;
+        let fresh: i64 = conn.query_row(
+            "SELECT document_version FROM state_events WHERE event_id = 'a-fresh'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(fresh, 4, "appends resume above the backfilled high-water mark");
         Ok(())
     }
 

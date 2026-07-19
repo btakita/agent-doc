@@ -150,13 +150,13 @@ The type-check now runs and reports **267 errors**. That is the honest state of 
 **One thing I deliberately did not commit:** `bun.lock`. Regenerating it rewrites the yalc-linked `@rappstack/*` entries from local `.yalc` state, stripping their dependency metadata — 213 deletions describing this machine rather than the project. CI installs through the npm fallback regardless. The gitlink bump carries the fix without carrying that.
 
 Parent repo re-verified after the bump: `typecheck` clean, 76 tests pass. The Pages deploy for the previous push (`#rak9`, `eeabb5e`) went green; the one for this push is still pending, so this closes on local evidence rather than waiting on it.
-<!-- agent:boundary:4d918395 -->
+<!-- agent:boundary:c60149b4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#tsappsub]
+- ~~do [#tsappsub]~~
 - do [#tsbrowser]
 - ~~do [#rak9]~~
 - do [#sbv9]
@@ -176,8 +176,8 @@ Parent repo re-verified after the bump: `typecheck` clean, 76 tests pass. The Pa
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#tsappclean] the app/brookebrodack-site type-check now runs and reports 267 errors — the honest state of a package that had never been checked, not a regression. Dominated by build.ts (esbuild used but not a direct dependency, implicit anys in plugin callbacks) and app/index.ts (a hono ErrorHandler returning void where it must return Response). Separate repo (brookebrodack-site); do it there. Pairs with #tsbrowser for the lib/ half of the parent repo
 - [ ] [#tsbrowser] type-check the browser half: lib/** and test/guestbook-hyop.test.ts are not covered by tsconfig.json, because @cloudflare/workers-types replaces Response with the Workers one and browser code fails against it on every element. A separate DOM-lib config measures 56 errors today — mostly in lib/domain--server--brookebrodack (sig/ctx generic mismatches) plus a missing image-module declaration in the app submodule. Needs the config split plus those fixes, or an explicit decision that lib/ is checked by its own workspace package instead
-- [ ] [#tsappsub] app/brookebrodack-site/tsconfig.json carries the SAME TS5110 defect just fixed in the root (module esnext + moduleResolution nodenext), so the submodule's own type-check has also never run. It is a separate repo (brookebrodack-site) — fix it there, not from here
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
 - [ ] [#nd8n] Add cgroup limits for the bwrap sandbox path in src/freehold via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin. Confirmed still absent: mem_limit_mb exists on PluginSpec but no systemd-run/cgroup call site
@@ -222,4 +222,5 @@ Parent repo re-verified after the bump: `typecheck` clean, 76 tests pass. The Pa
 - 2026-07-18 [#fhsystemd] supervise the freehold host instead of running it under nohup — a systemd user unit plus a credential source it can read without an interactive gpg unlock (passage cannot be read from a unit). Until this lands the push path dies with the login session, and the 15-minute cron in workers/guestbook-moderate is the only backstop
 - 2026-07-18 [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
 - 2026-07-18 [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
+- 2026-07-18 [#tsappsub] app/brookebrodack-site/tsconfig.json carries the SAME TS5110 defect just fixed in the root (module esnext + moduleResolution nodenext), so the submodule's own type-check has also never run. It is a separate repo (brookebrodack-site) — fix it there, not from here
 <!-- /agent:done -->

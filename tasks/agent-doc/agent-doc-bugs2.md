@@ -89,7 +89,62 @@ Reproduced exactly: `free_text_prompt_is_backlog_task` returns `false` for "Plea
 One test moved as a consequence, and it is worth flagging: `finalize_prewrite_guard_failure_leaves_cycle_open_for_retry` used "Please update the backlog." precisely *because* it was not imperative. It now trips the stricter execution-evidence guard first, so I made the fixture a question to keep it covering the pending-capture gate it was written for. The new behavior there is more correct, not a regression.
 
 **Not fixed:** `rebuild` is missing from `IMPERATIVE_LEADING_VERBS` (`build` is present). I left it out to keep this change scoped to politeness rather than quietly widening the verb list.
-<!-- agent:boundary:86f36cc1 -->
+❯ 🚧 For Item 1, please automatically prune the retained state.
+
+### Re: automatically prune the retained state — opus-4-8
+
+Done — and the diagnosis was more interesting than "run the prune more often." Retention was already correct; it just was not **automatic** in the two places that matter.
+
+**Gap 1 — retention was latched once per *process* (`#retentionperiodic`).** Each prune sat behind its own `AtomicBool`, tripped on the first `open_state_db`. That is right for a short-lived CLI invocation, and exactly wrong for the two processes that write the most: `controller serve` and the supervisor run for **days**. They pruned once at startup and then accumulated unbounded — which is why the ledger grew back and you had to notice it and ask.
+
+One `run_state_event_retention_if_due` now drives every pass on a 15-minute interval, claimed with a compare-exchange so concurrent opens do not all rescan `state_events`, with the run stamp restored on a failed pass so a transient error retries at the next open instead of waiting out the window. It is strictly a superset of the old behavior — the first open in any process still prunes immediately. The interval policy is a pure, unit-tested function (`state_event_retention_due`).
+
+**Gap 2 — two facts still had no cap at all.** With `#deferredintentretention` and `#baselinefactretention` in force, the ledger's composition changed and two new leaders emerged. Both assign their projection field wholesale in `apply_fact` and neither is ever enumerated by fact type, so keep-newest-N replays identically:
+
+| fact | rows | size | cap |
+|---|---|---|---|
+| `response_captured` | 658 | 14MB | 3/document |
+| `turn_intent_checkpointed` | 1,445 | 3MB | 2/document |
+
+`response_captured` is heavy because each row embeds the response body, the full replayable intent body, **and** the editor-visible baseline content. Three rather than two is deliberate: the open cycle's capture plus headroom, because recovery may reconcile a partially materialized response against the capture before it.
+
+**What I did not cap:** `visible_write_commit_candidate_observed` (164 rows / 4MB) is now the largest unbounded fact, but `rpc.rs::visible_write_commit_candidate_events` reads those rows as a **list**, so it is not superseding and a keep-newest-N cap would be wrong. It needs projection-mirroring retention like the deferred intents; queued at the top of the backlog rather than guessed at here.
+
+The three per-document caps had also quietly become three copies of the same SQL — they now share `prune_superseding_fact_to`.
+
+**Verification** — measured on a `.backup` of the live 63MB database rather than assumed: **63MB → 35MB (44%)**, with the caps holding exactly (`response_captured` 658 → 20 rows across 7 documents, `turn_intent_checkpointed` 1,445 → 9 across 5, no document over its cap). `make check` green: 7662 tests run, 7662 passed, 240 skipped. Committed `2c3c14991`, pushed, installed, supervisor marked to recycle.
+
+**CI is red, and it is not this change.** Run `29667970256` fails only on `finalize_skips_ignored_untracked_session_doc` — the same pre-existing `#ay80` failure that was already red on the parent commit. I pulled the actual CI stderr this time, which sharpens it: the test does not fail on the ignored-path assertion at all. `finalize` exits earlier with `captured turn intent … was not projected as active` — `save_pending_after_capture` writes the capture, reads it straight back through `load_active_pending_response`, and gets `None`. So `#ay80` is a **capture read-back miss**, not an ignored-untracked-path bug, and the assertion message has been pointing at the wrong thing. I could not reproduce it locally across TMPDIR-as-symlink, `.agent-doc` in the temp parent, or `TMPDIR=/tmp`, and two full local suites are green — so I am not going to invent a fix. The corrected mechanism is worth more than another guess; `#ay80` keeps its slot.
+### Re: #px82 / #bn41 — editor-authority self-heal, and #f6j3 — stale branch deleted — opus-4-8
+
+**#px82 + #bn41 — fixed, tested, installed, pushed** (`f69339ef0`).
+
+Your read in #px82 was right: the failure is intermittent, and one bounded observation is a coin flip. Three chokepoints were discarding work on the first miss; all three now re-register the replica and re-observe within a bounded budget — the same recovery `admin recycle` + `admin reload-lib` was doing by hand (#bn41):
+
+1. `run_queue_maintenance`'s authority read.
+2. `persist_queue_maintenance_doc`'s `ensure_document_model` — **this was the one that mattered.** A first-attempt failure `?`-ed straight out and threw away the entire recomputed queue. The authority *read* was already returning `status=current`; the discard happened downstream at the write-back, which is why the mirror/sync lines printed as success while nothing landed.
+3. `try_resolve_current_doc_with_disk_inner`, covering both the explicit `EditorAttachedMissingReplica` status **and** an authority *error* raised while Lazily still reports the editor open. That second shape is what reached the fail-closed bail in `resolve_closed_editor_disk_fallback_current_doc`, and it bypassed the first hook entirely.
+
+Every attempt logs its `source`+`status` pair to `ops.log`, which is the instrumentation you asked for. Live proof from this session:
+
+```
+editor_replica_reregister_attempt ... attempt=1/3 reregister=requested (#bn41)
+editor_replica_reobserved        ... attempt=1/3 status=error (#px82)
+queue_maintenance_model_ensure_retry ... attempt=3/3 outcome=failed:... (#px82)
+```
+
+Fail-closed behavior is preserved: a genuinely absent replica still errors after the budget, and `EditorSyncPending` (a live editor mid-sync) is never nudged with a force-refresh. Budgets override via `AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS` / `AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS`.
+
+`preflight_missing_editor_model_recovers_after_delayed_replica_registration` had encoded the *old* contract — first call errors, recover on a later run. It now asserts the stronger contract its name always implied: a replica registering shortly after the first observation is picked up by the **same** call. `make check` green (7650 passed), `make install` done.
+
+**What this did NOT fix, honestly.** This document's replica is *persistently* missing, not intermittently — the retry fires three times and still fails. `admin reload-lib` recovered the initial-resolve path (preflight now exits 0), but queue maintenance still cannot persist here. That is very likely self-inflicted: I ran `make install` + lib-install four times this turn while the JB plugin held the buffer, which is the stale-plugin wedge. The retry is the right fix for the intermittent case you filed; it cannot conjure a replica that is really gone.
+
+**#f6j3 — deleted, not salvaged.** The evidence was decisive: `tail_repair.rs` is 43K on main versus the branch's 152-line version (that work landed independently), and the write-runtime area the retry patch targets has diverged by ~6,600 insertions across 10 files. A 104-line patch against a 50-commit-stale base of rewritten code is not salvageable. I tagged `archive/editor-authority-no-disk-repair` at `8104031d4` first so nothing is unrecoverable, then removed the worktree and branch.
+
+**CI is red on main — and it is not mine.** `finalize_skips_ignored_untracked_session_doc` fails at the parent sha `71195dd7`, before my commit, with `captured turn intent ... was not projected as active`. It passes locally (both in the full suite and in isolation), so it is environment-dependent rather than a code regression. I have filed it rather than waiving it.
+
+**What I did not do.** The other nine queued heads (#eqmv, #0dsr, #17jk, #f1s3, #fr79, #05r0, #a45a, #30p6, #n39j) are untouched — the plan bundled twelve items into one turn, and I chose depth on the editor-authority family that was actively blocking this session over twelve shallow passes. They stay at the head of the queue.
+<!-- agent:boundary:7e8c2c84 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -206,7 +261,7 @@ What are #next-steps to fix bugs?
 - [ ] [#n39j] SimWorld coverage for #queuepersiststall: preflight must report PROBED drainability when queue maintenance fails to persist, never QueueState::default(). Fixed + verified live (0 -> 14 drainable on brookebrodack-dev.md) but has no deterministic test — reproducing it needs a simulated editor-authority failure (editor_attached_model_missing), which is a SimWorld job rather than a mock. Add a SimWorld case that forces the persist failure and asserts preflight still reports the real drainable head count, so the loop-gate contract cannot silently regress to zeros
 - [ ] [#bn41] Compact hit the same editor-authority family as #5d9f: compact_document retained the canonical write in CRDT+Lazily but found no registered editor replica (recovery=await_editor_replica_no_disk_write_then_session_check), and session-check then failed with editor_attached_model_missing. RESOLVED by admin recycle + admin reload-lib, after which session-check returned committed/ok with no data loss. Actor was state=starting gen=57 with controller+supervisor both fresh, so the replica — not the controller — was the missing piece. Make the binary attempt the replica re-registration it already reports as editor_replica_reregister=requested BEFORE surfacing the error, so this self-heals instead of needing two manual admin commands
 - [ ] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
-- [ ] [#px82] Editor-authority persistence failure (tracked as 5d9f) is INTERMITTENT, not permanent: on tasks/brookebrodack-dev.md, queue_maintenance_not_persisted alternates with clean persistence across back-to-back preflights (observed FAIL/OK/FAIL/OK), and a contended run instead errors 'Lazily current authority remained delivery_pending for 3000ms'. That points at a race against a concurrently-live editor/turn rather than a hard authority outage. Instrument the retry: log which source+status pair each maintenance attempt observed, then retry the bounded observation instead of discarding the computed queue on first failure — the current fallback to QueueState::default() is what zeroes queue_drainable_head_count and silently disarms the loop
+- [x] [#px82] Editor-authority persistence failure (tracked as 5d9f) is INTERMITTENT, not permanent: on tasks/brookebrodack-dev.md, queue_maintenance_not_persisted alternates with clean persistence across back-to-back preflights (observed FAIL/OK/FAIL/OK), and a contended run instead errors 'Lazily current authority remained delivery_pending for 3000ms'. That points at a race against a concurrently-live editor/turn rather than a hard authority outage. Instrument the retry: log which source+status pair each maintenance attempt observed, then retry the bounded observation instead of discarding the computed queue on first failure — the current fallback to QueueState::default() is what zeroes queue_drainable_head_count and silently disarms the loop
 - [ ] [#f6j3] [recommended] Stale branch fix/editor-authority-no-disk-repair (worktree src/agent-doc-editor-authority-fix) has 2 unmerged commits targeting the editor-authority blocker, but is 5 days / 50 commits behind main and still carries the OLD error wording ('bounded publish-live-buffer request', 'reload or save the editor buffer') where main now says 'bounded Lazily-current observation request ... operator_action=none'. Main has already reworked that area. Decide explicitly: rebase and salvage, or delete the branch+worktree. Do NOT merge as-is
 - [ ] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
 - [ ] [#mrnh] Bootstrap size is NOT the cause of the ensure wedge — hypothesis falsified, do not re-run it. `d131457ab` cut the live `crdt_replica_register` bootstrap from 1,312,802 to 261,174 bytes (5.0x) and `queue_maintenance_not_persisted` is COMPLETELY UNCHANGED. The 400ms missing-replica window is therefore not failing on transfer size. Next probe should target why the ensure-path observer never sees a replica the controller already reports as `current live_editors=1 delivery_converged=true` — likely generation fencing on re-register, not payload volume.

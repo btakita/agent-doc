@@ -750,6 +750,10 @@ fn run_state_event_retention_if_due(conn: &Connection) {
             ),
         ),
         (
+            "visible_write_commit_candidate_observed",
+            prune_superseded_visible_write_commit_candidates(conn),
+        ),
+        (
             "document_write_deferred",
             prune_converged_document_write_intents(conn),
         ),
@@ -955,6 +959,71 @@ const RESPONSE_CAPTURES_KEPT_PER_DOCUMENT: i64 = 3;
 /// numbers within a turn make this the highest-**row-count** fact after the
 /// authority observations (1,441 rows / 3MB live on 2026-07-18).
 const TURN_INTENT_CHECKPOINTS_KEPT_PER_DOCUMENT: i64 = 2;
+
+/// Drop `visible_write_commit_candidate_observed` rows the projection can no
+/// longer elect (`#visiblecandidateretention`).
+///
+/// This fact is superseding, but **not per document** — a keep-newest-N-per-
+/// document cap would be wrong. `VisibleWriteProjection::observe_commit_candidate`
+/// maintains a MAP keyed by `commit_candidate_hash`, so several distinct
+/// candidates stay simultaneously live for one document and evicting by
+/// recency would drop a candidate the write state machine can still elect.
+///
+/// Retention mirrors the map instead. Within one `(document_hash,
+/// commit_candidate_hash)` key the projection keeps whichever row survives
+/// `if current_revision > model_revision { return }` — that is, the highest
+/// `model_revision`, and on a tie the last one replayed (highest `id`). Every
+/// other row for that key is provably dead: replaying it cannot change the final
+/// map, and nothing enumerates this fact as a list (the only readers are the
+/// single `apply_fact` arm and writers).
+///
+/// `latest_model_revision` is a running max across all candidates, and the
+/// document's global maximum is by construction the max of the per-key maxima we
+/// keep, so it is preserved exactly too.
+///
+/// Live measurement 2026-07-18 (agent-loop): 164 rows holding **4MB**, the
+/// largest remaining unbounded fact once `#responsecaptureretention` and
+/// `#turnintentretention` were in force — each row embeds a full
+/// `commit_candidate_content` image.
+fn prune_superseded_visible_write_commit_candidates(conn: &Connection) -> Result<()> {
+    // Bounded batches so a one-time cleanup of a legacy backlog cannot balloon a
+    // single WAL frame or hold the write lock for the whole scan.
+    loop {
+        let deleted = conn
+            .execute(
+                r#"
+                DELETE FROM state_events
+                WHERE rowid IN (
+                    SELECT e.rowid FROM state_events e
+                    WHERE e.fact_type = 'visible_write_commit_candidate_observed'
+                      AND EXISTS (
+                        SELECT 1 FROM state_events n
+                        WHERE n.fact_type = 'visible_write_commit_candidate_observed'
+                          AND n.document_hash = e.document_hash
+                          AND json_extract(n.payload_json, '$.fact.commit_candidate_hash')
+                              IS json_extract(e.payload_json, '$.fact.commit_candidate_hash')
+                          AND (
+                            json_extract(n.payload_json, '$.fact.model_revision')
+                              > json_extract(e.payload_json, '$.fact.model_revision')
+                            OR (
+                              json_extract(n.payload_json, '$.fact.model_revision')
+                                IS json_extract(e.payload_json, '$.fact.model_revision')
+                              AND n.id > e.id
+                            )
+                          )
+                      )
+                    LIMIT 2000
+                )
+                "#,
+                [],
+            )
+            .context("failed to prune superseded visible write commit candidates")?;
+        if deleted == 0 {
+            break;
+        }
+    }
+    Ok(())
+}
 
 /// The one `document_write_deferred` reason that lands in an INDEPENDENT durable
 /// lineage (`DocumentStateProjection::pending_external_disk`) instead of the
@@ -4294,6 +4363,63 @@ mod tests {
             remaining,
             vec!["a-turn-3".to_string(), "a-turn-4".to_string()],
             "only the newest checkpoints survive, newest last"
+        );
+        Ok(())
+    }
+
+    /// `#visiblecandidateretention`: `observe_commit_candidate` maintains a MAP
+    /// keyed by `commit_candidate_hash`, so several candidates stay live for one
+    /// document at once. Retention must mirror that map — keep the highest
+    /// `model_revision` per key (last replayed on a tie) — and must NOT evict by
+    /// per-document recency, which would drop a still-electable candidate.
+    #[test]
+    fn superseded_visible_write_commit_candidates_are_pruned_per_candidate_hash() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+
+        let observe = |event_id: &str, doc: &str, candidate: &str, revision: u64| {
+            let payload = format!(
+                r#"{{"fact":{{"commit_candidate_hash":"{candidate}","model_revision":{revision}}}}}"#
+            );
+            conn.execute(
+                "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                 VALUES (?1, ?2, 'document', 'visible_write_commit_candidate_observed', ?3, 0)",
+                rusqlite::params![event_id, doc, payload],
+            )
+        };
+
+        // One candidate observed three times at rising revisions: only the
+        // newest revision survives.
+        observe("a-c1-r1", "docA", "cand-1", 1)?;
+        observe("a-c1-r2", "docA", "cand-1", 2)?;
+        observe("a-c1-r3", "docA", "cand-1", 3)?;
+        // A SECOND candidate for the same document, at a LOWER revision than
+        // cand-1's newest. Per-document recency would evict it; the map keeps it.
+        observe("a-c2-r1", "docA", "cand-2", 1)?;
+        // Tie on revision: the last row replayed wins.
+        observe("a-c3-r5-old", "docA", "cand-3", 5)?;
+        observe("a-c3-r5-new", "docA", "cand-3", 5)?;
+        // A quiet second document is untouched.
+        observe("b-c1-r1", "docB", "cand-1", 1)?;
+
+        prune_superseded_visible_write_commit_candidates(&conn)?;
+
+        let remaining: Vec<String> = conn
+            .prepare(
+                "SELECT event_id FROM state_events \
+                 WHERE fact_type = 'visible_write_commit_candidate_observed' ORDER BY id",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(
+            remaining,
+            vec![
+                "a-c1-r3".to_string(),
+                "a-c2-r1".to_string(),
+                "a-c3-r5-new".to_string(),
+                "b-c1-r1".to_string(),
+            ],
+            "one row survives per (document, commit_candidate_hash): highest revision, last on a tie"
         );
         Ok(())
     }

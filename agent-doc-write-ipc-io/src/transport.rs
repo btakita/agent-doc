@@ -799,7 +799,7 @@ fn try_ipc_inner(
                     });
                 }
                 eprintln!(
-                    "[write] socket already_applied lacked an authoritative editor receipt containing the response — retaining the response operation for CPC retry"
+                    "[write] socket already_applied lacked an authoritative editor receipt containing the response — retaining the response operation for CP retry"
                 );
                 agent_doc_ops_log_io::log_op(
                     file,

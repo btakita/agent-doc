@@ -303,7 +303,7 @@ object TerminalUtil {
     }
 
     /**
-     * Routes a document trigger command via the CPC `editor_route` RPC.
+     * Routes a document trigger command via the CP `editor_route` RPC.
      *
      * The project controller executes the existing route implementation, which:
      * 1. Reads the session UUID from the file's frontmatter
@@ -369,7 +369,7 @@ object TerminalUtil {
         val routeKey = RunAgentDocAttemptLedger.routeKey(cwd, relativePath)
         val documentPath = java.io.File(cwd, relativePath).absolutePath
 
-        LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath transport=cpc")
+        LOG.warn("[route] sendToTerminal: cwd=$cwd rel=$relativePath transport=cp")
         attempt?.recordIfCurrent("route_prepare")
 
         if (!commandPreAcquired) {
@@ -423,7 +423,7 @@ object TerminalUtil {
         // so the guard only produced false positives (blocked every route attempt)
 
         try {
-            // Build a diagnostic command shape matching the CPC editor_route request.
+            // Build a diagnostic command shape matching the CP editor_route request.
             val cmd = buildEditorRouteRequestCommand(relativePath)
 
             val manager = com.intellij.openapi.fileEditor.FileEditorManager.getInstance(project)
@@ -446,7 +446,7 @@ object TerminalUtil {
             cmd.addAll(layoutArgs)
 
             // Pass focused file
-            LOG.warn("[route] sending CPC request: ${cmd.joinToString(" ")}")
+            LOG.warn("[route] sending CP request: ${cmd.joinToString(" ")}")
             attempt?.recordIfCurrent("route_command_built", command = cmd)
 
             val handle = RetryingRouteHandle()
@@ -475,7 +475,7 @@ object TerminalUtil {
                         if (routeGeneration == null) {
                             routeGeneration = StateProjectionBridge.recordRouteDispatchStarted(documentPath, routeKey)
                         }
-                        val routeResult = CpcRouteClient.runEditorRoute(
+                        val routeResult = CpRouteClient.runEditorRoute(
                             projectRoot = cwd,
                             filePath = documentPath,
                             relativePath = relativePath,
@@ -623,7 +623,7 @@ object TerminalUtil {
                 e.message ?: e.javaClass.simpleName,
             )
             onComplete?.invoke()
-            notifyError(project, "Failed to send Run Agent Doc through CPC: ${e.message}")
+            notifyError(project, "Failed to send Run Agent Doc through CP: ${e.message}")
         }
     }
 
@@ -638,7 +638,7 @@ object TerminalUtil {
 
     internal fun buildEditorRouteRequestCommand(relativePath: String): MutableList<String> =
         mutableListOf(
-            "cpc:editor_route",
+            "cp:editor_route",
             "--dispatch-only",
             "--plain-trigger",
             "--wait-for-ready",

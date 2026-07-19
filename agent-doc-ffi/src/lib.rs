@@ -423,7 +423,7 @@ pub unsafe extern "C" fn agent_doc_crdt_merge(
 // [`crate::crdt_sync::ReplicaState`]) lives in the shared library; thin editor
 // plugins are bindings that forward local Document deltas (`apply_local`) and
 // apply remote updates (`apply_update`), exchanging state vectors / updates with
-// the CPC/controller-owned canonical replica. Each replica is keyed by a caller-chosen
+// the CP/controller-owned canonical replica. Each replica is keyed by a caller-chosen
 // `replica_id` (also its yrs client id, so distinct replicas order concurrent
 // inserts deterministically). Authority gating (sync only under a multi-replica
 // authority, `#crdtauth1sv`) lives in the orchestration layer over this transport.

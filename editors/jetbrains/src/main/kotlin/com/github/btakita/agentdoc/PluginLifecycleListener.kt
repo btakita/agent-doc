@@ -20,7 +20,7 @@ class PluginLifecycleListener : ProjectManagerListener {
     override fun projectOpened(project: Project) {
         // Track document changes for typing debounce in SubmitAction
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, project)
-        // Attach markdown buffers as CRDT replicas when the CPC endpoint is available.
+        // Attach markdown buffers as CRDT replicas when the CP endpoint is available.
         CrdtReplicaManager.getInstance(project)
         // Dynamic plugin upgrades re-run project lifecycle startup, but do not
         // necessarily emit a later reload_lib broadcast. Re-register every
@@ -35,7 +35,7 @@ class PluginLifecycleListener : ProjectManagerListener {
         VisualHighlighterManager.getInstance(project)
         // Detect editor layout changes (tab drags, new splits) and sync tmux
         LayoutChangeDetector.getInstance(project)
-        // Flip the turn-state editor banner on/off as the CPC turn phase changes.
+        // Flip the turn-state editor banner on/off as the CP turn phase changes.
         TurnStateBannerRefresher.getInstance(project).start()
         // Register EditorTabSyncListener via code (not XML) so it survives hot-reload
         val editorTabSync = EditorTabSyncListener()

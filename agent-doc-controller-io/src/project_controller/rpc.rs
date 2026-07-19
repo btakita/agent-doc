@@ -28,7 +28,7 @@ const CONTROLLER_CRDT_REVISION_READ_TIMEOUT: Duration = Duration::from_millis(75
 const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
 const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
 const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
-/// A CPC-owned git commit (barrier + stage + commit + boundary reposition) can run
+/// A CP-owned git commit (barrier + stage + commit + boundary reposition) can run
 /// several seconds — well past the 5s default RPC timeout — so `commit_document`
 /// gets a generous ceiling.
 const CONTROLLER_COMMIT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -1645,7 +1645,7 @@ pub fn recycle_stale_supervisor_for_turn_stage(file: &Path, stage: &str) -> Opti
     let (mut message, recycle_status) = if let Some(message) =
         stale_supervisor_warning_for_doc(file)
     {
-        (message, schedule_stale_supervisor_pcp_recycle(file, stage))
+        (message, schedule_stale_supervisor_cp_recycle(file, stage))
     } else if reliable_sync_editor_live_for_file(file)
         && matches!(
             agent_doc_crdt_relay_io::current_text_for_file_nonblocking(file),
@@ -1660,7 +1660,7 @@ pub fn recycle_stale_supervisor_for_turn_stage(file: &Path, stage: &str) -> Opti
                 "route-owned editor authority for {} has zero registered relay replicas; the serving supervisor/editor bridge is stale",
                 file.display()
             ),
-            schedule_stale_editor_replica_pcp_recycle(file, stage),
+            schedule_stale_editor_replica_cp_recycle(file, stage),
         )
     } else {
         return None;
@@ -1678,14 +1678,14 @@ pub fn recycle_stale_supervisor_for_turn_stage(file: &Path, stage: &str) -> Opti
 /// proven that the document's serving supervisor maps an old binary, and the
 /// non-destructive repair is to ask the owner to recycle at the next idle boundary.
 /// This helper owns that effect through the same recycle-request marker consumed by
-/// the PCP/supervisor recycle graph. Fail-open: every refusal is logged and returned
+/// the CP/supervisor recycle graph. Fail-open: every refusal is logged and returned
 /// as a status string, never raised into the live cycle.
-pub fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> String {
-    schedule_supervisor_pcp_recycle(
+pub fn schedule_stale_supervisor_cp_recycle(file: &Path, source: &str) -> String {
+    schedule_supervisor_cp_recycle(
         file,
         source,
         agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE,
-        "stale_supervisor_pcp_recycle_requested",
+        "stale_supervisor_cp_recycle_requested",
         "supervisor_binary_stale",
     )
 }
@@ -1694,17 +1694,17 @@ pub fn schedule_stale_supervisor_pcp_recycle(file: &Path, source: &str) -> Strin
 /// when the canonical document and its disk projection diverge after closeout.
 /// This is the editor-authority equivalent of a stale-binary recycle and is
 /// intentionally independent of the proactive auto-recycle preference.
-pub fn schedule_stale_editor_replica_pcp_recycle(file: &Path, source: &str) -> String {
-    schedule_supervisor_pcp_recycle(
+pub fn schedule_stale_editor_replica_cp_recycle(file: &Path, source: &str) -> String {
+    schedule_supervisor_cp_recycle(
         file,
         source,
         agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
-        "stale_editor_replica_pcp_recycle_requested",
+        "stale_editor_replica_cp_recycle_requested",
         "editor_authority_unavailable_or_diverged",
     )
 }
 
-fn schedule_supervisor_pcp_recycle(
+fn schedule_supervisor_cp_recycle(
     file: &Path,
     source: &str,
     reason: &str,
@@ -1718,7 +1718,7 @@ fn schedule_supervisor_pcp_recycle(
             } else {
                 project_root.display().to_string()
             };
-            match checkpoint_route_owned_document_crdt(file, "stale_supervisor_pcp_recycle") {
+            match checkpoint_route_owned_document_crdt(file, "stale_supervisor_cp_recycle") {
                 Ok(checkpoint_status) => {
                     match agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(
                         file, reason,
@@ -1868,7 +1868,7 @@ const AUTO_INSTALL_RETRY_BACKOFF_SECS: u64 = 20;
 /// A `make install` child spawned with inherited stdio therefore sends `make`'s
 /// unsuppressed recipe echo (`cargo install --path ...`) and any cargo stdout
 /// straight to fd1 — i.e. straight into the agent pane, corrupting the live TUI /
-/// prompt during a supervisor/PCP restart. Pointing the child's stdout at a dup of
+/// prompt during a supervisor/CP restart. Pointing the child's stdout at a dup of
 /// the supervisor's stderr keeps that output on the same channel the rest of the
 /// build diagnostics already use (the redirected log when route-owned), and never
 /// on fd1. Nulling stdin stops a build sub-process from consuming forwarded
@@ -2426,7 +2426,7 @@ fn supervisor_recycle_reason_is_yield(reason: Option<&str>) -> bool {
     )
 }
 
-/// Ask the in-session loop to yield one boundary through the PCP recycle graph.
+/// Ask the in-session loop to yield one boundary through the CP recycle graph.
 ///
 /// This replaces the legacy `.agent-doc/recycle-yield` sidecar. A yield is a
 /// pre-recycle in-flight phase: route callers defer through the same lazily-backed
@@ -3389,7 +3389,7 @@ pub fn recycle_controllers_all_projects_force(force: bool) -> Result<(usize, usi
 }
 
 /// `#turnsaferecycle` Goal 1 — the supervisor breadth of an install fan-out. Today
-/// [`recycle_controllers_all_projects_force`] only marks lazy CONTROLLER (PCP)
+/// [`recycle_controllers_all_projects_force`] only marks lazy CONTROLLER (CP)
 /// processes; the long-lived `agent-doc start --route-owned` supervisors that
 /// actually write documents are left to self-detect staleness. This walks `/proc`
 /// for every route-owned supervisor, dedups by served document, and writes each a
@@ -3434,7 +3434,7 @@ fn checkpoint_crdt_via_controller_document_model(
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
-                    "controller_crdt_checkpoint file={} source={} status=detached authority=cpc_model transport=local_document_model",
+                    "controller_crdt_checkpoint file={} source={} status=detached authority=cp_model transport=local_document_model",
                     canonical.display(),
                     source,
                 ),
@@ -3451,7 +3451,7 @@ fn checkpoint_crdt_via_controller_document_model(
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
-                    "controller_crdt_checkpoint file={} source={} status=checkpointed authority=cpc_model transport=local_document_model bytes={} changed={} live_editors={} text_len={} text_hash={}",
+                    "controller_crdt_checkpoint file={} source={} status=checkpointed authority=cp_model transport=local_document_model bytes={} changed={} live_editors={} text_len={} text_hash={}",
                     canonical.display(),
                     source,
                     bytes,
@@ -3467,7 +3467,7 @@ fn checkpoint_crdt_via_controller_document_model(
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
-                    "controller_crdt_checkpoint file={} source={} status=deferred authority=cpc_model transport=local_document_model reason={} recovery=background_yrs_repair",
+                    "controller_crdt_checkpoint file={} source={} status=deferred authority=cp_model transport=local_document_model reason={} recovery=background_yrs_repair",
                     canonical.display(),
                     source,
                     reason,
@@ -3479,7 +3479,7 @@ fn checkpoint_crdt_via_controller_document_model(
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
-                    "controller_crdt_checkpoint_failed file={} source={} authority=cpc_model transport=local_document_model error={:?}",
+                    "controller_crdt_checkpoint_failed file={} source={} authority=cp_model transport=local_document_model error={:?}",
                     canonical.display(),
                     source,
                     err.to_string(),
@@ -3980,23 +3980,23 @@ fn request_existing_controller_crdt_revision_read(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ControllerCrdtCpcWriteResult {
-    pub write: Option<agent_doc_crdt_relay_io::CpcRelayWrite>,
+pub struct ControllerCrdtCpWriteResult {
+    pub write: Option<agent_doc_crdt_relay_io::CpRelayWrite>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ControllerCrdtCpcWritePayload {
+struct ControllerCrdtCpWritePayload {
     expected_current: String,
     content: String,
     source: Option<String>,
 }
 
-pub fn apply_cpc_write_via_controller_model_for_doc(
+pub fn apply_cp_write_via_controller_model_for_doc(
     doc: &Path,
     expected_current: &str,
     content: &str,
     source: &str,
-) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
+) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let file_arg = canonical.to_string_lossy().to_string();
     let authority = crdt_authority_for_file(&file_arg);
@@ -4004,7 +4004,7 @@ pub fn apply_cpc_write_via_controller_model_for_doc(
         agent_doc_ops_log_io::log_op(
             &canonical,
             &format!(
-                "controller_crdt_cpc_write_skipped file={} source={} authority=git reason=detached_authority",
+                "controller_crdt_cp_write_skipped file={} source={} authority=git reason=detached_authority",
                 canonical.display(),
                 source,
             ),
@@ -4015,7 +4015,7 @@ pub fn apply_cpc_write_via_controller_model_for_doc(
         agent_doc_ops_log_io::log_op(
             doc,
             &format!(
-                "controller_crdt_cpc_write_skipped file={} source={} reason=no_project_root",
+                "controller_crdt_cp_write_skipped file={} source={} reason=no_project_root",
                 doc.display(),
                 source,
             ),
@@ -4023,15 +4023,15 @@ pub fn apply_cpc_write_via_controller_model_for_doc(
         return Ok(None);
     };
     ensure_controller_running(&project_root, LaunchMode::Lazy)?;
-    let payload = ControllerCrdtCpcWritePayload {
+    let payload = ControllerCrdtCpWritePayload {
         expected_current: expected_current.to_string(),
         content: content.to_string(),
         source: Some(source.to_string()),
     };
-    let result: ControllerCrdtCpcWriteResult = request_controller(
+    let result: ControllerCrdtCpWriteResult = request_controller(
         &project_root,
         ControllerRequest {
-            command: "crdt_cpc_write".to_string(),
+            command: "crdt_cp_write".to_string(),
             file: Some(canonical),
             session_id: None,
             pane_id: None,
@@ -4286,7 +4286,7 @@ pub fn commit_barrier_via_controller_model_for_doc(doc: &Path) -> Result<bool> {
     )
 }
 
-/// Delegate the git commit for `doc` to the CPC controller — the authoritative
+/// Delegate the git commit for `doc` to the CP controller — the authoritative
 /// owner of the converged relay canonical — instead of committing as a
 /// non-authoritative CLI replica. Returns:
 /// - `Ok(Some(outcome))` when the controller performed the commit;
@@ -4362,7 +4362,7 @@ pub fn commit_document_via_controller(
     Ok(Some(outcome))
 }
 
-/// Submit Compact Exchange to the CPC. The caller never computes or applies a
+/// Submit Compact Exchange to the CP. The caller never computes or applies a
 /// document rewrite; it waits for the controller-owned operation to complete.
 pub fn compact_document_via_controller(
     doc: &Path,
@@ -4371,7 +4371,7 @@ pub fn compact_document_via_controller(
     let canonical = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
         anyhow::bail!(
-            "cannot execute Compact Exchange for {} through the CPC: no project root",
+            "cannot execute Compact Exchange for {} through the CP: no project root",
             canonical.display(),
         );
     };
@@ -4607,7 +4607,7 @@ struct ControllerCommitDocumentPayload {
 }
 
 /// Perform the git commit for a document from inside the controller process. This
-/// is the CPC-owned commit: the controller hosts the converged relay canonical, so
+/// is the CP-owned commit: the controller hosts the converged relay canonical, so
 /// running the commit here — rather than the CLI asking over the socket and then
 /// committing as a non-authoritative replica — lets a document with a live editor
 /// commit authoritatively instead of failing closed
@@ -4669,7 +4669,7 @@ fn handle_compact_document_rpc(
         ),
     );
     runtime_effects()?.compact_document(&canonical, invocation)?;
-    Ok(serde_json::json!({ "executed_by": "cpc" }))
+    Ok(serde_json::json!({ "executed_by": "cp" }))
 }
 
 fn handle_crdt_record_committed_baseline_rpc(
@@ -4840,7 +4840,7 @@ fn log_controller_current_text_result(
         agent_doc_crdt_relay_io::CurrentText::Detached => agent_doc_ops_log_io::log_op(
             canonical,
             &format!(
-                "controller_crdt_current_text file={} source={} status=detached authority=cpc_model",
+                "controller_crdt_current_text file={} source={} status=detached authority=cp_model",
                 canonical.display(),
                 source,
             ),
@@ -4849,7 +4849,7 @@ fn log_controller_current_text_result(
             agent_doc_ops_log_io::log_op(
                 canonical,
                 &format!(
-                    "controller_crdt_current_text file={} source={} status=editor_attached_model_missing authority=cpc_model",
+                    "controller_crdt_current_text file={} source={} status=editor_attached_model_missing authority=cp_model",
                     canonical.display(),
                     source,
                 ),
@@ -4858,7 +4858,7 @@ fn log_controller_current_text_result(
         agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => agent_doc_ops_log_io::log_op(
             canonical,
             &format!(
-                "controller_crdt_current_text file={} source={} status=editor_sync_pending authority=cpc_model",
+                "controller_crdt_current_text file={} source={} status=editor_sync_pending authority=cp_model",
                 canonical.display(),
                 source,
             ),
@@ -4870,7 +4870,7 @@ fn log_controller_current_text_result(
         } => agent_doc_ops_log_io::log_op(
             canonical,
             &format!(
-                "controller_crdt_current_text file={} source={} status=current authority=cpc_model text_len={} text_hash={} live_editors={} delivery_converged={}",
+                "controller_crdt_current_text file={} source={} status=current authority=cp_model text_len={} text_hash={} live_editors={} delivery_converged={}",
                 canonical.display(),
                 source,
                 text.len(),
@@ -5008,28 +5008,28 @@ fn crdt_current_text_source(payload: &ControllerCrdtCurrentTextPayload) -> Strin
         .to_string()
 }
 
-fn handle_crdt_cpc_write_rpc(
+fn handle_crdt_cp_write_rpc(
     bootstrap: &ControllerBootstrap,
     request: ControllerRequest,
-) -> Result<ControllerCrdtCpcWriteResult> {
+) -> Result<ControllerCrdtCpWriteResult> {
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
-    let payload: ControllerCrdtCpcWritePayload =
-        serde_json::from_str(&payload_json).context("failed to parse CRDT CPC write payload")?;
+    let payload: ControllerCrdtCpWritePayload =
+        serde_json::from_str(&payload_json).context("failed to parse CRDT CP write payload")?;
     let source = payload
         .source
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or("controller_cpc_write");
-    let write = agent_doc_crdt_relay_io::apply_cpc_write_for_file(
+        .unwrap_or("controller_cp_write");
+    let write = agent_doc_crdt_relay_io::apply_cp_write_for_file(
         &canonical,
         &payload.expected_current,
         &payload.content,
         source,
     )?;
-    Ok(ControllerCrdtCpcWriteResult { write })
+    Ok(ControllerCrdtCpWriteResult { write })
 }
 
 fn handle_response_cell_add_rpc(
@@ -5154,7 +5154,7 @@ fn handle_crdt_replica_rpc(
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
-            "controller_crdt_replica_handled file={} method={} source={} authority=cpc_model data_kind={}",
+            "controller_crdt_replica_handled file={} method={} source={} authority=cp_model data_kind={}",
             canonical.display(),
             method_name,
             source,
@@ -5417,7 +5417,7 @@ fn command_submit_projection(
     projection
 }
 
-/// Submit an editor command and return after CPC admission.
+/// Submit an editor command and return after CP admission.
 ///
 /// This is the message-passing fast path for editor gestures such as
 /// `Sync Tmux Layout` and focus handoff. The terminal `editor_command_submit`
@@ -7957,8 +7957,8 @@ pub(crate) fn handle_request_locked(
         "crdt_revision" => {
             controller_envelope(handle_crdt_revision_rpc(&bootstrap_snapshot, request))
         }
-        "crdt_cpc_write" => {
-            controller_envelope(handle_crdt_cpc_write_rpc(&bootstrap_snapshot, request))
+        "crdt_cp_write" => {
+            controller_envelope(handle_crdt_cp_write_rpc(&bootstrap_snapshot, request))
         }
         "response_cell_add" => {
             controller_envelope(handle_response_cell_add_rpc(&bootstrap_snapshot, request))
@@ -12481,7 +12481,7 @@ pub struct ControllerRestartOutcome {
 
 /// `#cpcrestart` — restart/recycle the current project controller out-of-band.
 ///
-/// The CPC is the live state authority; a restart is only for cold-start recovery
+/// The CP is the live state authority; a restart is only for cold-start recovery
 /// (recycle onto a new binary, or recover from a bug that wedged it). Because a
 /// spin-wedged controller stops servicing RPCs (`shutdown` times out), the reap
 /// signals the controller PID(s) directly (SIGTERM → 750ms → SIGKILL, via
@@ -15422,7 +15422,7 @@ mod tests {
         );
     }
     #[test]
-    fn schedule_stale_supervisor_pcp_recycle_marks_doc_for_idle_recycle() {
+    fn schedule_stale_supervisor_cp_recycle_marks_doc_for_idle_recycle() {
         // `#fccsupwarn4`: a preflight-proven stale route-owned supervisor should
         // schedule the safe idle-boundary recycle automatically, not just tell the
         // operator to run `admin recycle` by hand.
@@ -15445,7 +15445,7 @@ mod tests {
             !agent_doc_supervisor_io::config::supervisor_auto_recycle_enabled(&file),
             "test must prove stale recycling overrides the proactive recycle opt-out"
         );
-        let status = schedule_stale_supervisor_pcp_recycle(&file, "finalize_start");
+        let status = schedule_stale_supervisor_cp_recycle(&file, "finalize_start");
         assert!(
             status.contains("requested project_root="),
             "schedule status should prove the request was written: {status}"
@@ -15465,7 +15465,7 @@ mod tests {
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("stale_supervisor_pcp_recycle_requested")
+            ops_log.contains("stale_supervisor_cp_recycle_requested")
                 && ops_log.contains("source=finalize_start")
                 && ops_log.contains("reason=supervisor_binary_stale"),
             "ops log should record the automatic recycle request:\n{ops_log}"
@@ -15473,14 +15473,14 @@ mod tests {
     }
 
     #[test]
-    fn schedule_stale_editor_replica_pcp_recycle_marks_doc_for_idle_recycle() {
+    fn schedule_stale_editor_replica_cp_recycle_marks_doc_for_idle_recycle() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
         std::fs::write(&file, "body\n").unwrap();
 
         let status =
-            schedule_stale_editor_replica_pcp_recycle(&file, "session_check_terminal_convergence");
+            schedule_stale_editor_replica_cp_recycle(&file, "session_check_terminal_convergence");
         assert!(
             status.contains("requested project_root="),
             "schedule status should prove the request was written: {status}"
@@ -15495,7 +15495,7 @@ mod tests {
         assert!(!dir.path().join(".agent-doc/crdt-replica-events").exists());
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("stale_editor_replica_pcp_recycle_requested")
+            ops_log.contains("stale_editor_replica_cp_recycle_requested")
                 && ops_log.contains("source=session_check_terminal_convergence")
                 && ops_log.contains("reason=editor_authority_unavailable_or_diverged"),
             "ops log should record editor authority recovery:\n{ops_log}"
@@ -16642,7 +16642,7 @@ mod tests {
     fn commit_document_via_controller_is_none_for_headless_document() {
         let _env = reliable_sync_env_lock();
         use agent_doc_document_realtime::crdt_authority::CrdtAuthority;
-        // `#cpc-commit`: a headless document has no live editor authority to defer
+        // `#cp-commit`: a headless document has no live editor authority to defer
         // to, so the CLI commits locally — `commit_document_via_controller` must
         // short-circuit to `Ok(None)` WITHOUT touching a controller socket or
         // launching one. A fresh temp path is absent from Lazily liveness and

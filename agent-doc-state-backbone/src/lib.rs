@@ -15,7 +15,7 @@ use lazily::{
 use serde::{Deserialize, Serialize};
 
 use agent_doc_turn::CyclePhase;
-use agent_doc_turn::cpc_projection::TurnSteeringProjection;
+use agent_doc_turn::cp_projection::TurnSteeringProjection;
 use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
 
 /// Phase E (`#adstatechart`) local-process Harel state chart consolidation.
@@ -24,7 +24,7 @@ pub mod write_pipeline;
 
 /// Project-scoped supervisor graph document. Most state facts are per session
 /// document; supervisor recycle is a project-wide gate shared by every routed
-/// document, so the PCP folds it under this reserved document id.
+/// document, so the CP folds it under this reserved document id.
 pub const PROJECT_SUPERVISOR_DOCUMENT_HASH: &str = "__agent_doc_project_supervisor__";
 pub const ROUTE_SUBMIT_IN_FLIGHT_TTL_SECS: u64 = 30;
 pub const ROUTE_SUBMIT_READY_PROBE_TTL_SECS: u64 = 150;
@@ -354,7 +354,7 @@ pub enum StateFact {
         hosting_epoch: Option<u64>,
     },
     /// A supervisor-owned `/clear` or equivalent context-clear command is
-    /// pending/settling for this document. The PCP queue projection is the
+    /// pending/settling for this document. The CP queue projection is the
     /// durable authority for this gate.
     QueueContextClearStarted {
         document_hash: String,
@@ -372,7 +372,7 @@ pub enum StateFact {
         marked_secs: u64,
     },
     /// The supervisor-owned context-clear window settled; queue drains may resume
-    /// once this fact is folded into the PCP graph.
+    /// once this fact is folded into the CP graph.
     QueueContextClearSettled {
         document_hash: String,
         file: String,
@@ -436,7 +436,7 @@ pub enum StateFact {
     },
     /// Project-scoped supervisor recycle/restart was REQUESTED (stale binary,
     /// `admin recycle`, install fan-out, or a wedge trigger) but has not begun.
-    /// The PCP owns this pending-intent fact on the Lazily statechart so route
+    /// The CP owns this pending-intent fact on the Lazily statechart so route
     /// callers and the editor projection see the pending restart durably.
     SupervisorRecycleRequested {
         document_hash: String,
@@ -453,7 +453,7 @@ pub enum StateFact {
         marked_secs: u64,
     },
     /// Project-scoped supervisor recycle settled; route callers may inject
-    /// triggers again once this fact is folded into the PCP graph.
+    /// triggers again once this fact is folded into the CP graph.
     SupervisorRecycleSettled {
         document_hash: String,
         reason: String,
@@ -4805,7 +4805,7 @@ mod tests {
 
     #[test]
     fn realtime_steering_is_scoped_to_the_open_closeout_cycle() {
-        use agent_doc_turn::cpc_projection::{TurnSteeringProjection, TurnSteeringState};
+        use agent_doc_turn::cp_projection::{TurnSteeringProjection, TurnSteeringState};
 
         let mut projection = DocumentStateProjection::new("doc-steering");
         projection.apply(&StateFact::PreflightStarted {
@@ -5830,7 +5830,7 @@ mod tests {
             "doc-vscode-file",
             "vscode-file-patch",
             41,
-            "cpc_delivery_timeout",
+            "cp_delivery_timeout",
         ));
         events.extend(route_started_events(
             "vscode-file",
@@ -5907,7 +5907,7 @@ mod tests {
         );
         assert_eq!(
             vscode_file.transport.last_unproven_reason.as_deref(),
-            Some("cpc_delivery_timeout")
+            Some("cp_delivery_timeout")
         );
         assert_eq!(
             vscode_file.route.readiness,

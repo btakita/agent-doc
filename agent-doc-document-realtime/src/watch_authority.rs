@@ -94,7 +94,7 @@ pub enum WatchDelivery {
 /// Stable controller/state boundary projection of a disk-change watch delivery.
 ///
 /// `WatchDelivery` is the edge watcher's local decision. `DiskChangeSignal` is
-/// the small serializable fact that can cross the CPC/state boundary and be
+/// the small serializable fact that can cross the CP/state boundary and be
 /// converted back when the controller routes the signal through the canonical
 /// document model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,7 +269,7 @@ impl WatcherRegistry {
 }
 
 /// Whether the editor plugin's `WatchService` is limited to buffer reporting.
-/// The CPC document model and typed editor intents are the only mutation path.
+/// The CP document model and typed editor intents are the only mutation path.
 pub fn plugin_watch_is_readonly() -> bool {
     true
 }

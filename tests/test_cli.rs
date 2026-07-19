@@ -1763,8 +1763,8 @@ fn flowcore_hot_path_token_budget(source: &str, token: &str) -> usize {
         // 26 -> 27 (#detached-disk-current-file): the audited `DetachedDisk`
         // path logs `transport=disk_detached reason=<...>` after proving no live
         // editor owner/sidecar and rechecking the current visible file.
-        // -2 (#cpc-editor-ipc): stale-supervisor IPC-drift recycle diagnostics
-        // were removed from editor write convergence. CPC owns process recycling;
+        // -2 (#cp-editor-ipc): stale-supervisor IPC-drift recycle diagnostics
+        // were removed from editor write convergence. CP owns process recycling;
         // editor IPC proof failures now stay on retry/repair paths.
         ("agent-doc-write-converge-io/src/convergence_fixture_tests.rs", "reason=") => 11,
         // -1 (#final-response-transaction): the post-mutation
@@ -9303,7 +9303,7 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
 }
 
 #[test]
-fn test_agent_doc_supervisor_recycle_uses_pcp_graph_for_inflight() {
+fn test_agent_doc_supervisor_recycle_uses_cp_graph_for_inflight() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_manifest = fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
     let workspace: toml::Value = toml::from_str(&workspace_manifest).unwrap();
@@ -9323,7 +9323,7 @@ fn test_agent_doc_supervisor_recycle_uses_pcp_graph_for_inflight() {
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/recycle_inflight.rs"))
             .unwrap();
     for required in [
-        "Reason labels for the PCP-backed supervisor recycle projection",
+        "Reason labels for the CP-backed supervisor recycle projection",
         "RECYCLE_INFLIGHT_AUTO_INSTALL",
         "RECYCLE_INFLIGHT_RESTART",
     ] {
@@ -9349,7 +9349,7 @@ fn test_agent_doc_supervisor_recycle_uses_pcp_graph_for_inflight() {
     let supervisor_yield =
         fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/recycle_yield.rs")).unwrap();
     for required in [
-        "Reason labels for recycle-yield requests carried by the PCP recycle graph",
+        "Reason labels for recycle-yield requests carried by the CP recycle graph",
         "pub const RECYCLE_YIELD_STALE_BINARY",
         "pub const RECYCLE_YIELD_STATE_FLUSH",
     ] {
@@ -9462,7 +9462,7 @@ fn test_agent_doc_supervisor_recycle_uses_pcp_graph_for_inflight() {
             && project_controller_rpc
                 .contains("agent_doc_supervisor_io::recycle_request::request_recycle_for_doc(")
             && !project_controller_rpc.contains("pub fn schedule_supervisor_recycle_for_doc("),
-        "project_controller::rpc must own PCP supervisor recycle graph helpers and still call focused recycle-request IO directly"
+        "project_controller::rpc must own CP supervisor recycle graph helpers and still call focused recycle-request IO directly"
     );
     for (relative, required) in [
         (
@@ -9489,7 +9489,7 @@ fn test_agent_doc_supervisor_recycle_uses_pcp_graph_for_inflight() {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
         assert!(
             source.contains(required),
-            "{relative} should use PCP supervisor recycle graph helpers directly: {required}"
+            "{relative} should use CP supervisor recycle graph helpers directly: {required}"
         );
     }
 }
@@ -9871,7 +9871,7 @@ fn test_agent_doc_queue_owns_context_clear_in_flight_policy() {
     ] {
         assert!(
             !queue_source.contains(forbidden),
-            "agent-doc-queue must not own context-clear marker storage/freshness policy after the PCP projection migration: {forbidden}"
+            "agent-doc-queue must not own context-clear marker storage/freshness policy after the CP projection migration: {forbidden}"
         );
     }
 
@@ -17080,9 +17080,9 @@ fn test_stale_supervisor_recycle_is_checked_at_every_turn_stage() {
     let preflight_queue =
         fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
     assert!(
-        preflight_queue.contains("agent_doc_crdt_relay_io::apply_cpc_write_for_file(")
+        preflight_queue.contains("agent_doc_crdt_relay_io::apply_cp_write_for_file(")
             && preflight_queue.contains("authority=lazily surface=queue_maintenance")
-            && !preflight_queue.contains("schedule_stale_editor_replica_pcp_recycle("),
+            && !preflight_queue.contains("schedule_stale_editor_replica_cp_recycle("),
         "queue convergence must make one Lazily-authoritative compare-and-swap instead of starting a recycle side path"
     );
 }
@@ -17180,7 +17180,7 @@ fn test_agent_doc_controller_owns_editor_route_error_path_policy() {
 }
 
 #[test]
-fn test_jetbrains_run_agent_doc_uses_cpc_editor_route_rpc() {
+fn test_jetbrains_run_agent_doc_uses_cp_editor_route_rpc() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let terminal_util = fs::read_to_string(
         manifest_dir
@@ -17189,7 +17189,7 @@ fn test_jetbrains_run_agent_doc_uses_cpc_editor_route_rpc() {
     .unwrap();
     let route_client =
         fs::read_to_string(manifest_dir.join(
-            "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CpcRouteClient.kt",
+            "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CpRouteClient.kt",
         ))
         .unwrap();
     let controller_rpc = fs::read_to_string(
@@ -17208,7 +17208,7 @@ fn test_jetbrains_run_agent_doc_uses_cpc_editor_route_rpc() {
             && controller_rpc.contains("run_editor_route(ControllerEditorRouteInvocation")
             && controller_rpc.contains("EditorRouteAttemptIdGuard::set(")
             && controller_rpc.contains("validate_editor_route_layout_args("),
-        "project controller must expose a high-level editor_route RPC over CPC and execute the route through runtime effects"
+        "project controller must expose a high-level editor_route RPC over CP and execute the route through runtime effects"
     );
     assert!(
         !editor_route_handler.contains("Command::new(&binary)")
@@ -17222,14 +17222,14 @@ fn test_jetbrains_run_agent_doc_uses_cpc_editor_route_rpc() {
             && route_client.contains("File(projectRoot, \".agent-doc/controller.sock\")")
             && route_client
                 .contains("SocketChannel.open(UnixDomainSocketAddress.of(socket.toPath()))"),
-        "JetBrains Run Agent Doc must send editor_route over the existing CPC/controller socket"
+        "JetBrains Run Agent Doc must send editor_route over the existing CP/controller socket"
     );
     assert!(
-        terminal_util.contains("CpcRouteClient.runEditorRoute(")
+        terminal_util.contains("CpRouteClient.runEditorRoute(")
             && terminal_util.contains("buildEditorRouteRequestCommand(relativePath)")
             && terminal_util.contains("attemptId = attempt?.id")
             && terminal_util.contains("routeKey = attempt?.routeKey")
-            && terminal_util.contains("transport=cpc")
+            && terminal_util.contains("transport=cp")
             && !terminal_util.contains("ProcessBuilder(cmd)")
             && !terminal_util.contains("val cmd = buildRunRouteCommand("),
         "JetBrains Run Agent Doc must not launch the route dispatch CLI from the plugin"
@@ -18098,7 +18098,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         members
             .iter()
             .all(|member| member.as_str() != Some("agent-doc-supervisor-crdt-io")),
-        "supervisor CRDT IPC adapter crate must be removed; editor CRDT IPC belongs to the CPC"
+        "supervisor CRDT IPC adapter crate must be removed; editor CRDT IPC belongs to the CP"
     );
     assert!(
         manifest_dir
@@ -18501,7 +18501,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         orchestration_start_run.contains("current_text_via_controller_model_read_for_doc")
             && !orchestration_start_run.contains("current_text_via_controller_model_for_doc(")
             && !orchestration_start_run.contains("agent_doc_crdt_relay_io::ensure_document_model("),
-        "start-runtime post-registration current-text checks must use CPC read-only state instead of allocating or foreground-ensuring the CRDT hub locally"
+        "start-runtime post-registration current-text checks must use CP read-only state instead of allocating or foreground-ensuring the CRDT hub locally"
     );
     assert!(
         orchestration_start_idle_watch.contains("current_text_via_controller_model_read_for_doc")
@@ -18638,7 +18638,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             !supervisor_ipc_protocol.contains(forbidden_snippet)
                 && !supervisor_io_ipc.contains(forbidden_snippet)
                 && !orchestration_supervisor_io.contains(forbidden_snippet),
-            "supervisor IPC must not expose or dispatch editor CRDT methods after CPC owns editor IPC: {forbidden_snippet}"
+            "supervisor IPC must not expose or dispatch editor CRDT methods after CP owns editor IPC: {forbidden_snippet}"
         );
     }
     for forbidden_snippet in [
@@ -18653,7 +18653,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         assert!(
             !supervisor_io_ipc.contains(forbidden_snippet)
                 && !orchestration_supervisor_io.contains(forbidden_snippet),
-            "supervisor IO dispatch must not expose editor CRDT wire methods after CPC owns editor IPC: {forbidden_snippet}"
+            "supervisor IO dispatch must not expose editor CRDT wire methods after CP owns editor IPC: {forbidden_snippet}"
         );
     }
     for source in [
@@ -18699,10 +18699,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     ] {
         assert!(
             rpc_source.contains(required_snippet),
-            "controller RPC must own CPC CRDT hub mutation boundary: {required_snippet}"
+            "controller RPC must own CP CRDT hub mutation boundary: {required_snippet}"
         );
     }
-    let cpc_owned_crdt_hub_mutators = [
+    let cp_owned_crdt_hub_mutators = [
         "agent_doc_crdt_relay_io::ensure_document_model(",
         "agent_doc_crdt_relay_io::consume_disk_change_reconcile(",
         "agent_doc_crdt_relay_io::checkpoint_durable_projection_for_file(",
@@ -18729,10 +18729,10 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "src/main.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
-        for forbidden_snippet in cpc_owned_crdt_hub_mutators {
+        for forbidden_snippet in cp_owned_crdt_hub_mutators {
             assert!(
                 !source.contains(forbidden_snippet),
-                "{relative} must route CPC-owned CRDT hub mutations through controller RPC: {forbidden_snippet}"
+                "{relative} must route CP-owned CRDT hub mutations through controller RPC: {forbidden_snippet}"
             );
         }
     }
@@ -18746,7 +18746,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     ] {
         assert!(
             realtime_io.contains(required_snippet),
-            "document realtime must allow direct relay access only inside the CPC-owned document mutation scope: {required_snippet}"
+            "document realtime must allow direct relay access only inside the CP-owned document mutation scope: {required_snippet}"
         );
     }
     // `#ensurereplicagen`: queue maintenance runs in the short-lived preflight CLI
@@ -18763,7 +18763,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "fn ensure_document_model_via_authority(",
         "agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file)",
         "current_text_via_controller_model_for_doc(",
-        "apply_cpc_write_via_controller_model_for_doc(",
+        "apply_cp_write_via_controller_model_for_doc(",
     ] {
         assert!(
             preflight_io.contains(required_snippet),
@@ -18817,7 +18817,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     assert!(
         main_source.contains("with_controller_document_mutation(||"),
-        "Compact Exchange CPC runtime effect must enter the in-process document mutation scope"
+        "Compact Exchange CP runtime effect must enter the in-process document mutation scope"
     );
     for (editor_name, source) in [
         ("JetBrains", &jetbrains_crdt_forwarder),
@@ -18825,11 +18825,11 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     ] {
         assert!(
             source.contains("crdt_replica") && source.contains("diagnostic_payload"),
-            "{editor_name} CRDT transport must use the CPC controller RPC envelope"
+            "{editor_name} CRDT transport must use the CP controller RPC envelope"
         );
         assert!(
             source.contains("controller.sock"),
-            "{editor_name} CRDT transport must connect to the CPC controller socket"
+            "{editor_name} CRDT transport must connect to the CP controller socket"
         );
         assert!(
             !source.contains(".agent-doc/supervisor") && !source.contains("supervisor/$"),
@@ -18845,7 +18845,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             )
             && !jetbrains_crdt_forwarder.contains("agentDocSessionId(")
             && !jetbrains_crdt_forwarder.contains("File(filePath).readText()"),
-        "JetBrains CRDT transport must route directly through CPC/controller.sock without resolving session frontmatter"
+        "JetBrains CRDT transport must route directly through CP/controller.sock without resolving session frontmatter"
     );
     for required_snippet in [
         "use agent_doc_supervisor::ipc_protocol::{IpcMethod, IpcResponse};",
@@ -27679,7 +27679,7 @@ fn test_lazily_is_the_only_live_document_authority() {
         fs::read_to_string(manifest_dir.join("agent-doc-document-realtime-io/src/lib.rs")).unwrap();
     assert!(realtime.contains("current_text_via_controller_model_read_for_doc"));
     assert!(realtime.contains("current_text_via_controller_model_for_doc"));
-    assert!(realtime.contains("apply_cpc_write_for_file"));
+    assert!(realtime.contains("apply_cp_write_for_file"));
     assert!(!realtime.contains("await_idle_via_file"));
     assert!(!realtime.contains("send_publish_live_buffer_file_signal"));
 
@@ -30228,7 +30228,7 @@ fn test_preflight_drainability_contract_true_with_real_drainable_head() {
         .as_str()
         .expect("non-stall guidance must be present when continuation is required");
     assert!(
-        guidance.contains("CPC editor delivery") && guidance.contains("NOT stop reasons"),
+        guidance.contains("CP editor delivery") && guidance.contains("NOT stop reasons"),
         "guidance must carry the proven-delivery no-stall contract: {guidance}"
     );
 }

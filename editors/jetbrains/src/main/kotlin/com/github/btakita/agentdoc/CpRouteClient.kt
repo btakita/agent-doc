@@ -11,12 +11,12 @@ import java.nio.channels.SocketChannel
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-internal data class CpcEditorRouteResult(
+internal data class CpEditorRouteResult(
     val exitCode: Int,
     val output: String,
 )
 
-internal data class CpcTmuxLayoutSyncState(
+internal data class CpTmuxLayoutSyncState(
     val synced: Boolean,
     val reason: String,
 )
@@ -29,8 +29,8 @@ internal data class ProjectControllerStateSubscribeResult(
 /**
  * High-level editor route RPC over the Project Controller socket.
  */
-internal object CpcRouteClient {
-    private val log = Logger.getInstance(CpcRouteClient::class.java)
+internal object CpRouteClient {
+    private val log = Logger.getInstance(CpRouteClient::class.java)
 
     fun runEditorRoute(
         projectRoot: String,
@@ -40,7 +40,7 @@ internal object CpcRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
-    ): CpcEditorRouteResult {
+    ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         if (commandPlaneEnabled()) {
             val commandId = "cmd-" + java.util.UUID.randomUUID().toString()
@@ -57,7 +57,7 @@ internal object CpcRouteClient {
                 sendCommandSubmitToSocket(socket, request, commandId)
             } catch (e: Exception) {
                 log.warn("[route] command-plane editor_route request failed via ${socket.path}: ${e.message}")
-                CpcEditorRouteResult(
+                CpEditorRouteResult(
                     exitCode = 1,
                     output = "command-plane editor_route request failed via ${socket.path}: ${e.message}",
                 )
@@ -75,7 +75,7 @@ internal object CpcRouteClient {
             sendToSocket(socket, request)
         } catch (e: Exception) {
             log.warn("[route] Project Controller editor_route request failed via ${socket.path}: ${e.message}")
-            CpcEditorRouteResult(
+            CpEditorRouteResult(
                 exitCode = 1,
                 output = "Project Controller editor_route request failed via ${socket.path}: ${e.message}",
             )
@@ -90,7 +90,7 @@ internal object CpcRouteClient {
         noAutostart: Boolean,
         exactVisible: Boolean,
         callerKind: String,
-    ): CpcEditorRouteResult {
+    ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         val commandId = "cmd-" + java.util.UUID.randomUUID().toString()
         val request = syncTmuxLayoutCommandSubmitRequest(
@@ -108,7 +108,7 @@ internal object CpcRouteClient {
             sendAcceptedCommandSubmitToSocket(socket, request, commandId, "sync_tmux_layout")
         } catch (e: Exception) {
             log.warn("[sync] command-plane sync_tmux_layout submit failed via ${socket.path}: ${e.message}")
-            CpcEditorRouteResult(
+            CpEditorRouteResult(
                 exitCode = 1,
                 output = "command-plane sync_tmux_layout submit failed via ${socket.path}: ${e.message}",
             )
@@ -118,7 +118,7 @@ internal object CpcRouteClient {
     fun submitFocusDocumentPane(
         projectRoot: String,
         documentPath: String,
-    ): CpcEditorRouteResult {
+    ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         val commandId = "cmd-" + java.util.UUID.randomUUID().toString()
         val request = focusDocumentPaneCommandSubmitRequest(
@@ -131,7 +131,7 @@ internal object CpcRouteClient {
             sendAcceptedCommandSubmitToSocket(socket, request, commandId, "focus_document_pane")
         } catch (e: Exception) {
             log.warn("[focus] command-plane focus_document_pane submit failed via ${socket.path}: ${e.message}")
-            CpcEditorRouteResult(
+            CpEditorRouteResult(
                 exitCode = 1,
                 output = "command-plane focus_document_pane submit failed via ${socket.path}: ${e.message}",
             )
@@ -142,12 +142,12 @@ internal object CpcRouteClient {
         projectRoot: String,
         columnsJson: String,
         focus: String?,
-    ): CpcTmuxLayoutSyncState? {
+    ): CpTmuxLayoutSyncState? {
         val socket = cpcSocket(projectRoot)
         val request = tmuxLayoutSyncStateRequest(columnsJson, focus)
         return try {
             val data = sendRequestDataToSocket(socket, request)
-            CpcTmuxLayoutSyncState(
+            CpTmuxLayoutSyncState(
                 synced = data.get("synced")?.asBoolean ?: false,
                 reason = data.get("reason")?.asString ?: "missing_reason",
             )
@@ -396,44 +396,44 @@ internal object CpcRouteClient {
     // Resolve a unary `call` from the controller's returned command projection.
     // Terminal-only: an `applied` terminal yields the output; anything else (a
     // non-terminal projection, or a rejected terminal) is a failure result.
-    internal fun resolveCommandSubmitData(data: JsonObject, commandId: String): CpcEditorRouteResult {
+    internal fun resolveCommandSubmitData(data: JsonObject, commandId: String): CpEditorRouteResult {
         val output = data.get("output")?.asString ?: ""
         val commands = data.getAsJsonObject("projection")?.getAsJsonArray("commands")
         val entry = commands?.firstOrNull {
             it.isJsonObject && it.asJsonObject.get("command_id")?.asString == commandId
         }?.asJsonObject
         if (entry == null || entry.get("terminal")?.asBoolean != true) {
-            return CpcEditorRouteResult(1, output.ifEmpty { "command plane returned a non-terminal projection" })
+            return CpEditorRouteResult(1, output.ifEmpty { "command plane returned a non-terminal projection" })
         }
         val status = entry.get("status")?.asString
         if (status != "applied") {
             val reason = entry.get("reason")?.takeIf { !it.isJsonNull }?.asString
-            return CpcEditorRouteResult(1, output.ifEmpty { "editor_route ${status ?: "rejected"}: ${reason ?: ""}" })
+            return CpEditorRouteResult(1, output.ifEmpty { "editor_route ${status ?: "rejected"}: ${reason ?: ""}" })
         }
-        return CpcEditorRouteResult(0, output)
+        return CpEditorRouteResult(0, output)
     }
 
     internal fun resolveCommandSubmitAcceptedData(
         data: JsonObject,
         commandId: String,
         commandName: String,
-    ): CpcEditorRouteResult {
+    ): CpEditorRouteResult {
         val output = data.get("output")?.asString ?: "$commandName accepted"
         val commands = data.getAsJsonObject("projection")?.getAsJsonArray("commands")
         val entry = commands?.firstOrNull {
             it.isJsonObject && it.asJsonObject.get("command_id")?.asString == commandId
         }?.asJsonObject
-            ?: return CpcEditorRouteResult(1, output.ifEmpty { "command plane returned no projection entry" })
+            ?: return CpEditorRouteResult(1, output.ifEmpty { "command plane returned no projection entry" })
         val status = entry.get("status")?.asString
         val terminal = entry.get("terminal")?.asBoolean ?: false
         if (terminal && status != "applied") {
             val reason = entry.get("reason")?.takeIf { !it.isJsonNull }?.asString
-            return CpcEditorRouteResult(1, output.ifEmpty { "$commandName ${status ?: "rejected"}: ${reason ?: ""}" })
+            return CpEditorRouteResult(1, output.ifEmpty { "$commandName ${status ?: "rejected"}: ${reason ?: ""}" })
         }
         if (status == "submitted" || status == "accepted" || status == "running" || status == "applied") {
-            return CpcEditorRouteResult(0, output)
+            return CpEditorRouteResult(0, output)
         }
-        return CpcEditorRouteResult(1, output.ifEmpty { "$commandName unexpected command status: ${status ?: "<missing>"}" })
+        return CpEditorRouteResult(1, output.ifEmpty { "$commandName unexpected command status: ${status ?: "<missing>"}" })
     }
 
     internal fun cpcSocket(projectRoot: String): File = File(projectRoot, ".agent-doc/controller.sock")
@@ -454,7 +454,7 @@ internal object CpcRouteClient {
     private const val SOCKET_REQUEST_TIMEOUT_MS = 60_000L
 
     private val socketWatchdog = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "agent-doc-cpc-socket-watchdog").apply { isDaemon = true }
+        Thread(runnable, "agent-doc-cp-socket-watchdog").apply { isDaemon = true }
     }
 
     private fun sendRequestDataToSocket(socket: File, request: JsonObject): JsonObject {
@@ -502,9 +502,9 @@ internal object CpcRouteClient {
         ?: throw IllegalStateException("Project Controller response missing data")
     }
 
-    private fun sendToSocket(socket: File, request: JsonObject): CpcEditorRouteResult {
+    private fun sendToSocket(socket: File, request: JsonObject): CpEditorRouteResult {
         val data = sendRequestDataToSocket(socket, request)
-        return CpcEditorRouteResult(
+        return CpEditorRouteResult(
             exitCode = data.get("exit_code")?.asInt ?: 1,
             output = data.get("output")?.asString ?: "",
         )
@@ -514,7 +514,7 @@ internal object CpcRouteClient {
         socket: File,
         request: JsonObject,
         commandId: String,
-    ): CpcEditorRouteResult {
+    ): CpEditorRouteResult {
         val data = sendRequestDataToSocket(socket, request)
         return resolveCommandSubmitData(data, commandId)
     }
@@ -524,7 +524,7 @@ internal object CpcRouteClient {
         request: JsonObject,
         commandId: String,
         commandName: String,
-    ): CpcEditorRouteResult {
+    ): CpEditorRouteResult {
         val data = sendRequestDataToSocket(socket, request)
         return resolveCommandSubmitAcceptedData(data, commandId, commandName)
     }

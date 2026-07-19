@@ -12,10 +12,10 @@ import org.junit.Test
 class TerminalUtilTest {
 
     @Test
-    fun `run route request command uses CPC editor route`() {
+    fun `run route request command uses CP editor route`() {
         assertEquals(
             listOf(
-                "cpc:editor_route",
+                "cp:editor_route",
                 "--dispatch-only",
                 "--plain-trigger",
                 "--wait-for-ready",
@@ -37,7 +37,7 @@ class TerminalUtilTest {
         assertTrue(source.contains("attempt?.recordIfCurrent(\"route_start\", command = cmd)"))
         assertTrue(source.contains("route_deduped_active_run"))
         assertFalse(source.contains("inFlightRouteRegistry.replace(routeKey, handle)"))
-        assertTrue(source.contains("CpcRouteClient.runEditorRoute("))
+        assertTrue(source.contains("CpRouteClient.runEditorRoute("))
         assertTrue(source.contains("attemptId = attempt?.id"))
         assertTrue(source.contains("routeKey = attempt?.routeKey"))
         assertFalse(source.contains("ProcessBuilder(cmd)"))
@@ -46,8 +46,8 @@ class TerminalUtilTest {
     }
 
     @Test
-    fun `CPC editor route request carries route metadata`() {
-        val request = CpcRouteClient.editorRouteRequest(
+    fun `CP editor route request carries route metadata`() {
+        val request = CpRouteClient.editorRouteRequest(
             filePath = "/repo/tasks/root.md",
             relativePath = "tasks/root.md",
             layoutArgs = listOf("--col", "/repo/tasks/root.md", "--focus", "/repo/tasks/root.md"),

@@ -56,7 +56,7 @@ class CrdtReplicaAckFrontierTest {
      */
     @Test
     fun `controller published crdt frontiers bypass the speculative no-op drain backoff`() {
-        assertTrue(shouldUrgentDrainForRemoteEventUtil("cpc_write"))
+        assertTrue(shouldUrgentDrainForRemoteEventUtil("cp_write"))
         assertTrue(shouldUrgentDrainForRemoteEventUtil("ack_replay"))
         assertTrue(shouldUrgentDrainForRemoteEventUtil("ack_recovery_force_refresh"))
         assertTrue(shouldUrgentDrainForRemoteEventUtil("fanout"))

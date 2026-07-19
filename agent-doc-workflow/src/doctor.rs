@@ -410,7 +410,7 @@ fn evaluate_editor_convergence(
             .disproof_markers
             .push("live editor buffer diverges from disk".to_string());
         return result.recoverable(
-            "the Lazily/CPC live authority is ahead of its disk projection; retained intents rebase on that authority and the plugin owns native-save settlement",
+            "the Lazily/CP live authority is ahead of its disk projection; retained intents rebase on that authority and the plugin owns native-save settlement",
             vec![format!("agent-doc session-check {}", file.display())],
         );
     }
@@ -425,7 +425,7 @@ fn evaluate_editor_convergence(
     }
     if facts.editor.lazily_current_diverges == Some(false) {
         return result
-            .ok("Lazily/CPC current is converged with disk and no failure markers were found");
+            .ok("Lazily/CP current is converged with disk and no failure markers were found");
     }
     result.blocked_missing(
         "editor_lazily_projection",

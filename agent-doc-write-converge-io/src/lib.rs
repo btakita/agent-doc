@@ -1,6 +1,6 @@
 //! Write convergence adapters.
 //!
-//! This crate connects pure realtime/write policy to the Lazily/CPC document
+//! This crate connects pure realtime/write policy to the Lazily/CP document
 //! authority and to purpose-specific durable recovery records. It keeps those
 //! decision graphs out of the orchestration command crate.
 
@@ -440,7 +440,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
                         "socket_already_applied",
                         Some(patch_id),
                         "published_live_buffer_missing_response",
-                        "retry_response_cell_via_cpc",
+                        "retry_response_cell_via_cp",
                         &format!(
                             "published_len={} published_hash={} response_sha256={}",
                             content.len(),
@@ -534,14 +534,14 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             // `already_applied` is only a transport result. Even when a
             // visible-write receipt exists, it cannot authorize rebuilding a
             // whole document or writing a repaired disk image behind a live
-            // editor. Retain the response operation and let the CPC replay its
+            // editor. Retain the response operation and let the CP replay its
             // response-cell delta against a fresh canonical editor cut.
             log_ipc_proof_failure_with_recycle(
                 file,
                 "socket_already_applied",
                 Some(patch_id),
                 "visible_write_receipt_missing_response",
-                "retry_response_cell_via_cpc_without_disk_write",
+                "retry_response_cell_via_cp_without_disk_write",
                 &format!(
                     "response_sha256={} visible_len={} visible_hash={} content_ours_len={} content_ours_hash={}",
                     agent_doc_hash::content_hash(expected_response),
@@ -639,7 +639,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             Some(patch_id),
             "already_applied_empty_response_probe",
-            "authoritative_cpc_retry",
+            "authoritative_cp_retry",
             &format!(
                 "snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
                 repair_decision.snapshot_content.len(),
@@ -657,7 +657,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             Some(patch_id),
             "already_applied_unproven_content_ours",
-            "authoritative_cpc_retry",
+            "authoritative_cp_retry",
             &format!(
                 "snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
                 repair_decision.snapshot_content.len(),
@@ -680,7 +680,7 @@ pub fn persist_already_applied_socket_content_ours_snapshot(
             "socket_already_applied",
             Some(patch_id),
             "already_applied_snapshot_missing_response",
-            "retry_response_cell_via_cpc",
+            "retry_response_cell_via_cp",
             &format!(
                 "response_sha256={} snapshot_len={} snapshot_hash={} content_ours_len={} content_ours_hash={}",
                 agent_doc_hash::content_hash(expected_response),
@@ -1625,7 +1625,7 @@ fn visible_write_content_from_lazily_event(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "visible_write_lazily_event_cpc_current_hash_mismatch file={} patch_id={} candidate_hash={} current_len={} current_hash={}",
+                    "visible_write_lazily_event_cp_current_hash_mismatch file={} patch_id={} candidate_hash={} current_len={} current_hash={}",
                     file.display(),
                     patch_id,
                     proof.commit_candidate_hash,
@@ -1638,7 +1638,7 @@ fn visible_write_content_from_lazily_event(
         Err(err) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "visible_write_lazily_event_cpc_current_unavailable file={} patch_id={} error={}",
+                "visible_write_lazily_event_cp_current_unavailable file={} patch_id={} error={}",
                 file.display(),
                 patch_id,
                 err
@@ -1753,7 +1753,7 @@ pub trait EditorConvergenceEffects {
         expected_current: &str,
         content: &str,
         source: &str,
-    ) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
+    ) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
         let _ = (file, expected_current, content, source);
         Ok(None)
     }
@@ -1807,7 +1807,7 @@ pub fn visible_write_disk_proof(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "visible_write_cpc_proof_hash_mismatch file={} editor_id={} expected_len={} expected_hash={} current_len={} current_hash={}",
+                        "visible_write_cp_proof_hash_mismatch file={} editor_id={} expected_len={} expected_hash={} current_len={} current_hash={}",
                         file.display(),
                         editor_id,
                         content.len(),
@@ -1827,7 +1827,7 @@ pub fn visible_write_disk_proof(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "visible_write_cpc_proof_unavailable file={} editor_id={} error={}",
+                    "visible_write_cp_proof_unavailable file={} editor_id={} error={}",
                     file.display(),
                     editor_id,
                     err
@@ -1838,7 +1838,7 @@ pub fn visible_write_disk_proof(
     }
 }
 
-/// CPC relay current text, or `None` when no editor-attached CRDT current is
+/// CP relay current text, or `None` when no editor-attached CRDT current is
 /// available.
 fn newest_operator_authoritative_buffer(file: &Path, editor_id: &str) -> Option<String> {
     match current_text_via_recovery_authority(file, "visible_write_reconcile_operator_buffer") {
@@ -1848,7 +1848,7 @@ fn newest_operator_authoritative_buffer(file: &Path, editor_id: &str) -> Option<
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "visible_write_reconcile_cpc_current_unavailable file={} editor_id={} error={}",
+                    "visible_write_reconcile_cp_current_unavailable file={} editor_id={} error={}",
                     file.display(),
                     editor_id,
                     err
@@ -3384,13 +3384,13 @@ pub fn redeliver_full_content_repair_to_editor(
             if text != expected_bad_state =>
         {
             eprintln!(
-                "[write] {} editor repair skipped: CPC document model has advanced past the bad state",
+                "[write] {} editor repair skipped: CP document model has advanced past the bad state",
                 kind.label()
             );
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "{}_editor_redelivery_skipped file={} patch_id={} skip=cpc_model_diverges expected_len={} expected_hash={} cpc_len={} cpc_hash={}",
+                    "{}_editor_redelivery_skipped file={} patch_id={} skip=cp_model_diverges expected_len={} expected_hash={} cp_len={} cp_hash={}",
                     kind.label(),
                     file.display(),
                     source_patch_id.unwrap_or("-"),
@@ -3406,7 +3406,7 @@ pub fn redeliver_full_content_repair_to_editor(
         Err(err) => agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "{}_editor_redelivery_cpc_guard_unavailable file={} patch_id={} error={}",
+                "{}_editor_redelivery_cp_guard_unavailable file={} patch_id={} error={}",
                 kind.label(),
                 file.display(),
                 source_patch_id.unwrap_or("-"),
@@ -4400,8 +4400,8 @@ mod tests {
             _expected_current: &str,
             content: &str,
             _source: &str,
-        ) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
-            Ok(Some(agent_doc_crdt_relay_io::CpcRelayWrite {
+        ) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
+            Ok(Some(agent_doc_crdt_relay_io::CpRelayWrite {
                 applied: true,
                 content_len: content.len(),
                 content_hash: agent_doc_hash::content_hash(content),

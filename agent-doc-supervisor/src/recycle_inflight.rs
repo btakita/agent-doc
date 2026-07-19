@@ -1,4 +1,4 @@
-//! Reason labels for the PCP-backed supervisor recycle projection.
+//! Reason labels for the CP-backed supervisor recycle projection.
 //!
 //! The old `.agent-doc/recycle-inflight` marker store has been retired. Runtime
 //! callers publish [`agent_doc_state_backbone::StateFact::SupervisorRecycleStarted`]

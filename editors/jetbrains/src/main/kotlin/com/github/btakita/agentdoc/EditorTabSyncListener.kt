@@ -66,7 +66,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 columns.joinToString(" ") { "--col $it" } +
                 " --focus $focus --exact-visible --no-autostart"
 
-        internal fun formatCpcSyncHint(columns: List<String>, focus: String): String =
+        internal fun formatCpSyncHint(columns: List<String>, focus: String): String =
             "Sync: ${columns.joinToString(" ") { "--col $it" }} [focus: $focus]"
     }
 
@@ -312,7 +312,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     log("focus: superseded gen=$generation")
                     return@focus
                 }
-                val result = CpcRouteClient.submitFocusDocumentPane(
+                val result = CpRouteClient.submitFocusDocumentPane(
                     projectRoot = snapshot.focusedProjectRoot,
                     documentPath = snapshot.activeFile,
                 )
@@ -386,7 +386,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         syncColumns: List<String>,
     ): Boolean? {
         if (syncColumns.size < 2) return true
-        val report = CpcRouteClient.tmuxLayoutSyncState(
+        val report = CpRouteClient.tmuxLayoutSyncState(
             projectRoot = snapshot.syncProjectRoot,
             columnsJson = GSON.toJson(syncColumns),
             focus = snapshot.activeFile,
@@ -549,7 +549,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                         log("submit: ${formatProjectControllerSyncLabel(execution.columns, execution.activeFile)}")
                         TerminalUtil.showHint(
                             project,
-                            formatCpcSyncHint(execution.columns, execution.activeFile),
+                            formatCpSyncHint(execution.columns, execution.activeFile),
                         )
                     }
                 }
@@ -558,7 +558,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                     AutomaticCommandKind.Sync -> AUTOMATIC_SYNC_TIMEOUT_MS
                 }
                 val processResult = if (execution.plan.kind == AutomaticCommandKind.Focus) {
-                    val result = CpcRouteClient.submitFocusDocumentPane(
+                    val result = CpRouteClient.submitFocusDocumentPane(
                         projectRoot = execution.projectRoot,
                         documentPath = execution.activeFile,
                     )
@@ -568,7 +568,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                         timedOut = false,
                     )
                 } else {
-                    val result = CpcRouteClient.submitSyncTmuxLayout(
+                    val result = CpRouteClient.submitSyncTmuxLayout(
                         projectRoot = execution.projectRoot,
                         columnsJson = GSON.toJson(execution.columns),
                         window = null,
@@ -602,7 +602,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
                         isCurrentGeneration(startedGeneration),
                     )
                 ) {
-                    val focusResult = CpcRouteClient.submitFocusDocumentPane(
+                    val focusResult = CpRouteClient.submitFocusDocumentPane(
                         projectRoot = snapshot.focusedProjectRoot,
                         documentPath = execution.activeFile,
                     )

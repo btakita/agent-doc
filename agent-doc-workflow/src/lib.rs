@@ -718,7 +718,7 @@ mod tests {
                 &[WorkflowProof::CaptureRecord][..],
             ),
             (
-                "recovered CPC materialized response delivery",
+                "recovered CP materialized response delivery",
                 decide_captured_response(CapturedResponseEvidence {
                     state: CapturedResponseState::WriteApplied,
                     visible_response_matches_capture: true,

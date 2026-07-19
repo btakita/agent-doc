@@ -184,7 +184,7 @@ byte-identical until ops are supplied.
 consume+clear wiring, and thin JetBrains `DocumentListener` / VS Code `onDidChangeTextDocument`
 reporters. Realtime editor-to-editor convergence now delivers the merged result with node-keyed IPC
 patches (plus legacy component fallback), so peer buffers can apply targeted node inserts/replaces
-under the same ACK proof used by CPC-to-editor writes. The zero-duplication live eyeball (a
+under the same ACK proof used by CP-to-editor writes. The zero-duplication live eyeball (a
 concurrent live edit + agent write) remains `[operator-verify]`.
 
 ## Roadmap — recursive AST-node merge

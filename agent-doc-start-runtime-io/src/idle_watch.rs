@@ -792,7 +792,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
         .spawn(move || {
             let path = PathBuf::from(&file);
             // `#jbdisprecycle`: a freshly-started (post-recycle) supervisor
-            // publishes the PCP graph settle transition so route waiters reopen.
+            // publishes the CP graph settle transition so route waiters reopen.
             if let Err(err) =
                 agent_doc_controller_io::project_controller::supervisor_recycle_settled_for_file(
                     &path,
@@ -1898,7 +1898,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 let turn_boundary = prompt_visible && !turn_active;
                 let head_pending = active_head.is_some();
                 // `#supkill-a` — graceful, idle-gated self-kill. An external driver
-                // (the PCP / `admin kill-supervisor`) records a per-document request;
+                // (the CP / `admin kill-supervisor`) records a per-document request;
                 // the supervisor honors it at a turn boundary by tearing down its
                 // harness child and exiting cleanly (no relaunch — this is a kill, not
                 // a recycle). A wedged supervisor that never reaches this point is
@@ -2285,7 +2285,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 // The cycle-open escalation gates both recycle and operator
                 // supervisor replacement. A normal open cycle still defers the
                 // true `execve`, but a never-closing cycle at a proven turn boundary
-                // must not starve the PCP-authorized replacement forever; the durable
+                // must not starve the CP-authorized replacement forever; the durable
                 // checkpoint remains on disk for the fresh supervisor to adopt or
                 // redispatch.
                 let effective_cycle_open = cycle_open && !escalate_cycle_open;
@@ -2326,7 +2326,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         eprintln!(
                             "[agent-doc] supervisor restart: draining complete, hot-reloading onto freshly-installed agent-doc binary; preserving the live agent child via execve"
                         );
-                        // `#jbdisprecycle`: refresh the PCP recycle-in-flight graph
+                        // `#jbdisprecycle`: refresh the CP recycle-in-flight graph
                         // immediately before the `execve` so a concurrent dispatch
                         // defers across the hot-reload boundary.
                         if let Err(err) =
@@ -2843,7 +2843,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                         eprintln!(
                             "[agent-doc] supervisor hot-reloading onto freshly-installed agent-doc binary ({recycle_boundary}); preserving the live agent child via execve"
                         );
-                        // `#jbdisprecycle`: refresh the PCP recycle-in-flight graph
+                        // `#jbdisprecycle`: refresh the CP recycle-in-flight graph
                         // immediately before the `execve` so a concurrent dispatch
                         // defers across the hot-reload boundary (this is the path
                         // that emits the `(next_queue_item)`/`(idle)` hot-reload

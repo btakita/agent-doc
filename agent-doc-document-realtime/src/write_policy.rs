@@ -49,7 +49,7 @@ pub enum VisibleWriteDecision {
     DeferActiveTyping,
 }
 
-/// Admission for a CPC-authored CRDT write while a previous canonical frontier
+/// Admission for a CP-authored CRDT write while a previous canonical frontier
 /// may still be in flight to editor replicas. A new write is backpressured until
 /// all live editors ACK the visible frontier; callers may coalesce queued intent
 /// to the latest target while waiting.
@@ -641,7 +641,7 @@ fn contains_contiguous_hunk(haystack: &[String], needle: &[String]) -> bool {
 
 /// Detect whether the current document already contains the response delta.
 ///
-/// On delivery-receipt timeout, CPC delivery may have succeeded while
+/// On delivery-receipt timeout, CP delivery may have succeeded while
 /// confirmation did not arrive in time. If the editor applied the patches, the
 /// exchange component in `content_current` already contains the response delta
 /// from `base -> content_ours`; applying it again would duplicate the response.

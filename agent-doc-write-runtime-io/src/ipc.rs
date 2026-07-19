@@ -1273,12 +1273,12 @@ Done.
     }
 
     #[test]
-    fn redelivery_skips_when_cpc_editor_buffer_diverges_from_bad_state() {
+    fn redelivery_skips_when_cp_editor_buffer_diverges_from_bad_state() {
         // #clearexchstale: disk still equals the bad state (so the disk-divergence
         // guard passes), but the operator has freshly cleared/edited the live editor
         // buffer (a smaller cleared exchange published through the CRDT relay).
         // Redelivering the stale snapshot would REVIVE the cleared content, so the
-        // redeliver must fail closed on the CPC model divergence.
+        // redeliver must fail closed on the CP model divergence.
         let dir = TempDir::new().unwrap();
         let agent_doc_dir = dir.path().join(".agent-doc");
         std::fs::create_dir_all(agent_doc_dir.join("patches")).unwrap();
@@ -1297,7 +1297,7 @@ Stale response that the operator cleared.
         // Disk still holds the bad state (the redeliver's disk check will pass).
         std::fs::write(&doc, bad_state).unwrap();
 
-        // The operator cleared the exchange in the editor; the relay-published CPC
+        // The operator cleared the exchange in the editor; the relay-published CP
         // current text diverges from the bad state and from disk.
         let cleared_buffer = "\
 <!-- agent:exchange patch=append -->
@@ -1334,8 +1334,8 @@ Stale response that the operator cleared.
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), bad_state);
         let ops_log = std::fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("skip=cpc_model_diverges"),
-            "CPC model divergence skip should be logged:\n{ops_log}"
+            ops_log.contains("skip=cp_model_diverges"),
+            "CP model divergence skip should be logged:\n{ops_log}"
         );
     }
 

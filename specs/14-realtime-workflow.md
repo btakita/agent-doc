@@ -49,15 +49,15 @@ be load-bearing for deciding what operator-visible state should survive.
 When a live editor owner owns the document, the CRDT relay/editor buffer is the
 source of truth for operator changes. Disk is only a projection of that buffer.
 Editor-buffer authority is origin-scoped: only a genuine incremental user edit
-may originate editor-to-CPC document state. A whole-buffer reload, file-cache
-refresh, force-refresh attachment, or mutation performed while applying a CPC
+may originate editor-to-CP document state. A whole-buffer reload, file-cache
+refresh, force-refresh attachment, or mutation performed while applying a CP
 projection is non-operator state and must never be adopted into the canonical
-document. When such a projection differs, the CPC canonical is re-applied to the
+document. When such a projection differs, the CP canonical is re-applied to the
 editor and acknowledged only after the visible text hash converges.
 If disk and editor state disagree, the binary must converge through the editor,
 wait for proven relay delivery, or fail closed. It must not use a direct disk
 write as an automatic recovery behind the editor. There is no full live-buffer
-side channel: current text lives in the Lazily/CPC CRDT model, while open/close,
+side channel: current text lives in the Lazily/CP CRDT model, while open/close,
 sync epochs, editor identity, plugin version, and capabilities travel on the
 reliable-sync Lazily plane. No filesystem representation of live editor state
 is created or consulted.
@@ -107,9 +107,9 @@ capture only the small event fields needed to identify the document, mark the
 document dirty/typing-active, and enqueue later work. They must not perform full-buffer reads, CRDT merge, code-point offset conversion, socket I/O, native sidecar writes, patch application, or document saves on the editor UI thread or extension-host text-change callback.
 
 Dirty/typing attribution is reserved for proven operator events. JetBrains
-admits incremental events outside its CPC-apply guard; VS Code admits dirty
+admits incremental events outside its CP-apply guard; VS Code admits dirty
 incremental events plus explicit undo/redo. Clean reloads and whole-document
-replacements fence stale queued deltas, request a CPC drain, and never set typing
+replacements fence stale queued deltas, request a CP drain, and never set typing
 or unsynced-user state. Both plugins must implement the same admission contract.
 
 Any work that can scale with document size, block on native code, block on IPC,
@@ -245,7 +245,7 @@ long-term owner of `🚧` semantics.
 | Active HEAD set changes for any reason | Move the `🚧` projection to the active HEAD set in the visible document and backup/audit projection. | Affects a turn only when that turn's active HEAD identity changed or other active-turn input changed. |
 | Edit `agent:exchange` | Preserve and merge the exchange update. | Always affects the active turn. Exchange edits are never hidden as future queue-only state, even when the same source epoch also changes non-selected queue heads. |
 
-Queue crash recovery is part of the Lazily/CPC current-document lineage. No
+Queue crash recovery is part of the Lazily/CP current-document lineage. No
 queue-specific journal or second head set exists: absence from newer Lazily
 current may be an operator deletion and must remain absent. A genuinely unsaved queue add survives through
 the editor's durable CRDT/reliable-sync stream, using the same ordered causality
@@ -364,7 +364,7 @@ content merely because a save notification fired.
 
 When the document file changes on disk out of band — a `git` operation
 (`checkout`/`reset`/rebase), an external editor, or another process — the change
-must reach the canonical CPC replica and, from there, the live editor buffers.
+must reach the canonical CP replica and, from there, the live editor buffers.
 The controller watch daemon and the owning supervisor run in separate processes;
 the canonical `RelayHub` lives in the supervisor. Propagation crosses that
 boundary through a **file marker polled by the supervisor idle loop** (the same
@@ -497,7 +497,7 @@ is automatic and does not require or authorize a force-disk reset.
 Editor-op capture is epoch-scoped. Immediately before JetBrains applies any
 remote or agent-authored text mutation, it closes the native op-capture epoch.
 Later operator operations therefore cannot be concatenated onto an old snapshot
-base across an intervening agent projection. The newest CPC/CRDT current text
+base across an intervening agent projection. The newest CP/CRDT current text
 remains the authority/fallback when an op epoch is unavailable.
 
 Document-scoped editor actions must not create cross-document authority edges.
@@ -524,15 +524,15 @@ text later replays an older boundary or queue state.
 
 ### Turn-State Projection To The Plugin
 
-The CPC owns the authoritative turn phase (`CyclePhase`). The plugin observes a
+The CP owns the authoritative turn phase (`CyclePhase`). The plugin observes a
 coarse projection — `TurnProjection` (Idle / AwaitingResponse / Persisting) plus
 `turn_in_flight` and a `would_collide_with_in_flight_response()` guard so a
 forwarded operator prompt queues for the next turn instead of double-appending
 into an in-flight response. The plugin never drives a turn-state transition; the
-CPC is authoritative for every transition (`transition_authority`).
+CP is authoritative for every transition (`transition_authority`).
 
 `TurnProjection` also carries optional `realtime_steering` while a turn is in
-flight. The CPC computes this from the current realtime document model compared
+flight. The CP computes this from the current realtime document model compared
 with the immutable turn baseline: prompt-target additions, document edits,
 prompt deletion, and prompt reduction are projected as named steering states
 with a short preview. These states do not make disk authoritative and they do not
@@ -555,7 +555,7 @@ The **turn-state projection is the shared contract; the visible surface is
 per-editor** because the two IDE platforms do not paint the same widgets
 reliably. Both frontends map `TurnProjection` through the identical
 `buildTurnStatePresentation` / `TurnStateBridge.presentation` logic (show
-`⟳ agent-doc: persisting` / `⟳ agent-doc: awaiting response` while the CPC turn is
+`⟳ agent-doc: persisting` / `⟳ agent-doc: awaiting response` while the CP turn is
 in flight, append realtime steering such as `prompt deleted` when present, hide
 when idle) and poll the `agent_doc_turn_projection` FFI on the same cadence. They
 differ only in the native surface that renders it:
@@ -568,7 +568,7 @@ differ only in the native surface that renders it:
   instantiates the widget but silently never paints it. The banner is a real
 editor component that fails loudly instead of silently, so it is both reliable
 and diagnosable. Local asynchronous document actions may install a token-guarded
-transient presentation over the CPC projection; `Compact Exchange` uses this to
+transient presentation over the CP projection; `Compact Exchange` uses this to
 show `⟳ agent-doc: Compacting Exchange` from action start through completion,
 without allowing a stale callback to clear a newer operation. The status-bar
 widget (`TurnStateStatusBarWidget`) is retained only for its `idea.log`
@@ -612,7 +612,7 @@ Snapshots never create a realtime state. A snapshot can contribute a candidate
 delta to `AgentDeltaReady`; it cannot move a document to `MergePlanned`,
 `ApplyInFlight`, or `AppliedVerified` by itself.
 
-A deferred response target also cannot overrule a newer `ApplyInFlight` CPC
+A deferred response target also cannot overrule a newer `ApplyInFlight` CP
 frontier that already contains the latest complete response. That newer live
 target supersedes the deferred assistant tail and rebases reconnect proof on the
 exact failed-ACK target. An unchanged editor cut receives the live target
@@ -695,7 +695,7 @@ Realtime transitions are continuous and must work regardless of agent state:
 | Disk/editor operator sources reconcile | `DiskDriftObserved` | `EditorDirty` or `EditorQuiescent` | The editor-visible buffer includes all preserved disk and editor operator edits. |
 | Disk/editor operator sources conflict | `DiskDriftObserved` | `ConflictBlocked` | Typed conflict proves the operator sources cannot be safely combined automatically. |
 | Debounce and editor epoch settle | `EditorDirty` | `EditorQuiescent` | Latest editor-visible text is known and no in-flight local edit remains. |
-| Agent response, queue operation, pending mutation, or compact operation is captured | Any source state | `AgentDeltaReady` | The operation is narrowed to the binary-owned node/intent and records the current Lazily/CPC authority epoch as its merge base; snapshots are only a fallback source for this candidate. |
+| Agent response, queue operation, pending mutation, or compact operation is captured | Any source state | `AgentDeltaReady` | The operation is narrowed to the binary-owned node/intent and records the current Lazily/CP authority epoch as its merge base; snapshots are only a fallback source for this candidate. |
 | Merge succeeds | `AgentDeltaReady` plus latest realtime source | `MergePlanned` | `agent-doc-merge` proves operator text is preserved or explicitly owned by the operation. |
 | Merge conflicts | `AgentDeltaReady` plus latest realtime source | `ConflictBlocked` | Typed conflict describing the same-node or ambiguous placement failure. |
 | Editor/CRDT delivery starts | `MergePlanned` with editor owner | `ApplyInFlight` | Patch plan targets the current editor-visible baseline or node proof. For CRDT remote text delivery, the handoff carries the expected editor text observed before convergence. |
@@ -1021,7 +1021,7 @@ The following are correctness violations:
   whole-document replacement;
 - reading stale disk after a socket `already_applied` result and materializing a
   missing response into that disk image; without a matching visible-write receipt,
-  the response operation remains pending for CPC/CRDT replay;
+  the response operation remains pending for CP/CRDT replay;
 - treating a pluginless editor save or other out-of-band disk write as stale
   drift to reset from `content_ours`, a snapshot, a lazily visible-write receipt, or HEAD;
 - storing realtime authority only in a turn-local cycle sidecar, backup
@@ -1090,7 +1090,7 @@ restores and proves that target;
 - `#crdtpushdrain`: the editor's no-op drain backoff gates only *speculative*
   polling (file-watcher, editor-event, and self-rescheduled drains that have no
   evidence of pending work). A controller-published CRDT remote event is positive
-  evidence that the CPC already holds a frontier, so it must drain urgently
+  evidence that the CP already holds a frontier, so it must drain urgently
   instead of being suppressed. Suppressing it stalled every write on an idle
   document — where the backoff has escalated toward its 30s ceiling — until the
   binary escalated to `ack_recovery_force_refresh`, costing a fixed ~2s on the

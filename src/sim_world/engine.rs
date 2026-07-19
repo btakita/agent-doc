@@ -1281,7 +1281,7 @@ impl SimWorld {
         // `#midturn-recycle-resume` Phase B: track consecutive cycle-open
         // deferrals at a turn boundary and ESCALATE past
         // `MAX_CYCLE_OPEN_DEFER_TICKS`. The same effective gate is shared by
-        // supervisor replacement and recycle so a PCP-authorized restart cannot
+        // supervisor replacement and recycle so a CP-authorized restart cannot
         // starve forever behind a never-closing cycle.
         use agent_doc_supervisor::lifecycle::{
             MAX_CYCLE_OPEN_DEFER_TICKS, cycle_open_defer_escalates,

@@ -203,7 +203,7 @@ class RefreshBeforeApplyConflictTest {
     }
 
     @Test
-    fun `jetbrains crdt replica transport talks to cpc not supervisor`() {
+    fun `jetbrains crdt replica transport talks to cp not supervisor`() {
         val forwarder = Files.readString(
             listOf(
                 Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaForwarder.kt"),

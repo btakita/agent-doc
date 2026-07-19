@@ -6,7 +6,7 @@
 //! layer the plan calls for (`tasks/agent-doc/plan-crdt-authority-model.md`,
 //! "Multiple editors"):
 //!
-//! - The **project controller/CPC hosts the canonical replica**; editor replicas
+//! - The **project controller/CP hosts the canonical replica**; editor replicas
 //!   register/deregister with the hub. On a replica's local update the hub pulls
 //!   that op into the canonical replica and **broadcasts only the missing update**
 //!   to every OTHER live replica via the existing `diff(their_sv)` /
@@ -154,7 +154,7 @@ pub struct ReplicaDeliverySnapshot {
 }
 
 /// Outcome of routing an out-of-band disk change into the hub
-/// ([`RelayHub::apply_disk_change`]). This is the CPC-replica side of the
+/// ([`RelayHub::apply_disk_change`]). This is the CP-replica side of the
 /// file-watch propagation path (`plan-crdt-scramble-and-disk-propagation.md`
 /// Phases C/D): the watcher hands the settled disk text to the hub, and the hub
 /// decides how it relates to the live canonical replica.
@@ -198,7 +198,7 @@ pub enum DocumentOpDeltaOutcome {
 
 /// Star-topology relay hub: one canonical replica + N registered editor replicas.
 pub struct RelayHub {
-    /// The CPC-owned canonical replica (the hub / git-checkpoint authority).
+    /// The CP-owned canonical replica (the hub / git-checkpoint authority).
     canonical: ReplicaState,
     canonical_id: u64,
     /// Opaque identity of the current additive CRDT history. Rotated whenever
@@ -815,7 +815,7 @@ impl RelayHub {
         self.relay(client_id)
     }
 
-    /// Apply a CPC-authored document target to the canonical replica using the
+    /// Apply a CP-authored document target to the canonical replica using the
     /// minimal changed span, then queue the resulting CRDT delta for every live
     /// editor replica.
     ///
@@ -831,7 +831,7 @@ impl RelayHub {
         let current = self.canonical.text();
         if current != expected_current {
             return Err(anyhow!(
-                "canonical text changed before CPC relay write: expected_len={} current_len={}",
+                "canonical text changed before CP relay write: expected_len={} current_len={}",
                 expected_current.len(),
                 current.len()
             ));
@@ -1185,7 +1185,7 @@ impl RelayHub {
         Ok(true)
     }
 
-    /// Route a settled out-of-band disk change into the hub — the CPC-replica
+    /// Route a settled out-of-band disk change into the hub — the CP-replica
     /// entry point the controller watcher calls when the document file changed on
     /// disk (a `git` operation, an external editor, another process). Composes the
     /// existing in-memory-wins reconcile primitives and reports how the change
@@ -1776,7 +1776,7 @@ mod tests {
     }
 
     #[test]
-    fn cpc_canonical_replace_queues_delta_for_live_editors() {
+    fn cp_canonical_replace_queues_delta_for_live_editors() {
         let mut hub = RelayHub::from_text(1, "before\n");
         hub.register(2).unwrap();
         hub.register(3).unwrap();
@@ -1791,7 +1791,7 @@ mod tests {
         assert_eq!(hub.member_text(3).unwrap(), "before\nresponse\n");
         assert!(
             !hub.delivery_converged(),
-            "CPC-origin editor delivery still requires editor ACK"
+            "CP-origin editor delivery still requires editor ACK"
         );
 
         let pending = hub.pending_updates(2).unwrap();
@@ -1802,7 +1802,7 @@ mod tests {
     }
 
     #[test]
-    fn cpc_canonical_replace_compacted_exchange_removes_response_cells() {
+    fn cp_canonical_replace_compacted_exchange_removes_response_cells() {
         let expanded = concat!(
             "---\nagent_doc_format: template\n---\n\n",
             "<!-- agent:exchange patch=append -->\n",
@@ -1841,7 +1841,7 @@ mod tests {
     }
 
     #[test]
-    fn cpc_canonical_replace_rejects_stale_expected_text() {
+    fn cp_canonical_replace_rejects_stale_expected_text() {
         let mut hub = RelayHub::from_text(1, "operator text\n");
         hub.register(2).unwrap();
 
@@ -1849,8 +1849,8 @@ mod tests {
             .apply_canonical_replace("stale text\n", "agent response\n")
             .unwrap_err();
         assert!(
-            format!("{err:#}").contains("canonical text changed before CPC relay write"),
-            "stale CPC relay writes must be rejected: {err:#}"
+            format!("{err:#}").contains("canonical text changed before CP relay write"),
+            "stale CP relay writes must be rejected: {err:#}"
         );
         assert_eq!(hub.canonical_text(), "operator text\n");
         assert!(hub.pending_updates(2).unwrap().is_empty());
@@ -2263,7 +2263,7 @@ mod tests {
         assert_eq!(hub.last_committed_text_for_test(), Some("v2 body"));
     }
 
-    // ---- apply_disk_change: the file-watch → CPC-replica entry point ----
+    // ---- apply_disk_change: the file-watch → CP-replica entry point ----
 
     #[test]
     fn apply_disk_change_is_a_noop_when_canonical_already_has_it() {

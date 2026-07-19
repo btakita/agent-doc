@@ -306,7 +306,7 @@ class CrdtReplicaForwarderTest {
 
     @Test
     fun `two forwarders converge through a relaying transport (seam-level fan-out)`() {
-        // Model the CPC hub fan-out at the seam level: editor A's broadcast
+        // Model the CP hub fan-out at the seam level: editor A's broadcast
         // is delivered to editor B's applyRemoteUpdate (the Rust hub does the real
         // delta math; this proves the plugin-side ingress/egress wiring).
         val nodeA = FakeNode()
@@ -336,7 +336,7 @@ class CrdtReplicaForwarderTest {
     fun `socket loss is distinguishable from an idle controller pull`() {
         val projectRoot = Files.createTempDirectory("agent-doc-missing-controller").toFile()
         try {
-            val transport = CpcSocketReplicaTransport(projectRoot.absolutePath)
+            val transport = CpSocketReplicaTransport(projectRoot.absolutePath)
 
             val delivery = transport.pullDelivery("plan.md", "intellij:lost-controller")
 

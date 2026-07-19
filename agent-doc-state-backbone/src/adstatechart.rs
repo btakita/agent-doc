@@ -69,7 +69,7 @@ pub fn transport_degraded(facts: &ChartFacts) -> bool {
     facts.ipc_send_failed
 }
 
-/// No CPC editor listener currently owns the project. Durable intent remains
+/// No CP editor listener currently owns the project. Durable intent remains
 /// retained until a Lazily replica registers; there is no file fallback.
 pub fn transport_no_listener(facts: &ChartFacts) -> bool {
     facts.ipc_no_listener

@@ -33,7 +33,7 @@ pub fn new_boundary_id_with_summary(summary: Option<&str>) -> String {
 ///
 /// This is the key to `#finalize-visible-buffer-ipc-timeout-race` corruption:
 /// a single logical write can build its IPC patches more than once (socket
-/// attempt and any subsequent CPC retry in the same response operation).
+/// attempt and any subsequent CP retry in the same response operation).
 /// When each build minted a fresh random boundary, the plugin received the same
 /// response under different boundary IDs and, unable to match an already-applied
 /// boundary, appended it a second time — doubling the editor buffer. Seeding the

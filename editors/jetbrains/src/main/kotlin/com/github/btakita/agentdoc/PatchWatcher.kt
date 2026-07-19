@@ -22,7 +22,7 @@ private enum class CrdtReplicaEventReason(val token: String) {
     RequestFullState("request_full_state"),
     Fanout("fanout"),
     ResponseCellAdd("response_cell_add"),
-    CpcWrite("cpc_write"),
+    CpWrite("cp_write"),
     Rebootstrap("rebootstrap"),
     AckReplay("ack_replay"),
     AckRecoveryForceRefresh("ack_recovery_force_refresh");
@@ -640,7 +640,7 @@ class PatchWatcher(private val project: Project) : Disposable {
      * Reposition boundary marker in a document via Document API.
      * Used by socket IPC "reposition" messages.
      *
-     * Applies immediately on the EDT. The CPC/binary owns debounce and retry
+     * Applies immediately on the EDT. The CP/binary owns debounce and retry
      * scheduling before it sends editor IPC.
      */
     private fun repositionBoundaryViaDocument(filePath: String, boundaryId: String? = null, preserveHead: Boolean = false) {

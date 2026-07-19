@@ -10,7 +10,7 @@
 //!
 //! `agent-doc-document-realtime` still owns the deterministic pure policy for
 //! reconciling a trusted editor buffer against disk. This crate owns the live
-//! relay/disk adapter and ops-log/CPC effects. Cycle read sites (`preflight.rs` / `write.rs` /
+//! relay/disk adapter and ops-log/CP effects. Cycle read sites (`preflight.rs` / `write.rs` /
 //! `session_check.rs`) source current-doc through
 //! [`try_resolve_current_doc_from_file`].
 //!
@@ -46,7 +46,7 @@ pub use agent_doc_state_backbone::DocumentWriteDeferredReason;
 static LAST_CONTROLLER_DEGRADED_SECS: AtomicI64 = AtomicI64::new(0);
 
 thread_local! {
-    /// True only while a CPC runtime effect is executing a document mutation.
+    /// True only while a CP runtime effect is executing a document mutation.
     /// Controller-owned operations must use the in-process relay rather than
     /// enqueueing RPCs back through the same controller socket.
     static CONTROLLER_DOCUMENT_MUTATION: Cell<bool> = const { Cell::new(false) };
@@ -553,7 +553,7 @@ impl agent_doc_write_converge_io::EditorConvergenceEffects for RuntimeWriteConve
         expected_current: &str,
         content: &str,
         source: &str,
-    ) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
+    ) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
         apply_canonical_replace_if_attached(file, expected_current, content, source)
     }
 
@@ -1758,31 +1758,31 @@ pub fn atomic_repair_write_if_current_through_authority(
     Ok(retained_target)
 }
 
-/// Apply a binary/CPC-authored document update to the live CRDT relay.
+/// Apply a binary/CP-authored document update to the live CRDT relay.
 ///
 /// When an editor owns the document, this is the write-side companion to
 /// [`try_resolve_current_document_content`]: the controller canonical replica is
 /// updated first, with `expected_current` proving that the response was merged
 /// against the current editor-buffer state. The real markdown file may then be
 /// materialized as a projection of this relay state.
-pub fn apply_cpc_write_through_relay_authority(
+pub fn apply_cp_write_through_relay_authority(
     file: &Path,
     expected_current: &str,
     content: &str,
     source: &str,
-) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
+) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
     validate_canonical_document_target(file, content, source)?;
     if controller_document_mutation_in_progress()
         || agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file)
     {
-        return agent_doc_crdt_relay_io::apply_cpc_write_for_file(
+        return agent_doc_crdt_relay_io::apply_cp_write_for_file(
             file,
             expected_current,
             content,
             source,
         );
     }
-    agent_doc_controller_io::project_controller::apply_cpc_write_via_controller_model_for_doc(
+    agent_doc_controller_io::project_controller::apply_cp_write_via_controller_model_for_doc(
         file,
         expected_current,
         content,
@@ -1813,7 +1813,7 @@ pub fn apply_canonical_replace_if_attached(
     expected_current: &str,
     content: &str,
     source: &str,
-) -> Result<Option<agent_doc_crdt_relay_io::CpcRelayWrite>> {
+) -> Result<Option<agent_doc_crdt_relay_io::CpRelayWrite>> {
     let started = std::time::Instant::now();
     // Keep the write budget as a portable lazily timeline. Individual controller
     // RPC timeouts are congestion signals inside this larger deadline, not a
@@ -1825,7 +1825,7 @@ pub fn apply_canonical_replace_if_attached(
     // is re-applying against a moving frontier and racing forever.
     let mut last_applied_hash: Option<String> = None;
     let mut pending_target: Option<String> = None;
-    let mut pending_write: Option<agent_doc_crdt_relay_io::CpcRelayWrite> = None;
+    let mut pending_write: Option<agent_doc_crdt_relay_io::CpRelayWrite> = None;
     let mut ack_recovery = AckRecoveryState::default();
     let mut wait_state = CrdtConvergenceState::TypingQuiescence;
     let mut last_notice = std::time::Instant::now()
@@ -1854,7 +1854,7 @@ pub fn apply_canonical_replace_if_attached(
             );
         }
 
-        // A CPC write is issued only from a quiescent editor cut. Waiting here
+        // A CP write is issued only from a quiescent editor cut. Waiting here
         // happens in the caller, outside the controller RPC loop, so editor
         // deltas and delivery ACKs remain responsive while typing settles.
         if pending_target.is_none() {
@@ -1914,7 +1914,7 @@ pub fn apply_canonical_replace_if_attached(
                                     .as_ref()
                                     .expect("pending CRDT target must retain its write receipt");
                                 let recycle_status = agent_doc_controller_io::project_controller::
-                                        schedule_stale_editor_replica_pcp_recycle(file, source);
+                                        schedule_stale_editor_replica_cp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
                                     "{source}: retained canonical target for {} after its editor replica disappeared (content_hash={}): zero-member delivery convergence is not visible-write proof; disk was not written; recycle_status={recycle_status}",
                                     file.display(),
@@ -2059,11 +2059,11 @@ pub fn apply_canonical_replace_if_attached(
                                 DocumentWriteDeferredReason::EditorDeliveryWorkerStale,
                             )?;
                             let recycle_status = agent_doc_controller_io::project_controller::
-                                    schedule_stale_editor_replica_pcp_recycle(file, source);
+                                    schedule_stale_editor_replica_cp_recycle(file, source);
                             agent_doc_ops_log_io::log_op(
                                 file,
                                 &format!(
-                                    "{source}_editor_delivery_worker_stale file={} intent_id={} content_hash={} authority=live_ide_pid delivery=fresh_heartbeat_missing recovery=pcp_recycle_no_disk_write recycle_status={recycle_status}",
+                                    "{source}_editor_delivery_worker_stale file={} intent_id={} content_hash={} authority=live_ide_pid delivery=fresh_heartbeat_missing recovery=cp_recycle_no_disk_write recycle_status={recycle_status}",
                                     file.display(),
                                     intent_id,
                                     agent_doc_hash::content_hash(&effective_target),
@@ -2097,7 +2097,7 @@ pub fn apply_canonical_replace_if_attached(
                                     DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
                 )?;
                                 let recycle_status = agent_doc_controller_io::project_controller::
-                    schedule_stale_editor_replica_pcp_recycle(file, source);
+                    schedule_stale_editor_replica_cp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
                                     "{source}: deferred write for {} in Lazily state (intent_id={intent_id}): the editor owns the document but no relay replica is registered; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
                                     file.display(),
@@ -2129,7 +2129,7 @@ pub fn apply_canonical_replace_if_attached(
                                 None
                             };
 
-                        match apply_cpc_write_through_relay_authority(
+                        match apply_cp_write_through_relay_authority(
                             file,
                             &relay_text,
                             &effective_target,
@@ -2140,7 +2140,7 @@ pub fn apply_canonical_replace_if_attached(
                                 if relay_write.applied && relay_write.targets == 0 =>
                             {
                                 let intent_id = zero_replica_intent.unwrap_or_else(|| {
-                                    "durable-intent-recorded-before-cpc-write".to_string()
+                                    "durable-intent-recorded-before-cp-write".to_string()
                                 });
                                 agent_doc_ops_log_io::log_op(
                                     file,
@@ -2152,7 +2152,7 @@ pub fn apply_canonical_replace_if_attached(
                                     ),
                                 );
                                 let recycle_status = agent_doc_controller_io::project_controller::
-                                    schedule_stale_editor_replica_pcp_recycle(file, source);
+                                    schedule_stale_editor_replica_cp_recycle(file, source);
                                 return Err(await_editor_replica_no_disk_write(format!(
                                     "{source}: retained the canonical write for {} in CRDT + Lazily state (intent_id={intent_id}), but no editor replica was registered to receive it; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
                                     file.display(),
@@ -2565,7 +2565,7 @@ fn validate_canonical_document_target(file: &Path, content: &str, source: &str) 
 
 /// Resolve the operator-authored editor cut independently from agent projection
 /// bytes. A live IDE buffer normally wins as-is. If it is structurally poisoned
-/// by a prior non-operator CPC projection (duplicate boundary/exchange), and the
+/// by a prior non-operator CP projection (duplicate boundary/exchange), and the
 /// durable operator-op stream can be replayed exactly from the expected base,
 /// use that replay as the authoritative editor branch. This preserves operator
 /// text such as `queue: stop` without accepting duplicated agent content.
@@ -2709,10 +2709,10 @@ fn log_fence_count_drop_if_any(path: &Path, new_content: &str) {
     }
 }
 
-// ── Rung 2 (`#rtwfeed`): CPC-owned CRDT current-document feed ──
+// ── Rung 2 (`#rtwfeed`): CP-owned CRDT current-document feed ──
 //
 // Rung 1 above is the pure authority decision over a trusted `BufferState`.
-// Rung 2 is the durable source of that state: the CPC-owned CRDT/lazily model.
+// Rung 2 is the durable source of that state: the CP-owned CRDT/lazily model.
 // Plugin reports are transport inputs only; Lazily is the sole live editor
 // authority and no filesystem projection participates in this path.
 
@@ -2985,7 +2985,7 @@ fn ensure_deferred_document_write_intent(
         } else {
             let expected_hash = agent_doc_hash::content_hash(expected_current);
             if requested_target_hash.eq_ignore_ascii_case(&expected_hash) {
-                // The requested target is already the live CPC authority. A prior
+                // The requested target is already the live CP authority. A prior
                 // deferred target is therefore obsolete, not a concurrent branch
                 // to merge back into the document. Rebase the reconnect lineage on
                 // that exact prior target so the editor buffer which failed to ACK
@@ -4366,7 +4366,7 @@ fn visible_write_content_matches(left: &str, right: &str) -> bool {
             == agent_doc_document::transient_markers::normalize_transient_agent_doc_markers(right)
 }
 
-/// Source the durable editor-buffer feed for `file` from the CPC-owned CRDT
+/// Source the durable editor-buffer feed for `file` from the CP-owned CRDT
 /// document model.
 ///
 /// Returns `Some(BufferState)` only when the controller/relay says the active
@@ -4412,7 +4412,7 @@ pub fn durable_buffer_state(file: &std::path::Path, disk: &str) -> Option<Buffer
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "durable_buffer_state_cpc_unavailable file={} error={}",
+                    "durable_buffer_state_cp_unavailable file={} error={}",
                     file.display(),
                     err
                 ),
@@ -5210,7 +5210,7 @@ mod tests {
         )));
     }
 
-    // ── Rung 2 (`#rtwfeed`) CPC-owned CRDT feed ──
+    // ── Rung 2 (`#rtwfeed`) CP-owned CRDT feed ──
 
     /// Build a temp project with `.agent-doc/` and the document on disk. Returns
     /// the `TempDir` (keep alive), the file `PathBuf`, and the canonical path
@@ -5523,7 +5523,7 @@ mod tests {
         let malformed = "<!-- agent:exchange -->\nQuestion.\n";
         let (_dir, file, _) = temp_doc(baseline);
 
-        let err = apply_cpc_write_through_relay_authority(
+        let err = apply_cp_write_through_relay_authority(
             &file,
             baseline,
             malformed,
@@ -5730,7 +5730,7 @@ mod tests {
             .expect("editor replica should attach");
 
         let prior =
-            apply_cpc_write_through_relay_authority(&file, baseline, source, "seed_prior_delivery")
+            apply_cp_write_through_relay_authority(&file, baseline, source, "seed_prior_delivery")
                 .unwrap()
                 .expect("seed write should use attached CRDT relay");
         assert!(
@@ -7747,24 +7747,24 @@ mod tests {
     }
 
     #[test]
-    fn durable_buffer_state_reads_cpc_crdt_current_text() {
+    fn durable_buffer_state_reads_cp_crdt_current_text() {
         let disk = "## Queue\n- do [#a]\n";
         let buffer = "## Queue\n- do [#a]\n- do [#rtwatch]\n";
         let (_dir, file, _canonical) = temp_doc(disk);
-        seed_reliable_sync_open(&file, "test-cpc-authority");
+        seed_reliable_sync_open(&file, "test-cp-authority");
         let (_client_id, _bootstrap) =
-            test_support_register_replica_for_file(&file, "test-cpc-authority")
+            test_support_register_replica_for_file(&file, "test-cp-authority")
                 .unwrap()
                 .expect("editor-attached replica registers");
         agent_doc_crdt_relay_io::with_hub(&file, |hub| {
             let client_id =
-                agent_doc_document_realtime::crdt_relay::mint_client_id("test-cpc-authority");
+                agent_doc_document_realtime::crdt_relay::mint_client_id("test-cp-authority");
             hub.apply_local(client_id, 0, disk.chars().count() as u32, buffer)
                 .unwrap();
         })
         .unwrap();
 
-        let state = durable_buffer_state(&file, disk).expect("CPC relay buffer wins");
+        let state = durable_buffer_state(&file, disk).expect("CP relay buffer wins");
         assert_eq!(state.content, buffer);
         let r = try_resolve_current_doc(&file, disk).unwrap();
         assert_eq!(
@@ -7776,7 +7776,7 @@ mod tests {
 
     #[test]
     fn durable_buffer_state_none_when_no_editor_feed() {
-        // No CPC model (no editor attached) → disk is the only source.
+        // No CP model (no editor attached) → disk is the only source.
         let disk = "plain disk body\n";
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();

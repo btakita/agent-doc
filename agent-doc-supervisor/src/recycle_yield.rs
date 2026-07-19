@@ -1,4 +1,4 @@
-//! Reason labels for recycle-yield requests carried by the PCP recycle graph.
+//! Reason labels for recycle-yield requests carried by the CP recycle graph.
 //!
 //! The old `.agent-doc/recycle-yield` sidecar has been retired. Idle-watch now
 //! publishes a lazily-backed supervisor recycle projection, and

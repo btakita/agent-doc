@@ -2456,7 +2456,7 @@ enum SimCommand {
     /// `#qflood2`: set whether the routed trigger is already pending in the
     /// modeled composer (the live pane-capture dedup signal).
     SetTriggerAlreadyPending(bool),
-    /// `#qdedup`: queue a supervisor/PCP fresh-context handoff request. Targeted
+    /// `#qdedup`: queue a supervisor/CP fresh-context handoff request. Targeted
     /// tests repeat this while the pane is busy to prove the inter-turn stage
     /// delivers one de-duplicated `/clear` + `agent-doc <FILE>` set.
     QueueBetweenTurnFreshContextHandoff,
@@ -5938,7 +5938,7 @@ fn restart_supervisor_drains_then_reexecs_in_place_no_dropped_turn() {
 
 #[test]
 fn restart_supervisor_open_cycle_escalates_then_reexecs_in_place() {
-    // A PCP-authorized supervisor replacement must not starve forever behind a
+    // A CP-authorized supervisor replacement must not starve forever behind a
     // stale open closeout cycle. It should share the bounded cycle-open escalation
     // used by recycle: below the threshold it defers; at the threshold it replaces
     // the supervisor in place, preserving the pane and clearing the stale binary.
@@ -6957,7 +6957,7 @@ fn brtc_reemit_storm_converges_to_one_item_per_identity_and_preserves_operator_p
 
 #[test]
 fn qdedup_between_turn_enqueue_waits_for_idle_and_dedupes_command_set() {
-    // `#qdedup`: repeated supervisor/PCP between-turn handoff requests should be
+    // `#qdedup`: repeated supervisor/CP between-turn handoff requests should be
     // buffered while a turn is active, then composed as a set at the idle boundary:
     // exactly one `/clear`, exactly one `agent-doc <FILE>`, in that order.
     let mut world = SimWorld::new(4_244);
@@ -9275,7 +9275,7 @@ fn editor_project(disk: &str) -> (tempfile::TempDir, PathBuf) {
     std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc/logs")).unwrap();
     // SimEditor is an in-process deterministic editor fixture. The production
-    // path observes CPC-owned relay state; seed the in-process Lazily model
+    // path observes CP-owned relay state; seed the in-process Lazily model
     // directly so there is no filesystem state to drift.
     let doc = dir.path().join("doc.md");
     std::fs::write(&doc, disk).unwrap();

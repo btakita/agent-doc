@@ -212,7 +212,7 @@ pub fn is_socket_status_error(message: impl AsRef<str>) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Provenance of the candidate used for CPC write reconciliation.
+/// Provenance of the candidate used for CP write reconciliation.
 pub enum IpcSnapshotSource {
     LazilyVisibleWriteEvent,
     ContentOurs,

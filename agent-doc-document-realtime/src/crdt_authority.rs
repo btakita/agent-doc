@@ -13,7 +13,7 @@
 //!   treated as authoritative. This is most headless dogfooding traffic, and it
 //!   carries zero stale-`.yrs` class by construction.
 //! - [`CrdtAuthority::MultiReplica`] — **EditorAttached**: a live editor plugin is
-//!   attached. The project controller/CPC hosts the canonical replica; each editor
+//!   attached. The project controller/CP hosts the canonical replica; each editor
 //!   hosts its own. Git/disk are durable **projections checkpointed at boundaries**,
 //!   not the live coordination medium.
 //!
@@ -43,7 +43,7 @@ pub enum CrdtAuthority {
     /// durable `.yrs` treated as authoritative). Most headless traffic.
     GitAuthoritative,
     /// **EditorAttached** — a live editor plugin owns/coordinates a replica. The
-    /// project controller/CPC hosts the canonical replica; editors host their own.
+    /// project controller/CP hosts the canonical replica; editors host their own.
     /// Git/disk are durable projections checkpointed at boundaries, not the live
     /// coordination medium.
     MultiReplica,

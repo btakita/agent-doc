@@ -372,20 +372,20 @@ A true red/green supervisor replacement must be owned by the project controller
 as a `SupervisorHandoff` state machine. The existing route-owned supervisor
 `execve` hot reload remains the default restart path because it preserves the
 live child and pty without cross-process fd transfer. The handoff state machine
-only applies when PCP starts a separate replacement supervisor process.
+only applies when CP starts a separate replacement supervisor process.
 
 States:
 
 - `Idle`: no handoff is active.
-- `LaunchingStandby`: PCP launches a fresh supervisor on a private socket.
-- `ProbingStandby`: PCP verifies standby freshness, capabilities, and health.
+- `LaunchingStandby`: CP launches a fresh supervisor on a private socket.
+- `ProbingStandby`: CP verifies standby freshness, capabilities, and health.
 - `AwaitTurnBoundary`: standby is healthy but fenced; old supervisor is still
   authoritative until `prompt_visible && !turn_active`.
-- `PromotingLease`: PCP compare-and-swap promotes the supervisor lease and
+- `PromotingLease`: CP compare-and-swap promotes the supervisor lease and
   generation at the turn boundary.
 - `TransferringOwnership`: promotion committed; the new supervisor may adopt
   child/pty ownership.
-- `StoppingOld`: ownership transferred; PCP stops the old supervisor generation.
+- `StoppingOld`: ownership transferred; CP stops the old supervisor generation.
 - `Complete`: the new supervisor owns the lease and child.
 - `RollingBack`: pre-promotion failure or abort; terminate standby and keep the
   old supervisor active.
@@ -424,7 +424,7 @@ Invariants:
 - A standby supervisor must not read/write the child pty, dispatch queue work,
   heartbeat as the active lease, or write the session document before
   `PromotionCommitted`.
-- PCP promotion is compare-and-swap guarded by document id, observed old
+- CP promotion is compare-and-swap guarded by document id, observed old
   generation, standby generation, and private standby socket identity.
 - Automatic rollback is allowed only before lease promotion. After promotion,
   ambiguous ownership is repair-only so two supervisors cannot race the same

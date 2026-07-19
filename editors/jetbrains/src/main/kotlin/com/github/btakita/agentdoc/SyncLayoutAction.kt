@@ -312,7 +312,7 @@ class SyncLayoutAction : AnAction() {
                         visibleMdFiles,
                         editorLayout,
                     )
-                    val receipt = CpcRouteClient.submitSyncTmuxLayout(
+                    val receipt = CpRouteClient.submitSyncTmuxLayout(
                         projectRoot = projectRoot,
                         columnsJson = GSON.toJson(columns),
                         window = null,

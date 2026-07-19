@@ -39,7 +39,7 @@ Enable debug output: IDEA → `Help > Diagnostic Tools > Debug Log Settings` →
 ## Conventions
 
 - Plugin is a thin wrapper — business logic lives in the `agent-doc` binary and project control plane.
-- CLI subprocesses and PCP-backed native calls use the resolved project root directory.
+- CLI subprocesses and CP-backed native calls use the resolved project root directory.
 - Automatic startup/layout sync paths stay thin: they use report-only `agent-doc resync`, and automatic `agent-doc sync` receives only layout/focus file paths while the binary owns autostart, ambiguity handling, and tmux targeting.
 - Submit/route waits for the markdown typing debounce before saving and dispatching, and stays silent on progress and success.
 - Repeating `Run Agent Doc` should supersede any stale plugin-spawned route process and dispatch again immediately.

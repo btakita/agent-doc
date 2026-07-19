@@ -1077,7 +1077,7 @@ pub(crate) fn run_stream(
     if !force_disk {
         // `#docop-plane` P4: relay membership is transport state, not editor
         // liveness. Only an authoritative reliable-sync Close permits the disk
-        // path to skip redundant CPC delivery attempts.
+        // path to skip redundant CP delivery attempts.
         let editor_absent = write_path_editor_absent(file);
         if editor_absent {
             eprintln!(
@@ -1266,7 +1266,7 @@ pub(crate) fn run_stream(
                 return Ok(());
             }
             let recovery = if editor_crdt_authority_attached(file) {
-                "cpc_crdt_relay"
+                "cp_crdt_relay"
             } else {
                 "detached_disk_authority"
             };
@@ -1604,7 +1604,7 @@ pub(crate) fn run_stream(
     if !force_disk
         && editor_crdt_authority_attached(file)
         && let Some(relay_write) =
-            agent_doc_document_realtime_io::apply_cpc_write_through_relay_authority(
+            agent_doc_document_realtime_io::apply_cp_write_through_relay_authority(
                 file,
                 &content_current,
                 &final_content,

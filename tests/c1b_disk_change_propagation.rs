@@ -1,4 +1,4 @@
-//! Integration: the C1b disk-change → CPC-replica reconcile vertical, end-to-end
+//! Integration: the C1b disk-change → CP-replica reconcile vertical, end-to-end
 //! in one process, against a genuinely **editor-attached** document.
 //!
 //! Editor-attachment is real, not mocked: the test folds an Open fact into the
@@ -10,7 +10,7 @@
 //!   route_disk_change_signal (watch-daemon/controller, uses decide_watch_action)
 //!     -> apply_disk_change_for_file -> RelayHub::apply_disk_change
 //!
-//! Demonstrates goals 4/5: an out-of-band disk change reconciles into the CPC
+//! Demonstrates goals 4/5: an out-of-band disk change reconciles into the CP
 //! canonical replica, idempotently (already-present → no-op) and safely
 //! (out-of-band deletion → rebuild + editors flagged for re-bootstrap).
 

@@ -345,7 +345,7 @@ pub fn prepare_start_runtime(file: &Path, force: bool, route_owned: bool) -> Res
             .with_context(|| format!("failed to write {}", file.display()))?;
     }
 
-    // Lazily/CPC is the durable current-document authority. Retire the legacy
+    // Lazily/CP is the durable current-document authority. Retire the legacy
     // append-only queue recovery journal instead of replaying it over that
     // frontier; replay could not distinguish a crash-lost add from an
     // operator-authored deletion and was the direct resurrection source.

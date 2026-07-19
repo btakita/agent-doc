@@ -90,7 +90,7 @@ internal fun shouldStartRemoteDrainUtil(backoffScheduled: Boolean): Boolean = !b
 
 /**
  * `#crdtpushdrain`: a controller-published CRDT remote event is positive evidence
- * that the CPC already holds a frontier for this document, so it must bypass the
+ * that the CP already holds a frontier for this document, so it must bypass the
  * speculative no-op drain backoff instead of being suppressed by it.
  *
  * The no-op backoff (see [scheduleRemoteDrainAfterBackoff]) exists to stop a
@@ -230,7 +230,7 @@ private val REMOTE_EDITOR_APPLY_MERGE = MergePolicy(
  * Production editor-as-CRDT-replica wiring (`#crdtauth5`, realtime phase 3).
  *
  * The manager is intentionally thin: local edits are forwarded to [CrdtReplicaForwarder],
- * remote updates are pulled from the CPC document model, and document mutation uses the same
+ * remote updates are pulled from the CP document model, and document mutation uses the same
  * minimal-edit helper as IPC patches. A remote mutation is saved before acknowledgement only
  * when raw disk still equals the guarded editor baseline or the converged target; novel external
  * disk text rejects the apply instead of being overwritten.
@@ -469,7 +469,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val started = System.nanoTime()
         if (projectionEpoch != nonOperatorMutationEpoch(filePath)) {
             log.debug(
-                "[crdt-replica] dropped stale operator event for $filePath after a newer CPC projection",
+                "[crdt-replica] dropped stale operator event for $filePath after a newer CP projection",
             )
             requestRemoteDrain(filePath, "stale-operator-event-fenced")
             return
@@ -537,7 +537,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 val moreWorkRequested = drainAllRequested.get() || drainRequestedPaths.isNotEmpty()
                 if (moreWorkRequested && appliedTotal == 0) {
                     // #crdt-drain-backoff: when a drain cycle applied zero useful
-                    // updates (notably when the CPC socket is unavailable and every
+                    // updates (notably when the CP socket is unavailable and every
                     // pullDelivery returns empty deltas), delay the reschedule with
                     // exponential backoff instead of re-executing immediately. A
                     // tight no-op spin generated ~70MB/min of logs and froze the IDE.
@@ -606,7 +606,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     "[reattach-adopt] refused full editor text adopt for ${File(filePath).name}; " +
                         "no unsynced operator edit proves editor-origin content",
                 )
-                requestRemoteDrain(filePath, "reattach-cpc-projection-only")
+                requestRemoteDrain(filePath, "reattach-cp-projection-only")
                 return@execute
             }
             val forwarder = forwarders[filePath] ?: return@execute
@@ -912,7 +912,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         }
         deferredEditorText?.let { editorText ->
             log.warn(
-                "[crdt-replica] CPC replace deferred to the exact live editor authority for $filePath; " +
+                "[crdt-replica] CP replace deferred to the exact live editor authority for $filePath; " +
                     "editor_hash=${contentHash(editorText)} canonical_hash=${contentHash(canonical)}",
             )
             adoptExactEditorBaseline(
@@ -1480,7 +1480,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             filePath = filePath,
             identity = identity,
             node = NativeReplicaNode(),
-            transport = CpcSocketReplicaTransport(root),
+            transport = CpSocketReplicaTransport(root),
         )
         if (!forwarder.register()) {
             recordRegisterFailure(filePath)

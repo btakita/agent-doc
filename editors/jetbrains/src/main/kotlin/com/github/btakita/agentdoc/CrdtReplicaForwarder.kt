@@ -23,17 +23,17 @@ import java.util.concurrent.TimeUnit
  *  1. forwards a local IntelliJ `Document` delta into the FFI replica
  *     (`apply_local`), encodes the resulting update (`diff` against an empty
  *     state vector, i.e. "everything a fresh peer is missing"), and ships it to
- *     the CPC over the `crdt_replica` RPC envelope, and
- *  2. applies a remote update received from the CPC back into the FFI
+ *     the CP over the `crdt_replica` RPC envelope, and
+ *  2. applies a remote update received from the CP back into the FFI
  *     replica (`apply_update`) so a peer's keystrokes converge locally —
  *     cursor/undo preserving is handled by the caller that writes the converged
  *     text back through the IntelliJ Document API.
  *
- * Both the FFI replica binding ([ReplicaNode]) and the CPC transport
+ * Both the FFI replica binding ([ReplicaNode]) and the CP transport
  * ([ReplicaTransport]) are injected so the seam is unit-testable without loading
  * the native library or opening a real Unix-domain socket. The production wiring
 * (a [ReplicaNode] backed by [AgentDocLib] + a [ReplicaTransport] backed by the
-* CPC socket + an IntelliJ `DocumentListener`) is the operator's live
+* CP socket + an IntelliJ `DocumentListener`) is the operator's live
 * hookup — see [NativeReplicaNode] and [CrdtReplicaManager].
 */
 class CrdtReplicaForwarder(
@@ -55,10 +55,10 @@ class CrdtReplicaForwarder(
         private set
 
     /**
-     * Register this editor as a replica with the CPC-owned document model and open the
-     * local FFI replica bootstrapped from the canonical state the CPC
+     * Register this editor as a replica with the CP-owned document model and open the
+     * local FFI replica bootstrapped from the canonical state the CP
      * returns. Returns true when the document is editor-attached and the replica
-     * is live; false when the CPC refuses (e.g. a headless / Detached
+     * is live; false when the CP refuses (e.g. a headless / Detached
      * document) — the caller must keep recovery controller-owned instead of
      * treating editor projections as authority.
      */
@@ -113,7 +113,7 @@ class CrdtReplicaForwarder(
 
     /**
      * Align a newly attached native replica with the live editor buffer before
-     * forwarding the first real `DocumentEvent` delta. The CPC bootstrap is
+     * forwarding the first real `DocumentEvent` delta. The CP bootstrap is
      * seeded from disk, while JetBrains can already hold unsaved edits; applying
      * an event offset against that stale bootstrap can otherwise clamp/truncate.
      */
@@ -172,7 +172,7 @@ class CrdtReplicaForwarder(
     }
 
     /** Current local replica text, used only as a precondition check before
-     * applying CPC-delivered updates. The editor buffer remains authoritative;
+     * applying CP-delivered updates. The editor buffer remains authoritative;
      * a mismatch makes the manager publish the editor buffer before mutating
      * this replica further. */
     fun replicaText(): String? {
@@ -272,14 +272,14 @@ class CrdtReplicaForwarder(
     }
 }
 
-/** The CPC `register` ack: the minted client-id + canonical bootstrap state. */
+/** The CP `register` ack: the minted client-id + canonical bootstrap state. */
 data class ReplicaRegisterAck(
     val clientId: Long,
     val bootstrap: ByteArray?,
     val lineage: String? = null,
 )
 
-/** One queued CPC-to-editor CRDT update owned by this replica. */
+/** One queued CP-to-editor CRDT update owned by this replica. */
 data class ReplicaRemoteUpdate(
     val patchId: String,
     val origin: Long,
@@ -295,7 +295,7 @@ private fun sha256Text(text: String): String =
         .joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
 /**
- * The outcome of a `replica_pull` (D2). The CPC decides which kind to send
+ * The outcome of a `replica_pull` (D2). The CP decides which kind to send
  * (FFI-first): a normal additive-delta delivery, or a **replace** delivery when the
  * editor was flagged for re-bootstrap — an out-of-band *deletion* (`RebuiltFromDisk`)
  * cannot be expressed as an additive CRDT delta, so the plugin may replace its
@@ -310,11 +310,11 @@ sealed interface ReplicaPullDelivery {
 }
 
 /**
- * Transport to the CPC-owned document model. Injected so the seam is testable
+ * Transport to the CP-owned document model. Injected so the seam is testable
  * without a real socket.
  */
 interface ReplicaTransport {
-    /** `replica_register`; null when the CPC refuses (Detached document). */
+    /** `replica_register`; null when the CP refuses (Detached document). */
     fun register(filePath: String, identity: String): ReplicaRegisterAck?
 
     /**
@@ -362,10 +362,10 @@ interface ReplicaTransport {
 }
 
 /**
- * Production transport over the CPC/project-controller NDJSON Unix-domain socket.
+ * Production transport over the CP/project-controller NDJSON Unix-domain socket.
  */
-class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransport {
-    private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CpcSocketReplicaTransport::class.java)
+class CpSocketReplicaTransport(private val projectRoot: String) : ReplicaTransport {
+    private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CpSocketReplicaTransport::class.java)
 
     @Volatile
     private var lastRegisterError: String? = null
@@ -504,7 +504,7 @@ class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransp
         send(controllerRequest("replica_deregister", filePath, identity))
     }
 
-    private data class CpcResponse(
+    private data class CpResponse(
         val ok: Boolean,
         val data: JsonObject?,
         val error: String?,
@@ -532,7 +532,7 @@ class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransp
     @Volatile
     private var lastSendError: String? = null
 
-    private fun send(request: JsonObject): CpcResponse? {
+    private fun send(request: JsonObject): CpResponse? {
         val socket = cpcSocket()
         return try {
             val response = sendToSocket(socket, request)
@@ -540,24 +540,24 @@ class CpcSocketReplicaTransport(private val projectRoot: String) : ReplicaTransp
             response
         } catch (e: Exception) {
             lastSendError = "${socket.path}: ${e.javaClass.simpleName}: ${e.message}"
-            log.debug("[crdt-replica] CPC socket ${socket.path} unavailable: ${e.message}")
+            log.debug("[crdt-replica] CP socket ${socket.path} unavailable: ${e.message}")
             null
         }
     }
 
     private fun cpcSocket(): File = File(projectRoot, ".agent-doc/controller.sock")
 
-    private fun sendToSocket(socket: File, request: JsonObject): CpcResponse {
+    private fun sendToSocket(socket: File, request: JsonObject): CpResponse {
         SocketChannel.open(UnixDomainSocketAddress.of(socket.toPath())).use { channel ->
             val writer = Channels.newWriter(channel, Charsets.UTF_8)
             writer.write(request.toString())
             writer.write("\n")
             writer.flush()
             val reader = Channels.newReader(channel, Charsets.UTF_8).buffered()
-            val line = reader.readLine() ?: return CpcResponse(false, null, "empty response")
+            val line = reader.readLine() ?: return CpResponse(false, null, "empty response")
             val root = JsonParser.parseString(line).asJsonObject
             val data = root.get("data")?.takeIf { it.isJsonObject }?.asJsonObject
-            return CpcResponse(
+            return CpResponse(
                 ok = root.get("ok")?.asBoolean ?: false,
                 data = data,
                 error = root.get("error")?.asString,
@@ -594,7 +594,7 @@ interface ReplicaNode {
  *
  * This is the FFI-first node: the plugin holds only a [Long] client-id handle and
  * marshals byte buffers; yrs lives entirely in Rust. ABI errors fail soft (the
- * forwarder leaves recovery with the CPC rather than creating a separate
+ * forwarder leaves recovery with the CP rather than creating a separate
  * editor-authoritative write path).
  */
 class NativeReplicaNode : ReplicaNode {
@@ -720,6 +720,6 @@ class NativeReplicaNode : ReplicaNode {
 
 /*
  * Production live hookup lives in CrdtReplicaManager: it owns the DocumentListener,
- * CPC socket transport, pull/ACK loop, and minimal editor-buffer apply.
+ * CP socket transport, pull/ACK loop, and minimal editor-buffer apply.
  * This file stays the testable seam around the native replica node and transport.
  */

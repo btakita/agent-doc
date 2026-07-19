@@ -11,7 +11,7 @@ Common behavior required of all `agent-doc` editor plugins.
 
 ## 1a. Typing / Live-Buffer Tracking
 
-- **Behavior:** On every markdown document change, plugins must apply the incremental edit to their CRDT replica and report typing/sync epochs through the shared FFI. The Lazily/CPC CRDT is the only live-text authority; plugins must not create a full-buffer filesystem sidecar.
+- **Behavior:** On every markdown document change, plugins must apply the incremental edit to their CRDT replica and report typing/sync epochs through the shared FFI. The Lazily/CP CRDT is the only live-text authority; plugins must not create a full-buffer filesystem sidecar.
 
 ## 2. Claim for Tmux Pane
 

@@ -1394,7 +1394,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                         &authoritative,
                         &marked,
                         |expected_current, content| {
-                            agent_doc_document_realtime_io::apply_cpc_write_through_relay_authority(
+                            agent_doc_document_realtime_io::apply_cp_write_through_relay_authority(
                                 file,
                                 expected_current,
                                 content,

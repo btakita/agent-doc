@@ -1,4 +1,4 @@
-//! `#supkill` — supervisor self-kill request channel + PCP-driven timeout force-kill.
+//! `#supkill` — supervisor self-kill request channel + CP-driven timeout force-kill.
 //!
 //! The `start --route-owned` supervisor is the **parent** of the live harness child
 //! (`agent-doc(sup) → claude(agent)`), so it cannot be force-killed from inside its
@@ -8,7 +8,7 @@
 //!   per-document sentinel each idle tick and, at a turn boundary, tears down its
 //!   harness child and exits cleanly (no relaunch). Idle-gating means a *healthy*
 //!   live turn is never interrupted.
-//! - **`#supkill-b` (PCP-driven timeout force-kill):** an external driver (the
+//! - **`#supkill-b` (CP-driven timeout force-kill):** an external driver (the
 //!   project controller, or `agent-doc admin kill-supervisor <FILE>`) records the
 //!   graceful request, waits a grace window, then force-kills the supervisor pid by
 //!   verified `/proc` cmdline when it is still alive. This is the robust backstop
@@ -107,7 +107,7 @@ fn read_ppid(pid: u32) -> Option<u32> {
 
 /// In-session safety: is `pid` this process or any of its ancestors? The driver must
 /// never force-kill the supervisor that spawned it (that kills the caller); an
-/// in-session operator is told to run from another pane / let the PCP drive it.
+/// in-session operator is told to run from another pane / let the CP drive it.
 #[cfg(unix)]
 fn pid_is_self_or_ancestor(pid: u32) -> bool {
     let mut cur = std::process::id();
@@ -185,13 +185,13 @@ pub fn force_kill_verified_supervisor_pid(_target: &Path, _pid: u32) -> bool {
     false
 }
 
-/// Outcome of [`drive_supervisor_kill`], so the CLI / PCP can report what happened.
+/// Outcome of [`drive_supervisor_kill`], so the CLI / CP can report what happened.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SupervisorKillOutcome {
     /// No live `start --route-owned` supervisor found for the document.
     NoSupervisor,
     /// The target supervisor is this caller's own ancestor — refused (run from
-    /// another pane or let the PCP drive it). Carries the offending pid.
+    /// another pane or let the CP drive it). Carries the offending pid.
     RefusedSelfAncestor(u32),
     /// Dry-run: a supervisor was found but nothing was signalled. Carries the pid.
     WouldKill(u32),
@@ -201,7 +201,7 @@ pub enum SupervisorKillOutcome {
     Forced(u32),
 }
 
-/// `#supkill-b` — the PCP-style driver: request a graceful self-kill, wait up to
+/// `#supkill-b` — the CP-style driver: request a graceful self-kill, wait up to
 /// `grace` for the supervisor to honor it, then force-kill the verified pid. Safe to
 /// call from any process; refuses to kill the caller's own ancestor. `dry_run`
 /// reports the target without writing the sentinel or signalling.

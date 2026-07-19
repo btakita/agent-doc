@@ -209,7 +209,7 @@ subject/source/sink governed by
 ## Supervisor And Controller Boundary
 
 The project controller is the control plane process and durable CAS/RPC owner
-for a project. Use `controller` in crate names, not `pcp`. The controller is
+for a project. Use `controller` in crate names, not `cp`. The controller is
 not the supervisor state machine itself; it persists and applies supervisor
 decisions.
 

@@ -257,7 +257,7 @@ pub fn exchange_shrink_guard_block(
     })
 }
 
-/// True when a CPC delivery consumed the patch while live exchange edits were
+/// True when a CP delivery consumed the patch while live exchange edits were
 /// present, but the caller lacks visible-write proof and the resulting exchange
 /// text did not materialize those live edits.
 pub fn live_exchange_without_visible_write_retry_required(

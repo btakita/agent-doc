@@ -34,7 +34,7 @@ is irrelevant to content, and the sidecar + lease chain become redundant (remova
   shipped shadow-dual-run → parity oracle → authority flip. **Mirror its rollout exactly.**
 
 The gap: the document-op path (`crdt-relay-io`: `register_replica_for_file` /
-`apply_cpc_write_for_file` / `pull_replica_updates_for_file`) is bespoke and **non-durable**.
+`apply_cp_write_for_file` / `pull_replica_updates_for_file`) is bespoke and **non-durable**.
 That is the only thing to replace.
 
 ## "Backpressure/retry instead of cold-miss, remove the lease chain"
@@ -61,7 +61,7 @@ blocking controller round-trip.)
 - **P2 — dual-run shadow in the controller:** run the doc-op plane beside the bespoke
   relay path; log divergence live (like liveness `dual_run`). GATE: zero divergence in
   dogfooding for N sessions.
-- **P3 — authority flip:** canonical is fed by the doc-op plane; `apply_cpc_write`/pull
+- **P3 — authority flip:** canonical is fed by the doc-op plane; `apply_cp_write`/pull
   become plane ops. `live_editors` no longer gates content. GATE: resurrection repro
   (`#sy71`-class) cannot reproduce.
 - **P4 — retire sidecar + lease chain:** remove the plugin-owner lease cold-miss and the

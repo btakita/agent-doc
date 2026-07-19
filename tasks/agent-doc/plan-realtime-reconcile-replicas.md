@@ -102,9 +102,9 @@ operator who keeps typing past the ack capture, both commit their edited respons
 with no wedge and no lost keystrokes; a genuinely dropped response still fails
 closed; `make check` + a SimWorld reconcile-loop test green.
 
-## Phase 3 — cell model across CPC + editor shadow replicas via FFI
+## Phase 3 — cell model across CP + editor shadow replicas via FFI
 
-Goal: every replica (turn, CPC/supervisor, editor plugin shadow) holds an
+Goal: every replica (turn, CP/supervisor, editor plugin shadow) holds an
 in-memory per-cell model and reconciles-before-accept.
 
 Work items:
@@ -115,7 +115,7 @@ Work items:
    buffer remains a linear OT authority (Document API); the plugin shadow model
    reconciles with the editor buffer before applying, via the existing
    shadow/ack protocol (ack-content sidecar, `live-buffer/` snapshots).
-2. **CPC in-memory model.** The route-owned supervisor holds the authoritative
+2. **CP in-memory model.** The route-owned supervisor holds the authoritative
    cell model and drives reconcile rounds when it sends a diff to the editor; if
    the editor's returned version is out of sync, run more CRDT rounds until in
    sync (bounded).
@@ -145,7 +145,7 @@ Work items:
 4. **Structured persistence.** Once the cell model is the authority, persist the
    per-cell structure (not a flat text blob) so restart/merge is per-node.
 
-Acceptance: operator + agent + CPC concurrent edits across editor and pane
+Acceptance: operator + agent + CP concurrent edits across editor and pane
 converge with no cross-cell splicing and no wedge; editor shadow reconciles
 before applying; documented decision on lazily-vs-yrs for persistence/transport.
 

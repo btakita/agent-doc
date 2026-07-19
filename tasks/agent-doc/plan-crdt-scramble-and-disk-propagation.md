@@ -1,4 +1,4 @@
-# Plan — CRDT scramble fix + disk→CPC-replica→editor-buffer propagation with reconcile
+# Plan — CRDT scramble fix + disk→CP-replica→editor-buffer propagation with reconcile
 
 **Status:** design captured 2026-07-03 (operator-directed). Consolidates and sequences
 three prior plans against a fresh subsystem audit. Supersedes nothing — it is the
@@ -44,8 +44,8 @@ restart cleanly reclaims ownership. `compileKotlin` clean; plugin zip built. Ins
 Bricks landed this session that new phases build on. Each is pure logic with unit tests +
 clippy clean; none is wired into the live path yet, so live sessions are unaffected.
 
-- **Goal 1 — turn-state CPC→plugin projection + FFI + parity bindings (LANDED).**
-  `agent-doc-turn/src/cpc_projection.rs`: `TurnProjection::from_phase(CyclePhase)` → coarse
+- **Goal 1 — turn-state CP→plugin projection + FFI + parity bindings (LANDED).**
+  `agent-doc-turn/src/cp_projection.rs`: `TurnProjection::from_phase(CyclePhase)` → coarse
   `TurnState` (Idle/AwaitingResponse/Persisting) + `turn_in_flight` + `transition_authority`.
   `would_collide_with_in_flight_response()` is the `live_prompt_drift` double-append guard;
   `transition_authority()` encodes the single-authority invariant. 5 tests. **Wired:** FFI export
@@ -56,7 +56,7 @@ clippy clean; none is wired into the live path yet, so live sessions are unaffec
   VS Code `buildTurnStatePresentation` (consumes the projection → status label + double-append
   forwarding guard; 2 unit tests, 19 sessionUi tests green, tsc clean) **wired live** — `extension.ts`
   `refreshTurnStatus` *calls* `turnProjectionForFile` on editor-change + a 1.5s interval and reflects
-  the CPC turn phase in a status-bar item. JetBrains parity: `TurnStateBridge.kt` (same
+  the CP turn phase in a status-bar item. JetBrains parity: `TurnStateBridge.kt` (same
   projection→presentation logic, mirrors the working `StateProjectionBridge` FFI pattern).
   Remaining: JB status-*widget* wiring + a `make bump-plugin` / `npm compile` + editor reload to
   observe live.
@@ -76,7 +76,7 @@ clippy clean; none is wired into the live path yet, so live sessions are unaffec
 ## Goal (operator, verbatim intent)
 
 1. Fix the causes of CRDT scrambling.
-2. When the document file on disk changes, the file watcher updates the CPC replica
+2. When the document file on disk changes, the file watcher updates the CP replica
    document and propagates the change through to the plugin's editor buffer.
 3. If the editor buffer already has the change, reconcile it (no double-apply, no
    scramble, no lost operator text).
@@ -107,13 +107,13 @@ Two required components do not exist today and must be built for goal (2)/(3):
   Not a durable per-cell CRDT. `crdt_sync.rs` (state-vector, idempotent causal-buffered
   `apply_update`) and `replica_sync.rs` (lazily `CrdtPlaneRuntime` HLC + `StampFrontier`
   delta sync) are the correct substrate — **dormant**.
-- **CPC replica:** `RelayHub` (`crdt_relay.rs:123`), one per doc, in a process-global
+- **CP replica:** `RelayHub` (`crdt_relay.rs:123`), one per doc, in a process-global
   registry (`crdt-relay-io/src/lib.rs:75`) in the supervisor. Allocated only under
   `CrdtAuthority::MultiReplica` (live editor attached).
 - **Watcher:** `notify`-backed `agent-doc watch` daemon (`agent-doc-watch-io/src/daemon.rs`),
   separate process. On settled `.md` change → `route_file_change` (`src/main.rs:751`) →
   `FileWatchChangeObserved` StateFact → SQLite. No consumer.
-- **Editor write channels:** (a) replica delta channel (editor⇄CPC⇄peers via `ReplicaUpdate`/
+- **Editor write channels:** (a) replica delta channel (editor⇄CP⇄peers via `ReplicaUpdate`/
   `ReplicaPull`/`ReplicaAck`, forwarder polls ~4×/s); (b) patch-file channel
   (`.agent-doc/patches/<hash>.json`, `PatchWatcher.kt`). Neither is triggered by disk change.
 - **Authority order:** live editor buffer > in-memory canonical > disk > git baseline.
@@ -232,7 +232,7 @@ This is `plan-realtime-reconcile-replicas.md` Phase 2 + the `#crdtsvdom` correct
 - **Guardrail:** keep yrs as persistence until the lazily plane serialization is proven; migrate
   `.yrs` → op-log snapshot in a later, reversible cutover (not in this change).
 
-### Phase C — Disk change → CPC replica (the missing propagation, needs B)
+### Phase C — Disk change → CP replica (the missing propagation, needs B)
 
 - **C0 — decision layer — LANDED (2026-07-03, tested).** `decide_watch_action(delivery,
   authority, editor_edit_in_flight) -> WatchAction` in `watch_authority.rs` is the pure consumer
@@ -283,9 +283,9 @@ This is `plan-realtime-reconcile-replicas.md` Phase 2 + the `#crdtsvdom` correct
   `GitAuthoritative`/headless (no hub) this is a no-op (disk is already authority).
 - **C3 — Idempotent by construction.** Because B integrates via state-vector merge, a disk change
   the canonical already holds is a structural no-op (goal 3, the "already has it" case at the
-  CPC layer). Reuse `SelfWriteEcho` (`watch_authority.rs:132`) to drop the agent's own writeback.
+  CP layer). Reuse `SelfWriteEcho` (`watch_authority.rs:132`) to drop the agent's own writeback.
 
-### Phase D — CPC replica → editor buffer (needs C)
+### Phase D — CP replica → editor buffer (needs C)
 
 - **D0 — hub disk-change entry point — LANDED (2026-07-03, tested).**
   `RelayHub::apply_disk_change(on_disk) -> DiskChangeOutcome` in `crdt_relay.rs` composes the

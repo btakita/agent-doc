@@ -2166,12 +2166,12 @@ fn record_queue_worklist_state(
     Ok(())
 }
 
-/// Fold a CPC-proven editor-buffer queue deletion into the preflight queue source.
+/// Fold a CP-proven editor-buffer queue deletion into the preflight queue source.
 ///
 /// Queue maintenance normally starts from disk and then converges that queue
 /// shape back into a live editor buffer. When the operator deletes queue rows in
 /// the editor during a turn, that delete may be unsaved: blindly starting from
-/// disk re-pushes the stale rows and makes them "reappear". Only adopt the CPC
+/// disk re-pushes the stale rows and makes them "reappear". Only adopt the CP
 /// current document when its queue is a count-wise subset of disk after
 /// stripping cosmetic progress/pin markers. That covers deleting one duplicate
 /// row or all copies of a row without treating same-cycle queue additions as an
@@ -2445,7 +2445,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             return Ok(QueueState::default());
         }
     };
-    // `content` already came from the CPC/editor authority above. Do not reread
+    // `content` already came from the CP/editor authority above. Do not reread
     // disk or run a second queue-only merge here: that used to compare the live
     // frontier with itself, making the supposed deletion-adoption branch dead
     // while obscuring which authority maintenance actually mutated.
@@ -4693,7 +4693,7 @@ pub(crate) fn persist_queue_maintenance_doc(
             );
             // `#ensurereplicagen`: the write is the symmetric half of the read
             // fix above and must land in the hub-owning process too.
-            // `apply_cpc_write_for_file` is process-local: with no hub in this
+            // `apply_cp_write_for_file` is process-local: with no hub in this
             // short-lived CLI it recovers one from the durable `.yrs` projection
             // and compare-and-swaps against THAT. The projection is the
             // last-known canonical, so once it lags the controller's live model
@@ -4702,14 +4702,14 @@ pub(crate) fn persist_queue_maintenance_doc(
             // that no retry can ever satisfy. Route through the controller, whose
             // model is the real current.
             let write = if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
-                agent_doc_crdt_relay_io::apply_cpc_write_for_file(
+                agent_doc_crdt_relay_io::apply_cp_write_for_file(
                     file,
                     expected_current,
                     content,
                     source,
                 )?
             } else {
-                agent_doc_controller_io::project_controller::apply_cpc_write_via_controller_model_for_doc(
+                agent_doc_controller_io::project_controller::apply_cp_write_via_controller_model_for_doc(
                     file,
                     expected_current,
                     content,

@@ -44,7 +44,7 @@ pub enum UserFacingOutcomeKind {
     DeferredForSupervisorDrain,
     /// `#turnsaferecycle` Goal 3 — the hosting supervisor is running a stale binary,
     /// so the current turn phase (preflight / route / stream / session-check / write)
-    /// skips its doomed IPC write, schedules the recycle (forced PCP recycle +
+    /// skips its doomed IPC write, schedules the recycle (forced CP recycle +
     /// supervisor recycle-request), and defers uniformly instead of each phase
     /// thrashing the buffer. No operator action is required; the recycle promotes the
     /// fresh binary at the next idle boundary and the phase re-runs cleanly.

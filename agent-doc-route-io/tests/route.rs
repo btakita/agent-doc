@@ -285,7 +285,7 @@ fn retry_once_crdt_merge_route_write_document(
         );
         std::fs::write(file, concurrent)?;
         anyhow::bail!(
-            "project controller command `crdt_cpc_write` failed: CPC relay write refused for {}: expected_hash={} current_hash={} recovery=retry_crdt_merge",
+            "project controller command `crdt_cp_write` failed: CP relay write refused for {}: expected_hash={} current_hash={} recovery=retry_crdt_merge",
             file.display(),
             agent_doc_hash::content_hash(previous_content),
             agent_doc_hash::content_hash(next_content),
@@ -1078,7 +1078,7 @@ mod tests {
         );
     }
     #[test]
-    fn route_enqueue_dispatch_prompt_converges_via_cpc_editor_replica() {
+    fn route_enqueue_dispatch_prompt_converges_via_cp_editor_replica() {
         // JB Run Agent Doc can queue a pending dispatch while the editor plugin
         // owns the live buffer. That write must use the shared editor-converger,
         // not a direct disk write that manufactures a File Cache Conflict.
@@ -1151,7 +1151,7 @@ mod tests {
                 && ops_log.contains("route_dispatch_queue_writeback")
                 && ops_log.contains("transport=crdt_relay")
                 && ops_log.contains("secondary_transport=none"),
-            "route queue write must be observable as CPC editor convergence:\n{ops_log}"
+            "route queue write must be observable as CP editor convergence:\n{ops_log}"
         );
         assert!(
             !ops_log.contains("transport=disk_fallback"),
@@ -1162,7 +1162,7 @@ mod tests {
     #[test]
     fn route_enqueue_dispatch_prompt_retries_stale_crdt_relay_baseline() {
         // Repro shape for JB Run Agent Doc failing with
-        // `crdt_cpc_write ... recovery=retry_crdt_merge`: the relay current changed
+        // `crdt_cp_write ... recovery=retry_crdt_merge`: the relay current changed
         // between queue-read and writeback. Route must re-read and re-merge the
         // queue prompt instead of surfacing the transient hash mismatch.
         let dir = tempfile::TempDir::new().unwrap();

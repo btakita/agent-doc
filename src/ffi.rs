@@ -375,7 +375,7 @@ pub unsafe extern "C" fn agent_doc_cancel_preflight_cycle(file_path: *const c_ch
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> *mut c_char {
     fn idle_json() -> String {
-        let proj = agent_doc_turn::cpc_projection::TurnProjection::from_phase(
+        let proj = agent_doc_turn::cp_projection::TurnProjection::from_phase(
             agent_doc_turn::CyclePhase::Committed,
         );
         serde_json::to_string(&proj).unwrap_or_else(|_| r#"{"state":"idle"}"#.to_string())
@@ -393,13 +393,13 @@ pub unsafe extern "C" fn agent_doc_turn_projection(file_path: *const c_char) -> 
         document_model_actor_state(std::path::Path::new(path)),
         projected_phase,
     );
-    let mut proj = agent_doc_turn::cpc_projection::TurnProjection::from_phase(phase);
+    let mut proj = agent_doc_turn::cp_projection::TurnProjection::from_phase(phase);
     if proj.turn_in_flight {
         let steering =
             agent_doc_session_check_io::realtime_steering_set_since_turn_baseline(Path::new(path))
                 .ok()
                 .map(|set| set.turn_projection())
-                .unwrap_or_else(agent_doc_turn::cpc_projection::TurnSteeringProjection::none);
+                .unwrap_or_else(agent_doc_turn::cp_projection::TurnSteeringProjection::none);
         proj = proj.with_realtime_steering(steering);
     }
     let json = serde_json::to_string(&proj).unwrap_or_else(|_| idle_json());
@@ -665,7 +665,7 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
 /// - `1` → receipt `{"type":"receipt","status":"applied"}` (apply succeeded)
 /// - `2` → receipt `{"type":"receipt","status":"applied","reason":"already_applied"}`
 ///   (plugin detected the patch is already in the live buffer and chose NOT
-///   to re-apply; binary skips redundant CPC delivery so a duplicate response
+///   to re-apply; binary skips redundant CP delivery so a duplicate response
 ///   heading cannot land).
 ///
 /// Plugins should prefer v2 when available.

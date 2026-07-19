@@ -245,7 +245,7 @@ class TmuxPaneFocusSync private constructor(
         }
 
         internal fun isAgentDocWindowActive(projectRoot: String): Boolean? =
-            CpcRouteClient.tmuxFocusState(projectRoot)?.let { json ->
+            CpRouteClient.tmuxFocusState(projectRoot)?.let { json ->
                 extractWindowNameFromFocusState(json) == "agent-doc"
             }
 
@@ -343,7 +343,7 @@ class TmuxPaneFocusSync private constructor(
 
         private fun focusedDocumentPath(projectRoots: List<String>): String? {
             for (root in projectRoots) {
-                val json = CpcRouteClient.tmuxFocusState(projectRoot = root)
+                val json = CpRouteClient.tmuxFocusState(projectRoot = root)
                     ?: continue
                 if (extractWindowNameFromFocusState(json) != "agent-doc") continue
                 extractDocumentPathFromFocusState(json)?.let { return it }

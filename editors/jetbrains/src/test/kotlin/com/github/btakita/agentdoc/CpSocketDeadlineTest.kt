@@ -12,7 +12,7 @@ import org.junit.Test
  * registry slot, so every later click deduped away — the likely mechanism behind
  * "Run Agent Doc does nothing".
  */
-class CpcSocketDeadlineTest {
+class CpSocketDeadlineTest {
     private fun source(relative: String): String =
         listOf(
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/$relative"),
@@ -21,7 +21,7 @@ class CpcSocketDeadlineTest {
 
     @Test
     fun `controller socket requests are bounded by a watchdog that closes the channel`() {
-        val client = source("CpcRouteClient.kt")
+        val client = source("CpRouteClient.kt")
 
         assertTrue(
             "the socket request must have a hard timeout",
@@ -50,7 +50,7 @@ class CpcSocketDeadlineTest {
      */
     @Test
     fun `the socket ceiling stays above the longest legitimate server wait`() {
-        val client = source("CpcRouteClient.kt")
+        val client = source("CpRouteClient.kt")
         val declaration = client
             .substringAfter("SOCKET_REQUEST_TIMEOUT_MS")
             .substringAfter("=")

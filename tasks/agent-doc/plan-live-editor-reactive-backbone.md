@@ -172,7 +172,7 @@ reactive models, if any, are UI *views* of the Rust-owned truth — never a seco
     editor events (replica register/update → `mark_open`, deregister → `mark_closed`, in
     `agent-doc-crdt-relay-io`), so the reactive authority is truthful controller-side with no
     per-decision filesystem read; the lease is read only on a cold miss (see S4 + the sidecar note).
-  - **CPC-write demote (`crdt-relay-io` `crdt_cpc_write_disk_authority_stale_lease`, `lib.rs:1219`)
+  - **CP-write demote (`crdt-relay-io` `crdt_cp_write_disk_authority_stale_lease`, `lib.rs:1219`)
     deliberately unchanged.** With zero live replicas there is no replica to write through; forcing
     editor authority there reintroduces the documented CAS `retry_crdt_merge` strand wedge, and disk
     clobber is already prevented downstream by `disk_write_permitted_for_file`. Recorded as a scope

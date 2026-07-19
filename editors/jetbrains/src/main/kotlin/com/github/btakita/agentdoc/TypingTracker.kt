@@ -159,14 +159,14 @@ object TypingTracker : DocumentListener {
         if (!vFile.name.endsWith(".md")) return
         val filePath = vFile.path
 
-        // CPC/agent projections and whole-buffer file-cache reloads are not
+        // CP/agent projections and whole-buffer file-cache reloads are not
         // operator typing. They may be reported as visibility observations, but
-        // they must never originate editor -> CPC document operations.
+        // they must never originate editor -> CP document operations.
         val operatorEdit = CrdtReplicaManager.isOperatorDocumentEvent(filePath, event)
         val nonOperatorMutation = !operatorEdit
         if (operatorEdit) {
             // #falsetyping-guard: a genuine local operator edit is now ahead of
-            // disk until saved. CPC projection/cache churn must NOT set this flag.
+            // disk until saved. CP projection/cache churn must NOT set this flag.
             unsyncedLocalEditPaths.add(filePath)
         }
 

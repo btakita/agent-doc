@@ -534,7 +534,7 @@ pub fn seed_lazily_editor_registration(file: &str, editor_id: &str) {
 /// controller recycled the editor never re-registered its relay replica. The
 /// durable Open fact survives, so `editor_attached()` remains true while the recovered hub
 /// carries the canonical text with ZERO live replicas (`live_count() == 0`,
-/// delivery converged). This is the exact input to `#stale-lease-cpc-authority`.
+/// delivery converged). This is the exact input to `#stale-lease-cp-authority`.
 ///
 /// Registers a live replica, then deregisters it so the hub keeps the canonical
 /// but reports zero relay members while Lazily liveness remains open.

@@ -640,7 +640,7 @@ pub fn run_with_reap_policy(
             // A managed supervisor owns one document. Harness shortcuts such as
             // Claude `--continue`, Codex `resume --last`, and OpenCode
             // `--continue` select process-global history and can therefore
-            // hijack another document's live conversation after a CPC recycle.
+            // hijack another document's live conversation after a CP recycle.
             // Until a harness-specific session id is durably bound to this
             // document, restart fresh and re-submit only this document's trigger.
             let restart_args = base_args.clone();

@@ -132,7 +132,7 @@ object StateProjectionBridge {
         val docHash = documentHash(filePath)
         val view = mirrors.computeIfAbsent(docHash) { GraphView() }
         val lastEpoch = if (view.isInitialized) view.epoch else 0L
-        val response = CpcRouteClient.stateSubscribe(
+        val response = CpRouteClient.stateSubscribe(
             projectRoot = projectRoot.path,
             filePath = filePath,
             documentHash = docHash,

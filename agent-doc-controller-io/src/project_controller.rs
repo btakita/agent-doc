@@ -129,7 +129,7 @@ pub struct ControllerCommitDocumentOutcome {
     pub vcs_refresh_signaled: Option<bool>,
 }
 
-/// Complete Compact Exchange invocation executed inside the CPC process. The
+/// Complete Compact Exchange invocation executed inside the CP process. The
 /// editor/CLI is only a command submitter; all reads, CRDT mutation, archive,
 /// commit, and delivery acknowledgement remain under controller ownership.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -2756,7 +2756,7 @@ mod tests {
         // is monotonic once set.
         assert!(ops_log.contains("controller_crdt_checkpoint"));
         assert!(
-            ops_log.contains("authority=cpc_model")
+            ops_log.contains("authority=cp_model")
                 && ops_log.contains("transport=local_document_model"),
             "the checkpoint must go through the controller document model: {ops_log}"
         );

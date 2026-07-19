@@ -435,7 +435,7 @@ pub fn run(
     )
 }
 
-/// Execute compaction inside the CPC process. This entrypoint is wired only by
+/// Execute compaction inside the CP process. This entrypoint is wired only by
 /// the project-controller runtime effect; editor/CLI callers use [`run`].
 pub fn run_in_controller(
     file: &Path,
@@ -825,7 +825,7 @@ fn commit_compacted_authoritative(
     )?;
     // `#jb-compact-commit-stale-relay-canonical`: the third desync mechanism.
     // When the compaction wrote through the stale-lease disk-authority path
-    // (`crdt_cpc_write_disk_authority_stale_lease`, `live_editors == 0` under a
+    // (`crdt_cp_write_disk_authority_stale_lease`, `live_editors == 0` under a
     // phantom editor lease — e.g. an older plugin whose CRDT replica register
     // failed), only disk + snapshot hold the compacted content; the lazily relay
     // canonical stays FROZEN at the pre-compact text. `closeout_compact_with_commit`
@@ -998,7 +998,7 @@ fn flush_editor_buffer_to_disk_after_compact(
         return false;
     }
 
-    // The typed `save_document` intent responds after saving; the CPC receipt is applied
+    // The typed `save_document` intent responds after saving; the CP receipt is applied
     // asynchronously, so poll the working tree until the flush lands (or time out).
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1000);
     loop {
@@ -1204,7 +1204,7 @@ fn is_retryable_crdt_merge_error(err: &anyhow::Error) -> bool {
 /// re-settled to `source_content` (a transient in-flight editor delta) — it never
 /// rewrites the now-stale `compacted` over a genuine concurrent operator edit.
 /// A real edit (live text != `source_content`) fails closed with an actionable
-/// "re-run when the editor is idle" message instead of the raw CPC error.
+/// "re-run when the editor is idle" message instead of the raw CP error.
 fn converge_compacted_with_retry(
     effects: &dyn CompactRuntimeEffects,
     file: &Path,
@@ -1368,8 +1368,8 @@ fn apply_compacted_document(
         // rewrite the now-stale `compacted` over a genuine concurrent operator edit.
         // If the text truly changed, fail closed with an actionable message so the
         // operator re-runs compact when the editor is idle, instead of surfacing the
-        // raw CPC error (the reported JB `Compact Exchange` exit-1). The zero-live
-        // editor case is already resolved to disk authority by #stale-lease-cpc-authority.
+        // raw CP error (the reported JB `Compact Exchange` exit-1). The zero-live
+        // editor case is already resolved to disk authority by #stale-lease-cp-authority.
         converge_compacted_with_retry(runtime_effects()?, file, compacted, write_base_content)?;
 
         // #compact-independent-cells: editor/CRDT convergence may legitimately
@@ -1894,7 +1894,7 @@ mod tests {
             if remaining > 0 {
                 self.fail_times.store(remaining - 1, Ordering::Relaxed);
                 anyhow::bail!(
-                    "CPC relay write refused for {}: expected_hash=a current_hash=b recovery=retry_crdt_merge",
+                    "CP relay write refused for {}: expected_hash=a current_hash=b recovery=retry_crdt_merge",
                     file.display()
                 );
             }
@@ -1915,7 +1915,7 @@ mod tests {
     fn converge_compacted_retries_transient_resettled_crdt_merge_then_succeeds() {
         // #compactcrdtretry: one retry_crdt_merge refusal, but the live text has
         // re-settled to the compacted base (`current == source`), so the bounded retry
-        // converges instead of surfacing the raw CPC error.
+        // converges instead of surfacing the raw CP error.
         use std::sync::atomic::{AtomicUsize, Ordering};
         let base = "prompt\n";
         let effects = RetryConvergeEffects {

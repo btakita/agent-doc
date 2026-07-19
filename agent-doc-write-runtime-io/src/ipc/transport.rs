@@ -565,12 +565,12 @@ mod submodule_patch_routing_tests {
         assert_eq!(
             fs::read_to_string(&doc).unwrap(),
             baseline,
-            "the response cell must be retried through CPC/CRDT, never by replacing the document"
+            "the response cell must be retried through CP/CRDT, never by replacing the document"
         );
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=visible_write_receipt_missing_response")
-                && log.contains("recovery=retry_response_cell_via_cpc_without_disk_write")
+                && log.contains("recovery=retry_response_cell_via_cp_without_disk_write")
                 && !log.contains("finalize_typing_during_write")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "receipt-backed response retry must be explicit and non-mutating:\n{log}"
@@ -665,7 +665,7 @@ mod submodule_patch_routing_tests {
         let log = fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             log.contains("invariant=visible_write_receipt_missing_response")
-                && log.contains("recovery=retry_response_cell_via_cpc_without_disk_write")
+                && log.contains("recovery=retry_response_cell_via_cp_without_disk_write")
                 && !log.contains("ipc_socket_already_applied_snapshot"),
             "deferred visible repair must remain pending without a disk write:\n{log}"
         );

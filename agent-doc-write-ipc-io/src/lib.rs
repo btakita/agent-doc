@@ -41,7 +41,7 @@ pub(crate) fn projected_cycle_id(file: &Path) -> Option<String> {
 ///
 /// The `patch_id` is returned so callers can report/retry the same logical
 /// response. The plugin tracks applied patch_ids and skips duplicates,
-/// preventing double-apply when a CPC delivery is retried.
+/// preventing double-apply when a CP delivery is retried.
 #[derive(Debug)]
 pub struct IpcResult {
     /// Whether the plugin successfully consumed the patch.
@@ -94,7 +94,7 @@ pub fn build_ipc_patches_json(
     let raw_doc = ipc_document_content(file, "write_ipc_build_patches_current")?;
     let summary = file.file_stem().and_then(|s| s.to_str());
     // #finalize-visible-buffer-ipc-timeout-race: when a stable seed (the IPC
-    // patch_id) is supplied, derive a deterministic boundary so CPC delivery
+    // patch_id) is supplied, derive a deterministic boundary so CP delivery
     // retries carry the same boundary and the plugin does not append
     // the same response twice under different node IDs.
     let current_doc = match boundary_seed {

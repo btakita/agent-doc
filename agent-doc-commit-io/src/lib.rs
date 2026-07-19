@@ -38,7 +38,7 @@ thread_local! {
     /// `### Re:` turns. Correctness is guaranteed by the compaction's own
     /// `verify_compact_head_landed` post-commit check, not by this guard.
     static AUTHORITATIVE_COMPACTION_COMMIT: Cell<bool> = const { Cell::new(false) };
-    /// Set while a commit is executing INSIDE the CPC controller process (the
+    /// Set while a commit is executing INSIDE the CP controller process (the
     /// `commit_document` runtime effect). Two jobs:
     ///  1. suppress re-delegation — `commit_with_outcome` must not round-trip back
     ///     to the controller socket (it is already running there); and
@@ -606,8 +606,8 @@ pub fn commit_with_outcome(file: &Path) -> Result<CommitOutcome> {
                 "commit_start",
             );
     }
-    // `#cpc-commit`: when a live editor owns the document, delegate the git commit
-    // to the CPC controller — the authoritative owner of the converged relay
+    // `#cp-commit`: when a live editor owns the document, delegate the git commit
+    // to the CP controller — the authoritative owner of the converged relay
     // canonical — so it commits IN-PROCESS where its canonical is authority,
     // instead of the CLI failing closed as a non-authoritative replica
     // (`editor is the current authority ... was not used as commit authority`).
@@ -701,7 +701,7 @@ fn authoritative_compaction_commit_enabled() -> bool {
     AUTHORITATIVE_COMPACTION_COMMIT.with(Cell::get)
 }
 
-/// Run `f` (the actual git commit) marked as executing inside the CPC controller,
+/// Run `f` (the actual git commit) marked as executing inside the CP controller,
 /// so the commit does not re-delegate to the controller socket and treats the
 /// relay barrier as pre-converged. The binary wires this around the
 /// `commit_document` runtime effect (`agent-doc-commit-io` cannot be called from
@@ -740,7 +740,7 @@ fn commit_current_document_content(file: &Path, source: &str) -> Result<String> 
     }
 }
 
-/// A CPC-owned commit runs in the same process as the authoritative relay. The
+/// A CP-owned commit runs in the same process as the authoritative relay. The
 /// `commit_document` RPC handler has already crossed the commit barrier before
 /// entering this scope, so asking the controller socket for the same canonical
 /// again only queues a request back into ourselves. A normal commit performs
@@ -1869,7 +1869,7 @@ mod controller_commit_scope_tests {
 
     #[test]
     fn controller_commit_scope_preconverges_barrier_and_suppresses_reentry() {
-        // `#cpc-commit`: inside the controller-owned commit scope the relay barrier
+        // `#cp-commit`: inside the controller-owned commit scope the relay barrier
         // is treated as pre-converged (the `commit_document` RPC handler already
         // flushed live editor ops into the canonical), so the in-process commit
         // neither re-asks the controller over the socket (which would deadlock — the

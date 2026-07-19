@@ -136,7 +136,7 @@ commit, recycle, or closeout correctness.
   restart or be shared across controller, route, supervisor, editor, and commit
   paths.
 - Use a lazily-backed projection in the project controller when callers need
-  reactive live reads or waits over the PCP state.
+  reactive live reads or waits over the CP state.
 - Use `agent-doc-document-realtime` for pure decisions about visible writes,
   editor authority, delivery proof, reconnect behavior, and commit-candidate
   proof.
@@ -155,7 +155,7 @@ commit, recycle, or closeout correctness.
 ## Current Consolidation Targets
 
 - Supervisor recycle in-flight state: move route direct dispatch and
-  dispatch-only proof from marker polling to the PCP-backed supervisor recycle
+  dispatch-only proof from marker polling to the CP-backed supervisor recycle
   projection and lazily controller waiters.
 - Supervisor recycle-yield state: move the self-draining loop yield gate from
   `.agent-doc/recycle-yield` marker files to controller recycle-yield helpers

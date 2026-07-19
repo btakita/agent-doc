@@ -37,9 +37,9 @@ target path is the lazily command envelope.
 
 | Command | `name` | `payload_type` | Interim path |
 |---|---|---|---|
-| Run Agent Doc | `editor_route` | `agent-doc.editor_route.v1` | JB `CpcRouteClient`; VS Code raw `controller.sock` `editor_route` |
-| Sync Tmux Layout / Load Window | `sync_tmux_layout` | `agent-doc.sync_tmux_layout.v1` | JB `CpcRouteClient` submits `editor_command_submit_async`; legacy native endpoint remains available for older plugins |
-| Focus handoff | `focus_document_pane` | `agent-doc.focus_document_pane.v1` | JB `CpcRouteClient` submits `editor_command_submit_async`; legacy native endpoint remains available for older plugins |
+| Run Agent Doc | `editor_route` | `agent-doc.editor_route.v1` | JB `CpRouteClient`; VS Code raw `controller.sock` `editor_route` |
+| Sync Tmux Layout / Load Window | `sync_tmux_layout` | `agent-doc.sync_tmux_layout.v1` | JB `CpRouteClient` submits `editor_command_submit_async`; legacy native endpoint remains available for older plugins |
+| Focus handoff | `focus_document_pane` | `agent-doc.focus_document_pane.v1` | JB `CpRouteClient` submits `editor_command_submit_async`; legacy native endpoint remains available for older plugins |
 | Save document | `save_document` | `agent-doc.save_document.v1` | file signal / socket IPC |
 | Session status/clear/restart/doctor | `session_command` | `agent-doc.session_command.v1` | editor-spawned CLI |
 | CRDT replica register/update/pull/ack | `crdt_replica` | `agent-doc.crdt_replica.v1` | controller `crdt_replica` custom envelope |
@@ -144,4 +144,4 @@ commands keep their interim paths; a command that requires the plane fails close
 with a stale-plugin/update warning rather than downgrading silently. Controller
 wiring (the shadow endpoint that decodes these payloads and dispatches the
 existing code paths) is tracked in the agent-loop plan
-`plan-lazily-message-passing-editor-pcp.md` (`#lzmsgpcp`), Phase 6.
+`plan-lazily-message-passing-editor-cp.md` (`#lzmsgpcp`), Phase 6.

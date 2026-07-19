@@ -103,7 +103,7 @@ pub fn log_ipc_proof_failure_with_recycle(
         ),
     );
     // `#turnsaferecycle` Goal 2 — a `retry_without_disk_write` proof failure against a
-    // STALE supervisor is a doomed IPC write; schedule an immediate forced PCP recycle
+    // STALE supervisor is a doomed IPC write; schedule an immediate forced CP recycle
     // (fail-open, gated on proven staleness inside the helper) rather than let the
     // caller keep thrashing the buffer. Only the retry-without-disk recovery class is a
     // candidate; genuine disk-fallback failures are not stale-supervisor drift.

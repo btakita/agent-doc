@@ -10,7 +10,7 @@ import org.junit.Test
  * `Run Agent Doc`. Pins the `CommandSubmit` envelope shape and the terminal-only
  * projection resolution the controller's shadow endpoint relies on.
  */
-class CpcRouteClientCommandPlaneTest {
+class CpRouteClientCommandPlaneTest {
     private fun inlinePayload(submit: com.google.gson.JsonObject): com.google.gson.JsonObject {
         val bytes = submit.getAsJsonObject("payload").getAsJsonArray("Inline")
             .map { it.asInt.toByte() }
@@ -20,7 +20,7 @@ class CpcRouteClientCommandPlaneTest {
 
     @Test
     fun `editorCommandSubmitRequest builds an agent-doc editor_route CommandSubmit`() {
-        val request = CpcRouteClient.editorCommandSubmitRequest(
+        val request = CpRouteClient.editorCommandSubmitRequest(
             filePath = "/proj/plan.md",
             relativePath = "plan.md",
             layoutArgs = listOf("-h"),
@@ -52,7 +52,7 @@ class CpcRouteClientCommandPlaneTest {
 
     @Test
     fun `syncTmuxLayoutCommandSubmitRequest builds sync_tmux_layout CommandSubmit`() {
-        val request = CpcRouteClient.syncTmuxLayoutCommandSubmitRequest(
+        val request = CpRouteClient.syncTmuxLayoutCommandSubmitRequest(
             projectRoot = "/proj",
             columnsJson = """["/proj/tasks/one.md","/proj/tasks/two.md"]""",
             window = null,
@@ -83,7 +83,7 @@ class CpcRouteClientCommandPlaneTest {
 
     @Test
     fun `syncTmuxLayoutCommandSubmitRequest can target async submit endpoint`() {
-        val request = CpcRouteClient.syncTmuxLayoutCommandSubmitRequest(
+        val request = CpRouteClient.syncTmuxLayoutCommandSubmitRequest(
             projectRoot = "/proj",
             columnsJson = """["/proj/tasks/one.md"]""",
             window = null,
@@ -107,7 +107,7 @@ class CpcRouteClientCommandPlaneTest {
 
     @Test
     fun `tmuxLayoutSyncStateRequest builds read side model check request`() {
-        val request = CpcRouteClient.tmuxLayoutSyncStateRequest(
+        val request = CpRouteClient.tmuxLayoutSyncStateRequest(
             columnsJson = """["/proj/tasks/one.md","/proj/tasks/two.md"]""",
             focus = "/proj/tasks/two.md",
         )
@@ -121,7 +121,7 @@ class CpcRouteClientCommandPlaneTest {
 
     @Test
     fun `focusDocumentPaneCommandSubmitRequest builds focus_document_pane CommandSubmit`() {
-        val request = CpcRouteClient.focusDocumentPaneCommandSubmitRequest(
+        val request = CpRouteClient.focusDocumentPaneCommandSubmitRequest(
             projectRoot = "/proj",
             documentPath = "/proj/tasks/one.md",
             commandId = "cmd-focus",
@@ -145,7 +145,7 @@ class CpcRouteClientCommandPlaneTest {
 
     @Test
     fun `focusDocumentPaneCommandSubmitRequest can target async submit endpoint`() {
-        val request = CpcRouteClient.focusDocumentPaneCommandSubmitRequest(
+        val request = CpRouteClient.focusDocumentPaneCommandSubmitRequest(
             projectRoot = "/proj",
             documentPath = "/proj/tasks/one.md",
             commandId = "cmd-focus-async",
@@ -161,12 +161,12 @@ class CpcRouteClientCommandPlaneTest {
 
     @Test
     fun `focus submissions for different tabs coalesce as one latest project intent`() {
-        val first = CpcRouteClient.focusDocumentPaneCommandSubmitRequest(
+        val first = CpRouteClient.focusDocumentPaneCommandSubmitRequest(
             projectRoot = "/proj",
             documentPath = "/proj/tasks/one.md",
             commandId = "cmd-focus-one",
         )
-        val second = CpcRouteClient.focusDocumentPaneCommandSubmitRequest(
+        val second = CpRouteClient.focusDocumentPaneCommandSubmitRequest(
             projectRoot = "/proj",
             documentPath = "/proj/tasks/two.md",
             commandId = "cmd-focus-two",
@@ -203,20 +203,20 @@ class CpcRouteClientCommandPlaneTest {
 
     @Test
     fun `resolveCommandSubmitData returns output only on an applied terminal`() {
-        val result = CpcRouteClient.resolveCommandSubmitData(projectionData("applied", true, "routed ok"), "cmd-1")
+        val result = CpRouteClient.resolveCommandSubmitData(projectionData("applied", true, "routed ok"), "cmd-1")
         assertEquals(0, result.exitCode)
         assertEquals("routed ok", result.output)
     }
 
     @Test
     fun `resolveCommandSubmitData fails on a non-terminal projection`() {
-        val result = CpcRouteClient.resolveCommandSubmitData(projectionData("running", false, ""), "cmd-1")
+        val result = CpRouteClient.resolveCommandSubmitData(projectionData("running", false, ""), "cmd-1")
         assertEquals(1, result.exitCode)
     }
 
     @Test
     fun `resolveCommandSubmitData fails on a rejected terminal`() {
-        val result = CpcRouteClient.resolveCommandSubmitData(
+        val result = CpRouteClient.resolveCommandSubmitData(
             projectionData("rejected", true, "boom", reason = "editor_route exit_code=1"),
             "cmd-1",
         )
@@ -226,7 +226,7 @@ class CpcRouteClientCommandPlaneTest {
 
     @Test
     fun `resolveCommandSubmitAcceptedData succeeds on accepted non terminal projection`() {
-        val result = CpcRouteClient.resolveCommandSubmitAcceptedData(
+        val result = CpRouteClient.resolveCommandSubmitAcceptedData(
             projectionData("accepted", false, "sync_tmux_layout accepted"),
             "cmd-1",
             "sync_tmux_layout",
@@ -238,7 +238,7 @@ class CpcRouteClientCommandPlaneTest {
 
     @Test
     fun `resolveCommandSubmitAcceptedData fails on rejected terminal projection`() {
-        val result = CpcRouteClient.resolveCommandSubmitAcceptedData(
+        val result = CpRouteClient.resolveCommandSubmitAcceptedData(
             projectionData("rejected", true, "sync failed", reason = "bad payload"),
             "cmd-1",
             "sync_tmux_layout",

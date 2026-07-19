@@ -11,7 +11,7 @@
 //! `.agent-doc/supervisor/<session-uuid>.sock`. Route/runtime and CLI control
 //! paths connect and send JSON commands for supervisor lifecycle/state/inject
 //! operations. Editor document authority and CRDT replica traffic stay on the
-//! CPC/project-controller route, not this per-session socket.
+//! CP/project-controller route, not this per-session socket.
 //!
 //! ## Protocol
 //!

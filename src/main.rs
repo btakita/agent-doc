@@ -290,7 +290,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         // Runs INSIDE the controller process (invoked by `handle_commit_document_rpc`).
         // `commit_document_in_controller` marks the commit as controller-owned so it
         // does not re-delegate over the socket and treats the relay barrier the
-        // handler already flushed as pre-converged (`#cpc-commit`).
+        // handler already flushed as pre-converged (`#cp-commit`).
         let outcome =
             agent_doc_commit_io::commit_document_in_controller(file, authoritative_compaction)?;
         Ok(
@@ -1123,7 +1123,7 @@ impl agent_doc_watch_io::WatchDaemonEffects for CliWatchDaemonEffects {
         }
         // A filesystem change cannot outrank an open editor. Retain its exact
         // disk bytes as a Lazily user-decision candidate, or settle an older
-        // candidate when the CPC current document proves the same bytes were
+        // candidate when the CP current document proves the same bytes were
         // saved. Filesystem live-buffer projections are not an authority input.
         let (relay_has_live_editor, relay_editor_content) =
             match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(Path::new(file)) {

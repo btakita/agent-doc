@@ -3,7 +3,7 @@
 //!
 //! # Why this module exists
 //!
-//! The replica reconciliation architecture (turn ⇄ CPC/supervisor ⇄ editor
+//! The replica reconciliation architecture (turn ⇄ CP/supervisor ⇄ editor
 //! shadow) needs a document model where **any replica that is written to
 //! reconciles with the sender before accepting the change**, and where
 //! concurrent edits from independent replicas converge **without a shared base
@@ -22,7 +22,7 @@
 //!   an HLC clock + per-peer `StampFrontier`, and `sync_frame_since(frontier)` /
 //!   `sync_reply(request)` ship exactly the ops a peer's frontier is missing —
 //!   i.e. **delta sync keyed on causal metadata**, the coordinator-free pull
-//!   protocol the CPC/editor replicas need.
+//!   protocol the CP/editor replicas need.
 //!
 //! So yrs (the current whole-document `Y.Text`) is **retirable for the replica
 //! model** — lazily's per-cell plane is a better fit (per-cell isolation kills
@@ -58,7 +58,7 @@ pub struct ReplicaConvergence {
 /// Seeds a shared root, forks a replica per peer, applies each side's edits, then
 /// cross-merges both directions. Returns the converged text plus the CRDT
 /// invariants observed (equal replicas, order-independent result). This is the
-/// coordinator-free primitive the CPC/editor/turn replicas build on: neither side
+/// coordinator-free primitive the CP/editor/turn replicas build on: neither side
 /// needs the other's base, only its op state.
 pub fn converge_two_replicas<A, B>(base: &str, edit_a: A, edit_b: B) -> ReplicaConvergence
 where

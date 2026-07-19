@@ -138,8 +138,8 @@ impl RealtimeSteeringSet {
     /// Project the full operator-steering set into the wire-stable turn view.
     /// The primary directive supplies the compact state/preview while `count`
     /// and `verbatim` retain the complete aggregate for every consumer.
-    pub fn turn_projection(&self) -> agent_doc_turn::cpc_projection::TurnSteeringProjection {
-        use agent_doc_turn::cpc_projection::{TurnSteeringProjection, TurnSteeringState};
+    pub fn turn_projection(&self) -> agent_doc_turn::cp_projection::TurnSteeringProjection {
+        use agent_doc_turn::cp_projection::{TurnSteeringProjection, TurnSteeringState};
 
         let primary = self.primary();
         let preview = primary.preview().map(str::to_string);

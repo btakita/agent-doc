@@ -311,7 +311,7 @@ fn queue_continuation_invariant() -> WorkflowInvariant {
         regression_coverage: vec![
             coverage(
                 RegressionCoverageKind::SimWorld,
-                "queue continuation remains eligible after proven CPC delivery recovery",
+                "queue continuation remains eligible after proven CP delivery recovery",
                 Some("cargo test -p agent-doc-workflow"),
             ),
             coverage(
@@ -500,13 +500,13 @@ fn editor_convergence_invariant() -> WorkflowInvariant {
     WorkflowInvariant {
         id: WorkflowInvariantId::EditorConvergence,
         title: text(
-            "Editor-visible writes rebase on Lazily/CPC authority and settle without operator save",
+            "Editor-visible writes rebase on Lazily/CP authority and settle without operator save",
         ),
         severity: InvariantSeverity::High,
         fact_sources: vec![
             fact(
                 FactSourceKind::WorkflowStateKernel,
-                "Lazily/CPC authority hash and replica ACK frontier",
+                "Lazily/CP authority hash and replica ACK frontier",
             ),
             fact(
                 FactSourceKind::OpsLog,
@@ -522,7 +522,7 @@ fn editor_convergence_invariant() -> WorkflowInvariant {
                     "canonical authority hash",
                     PredicateRelation::Present,
                     None,
-                    "Lazily/CPC owns the live editor text used for convergence.",
+                    "Lazily/CP owns the live editor text used for convergence.",
                 ),
                 clause(
                     FactSourceKind::OpsLog,
@@ -560,7 +560,7 @@ fn editor_convergence_invariant() -> WorkflowInvariant {
             RemediationAction::UseEditorIpcWriteback,
             None,
             &[
-                "live CPC replica registered",
+                "live CP replica registered",
                 "retained intent has a content-bearing merge base",
                 "rebased canonical target passes the shared structural validator",
             ],

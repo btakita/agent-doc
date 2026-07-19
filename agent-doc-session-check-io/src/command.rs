@@ -275,7 +275,7 @@ fn ensure_terminal_authority_disk_convergence(
         return Ok(());
     }
     let recycle_status =
-        agent_doc_controller_io::project_controller::schedule_stale_editor_replica_pcp_recycle(
+        agent_doc_controller_io::project_controller::schedule_stale_editor_replica_cp_recycle(
             file,
             "session_check_terminal_convergence",
         );
@@ -644,7 +644,7 @@ fn run_with_options_inner(
                         deferred, noise, outcome_fields
                     );
                     eprintln!(
-                        "[session-check] queue continues via supervisor: a [focused-cycle] head remains that the CPC/supervisor clear-and-continue path drains (force /clear + re-dispatch to a fresh session). End this turn so the supervisor takes over — NOT an operator stall ({}; #qfocsup). {}",
+                        "[session-check] queue continues via supervisor: a [focused-cycle] head remains that the CP/supervisor clear-and-continue path drains (force /clear + re-dispatch to a fresh session). End this turn so the supervisor takes over — NOT an operator stall ({}; #qfocsup). {}",
                         file.display(),
                         outcome_fields
                     );

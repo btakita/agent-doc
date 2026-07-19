@@ -609,7 +609,7 @@ mod tests {
     #[test]
     fn session_check_accepts_latest_committed_response_visible_in_operator_crdt() {
         // When an attached editor is authoritative, the operator-visible
-        // document is the Lazily/CPC editor replica, not stale disk. If CRDT
+        // document is the Lazily/CP editor replica, not stale disk. If CRDT
         // authority proves the latest committed response is visible there,
         // session-check must not ask recovery to merge it into disk and risk
         // racing the operator buffer.

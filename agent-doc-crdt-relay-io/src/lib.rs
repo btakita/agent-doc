@@ -79,7 +79,7 @@ pub enum CrdtReplicaEventReason {
     RequestFullState,
     Fanout,
     ResponseCellAdd,
-    CpcWrite,
+    CpWrite,
     Rebootstrap,
     AckReplay,
     AckRecoveryForceRefresh,
@@ -91,7 +91,7 @@ impl CrdtReplicaEventReason {
             Self::RequestFullState => "request_full_state",
             Self::Fanout => "fanout",
             Self::ResponseCellAdd => "response_cell_add",
-            Self::CpcWrite => "cpc_write",
+            Self::CpWrite => "cp_write",
             Self::Rebootstrap => "rebootstrap",
             Self::AckReplay => "ack_replay",
             Self::AckRecoveryForceRefresh => "ack_recovery_force_refresh",
@@ -202,7 +202,7 @@ fn authority_for_file(file: &str) -> CrdtAuthority {
 }
 
 /// The canonical replica's reserved yrs client-id for every per-document hub. The
-/// CPC/controller-owned canonical replica is the hub authority; editor replicas
+/// CP/controller-owned canonical replica is the hub authority; editor replicas
 /// mint their own ids via [`mint_client_id`] and can never collide with this
 /// reserved id (`RelayHub::register` rejects it).
 const CANONICAL_CLIENT_ID: u64 = 1;
@@ -730,7 +730,7 @@ pub fn current_text_for_file_with_authority(
 
 /// [`current_text_for_file_with_authority`] without flushing live editor ops.
 ///
-/// This is for latency-sensitive observation paths that need a cheap CPC state
+/// This is for latency-sensitive observation paths that need a cheap CP state
 /// proof. If a hub exists but is not already a consistent cut, it reports
 /// [`CurrentText::EditorSyncPending`] instead of driving the commit barrier.
 pub fn current_text_for_file_with_authority_nonblocking(
@@ -900,7 +900,7 @@ pub fn ensure_document_model(file: &Path, source: &str) -> Result<CurrentText> {
 ///
 /// This keeps the single bounded observe/retry transition in the relay crate while
 /// allowing controller clients to request an editor observation outside the
-/// controller RPC handler and then poll CPC-owned relay state through the
+/// controller RPC handler and then poll CP-owned relay state through the
 /// controller. The observer must read relay state only; it must not treat disk or
 /// filesystem sidecars as fallback authority while an editor is attached.
 pub fn ensure_document_model_with_current_text_observer(
@@ -1289,11 +1289,11 @@ pub struct FanOut {
     pub canonical_len: usize,
 }
 
-/// Result of a CPC-authored CRDT write into the controller-owned canonical
+/// Result of a CP-authored CRDT write into the controller-owned canonical
 /// replica. Disk materialization may use this result as proof that the document
 /// file is a projection of the relay, not a separate editor-authoritative path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CpcRelayWrite {
+pub struct CpRelayWrite {
     pub applied: bool,
     pub content_len: usize,
     pub content_hash: String,
@@ -1652,41 +1652,41 @@ pub fn relay_replica_update_for_file(
     }))
 }
 
-/// Apply a CPC-authored full-document update through the CRDT relay.
+/// Apply a CP-authored full-document update through the CRDT relay.
 ///
 /// This is the controller→editor direction for recovered/finalized writes. It
 /// refuses to create a relay hub from disk while an editor is attached, and it
 /// only mutates the canonical replica when the caller's `expected_current`
-/// byte-matches the current CPC canonical text after the live-editor commit
+/// byte-matches the current CP canonical text after the live-editor commit
 /// barrier has flushed inbound editor ops. That baseline check is the guard that
 /// keeps unsaved editor-buffer changes from being overwritten by a stale binary
 /// recovery response.
-/// Apply a CPC full-document replace against an already-resolved relay `hub`.
+/// Apply a CP full-document replace against an already-resolved relay `hub`.
 ///
 /// Shared by the first-attempt and durable-projection-recovery paths of
-/// [`apply_cpc_write_for_file`] so both enforce the identical commit-barrier and
+/// [`apply_cp_write_for_file`] so both enforce the identical commit-barrier and
 /// `expected_current` baseline guards. Fails closed (`retry_crdt_merge`) when the
 /// hub canonical diverges from `expected_current`, so recovering a hub from the
 /// durable projection can never overwrite unsaved editor state that the caller
 /// did not compact against.
-fn apply_cpc_write_on_hub(
+fn apply_cp_write_on_hub(
     hub: &mut RelayHub,
     file: &Path,
     authority: CrdtAuthority,
     expected_current: &str,
     content: &str,
-) -> Result<CpcRelayWrite> {
+) -> Result<CpRelayWrite> {
     let ready = hub.commit_barrier_under_authority(authority)?;
     if !ready {
         anyhow::bail!(
-            "CPC relay write refused for {}: editor_sync_pending; disk is a non-authoritative projection",
+            "CP relay write refused for {}: editor_sync_pending; disk is a non-authoritative projection",
             file.display()
         );
     }
     let canonical = hub.canonical_text();
     if canonical != expected_current {
         anyhow::bail!(
-            "CPC relay write refused for {}: expected_hash={} current_hash={} recovery=retry_crdt_merge",
+            "CP relay write refused for {}: expected_hash={} current_hash={} recovery=retry_crdt_merge",
             file.display(),
             agent_doc_hash::content_hash(expected_current),
             agent_doc_hash::content_hash(&canonical)
@@ -1696,7 +1696,7 @@ fn apply_cpc_write_on_hub(
     let packet = hub.apply_canonical_replace(expected_current, content)?;
     let applied = before_hash != agent_doc_hash::content_hash(content);
     let targets = packet.targets.len();
-    Ok(CpcRelayWrite {
+    Ok(CpRelayWrite {
         applied,
         content_len: content.len(),
         content_hash: agent_doc_hash::content_hash(content),
@@ -1828,12 +1828,12 @@ pub fn add_response_cell_for_file(
     Ok(Some(result))
 }
 
-pub fn apply_cpc_write_for_file(
+pub fn apply_cp_write_for_file(
     file: &Path,
     expected_current: &str,
     content: &str,
     source: &str,
-) -> Result<Option<CpcRelayWrite>> {
+) -> Result<Option<CpRelayWrite>> {
     let authority = authority_for_file(&file.display().to_string());
     if !authority.editor_attached() {
         return Ok(None);
@@ -1847,7 +1847,7 @@ pub fn apply_cpc_write_for_file(
     // a controller recycle / editor restart, or the FFI replica dropped), the hub
     // is absent and `with_existing_hub` returns `None`.
     let result = if let Some(result) = with_existing_hub(file, |hub| {
-        apply_cpc_write_on_hub(hub, file, authority, expected_current, content)
+        apply_cp_write_on_hub(hub, file, authority, expected_current, content)
     })? {
         result
     } else {
@@ -1856,16 +1856,16 @@ pub fn apply_cpc_write_for_file(
         // ([`current_text_for_file_with_authority_recovering_projection`]). The
         // projection is the last-known relay canonical, not raw disk, so this does
         // not smuggle a non-authoritative disk image in: the `expected_current`
-        // baseline check inside [`apply_cpc_write_on_hub`] still fails closed with
+        // baseline check inside [`apply_cp_write_on_hub`] still fails closed with
         // `retry_crdt_merge` if the recovered canonical diverges from what the
-        // caller compacted against. Without this, a compact/CPC write hard-fails
+        // caller compacted against. Without this, a compact/CP write hard-fails
         // the whole operation (observed: JB `Compact Exchange` →
-        // `crdt_cpc_write ... no registered replica yet`, #cpcwritemissingreplica).
+        // `crdt_cp_write ... no registered replica yet`, #cpcwritemissingreplica).
         let hash = agent_doc_fs::document_state_hash(file)?;
         let recovered = recover_missing_hub_from_durable_projection(file, &hash)?;
         match if recovered {
             with_existing_hub(file, |hub| {
-                apply_cpc_write_on_hub(hub, file, authority, expected_current, content)
+                apply_cp_write_on_hub(hub, file, authority, expected_current, content)
             })?
         } else {
             None
@@ -1874,7 +1874,7 @@ pub fn apply_cpc_write_for_file(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "crdt_cpc_write_recovered_missing_replica file={} source={} authority=multi_replica doc_hash={} recovery=durable_projection",
+                        "crdt_cp_write_recovered_missing_replica file={} source={} authority=multi_replica doc_hash={} recovery=durable_projection",
                         file.display(),
                         source,
                         hash,
@@ -1886,14 +1886,14 @@ pub fn apply_cpc_write_for_file(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "crdt_cpc_write_deferred file={} source={} authority=multi_replica reason=missing_relay_model recovered_projection={} recovery=observe_lazily_current_register_crdt",
+                        "crdt_cp_write_deferred file={} source={} authority=multi_replica reason=missing_relay_model recovered_projection={} recovery=observe_lazily_current_register_crdt",
                         file.display(),
                         source,
                         recovered,
                     ),
                 );
                 anyhow::bail!(
-                    "CPC relay write unavailable for {}; editor is the current authority but the CRDT relay has no registered replica yet",
+                    "CP relay write unavailable for {}; editor is the current authority but the CRDT relay has no registered replica yet",
                     file.display()
                 );
             }
@@ -1903,12 +1903,12 @@ pub fn apply_cpc_write_for_file(
     if result.targets > 0
         && result.update_bytes > 0
         && let Err(err) =
-            signal_crdt_replica_event(file, CrdtReplicaEventReason::CpcWrite, result.targets)
+            signal_crdt_replica_event(file, CrdtReplicaEventReason::CpWrite, result.targets)
     {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_replica_event_signal_failed file={} reason=cpc_write error={err}",
+                "crdt_replica_event_signal_failed file={} reason=cp_write error={err}",
                 file.display(),
             ),
         );
@@ -1916,7 +1916,7 @@ pub fn apply_cpc_write_for_file(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_cpc_write file={} source={} authority=multi_replica applied={} content_len={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged={}",
+            "crdt_cp_write file={} source={} authority=multi_replica applied={} content_len={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged={}",
             file.display(),
             source,
             result.applied,
@@ -3289,7 +3289,7 @@ mod tests {
             other => panic!("expected relay current text, got {other:?}"),
         };
         let next = format!("{current}\n### Re: retained\n\nComplete response.\n");
-        apply_cpc_write_for_file(&doc, &current, &next, "test_dead_editor_prune")
+        apply_cp_write_for_file(&doc, &current, &next, "test_dead_editor_prune")
             .unwrap()
             .expect("canonical response write should queue delivery");
         with_hub(&doc, |hub| {
@@ -3516,19 +3516,19 @@ mod tests {
     }
 
     #[test]
-    fn cpc_relay_write_requires_current_canonical_baseline() {
-        let (_dir, doc) = temp_doc("cpc-baseline.md");
+    fn cp_relay_write_requires_current_canonical_baseline() {
+        let (_dir, doc) = temp_doc("cp-baseline.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
-        register_replica_for_file(&doc, "intellij:cpc-baseline")
+        register_replica_for_file(&doc, "intellij:cp-baseline")
             .unwrap()
             .expect("editor replica should attach");
 
-        let err = apply_cpc_write_for_file(
+        let err = apply_cp_write_for_file(
             &doc,
             "stale baseline\n",
             "stale baseline\n### Re: no — gpt-5\n\nNo.\n",
-            "test_cpc_relay",
+            "test_cp_relay",
         )
         .unwrap_err();
         assert!(
@@ -3538,7 +3538,7 @@ mod tests {
         with_hub(&doc, |hub| {
             assert!(hub.canonical_text().contains("body"));
             assert_eq!(
-                hub.pending_updates(mint_client_id("intellij:cpc-baseline"))
+                hub.pending_updates(mint_client_id("intellij:cp-baseline"))
                     .unwrap()
                     .len(),
                 0
@@ -3548,13 +3548,13 @@ mod tests {
     }
 
     #[test]
-    fn cpc_relay_write_zero_live_editors_keeps_doc_op_canonical_authority() {
+    fn cp_relay_write_zero_live_editors_keeps_doc_op_canonical_authority() {
         // The document-op plane feeds canonical independently of relay-member
         // liveness. Zero live members must not demote an existing hub to disk.
-        let (_dir, doc) = temp_doc("cpc-stale-lease.md");
+        let (_dir, doc) = temp_doc("cp-stale-lease.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
-        register_replica_for_file(&doc, "intellij:cpc-stale")
+        register_replica_for_file(&doc, "intellij:cp-stale")
             .unwrap()
             .expect("editor replica should attach");
         let baseline = match current_text_for_file(&doc).unwrap() {
@@ -3562,7 +3562,7 @@ mod tests {
             other => panic!("expected relay current text, got {other:?}"),
         };
         // The member goes offline while the durable Open fact remains live.
-        let client_id = mint_client_id("intellij:cpc-stale");
+        let client_id = mint_client_id("intellij:cp-stale");
         with_hub(&doc, |hub| {
             assert!(
                 hub.disconnect(client_id),
@@ -3577,7 +3577,7 @@ mod tests {
         .unwrap();
 
         let next = format!("{baseline}\n### Re: current — gpt-5\n\nCanonical authority.\n");
-        let result = apply_cpc_write_for_file(&doc, &baseline, &next, "test_cpc_relay")
+        let result = apply_cp_write_for_file(&doc, &baseline, &next, "test_cp_relay")
             .expect("zero-live canonical write should pass its CAS")
             .expect("an existing doc-op canonical must not demote to disk");
         assert!(result.applied);
@@ -3586,11 +3586,11 @@ mod tests {
     }
 
     #[test]
-    fn cpc_relay_write_queues_editor_pull_without_file_ipc_sidecar() {
-        let (_dir, doc) = temp_doc("cpc-write.md");
+    fn cp_relay_write_queues_editor_pull_without_file_ipc_sidecar() {
+        let (_dir, doc) = temp_doc("cp-write.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
-        register_replica_for_file(&doc, "intellij:cpc-write")
+        register_replica_for_file(&doc, "intellij:cp-write")
             .unwrap()
             .expect("editor replica should attach");
         let current = match current_text_for_file(&doc).unwrap() {
@@ -3599,16 +3599,16 @@ mod tests {
         };
         let next = format!("{current}\n### Re: relay — gpt-5\n\nRecovered via relay.\n");
 
-        let result = apply_cpc_write_for_file(&doc, &current, &next, "test_cpc_relay")
+        let result = apply_cp_write_for_file(&doc, &current, &next, "test_cp_relay")
             .unwrap()
-            .expect("attached CPC relay write should apply");
+            .expect("attached CP relay write should apply");
         assert!(result.applied);
         assert_eq!(result.targets, 1);
         assert!(!result.delivery_converged);
         with_hub(&doc, |hub| {
             assert_eq!(hub.canonical_text(), next);
             let pending = hub
-                .pending_updates(mint_client_id("intellij:cpc-write"))
+                .pending_updates(mint_client_id("intellij:cp-write"))
                 .unwrap();
             assert_eq!(pending.len(), 1);
             assert_eq!(pending[0].origin, CANONICAL_CLIENT_ID);
@@ -3617,17 +3617,17 @@ mod tests {
     }
 
     #[test]
-    fn cpc_relay_write_recovers_missing_replica_from_durable_projection() {
+    fn cp_relay_write_recovers_missing_replica_from_durable_projection() {
         // Editor attached (authority) but this process has NO registered relay
         // replica — the transient gap after a controller recycle / editor restart
         // that made JB `Compact Exchange` hard-fail with
-        // `crdt_cpc_write ... no registered replica yet` (#cpcwritemissingreplica).
+        // `crdt_cp_write ... no registered replica yet` (#cpcwritemissingreplica).
         // With a durable state-db projection, the write must recover the hub and
         // apply rather than aborting.
-        let (_dir, doc) = temp_doc("cpc-missing-replica.md");
+        let (_dir, doc) = temp_doc("cp-missing-replica.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
-        register_replica_for_file(&doc, "intellij:cpc-recover")
+        register_replica_for_file(&doc, "intellij:cp-recover")
             .unwrap()
             .expect("editor replica should attach");
         let current = match current_text_for_file(&doc).unwrap() {
@@ -3650,9 +3650,9 @@ mod tests {
         );
 
         let next = format!("{current}\n### Re: recovered — gpt-5\n\nAfter recycle.\n");
-        let result = apply_cpc_write_for_file(&doc, &current, &next, "test_cpc_relay")
+        let result = apply_cp_write_for_file(&doc, &current, &next, "test_cp_relay")
             .unwrap()
-            .expect("missing-replica CPC write should recover from projection and apply");
+            .expect("missing-replica CP write should recover from projection and apply");
         assert!(result.applied);
         with_hub(&doc, |hub| assert_eq!(hub.canonical_text(), next)).unwrap();
     }
@@ -3715,11 +3715,11 @@ mod tests {
     }
 
     #[test]
-    fn cpc_relay_write_without_projection_still_fails_closed_on_missing_replica() {
+    fn cp_relay_write_without_projection_still_fails_closed_on_missing_replica() {
         // Missing replica AND no durable projection to recover from: the write must
         // still fail closed with the actionable "no registered replica yet" error
         // rather than fabricating a hub from raw disk.
-        let (_dir, doc) = temp_doc("cpc-no-projection.md");
+        let (_dir, doc) = temp_doc("cp-no-projection.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
@@ -3735,7 +3735,7 @@ mod tests {
         );
 
         let err =
-            apply_cpc_write_for_file(&doc, "baseline\n", "baseline\nmore\n", "test_cpc_relay")
+            apply_cp_write_for_file(&doc, "baseline\n", "baseline\nmore\n", "test_cp_relay")
                 .unwrap_err();
         assert!(
             format!("{err:#}").contains("no registered replica yet"),
@@ -4423,7 +4423,7 @@ mod tests {
         assert!(
             log.contains("crdt_commit_barrier_deferred")
                 && log.contains("reason=missing_relay_model"),
-            "multi-replica commit barrier must fail closed on missing CPC relay model:\n{log}"
+            "multi-replica commit barrier must fail closed on missing CP relay model:\n{log}"
         );
     }
 

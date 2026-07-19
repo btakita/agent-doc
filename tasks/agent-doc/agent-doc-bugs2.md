@@ -34,17 +34,15 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260719-031359.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260719-031545.md`*
 
 Compacted content:
-- Archived 4 response topic(s): replay-state lifetime, reap triggers, and a peer watermark; version counter / ULID surrogate key for removing old snapshots + replay state; do [#sk47] + declarative schema sync instead of migrations; 1 more
-- Prior summary/context: prior compacted content: Archived 5 response topic(s): do [#eqmv]; state.db GC + binary-owned reconciliation; automat...
-<!-- agent:boundary:dbaf4899 -->
+- Prior summary/context: prior compacted content: Archived 4 response topic(s): replay-state lifetime, reap triggers, and a peer watermark; ve...
+<!-- agent:boundary:66941869 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#sk47]~~
 - do [#fmgc]
 - do [#eqmvscroll]
 - do [#0dsr]

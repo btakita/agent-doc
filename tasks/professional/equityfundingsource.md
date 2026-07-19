@@ -243,11 +243,13 @@ The three states stay distinct end to end, since collapsing any two sends an adm
 **What the verification caught.** My SELECT change broke 10 existing tests with `no such column: match_outcome` — the test fixtures build their own SQLite schema inline and had not gained the 0142 columns. Real omission, fixed in the fixture. Beyond the suite I confirmed the page and route are actually in the built artifacts (`Not scored yet` in the browser bundle, `tmo-unmatched-fundings/reconcile` in the worker bundle), since registering a section and having it survive the build are different claims.
 
 **Not verified:** I have not driven this page in a browser against real parked rows. The reconcile pass has no cron or scheduled trigger either — it runs from the admin button or a direct POST only. Neither is a gap I can close without a live environment, and neither blocks the queue from being used.
-<!-- agent:boundary:209e0e96 -->
+<!-- agent:boundary:96e5c33e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Please add a backup command to backup the TMO system. Test backup on the sandbox.
+- do [#efs-do-hibernation]
+- do [#tmo-sandbox-purge-apply]
+- do [#tmo-backup-command]
 - ~~do [#tmo-reconcile-binder-ui]~~
 - do [#efs-prod-secret-parity]
 - do [#tmo-orphan-cache]

@@ -259,18 +259,40 @@ The 8 dangling gitlinks are filed as `#rappgitlink` rather than fixed — pushin
 I also left `rappstack/dev` uncommitted on purpose. `git status` shows `M bun.lockb` plus `M` on those same 8 submodules — but those 8 are *stuck at older commits* because their checkout failed, so committing them would regress `origin/main`'s gitlinks. The lockfile is likewise derived from a tree with 8 stale submodules. Both should land only after `#rappgitlink` is resolved.
 
 Note that `#rappts`'s 15-error youtube cluster lives in **brookebrodack-dev**, which was already on `^0.45.1`. This cycle fixed the upstream half it consumes; whether that clears the cluster needs a typecheck over there. I could not verify it from this side — `tsc` in `domain--server--youtube` fails first on an unrelated `tsconfig.json` error (`TS5110: 'module' must be set to 'NodeNext' when 'moduleResolution' is 'NodeNext'`) against the old `typescript@5.5.0-dev` that the root `next` pin resolved to.
-<!-- agent:boundary:06edbc42 -->
+❯ 🚧 please commit + push
+
+### Re: please commit + push — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#rappgitlink]
+
+
+Done, and `#rappgitlink` is fixed at the root rather than worked around. `rappstack/dev` is now at `6201622`, pushed, with a fresh recursive clone verified working.
+
+**What the 8 submodules actually had.** Each carried exactly one unpushed commit — `chore: bump version to 0.1.0 for npm publishing` — while its own remote had moved on with dependency updates and a `typescript` peerDep loosening. A batch npm-publish bump was committed into `rappstack/dev`'s gitlinks but the submodule commits themselves were never pushed, so the superproject referenced objects nobody could fetch.
+
+None were a simple push; all 8 were diverged (1 ahead, 1–5 behind). I rebased each bump onto its remote `main`, which produced the intended union — version bump on top of the newer deps.
+
+Six rebased clean. Two conflicted (`snippet--rappstack`, `ui--any--blog`) because both sides edited the same `package.json` region. I resolved both by taking **upstream's** file and applying only the version bump, since upstream's dependency decisions were strictly newer — `snippet--rappstack` upstream had already replaced `workspace:*` with `^0.1.1` ranges (vs the local commit's `^0.1.0`) plus a `relysjs → rhonojs` migration. Every result was verified fast-forward, clean tree, valid JSON before anything left the machine. Prior HEADs are tagged `backup/pre-rappgitlink` in each submodule.
+
+**7 of 8 pushed. One can't be.** `btakita/snippet--rappstack` is **archived on GitHub — read-only**, so its commit is unpublishable by any means. I pointed that gitlink at the existing remote `main` (`94e07aa`) and dropped the local bump, which is what makes a clone work today. That needs a real decision from you, so it is filed as `#rappsnippetarchive` — unarchive and re-push, move the package to a new remote, or leave it pinned.
+
+**Verification.** After committing the gitlinks I ran a full `git clone --recurse-submodules` from GitHub into a temp dir. Every submodule checked out, including all 8 that previously failed. That was the actual broken behavior, so this is the proof that matters — `submodule update` in the existing checkout would have kept resetting to the old recorded gitlink and told me nothing.
+
+I then regenerated `bun.lockb` against the corrected submodules and confirmed the drizzle result held: no split store entries, all four consumers on one hoisted **0.45.2**. That lockfile is now committed — last cycle I withheld it precisely because it was derived from a tree with 8 stale submodules, and that objection no longer applies.
+
+Both checkouts are synced to `6201622` with clean trees. `rappstack/dev` shows only an untracked `.idea/`, which I left alone. I did not touch the `agent-loop` superproject — it has ~30 modified paths from concurrent sessions, and none of this turn's work belongs there.
+
+Two caveats carried forward unchanged. `better-sqlite3` still fails its native build against Node v26, so installs need `--ignore-scripts`; and whether this clears `#rappts`'s 15-error youtube cluster still needs a typecheck in brookebrodack-dev, which I can't run from this side.
+<!-- agent:boundary:cd86cf4a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#rappgitlink]
-- ~~do [#oidcnpm]~~
-- ~~do [#schemadts2]~~
-- ~~do [#ctxredtests]~~
-- ~~do [#rappdeps]~~
-- ~~do [#rhonouvu]~~
+- do [#rappsnippetarchive]
+- ~~do [#rappgitlink]~~
 - do [#tsnextpin]
 - do [#lzeffectvoid]
 - do [#tsappclean]
@@ -291,7 +313,7 @@ Note that `#rappts`'s 15-error youtube cluster lives in **brookebrodack-dev**, w
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rappgitlink] rappstack/dev origin/main references 8 submodule commits never pushed to their own remotes, so a fresh clone cannot check them out: lib/dev-bin (2ec18b4), domain--browser, domain--browser--blog, snippet--rappstack, ui--any (e8e383a), ui--any--blog, ui--browser, ui--browser--semantic. Commits exist locally in agent-loop/src/rappstack-dev/lib/*. dev-bin additionally needs a real merge, not just a push: gitlink 2ec18b4 has version 0.1.0 (npm publish bump) while its origin/main 248ac1c has newer deps (marked ^17, ora ^9, clipboardy ^5, ctx-core ^7.2.32) plus typescript peerDep loosened to '*' — neither side is a superset, common ancestor e10283e. Until resolved, rappstack/dev bun.lockb + 8 gitlinks must stay uncommitted (committing would regress origin/main)
+- [ ] [#rappsnippetarchive] btakita/snippet--rappstack is ARCHIVED on GitHub (read-only), so its unpushed 'bump version to 0.1.0' commit a61f06b can never be published. rappstack/dev's gitlink now points at the existing remote main 94e07aa and the local bump is dropped (preserved as tag backup/pre-rappgitlink in agent-loop/src/rappstack-dev/lib/snippet--rappstack). Decide: unarchive the repo and re-push the bump, move the package to a new remote, or leave it pinned at 94e07aa. Note its remote main also carries a relysjs->rhonojs migration the local branch never had
 - [ ] [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface. KEPT OPEN: not started — sequence after #pushctxcore so it does not stack a second uncommitted sweep on top of the unpushed dependency sweep
 - [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit
 - [ ] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
@@ -355,4 +377,5 @@ Note that `#rappts`'s 15-error youtube cluster lives in **brookebrodack-dev**, w
 - 2026-07-19 [#ctxredtests] 7 ctx-core-dev packages have test scripts that were already red before the dependency sweep: auth0, google, preprocess, rebuildjs-tailwindcss, relysjs, rhonojs (#rhonouvu), search. relysjs is a missing check-dts script. Triage and fix so the workspace suite is a usable gate. KEPT OPEN: not started — each is an independent pre-existing failure, and none block the sweep that is already committed
 - 2026-07-19 [#rappts] 24 of the remaining type errors are in yalc/npm-linked @rappstack/* SOURCES, not this repo (they ship .ts, so skipLibCheck does not apply): 17 in ui--any/md/MarkedPlaintextRenderer.ts (written against marked 13's Renderer signature, now resolving marked 17), 3 in domain--server--blog/post/Post__schema.ts (zod errorMap), plus dl/, rdfa/, jsonld/, breadcrumb/. SEPARATELY, 15 errors in lib/domain--server--brookebrodack/youtube/ have a single rappstack root cause: @rappstack/domain--server--youtube pins drizzle-orm ^0.32.0 while @rappstack/domain--server pins ^0.45.1, so youtube_video_tbl is a 0.32 table type and drizzle_db_(ctx) is a 0.45 db handle and every query between them is a nominal mismatch. Bumping this repo's pin cannot fix it. Align both packages on one drizzle major and republish; that unblocks #ciappts and gating typecheck:browser
 - 2026-07-19 [#rappdeps] rappstack is at /home/brian/work/rappstack/dev (github rappstack/dev). Run the same dependency sweep, and ALIGN DRIZZLE: 4 packages pin drizzle-orm ^0.32.0 while domain--server pins ^0.45.1, which is the whole 15-error youtube cluster in brookebrodack-dev (#rappts) — a table type and a db handle from two different drizzle universes. Also has an uncommitted working tree (bun.lockb, lib/dev-bin, lib/domain--any--blog) to resolve first
+- 2026-07-19 [#rappgitlink] rappstack/dev origin/main references 8 submodule commits never pushed to their own remotes, so a fresh clone cannot check them out: lib/dev-bin (2ec18b4), domain--browser, domain--browser--blog, snippet--rappstack, ui--any (e8e383a), ui--any--blog, ui--browser, ui--browser--semantic. Commits exist locally in agent-loop/src/rappstack-dev/lib/*. dev-bin additionally needs a real merge, not just a push: gitlink 2ec18b4 has version 0.1.0 (npm publish bump) while its origin/main 248ac1c has newer deps (marked ^17, ora ^9, clipboardy ^5, ctx-core ^7.2.32) plus typescript peerDep loosened to '*' — neither side is a superset, common ancestor e10283e. Until resolved, rappstack/dev bun.lockb + 8 gitlinks must stay uncommitted (committing would regress origin/main)
 <!-- /agent:done -->

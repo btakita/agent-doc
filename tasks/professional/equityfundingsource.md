@@ -92,7 +92,34 @@ Everything below that keeps its existing relative order. No new items — this w
 **One thing did not land: the queue block itself is still empty.** Preflight's backlog→queue mirror has failed to persist on every cycle tonight with the same cause — `editor_attached_model_missing`, the wedge where the JetBrains plugin holds an attachment for this file but no CRDT model behind it. Responses and backlog mutations write fine (they go through the realtime backbone); only queue maintenance is discarded. `admin reload-lib` clears it temporarily, and it comes back.
 
 So the backlog is now in the order you asked for, but the queue won't populate from it until that wedge is cleared for real. Closing and reopening this file's tab in the IDE should do it — after that, the next preflight will mirror all six into the queue in this sequence.
-<!-- agent:boundary:24f768bd -->
+
+### Re: Correction — the response above describes a reorder that did not happen — opus-4-8
+
+
+Retracting the six-item ordering in the response above. That write was rejected (`pending reorder: no item with id [#efs-cf-account-custody]`) and the response cell landed anyway, so the document is currently describing work I did not do. Here is what is actually true.
+
+**`agent:backlog` contains exactly three items.** Not the ~50 I assumed from grepping the file. The block spans lines 104–108:
+
+```
+&lt;!-- agent:backlog priority queue --&gt;
+- [ ] [#tmo-getlender-verify]
+- [ ] [#efs-do-hibernation]
+- [ ] [#tmo-sandbox-purge-apply]
+&lt;!-- /agent:backlog --&gt;
+```
+
+That is the real reorder, and it is committed. Cheapest-and-unblocked first (`#tmo-getlender-verify` — `L-TEST067` is the fixture, only the modal assertion remains), then the actionable cost item (`#efs-do-hibernation`), then the destructive operator-gated one last (`#tmo-sandbox-purge-apply` — no reason to spend an irreversible `DeleteLoan` early).
+
+**The finding that matters more: the launch-critical items are in `agent:icebox`, not the backlog.**
+
+`#efs-cf-account-custody`, `#efs-prod-secrets`, and `#efs-dns-cutover` all live in the icebox block (lines 176–212), along with roughly forty others. That is why my reorder failed, and it has a consequence worth stating plainly: **the icebox does not mirror into the queue.** Those three items cannot be queued, cannot be drained, and will not surface in any go-mode cycle while they sit there.
+
+`#efs-dns-cutover` is the remaining gate on launch. It is currently iceboxed.
+
+I don't know whether that placement was deliberate — a decision to park the whole cutover track — or drift from an earlier compaction. Both are plausible and they call for opposite actions, so I'm not going to move forty items on a guess. If you want the cutover track live, say so and I'll promote the three launch items into the backlog in the custody → secrets → DNS order that their dependencies require, and leave the rest iceboxed.
+
+**Also still true:** the queue block is empty and preflight's backlog→queue mirror has failed to persist on every cycle tonight — `editor_attached_model_missing`, the JetBrains plugin holding an attachment for this file with no CRDT model behind it. Responses and backlog mutations write fine through the realtime backbone; only queue maintenance is discarded. `admin reload-lib` clears it, then it returns. Closing and reopening this file's tab in the IDE should fix it properly, after which the three backlog items will mirror into the queue in the order above.
+<!-- agent:boundary:4ff751ef -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

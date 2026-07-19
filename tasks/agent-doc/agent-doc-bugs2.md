@@ -34,12 +34,11 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260719-061504.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260719-061509.md`*
 
 Compacted content:
-- Archived 2 response topic(s): JB Run Agent Doc latency, clone cost, the AST question, and the brookebrodack corruption; do [#fzmutloss]
-- Prior summary/context: prior compacted content: Archived 2 response topic(s): pane %38 reroute wedge; consuming the acadian-take-home rerout...
-<!-- agent:boundary:3f4a26c3 -->
+- Prior summary/context: prior compacted content: Archived 2 response topic(s): JB Run Agent Doc latency, clone cost, the AST question, and th...
+<!-- agent:boundary:aa6053cc -->
 <!-- /agent:exchange -->
 ## Queue
 

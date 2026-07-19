@@ -399,6 +399,38 @@ pub fn reset_state_db_schema_convergence_memo() {
     }
 }
 
+/// UNRESOLVED — `state.db` has been observed corrupting itself in the field.
+///
+/// 2026-07-19, `agent-loop`: a 73MB `state.db` (plus an 8.8MB WAL) failed
+/// `PRAGMA integrity_check` with 101 errors, all of the form
+/// `Tree N page P cell C: 2nd reference to page Q` — b-tree pages referenced
+/// from two parents. Blast radius was total: `.recover` reattributed rows into
+/// the wrong tables, `registry_entries` came back with NULL `document_id`
+/// primary keys, and every agent-doc command on the project failed.
+///
+/// **The cause is not known.** The settings below are not obviously implicated:
+/// `journal_mode = WAL` with a 30s `busy_timeout` is a sound multi-process
+/// configuration, and no crash was correlated with the corruption. Do not
+/// assume it was a one-off. If it recurs, these are the untested suspects,
+/// roughly in order of how much they would explain a double-referenced page:
+///
+/// - **`synchronous` is never set**, so it takes SQLite's default. Under WAL, a
+///   checkpoint racing power loss or an OS-level crash can tear the main db.
+///   Worth pinning explicitly (`NORMAL` is the usual WAL choice; `FULL` is
+///   safer and slower) rather than inheriting whatever the build defaults to.
+/// - **Many concurrent writers.** Five-plus supervisors plus CLI invocations
+///   share one file; the same `.agent-doc/state.db` is also opened by the
+///   sibling tmux-router registry code. Cross-process WAL correctness depends
+///   on every opener agreeing on locking mode and on the file living on a
+///   filesystem with working POSIX advisory locks.
+/// - **A killed process mid-checkpoint.** Supervisors are force-killed on some
+///   recovery paths; a SIGKILL during checkpoint is a classic source of this
+///   exact signature.
+///
+/// Recovery that worked: `sqlite3 state.db ".recover" | sqlite3 fresh.db`,
+/// verify `integrity_check`, drop rows whose primary key came back NULL, then
+/// let the registry rebuild from live panes (`agent-doc fix`). Preserve the
+/// corrupt original — it is the only evidence for diagnosing this properly.
 fn open_and_init_state_db(path: &Path) -> Result<Connection> {
     let conn =
         Connection::open(path).with_context(|| format!("failed to open {}", path.display()))?;
@@ -484,6 +516,9 @@ fn initialize_state_db_memoizing_shape(conn: &Connection, path: &Path) -> Result
 fn create_canonical_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         r#"
+-- NOTE: `synchronous` is deliberately absent here only because nobody has
+-- chosen a value, not because the default was validated. See the unresolved
+-- corruption notes on `open_and_init_state_db` before changing these.
 PRAGMA foreign_keys = ON;
 PRAGMA journal_mode = WAL;
 PRAGMA busy_timeout = 30000;

@@ -445,10 +445,65 @@ fn open_and_init_state_db(path: &Path) -> Result<Connection> {
                 let remaining = STATE_DB_BUSY_TIMEOUT.saturating_sub(started.elapsed());
                 std::thread::sleep(STATE_DB_SCHEMA_RETRY_INTERVAL.min(remaining));
             }
+            // Corruption is not retryable and not self-explanatory. Attach the
+            // recovery steps here, at the single chokepoint every caller opens
+            // through, so no command can surface a bare "database disk image is
+            // malformed" with no way forward.
+            Err(error) if is_state_db_corruption_error(&error) => {
+                let project_root = project_root_for_state_db_path(path);
+                return Err(error.context(state_db_corruption_guidance(&project_root)));
+            }
             Err(error) => return Err(error),
         }
     }
     Ok(conn)
+}
+
+/// Recover the project root from a `<root>/.agent-doc/state.db` path.
+fn project_root_for_state_db_path(path: &Path) -> PathBuf {
+    path.parent()
+        .and_then(|agent_doc_dir| agent_doc_dir.parent())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// True when `error` is SQLite reporting structural corruption
+/// (`SQLITE_CORRUPT` / `SQLITE_NOTADB`).
+pub fn is_state_db_corruption_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<rusqlite::Error>(),
+            Some(rusqlite::Error::SqliteFailure(sqlite, _))
+                if matches!(
+                    sqlite.code,
+                    rusqlite::ffi::ErrorCode::DatabaseCorrupt
+                        | rusqlite::ffi::ErrorCode::NotADatabase
+                )
+        )
+    })
+}
+
+/// Operator-facing recovery instructions for a corrupt state db.
+///
+/// Corruption previously surfaced as a bare `database disk image is malformed`
+/// behind a wall of "failed to prune ..." warnings, with no indication of what
+/// to do — every command failed and the operator had to work out the recovery
+/// by hand. `state.db` holds cycle/closeout state and is rebuildable: the
+/// documents themselves live in git, and the session registry re-derives from
+/// live panes. Say so, and name the exact steps.
+pub fn state_db_corruption_guidance(project_root: &Path) -> String {
+    let db = state_db_path(project_root).display().to_string();
+    format!(
+        "state db is corrupt: {db}\n\
+         `state.db` holds cycle/closeout state and is rebuildable — documents live in git and the \
+         session registry re-derives from live panes.\n\
+         Recover with:\n  \
+         1. stop writers:   pkill -f 'agent-doc (controller|start) '\n  \
+         2. keep evidence:  mv {db} {db}.corrupt-$(date +%s)\n  \
+         3. rebuild:        agent-doc admin detect   # recreates a clean db\n  \
+         4. restore panes:  agent-doc fix\n\
+         Preserve the corrupt copy — it is the only evidence for diagnosing the cause."
+    )
 }
 
 fn is_state_db_lock_error(error: &anyhow::Error) -> bool {
@@ -3907,6 +3962,65 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A corrupt state db must fail with recovery steps attached, not a bare
+    /// `database disk image is malformed`. Corruption took down every command
+    /// on the project and the error said nothing about what to do.
+    #[test]
+    fn corrupt_state_db_open_reports_recovery_steps() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let db = state_db_path(root);
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        // A file that is definitively not a SQLite database.
+        std::fs::write(&db, b"this is not a sqlite database, not even close").unwrap();
+
+        let error = open_state_db(root).expect_err("a non-database file must fail to open");
+        assert!(
+            is_state_db_corruption_error(&error),
+            "must classify as corruption: {error:#}"
+        );
+        let rendered = format!("{error:#}");
+        assert!(
+            rendered.contains("state db is corrupt"),
+            "must name the fault: {rendered}"
+        );
+        assert!(
+            rendered.contains("agent-doc admin detect") && rendered.contains("agent-doc fix"),
+            "must name the recovery commands: {rendered}"
+        );
+        assert!(
+            rendered.contains("Preserve the corrupt copy"),
+            "must tell the operator to keep the evidence: {rendered}"
+        );
+    }
+
+    /// The guidance must point at the real db, not a guessed path.
+    #[test]
+    fn corruption_guidance_names_the_actual_state_db_path() {
+        let root = Path::new("/w/project");
+        let guidance = state_db_corruption_guidance(root);
+        assert!(
+            guidance.contains(&state_db_path(root).display().to_string()),
+            "guidance must name the db path: {guidance}"
+        );
+        assert_eq!(
+            project_root_for_state_db_path(&state_db_path(root)),
+            root,
+            "project root must round-trip from the state db path"
+        );
+    }
+
+    /// A busy/locked db is retryable and must NOT be misreported as corruption.
+    #[test]
+    fn lock_errors_are_not_classified_as_corruption() {
+        let locked = anyhow::Error::new(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(5), // SQLITE_BUSY
+            None,
+        ));
+        assert!(!is_state_db_corruption_error(&locked));
+        assert!(is_state_db_lock_error(&locked));
+    }
 
     /// `#adopenfast`: the second open of the same path must skip schema
     /// convergence, and a path this process has never converged must not

@@ -199,7 +199,7 @@ It's now a lazily `Context` + `SlotMap` scoped to the turn, with a reference-cou
 ### Re: closeout bookkeeping — opus-4-8
 
 Recovery note, not new work. The previous closeout attempt hit a delivery-ACK stall, was cleared non-destructively with `admin reload-lib`, and on retry the response committed while the cycle's own mutation ledger came back empty — the `#fzmutloss` shape. Verified directly rather than assumed: `#ensurereplicagensup` is present in `agent:backlog` and mirrored into `agent:queue`, so the mutation did land on the earlier attempt. Declaring no new follow-ups for this cycle.
-<!-- agent:boundary:b07af307 -->
+<!-- agent:boundary:857e412f -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -345,7 +345,6 @@ Recovery note, not new work. The previous closeout attempt hit a delivery-ACK st
 - [ ] [#agentsignals] [future/separate] Add a realtime agent:signals element after core realtime convergence is stable. Start with deterministic built-in signals for tests, queue, supervisor, and ipc; design custom user-defined signals as plugin-backed tracked work with Rust as the first target and future multi-language support; use tasks/software/realtime-signals-patchboard.md as the GUI/semi-programmatic reference; keep MLP enhancement optional/experimental and not load-bearing for deterministic states.
 - [ ] [#elementgraphprd] [future/separate] Define the single-document element layout for both single-model sessions and multi-harness orchestration, including typed graph/workers/jobs/schedule elements plus an advisory perceptron graph that scores visible signals without directly mutating runnable work. PRD: tasks/agent-doc/prd-element-layout-perceptron-graph.md
 - [ ] 🚧 [#ensurereplicagensup] #agent-doc-bug Same process-local hub_registry class as #ensurereplicagen, remaining callers. Proof: document_model_ensure_failed for equityfundingsource.md with source=controller_recycle_request:background, and crdt_current_text_unavailable reason=missing_replica from process_pid 2761972/458607/503509 — supervisor pids, NOT the controller (3811498). hub_registry() is only ever populated by the controller, so any supervisor/CLI caller of current_text_for_file* / ensure_document_model / apply_cpc_write_for_file can only miss, permanently. #ensurereplicagen fixed the preflight queue-maintenance caller (proven: queue CAS now succeeds); this covers the rest. Audit every direct caller outside the controller and route through current_text_via_controller_model_for_doc / apply_cpc_write_via_controller_model_for_doc behind the embedded_relay_is_available_for_file guard, then EXTEND the test_cli CPC-boundary forbidden-crate list to cover them (agent-doc-preflight-io was missing from it, which is how the original escaped).
-- [ ] [#mrnh] Bootstrap size is NOT the cause of the ensure wedge — hypothesis falsified, do not re-run it. `d131457ab` cut the live `crdt_replica_register` bootstrap from 1,312,802 to 261,174 bytes (5.0x) and `queue_maintenance_not_persisted` is COMPLETELY UNCHANGED. The 400ms missing-replica window is therefore not failing on transfer size. Next probe should target why the ensure-path observer never sees a replica the controller already reports as `current live_editors=1 delivery_converged=true` — likely generation fencing on re-register, not payload volume.
 <!-- /agent:backlog -->
 
 ## Review

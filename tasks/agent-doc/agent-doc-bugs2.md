@@ -76,36 +76,82 @@ The item now carries the decisive experiment instead: log `editor_generation` an
 **One thing worth fixing regardless of the answer:** `admin detect` told me "No fleet anomalies detected in /home/brian/work/btakita/agent-loop" while two of its seven documents were hard-wedged and unrecoverable. That is a detector gap independent of the root cause — attached-with-no-replica across repeated observations should be a reported anomaly, not something you discover by noticing your queue prose went stale. Noted on the item.
 
 Gated rather than done, and the `[operator-verify]` tag is now carrying real weight: the reading has to come from your wedged session, because a fresh document will not reproduce it.
-<!-- agent:boundary:72eb14f4 -->
+<!-- agent:boundary:f422ebb0 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#bbdqprio]~~
+- ~~do [#px82]~~
+- ~~do [#jblocalhistverify]~~
+- ~~do [#5bzd]~~
+- ~~do [#jblocalhistverify]~~
+- do [#hvw0]
+- do [#bbpe]
+- 🚧 do [#mrnh]
+- do [#f4d5]
+- do [#5d9f]
+- do [#7n20]
+- do [#42xb]
+- do [#zq8e]
+- do [#a2zx]
+- do [#dbj7]
+- do [#ay80]
+- do [#syncfocuslag]
+- do [#jbrunsteering]
+- do [#crdtpushdrainverify]
+- do [#supboundarylivelock]
+- do [#statedbvacuum]
+- do [#qdonestrikeverify]
+- do [#crashresiliencelograce]
+- do [#compacttombgc]
+- do [#compactindcellsverify]
+- do [#zqv8]
+- do [#crde]
+- do [#steeringobservableset]
+- do [#vscsaveproj]
+- do [#restartbleednonroute]
+- do [#r4gq]
+- do [#af88]
+- do [#claimnewpane]
+- do [#boundaryaccum1]
+- do [#qactsync]
+- do [#ftimmediate]
+- do [#qeditrace]
+- do [#jbcompactcommit]
+- do [#tmuxsynccrashlog]
+- do [#60ev]
+- do [#2y8j]
+- do [#cdtcutover]
+- do [#coredecomp]
+- do [#orchdecomp]
+- do [#skillharnessplugin]
 - ~~do #editormodelmissing: I restarted Idea~~
 - JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
-- do [#bbdcompactnocommit]
-- do [#bbdqprio]
-- do [#fmgc]
-- do [#eqmvscroll]
-- do [#0dsr]
-- do [#17jk]
-- do [#f1s3]
-- do [#fr79]
-- do [#05r0]
-- do [#a45a]
-- do [#30p6]
+- do [#crdtauth6]
+- do [#nsfz]
+- do [#suprestassoc-live]
+- do [#agentsignals]
+- do [#elementgraphprd]
+- ⏭️ do [#bbdcompactnocommit]
+- ⏭️ do [#fmgc]
+- ⏭️ do [#eqmvscroll]
+- ⏭️ do [#0dsr]
+- ⏭️ do [#17jk]
+- ⏭️ do [#f1s3]
+- ⏭️ do [#fr79]
+- ⏭️ do [#05r0]
+- ⏭️ do [#a45a]
+- ⏭️ do [#30p6]
 - do [#n39j]
 - do [#bn41]
-- do [#px82]
 - do [#f6j3]
 - do [#promptselect]
 - do [#realtimesalient]
 - do [#syncobscache2]
-- ⏭️ do [#jblocalhistverify]
-- ⏭️ do [#capturebacklogatomic]
-- ⏭️ do [#opcapturelazily]
-- ⏭️ do [#jbtsiftnosub2verify]
-- 🚧 do [#5bzd]
+- do [#capturebacklogatomic]
+- do [#opcapturelazily]
+- do [#jbtsiftnosub2verify]
 - do [#sidecarstate]
 - do [#64we]
 - do [#adstatechart2]
@@ -118,9 +164,8 @@ Gated rather than done, and the `[operator-verify]` tag is now carrying real wei
 - do [#ipcpostcommitinv]
 - do [#staleplugindeploy]
 - do [#5qjj]
-- ⏭️ do [#jblocalhistverify]
-- ⏭️ do [#capturebacklogatomic]
-- ⏭️ do [#opcapturelazily]
+- do [#capturebacklogatomic]
+- do [#opcapturelazily]
 <!-- /agent:queue -->
 
 ## Notes
@@ -146,7 +191,7 @@ Gated rather than done, and the `[operator-verify]` tag is now carrying real wei
 - [ ] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
 - [ ] [#f6j3] [recommended] Stale branch fix/editor-authority-no-disk-repair (worktree src/agent-doc-editor-authority-fix) has 2 unmerged commits targeting the editor-authority blocker, but is 5 days / 50 commits behind main and still carries the OLD error wording ('bounded publish-live-buffer request', 'reload or save the editor buffer') where main now says 'bounded Lazily-current observation request ... operator_action=none'. Main has already reworked that area. Decide explicitly: rebase and salvage, or delete the branch+worktree. Do NOT merge as-is
 - [ ] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
-- [ ] [#mrnh] Bootstrap size is NOT the cause of the ensure wedge — hypothesis falsified, do not re-run it. `d131457ab` cut the live `crdt_replica_register` bootstrap from 1,312,802 to 261,174 bytes (5.0x) and `queue_maintenance_not_persisted` is COMPLETELY UNCHANGED. The 400ms missing-replica window is therefore not failing on transfer size. Next probe should target why the ensure-path observer never sees a replica the controller already reports as `current live_editors=1 delivery_converged=true` — likely generation fencing on re-register, not payload volume.
+- [ ] 🚧 [#mrnh] Bootstrap size is NOT the cause of the ensure wedge — hypothesis falsified, do not re-run it. `d131457ab` cut the live `crdt_replica_register` bootstrap from 1,312,802 to 261,174 bytes (5.0x) and `queue_maintenance_not_persisted` is COMPLETELY UNCHANGED. The 400ms missing-replica window is therefore not failing on transfer size. Next probe should target why the ensure-path observer never sees a replica the controller already reports as `current live_editors=1 delivery_converged=true` — likely generation fencing on re-register, not payload volume.
 - [ ] [#f4d5] Destructive cascade: a queue-maintenance persist failure erases the operator's queue activation. Reported live from a second session on brookebrodack-dev.md: operator flips frontmatter to `queue: start`, preflight reads the (unpersisted, therefore empty) queue body as drained and strips the activation back to `queue: stop`. Path: `agent-doc-preflight-io/src/lib.rs:3485` — `queue_has_prompts`/`drained_residue` feed `need_clear_active` and `need_clear_drained_body`, all computed from a queue body that a PREVIOUS cycle failed to persist. Deactivating on known-stale data is unsafe: when this cycle could not persist queue maintenance, preflight must preserve operator activation rather than infer 'drained'. Not fixed here — activation logic is safety-critical and I did not have the failing document's state to verify against.
 - [ ] [#5d9f] Second session observed that finalize's commit boundary persists queue maintenance through a path standalone `agent-doc queue sync` never reaches — the queue landed on the next write after three straight sync failures plus an `admin reload-lib`. Two persistence paths with different reachability is itself the bug surface. Determine why the commit path succeeds where queue sync fails, and route queue sync through whatever the commit boundary does. Result: queue text populates but stays UNARMED (`queue_drainable_head_count: 0`, `queue_continuation_required: false`), so the auto-loop still never gets the head.
 - [ ] [#7n20] Finish the ensure-window liveness fix across the CLI/controller process boundary. `bbc50c26e` extends the 400ms missing-replica ensure window when a `crdt_replica_register` proves the editor is alive, but the counter is process-global: on the split path the register lands controller-side while `ensure_document_model` runs CLI-side, so live telemetry still shows `window_extended=false` and the wedge persists. Two options: carry the liveness proof across IPC, or run the ensure controller-side where the registration already is. Do NOT route preflight's initial current-doc resolve through the ensure path — tried in this cycle and reverted; it violates `preflight_missing_editor_model_pauses_without_reading_disk_authority` and made preflight resolve to DISK content instead of waiting for the attached editor.
@@ -193,7 +238,7 @@ Gated rather than done, and the `[operator-verify]` tag is now carrying real wei
 - [ ] [#claimnewpane] [focused-cycle] #agent-doc-feature Claim for Tmux Pane should open a new document in a fresh pane in the SAME tmux session (never replace the current pane or move the window to another session). Plan: tasks/agent-doc/plan-claim-new-pane-same-session.md
 - [ ] [#boundaryaccum1] [focused-cycle] #agent-doc-bug Scattered agent:boundary markers accumulate in committed content (3 in this doc: d0dd7c4e, qactsync1, ftimm0001) — violates the exactly-one-boundary invariant. Root cause: reposition_boundary_in_snapshot (git.rs:1613) hands the collapse to the finalize/IPC path via the active-run guard AND delegates the working-tree rewrite to the IDE plugin via the IPC-listener guard; when finalize wedges on stale_install and the response lands via direct commit (and the stale plugin never applies the IPC reposition signal), nothing re-enforces the single-boundary invariant on the binary's own staged/committed blob, so one boundary accretes per wedged cycle. Fix: always collapse boundaries in the binary-owned snapshot/staged blob independent of the guards (git stages a snapshot, not the live editor buffer, so it never races user text) and scope the guards to the working-tree disk rewrite only; add a post-commit invariant check that reconciles or fails loudly if HEAD carries >1 boundary; promote the aspirational reposition_boundary_removes_stale/apply_patches_boundary_invariant tests to real regressions + SimWorld coverage for N wedged-finalize→direct-commit cycles. Distinct from #fullboundary (convergence gate reduces the wedge trigger; this makes the invariant self-healing regardless of write path). Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md
 - [ ] [#qactsync] [focused-cycle] #agent-doc-feature Bidirectional realtime sync of queue-activation state: when the operator adds/removes go on agent:queue OR changes the queue: frontmatter value, the realtime system converges BOTH representations to the operator edit (operator-authoritative, never revert). Today explicit_queue_go_mode reads both but they are not synced, so halting needs editing both (go-marker churn). Define a canonical QueueActivation state + edit-provenance propagation; deterministic on two-sided conflict; fixed-point on synced input. SimWorld both directions + conflict; make tmux-ci + live editor proof. Plan: tasks/agent-doc/plan-queue-activation-state-sync.md
-- [ ] 🚧 [#ftimmediate] #agent-doc-feature Free-text prompts begin work immediately: a free-text exchange/queue prompt is an executable directive that should start work at once; if the agent determines a dedicated/fresh session is needed (high accretion or focused-cycle scope), it should auto /clear or request a PCP restart and RUN the work, not park it as an operator-gated defer. Tighten the #drain-no-defer / #qfocsup boundary so focused-cycle free-text prompts get run-after-clear rather than left for the operator.
+- [ ] [#ftimmediate] #agent-doc-feature Free-text prompts begin work immediately: a free-text exchange/queue prompt is an executable directive that should start work at once; if the agent determines a dedicated/fresh session is needed (high accretion or focused-cycle scope), it should auto /clear or request a PCP restart and RUN the work, not park it as an operator-gated defer. Tighten the #drain-no-defer / #qfocsup boundary so focused-cycle free-text prompts get run-after-clear rather than left for the operator.
 - [ ] [#qeditrace] [focused-cycle] #agent-doc-bug Pre-run queue edits partially reverted: when the operator adds multiple queue heads before a run (or JB Run Agent Doc) with no active turn, only the FIRST added head survives and the rest revert to the pre-edit queue. Distinct from the during-turn race - the preflight queue-maintenance reconcile drops all-but-first operator addition. Investigate preflight/maintenance.rs: queue_journal record + record_live_buffer (#qftloss mode-6), #mirrorall backlog-to-queue mirror, #rz3a freshly-added hold-out, #7r2s manual-add pin, #qdedupsync dedup - hypothesis is convergence keeps the first new head (pin/anchor match) but journals-without-replaying the rest. Repro 2026-07-01 reitrades.md; live dup heads in bugs2 (do #tmuxsynccrashlog x2, do #60ev x2). Add SimWorld coverage for multi-line pre-run operator-add survival + fail-closed recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#jbcompactcommit] [operator-verify] Live JB Compact Exchange no-uncommitted-changes proof: after the fixed binary is installed + recycled, run JB Compact Exchange on a large session doc and confirm HEAD lands the compacted content (no green git gutter / no snapshot>visible drift on next preflight). Grep ops.log for compact_commit_head_mismatch (must be ABSENT on success; present = the new fail-closed guard fired with a reset --from-current recovery). Rust fix shipped in agent-doc-orchestration/src/compact.rs commit_compacted_authoritative (#jb-compact-commit-left-uncommitted).
 - [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md

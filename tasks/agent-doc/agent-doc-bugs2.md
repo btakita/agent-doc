@@ -229,7 +229,38 @@ Absence of a row means "operator-authored, never strike". That default is the sa
 No code changed this cycle, so no build or suite run was warranted; the item is closed as decided.
 
 Still open and genuinely needing you: `#5pn7`, the live JB `Run Agent Doc` eyeball. I left it queued rather than marking it done, since I can't supply that proof myself.
-<!-- agent:boundary:ef471cf1 -->
+
+### Re: Fix the churn and the queue stall in the agent-doc binary — opus-4-8
+
+Both were the same failure mode wearing two masks, plus the bullet-less head you called out. All three fixed in the binary, pushed, and verified live on this document.
+
+**The churn and the stall are one bug (`#qstrikechurn`).** Striking a head is how the queue records that it drained. But `line_is_managed_state_only` only recognized `do [#id]` as bookkeeping, so a struck **free-text or slash-command** head read as a *fresh user prompt* on the next preflight. That set `exchange_prompt_preempts_queue`, which forces `queue_continuation_required=false`. So: drain a head → strike it → next preflight sees the strike as a new prompt → stall. Re-run, and the same strike stalls it again, forever. That is exactly the churn.
+
+I saw it happen to me in real time: after I struck the `/goal` head, preflight came back with `queue_drainable_head_count=8` and `queue_continuation_required=false`, and `user_intent_prompt_changes` contained nothing but my own strike.
+
+Any list line whose entire content is struck is now bookkeeping. Deliberately scoped — partial strikes (`- use ~~foo~~ bar instead`), non-list lines, and empty `- ~~~~` all stay user intent, with tests pinning each.
+
+**The bullet-less head (`#qbulletlesshead`).** You were right that this needed fixing rather than filing. `render` special-cased slash commands to emit them *bare*, with no `- ` bullet. `parse_spans` still saw them, but the bullet-only `markdown_ast` `item_nodes` enumerator did not — the precise "second enumerator disagrees" divergence that module's own comments warn about. Both consequences were live:
+
+- the free-text residue guard found the head by text scan and INTERRUPTed *every* closeout, unfixably, because
+- `queue consume` could not address it, and struck the **next list item** instead — that is how `#c8tb` got marked complete without ever running.
+
+Heads now render as list items. `parse_spans` still accepts the legacy bare form, so existing documents round-trip and self-heal on the next render rather than needing migration. There's a regression asserting every rendered head is a list item, and that healing is idempotent.
+
+**Verification** — same 8 drainable heads, before → after:
+
+| Signal | Before | After |
+| --- | --- | --- |
+| `queue_continuation_required` | `false` | `true` |
+| `user_intent_prompt_changes` | the `~~/goal~~` strike | `null` |
+| Bullet-less queue lines | 1 | none (self-healed) |
+
+`make check`: **7750 passed, 0 failed**, EXIT=0 captured directly. Committed, pushed, installed, supervisor recycled.
+
+Two test expectations changed rather than code, and both deserve to be called out: one pinned the bare slash-command rendering (the bug itself), and one of my own from earlier today wrongly asserted a *struck* `- ~~do the refactor now~~` stays user intent. The property that matters — an **unstruck** free-text head beginning with the verb "do" stays real intent — is still pinned.
+
+The drain is unblocked with 8 heads ready; `#5pn7` still needs your live JB eyeball.
+<!-- agent:boundary:d3c41511 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -252,7 +283,7 @@ Still open and genuinely needing you: `#5pn7`, the live JB `Run Agent Doc` eyeba
 - ⏭️ 📌 do [#realtimesalient]
 - ⏭️ 📌 do [#syncobscache2]
 - ⏭️ 📌 do [#capturebacklogatomic]
-- 📌 do [#opcapturelazily]
+- ⏭️ 📌 do [#opcapturelazily]
 - 📌 do [#jbtsiftnosub2verify]
 - 📌 do [#sidecarstate]
 - 🚧 📌 do [#64we]

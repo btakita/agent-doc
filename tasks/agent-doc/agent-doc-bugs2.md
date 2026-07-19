@@ -413,23 +413,22 @@ Restored tmux session 1 window 0 to 4 panes. I could not resurrect the killed pr
 `state.db` was genuinely corrupt (b-tree pages double-referenced). I rebuilt it via `sqlite3 .recover` — integrity now `ok`, 34.5MB from 73MB, with `op_log`, `actor_transitions`, `pending_mutations` and `queue_heads` intact. The corrupt original is preserved at `.agent-doc/_corrupt-state-db-aside-151817aaf/`, and 353 unattributable rows are in `lost_and_found`. **What corrupted it in the first place is still unknown** — the pragmas (WAL, 30s busy_timeout) are sound, so I have no root cause for that and did not invent one.
 
 7787 tests pass, tmux-router 134 pass, clippy clean, `make check` exit 0.
-<!-- agent:boundary:8d8eae4d -->
+<!-- agent:boundary:771210c1 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 ---
+I ran JB `Compact Exchange` but the operation did not compact.
+```
+agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: waiting for editor typing to settle before CRDT write for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md: visible document write for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md deferred: Lazily current transition remained delivery_pending for 60000ms; retry after it settles
+```
+---
+- Free text queue items that were already done should be struck or removed from the queue. The following queue item was complete but is still open.
+---
 We should immediately self-heal. Make all self-healing real-time, not turn-based...if possible.
 > Heads now render as list items. `parse_spans` still accepts the legacy bare form, so existing documents round-trip and self-heal on the next render rather than needing migration. There's a regression asserting every rendered head is a list item, and that healing is idempotent.
 ---
-- ~~do [#lazilynottl]~~
-- ~~do [#orphandrain]~~
-- ~~do [#c8tb]~~
-- ~~📌 do [#jbrouteasyncchannel]~~
-- ~~do [#wsflake2]~~
-- ~~do [#patchretryidem]~~
-- ⏭️ The free text queue items were not immediately replaced by a new backlog item with a `do [#task-id]`. This should be agent-doc realtime behavior. Also, agent-doc should create a descriptive id in the binary. Use heuristics to find the representative keys.
-- ~~📌 do [#jbroutasync]~~
 - 📌 do [#jbedtledgerverify]
 - 📌 do [#fmgc]
 - 📌 do [#0dsr]

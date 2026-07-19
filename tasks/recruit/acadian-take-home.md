@@ -31,12 +31,29 @@ Queued as 5 phase items **#acad1–#acad5** (scaffold → backend → frontend �
 Please read tasks/recruit/acadian/acadian-take-home.md
 
 Please create a plan to implement.
-<!-- agent:boundary:424725bb -->
+
+### Re: private repo + submodule — fable-5
+
+> **Queue prompt:** Create a private gh repo btakita/acadian-take-home. Add as a submodule in src/acadian-take-home
+
+Done.
+
+- Created **`btakita/acadian-take-home`** (private) via `gh repo create`.
+- Seeded it with an initial commit (stub README naming the `backend/` + `frontend/` split) and pushed `main`, so it was a valid submodule target.
+- Added it at **`src/acadian-take-home`** — registered in `.gitmodules` as `submodule.src/acadian-take-home`, cloned and staged.
+- Committed the superproject: `228a8917 acadian-take-home: add private repo as submodule at src/acadian-take-home`.
+
+Note: the repo name is `acadian-take-home`, not the `mag7-returns` name the plan file proposed — I followed your queue item. `tasks/recruit/acadian/plan.md` is gitignored under this workspace, so it stays untracked here; the plan content moves into the submodule's own README during the scaffold phase.
+
+Next queue item is `/goal do tasks/recruit/acadian/plan.md`, which drains #acad1–#acad5 into the new submodule.
+<!-- agent:boundary:c24135a4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- Create a private gh repo btakita/acadian-take-home. Add as a submodule in src/acadian-take-home
+- /goal do tasks/recruit/acadian/plan.md
 <!-- /agent:queue -->
 
 ## Backlog

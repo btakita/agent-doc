@@ -6640,6 +6640,11 @@ pub(crate) fn serve_with_options(
     previous_controller_pid: Option<u32>,
     handoff_state: ControllerHandoffState,
 ) -> Result<()> {
+    // `#ensurereplicagensup`: this process is about to become the relay-hub
+    // owner. Everything that keys off `hub_registry()` needs to distinguish "the
+    // replica has not registered yet" (worth waiting on, only meaningful here)
+    // from "the hub lives in another process" (waiting can never help).
+    agent_doc_crdt_relay_io::mark_process_as_relay_hub_owner();
     // Detached startup races with short-lived callers (especially TempDir-backed
     // tests). Capture the caller's directory incarnation before any bootstrap
     // helper can create `.agent-doc`; a deleted root must never be resurrected by

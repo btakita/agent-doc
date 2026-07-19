@@ -18773,6 +18773,34 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "queue maintenance must not ensure the document model against this process's empty local hub registry"
     );
 
+    // `#ensurereplicagensup`: the relay-hub-owner role is what lets hub-backed
+    // work tell "the replica has not registered yet" (a real transient, only
+    // meaningful in the owning process) apart from "the hub lives in another
+    // process" (waiting can never help). Only the controller may claim it — if
+    // any other crate marks itself as owner, every non-owner guard silently stops
+    // guarding.
+    let relay_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-crdt-relay-io/src/lib.rs")).unwrap();
+    assert!(
+        relay_io.contains("if !process_serves_relay_hub() {"),
+        "the durable checkpoint must defer when this process does not serve the relay hub"
+    );
+    for relative in [
+        "agent-doc-preflight-io/src/lib.rs",
+        "agent-doc-start-io/src/lib.rs",
+        "agent-doc-start-runtime-io/src/idle_watch.rs",
+        "agent-doc-start-runtime-io/src/run.rs",
+        "agent-doc-write-runtime-io/src/lib.rs",
+        "agent-doc-document-realtime-io/src/lib.rs",
+        "src/main.rs",
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        assert!(
+            !source.contains("mark_process_as_relay_hub_owner("),
+            "{relative} must not claim the relay-hub-owner role; only the controller serves the hub"
+        );
+    }
+
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     assert!(
         main_source.contains("with_controller_document_mutation(||"),

@@ -259,6 +259,36 @@ fn replica_reregister_cooldown_elapsed(file: &Path) -> bool {
     }
 }
 
+/// `#ensurereplicagensup` — whether THIS process serves the relay hub.
+///
+/// `hub_registry()` is process-local and populated only by the process running
+/// the controller, so "the registry has no hub for this document" means two very
+/// different things depending on who is asking:
+///
+/// - the hub owner: the editor is attached but its replica has not registered
+///   yet — a real, transient condition worth waiting on and repairing.
+/// - anyone else (supervisor, short-lived CLI): the hub simply lives in another
+///   process. Waiting cannot help; no editor behaviour can ever populate this
+///   registry.
+///
+/// Document-scoped checks like [`embedded_relay_is_available_for_file`] cannot
+/// tell these apart — both see an empty map — which is why guarding on them
+/// breaks the legitimate transient case. This is process-scoped and answers the
+/// question actually being asked.
+static PROCESS_SERVES_RELAY_HUB: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(cfg!(test));
+
+/// Mark this process as the relay-hub owner. Called by the controller when it
+/// begins serving; every other process leaves this false.
+pub fn mark_process_as_relay_hub_owner() {
+    PROCESS_SERVES_RELAY_HUB.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Whether this process serves the relay hub. See [`PROCESS_SERVES_RELAY_HUB`].
+pub fn process_serves_relay_hub() -> bool {
+    PROCESS_SERVES_RELAY_HUB.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Per-document count of editor replica registrations observed in this process.
 ///
 /// `#ensurewindowsize`: `ensure_document_model` gives a missing-replica editor
@@ -2123,6 +2153,32 @@ fn checkpoint_durable_projection_for_file_with_mode(
             ),
         );
         return Ok(DurableProjectionCheckpoint::Detached);
+    }
+
+    // `#ensurereplicagensup`: only the process that owns the relay hub can
+    // checkpoint it. `hub_registry()` is process-local and populated solely by
+    // the controller, so a supervisor or CLI process running this path reads an
+    // empty registry, and — because durable liveness says the editor is
+    // attached — that miss surfaces as `editor_attached_model_missing` on every
+    // attempt. Observed on equityfundingsource.md as repeating
+    // `document_model_ensure_failed ... source=controller_recycle_request:background`
+    // from pids that were not the controller: work that could never succeed,
+    // logged as an editor fault. Defer instead; the hub owner checkpoints at its
+    // own boundaries, and the caller already treats `Deferred` as "continue
+    // without trusting the stale projection".
+    if !process_serves_relay_hub() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_durable_checkpoint_deferred file={} source={} reason=not_hub_owner process_pid={} (#ensurereplicagensup)",
+                file.display(),
+                source,
+                std::process::id(),
+            ),
+        );
+        return Ok(DurableProjectionCheckpoint::Deferred {
+            reason: "not_hub_owner".to_string(),
+        });
     }
 
     let current = match mode {
@@ -4277,8 +4333,70 @@ mod tests {
         );
     }
 
+    /// Serializes tests that toggle the process-global relay-hub-owner role.
+    /// Without this the toggle leaks into siblings running in parallel in the
+    /// same test process.
+    fn hub_owner_role_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    /// `#ensurereplicagensup` — a process that does not serve the relay hub must
+    /// defer the durable checkpoint instead of attempting it.
+    ///
+    /// `hub_registry()` is process-local and only the controller populates it, so
+    /// a supervisor or short-lived CLI running this path reads an empty registry
+    /// and — because durable liveness reports the editor attached — reports
+    /// `editor_attached_model_missing` on every attempt. Observed live on
+    /// equityfundingsource.md as repeating `document_model_ensure_failed ...
+    /// source=controller_recycle_request:background` from non-controller pids:
+    /// work that could never succeed, logged as if the editor were at fault.
+    ///
+    /// The guard must be PROCESS-scoped, not document-scoped: the hub owner
+    /// seeing an empty registry is a real transient (replica not registered yet)
+    /// that must still be waited on and repaired, which the sibling test below
+    /// pins.
+    #[test]
+    fn durable_checkpoint_defers_when_process_does_not_serve_the_hub() {
+        let _role = hub_owner_role_test_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let (_dir, doc) = temp_doc("durable-checkpoint-not-hub-owner.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        hub_registry().lock().unwrap().remove(&hash);
+
+        // Tests default to owner (they exercise hub mechanics in-process), so
+        // drop the role for the duration of this one.
+        let previously_owner = process_serves_relay_hub();
+        PROCESS_SERVES_RELAY_HUB.store(false, std::sync::atomic::Ordering::SeqCst);
+        let checkpoint = checkpoint_durable_projection_for_file_with_mode(
+            &doc,
+            "test_not_hub_owner",
+            DurableProjectionMode::Background,
+        );
+        PROCESS_SERVES_RELAY_HUB.store(previously_owner, std::sync::atomic::Ordering::SeqCst);
+
+        match checkpoint.unwrap() {
+            DurableProjectionCheckpoint::Deferred { reason } => {
+                assert_eq!(reason, "not_hub_owner");
+            }
+            other => panic!("non-owner process must defer, got {other:?}"),
+        }
+        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("reason=not_hub_owner") && log.contains("(#ensurereplicagensup)"),
+            "the deferral must be diagnosable from ops.log, got:\n{log}"
+        );
+        assert!(
+            !log.contains("document_model_ensure_failed"),
+            "a non-owner must not attempt (and fail) the model ensure at all, got:\n{log}"
+        );
+    }
+
     #[test]
     fn durable_checkpoint_defers_missing_model_to_background_repair() {
+        let _role = hub_owner_role_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_dir, doc) = temp_doc("durable-checkpoint-deferred.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);

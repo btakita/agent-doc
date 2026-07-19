@@ -248,14 +248,35 @@ I also fixed why that took two rounds to see. The readiness loop gave up **silen
 **Verification.** `typecheck` 0; `typecheck:browser` steady at 15 (all `@rappstack` drizzle, unchanged); `test` 67/0; `test:dom` 9/0; `bun run build` green. Pushed `47c153e` (app submodule) and `6762d07` (parent), gitlink `da0383feb`. Check run `29671085390` queued at closeout.
 
 One line on session size, as the accretion warning asks: the exchange is long and the queue is active, so I kept draining rather than pausing to compact.
-<!-- agent:boundary:2da237d7 -->
+
+### Re: #eslintflat — the lint gate is real now, and Check is finally green — opus-4-8
+
+> **Queue prompt:** do [#eslintflat]
+
+**Check went green.** Run `29671439782` passed — the first one that ever has. It took one more layer: `start.ts` imports `./dist/server--dev/index.js` unless `NODE_ENV` is production, and the Build step I added last cycle ran *with* `NODE_ENV=production`, which emits only `./dist/server`. So the server could not boot. Dropping `NODE_ENV` from that step makes CI do exactly what a developer does locally — I verified against a from-scratch build rather than trusting the leftover `dist/` in my tree: a plain `bun run build` emits `browser--dev/` and `server--dev/` only, and the suite is 67/0 against it.
+
+Worth saying plainly: **the readiness guard I added last cycle is why this took one run instead of another round of guessing.** It turned 20 identical `ConnectionRefused` failures into a single message naming the missing module. The three-round sequence — missing asset, missing build, wrong bundle — was three genuinely different causes stacked behind one silent give-up.
+
+**`#eslintflat`: I took the migrate option, not the delete option.** The gap was worse than "stale deps": eslint 10 cannot read `.eslintrc.json` at all, so bumping without migrating would have shipped a lint setup that silently could not run — the same class of thing as a tsconfig whose type-check had never executed.
+
+`eslint.config.js` replaces `.eslintrc.json` and carries all seven stylistic rules over **unchanged**, so this does not quietly change what the codebase is held to. They moved out of eslint core in v9, so they now come from `@stylistic/eslint-plugin`. Deps: eslint ^10.7.0, typescript-eslint ^8.64.0, `@stylistic/eslint-plugin` ^5.10.0, `globals` ^17.7.0, replacing the two `@typescript-eslint/*` v7 packages.
+
+**It reported 19 errors and I fixed all 19,** so the Check workflow gates on `bun run lint` rather than landing red — the same standard I applied to the type-checks earlier. The breakdown:
+
+- **10 autofixable stylistic** — ternary and indent, mechanical.
+- **5 intentionally-unused bindings** (`_ws`, `_code`, `_reason`, `_clean`, `_ctx`). The codebase already marks these with a leading underscore, so the config honours that via `argsIgnorePattern` instead of me rewriting WebSocket close signatures to satisfy a linter.
+- **2 genuinely unused imports** — `raw_` and `h1_`, deleted.
+- **2 `as any` casts**, both reading a `video_url` field the declared post-meta type does not carry. Narrowed to `Record<string, unknown>`: same behaviour, and the rest of `meta` keeps its typing.
+
+**Verification.** lint clean; `typecheck` 0; `typecheck:browser` steady at 15 (all the `@rappstack` drizzle split, untouched); `test` 67/0; `test:dom` 9/0; build green. Pushed `b04644e` (ui--server), `aa0f0f1` (ui--browser), `d21a842` and `aa29ca0` (parent), gitlinks `da0383feb` / `07fd0061e`. Run `29671488535` — the first with the lint gate in it — was queued at closeout.
+<!-- agent:boundary:75c1140b -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#schemadts2]
 - do [#eslintflat]
+- do [#schemadts2]
 - ~~do [#bbdeps]~~
 - do [#ctxredtests]
 - do [#oidcnpm]
@@ -283,6 +304,7 @@ One line on session size, as the accretion warning asks: the exchange is long an
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#ciappts2] Now that Check is green and gates lint + edge typecheck, revisit adding the two remaining type-check steps (bun run typecheck:browser, and app/brookebrodack-site typecheck). Both are still red ONLY on @rappstack sources — 15 drizzle-split errors plus the marked 13/17 split. Gate them the same cycle #rappdeps lands, not before
 - [ ] [#schemadts2] schema-dts 2.0 is a real breaking change for this codebase, not a routine bump: Article, ItemList and VideoObject stop being assignable to Thing, plus TS2321 excessive stack depth in brookers__doc_html.ts. Measured 8 new errors in lib/ui--server--brookebrodack, so it was reverted to ^1.1.5. Revisit when the jsonld/rdfa helpers in @rappstack/domain--server are updated for schema-dts 2 typing
 - [ ] [#eslintflat] eslint and @typescript-eslint are pinned at 9 / 7 in brookebrodack-dev and nothing runs them (no lint script, no CI step). eslint 10 dropped .eslintrc.json support, which is the config this repo has. Either delete the three dead devDeps or migrate to eslint.config.js and add a lint step to check.yml — do not bump without picking one
 - [ ] [#pushctxcore] Push the ctx-core-dev dependency sweep: 188 per-package submodule commits + superproject 31ad9151a are committed LOCALLY and unpushed on purpose (~190 public repos in one motion). Working tree is clean. Needs operator go, then push each submodule and the superproject

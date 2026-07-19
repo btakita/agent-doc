@@ -2850,6 +2850,47 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             entries = synced;
             mutated = true;
         }
+
+        // `#fr79` head provenance: record which heads the backlog mirror owns.
+        //
+        // Ownership is "this id is in the mirror's source set AND has a head" —
+        // not merely "inserted this cycle". The mirror is idempotent and
+        // restores a head for every open queue-attr backlog id, so it owns those
+        // heads continuously; recording only fresh insertions would leave every
+        // pre-existing head permanently unattributed.
+        //
+        // This records provenance ONLY. Nothing is struck here — the strike
+        // decision is `queue_head_is_strikable_drift`, and heads with no
+        // recorded provenance stay operator-authored and untouchable
+        // (`#qauthorder`).
+        let mirror_owned: Vec<String> = entries
+            .iter()
+            .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
+            .filter(|id| backlog_ids.iter().any(|b| b.eq_ignore_ascii_case(id)))
+            .map(|id| id.to_ascii_lowercase())
+            .collect::<std::collections::HashSet<String>>()
+            .into_iter()
+            .collect();
+        if !mirror_owned.is_empty()
+            && let Err(err) = agent_doc_project_root_io::project_root_containing(file)
+                .context("queue head provenance: no project root for state.db")
+                .and_then(|root| {
+                    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+                    agent_doc_sqlite::state_store::record_mirrored_queue_heads_in_db(
+                        &conn,
+                        &file.display().to_string(),
+                        &mirror_owned,
+                    )
+                })
+        {
+            // Provenance is an optimization for a later strike decision, never a
+            // correctness gate: a miss just leaves heads unattributed, which
+            // fails safe (never struck). Warn rather than fail the cycle.
+            eprintln!(
+                "[preflight] warning: failed to record queue head provenance for {}: {err:#}",
+                file.display()
+            );
+        }
     }
 
     // Queue priority ordering (#backlog-priority-attribute): when the queue

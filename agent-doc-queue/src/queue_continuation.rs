@@ -1516,12 +1516,111 @@ pub fn queue_head_id_is_orphaned(
     !active_tracked.contains(&id) && !done_ids.contains(&id) && !gated_ids.contains(&id)
 }
 
+/// Whether a dangling queue head may be auto-struck (`#fr79`).
+///
+/// This is the guard the earlier attempt was missing. Wiring
+/// [`queue_head_id_is_orphaned`] straight into the preflight strike pass struck
+/// REAL heads and failed 12 preflight tests (for example
+/// `preflight_rebases_active_queue_head_change_without_mid_edit_evidence` lost
+/// `do [#newhead]` to `source=orphaned_no_tracked_item`). The reason is
+/// structural, not a tuning problem: **a queue head is not required to have a
+/// backlog item.** Operators author `do [#id]` heads directly, and a document
+/// need not carry a backlog component at all, so "no tracked item" cannot mean
+/// "orphaned" without deleting legitimate queued work.
+///
+/// Provenance is what separates the two cases:
+///
+/// - **Mirror-created head whose backlog id vanished** — real drift. The mirror
+///   put it there *because* an item existed; the item is gone, so the head can
+///   never be resolved. Safe to strike.
+/// - **Operator-authored head** — authoritative on its own (`#qauthorder`).
+///   Never strike, no matter what the backlog says.
+/// - **Unknown provenance** — treated as operator-authored. This is what makes
+///   the rollout safe by construction: documents predating the provenance table
+///   have no rows, so nothing becomes strikable until the mirror records it.
+///
+/// Both conditions must hold, so the conservative default survives: an id that
+/// is merely deferred, gated, iceboxed or pending is never orphaned, and a head
+/// the mirror never created is never struck.
+pub fn queue_head_is_strikable_drift(
+    id: &str,
+    active_tracked: &HashSet<String>,
+    done_ids: &HashSet<String>,
+    gated_ids: &HashSet<String>,
+    mirror_created_identities: &HashSet<String>,
+) -> bool {
+    if !queue_head_id_is_orphaned(id, active_tracked, done_ids, gated_ids) {
+        return false;
+    }
+    let normalized = id.trim().to_ascii_lowercase();
+    mirror_created_identities.contains(&normalized)
+}
+
 #[cfg(test)]
 mod fr79_orphan_reconcile_tests {
     use super::*;
 
     fn set(items: &[&str]) -> HashSet<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The core `#fr79` distinction: same dangling id, opposite outcome
+    /// depending on who created the head.
+    #[test]
+    fn only_mirror_created_dangling_heads_are_strikable() {
+        let none = set(&[]);
+
+        assert!(
+            queue_head_is_strikable_drift("sy71", &none, &none, &none, &set(&["sy71"])),
+            "a mirror-created head whose backlog id vanished is real drift"
+        );
+        assert!(
+            !queue_head_is_strikable_drift("newhead", &none, &none, &none, &set(&["sy71"])),
+            "an operator-authored head is authoritative on its own (#qauthorder)"
+        );
+    }
+
+    /// Unknown provenance must behave exactly like operator-authored — this is
+    /// the property that makes existing documents safe on upgrade.
+    #[test]
+    fn unknown_provenance_is_never_struck() {
+        let none = set(&[]);
+        assert!(
+            !queue_head_is_strikable_drift("anything", &none, &none, &none, &none),
+            "with no provenance recorded, nothing may be struck"
+        );
+    }
+
+    /// Provenance never overrides the conservative orphan test — a head whose id
+    /// still exists anywhere is kept even if the mirror created it.
+    #[test]
+    fn mirror_provenance_does_not_strike_a_live_id() {
+        let mirrored = set(&["alpha"]);
+        let none = set(&[]);
+
+        assert!(
+            !queue_head_is_strikable_drift("alpha", &set(&["alpha"]), &none, &none, &mirrored),
+            "an id still tracked is not drift"
+        );
+        assert!(
+            !queue_head_is_strikable_drift("alpha", &none, &set(&["alpha"]), &none, &mirrored),
+            "an id resolved into done is handled by the existing auto-strike, not this path"
+        );
+        assert!(
+            !queue_head_is_strikable_drift("alpha", &none, &none, &set(&["alpha"]), &mirrored),
+            "a gated id is still live work"
+        );
+    }
+
+    /// The regression the earlier attempt hit, pinned directly.
+    #[test]
+    fn operator_authored_new_head_survives_an_empty_backlog() {
+        let none = set(&[]);
+        assert!(
+            !queue_head_is_strikable_drift("newhead", &none, &none, &none, &none),
+            "preflight_rebases_active_queue_head_change_without_mid_edit_evidence must keep \
+             `do [#newhead]` — a document need not carry a backlog component at all"
+        );
     }
 
     #[test]

@@ -639,6 +639,29 @@ WHERE fact_type <> 'document_authority_observed';
             PRIMARY KEY (document_id, queue_name)
         );
 
+        -- `#fr79` head provenance: which queue heads the BINARY created by
+        -- mirroring a backlog item, as opposed to heads the operator typed
+        -- directly.
+        --
+        -- Needed because "this head's id has no tracked item" cannot by itself
+        -- mean "orphaned": a queue head is not required to have a backlog item
+        -- at all — operators author `do [#id]` heads directly, and a document
+        -- need not carry a backlog component. Striking on absence alone deleted
+        -- legitimate queued work and failed 12 preflight tests. Only a head the
+        -- mirror created and whose backlog id later vanished is real drift.
+        --
+        -- Absence of a row means "unknown provenance", which callers must treat
+        -- as operator-authored (never strike). That makes the rollout safe by
+        -- construction: documents predating this table record nothing, so no
+        -- existing head can be struck until the mirror observes it again.
+        CREATE TABLE IF NOT EXISTS queue_head_provenance (
+            document_id TEXT NOT NULL,
+            head_identity TEXT NOT NULL,
+            source TEXT NOT NULL,
+            recorded_at INTEGER NOT NULL,
+            PRIMARY KEY (document_id, head_identity)
+        );
+
         CREATE TABLE IF NOT EXISTS queue_controls (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             scope_kind TEXT NOT NULL,
@@ -3315,6 +3338,83 @@ pub fn upsert_queue_head_in_db(
         params![document_id, queue_name, head_id, prompt, state, now],
     )?;
     Ok(())
+}
+
+/// Provenance of a queue head (`#fr79`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueueHeadSource {
+    /// The binary created this head by mirroring a backlog item. If its backlog
+    /// id later vanishes, the head is real drift and may be struck.
+    BacklogMirror,
+}
+
+impl QueueHeadSource {
+    pub fn label(self) -> &'static str {
+        match self {
+            QueueHeadSource::BacklogMirror => "backlog_mirror",
+        }
+    }
+}
+
+/// Record that the backlog mirror created these queue head identities.
+///
+/// Idempotent and additive: re-recording an identity only refreshes its
+/// timestamp. Nothing here ever marks a head operator-authored — that is the
+/// DEFAULT, expressed as the absence of a row (see the table comment).
+pub fn record_mirrored_queue_heads_in_db(
+    conn: &Connection,
+    document_id: &str,
+    head_identities: &[String],
+) -> Result<()> {
+    if head_identities.is_empty() {
+        return Ok(());
+    }
+    let now = sqlite_i64(timestamp_secs(), "queue head provenance timestamp")?;
+    for identity in head_identities {
+        conn.execute(
+            r#"
+            INSERT INTO queue_head_provenance (
+                document_id,
+                head_identity,
+                source,
+                recorded_at
+            )
+            VALUES (?1, ?2, ?3, ?4)
+            ON CONFLICT(document_id, head_identity) DO UPDATE SET
+                recorded_at = excluded.recorded_at
+            "#,
+            params![
+                document_id,
+                identity,
+                QueueHeadSource::BacklogMirror.label(),
+                now
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+/// Head identities this document's backlog mirror is known to have created.
+///
+/// An identity absent from this set has UNKNOWN provenance and must be treated
+/// as operator-authored — never struck (`#qauthorder`).
+pub fn load_mirrored_queue_head_identities_from_db(
+    conn: &Connection,
+    document_id: &str,
+) -> Result<std::collections::HashSet<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT head_identity FROM queue_head_provenance \
+         WHERE document_id = ?1 AND source = ?2",
+    )?;
+    let rows = stmt.query_map(
+        params![document_id, QueueHeadSource::BacklogMirror.label()],
+        |row| row.get::<_, String>(0),
+    )?;
+    let mut out = std::collections::HashSet::new();
+    for row in rows {
+        out.insert(row?);
+    }
+    Ok(out)
 }
 
 pub fn upsert_queue_control_in_db(

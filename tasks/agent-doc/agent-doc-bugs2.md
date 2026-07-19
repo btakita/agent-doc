@@ -60,11 +60,41 @@ Fixed. The `#recycleidleonly` guard was already in place but had a hole: `head_p
 I took the *first* branch of your either/or (restrict recycle to idle boundaries) rather than scrollback preservation across `execve` — the yield protocol already wants that landing, and preserving scrollback would only paper over a recycle that shouldn't happen mid-turn in the first place.
 
 The running supervisor is now stale against the fresh build; with this fix it recycles at the next turn boundary instead of taking the pane with it.
-<!-- agent:boundary:b4f09c62 -->
+
+### Re: state.db GC + binary-owned reconciliation — opus-4-8
+
+Three things landed. Full suite green at each step (7659 tests, 240 skipped).
+
+**1. `Run Agent Doc` slowness — it was not tombstones (`006dea00e`)**
+
+The operator-delete tombstones you pointed at are 416 bytes for `equityfundingsource.md`; they were never the cost. The actual bottleneck was `state_events`: **166MB of `payload_json` inside a 200MB `state.db`**, inflating every whole-database operation. Two fact types with no retention dominated:
+
+| fact | rows | size |
+|---|---|---|
+| `document_write_deferred` | 1,091 | 96MB |
+| `document_baseline_checkpointed` | 816 | 30MB |
+
+Baselines are purely superseding (`apply_fact` assigns `merge_baseline` wholesale), so they get the same per-document cap as the CRDT recovery checkpoints. Deferred write intents are **not** — the agent lineage accumulates into `pending_write_journal` and an intent stays live until its ACK, so a keep-newest-N cap would have eaten unconverged intents. Retention there mirrors the projection exactly: `DocumentWriteConverged` drains `..=index` by `(intent_id, target_hash)`, so only rows at or below the newest converged intent are dropped, and the independent `pending_external_disk` lineage is excluded on both sides.
+
+Verified live rather than assumed: dry-run on a copy first, then the installed binary pruned `document_write_deferred` 1097 → 23 and baselines 837 → 11 on open. `agent-doc gc` then reclaimed the freed pages — **192MB → 51MB**.
+
+**2. `[guards]` key silently discarded (`a9dbca37a`, `#guardkeyalias`)**
+
+You were right that this should not be a hand-edit. The guard is spelled `pending_done_guard` in frontmatter but `pending_done` under `[guards]`, and serde parses an unknown key to `None` — so the frontmatter spelling gave no error, no warning, and no guard, and the next config rewrite erased it (your `[guards]` block was empty when I looked). Each `GuardConfig` field now accepts its frontmatter spelling as an alias and always re-emits the canonical short name, so the file self-heals on the next write. I restored `pending_done = "warn"` in `.agent-doc/config.toml`, since that setting was lost.
+
+**3. Free-text queue head not admitted (`a9dbca37a`, `#politeimperative`)**
+
+Reproduced exactly: `free_text_prompt_is_backlog_task` returns `false` for "Please add a backup command to backup the TMO system…" and `true` for the same sentence without "Please". `looks_like_imperative_directive` keys off the first word, so your politeness silently demoted your own instruction — which is why an agent had to rewrite the line to `do [#tmo-backup-command]` by hand. `normalize_imperative_candidate` now strips leading politeness markers (`please` / `pls` / `kindly` / `can|could|would you [please]`, stacking); a mid-sentence "please" is untouched.
+
+One test moved as a consequence, and it is worth flagging: `finalize_prewrite_guard_failure_leaves_cycle_open_for_retry` used "Please update the backlog." precisely *because* it was not imperative. It now trips the stricter execution-evidence guard first, so I made the fixture a question to keep it covering the pending-capture gate it was written for. The new behavior there is more correct, not a regression.
+
+**Not fixed:** `rebuild` is missing from `IMPERATIVE_LEADING_VERBS` (`build` is present). I left it out to keep this change scoped to politeness rather than quietly widening the verb list.
+<!-- agent:boundary:86f36cc1 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#eqmvscroll]
 - ~~do [#eqmv]~~
 - do [#0dsr]
 - do [#17jk]
@@ -165,6 +195,7 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.
 - [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean
 - [ ] [#17jk] Give free-text queue/backlog leaves stable ids so they can be after= targets (#dagdraingate/#queuenest gap found in plan review): after= targets resolve only through ids (id_to_idx built from entry_do_id, document_queue.rs:1271-1276; collect_after_deps reads only tracked items, backlog_sync.rs:341-358), so an ordered list of id-less free-text leaves cannot compile to dependency edges at all. Prefer minting ids the same way backlog items already get them over introducing HTML tags in the queue body — an HTML container would break the markdown-list model, the byte-preserving insert-only splice, and line-oriented CRDT merge
 - [ ] [#f1s3] Implement nested queue lists per tasks/agent-doc/plan-queue-nested-list-grouping.md (#queuenest): indent-aware document_queue::parse retaining depth + marker kind, leaf-only execution (parents are epic/group labels and never yield do-heads), nested ol compiles to after= edges at ingress, nested ul = related-but-unordered. Render MUST stay insert-only/byte-preserving — a parse->render round-trip already corrupted an operator line once (#queueatcreate). Key decision recorded in the plan: ol is sugar that compiles to after=, which stays the single source of truth, so reordering an ol re-derives edges and there is nothing to reject or revert

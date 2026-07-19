@@ -39,12 +39,33 @@ done
 Compacted content:
 - Archived 1 response topic(s): #px82 / #bn41
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): #jbsteerinterrupt; /goal complete the entire queue; Fix the co...
-<!-- agent:boundary:9dc0214c -->
+
+### Re: do [#eqmv] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#eqmv]
+
+
+Fixed. The `#recycleidleonly` guard was already in place but had a hole: `head_pending` bypassed the intra-turn deferral, so a routine stale-binary recycle could still fire mid-turn and log `boundary=safe_intra_turn via=execve_preserve_child` — the exact shape from your pane-%3 screenshot.
+
+**Root cause** (`agent-doc-start-runtime-io/src/idle_watch.rs`): the deferral was `RecycleDebounced && !turn_boundary && !head_pending`. A pending queue head is not a licence to recycle mid-turn — `head_pending` exists to bypass the *idle-grace debounce* (an inter-queue-item recycle shouldn't wait out the grace window), and a real inter-queue-item boundary is already a `turn_boundary`. With a head pending while a turn was active, the routine recycle fired anyway; when `execve` fell back to its documented clean-exit + child-restart path, the pane and its scrollback went with it.
+
+**Fix:** gate the routine recycle solely on `turn_boundary`. Policy extracted as a pure, unit-tested function `agent_doc_controller::recycle::routine_stale_recycle_deferred_intra_turn(routine_stale_recycle, turn_boundary)` with the rationale documented at the policy site. This closes the gap with the `#wd40` / `#staleloop-recycle-restart` yield protocol, which already asks the in-session loop to arrange an idle landing.
+
+`RecycleImmediate` stays ungated — wedged supervisor (`#midturn-wedge-recycle`), explicit admin recycle, and stale editor delivery must still break through mid-turn, because the alternative there is staying wedged forever. Those are the only paths that can now produce a `safe_intra_turn` boundary label, so the label is truthful again.
+
+**Verification:** `make check` green — 7655 tests run, 7655 passed, 240 skipped (up one: the new `routine_stale_recycle_waits_for_a_turn_boundary` case). `make install` clean; binary + cdylib + JB package (0.2.278) installed into 4 IDEs. Committed `fb16d5845` and pushed. CI run `29667584588` is queued at the time of writing — the prior red on main is the pre-existing, unrelated `finalize_skips_ignored_untracked_session_doc` failure already tracked as `#ay80`.
+
+I took the *first* branch of your either/or (restrict recycle to idle boundaries) rather than scrollback preservation across `execve` — the yield protocol already wants that landing, and preserving scrollback would only paper over a recycle that shouldn't happen mid-turn in the first place.
+
+The running supervisor is now stale against the fresh build; with this fix it recycles at the next turn boundary instead of taking the pane with it.
+<!-- agent:boundary:b4f09c62 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#eqmv]
+- ~~do [#eqmv]~~
 - do [#0dsr]
 - do [#17jk]
 - do [#f1s3]
@@ -144,7 +165,6 @@ What are #next-steps to fix bugs?
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#eqmv] Supervisor self-recycle at boundary=safe_intra_turn destroys the operator's tmux pane output (operator-reported with screenshot: equityfundingsource.md pane %3 went blank, ctx:6%). Ops log: 'supervisor_binary_stale_self_recycled file=tasks/professional/equityfundingsource.md pane=%3 boundary=safe_intra_turn via=execve_preserve_child'. Triggered by repeated make install during an agent-doc dev session making the running supervisor stale. The document survived (both exchange markers intact) so safe_intra_turn is truthful about DOCUMENT safety — but it is not safe for the pane: execve replaces the process and the scrollback is gone, taking the operator's in-flight debugging context with it. This appears to defeat the point of the #wd40/#staleloop-recycle-restart YIELD protocol, which exists so the recycle lands on an IDLE boundary. Either restrict stale self-recycle to idle boundaries (yield first, as that protocol intends) or preserve/replay pane scrollback across the execve
 - [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean
 - [ ] [#17jk] Give free-text queue/backlog leaves stable ids so they can be after= targets (#dagdraingate/#queuenest gap found in plan review): after= targets resolve only through ids (id_to_idx built from entry_do_id, document_queue.rs:1271-1276; collect_after_deps reads only tracked items, backlog_sync.rs:341-358), so an ordered list of id-less free-text leaves cannot compile to dependency edges at all. Prefer minting ids the same way backlog items already get them over introducing HTML tags in the queue body — an HTML container would break the markdown-list model, the byte-preserving insert-only splice, and line-oriented CRDT merge
 - [ ] [#f1s3] Implement nested queue lists per tasks/agent-doc/plan-queue-nested-list-grouping.md (#queuenest): indent-aware document_queue::parse retaining depth + marker kind, leaf-only execution (parents are epic/group labels and never yield do-heads), nested ol compiles to after= edges at ingress, nested ul = related-but-unordered. Render MUST stay insert-only/byte-preserving — a parse->render round-trip already corrupted an operator line once (#queueatcreate). Key decision recorded in the plan: ol is sugar that compiles to after=, which stays the single source of truth, so reordering an ol re-derives edges and there is nothing to reject or revert

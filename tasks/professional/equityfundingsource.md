@@ -221,18 +221,36 @@ Only the "does the class expose the handlers" assertion is trivially satisfiable
 Updated `docs/deploy.md` — the cost section now reads as resolved rather than pending, and the bill table drops the "up to ~$5" DO row. The open-tab scaling that made a single always-on room ~82% of the included 400,000 GB-s is gone.
 
 No new backlog items: this one is complete, and there is no follow-up it created.
-<!-- agent:boundary:53407453 -->
+
+### Re: do [#tmo-reconcile-binder-ui] — opus-4-8
+
+Shipped and pushed as `5383afba`. `bun run check` green: 1972 tests, build, worker build.
+
+**I had the scope wrong when I filed this.** I wrote that the queue "still renders blank candidate lists" — it doesn't, because there was no binding-queue page at all. `/api/admin/tmo-unmatched-fundings` existed but nothing in the UI tree fetched it. So this cycle wired the whole path, not just a render fix.
+
+Read layer:
+
+- both SELECTs now carry the 0142 columns;
+- pending rows order by `match_confidence DESC` with **NULLs last** — otherwise never-scored rows sort first and lead the queue with the least useful entries;
+- `tmo_unmatched_funding_match_()` decodes the ranking and degrades a malformed `match_candidates_json` to "no candidates" rather than taking the whole render down.
+
+Routes: the `GET` returns each row with `match` already decoded, and a new `POST .../reconcile` runs the pass. Auto-bind is `body.auto_bind === true` — an explicit `true`, never a truthy default.
+
+UI: a new admin page under nav **Unmatched Fundings**, rendering candidates highest-confidence first with the evidence behind each as one-click bind targets, plus Rescore. Rescore posts `auto_bind: false`, and there's a test asserting the page contains no `auto_bind: true` anywhere — ranking the queue must never be the same click as moving money.
+
+The three states stay distinct end to end, since collapsing any two sends an admin to guess at money: **never scored** ("Not scored yet"), **scored and found nobody** ("No candidate"), and **scored with candidates**.
+
+**What the verification caught.** My SELECT change broke 10 existing tests with `no such column: match_outcome` — the test fixtures build their own SQLite schema inline and had not gained the 0142 columns. Real omission, fixed in the fixture. Beyond the suite I confirmed the page and route are actually in the built artifacts (`Not scored yet` in the browser bundle, `tmo-unmatched-fundings/reconcile` in the worker bundle), since registering a section and having it survive the build are different claims.
+
+**Not verified:** I have not driven this page in a browser against real parked rows. The reconcile pass has no cron or scheduled trigger either — it runs from the admin button or a direct POST only. Neither is a gap I can close without a live environment, and neither blocks the queue from being used.
+<!-- agent:boundary:2dddfce3 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- Please add a backup command to backup the TMO system. Test backup on the sandbox.
 - do [#tmo-reconcile-binder-ui]
-- ~~do [#vesting-gap-admin-queue]~~
-- ~~do [#tmo-orphan-reconcile-exec]~~
-- ~~do [#tmo-reconcile-binder]~~
-- ~~do [#efs-do-hibernation]~~
 - do [#efs-prod-secret-parity]
 - do [#tmo-orphan-cache]
-- ~~do [#tmo-sandbox-purge-apply]~~
 - do [#efs-cf-account-custody]
 - do [#efs-prod-seed]
 - do [#efs-dns-cutover]

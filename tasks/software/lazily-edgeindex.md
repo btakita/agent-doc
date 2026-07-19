@@ -148,13 +148,110 @@ exactly where the working set crosses this box's 128 MiB L3.
 
 Do not start 3 before 1 and 2.
 
-### 4. Release (tasks #5, #6) — blocked
+### 4. Release: lazily family + ctx-core (tasks #5, #6)
 
-`npm whoami` returns **E401**; the stored token is dead, so `publish--force`
-would fail on all 192 `ctx-core` packages. Needs a human re-login, and that is
-the moment to switch to an org-scoped granular token and move publishing into
-CI — `ctx-core-dev` has no `.github/` directory at all. Full audit is in the
-session history; crates.io and pub.dev also need one interactive auth each.
+Do not start until 1 and 2 land — publishing a partial family means bindings
+disagreeing about `#lzspecedgeindex`.
+
+#### Blockers, resolve first
+
+- **`npm whoami` returns E401.** The stored `~/.npmrc` token is dead, so
+  `publish--force` fails on all 192 `ctx-core` packages. Needs a human login.
+  That login is the moment to switch to an **org-scoped granular token** rather
+  than restoring a classic one — npm is deprecating 2FA-bypass tokens
+  (`gh.io/npm-gat-bypass2fa-deprecation`).
+- **`BENCHMARKS.md` must be regenerated** (`make benchmark-update` in
+  `lazily-rs`) or `make check` fails on `benchmark-check`. Its earlier red was
+  stale criterion data, not a regression — do not misread it as one.
+- **Version bumps + `VERSIONS.md`** before any tag. `lazily-py` also needs
+  `pyproject.toml`.
+
+#### Publish order
+
+Spec first, because the bindings replay its conformance fixtures.
+
+1. `lazily-spec` — no registry; tag only. Version field is `"0"`; protocol
+   versioning is per-message, not per-repo.
+2. `lazily-formal` — no registry; tag only.
+3. `lazily-rs` — crates.io. **Currently 0.45.0.**
+4. Bindings in any order — kt, py, js, go, dart, cpp, zig, react.
+5. `ctx-core` last: it is a separate dependency graph and does not consume
+   lazily.
+
+#### Per-target mechanics
+
+| target | registry | how | auth |
+|---|---|---|---|
+| `lazily-rs` | crates.io | **local `cargo publish`** — only `ci.yml`, `mdbook.yml`, `regressions.yml` exist; no release workflow | **interactive** — use `CARGO_REGISTRY_TOKEN="$(passage show btak/CARGO_REGISTRY_TOKEN)"`; `credentials.toml` is stale and 403s |
+| `lazily-js` | npm `@lazily-hub/lazily-js` | CI `release.yml`, OIDC + `--provenance` | none, *if* the Trusted Publisher is registered on the package — otherwise E404 on PUT |
+| `lazily-py` | PyPI | CI `wheels.yml` on tag | none — `PYPI_PUBLISH_TOKEN` secret (`passage btak/PYPI_PUBLISH_TOKEN`) |
+| `lazily-kt` | GitHub Packages | CI `release.yml` on `v*` tag, `GITHUB_TOKEN` | none |
+| `lazily-go` | Go proxy | tag push, proxy pulls | none |
+| `lazily-dart` | pub.dev | **local `dart pub publish`** — `ci.yml` is test-only | **interactive** — Google OAuth, expires |
+| `lazily-cpp`, `lazily-zig` | GitHub Releases | tag + `gh release create` | none (persisted `gh` token) |
+| `lazily-react` | npm | **not wired** — no workflows, `provenance: false` | **interactive** on first publish; npm has no pending-publisher, so the package must exist before a Trusted Publisher can be attached |
+| `ctx-core` | npm ×192 | **local** `publish--force` | dead token — see blockers |
+
+Three interactive auths in the steady state: crates.io, pub.dev, and
+`lazily-react`'s first publish. Everything else is CI or a persisted token.
+
+**Gotchas:** `lazily-kt` publishes to *immutable* GitHub Packages — check the
+registry before tagging, a 409 kills the run. `lazily-zig` has no CI at all.
+`coverage.json` is a hot multi-session file; commit it alone.
+
+#### ctx-core (task #6, scope decided: changeset-affected only)
+
+Three steps, from `ctx-core-dev/AGENTS.md`:
+
+```sh
+changeset-version-COMMIT_EDITMSG   # applies changesets, fills COMMIT_EDITMSG
+recursive-git-commit               # commits per workspace package
+publish--force                     # parallel bun publish; skips unchanged versions
+```
+
+`publish--force` (`lib/monorepo/bin/publish--force.sh:61`) runs
+`bun publish --tag latest --access public` across **all 192 publishable packages
+concurrently via GNU parallel**, comparing local version against the registry
+and skipping matches. **Scope is changeset-affected only** — let changesets bump
+`rmemo`, `ctx-core` and their dependents; do not force-publish the whole
+monorepo.
+
+This session changed `ctx-core/all/rmemo` (drain, error contract, `rmemo__warm`)
+and `lib/rmemo` (size limits, README). Both are committed but have **no
+changeset yet** — write one before versioning. Note the rmemo error-contract
+change is **breaking**: a throwing memo now propagates instead of yielding
+`undefined`.
+
+#### Auth work (task #5, decided: move ctx-core into CI)
+
+`ctx-core-dev` has **no `.github/` directory at all**. Add a tag-triggered
+release workflow using one org-scoped granular npm token, so publishing leaves
+the laptop and the credential is scoped and expiring rather than a long-lived
+token with write access to 192 packages.
+
+Full npm OIDC is *not* the near-term answer: Trusted Publishers are configured
+**per package**, so covering `@ctx-core/*` means 192 separate registrations —
+strictly more clicking than today. Stage it onto the ~14 high-blast-radius
+standalone packages (`rmemo`, `relementjs`, `rebuildjs`, `esmcss`, `hyop`, …)
+after the CI workflow exists.
+
+Worth doing at the same time, each removing one interactive auth or one stored
+secret:
+
+- **crates.io** — add a release workflow to `lazily-rs` with
+  `permissions: id-token: write` + `rust-lang/crates-io-auth-action@v1`, then
+  register the Trusted Publisher for crate `lazily`. Highest value: also moves
+  the release off the laptop.
+- **pub.dev** — supports GitHub Actions publishing natively. Configure on the
+  `lazily` package (repo `lazily-hub/lazily-dart`, tag pattern `v{{version}}`)
+  and use `dart-lang/setup-dart`'s publish workflow. No secret at all.
+- **PyPI** — replace the `PYPI_PUBLISH_TOKEN` secret in `wheels.yml` with a
+  Trusted Publisher; retires a stored credential.
+
+#### Current versions, for reference
+
+`lazily-rs` 0.45.0 · `lazily-py` 0.33.0 · `lazily-js` 0.24.0 ·
+`lazily-dart` 0.23.0 · `lazily-react` 0.1.0 (never published)
 
 ## Files worth reading first
 

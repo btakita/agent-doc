@@ -4723,6 +4723,35 @@ fn watch_action_from_payload(action: &str) -> Result<WatchAction> {
     }
 }
 
+/// `#ctrlrespawnenoent` — retry schedule for a controller launch that hits
+/// `ENOENT` because a concurrent install is replacing the binary.
+///
+/// Kept as constants plus a pure schedule function so the budget can be asserted
+/// without spawning processes or sleeping (`#wsflake2`: tests that reach for
+/// real processes or global state are what made this suite unreliable).
+pub(crate) mod launch_enoent {
+    pub(crate) const LAUNCH_ENOENT_BACKOFF_INITIAL: std::time::Duration =
+        std::time::Duration::from_millis(100);
+    pub(crate) const LAUNCH_ENOENT_BACKOFF_MAX: std::time::Duration =
+        std::time::Duration::from_millis(1_500);
+    pub(crate) const LAUNCH_ENOENT_TOTAL_BUDGET: std::time::Duration =
+        std::time::Duration::from_secs(15);
+
+    /// Cumulative wait before each retry, mirroring the loop's
+    /// `elapsed + backoff < budget` admission rule.
+    pub(crate) fn retry_schedule_ms() -> Vec<u128> {
+        let mut elapsed = std::time::Duration::ZERO;
+        let mut backoff = LAUNCH_ENOENT_BACKOFF_INITIAL;
+        let mut waits = Vec::new();
+        while elapsed + backoff < LAUNCH_ENOENT_TOTAL_BUDGET {
+            elapsed += backoff;
+            waits.push(elapsed.as_millis());
+            backoff = (backoff * 2).min(LAUNCH_ENOENT_BACKOFF_MAX);
+        }
+        waits
+    }
+}
+
 fn controller_current_text_from_data(
     data: &serde_json::Value,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
@@ -6472,24 +6501,65 @@ pub(crate) fn launch_detached_at(
     // freshly-installed path is picked up) instead of surfacing `failed to launch
     // project controller: No such file or directory` and cascading into a 5s
     // controller-response timeout during a fleet recycle.
-    const LAUNCH_ENOENT_RETRIES: u32 = 5;
-    const LAUNCH_ENOENT_BACKOFF: std::time::Duration = std::time::Duration::from_millis(100);
+    // `#ctrlrespawnenoent`: the original window here was 5 x 100ms = 500ms, sized
+    // for the microsecond unlink+rename of an atomic replace. A real `make
+    // install` is not that: `cargo install` rebuilds and copies a ~70MB binary,
+    // and the path can be absent for seconds. Operator-reported 2026-07-19 —
+    // every agent-doc command on the project failed, all 6 attempts exhausted
+    // inside 500ms, and recovery required starting `controller serve` by hand.
+    // Span a realistic install instead, with exponential backoff so the common
+    // microsecond case still resolves on the first retry.
+    use launch_enoent::{
+        LAUNCH_ENOENT_BACKOFF_INITIAL, LAUNCH_ENOENT_BACKOFF_MAX, LAUNCH_ENOENT_TOTAL_BUDGET,
+    };
+    let launch_started = std::time::Instant::now();
+    let mut backoff = LAUNCH_ENOENT_BACKOFF_INITIAL;
     let mut attempt: u32 = 0;
     let child = loop {
         let exe = current_agent_doc_binary()?;
         match build_command(&exe).spawn() {
-            Ok(child) => break child,
+            Ok(child) => {
+                if attempt > 0 {
+                    agent_doc_ops_log_io::log_op(
+                        project_root,
+                        &format!(
+                            "controller_launch_recovered_after_enoent project_root={} binary={} spawn_attempts={} waited_ms={} (#ctrlrespawnenoent)",
+                            project_root.display(),
+                            exe.display(),
+                            attempt + 1,
+                            launch_started.elapsed().as_millis(),
+                        ),
+                    );
+                }
+                break child;
+            }
             Err(err)
                 if err.kind() == std::io::ErrorKind::NotFound
-                    && attempt < LAUNCH_ENOENT_RETRIES =>
+                    && launch_started.elapsed() + backoff < LAUNCH_ENOENT_TOTAL_BUDGET =>
             {
                 attempt += 1;
-                std::thread::sleep(LAUNCH_ENOENT_BACKOFF);
+                std::thread::sleep(backoff);
+                backoff = (backoff * 2).min(LAUNCH_ENOENT_BACKOFF_MAX);
                 continue;
             }
             Err(err) => {
+                // Name the cause. This used to surface to the operator wrapped in
+                // `editor_attached_model_missing`, which points diagnosis at the
+                // editor when the editor is fine and the controller is simply
+                // absent.
+                let enoent = err.kind() == std::io::ErrorKind::NotFound;
+                let hint = if enoent {
+                    format!(
+                        "; the binary path was still missing after {}ms — a concurrent `cargo install` / `make install` may have been replacing it. \
+                         This is a MISSING CONTROLLER, not an editor problem. Recover with `agent-doc controller serve --project-root {} --launch-mode lazy`",
+                        launch_started.elapsed().as_millis(),
+                        project_root.display(),
+                    )
+                } else {
+                    String::new()
+                };
                 return Err(anyhow::Error::new(err).context(format!(
-                    "failed to launch project controller (binary={}, spawn_attempts={})",
+                    "failed to launch project controller (binary={}, spawn_attempts={}){hint}",
                     exe.display(),
                     attempt + 1
                 )));
@@ -13942,6 +14012,38 @@ mod tests {
         let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         handle.join().unwrap();
+    }
+
+    /// `#ctrlrespawnenoent` — the ENOENT retry budget must span a real install,
+    /// not just an atomic rename.
+    ///
+    /// The original schedule was 5 x 100ms. A `make install` rebuilds and copies
+    /// a ~70MB binary, so the path can be absent for seconds: every attempt was
+    /// exhausted inside 500ms, every agent-doc command on the project failed, and
+    /// recovery needed a hand-started `controller serve`.
+    #[test]
+    fn launch_enoent_retry_budget_spans_a_real_install() {
+        let schedule = launch_enoent::retry_schedule_ms();
+
+        assert!(
+            schedule.first().is_some_and(|first| *first <= 100),
+            "the common microsecond rename must still resolve on a fast first retry, got {schedule:?}"
+        );
+        let total = *schedule.last().expect("schedule must retry at least once");
+        assert!(
+            total >= 10_000,
+            "the budget must span a realistic install window; got {total}ms across {} retries",
+            schedule.len()
+        );
+        assert!(
+            total < launch_enoent::LAUNCH_ENOENT_TOTAL_BUDGET.as_millis(),
+            "the schedule must stay inside its own bound"
+        );
+        // The regression: the old 5 x 100ms schedule capped out here.
+        assert!(
+            total > 500,
+            "500ms is the window that failed in production; got {total}ms"
+        );
     }
 
     #[test]

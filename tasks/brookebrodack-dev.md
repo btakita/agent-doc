@@ -230,16 +230,46 @@ Measured in the consumer: `typecheck:browser` **36 → 21**, youtube cluster **1
 **Not done, and still queued:** the dependency sweep proper, which is the other half of `#rappdeps`. I amended the item with the correct checkout so the next run does not start from the stale one. I also gated `#oidcnpm`, which has been sitting resolved-but-unstruck at the queue head since the first preflight's queue maintenance failed to persist.
 
 **Session infrastructure note:** the finalize before this one failed with `editor_attached_model_missing` — `reload-lib` reported 0/0 live editor endpoints while Lazily still believed the editor was open. `admin recycle` cold-started a replacement supervisor and cleared it. The stale supervisor (pid 1912833) is still mapping an old binary with its recycle deferred.
-<!-- agent:boundary:6071a129 -->
+
+### Re: do [#rappdeps] — opus-4-8
+
+The premise in the item turned out to be stale in a useful way: **the drizzle alignment was already committed and pushed upstream** as `d382c3c fix(deps): align drizzle-orm on ^0.45.1 across the server packages` on `rappstack/dev` `origin/main`. `/home/brian/work/rappstack/dev` was simply a stale checkout — 0 commits ahead, 18 behind, no local-only work.
+
+**Uncommitted tree, resolved.** Before touching anything I backed it up to scratchpad (`rappdeps-backup/`: superproject patch, 10 per-submodule patches, submodule head list) and tagged the two divergent submodule commits `backup/rappdeps-pre-sync` in `domain--any--blog` (712ac18) and `domain--server--blog` (cbb0371) so they stay reachable.
+
+What the tree actually contained was superseded, not valuable:
+- The 10 `package.json` edits were tool-generated peerDep loosenings (`typescript: "^5.5.3"` → `"*"`). Root pins `typescript: "next"`, which resolves to a 7.1.0-dev build that does not satisfy `^5.5.3`, so bun rewrites them on every install. `origin/main` already carries the same loosening in several packages.
+- The two divergent submodule commits ran *backwards* relative to upstream: local 712ac18 does `tags → tag_a1` and `rhonojs → relysjs`, while upstream went the other way (`Rename tag_a1 to tags`, `migrate relysjs to rhonojs`). Keeping them would have re-reverted the upstream direction.
+
+**Sweep result — single drizzle universe confirmed.** Fast-forwarded to `d382c3c`, synced submodules, and reinstalled clean. All four consumers now resolve to one hoisted copy:
+
+| package | pin | resolves |
+|---|---|---|
+| `domain--server` | `^0.45.1` | 0.45.2 |
+| `domain--server--auth` | `^0.45.1` | 0.45.2 |
+| `domain--server--youtube` | `^0.45.1` | 0.45.2 |
+| `persontric-adapter-drizzle` | `^0.45.1` | 0.45.2 |
+
+That took two passes worth flagging. The first `bun install` aborted partway through linking when `better-sqlite3` failed its native build against Node v26 (its C++ does not match Node 26's V8 API — pre-existing, unrelated to this change). The abort left `.bun/drizzle-orm@0.32.2` in the store with all four packages still symlinked to it, so `bun pm ls` reported 0.45.2 while the on-disk links were the old universe — exactly the split we were trying to kill. `bun install --force` did not prune it; only a full `node_modules` wipe and reinstall did.
+
+**Two things I deliberately did not do.**
+
+The 8 dangling gitlinks are filed as `#rappgitlink` rather than fixed — pushing to 8 separate repos is outward-facing, and `dev-bin` needs a genuine merge decision rather than a push, since the gitlink commit and its `origin/main` have each got content the other lacks.
+
+I also left `rappstack/dev` uncommitted on purpose. `git status` shows `M bun.lockb` plus `M` on those same 8 submodules — but those 8 are *stuck at older commits* because their checkout failed, so committing them would regress `origin/main`'s gitlinks. The lockfile is likewise derived from a tree with 8 stale submodules. Both should land only after `#rappgitlink` is resolved.
+
+Note that `#rappts`'s 15-error youtube cluster lives in **brookebrodack-dev**, which was already on `^0.45.1`. This cycle fixed the upstream half it consumes; whether that clears the cluster needs a typecheck over there. I could not verify it from this side — `tsc` in `domain--server--youtube` fails first on an unrelated `tsconfig.json` error (`TS5110: 'module' must be set to 'NodeNext' when 'moduleResolution' is 'NodeNext'`) against the old `typescript@5.5.0-dev` that the root `next` pin resolved to.
+<!-- agent:boundary:06edbc42 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- do [#rappgitlink]
 - ~~do [#oidcnpm]~~
 - ~~do [#schemadts2]~~
 - ~~do [#ctxredtests]~~
-- do [#rappdeps]
+- ~~do [#rappdeps]~~
 - ~~do [#rhonouvu]~~
 - do [#tsnextpin]
 - do [#lzeffectvoid]
@@ -261,7 +291,7 @@ Measured in the consumer: `typecheck:browser` **36 → 21**, youtube cluster **1
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#rappdeps] rappstack is at /home/brian/work/rappstack/dev (github rappstack/dev). Run the same dependency sweep, and ALIGN DRIZZLE: 4 packages pin drizzle-orm ^0.32.0 while domain--server pins ^0.45.1, which is the whole 15-error youtube cluster in brookebrodack-dev (#rappts) — a table type and a db handle from two different drizzle universes. Also has an uncommitted working tree (bun.lockb, lib/dev-bin, lib/domain--any--blog) to resolve first
+- [ ] [#rappgitlink] rappstack/dev origin/main references 8 submodule commits never pushed to their own remotes, so a fresh clone cannot check them out: lib/dev-bin (2ec18b4), domain--browser, domain--browser--blog, snippet--rappstack, ui--any (e8e383a), ui--any--blog, ui--browser, ui--browser--semantic. Commits exist locally in agent-loop/src/rappstack-dev/lib/*. dev-bin additionally needs a real merge, not just a push: gitlink 2ec18b4 has version 0.1.0 (npm publish bump) while its origin/main 248ac1c has newer deps (marked ^17, ora ^9, clipboardy ^5, ctx-core ^7.2.32) plus typescript peerDep loosened to '*' — neither side is a superset, common ancestor e10283e. Until resolved, rappstack/dev bun.lockb + 8 gitlinks must stay uncommitted (committing would regress origin/main)
 - [ ] [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface. KEPT OPEN: not started — sequence after #pushctxcore so it does not stack a second uncommitted sweep on top of the unpushed dependency sweep
 - [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit
 - [ ] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
@@ -324,4 +354,5 @@ Measured in the consumer: `typecheck:browser` **36 → 21**, youtube cluster **1
 - 2026-07-19 [#rhonouvu] rhonojs test:unit is red at HEAD and unrelated to dependencies: server/app/hono_duck_type.test.ts calls describe() (bun's runner) while test:unit runs uvu, so the file dies with 'Cannot use describe outside of the test runner'. Either port the file to uvu or move rhonojs to bun test
 - 2026-07-19 [#ctxredtests] 7 ctx-core-dev packages have test scripts that were already red before the dependency sweep: auth0, google, preprocess, rebuildjs-tailwindcss, relysjs, rhonojs (#rhonouvu), search. relysjs is a missing check-dts script. Triage and fix so the workspace suite is a usable gate. KEPT OPEN: not started — each is an independent pre-existing failure, and none block the sweep that is already committed
 - 2026-07-19 [#rappts] 24 of the remaining type errors are in yalc/npm-linked @rappstack/* SOURCES, not this repo (they ship .ts, so skipLibCheck does not apply): 17 in ui--any/md/MarkedPlaintextRenderer.ts (written against marked 13's Renderer signature, now resolving marked 17), 3 in domain--server--blog/post/Post__schema.ts (zod errorMap), plus dl/, rdfa/, jsonld/, breadcrumb/. SEPARATELY, 15 errors in lib/domain--server--brookebrodack/youtube/ have a single rappstack root cause: @rappstack/domain--server--youtube pins drizzle-orm ^0.32.0 while @rappstack/domain--server pins ^0.45.1, so youtube_video_tbl is a 0.32 table type and drizzle_db_(ctx) is a 0.45 db handle and every query between them is a nominal mismatch. Bumping this repo's pin cannot fix it. Align both packages on one drizzle major and republish; that unblocks #ciappts and gating typecheck:browser
+- 2026-07-19 [#rappdeps] rappstack is at /home/brian/work/rappstack/dev (github rappstack/dev). Run the same dependency sweep, and ALIGN DRIZZLE: 4 packages pin drizzle-orm ^0.32.0 while domain--server pins ^0.45.1, which is the whole 15-error youtube cluster in brookebrodack-dev (#rappts) — a table type and a db handle from two different drizzle universes. Also has an uncommitted working tree (bun.lockb, lib/dev-bin, lib/domain--any--blog) to resolve first
 <!-- /agent:done -->

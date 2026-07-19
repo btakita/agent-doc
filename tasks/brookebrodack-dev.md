@@ -150,12 +150,13 @@ The type-check now runs and reports **267 errors**. That is the honest state of 
 **One thing I deliberately did not commit:** `bun.lock`. Regenerating it rewrites the yalc-linked `@rappstack/*` entries from local `.yalc` state, stripping their dependency metadata — 213 deletions describing this machine rather than the project. CI installs through the npm fallback regardless. The gitlink bump carries the fix without carrying that.
 
 Parent repo re-verified after the bump: `typecheck` clean, 76 tests pass. The Pages deploy for the previous push (`#rak9`, `eeabb5e`) went green; the one for this push is still pending, so this closes on local evidence rather than waiting on it.
-<!-- agent:boundary:c60149b4 -->
+<!-- agent:boundary:75a33869 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- do [#tsappclean]
 - ~~do [#tsappsub]~~
 - do [#tsbrowser]
 - ~~do [#rak9]~~

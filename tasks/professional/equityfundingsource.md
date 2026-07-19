@@ -243,12 +243,32 @@ The three states stay distinct end to end, since collapsing any two sends an adm
 **What the verification caught.** My SELECT change broke 10 existing tests with `no such column: match_outcome` — the test fixtures build their own SQLite schema inline and had not gained the 0142 columns. Real omission, fixed in the fixture. Beyond the suite I confirmed the page and route are actually in the built artifacts (`Not scored yet` in the browser bundle, `tmo-unmatched-fundings/reconcile` in the worker bundle), since registering a section and having it survive the build are different claims.
 
 **Not verified:** I have not driven this page in a browser against real parked rows. The reconcile pass has no cron or scheduled trigger either — it runs from the admin button or a direct POST only. Neither is a gap I can close without a live environment, and neither blocks the queue from being used.
-<!-- agent:boundary:96e5c33e -->
+
+### Re: do [#tmo-backup-command] — opus-4-8
+
+Shipped and pushed as `b66e77df`. `bun run check` green: 1994 tests (up from 1972), build, worker build.
+
+**The tool you asked for already half-existed, and the missing half was the important one.** `bin/tmo-snapshot.ts` sweeps the same endpoints, but it deliberately skips attachment **bytes** — its own caveats say so. That means a document deleted in TMO was unrecoverable even with a snapshot in hand. `bin/tmo-backup.ts` is the restorable artifact; the snapshot stays as the fast pre-destructive evidence capture. `docs/TMO/backup.md` opens with the table saying which to reach for.
+
+Three things make it a backup rather than a bigger snapshot:
+
+- **Attachment content**, via `GetLoanAttachment/:RecId`, each with a recorded sha256 and decoded byte length. TMO returns `Document` as a bare string, a one-element array, or null depending on the record; all three are normalized, because treating the array form as "no document" would silently drop every attachment.
+- **`--verify`** re-derives every digest *from the artifact*, offline, no token. Recording a digest at capture time and never checking it again only proves a digest was recorded.
+- **`--restore-plan`** emits the ordered replay TMO supports, with `depends_on` as data — `NewBorrower` needs a `LoanRecID` that only exists after `NewLoan` returns, so a future applier can't parallelize it into corruption.
+
+`complete` is stricter than the snapshot's on purpose: a listed-but-uncaptured attachment sets `complete=false` and exits non-zero. A backup missing document bytes is not a backup of those documents.
+
+**On testing it against the sandbox.** I have no TMO token, so I could not run this against the real sandbox — that stays blocked, same as `#tmo-snapshot-verify`. What I could do is better than nothing and I want to be precise about which: the capture path now runs behind an injected fetch port, so `tests/tmo-backup.test.ts` drives the *real* capture code against the local TMO simulator — seed a loan, funding, and attachment through the simulator's write endpoints, capture, and assert the bytes come back and self-verify. I also drove the CLI itself end to end on a simulator-seeded artifact: `--verify` passes clean, and after flipping the content it reports `DIGEST_MISMATCH` with both digests and exits 1.
+
+**What the verification caught.** `--verify` on a clean artifact exited 1 while printing `ok=true` — digests passed, but the simulator's unimplemented `GetLenders` / `GetBorrowers` / `GetPaymentSchedule` made the backup incomplete, and verify mode never printed that. A non-zero exit under an all-green report reads as a broken checker. It now prints `complete=`, the incomplete loans, and the sweep errors.
+
+**Not verified, and the honest edge:** the simulator's `AddAttachment` echoes whatever fields you post, so the round trip seeds `Document` (what `GetLoanAttachment` returns) rather than `Content` (what real `AddAttachment` accepts). The capture reads `Document` and the restore plan writes `Content`, both per `docs/TMO/`, but only the read half faces a server that behaves like TMO. Recorded in `docs/TMO/backup.md` rather than left for someone to discover mid-restore.
+
+The CLI plans a restore, never applies one — writing a replay into a live TMO is the same class of action as `#tmo-sandbox-purge-apply` and belongs behind an explicit operator step, not a flag on the backup tool.
+<!-- agent:boundary:0963084c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#efs-do-hibernation]
-- do [#tmo-sandbox-purge-apply]
 - do [#tmo-backup-command]
 - ~~do [#tmo-reconcile-binder-ui]~~
 - do [#efs-prod-secret-parity]
@@ -263,7 +283,7 @@ The three states stay distinct end to end, since collapsing any two sends an adm
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-backup-command] Add a backup command for the TMO system and test the backup against the TMO sandbox. Operator request (verbatim: "Please add a backup command to backup the TMO system. Test backup on the sandbox."). Scope: a bin/ command that captures a restorable snapshot of TMO state (lenders, borrowers, loans, fundings) via the documented LSS/LOS API surface, written to a versioned artifact; dry-run + apply split like bin/tmo-snapshot.ts; verify a full backup+restore round trip on the sandbox tenant. Blocked-ish: no real TMO token locally — see #tmo-snapshot-verify.
+- [x] [#tmo-backup-command] Add a backup command for the TMO system and test the backup against the TMO sandbox. Operator request (verbatim: "Please add a backup command to backup the TMO system. Test backup on the sandbox."). Scope: a bin/ command that captures a restorable snapshot of TMO state (lenders, borrowers, loans, fundings) via the documented LSS/LOS API surface, written to a versioned artifact; dry-run + apply split like bin/tmo-snapshot.ts; verify a full backup+restore round trip on the sandbox tenant. Blocked-ish: no real TMO token locally — see #tmo-snapshot-verify.
 - [ ] [#tmo-snapshot-verify] [operator-verify] Run bin/tmo-snapshot.ts against the real TMO sandbox with the operator token (TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)") and confirm the sweep reports complete=true. The tool, its pure manifest/coverage layer, and its tests shipped 2026-07-18 (#tmo-orphan-reconcile-exec cycle) but no run has ever touched real TMO, so the endpoint set is unverified — in particular LSS.svc/GetLenders and LOS.svc/GetBorrowers are inferred from the documented API surface and are NOT covered by docs/TMO/*.md. If either 404s, drop it from the sweep or correct the path. This is the precondition for #tmo-sandbox-purge-apply. Spec: docs/TMO/snapshot.md.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#efs-prod-secret-parity] Production is missing secrets staging has and .dev.vars cannot supply (values are only in Cloudflare and cannot be read back out): DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN gate document sync. AUTH_SECRET, ADMIN_GLOBAL_PASSWORD, CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ACCOUNT_ID are already set (2026-07-18); TMO_API_TOKEN / TMO_DATABASE are intentionally unset so production runs split (#tmo-split-launch). AWS_*/S3_BUCKET_NAME are local bin/assets-*.sh only and are NOT needed in the worker. Compare with 'bun run cf:secrets:list' vs 'bun run cf:secrets:list:production'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.

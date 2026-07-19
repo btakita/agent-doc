@@ -38,11 +38,57 @@ done
 
 Compacted content:
 - Prior summary/context: prior compacted content: Archived 4 response topic(s): replay-state lifetime, reap triggers, and a peer watermark; ve...
-<!-- agent:boundary:66941869 -->
+Compact exchange commits but then deletes the agent:boundary tag above...leaving the deletion in an uncommitted state.
+
+### Re: compact exchange deletes the boundary tag — opus-4-8
+
+Reproduced on the first try, fixed, shipped.
+
+**What was happening.** Compaction rebuilds the exchange body from scratch. Both `split_component_content_at_boundary` and `parse_topic_sections_*` deliberately strip the `<!-- agent:boundary:… -->` marker on the way in, and nothing put it back. That is survivable when the live projection reaches the document through a patch-applying write, because `template.rs` has an unconditional post-patch repair that re-inserts a boundary at the end of the exchange. The **direct disk/detached projection has no such step** — and this session was in exactly that state (`editor authority stayed in editor_attached_model_missing`, which is also why queue maintenance did not persist). So compact wrote a boundary-less document.
+
+Commit, meanwhile, re-mints a boundary on the committed blob either way. Hence your symptom: HEAD carries `<!-- agent:boundary:66941869 -->`, the working tree does not, and the deletion sits there uncommitted. It is self-perpetuating — the same one-line diff exists at `71018f581` from the previous compact, and the `compact --commit` this cycle's plan required of me reproduced it a third time before I touched anything.
+
+**The fix** (`agent-doc-compact-io`, `#compactboundary`): `append_boundary_marker` re-attaches the marker to the live compacted content, carrying the *existing* id forward so compaction does not churn boundary identity — a fresh one is minted only when the component genuinely had none. Placement is end-of-component, the invariant every other write path maintains. Both the full-component and partial (`--keep N`) paths route through it.
+
+**One thing I got wrong first, worth recording.** My first attempt put the marker *before* the unresolved trailing prompt, reasoning that an unanswered prompt belongs below the boundary. Semantically appealing, and it broke `compact_commit_preserves_only_unresolved_prompt_in_live_editor`: the compact-owned prefix guard in `rebase_onto_authoritative_siblings` requires the authoritative live content to *start with* the committed content, and the converged document puts the boundary last. The real invariant is "boundary at end of exchange; operator prompts accumulate after it until the next write repositions it." I left the committed target alone — commit owns its boundary, and that guard depends on compact not adding one.
+
+Two regression tests pin the marker's presence, end-of-component position, carried-forward id, and that exactly one exists.
+
+### Re: the second bug your report tripped over — opus-4-8
+
+Persisting the above failed the first time, and the reason is its own defect worth fixing: your prompt begins "Compact exchange commits but then deletes…", and `detect_exchange_compaction_request` matched any exchange line *starting with* "compact exchange". So the write path hard-failed with `bare `compact exchange` directive detected` and told me to run compaction instead of answering.
+
+Your bug report about compaction was unanswerable because it was about compaction. There is already a `#qcompactfp` skip for the same false positive arriving as a queue/backlog bullet; prose had no equivalent.
+
+Fixed (`#compactfp-prose`): a genuine directive either ends at the prefix or continues with punctuation/flags (`compact exchange...do not add...`, `--message`), while a report continues with a finite verb or modal ("commits", "deletes", "should", "fails"). The detector now recognizes that continuation and skips it. The bias is deliberate — a missed directive just means the turn answers normally, whereas a false positive locks the operator out entirely.
+
+Both fixes: **7673 tests passed, 0 failed**, installed, supervisor recycled, pushed. CI is red on `finalize_skips_ignored_untracked_session_doc` at `d629360c`, which is the pre-existing `#ay80` failure (green locally, red only in Actions) and untouched by either change.
+
+### Re: why `.unwrap()` on `create_dir_all` when nothing is bound — opus-4-8
+
+Because `.unwrap()` there is not extracting a value — it *is* the error check. `create_dir_all` returns `io::Result<()>`; the payload is `()` and worthless, but the `Err` half is not. `.unwrap()` turns failed fixture setup into an immediate panic at the offending line.
+
+Both alternatives are worse. `let _ = std::fs::create_dir_all(…)` discards the error, which this repo's `AGENTS.md` bans outright ("NEVER swallow errors — no `let _ =` on fallible operations"). Dropping it entirely does not compile cleanly, since `Result` is `#[must_use]`. And if the archives directory silently fails to exist, the test does not fail there — it fails later inside compact with an unrelated-looking archive-write error, and the debugging time goes upstream of the real cause.
+
+In test fixture code `.unwrap()` is the intended idiom: fail loud, fail at the setup line. In library code it would not be — that is what the `?` operators throughout `run_component_compact_with_options` are for.
+
+### Re: brookebrodack-dev queue not reordered despite the `priority` attribute — opus-4-8
+
+Filed as `#bbdqprio` at the top of the backlog rather than fixed, and I want to be explicit that this is a scope call rather than a stall.
+
+I have a concrete hypothesis, and it is the same failure this document exhibited this cycle. Preflight printed `queue: sorted do-prompts by backlog priority (operator pins position-locked)` — the reorder was computed — and then, three lines later:
+
+> queue maintenance FAILED — the recomputed queue was NOT applied; the previous queue text is still in effect (any backlog→queue mirror, auto-strike, or reorder reported above did not land)
+
+…because editor authority stayed in `editor_attached_model_missing`. That is exactly your shape: priority honored in computation, invisible in the document, and an agent reading a log line that says it sorted the queue will report accordingly.
+
+I did not verify against `brookebrodack-dev.md` because pane `%9` owns it right now and running preflight there would interfere with a live session. The backlog item records how to confirm it and the likely fix: a non-persisted queue maintenance pass should fail loudly or retry, not emit a warning immediately after printing the work it did not do.
+<!-- agent:boundary:e4c5e615 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#bbdqprio]
 - do [#fmgc]
 - do [#eqmvscroll]
 - do [#0dsr]
@@ -89,6 +135,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#bbdqprio] #agent-doc-bug brookebrodack-dev.md: agent:queue carries the priority attribute but a cycle's response explained next tasks without reordering the queue by backlog priority. Hypothesis: same failure class as the queue_maintenance_not_persisted warning seen in agent-doc-bugs2.md this cycle — preflight COMPUTES the reorder (logs 'queue: sorted do-prompts by backlog priority') and then fails to persist it because editor authority stayed in editor_attached_model_missing, so the previous queue text stays in effect and the reorder silently evaporates. Verify by correlating a brookebrodack-dev preflight's 'queue: sorted' line against the resulting document; if confirmed, the fix is to make a non-persisted queue maintenance pass fail loudly (or retry) instead of logging a warning three lines after printing work it did not do. Do NOT run preflight against brookebrodack-dev.md while pane %9 owns it.
 - [ ] [#fmgc] Per-peer ack watermark for replay-state retention (#retentionwatermark). Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: `reliable_sync_outbox_cursor`/`reliable_sync_inbox_cursor` are `PRIMARY KEY (document_hash)` holding ONE scalar `acked_through` — there is no per-peer ack vector to take a MIN over, and `reliable_sync_liveness_journal.source_key` is a document hash, not a peer id. Needs: (a) a `(document_hash, peer_key)` ack table keyed by the PID-scoped editor registration; (b) retention keyed off `MIN(acked_version)` across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps stay as a backstop rather than being replaced. `PushChannel::flush` (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via `outbox.ack_through(ack)`; generalize that, do not rebuild it.
 - [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.
 - [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean

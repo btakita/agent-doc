@@ -38,14 +38,47 @@ done
 
 Compacted content:
 - Archived 36 response topic(s): do [#donestrikeextra]; do [#ctrliotestflake]; do [#ensurereplicagen]; 33 more
-<!-- agent:boundary:5400c965 -->
+
+### Re: JB Run Agent Doc stalls + duplicated queue line — opus-4-8
+
+Both reproduced from hard evidence and fixed in `0b49105e1` (pushed, installed, recycle marked).
+
+**The duplicated queue line (`#qstruckdup`).** Convergence caps each head identity at its *snapshot-authored* multiplicity — but the snapshot **is** the committed baseline. Once a duplicate strike lands there it authorizes itself (`authored == 2`), so every later preflight faithfully preserved it. That is why your struck `~~JB Run Agent Doc is slow...~~` line stayed doubled at the queue tail permanently instead of self-healing; `converged 0 duplicate queue head(s)` was convergence working as written.
+
+The multiplicity allowance exists to protect a deliberate "run it twice". That reasoning only applies while a head is **live** — a struck head is terminal residue, and two identical strikes carry the same zero information. Struck identities are now capped at 1 independently of the snapshot, so an already-committed duplicate collapses on the next pass. Purely subtractive at the earliest slot, so position-lock is untouched.
+
+**The stall (`#jbroutebusystall`).** The attempt ledger is unambiguous:
+
+| stage | elapsed |
+|---|---|
+| EDT stages (click → route_command_built) | 2 ms |
+| dispatch accepted | +1 s |
+| `route_success` | **+16.8 s** |
+
+So `#jbedtledger` did its job — the EDT is clean. The ~16s sits inside `ensure_existing_pane_ready_for_dispatch`, which polls for a ready prompt. An active turn is **not** a `dispatch_blocker_reason`, so the poll loop has no early exit for it and can only run out the full `--wait-for-ready 15` budget before concluding the pane is busy — an outcome the waiting could never change.
+
+The fix wasn't a judgment call, because the policy was already decided: the authoritative-actor path skips exactly this wait on an active-turn cue (`dispatch_only_busy_should_wait_for_ready`, whose log line literally says *"skipping the busy ready-wait ... without a {}s stall"*). Your route never reached it — `supervisor_health=no_socket` sent it down the **degraded/direct-pane fallback**, which never learned the rule. I applied the same policy there.
+
+Two deliberate constraints:
+- Keyed off `busy_proof_line` (proven active turn) rather than `has_busy_cue` (any blocker). A permission prompt can clear on its own inside the window, so those keep the full wait.
+- It returns the **same** `TimedOut` outcome the wait would have produced, so every downstream classification — queued-behind-blocker, the `BusyAlreadyRunning` focus path, `BusyNeedsAutoFix`'s blocker-gated interrupt recovery — behaves exactly as today, just ~15s sooner. Strictly latency-only.
+
+Note this is the fallback path only. `#jbrouteasyncchannel` (making the call non-blocking) is still the real answer and still correctly blocked on a completion channel.
+
+**Two things you should know about the suite.** `make check` was already red on HEAD before I touched anything, on two counts:
+
+1. A test-only retry-schedule mirror tripped `-D dead-code` and failed the workspace clippy leg. One-line `#[cfg(test)]` gate — fixed, since it blocked everyone.
+2. `crdt_checkpoint_uses_controller_document_model_directly` fails under nextest but passes under `cargo test --workspace`. That gap means it passes **only** via cross-test leakage of process-global state — nextest gives each test its own process, so nextest is right and the test is under-specified. I localized it to the two skip gates in `checkpoint_route_owned_document_crdt` but stopped short of patching: it's a concurrent session's subsystem and I'd have been guessing. Filed at the top of the backlog with the exact gates to check.
+
+Full workspace suite green at **7719 passed**; both fixes also pass their own crate suites. I did not waive the nextest failure — it reproduces on clean HEAD with my changes stashed.
+<!-- agent:boundary:340cb0b1 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#wsflake2]~~
 - ~~📌 do [#jbroutasync]~~
-- 🚧 JB Run Agent Doc stalls. `- ~~JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.~~` was duplicated in the queue.
+- ~~JB Run Agent Doc stalls. `- ~~JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.~~` was duplicated in the queue.~~ — auto-struck: answered this cycle (#ftstrike)
 - ⏭️ do [#jbrouteasyncchannel]
 - ⏭️ do [#jbedtledgerverify]
 - ⏭️ 📌 do [#fmgc]
@@ -86,6 +119,8 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#ctrlchkptiso] #agent-doc-bug PRE-EXISTING on HEAD (913f6e7e0), blocks `make check`: `project_controller::tests::crdt_checkpoint_uses_controller_document_model_directly` (project_controller.rs:2734) asserts `summary.checkpointed == 1` but gets 0 under nextest (`make check`), while `cargo test --workspace` passes it 7719/7719. nextest gives each test its own PROCESS, so this test passes ONLY via cross-test leakage of process-global state — nextest is right and the test is under-specified. It seeds `seed_reliable_sync_editor_open` + `register_replica_for_file` but `checkpoint_route_owned_document_crdt` (rpc.rs:3498) still returns non-`checkpointed`: the two skip gates are `!authority.editor_attached()` -> "detached" and `project_root_containing().is_none()` -> None (both land in summary.skipped/detached, hence failed==0). Determine which gate trips in a fresh process and seed it in the test. NOT diagnosed further to avoid guessing in a concurrent session's subsystem.
+- [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.
 - [ ] [#jbrouteasyncchannel] [focused-cycle] #agent-doc-bug Move editor_route onto the async accept-on-admission endpoint — BLOCKED on a completion channel, do NOT just add it to the whitelist. Tagged [focused-cycle] because it needs a clean design cycle, not an in-loop drain: it surfaced as the drain head 3x and was correctly declined each time. Split from #jbroutasync. The mechanical change is small: validate_async_editor_command_payload (rpc.rs:5465) whitelists only sync_tmux_layout/focus_document_pane, so adding an editor_route arm would route it through handle_editor_command_submit_async_rpc. DO NOT DO THAT ALONE — it silently destroys every Run Agent Doc failure notification. resolveCommandSubmitAcceptedData (CpcRouteClient.kt:431) returns CpcEditorRouteResult(0, output) — exit code 0 = SUCCESS — for status submitted/accepted/running/applied. The entire classification chain in TerminalUtil keys off a NON-ZERO exit: BUSY_RUNNING -> notifyRunAgentDocStillRunning, QUEUED_PENDING -> notifyRunAgentDocQueued, RETRYABLE_STARTING retries, DISPATCH_START_UNPROVEN, and the catch-all notifyPersistentRouteFailure (TerminalUtil.kt:490-566). Accept-on-admission returns 0 immediately so none can fire, and every click would report success. This is the exact feedback path verified working 2026-07-19 when a busy pane correctly refused to inject on brookebrodack-dev.md. PREREQUISITE: a completion channel so the plugin learns the real outcome after acceptance (poll the command projection by command_id — the accept response already carries a projection with per-command status/terminal fields — or a controller->plugin completion event), with the classification chain running against THAT rather than the submit response. Only then is the latency win safe.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 - [ ] [#wsflake2] Workspace suite hermeticity — NARROWED to ONE remaining test (c7edd3efc, 01b1eae3e). MEASURED: 9 'cargo test --workspace' runs since the git-io fix produced 1 failure total (batches of 6 and 3), vs a failure in nearly EVERY run before; --no-fail-fast clean. FIXED: (1) agent-doc-git-io ScopedCurrentDir (dirs.rs:317) mutated the process-global cwd while a sibling test READ it — resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path saw the other test's TempDir and then its deletion; every setter AND reader now takes one crate-local lock. This crate (73 tests) was the dominant source of the intermittent 1-3 failures. NOTE this corrects an earlier wrong ruling-out: I checked the set_current_dir guards in prompt-io/project-root-io/sync-io (separate processes) and missed the one in git-io itself. (2) my own #ensurereplicagensup test mutating PROCESS_SERVES_RELAY_HUB — now a pure fn, no test writes the global. (3) reliable_sync_status_projects_plane_open_set_without_sidecar_oracle asserted is_empty() over the crate-wide liveness plane — now scoped to its own document. REMAINING (the only known flake): session_actor_cmd::tests::status_context_refreshes_controller_lease_from_matching_live_supervisor (src/session_actor_cmd.rs:4951) — starts a real SupervisorIpc socket, asserts lease state + ctx.operator_status.transitions.len()==2. Live-socket TIMING, not shared global state, so the lock pattern above does not apply; needs deterministic socket readiness or SimWorld. Now rare enough that its assertion failure could not be captured across several targeted runs, which makes it HARDER to fix — consider a stress harness (run just that test N times under parallel load) before changing it. GENERAL LESSON (twice proven today): a test mutating process-global state is not hermetic however carefully it restores the value; make the decision pure or lock every setter AND reader.

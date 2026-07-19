@@ -445,7 +445,19 @@ The JB Compact Exchange head is multiline because it carries a fenced error bloc
 **I did not ship the fix.** It requires changing queue serialization for multiline entries on a live 151-item queue, and the failure mode of getting it wrong is silently marking unrun work complete — the exact harm just demonstrated. That is not something to land at the end of a long session. `#qconsumenostrike` now carries the full diagnosis and the two-part fix: make multiline heads bullet-addressable so both enumerators agree, and make consume **fail closed** when the head is not AST-addressable instead of striking a neighbour. The fail-closed half is small and safe and should land first.
 
 Marking `#lazilynottl` done — that is the TTL→Lazily work completed earlier this session (`adefcda0a`); its backlog entry was still open.
-<!-- agent:boundary:faf4d024 -->
+
+### Re: queue consume neighbour-strike — fixed and repaired — opus-4-8
+
+Fixed in `5b3761dfc`, and the two wrongly-struck heads are restored.
+
+**The real defect was not what I first guessed.** My initial guard keyed on `ast_backed`, and a unit test immediately disproved it: the consume returned `Ok` with `node_ops: [{ node_id: "queue:1:neighbour:0" }]` — it consumed the multiline head's *text* while targeting the **neighbour's node**, and reported `ast_backed: true` the whole time. `queue_prompt_node_keys_for_count` took the first `count` unstruck AST nodes with **no text verification**, so a count-only match (`1 == 1`) declared a correspondence that did not exist. Since `item_nodes` skips a multiline `---` prompt (no `- ` bullet) while `parse_spans` sees it, the first enumerable node was the neighbour.
+
+Each selected node is now verified against the head `parse_spans` actually identifies — the same check the text-driven sibling already performed — and consume **fails closed** when the head is not addressable rather than retargeting. A full drain keeps the re-render path, since every entry goes and there is no targeting ambiguity. Verified live: `queue consume` on this document now refuses with the `#qconsumenostrike` explanation instead of striking `#jbrouteasyncchannel`.
+
+`#orphandrain` and `#c8tb` are restored to `- do [#…]`. Their backlog entries were never touched, so nothing was lost beyond their place in the drain — and the restore now survives convergence, which it could not before, because the positional re-render that reverted it no longer runs on a targeted consume.
+
+The multiline head still cannot be struck; it is now *refused* instead of silently mis-striking. Making multiline prompts bullet-addressable so both enumerators agree is the remaining half, and it is a queue-serialization change that deserves its own cycle rather than the tail of this one.
+<!-- agent:boundary:f8a13d35 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -461,7 +473,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 🚧 We should immediately self-heal. Make all self-healing real-time, not turn-based...if possible.
 > Heads now render as list items. `parse_spans` still accepts the legacy bare form, so existing documents round-trip and self-heal on the next render rather than needing migration. There's a regression asserting every rendered head is a list item, and that healing is idempotent.
 ---
-- do [#qconsumenostrike]
+- ~~do [#qconsumenostrike]~~
 - ~~do [#lazilynottl]~~
 - ~~do [#orphandrain]~~
 - ~~do [#c8tb]~~
@@ -550,7 +562,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#qconsumenostrike] [focused-cycle] #agent-doc-bug ROOT-CAUSED: `queue consume` cannot address a MULTILINE free-text head. #qbulletlesshead fixed the single-line bare case by rendering `- `, but document_queue.rs::render still emits multiline prompts between bare `---` fences with no bullet, so markdown_ast `item_nodes` cannot see them while `parse_spans` can — the same two-enumerator divergence, unfixed for the multiline shape. Consequences are the ones #qbulletlesshead already documents: the #qheadresidue guard finds the head by text scan and INTERRUPTs every write (the document became unwritable), and consume strikes the NEXT list item instead, silently marking unrun work complete. Recurrence proof: struck #orphandrain and #c8tb on 2026-07-19 (both restored); the same bug previously mis-struck #c8tb. FIX: give multiline prompts a bullet-addressable shape so both enumerators agree, and make consume FAIL CLOSED when the target head is not AST-addressable rather than striking a neighbour.
 - [ ] [#deliveryackcut] [focused-cycle] delivery_converged() requires every LIVE member to have ACKed, so a zombie replica (registered + reported live, but no longer ACKing) wedges every write until timeout. Exclude a non-ACKing member from the convergence cut the way a disconnected one already is (crdt_relay.rs delivery_converged/is_live). Needs a staleness signal — is_live is a reactive cell with no ACK clock — and a threshold conservative enough that a slow-but-live editor is never dropped, since dropping one clobbers operator edits. Root-caused 2026-07-19; mitigation shipped in 651f63517.
 - [ ] [#orphandrain] [recommended] Controller-side drain for documents with NO supervisor. Shipped then REVERTED same session (revert of 'feat(controller): drain go-mode queues that have no supervisor') after it caused a dispatch storm: 15 dispatches for one doc in ~60s despite a 90s backoff, ~31 contending controller processes. Two faults, both in the effects half: (1) run_editor_route called from INSIDE the controller re-enters the controller ('timed out after 5.0s waiting for project controller response') — Run Agent Doc calls it from OUTSIDE; (2) the backoff lived in an in-memory HashMap in the controller, so every failed dispatch caused a restart that wiped it, permitting immediate re-dispatch. Redesign: dispatch from OUTSIDE the controller event loop (detached child, not a self-call) and persist per-document backoff in state.db next to the drain lease. The pure policy module (agent-doc-controller/src/orphan_drain.rs, 9 tests, gates correct) was sound — recover it from git history rather than rewriting. Underlying gap remains OPEN: a doc whose owner pane is a live agent TUI can never get a supervisor (preserve_pane_blocked), so it has no idle-queue watch and its go-mode queue only advances when a human triggers Run Agent Doc.
 - [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.

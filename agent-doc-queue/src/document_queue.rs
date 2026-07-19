@@ -2407,6 +2407,21 @@ pub fn converge_queue_via_lifecycle(
             0
         } else if pin_collapsing {
             1
+        } else if lifecycle == QueueItemLifecycle::Struck {
+            // `#qstruckdup`: a struck head is terminal residue — the record that
+            // an identity was answered-and-retired. Two identical struck copies
+            // carry exactly the same (zero) actionable information, so unlike a
+            // live head there is no such thing as an intentionally
+            // double-authored strike. Capping struck multiplicity at 1
+            // *independently of the snapshot* is what makes the duplicate
+            // self-heal: the snapshot-authored allowance below is computed from
+            // the committed baseline, so once a duplicate strike lands in the
+            // baseline it authorizes itself (`authored == 2`) and convergence
+            // preserves it forever. That is how the operator's struck free-text
+            // line ("JB Run Agent Doc is slow...") stayed doubled across every
+            // subsequent preflight. Collapsing here is purely subtractive and
+            // keeps the earliest slot, so position-lock is unaffected.
+            1
         } else {
             // Snapshot-authored multiplicity (min 1) for every shape, including a
             // live `do [#id]` directive twin: intentional "run it twice" must be
@@ -5125,6 +5140,42 @@ mod tests {
             converge_queue_via_lifecycle(&entries, &snapshot).is_none(),
             "double-authored free-text must survive at its authored multiplicity"
         );
+    }
+
+    /// `#qstruckdup`: a duplicated STRUCK head collapses even when the snapshot
+    /// authorizes both copies. Struck heads are terminal residue, so there is no
+    /// intentional double-strike to preserve — and because the snapshot IS the
+    /// committed baseline, a duplicate that reaches it would otherwise authorize
+    /// itself forever. Live-shape reproduction of the operator report: the struck
+    /// free-text line "JB Run Agent Doc is slow..." stayed doubled at the queue
+    /// tail across every subsequent preflight.
+    #[test]
+    fn converge_collapses_duplicate_struck_free_text_even_when_snapshot_authored_both() {
+        let line = "JB Run Agent Doc is slow. Please optimize.";
+        let snapshot = vec![c(line), c(line)];
+        let entries = snapshot.clone();
+
+        let out = converge(&entries, &snapshot);
+
+        assert_eq!(
+            out,
+            vec![c(line)],
+            "a duplicated struck head must self-heal even from a baseline that carries both: {out:?}"
+        );
+        assert!(
+            converge_queue_via_lifecycle(&out, &snapshot).is_none(),
+            "struck collapse must be idempotent"
+        );
+    }
+
+    /// The same cap applies to a duplicated struck `do [#id]` head — an
+    /// "intentional run it twice" allowance is only meaningful while the head is
+    /// still live.
+    #[test]
+    fn converge_collapses_duplicate_struck_directive_twins() {
+        let snapshot = vec![c("do [#deploy]"), c("do [#deploy]")];
+        let out = converge(&snapshot.clone(), &snapshot);
+        assert_eq!(out, vec![c("do [#deploy]")], "{out:?}");
     }
 
     /// Live vs struck of the same identity are distinct lawful states — a genuine

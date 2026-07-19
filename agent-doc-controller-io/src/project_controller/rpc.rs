@@ -4749,6 +4749,12 @@ pub(crate) mod launch_enoent {
 
     /// Cumulative wait before each retry, mirroring the loop's
     /// `elapsed + backoff < budget` admission rule.
+    ///
+    /// Test-only: this is the mirror the suite asserts the real retry loop
+    /// against (the loop itself inlines the same rule against the constants
+    /// above, which ARE production-used). Without the gate, `-D warnings`
+    /// fails the whole workspace clippy leg on a non-test build.
+    #[cfg(test)]
     pub(crate) fn retry_schedule_ms() -> Vec<u128> {
         let mut elapsed = std::time::Duration::ZERO;
         let mut backoff = LAUNCH_ENOENT_BACKOFF_INITIAL;

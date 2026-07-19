@@ -407,8 +407,54 @@ pub fn ensure_existing_pane_ready_for_dispatch(
     harness: &HarnessConfig,
     prompt_bearing_marker: Option<&str>,
 ) -> Result<ExistingPaneDispatchReadiness> {
-    let ready_outcome =
-        wait_for_agent_ready_outcome(tmux, pane, existing_pane_ready_timeout(cfg!(test)), harness);
+    // `#jbroutebusystall`: an active turn is proven busy — skip the ready-wait.
+    //
+    // This is the SAME policy `dispatch_only_busy_should_wait_for_ready` already
+    // applies on the authoritative-actor path (`authoritative_dispatch.rs`,
+    // "skipping the busy ready-wait ... without a {}s stall"). That path is
+    // bypassed whenever the supervisor is unreachable
+    // (`route_dispatch_only_authoritative_degraded_direct_pane
+    // supervisor_health=no_socket`), and this degraded fallback never learned
+    // the rule — so it polled the full `existing_pane_ready_timeout` before
+    // concluding the pane was busy. Measured on a live JB `Run Agent Doc`
+    // click: dispatch accepted at +1s, `route_success` at +16.8s, with the
+    // whole gap inside this wait. The ready-wait exists to let a pane that is
+    // *about to* become idle settle; an active-turn proof line (`esc to
+    // interrupt` / working spinner) says the pane is mid-turn, which the
+    // classification below already treats as busy. Waiting cannot change that
+    // outcome, so the poll is pure UI stall on the plugin's synchronous call.
+    //
+    // Deliberately keyed off `busy_proof_line` (active-turn proof) and NOT
+    // `has_busy_cue` (any dispatch blocker, including a permission prompt): a
+    // permission prompt can clear on its own inside the window, so those keep
+    // the wait and the existing blocker-streak early exit.
+    let active_turn_cue = agent_doc_tmux_io::capture_pane(tmux, pane)
+        .ok()
+        .and_then(|content| harness.busy_proof_line(&content));
+
+    let ready_outcome = if let Some(cue) = active_turn_cue.as_deref() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_existing_pane_busy_active_turn_skip_wait file={} pane={} harness={} cue={:?}",
+                file.display(),
+                pane,
+                harness.binary,
+                cue
+            ),
+        );
+        // Return the SAME outcome the full wait would have produced for a
+        // mid-turn pane (an active turn is not a `dispatch_blocker_reason`, so
+        // the poll loop can only fall through to `TimedOut`). This keeps the fix
+        // strictly latency-only: every downstream classification —
+        // `pending_prompt_waits_behind_queueable_blocker`, the
+        // `BusyAlreadyRunning` focus path, and `BusyNeedsAutoFix`'s
+        // blocker-reason-gated interrupt recovery — sees exactly what it sees
+        // today, just ~15s sooner.
+        AgentReadyWaitOutcome::TimedOut
+    } else {
+        wait_for_agent_ready_outcome(tmux, pane, existing_pane_ready_timeout(cfg!(test)), harness)
+    };
     if ready_outcome.is_ready() {
         return Ok(ExistingPaneDispatchReadiness::Ready);
     }
@@ -483,6 +529,44 @@ pub fn ensure_existing_pane_ready_for_dispatch(
 #[cfg(test)]
 mod tests {
     use super::pending_prompt_waits_behind_queueable_blocker;
+
+    /// `#jbroutebusystall`: the degraded/direct-pane fallback skips the
+    /// existing-pane ready-wait exactly when an ACTIVE TURN is proven, matching
+    /// the authoritative path's `dispatch_only_busy_should_wait_for_ready`
+    /// policy. Keyed off `busy_proof_line`, so a mid-turn pane short-circuits
+    /// (the ~15s JB `Run Agent Doc` stall) while a permission prompt — which can
+    /// clear inside the window — still gets the full wait.
+    #[test]
+    fn active_turn_proof_gates_the_existing_pane_ready_wait_skip() {
+        let harness = agent_doc_harness::HarnessConfig::claude();
+
+        let mid_turn = "\
+· Cogitating… (2m 10s · esc to interrupt)
+";
+        assert!(
+            harness.busy_proof_line(mid_turn).is_some(),
+            "a mid-turn pane must prove an active turn so the ready-wait is skipped"
+        );
+
+        let permission_prompt = "\
+Do you want to proceed?
+1. Yes
+2. No
+";
+        assert!(
+            harness.busy_proof_line(permission_prompt).is_none(),
+            "a permission prompt can clear on its own — it must NOT skip the ready-wait"
+        );
+
+        let idle = "\
+>
+? for shortcuts
+";
+        assert!(
+            harness.busy_proof_line(idle).is_none(),
+            "an idle composer must not be mistaken for an active turn"
+        );
+    }
 
     #[test]
     fn pending_claude_prompt_waits_behind_artifact_picker_without_auto_fix() {

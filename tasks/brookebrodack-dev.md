@@ -106,64 +106,18 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/5ed9ebdbe4a2edb795318ea94faf66a77813df7180cde01350e66214e980296b-20260719-062127.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/5ed9ebdbe4a2edb795318ea94faf66a77813df7180cde01350e66214e980296b-20260719-070224.md`*
 
 Compacted content:
-- Archived 1 response topic(s): do [#rappsqlite]
-- Prior summary/context: prior compacted content: Archived 10 response topic(s): #sweepstale; auto-rebase by default; #schemadts2; 7 more
-
-### Re: do [#tsnextpin] — opus-4-8
-
-> **Queue prompt:**
->
-> do [#tsnextpin]
-
-
-Done. Pinned all 190 `typescript: next` declarations in ctx-core-dev to `^7.0.2`, refreshed the lockfile, and fixed the four packages the refresh exposed.
-
-**Why it mattered:** `npm dist-tags` for typescript currently reads `latest: 7.0.2`, `next: 7.1.0-dev.20260717.1`. Every package tracking `next` was pulling an unreleased compiler — that is the mechanism behind the rebuildjs bun-types TS2309 failure that blocked `prepublishOnly`.
-
-**What I changed:**
-
-- 190 `package.json` files: `"typescript": "next"` → `"typescript": "^7.0.2"`. The 16 packages already on `^5.9.3` were left alone; they were never tracking a dev build.
-- `bun install` → root `node_modules/typescript` now resolves 7.0.2 (it had been sitting on a stale `6.0.0-dev.20260305` from an old lockfile, which is why these packages appeared green).
-- `lib/vanjs`: `skipLibCheck` — vanjs-ext's shipped `.d.ts` no longer exports the names `vanx/index.d.ts` re-exports. This is the dependency-`.d.ts` case the item called out.
-- `lib/solid-start`: excluded `templates/` from the program (scaffolding shipped to consumers, its deps are not installed here) plus `skipLibCheck` for `@solidjs/router`'s pre-nodenext `.d.ts`.
-- `tools/ctx-core-dev-tools`, `tools/ctx-core-git-tools`: `moduleResolution: "node"` → `"bundler"`. TS 7 removed node10 resolution outright (TS5108).
-- `tools/ctx-core-package-tools`: `module: "ESNext"` → `"NodeNext"`, required when `moduleResolution` is nodenext (TS5110).
-
-**Verification:** `tsc --noEmit` across every `lib/*` and `tools/*` package with a tsconfig — **189 of 190 clean**.
-
-**The one that is not clean, and why I did not force it:** `lib/solid-start` still fails on `node_modules/solid-start/index.tsx` importing `Route`, `useRoutes`, and `Navigate` from `@solidjs/router` 0.8.4, which does not export them. `skipLibCheck` does not apply — that is a `.tsx` source file, not a declaration file. This is not a TypeScript-version problem and pinning cannot fix it: solid-start 0.3.11 is dead upstream, superseded by `@solidjs/start`. Choosing between migrating, pinning a compatible router, or retiring the package to `dormant/` is a project decision rather than a dependency sweep, so I filed it instead of guessing.
-
-**Commits:** 190 per-package submodule commits plus the ctx-core-dev superproject commit, all local. I did **not** push — this is the same ~190-public-repo motion as `#pushctxcore`, which you gated on an explicit go. Backlog item filed for that.
-
-One note: `lib/rmemo` has an uncommitted `README.md` edit and an untracked `bench/` directory from the concurrent O(n)-propagation-drain work. I committed only the pin there and left the rest untouched.
-
-### Re: do [#4s08] — opus-4-8
-
-Retired it. `lib/solid-start` → `dormant/solid-start`, and `lib/*` + `tools/*` now type-check clean end to end (0 failing).
-
-**How I picked among the three options:**
-
-I looked at what the package actually is first. It is three type aliases (`FetchEvent_w_ctx_T`, `PageEvent_w_ctx_T`, `APIEvent_w_ctx_T`) over solid-start's event types, plus one AWS Lambda entry template. `index.js` is a single re-export line. Grepping `@ctx-core/solid-start` across every package.json in the monorepo returns exactly one hit — its own.
-
-- **Migrate to `@solidjs/start`** — the whole value of these aliases is intersecting solid-start's event types with a `ctx` local. `@solidjs/start` restructured that surface, so this is a rewrite, not a port. With zero consumers it would be speculative work.
-- **Pin a compatible `@solidjs/router`** — makes the type-check green while keeping a dead framework on life support. It fixes the symptom and leaves the package just as unusable.
-- **Retire to `dormant/`** — what I did. `dormant/` already holds five superseded packages (markdown, polka-types, shell, style, strip__logger), and it sits outside the root `workspaces` globs (`lib/*`, `tools/*`, `vendor/*`), so the package leaves the build and type-check without being deleted. The published 1.1.217 stays on npm; nothing breaks for anyone who already depends on it.
-
-**One thing worth flagging:** `git mv` on a submodule updates the `path` but leaves the `[submodule "..."]` section name at the old value. All 197 other entries have name == path, so I finished the rename by hand — moved `.git/modules/.../lib/solid-start` to `.../dormant/solid-start`, rewrote the submodule's `.git` gitdir pointer, and updated the section name in both `.gitmodules` and `.git/config`. Verified afterwards that the submodule still resolves its history (`git log` inside it works, `git submodule status` is clean).
-
-**Also worth knowing:** while I was working, a concurrent session committed `0eaf394a5 docs(rmemo): propagation benchmarks, algorithm notes, restored ts pin` and swept my staged rename into it along with its own `lib/ctx-core` and `lib/rmemo` gitlink bumps. The content is correct and the typescript pins survived intact — I re-checked, and there are zero `"typescript": "next"` declarations left. My follow-up commit `8ab6a51` carries only the `.gitmodules` section-name line.
-<!-- agent:boundary:5e40baac -->
+- Archived 2 response topic(s): do [#tsnextpin]; do [#4s08]
+- Prior summary/context: prior compacted content: Archived 1 response topic(s): do [#rappsqlite]
+<!-- agent:boundary:8642d71f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#4s08]
 - do [#mc4f]
-- ~~do [#tsnextpin]~~
 - do [#lzeffectvoid]
 - do [#tsappclean]
 - do [#sbv9]
@@ -184,7 +138,6 @@ I looked at what the package actually is first. It is three type aliases (`Fetch
 
 <!-- agent:backlog priority queue -->
 - [ ] [#mc4f] Push the ctx-core-dev typescript pin sweep: 190 per-package submodule commits + superproject are committed LOCALLY and unpushed. Same ~190-public-repo motion as #pushctxcore, so it needs operator go before pushing each submodule and the superproject
-- [ ] [#4s08] lib/solid-start type-check fails on solid-start@0.3.11's node_modules .tsx sources (TS2305 for Route/useRoutes/Navigate against @solidjs/router 0.8.4). skipLibCheck cannot cover .tsx, and solid-start is dead upstream (superseded by @solidjs/start). Decide: migrate to @solidjs/start, pin a compatible @solidjs/router, or retire lib/solid-start to dormant/
 - [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit
 - [ ] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
 - [ ] [#yalcdrift] CONFIRMED, with a measurement: a fresh bun install re-resolves marked 13.0.3 alongside 17.0.4 and the two ctx/*.ts Marked errors (Marked<string, string> vs Marked) come back, taking the app type-check to 62 with 2 in its own sources. Verified this is resolution churn and NOT caused by any version bump — reverted both package.json files to HEAD, reinstalled, measured 62/2 identically. Root cause: one yalc'd @rappstack package pins marked ^13.0.2 while two pin ^17.0.4. Fix belongs in rappstack alongside the drizzle alignment (#rappdeps)
@@ -251,4 +204,5 @@ I looked at what the package actually is first. It is three type aliases (`Fetch
 - 2026-07-19 [#rappsnippetarchive] btakita/snippet--rappstack is ARCHIVED on GitHub (read-only), so its unpushed 'bump version to 0.1.0' commit a61f06b can never be published. rappstack/dev's gitlink now points at the existing remote main 94e07aa and the local bump is dropped (preserved as tag backup/pre-rappgitlink in agent-loop/src/rappstack-dev/lib/snippet--rappstack). Decide: unarchive the repo and re-push the bump, move the package to a new remote, or leave it pinned at 94e07aa. Note its remote main also carries a relysjs->rhonojs migration the local branch never had
 - 2026-07-19 [#rappsqlite] better-sqlite3 fails its node-gyp native build against Node v26 in rappstack/dev (v8::Global ctor arity mismatch in better_sqlite3.o), so every 'bun install' aborts mid-link and leaves stale package symlinks — that is what silently reproduced the drizzle 0.32.2/0.45.2 split universe. Workaround today is 'bun install --ignore-scripts'. Fix properly: bump better-sqlite3 to a release with Node 26 prebuilds, pin the toolchain Node version for installs, or drop it if only a transitive dev dep. Stays in bun (see pinned note: rappstack uses bun)
 - 2026-07-19 [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface. KEPT OPEN: not started — sequence after #pushctxcore so it does not stack a second uncommitted sweep on top of the unpushed dependency sweep
+- 2026-07-19 [#4s08] lib/solid-start type-check fails on solid-start@0.3.11's node_modules .tsx sources (TS2305 for Route/useRoutes/Navigate against @solidjs/router 0.8.4). skipLibCheck cannot cover .tsx, and solid-start is dead upstream (superseded by @solidjs/start). Decide: migrate to @solidjs/start, pin a compatible @solidjs/router, or retire lib/solid-start to dormant/
 <!-- /agent:done -->

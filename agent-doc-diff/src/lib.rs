@@ -1315,6 +1315,25 @@ fn line_is_managed_state_only(line: &str) -> bool {
         }
         queue_body = peeled;
     }
+    // `#qstrikechurn`: a list line whose ENTIRE content is struck through is the
+    // queue recording consumption, never a fresh prompt. Striking is how a head
+    // is marked drained, so classifying it as user intent made every consumed
+    // free-text head preempt the queue on the next preflight — the drain stalled,
+    // the operator re-ran, and the same strike stalled it again. This must not be
+    // narrowed to `do [#id]`: free-text and slash-command heads are struck the
+    // same way and churned exactly the same.
+    let is_list_item = trimmed.starts_with("- ");
+    let struck_whole_line = {
+        let body = trimmed.strip_prefix("- ").unwrap_or("").trim();
+        body
+            .strip_prefix("~~")
+            .and_then(|rest| rest.strip_suffix("~~"))
+            .is_some_and(|inner| !inner.trim().is_empty() && !inner.contains("~~"))
+    };
+    if is_list_item && struck_whole_line {
+        return true;
+    }
+
     // Only the **item alias** form carries the `do ` prefix (`do [#id]`). A
     // free-text operator head may legitimately begin with "do " ("do the refactor
     // now") and must stay fresh user intent, so match the alias, not the verb.
@@ -4978,14 +4997,47 @@ Done.\n\
     /// be swallowed as queue bookkeeping.
     #[test]
     fn change_is_managed_state_only_rejects_free_text_heads_beginning_with_do() {
-        for line in [
-            "- do the refactor now",
-            "- do not ship this yet",
-            "- ~~do the refactor now~~",
-        ] {
+        for line in ["- do the refactor now", "- do not ship this yet"] {
             assert!(
                 !change_is_managed_state_only(&pbc(PromptBearingChangeKind::ContentEdit, line)),
                 "free-text head must stay user intent: {line}"
+            );
+        }
+    }
+
+    /// `#qstrikechurn`: the churn/stall loop. A consumed head is struck, and that
+    /// strike was read as a fresh prompt on the next preflight — which forced
+    /// `exchange_prompt_preempts_queue`, dropped `queue_continuation_required`,
+    /// and stalled the drain. Re-running reproduced it forever. Striking is how
+    /// the queue records consumption, so a fully-struck list line is always
+    /// bookkeeping — for free-text and slash-command heads too, not just
+    /// `do [#id]`.
+    #[test]
+    fn change_is_managed_state_only_accepts_any_fully_struck_queue_line() {
+        for line in [
+            "- ~~/goal Fix all contributing factors to queue go mode stall~~",
+            "- ~~JB `Run Agent Doc` still stalls on agent-doc-bugs2.md~~",
+            "- ~~do the refactor now~~",
+        ] {
+            assert!(
+                change_is_managed_state_only(&pbc(PromptBearingChangeKind::ContentEdit, line)),
+                "a consumed (struck) head is bookkeeping, not a fresh prompt: {line}"
+            );
+        }
+    }
+
+    /// The strike rule is shape-scoped: inline emphasis inside a live prompt is
+    /// not a consumed head, so it must still read as user intent.
+    #[test]
+    fn change_is_managed_state_only_rejects_partial_strikes_and_prose() {
+        for line in [
+            "- use ~~foo~~ bar instead",
+            "~~not a list item~~",
+            "- ~~~~",
+        ] {
+            assert!(
+                !change_is_managed_state_only(&pbc(PromptBearingChangeKind::ContentEdit, line)),
+                "only a fully-struck list line is bookkeeping: {line}"
             );
         }
     }

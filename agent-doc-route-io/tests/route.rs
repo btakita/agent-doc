@@ -575,7 +575,11 @@ mod tests {
         assert!(updated.contains("queue: go"));
         assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
-        assert!(updated.contains("\n/clear\n"), "{updated}");
+        // `#qbulletlesshead`: the head stays LITERAL (undecorated) so the
+        // idle-queue classifier still sees it, but it renders as a list item so
+        // the bullet-only `item_nodes` enumerator can strike it. The literalness
+        // is what this test guards; the missing bullet was the bug.
+        assert!(updated.contains("\n- /clear\n"), "{updated}");
         assert!(
             !updated.contains(":pushpin: /clear"),
             "slash command must stay literal so the idle-queue classifier sees it:\n{updated}"
@@ -645,7 +649,11 @@ mod tests {
         assert!(updated.contains("queue: go"));
         assert!(updated.contains("<!-- agent:queue go -->"));
         assert!(!updated.contains("agent:queue auto"));
-        assert!(updated.contains("\n/clear\n"), "{updated}");
+        // `#qbulletlesshead`: the head stays LITERAL (undecorated) so the
+        // idle-queue classifier still sees it, but it renders as a list item so
+        // the bullet-only `item_nodes` enumerator can strike it. The literalness
+        // is what this test guards; the missing bullet was the bug.
+        assert!(updated.contains("\n- /clear\n"), "{updated}");
         assert_eq!(
             agent_doc_queue::queue_continuation::live_continuation_head(&updated).as_deref(),
             Some("/clear"),

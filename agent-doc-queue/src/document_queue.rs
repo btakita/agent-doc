@@ -451,10 +451,18 @@ pub fn render(entries: &[QueueEntry]) -> String {
                         out.push('\n');
                     }
                     out.push_str("---\n");
-                } else if crate::queue_command::is_slash_command(&p.text) {
-                    out.push_str(p.text.trim());
-                    out.push('\n');
                 } else {
+                    // `#qbulletlesshead`: slash-command heads used to render BARE
+                    // (no `- ` bullet). `parse_spans` still saw them, but the
+                    // bullet-only `markdown_ast` `item_nodes` enumerator did not —
+                    // the exact "second enumerator disagrees" divergence this
+                    // module warns about. The consequences were both real: the
+                    // free-text-residue guard found the head by text scan and
+                    // INTERRUPTed every closeout, while `queue consume` could not
+                    // address it and struck the NEXT list item instead, silently
+                    // marking unrun work complete. Rendering the bullet keeps one
+                    // segmentation truth. `parse_spans` still accepts the legacy
+                    // bare form, so existing documents round-trip and self-heal.
                     // `#queuenest`: replay the captured indentation so a nested
                     // item round-trips byte-identically (#queueatcreate).
                     for _ in 0..p.indent {
@@ -2752,7 +2760,8 @@ mod tests {
 
         let entries = parse("- 🚧 /clear\n- do [#new]\n").unwrap();
         let marked = set_first_prompt_in_progress(&entries, true).unwrap();
-        assert_eq!(render(&marked), "/clear\n- do [#new]\n");
+        // `#qbulletlesshead`: slash-command heads keep their bullet.
+        assert_eq!(render(&marked), "- /clear\n- do [#new]\n");
     }
 
     #[test]
@@ -4238,7 +4247,42 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert!(matches!(&entries[0], QueueEntry::Prompt(p) if p.text == "/clear"));
         assert_eq!(first_prompt(&entries).unwrap().text, "/clear");
-        assert_eq!(render(&entries), "/clear\n");
+        // `#qbulletlesshead`: the legacy BARE form still parses, but renders back
+        // as a real list item so the bullet-only `item_nodes` enumerator can see
+        // (and therefore strike) it. Reading the old shape and writing the sound
+        // one is what lets existing documents self-heal.
+        assert_eq!(render(&entries), "- /clear\n");
+    }
+
+    /// `#qbulletlesshead`: every renderable queue head must be a list item, so
+    /// `parse_spans` and the bullet-only `markdown_ast` `item_nodes` enumerator
+    /// agree on segmentation. When they disagreed, the residue guard INTERRUPTed
+    /// closeout on a head `queue consume` could not address — and consume struck
+    /// the NEXT list item instead, marking unrun work complete.
+    #[test]
+    fn every_rendered_queue_head_is_a_list_item() {
+        let body = "/goal fix the thing\n- do [#alpha]\n";
+        let rendered = render(&parse(body).unwrap());
+        for line in rendered.lines().filter(|line| !line.trim().is_empty()) {
+            assert!(
+                line.trim_start().starts_with("- "),
+                "queue head must render as a list item: {line:?}"
+            );
+        }
+        assert_eq!(rendered, "- /goal fix the thing\n- do [#alpha]\n");
+
+        // Idempotent: re-parsing the healed shape does not double-bullet it.
+        assert_eq!(render(&parse(&rendered).unwrap()), rendered);
+    }
+
+    /// A consumed slash-command head must strike in the normal list shape, which
+    /// is what lets the strike be recognized as bookkeeping instead of churning
+    /// back as a fresh prompt (`#qstrikechurn`).
+    #[test]
+    fn a_consumed_slash_command_head_strikes_as_a_list_item() {
+        let entries = parse("- ~~/goal fix the thing~~\n").unwrap();
+        assert!(matches!(&entries[0], QueueEntry::Completed(p) if p.text == "/goal fix the thing"));
+        assert_eq!(render(&entries), "- ~~/goal fix the thing~~\n");
     }
 
     #[test]

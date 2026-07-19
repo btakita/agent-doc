@@ -4107,11 +4107,26 @@ pub fn guard_visible_write_current_transition_with_budget(
                     timeout_ms
                 ),
             );
+            // `delivery_pending` means a LIVE editor member still has unACKed
+            // fan-out. When that member is a zombie — registered and reported
+            // live, but no longer ACKing (typically a stale editor plugin) —
+            // nothing will ever advance it, so "retry after it settles" is
+            // advice that never comes true and every later operation burns the
+            // full timeout. Name the unwedge instead of implying patience.
+            let recovery = if state == "delivery_pending" {
+                "\nIf this repeats, a live editor replica is registered but no longer ACKing. \
+                 `agent-doc admin reload-lib` refreshes the editor library and clears that \
+                 wedge without touching the document; if the plugin's own version is stale, \
+                 reinstall it and reload the IDE host."
+            } else {
+                ""
+            };
             anyhow::bail!(
-                "visible document write for {} deferred: Lazily current transition remained {} for {}ms; retry after it settles",
+                "visible document write for {} deferred: Lazily current transition remained {} for {}ms; retry after it settles{}",
                 file.display(),
                 state,
-                timeout_ms
+                timeout_ms,
+                recovery
             );
         }
         std::thread::sleep(std::time::Duration::from_millis(50));

@@ -196,7 +196,7 @@ That closes the loop on the whole type-check thread: `bun run typecheck` is **0*
 **The Check workflow was red, and not for the reason `#chkci` predicted.** Run `29668807479` failed every single `app/brookebrodack-site` test on `Cannot find module '../../public/assets/images/brooke-brodack-logo.jpg'` — not `#yalcdrift`. `public/assets` is 119 MB of media, gitignored on purpose and served from Contabo S3; `config.ts` imports the logo from it, so a clean checkout cannot boot the app at all. The deploy workflow has always downloaded the bucket before building — Check had not. It does now, same step, same secrets. So the workflow I added last cycle could never have gone green as written, which is worth saying plainly.
 
 **Verification.** `typecheck` 0 errors; `test` 67 pass / 0 fail; `test:dom` 9 pass / 0 fail; `bun run build` green and still emitting `dist/browser`. Pushed as `61ad8f3` (ui--browser), `7671b07` (ui--server), `d31de57` and `36c60bb` (parent), gitlink bumped at `82af6ec13`. Check run `29670229183` and the Pages deploy were still queued at closeout — `#chkci` carries the confirmation, now with a specific thing to confirm.
-❯ 🚧 Please update esbuild in rebuildjs + rhonojs. Update all dependencies in the projects. Is there a way I can release from my machine without needing to 2 factor?
+❯ Please update esbuild in rebuildjs + rhonojs. Update all dependencies in the projects. Is there a way I can release from my machine without needing to 2 factor?
 
 ### Re: esbuild, dependency sweep, and releasing without 2FA — opus-4-8
 
@@ -226,19 +226,43 @@ Committed as 188 per-package commits plus `31ad9151a` on the superproject. Worth
 `#lzeffectvoid` is still queued and untouched: your prompt took this cycle, and widening lazily-js's `EffectRun` is a published-package change across the binding family rather than a tail-end edit.
 
 **Verification.** rebuildjs: type-check clean, 56/56 unit, publint + attw clean, pushed `c8e30a9` + `bfe2707`. ctx-core-dev: 184/191 packages green, 7 pre-existing failures each confirmed red at HEAD, committed locally through `31ad9151a`, unpushed by choice.
-<!-- agent:boundary:26fa5d81 -->
+
+### Re: #bbdeps — the sweep, plus the Check failure that was hiding behind the asset one — opus-4-8
+
+> **Queue prompt:** do [#bbdeps]
+
+**The Check run moved from 67 failures to 20, which exposed the real cause.** Downloading the assets fixed the module-resolution crash, and what was underneath is this: `app/brookebrodack-site/test/routes.test.ts` spawns `bun ./start.ts` on :14101 and fetches it. That is the *production* server — it needs a migrated db and a build to exist. The test file's own Prerequisites comment says exactly that; the workflow did neither, so `start.ts` never bound and 20 route tests reported `ConnectionRefused`. Both steps added, mirroring `deploy.yml`.
+
+I also fixed why that took two rounds to see. The readiness loop gave up **silently** after 15s and let the suite run anyway, so one cause turned into 20 identical network errors that named nothing. It now throws with `start.ts`'s own stdout and stderr and a pointer to the prerequisites.
+
+**The dependency sweep.** esbuild `^0.27.3 → ^0.28.1` in the app (same shut-caret situation as everywhere else this session), plus cssnano 7→8, rebuildjs 0.71.1, `esbuild-plugin-object-store-asset` 0.0.4, and patch bumps to typebox, esmcss, `esbuild-plugin-esmfile`, `@ctx-core/preprocess`. At the root: `@anthropic-ai/sdk` 0.79→0.112.3, `@ctx-core/monorepo`, `@changesets/cli`.
+
+**Two bumps I took back, and one I did not make.**
+
+- **schema-dts 2.0 — reverted.** I bumped it, re-checked, and it added **8 type errors** in `lib/ui--server--brookebrodack`: `Article`, `ItemList`, and `VideoObject` stopped being assignable to `Thing`, plus an excessive-stack-depth error. Latest is not the same as correct; back to `^1.1.5`.
+- **marked 18 — not attempted.** `@rappstack/ui--any` is still written against marked 13. Going to 18 widens the gap that is already 17 of the `#rappts` errors.
+- **eslint 9→10 and @typescript-eslint 7→8 — left alone deliberately.** Nothing in this repo runs eslint: no script, no CI step. And eslint 10 cannot read `.eslintrc.json`, which is the config this repo still has. Bumping would have shipped a config that is broken by construction and unrun, which is worse than stale.
+
+**A real answer for `#yalcdrift`, measured rather than guessed.** The app type-check reads 62 errors with 2 in its *own* sources (`ctx/*.ts`, `Marked<string, string>` vs `Marked`) — the exact two that `#yalcdrift` predicted would come back. They are **not** caused by my bumps: I reverted both package.json files to HEAD, reinstalled, and measured 62/2 there too. The cause is `bun install` re-resolution — a fresh install pulls marked 13.0.3 back in alongside 17.0.4, because one yalc'd `@rappstack` package pins `^13.0.2` while two pin `^17.0.4`. Same shape as the drizzle split, same fix location.
+
+**Verification.** `typecheck` 0; `typecheck:browser` steady at 15 (all `@rappstack` drizzle, unchanged); `test` 67/0; `test:dom` 9/0; `bun run build` green. Pushed `47c153e` (app submodule) and `6762d07` (parent), gitlink `da0383feb`. Check run `29671085390` queued at closeout.
+
+One line on session size, as the accretion warning asks: the exchange is long and the queue is active, so I kept draining rather than pausing to compact.
+<!-- agent:boundary:5bace699 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#pushctxcore]
-- do [#oidcnpm]
-- do [#rappdeps]
-- do [#bbdeps]
-- do [#tsnextpin]
-- do [#rhonouvu]
+- do [#schemadts2]
+- do [#eslintflat]
+- ~~do [#bbdeps]~~
 - do [#ctxredtests]
+- do [#oidcnpm]
+- do [#pushctxcore]
+- do [#rappdeps]
+- do [#rhonouvu]
+- do [#tsnextpin]
 - do [#lzeffectvoid]
 - do [#tsappclean]
 - ~~do [#tsbrowser]~~
@@ -259,18 +283,19 @@ Committed as 188 per-package commits plus `31ad9151a` on the superproject. Worth
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#schemadts2] schema-dts 2.0 is a real breaking change for this codebase, not a routine bump: Article, ItemList and VideoObject stop being assignable to Thing, plus TS2321 excessive stack depth in brookers__doc_html.ts. Measured 8 new errors in lib/ui--server--brookebrodack, so it was reverted to ^1.1.5. Revisit when the jsonld/rdfa helpers in @rappstack/domain--server are updated for schema-dts 2 typing
+- [ ] [#eslintflat] eslint and @typescript-eslint are pinned at 9 / 7 in brookebrodack-dev and nothing runs them (no lint script, no CI step). eslint 10 dropped .eslintrc.json support, which is the config this repo has. Either delete the three dead devDeps or migrate to eslint.config.js and add a lint step to check.yml — do not bump without picking one
 - [ ] [#pushctxcore] Push the ctx-core-dev dependency sweep: 188 per-package submodule commits + superproject 31ad9151a are committed LOCALLY and unpushed on purpose (~190 public repos in one motion). Working tree is clean. Needs operator go, then push each submodule and the superproject
 - [ ] [#oidcnpm] Configure the npm Trusted Publisher on the rebuildjs package at npmjs.com (org rebuildjs, repo rebuildjs, workflow release.yml). Workflow is committed (bfe2707); this browser step needs 2FA ONCE and then no release needs it again. npm retires 2FA-bypass tokens for account ops early Aug 2026 and for direct publishing ~Jan 2027. Repeat for rhonojs/relysjs/ctx-core once their release workflows land. Note lazily-js's E404 publish failure was this same missing step
 - [ ] [#rappdeps] rappstack is at /home/brian/work/rappstack/dev (github rappstack/dev). Run the same dependency sweep, and ALIGN DRIZZLE: 4 packages pin drizzle-orm ^0.32.0 while domain--server pins ^0.45.1, which is the whole 15-error youtube cluster in brookebrodack-dev (#rappts) — a table type and a db handle from two different drizzle universes. Also has an uncommitted working tree (bun.lockb, lib/dev-bin, lib/domain--any--blog) to resolve first
-- [ ] [#bbdeps] Dependency sweep for brookebrodack-dev and its lib/** submodules — the third project in the graph the operator named. Do after #rappdeps so the @rappstack versions it resolves are already aligned
 - [ ] [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface
 - [ ] [#rhonouvu] rhonojs test:unit is red at HEAD and unrelated to dependencies: server/app/hono_duck_type.test.ts calls describe() (bun's runner) while test:unit runs uvu, so the file dies with 'Cannot use describe outside of the test runner'. Either port the file to uvu or move rhonojs to bun test
 - [ ] [#ctxredtests] 7 ctx-core-dev packages have test scripts that were already red before the dependency sweep: auth0, google, preprocess, rebuildjs-tailwindcss, relysjs, rhonojs (#rhonouvu), search. relysjs is a missing check-dts script. Triage and fix so the workspace suite is a usable gate
 - [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit
 - [ ] [#rappts] 24 of the remaining type errors are in yalc/npm-linked @rappstack/* SOURCES, not this repo (they ship .ts, so skipLibCheck does not apply): 17 in ui--any/md/MarkedPlaintextRenderer.ts (written against marked 13's Renderer signature, now resolving marked 17), 3 in domain--server--blog/post/Post__schema.ts (zod errorMap), plus dl/, rdfa/, jsonld/, breadcrumb/. SEPARATELY, 15 errors in lib/domain--server--brookebrodack/youtube/ have a single rappstack root cause: @rappstack/domain--server--youtube pins drizzle-orm ^0.32.0 while @rappstack/domain--server pins ^0.45.1, so youtube_video_tbl is a 0.32 table type and drizzle_db_(ctx) is a 0.45 db handle and every query between them is a nominal mismatch. Bumping this repo's pin cannot fix it. Align both packages on one drizzle major and republish; that unblocks #ciappts and gating typecheck:browser
 - [ ] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
-- [ ] [#yalcdrift] Local .yalc/@rappstack/ui--server now pins marked ^17.0.4, which silently cleared two ctx/*.ts Marked errors mid-cycle. CI rewrites yalc paths to npm ^0.1.0, so the published package may still pin marked ^13 and reintroduce them. Verify what npm resolves and pin or republish
-- [ ] [#chkci] Confirm Check run 29670229183 went green. The FIRST run (29668807479) was red on every app/brookebrodack-site test with Cannot find module public/assets/images/brooke-brodack-logo.jpg — public/assets is 119MB of gitignored media served from Contabo S3 and check.yml never downloaded it, unlike deploy.yml. Fixed in 36c60bb by adding the same Download assets step. If this run is red it is a NEW signal (yalcdrift or otherwise), not the asset gap
+- [ ] [#yalcdrift] CONFIRMED, with a measurement: a fresh bun install re-resolves marked 13.0.3 alongside 17.0.4 and the two ctx/*.ts Marked errors (Marked<string, string> vs Marked) come back, taking the app type-check to 62 with 2 in its own sources. Verified this is resolution churn and NOT caused by any version bump — reverted both package.json files to HEAD, reinstalled, measured 62/2 identically. Root cause: one yalc'd @rappstack package pins marked ^13.0.2 while two pin ^17.0.4. Fix belongs in rappstack alongside the drizzle alignment (#rappdeps)
+- [ ] [#chkci] Confirm Check run 29671085390 went green. Progress so far: run 29668807479 failed all 67 app tests on the missing gitignored asset (fixed, 36c60bb); run 29670229183 then failed 20 on ConnectionRefused because routes.test.ts spawns the production start.ts with no build and no migrated db (fixed, 6762d07 adds Initialize database + Build). If this run is still red the next cause is new
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
 - [ ] [#nd8n] Add cgroup limits for the bwrap sandbox path in src/freehold via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin. Confirmed still absent: mem_limit_mb exists on PluginSpec but no systemd-run/cgroup call site
@@ -318,4 +343,5 @@ Committed as 188 per-package commits plus `31ad9151a` on the superproject. Worth
 - 2026-07-18 [#tsappsub] app/brookebrodack-site/tsconfig.json carries the SAME TS5110 defect just fixed in the root (module esnext + moduleResolution nodenext), so the submodule's own type-check has also never run. It is a separate repo (brookebrodack-site) — fix it there, not from here
 - 2026-07-18 [#tsappclean] the app/brookebrodack-site type-check now runs and reports 267 errors — the honest state of a package that had never been checked, not a regression. Dominated by build.ts (esbuild used but not a direct dependency, implicit anys in plugin callbacks) and app/index.ts (a hono ErrorHandler returning void where it must return Response). Separate repo (brookebrodack-site); do it there. Pairs with #tsbrowser for the lib/ half of the parent repo
 - 2026-07-18 [#tsbrowser] type-check the browser half: lib/** and test/guestbook-hyop.test.ts are not covered by tsconfig.json, because @cloudflare/workers-types replaces Response with the Workers one and browser code fails against it on every element. A separate DOM-lib config measures 56 errors today — mostly in lib/domain--server--brookebrodack (sig/ctx generic mismatches) plus a missing image-module declaration in the app submodule. Needs the config split plus those fixes, or an explicit decision that lib/ is checked by its own workspace package instead
+- 2026-07-18 [#bbdeps] Dependency sweep for brookebrodack-dev and its lib/** submodules — the third project in the graph the operator named. Do after #rappdeps so the @rappstack versions it resolves are already aligned
 <!-- /agent:done -->

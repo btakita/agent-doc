@@ -96,37 +96,55 @@ The other 24 split three ways. Five are `[operator-verify]` and need your eyes, 
 One item I looked at and left alone: `#f6j3` recommends a decision on `fix/editor-authority-no-disk-repair`. That branch is now remote-only — the `src/agent-doc-editor-authority-fix` worktree it names no longer exists — and main has since adopted the newer error wording the item cites as evidence the branch is stale. Deleting a remote branch is yours to authorize, so it stays a recommendation.
 
 **Filed `#queuecontmirror`**, which is the reason you kept seeing this. `queue_continuation_required` stays `true` on a queue that is entirely mirrored operator-gated heads — 43 of them here, none in-session drainable. `#mirrorall` mirrors `[operator-verify]` heads *explicitly marked deferred from auto-drain*, but the drainability count includes them anyway, so the loop is told to keep draining work it is forbidden to drain. That is what re-selected the same stale mirror set every cycle, and what handed `#planmassdone` its 26 ids in the first place.
-<!-- agent:boundary:a762fa5b -->
+### Re: reload-lib clears it, recycle never did — opus-4-8
+
+That asymmetry is the most useful thing anyone has learned about this bug, and it demotes the diagnosis I filed two cycles ago. I have rewritten the item around it.
+
+**Why it matters more than a workaround.** The binary *already* asks for exactly the recovery I assumed was missing. `observe_current_text_with_bounded_retry` (`agent-doc-preflight-io/src/lib.rs:157`) requests editor replica re-registration on this precise status — that is what `#px82`/`#bn41` added, specifically so this would self-heal instead of needing manual admin commands. It runs on every wedged preflight and does nothing. `reload_library` runs once and clears it.
+
+So the fix surface is not "add a recovery." It is the **difference between two plugin-side handlers that are both supposed to restore the same thing**: whatever `reload_library` does to rebuild the registration is missing from the re-registration path. That is a much smaller and much more findable target than anything I had before, and it is a Kotlin diff rather than a state-machine redesign.
+
+**And it suggests the trigger.** `make install` / `lib-install` replaces the cdylib, and the JB plugin hot-reloads it by mtime. An editor still holding a registration against the previous library instance is exactly "attached, with no replica hub behind it in the current one." That fits the shape of the evidence: this workspace wedges during install-heavy sessions, and the two affected documents are the two longest-lived ones with the most installs behind them. It also means I have been re-triggering it myself — I ran `make install` three times this session.
+
+**I demoted my earlier hypothesis rather than deleting it.** `TransportProjection.editor_generation` really is never cleared, and `document_has_live_editor_transport` really has no liveness proof — both still true, both still worth fixing if they bite. But neither is what `reload-lib` is repairing, so presenting them as the root cause would have sent the next session down a redesign it does not need. The item says so explicitly.
+
+Still no binary-side change from me, and now for a better reason than last cycle's: the reading that settles it is a diff of two Kotlin handlers, which is cheap and unambiguous. Guessing ahead of it would be strictly worse.
+
+**Recording the operator-facing rule too:** for this signature, go straight to `reload-lib`. Four recycles and an IDE restart bought nothing.
+
+### Re: closing out the operator-verify heads — opus-4-8
+
+`session-check` flagged `#crdtauth6`, `#nsfz`, and `#suprestassoc-live` as consumed-without-outcome. They are the `[operator-verify]` items from the mass-`--done` set I declined to close, so I gated them — code-complete, awaiting a live editor/pane proof. That is the honest state rather than either closing them falsely or leaving the guard warning to recur every cycle.
+<!-- agent:boundary:f3287105 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do #editormodelmissing: I restarted Idea~~
 - JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
-- JB Compact Exchange agent:boundary tag is committed, then the tag id is updated and in an uncommitted state.
-- do [#crdtauth6]
-- do [#nsfz]
-- do [#suprestassoc-live]
-- do [#agentsignals]
-- do [#elementgraphprd]
-- ⏭️ do [#bbdcompactnocommit]
-- ⏭️ do [#fmgc]
-- ⏭️ do [#eqmvscroll]
-- ⏭️ do [#0dsr]
-- ⏭️ do [#17jk]
-- ⏭️ do [#f1s3]
-- ⏭️ do [#fr79]
-- ⏭️ do [#05r0]
-- ⏭️ do [#a45a]
-- ⏭️ do [#30p6]
+- do [#bbdcompactnocommit]
+- do [#bbdqprio]
+- do [#fmgc]
+- do [#eqmvscroll]
+- do [#0dsr]
+- do [#17jk]
+- do [#f1s3]
+- do [#fr79]
+- do [#05r0]
+- do [#a45a]
+- do [#30p6]
 - do [#n39j]
-- ~~do [#bn41]~~
+- do [#bn41]
+- do [#px82]
 - do [#f6j3]
 - do [#promptselect]
 - do [#realtimesalient]
 - do [#syncobscache2]
-- do [#capturebacklogatomic]
-- do [#opcapturelazily]
-- do [#jbtsiftnosub2verify]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
+- ⏭️ do [#jbtsiftnosub2verify]
+- 🚧 do [#5bzd]
 - do [#sidecarstate]
 - do [#64we]
 - do [#adstatechart2]
@@ -137,50 +155,11 @@ One item I looked at and left alone: `#f6j3` recommends a decision on `fix/edito
 - do [#ipcliveness]
 - do [#ipcverhandshake]
 - do [#ipcpostcommitinv]
-- ~~do [#staleplugindeploy]~~
+- do [#staleplugindeploy]
 - do [#5qjj]
-- do [#capturebacklogatomic]
-- do [#opcapturelazily]
-- do [#hvw0]
-- do [#bbpe]
-- 🚧 do [#mrnh]
-- do [#f4d5]
-- do [#5d9f]
-- do [#7n20]
-- do [#42xb]
-- do [#zq8e]
-- do [#a2zx]
-- do [#dbj7]
-- do [#ay80]
-- do [#syncfocuslag]
-- do [#jbrunsteering]
-- do [#crdtpushdrainverify]
-- do [#supboundarylivelock]
-- do [#statedbvacuum]
-- do [#qdonestrikeverify]
-- do [#crashresiliencelograce]
-- do [#compacttombgc]
-- do [#compactindcellsverify]
-- do [#zqv8]
-- do [#crde]
-- do [#steeringobservableset]
-- do [#vscsaveproj]
-- do [#restartbleednonroute]
-- do [#r4gq]
-- do [#af88]
-- do [#claimnewpane]
-- do [#boundaryaccum1]
-- do [#qactsync]
-- do [#ftimmediate]
-- do [#qeditrace]
-- do [#jbcompactcommit]
-- do [#tmuxsynccrashlog]
-- do [#60ev]
-- do [#2y8j]
-- do [#cdtcutover]
-- do [#coredecomp]
-- do [#orchdecomp]
-- do [#skillharnessplugin]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
 <!-- /agent:queue -->
 
 ## Notes

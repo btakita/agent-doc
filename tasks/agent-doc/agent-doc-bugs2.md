@@ -39,13 +39,32 @@ done
 Compacted content:
 - Archived 4 response topic(s): #editormodelmissing after the IntelliJ restart; many of these items are stale; reload-lib clears it, recycle never did; 1 more
 - Prior summary/context: prior compacted content: Archived 6 response topic(s): compact exchange deletes the boundary tag; the second bug your...
-<!-- agent:boundary:7acb7662 -->
+
+### Re: pane %38 reroute wedge — root-caused and fixed — opus-4-8
+
+> **Queue prompt:** JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 ... never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
+
+The printed unblocker was unsatisfiable, and chasing that led to the actual bug.
+
+**What I found.** `is_dispatch_ready_prompt_line` recognizes Claude's permission-mode footer only in its `(shift+tab to cycle)` spelling. Pane %38 renders the shell-bearing variant, `⏵⏵ bypass permissions on · 1 shell · ← for agents`. That line is neither ignorable chrome nor a recognized prompt line, so `last_prompt_candidate` stopped on it and never reached the `❯` composer above. Result: a genuinely idle pane reads as never dispatch-ready, and route strands on `timed_out` telling the operator to "wait for the pane to become ready" — a condition waiting cannot produce. That is the wedge, not a slow boot.
+
+**Fix.** Treat the footer (any hint variant) and the box-drawing rules as chrome, so the candidate resolves to the composer where empty-vs-drafted is actually decided.
+
+Making the composer authoritative also exposed something the old footer proxy structurally could not see: pane %38 currently holds an **unsent operator draft** — `❯ keep the uv.lock`. A proxy one line below the composer cannot tell an empty composer from a drafted one, so the old path would have reported "not ready" without ever saying why. Route now reports the draft and the real unblocker (`submit_or_clear_pane_draft`) via a `StartingPaneBlocker` enum, rather than a boolean.
+
+**One consequence worth flagging.** The unrecognized footer had been accidentally disambiguating an active turn from stale busy scrollback — with a bare `❯` under a live spinner, the footer was the candidate, so the claude "dispatch-ready beats busy cue" short-circuit never fired. Once the composer became authoritative that accident disappeared and a busy pane briefly read as ready. I made the bypass principled instead: only a rendered placeholder composer (`❯ Press up to edit queued messages`, which proves input was accepted) may outrank the busy cue; a bare prompt under a spinner stays busy. Two existing tests pinned both halves of this and now pass on that rule rather than on the accident.
+
+**State.** `make check` green, 7687/7687. Installed, pushed as `17848a927`, supervisor marked for recycle at the next idle boundary. CI is in progress on that commit — recorded, not waited on.
+
+**I did not reroute acadian-take-home.md.** Its pane holds your unsubmitted draft, and injecting would concatenate onto it. Submit or clear `keep the uv.lock` and the reroute will go through on the fresh binary.
+<!-- agent:boundary:a4fcea86 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do #editormodelmissing: I restarted Idea~~
 - JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+- JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.
+- equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
 - do [#bbdcompactnocommit]
 - do [#bbdqprio]
 - do [#fmgc]
@@ -94,6 +113,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#mtds] [operator-verify] #panedraftunblocker live proof: on a Claude pane whose footer reads `⏵⏵ bypass permissions on · 1 shell · ← for agents` (the variant without `(shift+tab to cycle)`), with an EMPTY composer and no active turn, trigger JB Run Agent Doc. Expect dispatch to succeed instead of refusing with `timed_out` / `unblocker=wait_for_dispatch_ready_prompt`. Then repeat with unsent text typed in the composer and expect the new refusal naming the draft with `unblocker=submit_or_clear_pane_draft`, and NO injection over that text. Finally confirm a genuinely mid-turn pane (live spinner, bare `❯`) still refuses as busy. Fixed in 17848a927, installed 0.35.6; needs the supervisor idle-boundary recycle to pick up the fresh binary.
 - [ ] [#queuecontmirror] #agent-doc-bug queue_continuation_required stays true on a queue that is entirely bulk-mirrored [operator-verify] / [focused-cycle] / [future-separate] backlog heads (observed: 43 drainable heads on agent-doc-bugs2.md, none in-session drainable). SKILL.md defines the signal as false when every remaining head is operator-gated or inert, and #mirrorall explicitly mirrors operator-verify heads 'deferred from auto-drain' — but the drainability filter counts them anyway, so the in-session loop is told to keep draining work it must not drain. This is what kept re-selecting the same stale mirror set every cycle and what fed the #planmassdone footgun its 26 ids. Fix: apply the same deferral predicate #mirrorall uses when mirroring to the drainable-head count, so mirrored operator-gated heads raise queue_active without raising queue_continuation_required.
 - [ ] [#bbdcompactnocommit] #agent-doc-bug Compact Exchange applied but did not commit on brookebrodack-dev.md while the operator deleted queue lines mid-compact. CONFIRMED from ops.log: operator editor deletes landed 03:29:36-37, then at 03:29:43 'crdt_commit_barrier ready=true delivery_required=true delivery_converged=false live_editors=1' and 'controller_compact_document component=exchange commit=true barrier_ready=false'. The compacted document + its archive are on disk; only the commit is missing, so nothing is lost. Note handle_compact_document_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:4650) only LOGS barrier_ready and calls compact_document unconditionally, so the barrier is not what skipped the commit — find the actual skip inside compact_document's commit leg and make a commit=true compact that cannot commit either retry to convergence or fail loudly. Silently applying the compaction and leaving it uncommitted forced the operator to notice by hand.
 - [ ] [#fmgc] Per-peer ack watermark for replay-state retention (#retentionwatermark). Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: `reliable_sync_outbox_cursor`/`reliable_sync_inbox_cursor` are `PRIMARY KEY (document_hash)` holding ONE scalar `acked_through` — there is no per-peer ack vector to take a MIN over, and `reliable_sync_liveness_journal.source_key` is a document hash, not a peer id. Needs: (a) a `(document_hash, peer_key)` ack table keyed by the PID-scoped editor registration; (b) retention keyed off `MIN(acked_version)` across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps stay as a backstop rather than being replaced. `PushChannel::flush` (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via `outbox.ack_through(ack)`; generalize that, do not rebuild it.

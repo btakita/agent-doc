@@ -37,10 +37,12 @@ complete
 Compacted content:
 - Archived 3 response topic(s): I don't understand what I need to verify; Print #tmo-orphan-apply records; #efs-prod-seed is test data; What are you defining as production?
 - Prior summary/context: prior compacted content: Archived 14 response topic(s): Add backlog items onto the queue in priority order; add the b...
-<!-- agent:boundary:e6e3e92c -->
+<!-- agent:boundary:915cffa0 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#efs-prod-secrets]
+- do [#tmo-snapshot-verify]
 <!-- /agent:queue -->
 
 ## Backlog

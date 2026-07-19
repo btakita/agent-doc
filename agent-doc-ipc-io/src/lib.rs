@@ -122,6 +122,55 @@ pub fn is_listener_active(project_root: &Path) -> bool {
     is_listener_active_for_pid(project_root, u64::from(std::process::id()))
 }
 
+/// Discover live editor endpoints from the socket files themselves, independent
+/// of the reliable-sync registration record (`#editorendpointzero`).
+///
+/// Endpoint fan-out normally enumerates `reliable_sync_status().registrations`.
+/// When that record is empty the fan-out reports `0/0` and gives up — even though
+/// the editor may be alive and *actively listening* on its PID-scoped socket. That
+/// is the unrecoverable wedge: `admin reload-lib` becomes a no-op with nothing to
+/// deliver to, `admin recycle` does not touch the editor, and only an operator
+/// reopening the tab or restarting the IDE clears it.
+///
+/// The socket path is deterministic (`.agent-doc/<prefix>-<pid>.sock`) and
+/// [`is_listener_active_for_pid`] proves liveness by actually connecting (and
+/// reaps the file when it cannot), so discovery is sound: every returned pid has a
+/// live listener behind it as of this call. The caller's own pid is excluded so a
+/// process never fans out to itself.
+pub fn discover_listening_editor_pids(project_root: &Path) -> Vec<u64> {
+    let dir = project_root.join(".agent-doc");
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        // Never swallow: a project root without a readable .agent-doc cannot be
+        // fanned out to, and silently returning empty looks like "no editors".
+        Err(err) => {
+            eprintln!(
+                "[ipc] endpoint discovery skipped for {}: {}",
+                dir.display(),
+                err
+            );
+            return Vec::new();
+        }
+    };
+
+    let own_pid = u64::from(std::process::id());
+    let prefix = format!("{SOCKET_FILENAME_PREFIX}-");
+    let mut pids: Vec<u64> = entries
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.to_str()?;
+            let pid = name.strip_prefix(&prefix)?.strip_suffix(".sock")?;
+            pid.parse::<u64>().ok()
+        })
+        .filter(|pid| *pid != own_pid)
+        .filter(|pid| is_listener_active_for_pid(project_root, *pid))
+        .collect();
+    pids.sort_unstable();
+    pids.dedup();
+    pids
+}
+
 pub fn is_listener_active_for_pid(project_root: &Path, pid: u64) -> bool {
     let sock = socket_path_for_pid(project_root, pid);
     if !sock.exists() {
@@ -795,6 +844,50 @@ mod tests {
     use super::*;
     use std::thread;
     use std::time::{Duration, Instant};
+
+    /// `#editorendpointzero`: discovery must find a live listener that the
+    /// reliable-sync registration record knows nothing about, and must reap a
+    /// stale socket file rather than reporting it as an endpoint.
+    #[test]
+    fn discover_listening_editor_pids_finds_live_listeners_and_skips_stale_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        // A socket file with nothing behind it — the shape left by a dead editor.
+        let stale_pid = 999_000_001u64;
+        let stale = socket_path_for_pid(root, stale_pid);
+        std::fs::write(&stale, b"").unwrap();
+
+        // Nothing is listening, so discovery must return empty and reap the file.
+        assert!(
+            discover_listening_editor_pids(root).is_empty(),
+            "a stale socket file is not a live endpoint"
+        );
+        assert!(
+            !stale.exists(),
+            "is_listener_active_for_pid must reap the stale socket file"
+        );
+
+        // Non-socket files and foreign names are ignored rather than parsed.
+        std::fs::write(root.join(".agent-doc/controller.sock"), b"").unwrap();
+        std::fs::write(root.join(".agent-doc/notes.md"), b"").unwrap();
+        assert!(discover_listening_editor_pids(root).is_empty());
+    }
+
+    #[test]
+    fn discover_listening_editor_pids_excludes_the_calling_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let own = u64::from(std::process::id());
+        std::fs::write(socket_path_for_pid(root, own), b"").unwrap();
+        assert!(
+            discover_listening_editor_pids(root).is_empty(),
+            "a process must never fan out a reload intent to itself"
+        );
+    }
 
     #[test]
     fn slow_handler_does_not_block_concurrent_connections() {

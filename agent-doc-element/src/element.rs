@@ -995,6 +995,35 @@ fn byte_in_ranges(offset: usize, ranges: &[(usize, usize)]) -> bool {
         .any(|&(start, end)| offset >= start && offset < end)
 }
 
+/// A raw line from `split_inclusive('\n')` decomposed into the three pieces the
+/// marker scanners need.
+///
+/// Both the malformed-comment detector and its repair walked lines with the same
+/// four-line `trim_end_matches` / `trim_start_matches` / re-slice dance, which is
+/// easy to get subtly out of step (the detector needs `indent.len()` as a byte
+/// offset; the repair needs `indent` and `newline` verbatim to rebuild the line).
+/// Reassembling `indent + content + newline` always reproduces the input exactly.
+struct RawLine<'a> {
+    /// Leading spaces/tabs.
+    indent: &'a str,
+    /// The line with indentation and line ending removed.
+    content: &'a str,
+    /// The trailing `\n`, `\r\n`, or `""` on a final unterminated line.
+    newline: &'a str,
+}
+
+fn split_raw_line(raw_line: &str) -> RawLine<'_> {
+    let without_newline = raw_line.trim_end_matches(['\n', '\r']);
+    let newline = &raw_line[without_newline.len()..];
+    let content = without_newline.trim_start_matches([' ', '\t']);
+    let indent = &without_newline[..without_newline.len() - content.len()];
+    RawLine {
+        indent,
+        content,
+        newline,
+    }
+}
+
 /// Repair a boundary marker whose same-line `-->` terminator was lost, splicing
 /// the trailing remainder back onto its own line (`#boundarysplice`).
 ///
@@ -1028,15 +1057,16 @@ pub fn repair_malformed_boundary_comment(doc: &str) -> Option<String> {
         let line_start = offset;
         offset += raw_line.len();
 
-        let line = raw_line.trim_end_matches(['\n', '\r']);
-        let newline = &raw_line[line.len()..];
-        let leading = line.len() - line.trim_start_matches([' ', '\t']).len();
-        let trimmed = &line[leading..];
+        let RawLine {
+            indent,
+            content: trimmed,
+            newline,
+        } = split_raw_line(raw_line);
 
         let malformed = trimmed.starts_with(PREFIX)
             && !trimmed.contains("-->")
-            && !byte_in_ranges(line_start + leading, &code_ranges)
-            && !byte_in_ranges(line_start + leading, &quoted_ranges);
+            && !byte_in_ranges(line_start + indent.len(), &code_ranges)
+            && !byte_in_ranges(line_start + indent.len(), &quoted_ranges);
 
         if !malformed {
             out.push_str(raw_line);
@@ -1054,7 +1084,7 @@ pub fn repair_malformed_boundary_comment(doc: &str) -> Option<String> {
         }
 
         repaired = true;
-        out.push_str(&line[..leading]);
+        out.push_str(indent);
         out.push_str(PREFIX);
         out.push_str(id);
         out.push_str(" -->");
@@ -1092,10 +1122,12 @@ pub fn malformed_agent_comment_reason(doc: &str) -> Option<String> {
     let quoted_ranges = find_quoted_ranges(doc);
     let mut offset = 0usize;
     for (line_idx, raw_line) in doc.split_inclusive('\n').enumerate() {
-        let line = raw_line.trim_end_matches(['\n', '\r']);
-        let leading = line.len() - line.trim_start_matches([' ', '\t']).len();
-        let marker_start = offset + leading;
-        let trimmed = &line[leading..];
+        let RawLine {
+            indent,
+            content: trimmed,
+            ..
+        } = split_raw_line(raw_line);
+        let marker_start = offset + indent.len();
         offset += raw_line.len();
 
         if !trimmed.starts_with("<!--") {

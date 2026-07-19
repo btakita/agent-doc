@@ -5963,11 +5963,22 @@ pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutRepo
             report.failed += 1;
             continue;
         };
-        let endpoints = status
+        let mut endpoints = status
             .registrations
             .into_iter()
             .map(|registration| (registration.pid, registration.editor_id))
             .collect::<std::collections::BTreeSet<_>>();
+        // `#editorendpointzero`: the registration record can be empty while the
+        // editor is alive and listening on its PID-scoped socket — the state that
+        // made this fan-out report `0/0` and leave the document permanently
+        // wedged. Fall back to socket+liveness discovery so a live editor is
+        // always reachable, whatever the record says. `editor_id` is only a
+        // payload field, so an unknown one does not block delivery.
+        for pid in agent_doc_ipc_io::discover_listening_editor_pids(&project_root) {
+            if !endpoints.iter().any(|(known, _)| *known == pid) {
+                endpoints.insert((pid, String::new()));
+            }
+        }
         report.endpoints += endpoints.len();
         for (pid, editor_id) in endpoints {
             if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, pid) {

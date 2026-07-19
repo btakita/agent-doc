@@ -2571,6 +2571,26 @@ fn editor_operator_cut_for_agent_rebase(
     operator_cut
 }
 
+/// Heal a welded boundary marker AND re-establish the single-boundary invariant
+/// (`#boundarysplice`).
+///
+/// Restoring a terminator can reveal a *second* structurally valid boundary — the
+/// repaired one plus the document's real one — which immediately trips
+/// `duplicate_exchange_boundary` and leaves the document just as wedged, one gate
+/// further along. The boundary is binary-owned scaffolding that
+/// `reposition_boundary_to_end_*` already rewrites at will, so collapsing to the
+/// single canonical marker at the end of the exchange is the correct completion of
+/// the repair rather than a second guess.
+///
+/// Returns `None` when there was no welded marker, so sound documents are never
+/// rewritten.
+fn heal_welded_boundary(content: &str) -> Option<String> {
+    let repaired = agent_doc_element::element::repair_malformed_boundary_comment(content)?;
+    Some(agent_doc_template::reposition_boundary_to_end_clean(
+        &repaired,
+    ))
+}
+
 fn canonicalize_and_validate_agent_rebase(
     merged: &str,
     response_branch: &str,
@@ -2579,6 +2599,12 @@ fn canonicalize_and_validate_agent_rebase(
 ) -> Result<String> {
     let canonical =
         agent_doc_template::canonicalize_boundary_after_document_merge(merged, response_branch);
+    // `#boundarysplice`: canonicalization is the last seam before the structural
+    // gate, and a welded boundary marker can enter from either side of the merge —
+    // the editor cut OR a retained intent target replayed out of `state.db`.
+    // Healing only the intake leaves the poisoned copy in the durable intent, so
+    // every reconnect re-fails identically and the document stays wedged forever.
+    let canonical = heal_welded_boundary(&canonical).unwrap_or(canonical);
     validate_canonical_document_target(file, &canonical, source)?;
     Ok(canonical)
 }
@@ -3131,7 +3157,14 @@ pub fn deferred_document_write_reconnect_content(
     }
 
     let disk_content = std::fs::read_to_string(file).ok();
-    let mut merged = editor_content.to_string();
+    // `#boundarysplice`: heal a welded boundary marker in the editor canonical at
+    // intake. The corruption is in `editor_content` itself, so every downstream
+    // merge and `validate_canonical_document_target` call inherits it — which is
+    // the permanent reconnect wedge, since the validator refuses before any repair
+    // seam runs and nothing else rewrites the text. Repairing here is lossless and
+    // touches only binary-owned scaffolding.
+    let mut merged =
+        heal_welded_boundary(editor_content).unwrap_or_else(|| editor_content.to_string());
     for (intent_index, intent) in pending_journal.iter().enumerate() {
         let merge_base = intent
             .expected_content
@@ -3195,13 +3228,14 @@ pub fn deferred_document_write_reconnect_content(
         )?;
     }
     if agent_doc_hash::content_hash(&merged).eq_ignore_ascii_case(&pending.target_hash) {
-        validate_canonical_document_target(
-            file,
-            &pending.target_content,
-            "editor_reconnect_retained_target",
-        )?;
-        return Ok(Some(pending.target_content));
+        // `#boundarysplice`: the retained target is durable `state.db` content, so
+        // a welded boundary captured into it re-fails on every reconnect forever.
+        let retained =
+            heal_welded_boundary(&pending.target_content).unwrap_or(pending.target_content);
+        validate_canonical_document_target(file, &retained, "editor_reconnect_retained_target")?;
+        return Ok(Some(retained));
     }
+    let merged = heal_welded_boundary(&merged).unwrap_or(merged);
     validate_canonical_document_target(file, &merged, "editor_reconnect")?;
     ensure_deferred_document_write_intent(
         file,
@@ -3771,6 +3805,38 @@ fn current_text_status(current: &agent_doc_crdt_relay_io::CurrentText) -> &'stat
     }
 }
 
+/// Name the actual unblocker for an editor-authority refusal (`#editorendpointzero`).
+///
+/// The bare refusal is a dead end: it tells the operator the editor is open and
+/// disk will not be used, and stops there. But the binary can enumerate live
+/// editor registrations, and the recovery differs sharply by count:
+///
+/// - **zero endpoints** — the plugin has no registered endpoint for this document,
+///   so `admin reload-lib` is a no-op (nothing to deliver to) and `admin recycle`
+///   does not touch it either. Only the editor re-registering clears it. This is
+///   the state a `make install` / `lib-install` cdylib swap leaves behind when the
+///   plugin does not re-register after the hot-reload, which makes install-heavy
+///   dogfooding sessions self-inflict it.
+/// - **one or more endpoints** — a replica is registered but has no model behind
+///   it, which is the shape `reload-lib` clears immediately.
+///
+/// Diagnostic only: this never changes which replica wins authority.
+fn editor_authority_unavailable_unblocker(file: &Path) -> String {
+    match agent_doc_controller_io::project_controller::live_editor_registrations_for_file(file) {
+        Ok(registrations) if registrations.is_empty() => {
+            "; live_editor_endpoints=0 — the editor plugin holds no registered endpoint for this document, so `agent-doc admin reload-lib` cannot help (it has nothing to deliver to) and neither can `admin recycle`. Unblock by making the plugin re-register: reopen this file's editor tab, or restart the IDE. Commonly left behind by a `make install` / `lib-install` cdylib swap the plugin did not re-register after"
+                .to_string()
+        }
+        Ok(registrations) => format!(
+            "; live_editor_endpoints={} — a replica is registered but has no model behind it; `agent-doc admin reload-lib` clears this shape",
+            registrations.len()
+        ),
+        // Never swallow: an unavailable count is itself worth reporting, since it
+        // means the operator cannot tell the two recoveries apart.
+        Err(err) => format!("; live_editor_endpoints=unknown ({err:#})"),
+    }
+}
+
 fn resolve_closed_editor_disk_fallback_current_doc(
     file: &std::path::Path,
     disk: Option<&str>,
@@ -3789,8 +3855,9 @@ fn resolve_closed_editor_disk_fallback_current_doc(
             ),
         );
         anyhow::bail!(
-            "editor_attached_model_missing: {reason}: editor authority unavailable for {}; Lazily still reports the editor open, so disk is not consulted as a fallback",
-            file.display()
+            "editor_attached_model_missing: {reason}: editor authority unavailable for {}; Lazily still reports the editor open, so disk is not consulted as a fallback{}",
+            file.display(),
+            editor_authority_unavailable_unblocker(file),
         );
     }
 

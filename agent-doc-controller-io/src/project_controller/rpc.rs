@@ -6512,6 +6512,18 @@ pub(crate) fn launch_detached_at(
     use launch_enoent::{
         LAUNCH_ENOENT_BACKOFF_INITIAL, LAUNCH_ENOENT_BACKOFF_MAX, LAUNCH_ENOENT_TOTAL_BUDGET,
     };
+    // `#ctrlrespawnenoent2`: an empty or missing project root makes
+    // `Command::current_dir` fail with ENOENT no matter how healthy the binary
+    // is, and no amount of retrying can fix it. Without this guard the
+    // ENOENT retry budget below (widened to ~13.5s for real install races)
+    // burns that whole budget on a permanently-unsatisfiable condition and then
+    // blames a concurrent install. Fail fast and name the real cause.
+    if project_root.as_os_str().is_empty() || !project_root.is_dir() {
+        anyhow::bail!(
+            "cannot launch project controller: project root {:?} is empty or not a directory.              This is a caller passing a bad root, NOT a missing binary and NOT a concurrent              install — retrying cannot help (#ctrlrespawnenoent2)",
+            project_root,
+        );
+    }
     let launch_started = std::time::Instant::now();
     let mut backoff = LAUNCH_ENOENT_BACKOFF_INITIAL;
     let mut attempt: u32 = 0;

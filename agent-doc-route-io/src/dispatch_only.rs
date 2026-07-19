@@ -35,11 +35,12 @@ use crate::startup_ready::wait_for_agent_ready_outcome;
 use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
     BusyPaneAutoFixOutcome, DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyReopenDelivery,
-    DispatchOnlyStartingPaneActorReadyFacts, DispatchOnlyStartingPaneNotReadyMessageFacts,
-    RoutedReopenGuardReason, dispatch_only_blocked_guard_reason,
+    DispatchOnlyStartingPaneActorReadyFacts, DispatchOnlyStartingPaneDraftMessageFacts,
+    DispatchOnlyStartingPaneNotReadyMessageFacts,
+    RoutedReopenGuardReason, StartingPaneBlocker, dispatch_only_blocked_guard_reason,
     dispatch_only_blocker_recovery_hint, dispatch_only_should_print_unproven_progress,
-    dispatch_only_starting_pane_actor_settled, dispatch_only_starting_pane_not_ready_message,
-    prompt_ready_barrier_failed_event,
+    dispatch_only_starting_pane_actor_settled, dispatch_only_starting_pane_draft_message,
+    dispatch_only_starting_pane_not_ready_message, prompt_ready_barrier_failed_event,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible;
@@ -270,29 +271,50 @@ pub fn dispatch_only_send_reopen(
             }
 
             let detail = ready_outcome.blocker_reason().unwrap_or("timed_out");
+            // An operator draft parked in the composer can never satisfy the
+            // dispatch-ready predicate, so "wait for the pane to become ready"
+            // would be an unsatisfiable instruction. Report the draft and the
+            // real unblocker instead (#panedraftunblocker).
+            let draft = agent_doc_tmux_io::capture_pane(tmux, &dispatch_pane)
+                .ok()
+                .and_then(|content| agent_doc_harness::pane_composer_draft(harness, &content));
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome={}",
+                    "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome={} composer_draft={}",
                     file.display(),
                     dispatch_pane,
                     harness.binary,
-                    detail
+                    detail,
+                    draft.is_some()
                 ),
             );
             let file_display = file.display().to_string();
-            let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
-                "wait_for_dispatch_ready_prompt",
-            );
-            anyhow::bail!(dispatch_only_starting_pane_not_ready_message(
-                DispatchOnlyStartingPaneNotReadyMessageFacts {
-                    harness_binary: &harness.binary,
-                    pane: &dispatch_pane,
-                    file_display: &file_display,
-                    detail,
-                    outcome_fields: &outcome_fields,
-                },
-            ));
+            let blocker = StartingPaneBlocker::from_composer_draft(draft.as_deref());
+            let outcome_fields =
+                agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(blocker.unblocker());
+            match (blocker, draft.as_deref()) {
+                (StartingPaneBlocker::OperatorDraft, Some(draft_preview)) => {
+                    anyhow::bail!(dispatch_only_starting_pane_draft_message(
+                        DispatchOnlyStartingPaneDraftMessageFacts {
+                            harness_binary: &harness.binary,
+                            pane: &dispatch_pane,
+                            file_display: &file_display,
+                            draft_preview,
+                            outcome_fields: &outcome_fields,
+                        },
+                    ));
+                }
+                _ => anyhow::bail!(dispatch_only_starting_pane_not_ready_message(
+                    DispatchOnlyStartingPaneNotReadyMessageFacts {
+                        harness_binary: &harness.binary,
+                        pane: &dispatch_pane,
+                        file_display: &file_display,
+                        detail,
+                        outcome_fields: &outcome_fields,
+                    },
+                )),
+            }
         }
     }
 

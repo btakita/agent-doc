@@ -3222,10 +3222,21 @@ fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) 
 }
 
 fn live_pane_prompt_ready(harness: &agent_doc_harness::HarnessConfig, captured: &str) -> bool {
-    let latest_dispatch_ready_prompt = harness
-        .last_prompt_candidate(captured)
-        .is_some_and(|line| harness.is_dispatch_ready_prompt_line(&line));
-    if harness.binary == "claude" && latest_dispatch_ready_prompt {
+    let candidate = harness.last_prompt_candidate(captured);
+    let latest_dispatch_ready_prompt = candidate
+        .as_deref()
+        .is_some_and(|line| harness.is_dispatch_ready_prompt_line(line));
+    // Claude's busy cue can linger as stale scrollback, so a dispatch-ready
+    // composer may outrank it — but ONLY when the composer is a rendered
+    // placeholder (e.g. `❯ Press up to edit queued messages`), which itself
+    // proves input was accepted. A bare `❯` under a live spinner is an active
+    // turn and must fall through to the busy cue, or dispatch clobbers it.
+    if harness.binary == "claude"
+        && latest_dispatch_ready_prompt
+        && candidate
+            .as_deref()
+            .is_some_and(|line| harness.is_idle_placeholder_prompt_line(line))
+    {
         return true;
     }
     if harness.has_busy_cue(captured) {

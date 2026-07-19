@@ -1946,6 +1946,60 @@ pub fn dispatch_only_starting_pane_not_ready_message(
     )
 }
 
+/// Why a starting pane refused dispatch, and therefore which unblocker the
+/// operator must actually follow (`#panedraftunblocker`).
+///
+/// These are not interchangeable waits: a pane whose composer holds an operator
+/// draft never satisfies the dispatch-ready predicate (which requires a bare
+/// prompt sigil), so "wait for the pane to become ready" is unsatisfiable there
+/// — the draft must be submitted or cleared first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartingPaneBlocker {
+    /// The run has not yet reached a dispatch-ready prompt. Waiting resolves it.
+    Booting,
+    /// The composer holds unsent operator input. Waiting never resolves it.
+    OperatorDraft,
+}
+
+impl StartingPaneBlocker {
+    /// Classify from the pane's composer draft, if any.
+    pub fn from_composer_draft(draft: Option<&str>) -> Self {
+        match draft {
+            Some(_) => Self::OperatorDraft,
+            None => Self::Booting,
+        }
+    }
+
+    pub fn unblocker(self) -> &'static str {
+        match self {
+            Self::OperatorDraft => "submit_or_clear_pane_draft",
+            Self::Booting => "wait_for_dispatch_ready_prompt",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DispatchOnlyStartingPaneDraftMessageFacts<'a> {
+    pub harness_binary: &'a str,
+    pub pane: &'a str,
+    pub file_display: &'a str,
+    pub draft_preview: &'a str,
+    pub outcome_fields: &'a str,
+}
+
+pub fn dispatch_only_starting_pane_draft_message(
+    facts: DispatchOnlyStartingPaneDraftMessageFacts<'_>,
+) -> String {
+    format!(
+        "dispatch-only {} reopen refused to inject into pane {} for {} because the composer holds unsent operator input ({:?}); waiting will not clear it — submit or clear that draft in the pane, then reroute {}",
+        facts.harness_binary,
+        facts.pane,
+        facts.file_display,
+        facts.draft_preview,
+        facts.outcome_fields
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DispatchOnlyRecycleInflightMessageFacts<'a> {
     pub harness_binary: &'a str,
@@ -4400,6 +4454,50 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert!(refusal.contains("tmux_text_enter"));
         assert!(refusal.contains("only pane-input acceptance proof was available"));
         assert!(refusal.contains("treating this as not dispatched"));
+    }
+
+    #[test]
+    fn starting_pane_unblocker_distinguishes_operator_draft_from_boot_wait() {
+        assert_eq!(
+            StartingPaneBlocker::from_composer_draft(None),
+            StartingPaneBlocker::Booting
+        );
+        assert_eq!(
+            StartingPaneBlocker::Booting.unblocker(),
+            "wait_for_dispatch_ready_prompt"
+        );
+        // Waiting cannot clear a draft the operator parked in the composer, so
+        // the refusal must name the action that actually unblocks the reroute.
+        assert_eq!(
+            StartingPaneBlocker::from_composer_draft(Some("❯ keep the uv.lock")),
+            StartingPaneBlocker::OperatorDraft
+        );
+        assert_eq!(
+            StartingPaneBlocker::OperatorDraft.unblocker(),
+            "submit_or_clear_pane_draft"
+        );
+    }
+
+    #[test]
+    fn starting_pane_draft_message_reports_the_draft_and_its_unblocker() {
+        let outcome_fields =
+            "ui_outcome=blocked_with_exact_unblocker unblocker=submit_or_clear_pane_draft";
+        let drafted = dispatch_only_starting_pane_draft_message(
+            DispatchOnlyStartingPaneDraftMessageFacts {
+                harness_binary: "claude",
+                pane: "%38",
+                file_display: "tasks/recruit/acadian-take-home.md",
+                draft_preview: "❯ keep the uv.lock",
+                outcome_fields,
+            },
+        );
+        assert!(drafted.contains("composer holds unsent operator input"));
+        assert!(drafted.contains("keep the uv.lock"));
+        assert!(drafted.contains("submit or clear that draft"));
+        assert!(drafted.contains("unblocker=submit_or_clear_pane_draft"));
+        // The misleading boot-wait wording must not survive on this path.
+        assert!(!drafted.contains("still booting"));
+        assert!(!drafted.contains("unblocker=wait_for_dispatch_ready_prompt"));
     }
 
     #[test]

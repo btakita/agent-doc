@@ -245,6 +245,18 @@ impl HarnessConfig {
                 && trimmed.contains("(shift+tab to cycle)"))
     }
 
+    /// True when the line is a rendered composer placeholder rather than real
+    /// operator input — an empty composer wearing hint text.
+    pub fn is_idle_placeholder_prompt_line(&self, line: &str) -> bool {
+        let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
+        let trimmed = stripped.trim();
+        match self.binary.as_str() {
+            "claude" => is_claude_idle_placeholder_prompt(trimmed),
+            "codex" => is_codex_idle_placeholder_prompt(trimmed),
+            _ => false,
+        }
+    }
+
     /// Return true when the line represents an empty composer that route may
     /// safely inject into. Prompt lines with drafted user text are not idle for
     /// dispatch even if they still begin with the harness prompt glyph.
@@ -254,6 +266,7 @@ impl HarnessConfig {
         match self.binary.as_str() {
             "claude" => {
                 matches!(trimmed, "❯" | "⏵")
+                    || is_claude_idle_placeholder_prompt(trimmed)
                     || (trimmed.starts_with("⏵⏵ ") && trimmed.contains("(shift+tab to cycle)"))
             }
             "codex" => {
@@ -285,7 +298,10 @@ impl HarnessConfig {
             // the Claude busy cue (checked first in `live_pane_prompt_ready`), this
             // can only surface the composer for panes with no active turn.
             "claude" => {
-                is_claude_status_chrome_line(trimmed) || is_claude_artifact_attachment_line(trimmed)
+                is_claude_status_chrome_line(trimmed)
+                    || is_claude_artifact_attachment_line(trimmed)
+                    || is_claude_permission_mode_chrome_line(trimmed)
+                    || is_claude_composer_rule_line(trimmed)
             }
             _ => false,
         }
@@ -738,6 +754,23 @@ pub fn protected_prompt_draft_preview(harness: &HarnessConfig, content: &str) ->
     }
 }
 
+/// Return the operator's unsent composer text when the pane's last prompt
+/// candidate IS a harness prompt line that is NOT dispatch-ready — i.e. the
+/// composer holds drafted input.
+///
+/// Returns `None` for an empty/idle composer, and `None` when the last candidate
+/// is ordinary output rather than a prompt line, so a busy pane's scrollback is
+/// never misreported as an operator draft. Route uses this to distinguish "the
+/// run is still booting, waiting will help" from "an operator draft is parked in
+/// the composer, waiting will NEVER help" (`#panedraftunblocker`).
+pub fn pane_composer_draft(harness: &HarnessConfig, content: &str) -> Option<String> {
+    let candidate = harness.last_prompt_candidate(content)?;
+    if !harness.is_prompt_line(&candidate) || harness.is_dispatch_ready_prompt_line(&candidate) {
+        return None;
+    }
+    protected_prompt_draft_preview(harness, content)
+}
+
 pub fn dispatch_only_blocker_reason(harness: &HarnessConfig, content: &str) -> Option<String> {
     if let Some(reason) = harness.dispatch_blocker_reason(content) {
         return Some(reason);
@@ -774,7 +807,14 @@ pub fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<
     let latest_dispatch_ready_prompt = harness
         .last_prompt_candidate(content)
         .filter(|line| harness.is_dispatch_ready_prompt_line(line));
-    if harness.binary == "claude" && latest_dispatch_ready_prompt.is_some() {
+    // See `live_pane_prompt_ready`: only a rendered placeholder composer (which
+    // proves input was accepted) may outrank Claude's potentially-stale busy
+    // cue. A bare `❯` under a live spinner is an active turn.
+    if harness.binary == "claude"
+        && latest_dispatch_ready_prompt
+            .as_deref()
+            .is_some_and(|line| harness.is_idle_placeholder_prompt_line(line))
+    {
         return latest_dispatch_ready_prompt;
     }
     if harness.has_busy_cue(content) {
@@ -823,6 +863,44 @@ fn is_context_usage_status_line(trimmed: &str) -> bool {
 /// it never appears on the `❯`/`⏵⏵` composer or the active-turn spinner — so
 /// marking it ignorable cannot hide a real prompt or a busy cue.
 /// (#jb-stale-busy-idle-footer)
+/// True for Claude Code's permission-mode footer, e.g.
+/// `⏵⏵ bypass permissions on (shift+tab to cycle)` or the shell-bearing variant
+/// `⏵⏵ bypass permissions on · 1 shell · ← for agents`.
+///
+/// Keyed on the `⏵⏵ ` prefix rather than the trailing hint, because that hint
+/// varies with pane state. `is_dispatch_ready_prompt_line` only ever recognized
+/// the `(shift+tab to cycle)` spelling, so in every other variant this footer
+/// became the "last prompt candidate" and masked the real `❯` composer below it
+/// — making a genuinely idle pane read as never dispatch-ready and stranding
+/// route with `timed_out` (`#panedraftunblocker`). Marking it ignorable resolves
+/// the candidate down to the composer, where empty-vs-drafted is decided.
+/// Busy panes stay protected by the separate Claude busy cue, which callers
+/// check before the prompt candidate.
+fn is_claude_permission_mode_chrome_line(trimmed: &str) -> bool {
+    trimmed.starts_with("⏵⏵ ")
+}
+
+/// True for Claude Code composer text that is a rendered placeholder rather than
+/// operator input, e.g. `❯ Press up to edit queued messages` (shown when input
+/// was queued during a busy turn — the composer itself is empty).
+///
+/// The Claude analogue of `is_codex_idle_placeholder_prompt`: such a line is
+/// dispatch-ready, and must not be reported as an unsent operator draft.
+fn is_claude_idle_placeholder_prompt(trimmed: &str) -> bool {
+    const PLACEHOLDERS: &[&str] = &["Press up to edit queued messages"];
+    let Some(rest) = trimmed.strip_prefix("❯ ") else {
+        return false;
+    };
+    PLACEHOLDERS.contains(&rest.trim())
+}
+
+/// True for the box-drawing rules Claude Code renders above and below the
+/// composer. Skipping them lets the prompt candidate resolve to the composer
+/// once the permission footer below it is also treated as chrome.
+fn is_claude_composer_rule_line(trimmed: &str) -> bool {
+    !trimmed.is_empty() && trimmed.chars().all(|c| c == '─')
+}
+
 fn is_claude_status_chrome_line(trimmed: &str) -> bool {
     let lower = trimmed.to_ascii_lowercase();
     let Some(pos) = lower.find("ctx:") else {
@@ -1516,6 +1594,76 @@ mod tests {
         "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
     );
 
+    // Idle Claude pane whose composer holds an unsent operator draft. Captured
+    // live from pane %38 on 2026-07-19: the turn had finished, the operator had
+    // typed a follow-up, and route reported `wait_for_dispatch_ready_prompt` —
+    // an unblocker no amount of waiting can satisfy (#panedraftunblocker).
+    const CLAUDE_DRAFTED_PANE: &str = concat!(
+        "  Pushed as 9c492fd to btakita/acadian-take-home.\n",
+        "✻ Churned for 2m 33s · 1 shell still running\n",
+        "────────────────────────────────────────\n",
+        "❯ keep the uv.lock\n",
+        "────────────────────────────────────────\n",
+        "  Opus 4.8 ctx:18% ~/work/btakita/agent-loop main brian@cachyos-x8664\n",
+        "  ⏵⏵ bypass permissions on · 1 shell · ← for agents\n",
+    );
+
+    // Same idle pane as CLAUDE_IDLE_PANE, but with the shell-bearing permission
+    // footer variant that omits `(shift+tab to cycle)`.
+    const CLAUDE_IDLE_PANE_SHELL_FOOTER: &str = concat!(
+        "────────────────────────────────────────\n",
+        "❯\n",
+        "────────────────────────────────────────\n",
+        "  Opus 4.8 ctx:18% ~/work/btakita/agent-loop main brian@cachyos-x8664\n",
+        "  ⏵⏵ bypass permissions on · 1 shell · ← for agents\n",
+    );
+
+    #[test]
+    fn idle_pane_is_dispatch_ready_under_every_permission_footer_variant() {
+        let h = HarnessConfig::claude();
+        // Regression: this footer variant used to mask the `❯` composer, so an
+        // idle pane read as never dispatch-ready and route stranded on timed_out.
+        let candidate = h
+            .last_prompt_candidate(CLAUDE_IDLE_PANE_SHELL_FOOTER)
+            .unwrap();
+        assert_eq!(candidate, "❯", "footer must not mask the composer");
+        assert!(h.is_dispatch_ready_prompt_line(&candidate));
+        assert!(ready_prompt_candidate(CLAUDE_IDLE_PANE_SHELL_FOOTER, &h).is_some());
+        assert_eq!(pane_composer_draft(&h, CLAUDE_IDLE_PANE_SHELL_FOOTER), None);
+    }
+
+    #[test]
+    fn pane_composer_draft_reports_unsent_operator_input() {
+        let h = HarnessConfig::claude();
+        assert_eq!(
+            pane_composer_draft(&h, CLAUDE_DRAFTED_PANE).as_deref(),
+            Some("❯ keep the uv.lock"),
+        );
+        // The draft is what makes the pane non-dispatchable, so the safety guard
+        // and the reported unblocker must agree.
+        assert!(ready_prompt_candidate(CLAUDE_DRAFTED_PANE, &h).is_none());
+    }
+
+    #[test]
+    fn pane_composer_draft_ignores_empty_and_busy_composers() {
+        let h = HarnessConfig::claude();
+        // Empty composer: dispatch-ready, so there is no draft to clear.
+        assert_eq!(pane_composer_draft(&h, CLAUDE_IDLE_PANE), None);
+        // Busy pane: the blocker is an active turn, not an operator draft, so
+        // scrollback must never be reported as unsent input.
+        assert_eq!(pane_composer_draft(&h, CLAUDE_BUSY_PANE), None);
+        // A rendered placeholder is an empty composer, not operator input.
+        assert!(!h.is_ignorable_output_line("❯ Press up to edit queued messages"));
+        assert!(h.is_dispatch_ready_prompt_line("❯ Press up to edit queued messages"));
+        assert_eq!(
+            pane_composer_draft(
+                &h,
+                "────────\n❯ Press up to edit queued messages\n⏵⏵ bypass permissions on · 1 shell\n"
+            ),
+            None
+        );
+    }
+
     // Busy Claude pane (mid-turn): spinner with elapsed timer above the composer;
     // the permissions line drops `(shift+tab to cycle)` for `· N shell`.
     const CLAUDE_BUSY_PANE: &str = concat!(
@@ -1724,10 +1872,20 @@ mod tests {
             "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@host"
         ));
         assert!(h.is_ignorable_output_line("Opus 4.8 (1M context) ctx:23% ~/x/resume main b@h"));
-        // The composer and permissions lines must NEVER be ignorable.
+        // The composer itself must NEVER be ignorable — it is where
+        // empty-vs-drafted is decided.
         assert!(!h.is_ignorable_output_line("❯"));
-        assert!(!h.is_ignorable_output_line("⏵⏵ bypass permissions on (shift+tab to cycle)"));
-        assert!(!h.is_ignorable_output_line("⏵⏵ bypass permissions on · 1 shell"));
+        assert!(!h.is_ignorable_output_line("❯ keep the uv.lock"));
+        // The permission-mode footer IS chrome, in every hint variant. It used
+        // to stand in for the composer, but a proxy one line below the real
+        // composer cannot see an operator draft parked in it — route would read
+        // the footer as dispatch-ready and inject over unsent input. Skipping it
+        // resolves the candidate to the `❯` line above (#panedraftunblocker).
+        assert!(h.is_ignorable_output_line("⏵⏵ bypass permissions on (shift+tab to cycle)"));
+        assert!(h.is_ignorable_output_line("⏵⏵ bypass permissions on · 1 shell"));
+        assert!(h.is_ignorable_output_line("⏵⏵ bypass permissions on · 1 shell · ← for agents"));
+        // Box-drawing rules that frame the composer are chrome too.
+        assert!(h.is_ignorable_output_line("────────────────────────"));
         // The active-turn spinner must NEVER be ignorable.
         assert!(!h.is_ignorable_output_line(
             "· Roosting… (14s · ↓ 487 tokens · thinking with high effort)"

@@ -25,7 +25,6 @@ agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.6" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.6" }
 agent-doc-frontmatter-io = { path = "../agent-doc-frontmatter-io", version = "0.35.6" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.6" }
-agent-doc-lease = { path = "../agent-doc-lease", version = "0.35.6" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.6" }
 agent-doc-harness = { path = "../agent-doc-harness", version = "0.35.6" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.6" }

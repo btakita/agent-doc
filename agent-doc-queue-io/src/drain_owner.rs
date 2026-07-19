@@ -5,11 +5,13 @@
 //! authority beside Lazily.
 
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 
-use agent_doc_lease::DRAIN_OWNER_SCOPE;
+const DRAIN_OWNER_SCOPE: &str = "queue_drain";
+const DEFAULT_DRAIN_OWNER_TTL_SECS: u64 = 90;
+const DRAIN_OWNER_TTL_SECS_ENV: &str = "AGENT_DOC_DRAIN_OWNER_TTL_SECS";
 
 pub const DRAIN_OWNER_CLAUDE_LOOP: &str = "claude_loop";
 
@@ -19,7 +21,13 @@ pub struct DrainOwnerLease {
     pub heartbeat_secs: u64,
 }
 
-pub use agent_doc_lease::drain_owner_ttl;
+pub fn drain_owner_ttl() -> Duration {
+    let secs = std::env::var(DRAIN_OWNER_TTL_SECS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_DRAIN_OWNER_TTL_SECS);
+    Duration::from_secs(secs.max(1))
+}
 
 fn now_secs() -> u64 {
     SystemTime::now()

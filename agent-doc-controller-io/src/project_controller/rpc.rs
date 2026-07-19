@@ -6848,9 +6848,6 @@ pub(crate) fn serve_with_options(
     let mut supervisor_watchdog_last_run: Option<Instant> = None;
     let mut supervisor_watchdog_halt_notified: std::collections::HashSet<String> =
         std::collections::HashSet::new();
-    // `#orphandrain`: per-document backoff for controller-issued drain dispatches.
-    let mut orphan_drain_last_dispatch: std::collections::HashMap<String, Instant> =
-        std::collections::HashMap::new();
     while !should_stop.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok(stream) => {
@@ -6974,9 +6971,6 @@ pub(crate) fn serve_with_options(
                         &runtime,
                         &mut supervisor_watchdog_halt_notified,
                     );
-                    // `#orphandrain`: same cadence, the documents the watchdog
-                    // above cannot help — those with no supervisor to revive.
-                    controller_orphan_drain_tick(&runtime, &mut orphan_drain_last_dispatch);
                 }
                 std::thread::sleep(CONNECT_POLL);
             }
@@ -6985,163 +6979,6 @@ pub(crate) fn serve_with_options(
     }
     let _ = std::fs::remove_file(&sock);
     Ok(())
-}
-
-/// `#orphandrain` — advance `queue: go` documents that have NO supervisor.
-///
-/// The idle-queue watch lives in the supervisor, so a document that can never
-/// get one is never drained. That is not a rare corner: when the owner pane is a
-/// live agent TUI, the replacement path correctly refuses to cold-start a
-/// supervisor by typing a shell command into it, and then gives up — leaving the
-/// document with no idle watch at all. Every replacement attempt in a live
-/// workspace failed exactly that way, and the affected document logged ZERO
-/// idle-watch ticks while six siblings logged thousands each. The queue then only
-/// moved when a human triggered `Run Agent Doc`.
-///
-/// A supervisor is not required to advance a queue — it owns a harness *child*.
-/// Draining only needs the trigger delivered into an idle owner pane, which is
-/// exactly an editor route dispatch. The controller is already running and
-/// already sweeping documents, so it can do that for supervisor-less documents.
-/// Reusing `run_editor_route` (the same path `Run Agent Doc` takes) keeps pane
-/// election, busy guards, and startup-miss handling in one implementation.
-///
-/// Policy is [`agent_doc_controller::orphan_drain`]; this is the effect half.
-fn controller_orphan_drain_tick(
-    runtime: &Arc<ControllerRuntime>,
-    last_dispatch: &mut std::collections::HashMap<String, Instant>,
-) {
-    use agent_doc_controller::orphan_drain::{
-        DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainObservation,
-        orphan_drain_decision,
-    };
-
-    let Ok(bootstrap) = runtime.bootstrap_snapshot() else {
-        return;
-    };
-    let project_root = bootstrap.project_root.clone();
-    let Ok(conn) = open_state_db(&project_root) else {
-        return;
-    };
-    let Ok(store) = load_actor_store_from_db(&conn) else {
-        return;
-    };
-    let Ok(registry) = agent_doc_session_registry_io::load_in(&project_root) else {
-        return;
-    };
-
-    for record in store.values() {
-        if record.pane_id.is_empty()
-            || record.state == agent_doc_sqlite::state_store::ActorState::Closed
-        {
-            continue;
-        }
-        let Some(file) = registry
-            .get(&record.document_id)
-            .map(|entry| PathBuf::from(&entry.file))
-            .filter(|file| !file.as_os_str().is_empty())
-        else {
-            continue;
-        };
-        let Ok(content) = std::fs::read_to_string(&file) else {
-            continue;
-        };
-
-        // The SUPERVISOR drain scope already enforces queue activation and already
-        // excludes operator-gated and noise heads, so it is the single authority
-        // for "is there work an unattended drainer may take?".
-        let drainable = agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-            &content,
-            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-        );
-        let file_key = file.to_string_lossy().to_string();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        let observation = OrphanDrainObservation {
-            queue_active: drainable.is_some(),
-            has_drainable_head: drainable.is_some(),
-            supervisor_alive: agent_doc_supervisor_io::process::supervisor_pid_for_doc(&file)
-                .is_some(),
-            // Read the drain-owner lease through this crate's own lease store.
-            // `agent-doc-queue-io` (which claims it) depends on THIS crate, so the
-            // dependency cannot be reversed; the scope key and TTL live in the
-            // dependency-free `agent-doc-lease` so both sides share one policy.
-            loop_owns_drain: agent_doc_fs::document_state_hash(&file)
-                .ok()
-                .and_then(|document_hash| {
-                    crate::project_controller::load_coordination_lease(
-                        &project_root,
-                        agent_doc_lease::DRAIN_OWNER_SCOPE,
-                        &document_hash,
-                    )
-                    .ok()
-                    .flatten()
-                })
-                .is_some_and(|lease| {
-                    agent_doc_lease::timestamp_is_fresh(
-                        lease.heartbeat_secs,
-                        now,
-                        agent_doc_lease::drain_owner_ttl(),
-                    )
-                }),
-            pane_busy: record.state != agent_doc_sqlite::state_store::ActorState::Ready,
-            secs_since_last_dispatch: last_dispatch
-                .get(&file_key)
-                .map(|last| last.elapsed().as_secs()),
-        };
-
-        if orphan_drain_decision(observation, DEFAULT_MIN_DISPATCH_INTERVAL_SECS)
-            != OrphanDrainDecision::Dispatch
-        {
-            continue;
-        }
-
-        let relative_path = file
-            .strip_prefix(&project_root)
-            .unwrap_or(&file)
-            .to_string_lossy()
-            .to_string();
-        last_dispatch.insert(file_key, Instant::now());
-        agent_doc_ops_log_io::log_op(
-            &file,
-            &format!(
-                "controller_orphan_drain_dispatch file={} pane={} head={} reason=no_supervisor_idle_watch",
-                file.display(),
-                record.pane_id,
-                drainable.as_deref().unwrap_or("unknown")
-            ),
-        );
-        let invocation = ControllerEditorRouteInvocation {
-            file: file.clone(),
-            relative_path,
-            layout_args: Vec::new(),
-            dispatch_only: true,
-            plain_trigger: true,
-            wait_for_ready_secs: None,
-            force_disk: false,
-        };
-        match runtime_effects().and_then(|effects| effects.run_editor_route(invocation)) {
-            Ok(result) if result.exit_code == 0 => {}
-            Ok(result) => agent_doc_ops_log_io::log_op(
-                &file,
-                &format!(
-                    "controller_orphan_drain_dispatch_failed file={} exit_code={} output={}",
-                    file.display(),
-                    result.exit_code,
-                    result.output.trim()
-                ),
-            ),
-            Err(err) => agent_doc_ops_log_io::log_op(
-                &file,
-                &format!(
-                    "controller_orphan_drain_dispatch_failed file={} error={err:#}",
-                    file.display()
-                ),
-            ),
-        }
-    }
 }
 
 /// Env override (seconds) for the [`controller_supervisor_watchdog_tick`] cadence.

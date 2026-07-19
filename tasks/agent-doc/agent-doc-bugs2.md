@@ -34,41 +34,16 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260719-044303.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260719-050246.md`*
 
 Compacted content:
-- Archived 4 response topic(s): #editormodelmissing after the IntelliJ restart; many of these items are stale; reload-lib clears it, recycle never did; 1 more
-- Prior summary/context: prior compacted content: Archived 6 response topic(s): compact exchange deletes the boundary tag; the second bug your...
-
-### Re: pane %38 reroute wedge — root-caused and fixed — opus-4-8
-
-> **Queue prompt:** JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 ... never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again
-
-The printed unblocker was unsatisfiable, and chasing that led to the actual bug.
-
-**What I found.** `is_dispatch_ready_prompt_line` recognizes Claude's permission-mode footer only in its `(shift+tab to cycle)` spelling. Pane %38 renders the shell-bearing variant, `⏵⏵ bypass permissions on · 1 shell · ← for agents`. That line is neither ignorable chrome nor a recognized prompt line, so `last_prompt_candidate` stopped on it and never reached the `❯` composer above. Result: a genuinely idle pane reads as never dispatch-ready, and route strands on `timed_out` telling the operator to "wait for the pane to become ready" — a condition waiting cannot produce. That is the wedge, not a slow boot.
-
-**Fix.** Treat the footer (any hint variant) and the box-drawing rules as chrome, so the candidate resolves to the composer where empty-vs-drafted is actually decided.
-
-Making the composer authoritative also exposed something the old footer proxy structurally could not see: pane %38 currently holds an **unsent operator draft** — `❯ keep the uv.lock`. A proxy one line below the composer cannot tell an empty composer from a drafted one, so the old path would have reported "not ready" without ever saying why. Route now reports the draft and the real unblocker (`submit_or_clear_pane_draft`) via a `StartingPaneBlocker` enum, rather than a boolean.
-
-**One consequence worth flagging.** The unrecognized footer had been accidentally disambiguating an active turn from stale busy scrollback — with a bare `❯` under a live spinner, the footer was the candidate, so the claude "dispatch-ready beats busy cue" short-circuit never fired. Once the composer became authoritative that accident disappeared and a busy pane briefly read as ready. I made the bypass principled instead: only a rendered placeholder composer (`❯ Press up to edit queued messages`, which proves input was accepted) may outrank the busy cue; a bare prompt under a spinner stays busy. Two existing tests pinned both halves of this and now pass on that rule rather than on the accident.
-
-**State.** `make check` green, 7687/7687. Installed, pushed as `17848a927`, supervisor marked for recycle at the next idle boundary. CI is in progress on that commit — recorded, not waited on.
-
-**I did not reroute acadian-take-home.md.** Its pane holds your unsubmitted draft, and injecting would concatenate onto it. Submit or clear `keep the uv.lock` and the reroute will go through on the fresh binary.
-
-### Re: consuming the acadian-take-home reroute head — opus-4-8
-
-> **Queue prompt:** JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
-
-Answered in the response above: the `timed_out` was not a slow boot but the permission-mode footer masking the composer, fixed in `17848a927`. The prior echo abbreviated this prompt, so the head stayed queued — quoting it verbatim here to consume it.
-<!-- agent:boundary:11591078 -->
+- Archived 2 response topic(s): pane %38 reroute wedge; consuming the acadian-take-home reroute head
+- Prior summary/context: prior compacted content: Archived 4 response topic(s): #editormodelmissing after the IntelliJ restart; many of these ...
+<!-- agent:boundary:85b4d49e -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt~~
 - JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.
 - equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
 - do [#bbdcompactnocommit]

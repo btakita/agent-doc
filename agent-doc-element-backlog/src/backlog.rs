@@ -2698,6 +2698,128 @@ pub fn generate_hash_n(text: &str, doc_id: &str, counter: u64, width: usize) -> 
     out
 }
 
+/// Maximum length of a derived representative id, before any collision suffix.
+const REPRESENTATIVE_ID_MAX_LEN: usize = 24;
+
+/// How many representative keywords are joined into a derived id.
+const REPRESENTATIVE_ID_WORDS: usize = 3;
+
+/// Shortest keyword worth carrying into a representative id.
+const REPRESENTATIVE_ID_MIN_WORD_LEN: usize = 3;
+
+/// Structural noise and low-signal English that never distinguishes one tracked
+/// item from another. `agent`/`doc` are included because nearly every item in an
+/// agent-doc session document mentions them, so they carry no selectivity.
+const REPRESENTATIVE_ID_STOPWORDS: &[&str] = &[
+    "the", "and", "but", "for", "not", "are", "was", "were", "been", "being", "this", "that",
+    "these", "those", "should", "would", "could", "will", "shall", "can", "may", "must", "does",
+    "did", "done", "have", "has", "had", "with", "from", "into", "out", "over", "under", "again",
+    "all", "any", "some", "more", "most", "than", "then", "when", "where", "which", "what", "why",
+    "how", "its", "it", "you", "our", "we", "use", "used", "using", "make", "makes", "made",
+    "please", "also", "still", "just", "only", "even", "new", "get", "gets", "set", "sets", "add",
+    "adds", "via", "per", "each", "both", "there", "their", "they", "them", "here", "about",
+    "instead", "rather", "because", "since", "while", "after", "before", "agent", "doc", "agentdoc",
+];
+
+/// Strip fenced blocks, inline code spans, and blockquoted context so a derived
+/// id keys off the operator's own directive rather than pasted logs or a quoted
+/// prior response.
+fn representative_id_source(text: &str) -> String {
+    let mut source = String::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") || trimmed.starts_with('>') {
+            break;
+        }
+        source.push_str(line);
+        source.push('\n');
+    }
+    // Drop inline code spans: `do [#task-id]` contributes "task"/"id", which are
+    // structural, not representative.
+    let mut cleaned = String::with_capacity(source.len());
+    let mut in_code = false;
+    for ch in source.chars() {
+        if ch == '`' {
+            in_code = !in_code;
+            cleaned.push(' ');
+            continue;
+        }
+        if !in_code {
+            cleaned.push(ch);
+        }
+    }
+    // Drop `#tag` references. A tag in an item's text names OTHER work; minting
+    // it as this item's identity would invent an id the operator never assigned
+    // and collide with the thing being referenced.
+    cleaned
+        .split_whitespace()
+        .filter(|word| !word.trim_start_matches(['[', '(']).starts_with('#'))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Derive a human-readable id from an item's own words, or `None` when the text
+/// carries no distinctive keywords (an empty, emoji-only, or pure-boilerplate
+/// item) and a surrogate hash is the honest answer.
+///
+/// Keywords are taken in document order rather than by frequency: the operator's
+/// opening clause is the part that names the work, and order-preserving output
+/// stays predictable and reproducible. Repeats are dropped so a text that leans
+/// on one term still yields a distinguishing id.
+pub fn derive_representative_id(text: &str) -> Option<String> {
+    let source = representative_id_source(text);
+    let mut words: Vec<String> = Vec::new();
+    for raw in source
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+    {
+        let word = raw.to_ascii_lowercase();
+        if word.len() < REPRESENTATIVE_ID_MIN_WORD_LEN
+            || word.chars().all(|c| c.is_ascii_digit())
+            || REPRESENTATIVE_ID_STOPWORDS.contains(&word.as_str())
+            || words.contains(&word)
+        {
+            continue;
+        }
+        words.push(word);
+        if words.len() == REPRESENTATIVE_ID_WORDS {
+            break;
+        }
+    }
+    if words.is_empty() {
+        return None;
+    }
+    let mut id = words.concat();
+    if id.len() > REPRESENTATIVE_ID_MAX_LEN {
+        id.truncate(REPRESENTATIVE_ID_MAX_LEN);
+    }
+    is_valid_pending_id(&id).then_some(id)
+}
+
+/// Assign an id that does not collide with `taken`.
+///
+/// Prefers a representative id derived from the item's own words
+/// (`#freetextqueue` over `#0dsr`) so a queue head, commit message, or code
+/// comment referencing it resolves to something a reader can place. Falls back
+/// to the surrogate hash when the text yields no distinctive keywords, and
+/// appends a short hash to a representative id that is already taken so
+/// readability never costs uniqueness.
+fn assign_unique_id(text: &str, doc_id: &str, taken: &HashSet<String>) -> String {
+    if let Some(representative) = derive_representative_id(text) {
+        if !taken.contains(&representative) {
+            return representative;
+        }
+        for counter in 0..16u64 {
+            let suffix = generate_hash_n(text, doc_id, counter, 4);
+            let candidate = format!("{representative}-{suffix}");
+            if !taken.contains(&candidate) {
+                return candidate;
+            }
+        }
+    }
+    assign_unique_hash(text, doc_id, taken)
+}
+
 /// Assign a hash id that does not collide with `taken`.
 ///
 /// Starts at width 4 and extends up to the spec §1 ceiling of 8. Counter
@@ -3170,7 +3292,7 @@ pub fn op_add_at_with_outcome(
         }
         inline_id
     } else {
-        assign_unique_hash(&text, doc_id, &taken)
+        assign_unique_id(&text, doc_id, &taken)
     };
     taken.insert(id.clone());
 
@@ -5320,6 +5442,92 @@ mod tests {
             "got: {}",
             new_body
         );
+    }
+
+    /// A derived id should read like the work it names, not like `#0dsr`.
+    #[test]
+    fn derive_representative_id_uses_the_items_own_keywords() {
+        assert_eq!(
+            derive_representative_id(
+                "The free text queue items were not immediately replaced by a new backlog item."
+            )
+            .as_deref(),
+            Some("freetextqueue")
+        );
+        assert_eq!(
+            derive_representative_id("We should immediately self-heal, in real time.").as_deref(),
+            Some("immediatelyselfheal")
+        );
+    }
+
+    /// Structural noise must not leak into an id: fenced logs, quoted context,
+    /// inline code spans, stopwords, and bare numbers all carry no selectivity.
+    #[test]
+    fn derive_representative_id_ignores_structural_noise() {
+        let text = concat!(
+            "Replace the 10 second TTL with a witness.\n",
+            "> quoted prior response about caching\n",
+            "```\nERROR nonrepresentative log line\n```\n",
+        );
+        let id = derive_representative_id(text).expect("directive yields an id");
+        assert_eq!(id, "replacesecondttl");
+        assert!(!id.contains("quoted"), "blockquote context leaked: {id}");
+        assert!(!id.contains("error"), "fenced log leaked: {id}");
+
+        let with_code = derive_representative_id("Promote heads using `do [#task-id]` syntax.")
+            .expect("directive yields an id");
+        assert!(
+            !with_code.contains("task"),
+            "inline code span leaked: {with_code}"
+        );
+    }
+
+    /// `#tag` references name OTHER work. Minting one as this item's identity
+    /// would invent an id the operator never assigned and collide with the
+    /// referenced item — the same invariant `op_add` enforces for bare tags.
+    #[test]
+    fn derive_representative_id_never_mints_a_referenced_tag_as_the_id() {
+        assert_eq!(derive_representative_id("#somereference"), None);
+        let id = derive_representative_id("Verify the fix from #somereference regressed nothing.")
+            .expect("surrounding prose still yields an id");
+        assert!(
+            !id.contains("somereference"),
+            "referenced tag leaked into the id: {id}"
+        );
+    }
+
+    /// No distinctive keywords means a surrogate hash is the honest answer.
+    #[test]
+    fn derive_representative_id_declines_when_text_has_no_keywords() {
+        assert_eq!(derive_representative_id(""), None);
+        assert_eq!(derive_representative_id("the and but for not"), None);
+        assert_eq!(derive_representative_id("agent doc"), None);
+    }
+
+    /// Readability must never cost uniqueness.
+    #[test]
+    fn assign_unique_id_disambiguates_a_taken_representative_id() {
+        let mut taken = HashSet::new();
+        let text = "Replace the TTL with a liveness witness";
+        let first = assign_unique_id(text, DOC_ID, &taken);
+        assert_eq!(first, "replacettlliveness");
+        taken.insert(first.clone());
+
+        let second = assign_unique_id(text, DOC_ID, &taken);
+        assert_ne!(second, first, "a taken id must not be reused");
+        assert!(
+            second.starts_with("replacettlliveness-"),
+            "disambiguation should stay readable: {second}"
+        );
+    }
+
+    /// Text with no keywords still gets a working surrogate id.
+    #[test]
+    fn assign_unique_id_falls_back_to_the_surrogate_hash() {
+        let taken = HashSet::new();
+        let id = assign_unique_id("the and but", DOC_ID, &taken);
+        assert_eq!(id, assign_unique_hash("the and but", DOC_ID, &taken));
+        assert!(is_valid_pending_id(&id));
     }
 
     #[test]

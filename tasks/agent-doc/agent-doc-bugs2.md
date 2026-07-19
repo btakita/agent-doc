@@ -144,12 +144,32 @@ Fail-closed behavior is preserved: a genuinely absent replica still errors after
 **CI is red on main — and it is not mine.** `finalize_skips_ignored_untracked_session_doc` fails at the parent sha `71195dd7`, before my commit, with `captured turn intent ... was not projected as active`. It passes locally (both in the full suite and in isolation), so it is environment-dependent rather than a code regression. I have filed it rather than waiving it.
 
 **What I did not do.** The other nine queued heads (#eqmv, #0dsr, #17jk, #f1s3, #fr79, #05r0, #a45a, #30p6, #n39j) are untouched — the plan bundled twelve items into one turn, and I chose depth on the editor-authority family that was actively blocking this session over twelve shallow passes. They stay at the head of the queue.
-<!-- agent:boundary:d9bf7c02 -->
+
+### Re: do [#z8yj] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#z8yj]
+
+Done — and the first thing I found was that **my own exclusion rationale last cycle was wrong.**
+
+I deferred this fact on the grounds that `rpc.rs::visible_write_commit_candidate_events` reads the rows back as a list. It does not. That function is a **writer** — it constructs the three events to append. The only reader in the codebase is the single `apply_fact` arm. I inferred a read path from a function name instead of opening it. Filing the item rather than guessing a cap was the right call, but the stated reason was not the real one.
+
+**The real reason a keep-newest-N cap would have been wrong** is more interesting, and it is why this needed its own pass rather than one more entry in the shared `prune_superseding_fact_to` table. `VisibleWriteProjection::observe_commit_candidate` maintains a **map keyed by `commit_candidate_hash`**, not a single slot. Several candidates stay simultaneously live for one document, so evicting by per-document recency would have dropped a candidate the write state machine can still elect — silently, and only under concurrent-write load.
+
+So retention mirrors the map. Within one `(document_hash, commit_candidate_hash)` key the projection keeps whichever row survives `if current_revision > model_revision { return }` — the highest `model_revision`, and on a tie the last one replayed. Every other row for that key is provably dead. `latest_model_revision` is a running max across all candidates, and the document's global maximum is by construction the max of the per-key maxima we keep, so that is preserved exactly too.
+
+**Verification, on a `.backup` of the live database rather than a synthetic fixture:** 164 → **106 rows, exactly the 106 distinct `(document, candidate)` keys** — one survivor per key, no key collapsed and none over-kept. Stronger than the row count: a before/after diff of `max(model_revision)` grouped by key is **identical**, so every still-electable candidate survived with its electing revision intact. The unit test pins the three shapes that matter — rising revisions on one candidate collapse, a *second* candidate at a lower revision than the first's newest survives (the per-document-recency trap), and a revision tie keeps the last replayed.
+
+`make check` green: 7663 tests run, 7663 passed, 240 skipped. Committed `c7ee176c8`, pushed, installed, supervisor marked to recycle. CI run `29670029553` is queued at the time of writing; the standing red is still the pre-existing `#ay80` capture read-back miss, unchanged by this.
+
+That closes the unbounded facts I can prove. What remains in `state_events` is `document_authority_observed` sitting at its intended 5,000-row cap and `crdt_recovery_projection_checkpointed` at 26 rows for 13 documents — both bounded by design, and the 11MB the CRDT checkpoints hold is the cost of two recovery projections per document, not drift.
+<!-- agent:boundary:13bfe35c -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#z8yj]
+- ~~do [#z8yj]~~
 - do [#eqmvscroll]
 - ~~do [#eqmv]~~
 - do [#0dsr]
@@ -191,67 +211,11 @@ Fail-closed behavior is preserved: a genuinely absent replica still errors after
 ## Notes
 
 <!-- agent:notes -->
-We are not using an evented FD because this path deliberately has no live bidirectional connection to the plugin. The evented transport is the socket IPC path; file IPC exists specifically for “socket absent/degraded/stale but plugin file
-watcher may still apply patches”. We could use notify/inotify/kqueue as an implementation detail for the filesystem wait, but it still needs the same timeout, nack, ack-content, committed-cycle, and post-apply validation fallback. The
-right extraction is probably a focused FileIpcAckWaiter/sidecar waiter with today’s poll backend first, then an evented backend as an optimization once it is out of orchestration.
----
-```
-● Finalize deferred with an IPC edge case: socket reported already_applied (response landed in the live buffer) but
-  disk_missing_response_probe failed and it deferred ("document changed after merge; retry after typing stops"). Per
-  the closeout rules I must not force-disk here — I retry the editor path. Let me first check the actual on-disk state.
-
-  Ran 1 shell command
-
-● The response was captured (cycle at response_captured) and socket-applied to a live JetBrains buffer
-  (already_applied), but not yet flushed to disk — a live agent-doc sync --focus process for this doc is holding the
-  editor buffer, so the disk-probe deferred ("retry after typing stops"). Per closeout rules I retry the editor path
-  (no force-disk). Let me retry the finalize:
-
-  Ran 1 shell command
-
-● Same deferral, and notice: current_len=3546 stayed constant but current_hash changed between the two attempts
-  (02e1c199 → 64233287) — the live buffer is actively oscillating (my boundary insertions + a live sync --focus process
-  for this doc). The response is durably captured (response_sha256=d7ddb028). This is the already_applied +
-  buffer-differs deadlock. Before choosing recovery, I must know if there's a real JetBrains editor or just an orphaned
-  sync process holding a phantom buffer.
-
-  Ran 1 shell command
-
-● No live JetBrains IDE, no active listener (both sockets 0B/stale), and the sync process has exited. The
-  already_applied acks came from a now-dead stale endpoint — the "live buffer" is phantom. The response is durably
-  captured and disk is still the clean 2344-byte prompt. This is the documented stale-endpoint → force-disk recovery
-  (no live editor to preserve)
-JB `Compact Exchange` on this document had an error. As I was typing this prompt a JB `File Cache Conflict` occurred. I lost what I was typing:
-```
-agent-doc command failed (exit 1): Error: project controller command `compact_document` failed: compact: editor delivery ACK recovery for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md did not settle within 8000ms; the canonical response remains retained in CRDT + Lazily state and the editor reconnect continues asynchronously (no force-disk or operator recovery required)
-```.---
- Let me first confirm HEAD hasn't advanced (no concurrent commit), then force-disk
-  finalize.
-```
----
-Please make backlog replacements for all gated review items. We need to complete the plan, not have any more gates after this round. Let me know when I need to install JB plugin updates. Make sure all JB live gate items have adequate logging to prove/disprove the item. Clear the review items. I will test, files bugs, and you will check the logs.
----
-`'/clear' is disabled while a task is in progress
----
-agent-doc reentrant run on equityfundingsource.md had recovery churn.
-```
-● The recovery is complete and fully consistent. The binary converged the now-drained queue (empty block, queue_active:
-  false), no_changes: true, both responses are committed in the session doc, and both code deliverables are on
-  origin/main. The auto-loop terminated naturally.
-
-  Let me record the specific recovery path for this failure mode, since it's a recurring dogfooding pattern
-```
----
-The last run had a code fence stripped away by agent-doc.
-#spec-test-build-install-commit-push
----
-What are #next-steps to fix bugs?
 <!-- /agent:notes -->
 
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#z8yj] Bound `visible_write_commit_candidate_observed` in `state_events` (#agent-doc-bug; 164 rows / 4MB live, the largest remaining unbounded fact after #responsecaptureretention). Deliberately EXCLUDED from the keep-newest-N `prune_superseding_fact_to` cap because `rpc.rs::visible_write_commit_candidate_events` reads the rows as a LIST, not as a fold, so it is not a superseding fact. Needs projection-mirroring retention like #deferredintentretention: determine which candidates the visible-write state machine can still elect (unsettled patch_ids) and drop only rows provably below that watermark. Verify against a `.backup` of the live db before landing.
 - [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.
 - [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean
 - [ ] [#17jk] Give free-text queue/backlog leaves stable ids so they can be after= targets (#dagdraingate/#queuenest gap found in plan review): after= targets resolve only through ids (id_to_idx built from entry_do_id, document_queue.rs:1271-1276; collect_after_deps reads only tracked items, backlog_sync.rs:341-358), so an ordered list of id-less free-text leaves cannot compile to dependency edges at all. Prefer minting ids the same way backlog items already get them over introducing HTML tags in the queue body — an HTML container would break the markdown-list model, the byte-preserving insert-only splice, and line-oriented CRDT merge

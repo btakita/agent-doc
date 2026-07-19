@@ -230,11 +230,46 @@ Real progress is the canonical content actually changing, so the floor now reset
 The policy is a pure function (`convergence_gate::CrdtWriteBackoff`) in the non-IO crate rather than inline arithmetic, with deterministic tests. One of them asserts the attempt *budget* for a stalled 60s window instead of the shape of the curve, so the property survives future retuning of the constants. Both the apply path and the loop tail share it. Full workspace suite green, queue-maintenance writes still converge live. Pushed as `8cbb8ea4a`.
 
 Direction (b) is untouched and I have not folded it into this — it is a real design change (letting `agent-doc response-checkpoint` carry the response so `finalize` has less to converge), not a leftover of (a). Queued as `#crdtcaschkpt` so it gets its own cycle with its own proof, rather than being half-done under a closed id.
-<!-- agent:boundary:9b0753fa -->
+
+### Re: do [#crdtcaschkpt] — opus-4-8
+
+Direction (b) turned out to be blocked by a latent duplication bug in the checkpoint mechanism itself, not by the design questions I had queued. Details below.
+
+### Re: crdtcaschkpt findings — opus-4-8
+
+Two of the three design questions I filed last cycle were already answered by the existing code, and I should have checked before queuing them:
+
+- **"How does finalize reconcile an already-checkpointed response so it is not re-applied?"** — `add_response_cell` was already idempotent, with a replay-safety test. Answered.
+- **"Which checkpoints are safe to publish mid-turn?"** — already settled and enforced: complete `### Re:` sections only, never an incomplete token prefix.
+
+The third question — boundary-marker handling — is real but secondary. The actual blocker was something I only found by probing: **incremental checkpointing duplicated its own output.**
+
+The replay guard matched the response only as a *whole* contiguous sequence. So the realistic flow — checkpoint sections 1-2, finalize sections 1-2-3 — matched nothing, appended all three, and left sections 1 and 2 in the document twice. I proved it with a throwaway probe before changing anything (`ONE_COUNT=2`), then replaced the probe with real regression tests. Anyone who had started using `agent-doc response-checkpoint` incrementally would have silently corrupted their own exchange, which is likely why the mechanism has exactly one caller: the CLI subcommand. Nothing internal drives it.
+
+The fix appends only the suffix that is not already the tail of the exchange. It is anchored at the **tail** deliberately: the same heading with a different body is a legitimately distinct node, so an unanchored prefix search could mistake an older unrelated turn for this cycle's checkpoint and silently *drop* sections — a worse failure than duplicating them. There is a test for that case specifically.
+
+Verified live on this document rather than only in unit tests: the section above was published with `agent-doc response-checkpoint` (`r:72e637e23c1d advanced`) *before* this closeout ran, and this finalize carries the full response including it. If the bug were still present it would now appear twice.
+
+So direction (b) is now *possible* but not yet *realized* — the mechanism is safe to use incrementally, and finalize genuinely has less to converge when it is used, but nothing yet drives checkpointing automatically. That remaining piece is queued as `#crdtcaschkptdrive`, deliberately scoped as an instruction-surface change rather than another mechanism change.
+
+One correction to my own earlier framing: I described (b) as "a real design change" when I split it out. That was wrong. The design was already in place; what was missing was a correctness fix and a driver.
+
+### Re: workspace test flakes — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#crdtcaschkpt]
+
+
+While verifying, two tests failed under full-workspace parallel load but passed 6/6 in isolation, and the clean-tree baseline showed the same behaviour, so they are pre-existing and unrelated to this change (a pure function in `agent-doc-merge`). Filed as `#wsflake2` rather than waved off: `dirs::tests::resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path` and `project_controller::rpc::tests::reliable_sync_status_projects_plane_open_set_without_sidecar_oracle`. Same order-dependent class as `#ctrliotestflake`.
+
+Also filed `#ctrlrespawnenoent`: during a `make install` this cycle the agent-loop controller died and could not respawn, failing with `No such file or directory` on the binary across 6 spawn attempts while `cargo install` was replacing it. I restarted it by hand to continue; it is a real install/restart race, not a one-off.
+<!-- agent:boundary:aba9c506 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#crdtcasraced]~~
 - ~~do [#donestrikeextra]~~
 - ~~📌 do [#bbdqprio]~~
 - ~~📌 do [#bn41]~~
@@ -243,8 +278,8 @@ Direction (b) is untouched and I have not folded it into this — it is a real d
 - ~~📌 do [#5bzd]~~
 - ~~📌 do [#staleplugindeploy]~~
 - ~~equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.~~
-- ~~⏭️ do [#ensurereplicagensup]~~
-- ⏭️ do [#crdtcasraced]
+- ~~do [#ensurereplicagensup]~~
+- ~~do [#crdtcaschkpt]~~
 - ⏭️ 📌 do [#jbedtledger]
 - ⏭️ 📌 do [#jbroutasync]
 - ⏭️ 📌 do [#jbsockdeadline]
@@ -254,7 +289,7 @@ Direction (b) is untouched and I have not folded it into this — it is a real d
 - ⏭️ 📌 do [#eqmvscroll]
 - ⏭️ 📌 do [#0dsr]
 - ⏭️ 📌 do [#17jk]
-- 🚧 📌 do [#f1s3]
+- ⏭️ 📌 do [#f1s3]
 - 📌 do [#fr79]
 - 📌 do [#05r0]
 - 📌 do [#a45a]
@@ -292,7 +327,9 @@ Direction (b) is untouched and I have not folded it into this — it is a real d
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#crdtcaschkpt] #crdtcasraced direction (b), split out after (a) landed in 8cbb8ea4a. Take pressure OFF the finalize convergence window by letting semantic response checkpoints carry the response incrementally: complete '### Re:' sections already cross agent-doc response-checkpoint, so by the time finalize runs it should have little or nothing left to converge. (a) reduced the cost of a contended window (~2400 -> ~245 merge+CAS attempts); (b) attacks the window's SIZE instead. Design questions to settle first: which checkpoints are safe to publish mid-turn without ever exposing an incomplete token prefix (the existing rule is complete sections with balanced fences/markers only), how finalize reconciles an already-checkpointed response so it is not re-applied, and whether the boundary marker moves per checkpoint or only at the seal. Measure before/after with the same stalled-window attempt budget the (a) tests pin.
+- [ ] [#crdtcaschkptdrive] #crdtcasraced direction (b), remaining half. The checkpoint mechanism is now SAFE to use incrementally (duplication fixed + regression tests, this cycle), and finalize dedupes an already-checkpointed prefix, but nothing DRIVES checkpointing: agent_doc_write_runtime_io::checkpoint_response has exactly one caller, the CLI subcommand, so in practice finalize still converges the whole response every turn. Scope this as an instruction-surface change, NOT another mechanism change: have SKILL.md/runbooks/streaming-checkpoints.md direct agents to run 'agent-doc response-checkpoint' as each complete '### Re:' section is produced (balanced fences/markers only, never a partial token prefix). Then measure: compare finalize convergence elapsed_ms and merge+CAS attempt count on a large document with and without checkpointing, using the stalled-window attempt budget the #crdtcasraced (a) tests pin. Open design question that remains: whether the boundary marker moves per checkpoint or only at the final seal.
+- [ ] [#wsflake2] Two more order-dependent workspace test flakes, same class as #ctrliotestflake. dirs::tests::resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path and project_controller::rpc::tests::reliable_sync_status_projects_plane_open_set_without_sidecar_oracle. PROVEN pre-existing and load-dependent: each passes 6/6 when run in isolation, both only fail under full 'cargo test --workspace' parallel load, and a clean stashed tree reproduces a failure too. They make 'make check' an unreliable signal, which matters more now that the previously-red suite is otherwise green. Make them deterministic (per-test isolation or SimWorld) rather than retrying.
+- [ ] [#ctrlrespawnenoent] #agent-doc-bug The project controller can die during 'make install' and then fail to respawn. Observed 2026-07-19 on /home/brian/work/btakita/agent-loop: every agent-doc command failed with pre_write_guards -> editor_attached_model_missing, caused by 'failed to launch project controller (binary=/home/brian/.cargo/bin/agent-doc, spawn_attempts=6): No such file or directory (os error 2)'. The binary existed immediately afterward — cargo install had been mid-replacement of that path, so all 6 spawn attempts hit the ENOENT window and gave up. Recovery required manually starting 'agent-doc controller serve --project-root <root> --launch-mode lazy'. Fix: make spawn retry tolerate a transient ENOENT on the binary path (it is being replaced, not missing) with a bounded backoff spanning a realistic install window, rather than exhausting 6 fast attempts; and surface a clearer operator message than editor_attached_model_missing, which points diagnosis at the editor when the real cause is a missing controller.
 - [ ] [#patchretryidem] #patchretryidem #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). NARROWED 2026-07-19 by the #fzmutloss fix: the mutation half and the body half were never in one transaction, so this is NOT 'both halves lost together' - the body half is re-applied non-idempotently by the retry while the mutation half took a different path. Remaining question is only the body-half idempotency. Needs a reproduction of the CAS race; do not guess at the idempotency boundary.
 - [ ] [#respidxrealtime] Source exchange response nodes from the realtime document model instead of re-parsing a &str. closeout_signal::ResponseIndex::build now parses ONCE per guard invocation (was N x (1 + M) tree-sitter parses for N ids and M archives, #respidxparse), but it still parses from rc.doc_content() bytes. The live model already holds these nodes - agent-doc-markdown-ast::crdt::OverlayCrdtDoc, and the SeqCrdt exchange-node direction AGENTS.md commits to. Reading nodes from the realtime model removes the parse entirely and generalizes past this guard to every string-scanning consumer of exchange structure. Operator-raised 2026-07-19.
 - [ ] [#jbroutasync] #agent-doc-bug Move editor_route onto the async accept-on-admission controller endpoint and honor submit.deadline_ms. handle_editor_command_submit_async_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:5381) already exists, spawns a worker, and logs editor_command_async_completed; validate_async_editor_command_payload (rpc.rs:5427) whitelists only sync_tmux_layout/focus_document_pane so editor_route is rejected as unsupported. The plugin already has resolveCommandSubmitAcceptedData (CpcRouteClient.kt:414) for the accepted shape. Separately the controller never reads submit.deadline_ms, so routed_cycle_ack_timeout (30s with a live child, dispatch.rs:2092) outlives the client's 15s deadline: the operator sees a timeout while the route keeps running. Biggest remaining perceived-latency win.
@@ -305,7 +342,7 @@ Direction (b) is untouched and I have not folded it into this — it is a real d
 - [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.
 - [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean
 - [ ] [#17jk] Give free-text queue/backlog leaves stable ids so they can be after= targets (#dagdraingate/#queuenest gap found in plan review): after= targets resolve only through ids (id_to_idx built from entry_do_id, document_queue.rs:1271-1276; collect_after_deps reads only tracked items, backlog_sync.rs:341-358), so an ordered list of id-less free-text leaves cannot compile to dependency edges at all. Prefer minting ids the same way backlog items already get them over introducing HTML tags in the queue body — an HTML container would break the markdown-list model, the byte-preserving insert-only splice, and line-oriented CRDT merge
-- [ ] 🚧 [#f1s3] Implement nested queue lists per tasks/agent-doc/plan-queue-nested-list-grouping.md (#queuenest): indent-aware document_queue::parse retaining depth + marker kind, leaf-only execution (parents are epic/group labels and never yield do-heads), nested ol compiles to after= edges at ingress, nested ul = related-but-unordered. Render MUST stay insert-only/byte-preserving — a parse->render round-trip already corrupted an operator line once (#queueatcreate). Key decision recorded in the plan: ol is sugar that compiles to after=, which stays the single source of truth, so reordering an ol re-derives edges and there is nothing to reject or revert
+- [ ] [#f1s3] Implement nested queue lists per tasks/agent-doc/plan-queue-nested-list-grouping.md (#queuenest): indent-aware document_queue::parse retaining depth + marker kind, leaf-only execution (parents are epic/group labels and never yield do-heads), nested ol compiles to after= edges at ingress, nested ul = related-but-unordered. Render MUST stay insert-only/byte-preserving — a parse->render round-trip already corrupted an operator line once (#queueatcreate). Key decision recorded in the plan: ol is sugar that compiles to after=, which stays the single source of truth, so reordering an ol re-derives edges and there is nothing to reject or revert
 - [ ] [#fr79] Auto-reconcile queue with backlog when the backlog carries a queue attribute: a periodic/preflight pass ensuring every open queue-attr backlog id has a queue head and vice versa, so the two cannot drift even if an individual write's enqueue is lost. Complements #queueatcreate (which covers the creating write) by making the invariant self-healing rather than write-order dependent
 - [ ] [#05r0] Second probe checking enqueue fallback persistence path
 - [ ] [#a45a] Confirm the queueatcreate persistence fallback lands a do-head under a missing editor replica

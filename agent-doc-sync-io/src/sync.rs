@@ -4866,10 +4866,17 @@ pub fn pane_runs_other_document_owner(tmux: &Tmux, pane_id: &str, claimed_file: 
     let Some(pane_pid) = pane_pid_from_tmux(tmux, pane_id) else {
         return false;
     };
-    agent_doc_process_owner_io::process_tree_owns_other_document(
-        &pane_pid.to_string(),
-        claimed_file,
-    )
+    let pane_pid = pane_pid.to_string();
+    // `#bare-foreign-session-guard`: a bare `claude`/`codex` pane the operator
+    // started themselves binds no `.md`, so the document-ownership check below
+    // answers "owns nothing". Absence of ownership proof is NOT permission —
+    // reading it that way made a live Claude Code session in the project
+    // directory electable and reapable. Treat an unmanaged harness pane as
+    // foreign so owner election and reaping leave it alone.
+    if agent_doc_process_owner_io::process_tree_runs_unmanaged_harness_session(&pane_pid) {
+        return true;
+    }
+    agent_doc_process_owner_io::process_tree_owns_other_document(&pane_pid, claimed_file)
 }
 
 #[cfg(test)]

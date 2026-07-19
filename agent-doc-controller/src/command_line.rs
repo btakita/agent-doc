@@ -231,9 +231,89 @@ pub fn cmdline_owns_other_document(cmdline: &str, claimed_file: &str) -> bool {
         && !agent_doc_cmdline_is_owner(cmdline, claimed_file)
 }
 
+/// True when `cmdline` is a bare agent-harness session (`claude`, `codex`,
+/// `opencode`, …) that carries no `.md` document and was not launched through
+/// the `agent-doc` binary — a human's own session, not agent-doc-managed state.
+///
+/// `#bare-foreign-session-guard`: [`cmdline_owns_other_document`] requires a
+/// `.md` token, so a plain `claude` pane answers "owns no document" — and every
+/// consumer read that absence of proof as permission, making the operator's own
+/// live session electable as a document owner and reapable. The cross-repo
+/// guard cannot cover this: a Claude Code session started *inside the project*
+/// has the same git toplevel as the document, so it passes every same-repo
+/// check. Operator-reported 2026-07-19 — a pure Claude Code session in the
+/// project directory (tmux session 1, window 0) was hijacked and its panes
+/// killed.
+///
+/// Ownership must be proven, never assumed: a harness pane agent-doc cannot
+/// show it started is foreign, and foreign panes are left alone.
+pub fn cmdline_is_unmanaged_harness_session(cmdline: &str) -> bool {
+    let tokens = cmdline.split_whitespace().collect::<Vec<_>>();
+    // Anything the agent-doc binary launched is managed, whatever its shape.
+    if tokens.iter().any(|token| token_is_agent_doc_binary(token)) {
+        return false;
+    }
+    tokens.iter().any(|token| token_is_harness_binary(token))
+        && !cmdline_references_md_document(cmdline)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#bare-foreign-session-guard` — the operator's own Claude Code session,
+    /// started by hand in the project directory with no document argument. It
+    /// binds no `.md`, so `cmdline_owns_other_document` answers false; the
+    /// unmanaged-harness predicate is what keeps it from being claimed.
+    #[test]
+    fn bare_operator_harness_session_is_recognized_as_unmanaged() {
+        for cmdline in [
+            "claude",
+            "/usr/bin/claude",
+            "claude --continue",
+            "codex",
+            "opencode",
+        ] {
+            assert!(
+                cmdline_is_unmanaged_harness_session(cmdline),
+                "operator-started harness session must be unmanaged: {cmdline}"
+            );
+            assert!(
+                !cmdline_owns_other_document(cmdline, "/w/tasks/session.md"),
+                "precondition: a bare harness session binds no document, which is \
+                 exactly why the unmanaged guard is required: {cmdline}"
+            );
+        }
+    }
+
+    /// agent-doc's OWN panes must stay managed, or the guard would protect them
+    /// from the reaping and re-election they legitimately need.
+    #[test]
+    fn agent_doc_managed_sessions_are_not_treated_as_unmanaged() {
+        for cmdline in [
+            "agent-doc start tasks/session.md",
+            "agent-doc start --route-owned /w/tasks/session.md",
+            "/home/me/.cargo/bin/agent-doc start --force tasks/other.md",
+            "claude /w/tasks/session.md",
+        ] {
+            assert!(
+                !cmdline_is_unmanaged_harness_session(cmdline),
+                "agent-doc-managed session must not be treated as unmanaged: {cmdline}"
+            );
+        }
+    }
+
+    /// A non-harness pane is not protected by this guard — it has nothing to do
+    /// with agent sessions and must keep its existing classification.
+    #[test]
+    fn plain_shell_panes_are_not_unmanaged_harness_sessions() {
+        for cmdline in ["zsh", "bash", "vim notes.md", "uv run dev", "npm run dev"] {
+            assert!(
+                !cmdline_is_unmanaged_harness_session(cmdline),
+                "non-harness pane must not match the harness guard: {cmdline}"
+            );
+        }
+    }
 
     #[test]
     fn controller_serve_project_root_from_args_extracts_direct_and_shell_sentinel() {

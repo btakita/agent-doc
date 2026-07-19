@@ -3595,8 +3595,24 @@ fn current_text_controller_initial_read_for_doc(
         // as a missing binary rather than a bad root. Observed as
         // `--project-root ` (empty) in a launch failure while `binary=` in the
         // same message was correct.
-        let detached_project_root =
-            agent_doc_project_root_io::project_root_containing(&canonical).unwrap_or_default();
+        // The `unwrap_or_default()` this replaced still produced the very empty
+        // `PathBuf` sentinel described above whenever root resolution failed,
+        // which then surfaced downstream as the misleading "project root is
+        // empty" launch error instead of the real cause. There is no usable
+        // read without a root, so report no read rather than a bad one.
+        let Some(detached_project_root) =
+            agent_doc_project_root_io::project_root_containing(&canonical)
+        else {
+            agent_doc_ops_log_io::log_op(
+                &canonical,
+                &format!(
+                    "controller_crdt_current_text_skipped file={} source={} reason=no_project_root_detached",
+                    canonical.display(),
+                    source,
+                ),
+            );
+            return Ok(None);
+        };
         return Ok(Some(ControllerCurrentTextRead {
             canonical,
             project_root: detached_project_root,

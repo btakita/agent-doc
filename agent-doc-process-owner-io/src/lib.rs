@@ -313,6 +313,20 @@ pub fn process_tree_owns_other_document(root_pid: &str, claimed_file: &Path) -> 
     process_tree_owner_document_other_than(root_pid, claimed_file).is_some()
 }
 
+/// True when this process tree runs a bare agent-harness session that agent-doc
+/// did not launch (`#bare-foreign-session-guard`).
+///
+/// This is the operator's own `claude`/`codex` session. It binds no `.md`, so
+/// the document-ownership predicates all answer "owns nothing" — which callers
+/// must not read as "free to claim or reap".
+pub fn process_tree_runs_unmanaged_harness_session(root_pid: &str) -> bool {
+    process_tree_pids(root_pid).into_iter().any(|pid| {
+        process_command(&pid).as_deref().is_some_and(
+            agent_doc_controller::command_line::cmdline_is_unmanaged_harness_session,
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

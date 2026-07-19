@@ -32,98 +32,12 @@ complete
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260719-031057.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260719-035914.md`*
 
 Compacted content:
-- Archived 14 response topic(s): Add backlog items onto the queue in priority order; add the backlog items into the queue in priority order; do [#tmo-orphan-reconcile-exec]; 11 more
-- Prior summary/context: prior compacted content: Archived 10 response topic(s): do [#tmo-sandbox-orphan-loans]; vestings, fundings, and the r...
-I don't understand what I need to verify.
-
-### Re: I don't understand what I need to verify — opus-4-8
-
-Fair — "operator-verify" is doing too much work as a label. There are five gated items and each needs a different thing from you. Three need a *decision*, one needs *account access*, one needs you to *look at a screen*.
-
-**Need a decision from you (I can't make the call, but I can run it once you say go):**
-
-1. **`#tmo-orphan-apply`** — I've already done the dry run. It plans 12 cache reconciles + 6 tombstones, zero writes to TMO, EFS-local only. What I need: eyeball these 6 loan numbers and confirm they're junk, not real — **TST217, TST254, TST374, TST723, TST762, TST999**. They're absent from TMO with no EFS loan or funding behind them. I'm asking because your earlier directive said not to prune that class by default, and `--apply` mutates production D1 irreversibly. Say "go" and I run it.
-
-2. **`#efs-prod-seed`** — one question: **is the staging data real business data or test data?** Staging has 33 users / 7 loans / 7 deals; production D1 is schema-complete and empty. If it's real, it gets exported+imported exactly once immediately before cutover (a second import collides on primary keys) and R2 documents get copied separately. If it's test data, we launch empty and this item closes. That's the whole verification.
-
-**Needs access I don't have:**
-
-3. **`#efs-cf-account-custody`** — this one is on Judith, not you, for step 1: sign up for a Cloudflare account with a shared EFS address, verify the email, invite you as Super Administrator, enable 2FA, company card ready. I drafted those instructions 2026-07-18. Step 2 is mine once she's done.
-
-4. **`#efs-dns-cutover`** — needs registrar credentials (nameservers are still DreamHost). The worker is live and correct at `equityfundingsource.brian-takita.workers.dev`; the domain just doesn't resolve. This is the actual remaining gate on launch.
-
-**Needs you to look at a screen (~2 minutes):**
-
-5. **`#tmo-getlender-verify`** — I need one TMO lender account that was **created but never funded**. Nothing in production is currently in that state, so the success path of `GET /LSS.svc/GetLender/:Account` has never once returned a record in prod. It's covered by tests and it degrades safely, but it's unobserved against real data. Name me such an account, and I'll map a vesting to it — then you open the reconcile modal and confirm it reads **"In TMO · no funding yet"** and not "Unconfirmed in TMO."
-
-The fastest unblock is #2 — it's a yes/no and it also determines whether #efs-cf-account-custody has to sequence before it.
-
-Separately, the editor-side wedge is still active: the JetBrains plugin holds an attachment for this document but no CRDT model behind it, so recomputed queue text keeps getting discarded. Controller recycle and `reload-lib` both landed cleanly and didn't touch it. Closing and reopening this file's tab in the IDE should rebuild the model.
-- Print #tmo-orphan-apply records so I can eyeball them.
-- #efs-prod-seed: Staging data is a test. Make sure this is using the sandbox TMO.
-
-### Re: Print #tmo-orphan-apply records; #efs-prod-seed is test data — opus-4-8
-
-Both done. The dry run turned up a correction worth leading with.
-
-**The 6 tombstone candidates — all inert.**
-
-Re-ran the dry run against remote D1 (`reconcile_cache=12 push_funding=0 create_loan_then_funding=0 blocked_no_vesting=0 tombstone=6` — matches the earlier plan exactly). The 6 rows:
-
-| loan | efs_id | created | updated | deleted_at |
-|---|---|---|---|---|
-| TST217 | `NULL` | 2026-06-08 10:56 | 2026-06-08 10:58 | `NULL` |
-| TST254 | `NULL` | 2026-06-08 10:56 | 2026-06-08 10:58 | `NULL` |
-| TST374 | `NULL` | 2026-06-08 10:56 | 2026-06-08 10:58 | `NULL` |
-| TST723 | `NULL` | 2026-06-08 10:56 | 2026-06-08 10:58 | `NULL` |
-| TST762 | `NULL` | 2026-06-08 10:56 | 2026-06-08 10:58 | `NULL` |
-| TST999 | `NULL` | 2026-06-08 10:56 | 2026-06-08 10:58 | `NULL` |
-
-Identical timestamps across all six — one seeding batch. I also checked what references them:
-
-- `loans` where `tmo_loan_number` in that set → **0 rows**
-- `funds` where `loan_number` in that set → **0 rows** (`funds` is empty entirely — 0 rows total, which is why `efs_fundings=0`)
-
-So there is no EFS loan, no funding, and no TMO record behind any of them. Nothing links to them and nothing reads them.
-
-**Correction — this is not production.**
-
-The backlog item said `--apply` "mutates PRODUCTION D1 irreversibly." That was wrong, and it's why this item looked scarier than it is. `--d1` defaults to the `equityfundingsource` binding, which is `280e1539-b940-4c59-8988-fbed63c12ac0` — the **staging** database (7 loans, 0 funds). Production is a separate binding under `[env.production]`, `equityfundingsource-production` / `293f0a4d-5859-4394-9c1a-0570f2e805fe`, and this command never touches it. I've corrected the backlog text.
-
-Combined with your "staging data is a test" answer, the risk here is now approximately zero: test data, staging DB, no TMO writes, nothing referencing the rows. Say go and I'll run it.
-
-**Sandbox TMO — confirmed for the CLI, with one gap.**
-
-The dry run printed its own proof: `database="001-8553-000-Equity Funding - Sandbox" sandbox=true`. All four TMO bin tools (`tmo-orphan-reconcile`, `tmo-snapshot`, `tmo-backup`, `tmo-sandbox-purge`) hard-code that same `SANDBOX_DATABASE` constant as their default, and `--remote` only switches the **D1** side — it has no effect on which TMO database is addressed. Reaching production TMO requires explicitly passing `--database`, and for writes also `--push-gate-open`.
-
-The gap is on the app side rather than the CLI. The worker reads its TMO database from a `TMO_DATABASE` Cloudflare secret, and secret values can't be read back — only listed. Listing turned up something you should know about: **production has 4 secrets; staging has 13.** Production is missing both `TMO_API_TOKEN` and `TMO_DATABASE`, plus all three AWS/S3 and all three Dropbox secrets. Every TMO, S3, and Dropbox call in production will fail closed until those are pushed. Filed as `#efs-prod-secret-parity`, sequenced *after* `#efs-cf-account-custody` — secrets are per-account and per-environment, so pushing them before the account move means pushing them twice.
-
-**`#efs-prod-seed` closed.** Staging is test data, so there's nothing to export or import: production launches empty and no R2 copy is needed. That also removes the sequencing constraint that had it waiting on the account move.
-❯ **production has 4 secrets; staging has 13.**: What are you defining as production? We only have staging...no production yet.
-
-### Re: What are you defining as production? — opus-4-8
-
-You're right and my wording was sloppy. Let me be precise about what exists.
-
-I was using "production" to mean **the Cloudflare Worker environment literally named `production`** — the `[env.production]` block in `wrangler.toml`. That environment is provisioned and has been deployed (7 deployments, 2 of them uploads, the rest secret changes), with its own D1 (`equityfundingsource-production`, `293f0a4d-…`, empty), its own three `-production` R2 buckets, and 4 secrets.
-
-But in the sense you mean — a thing serving real users — you're correct, **there is no production.** It has no DNS, no data, and no traffic. It's a provisioned cutover target, not a running system. So the two environments are:
-
-| | live/default env | `[env.production]` |
-|---|---|---|
-| D1 | `equityfundingsource` `280e1539…` — 33 users, 7 loans, 0 funds | `equityfundingsource-production` `293f0a4d…` — empty |
-| R2 | base buckets | `-production` buckets |
-| Secrets | 13 | 4 |
-| URL | `equityfundingsource.brian-takita.workers.dev` | none |
-| Serving anyone | no | no |
-
-**This forces a correction to what I told you last cycle.** I called the default env "staging" and leaned on that to argue `#tmo-orphan-apply` was low-risk. That was the wrong reason. Since there's only one real environment, the DB that `--apply` touches is *the* app's database, not a throwaway. The conclusion doesn't change, but it should rest on the actual evidence: you confirmed the data is test data, and the 6 rows are provably unreferenced — `efs_id NULL`, zero matching rows in `loans.tmo_loan_number`, zero in `funds`. That's why it's safe, not because of an environment label I got wrong.
-
-I've also rewritten `#efs-prod-secrets` to say what it actually is: a **cutover prerequisite, not a live outage**. Nothing is broken right now because nothing points at that environment. But if DNS were cut over today, every TMO, S3, and Dropbox call would fail closed, because those 9 secrets were never pushed there. It still sequences after the account move, since secrets are per-account and per-environment.
-<!-- agent:boundary:9622844a -->
+- Archived 3 response topic(s): I don't understand what I need to verify; Print #tmo-orphan-apply records; #efs-prod-seed is test data; What are you defining as production?
+- Prior summary/context: prior compacted content: Archived 14 response topic(s): Add backlog items onto the queue in priority order; add the b...
+<!-- agent:boundary:e6e3e92c -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

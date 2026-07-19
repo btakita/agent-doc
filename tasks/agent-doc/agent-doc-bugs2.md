@@ -66,13 +66,32 @@ Landed, verified live at each step:
 So: the "operator must close the tab" step is gone and the recovery is binary-driven, but the underlying wedge needs one more cycle at the generation/keying layer.
 
 `make check` green apart from two controller-io tests that are flaky on a clean tree too — 3 stashed runs gave 1, 1, 2 failures. Filed as `#ctrliotestflake` rather than waved off. Committed and pushed as `44769325c`; plugin 0.2.279 installed.
-<!-- agent:boundary:c93968ba -->
+
+### Re: do [#ctrliotestflake] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#ctrliotestflake]
+
+
+Both fixed. Neither was shared global state — my earlier guess in the backlog text was wrong. Both raced wall-clock, which is why the failure count wandered between 1 and 2.
+
+**`connect_or_launch_adopts_controller_published_during_launch_lock_contention`** — the waiter got a fixed 150ms lock wait while the publish was timed with a bare 25ms sleep. The adoption marker is only emitted in a narrow band: publish too early and the caller's *pre*-lock status check adopts the controller with no marker at all; publish too late and the waiter fails outright. So the test needed the publish to land inside a 125ms window on a machine running the rest of the suite.
+
+Restructured to order the phases explicitly rather than hope: the caller signals over a channel immediately before it contends, the server publishes only after that signal, and dropping `held_lock` is what releases the waiter. It then adopts through the `phase=acquired` marker path instead of the timeout one, so there is no timing budget left to blow. Same two assertions, same property — it still must adopt rather than surface os-error-11. Also drops from a 150ms race to 0.26s.
+
+**`dispatch_clears_stale_supervisor_pause_when_named_pid_is_dead_after_reboot`** — the flake was `handle_dispatch(...).unwrap()` at rpc line 3889 panicking, not an assertion. The test placed its "pre-boot" records 1s and 2s before the boot timestamp, but that timestamp is `now - /proc/uptime`, and `handle_dispatch` re-derives it with a different `now`. The two computations routinely differ by a second, so the margin was inside its own jitter. When drift exceeded it the pause stopped reading as pre-boot, was not cleared, dispatch was refused, and the unwrap blew up — depending on where the run landed inside a second. Margins widened to 300s/600s; both records only need to sit unambiguously before the last boot.
+
+Verified rather than assumed: 6 consecutive full-crate runs green (195 passed each), and the **full workspace suite now reports zero FAILED results** — first clean run this session. Committed and pushed as `b235d03ce`.
+
+Worth noting for `#ensurereplicagen`: with the suite clean, a red `make check` is now a real signal again, which it was not while these two were flapping.
+<!-- agent:boundary:a7458992 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#ctrliotestflake]~~
 - do [#ensurereplicagen]
-- do [#ctrliotestflake]
 - ~~do [#donestrikeextra]~~
 - do [#crdtcasraced]
 - do [#jbedtledger]
@@ -129,7 +148,6 @@ So: the "operator must close the tab" step is gone and the recovery is binary-dr
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#ensurereplicagen] #agent-doc-bug The missing-replica wedge SURVIVES a successful re-registration. With #ensurereregister live (binary nudges, plugin 0.2.279 re-establishes), idea.log shows the full happy path per nudge: transport.register ok=true, register elapsed ~170ms, 'atomically replaced cached forwarder for agent-doc-bugs2.md', open-document-attach elapsed ~290ms force_refresh=true. Controller logs the matching crdt_replica_register bootstrap_bytes=290970 generation_fenced=true superseded_generations_pruned=1. Yet the very next observation still reads editor_attached_model_missing, AND CrdtReplicaManager.hasOpenDocumentReplica(file) still reads false (proven: the guard keeps letting the nudge through). So a replica is registered and its forwarder cached, but neither the binary reader nor the plugin's own forwarders map sees it. Two suspects: (a) generation fencing - each register fences the prior generation, and the reader may be resolving against a superseded/fenced generation; (b) path keying - forwarders is keyed by the plugin's RESOLVED file.path while the guard/reader use the binary's canonical path string. Start by logging both keys and the resolved-vs-fenced generation at read time.
-- [ ] [#ctrliotestflake] agent-doc-controller-io has 2 order-dependent/flaky tests, PRE-EXISTING (proven: 3 runs on a clean stashed tree gave 1,1,2 failures). project_controller::rpc::tests::connect_or_launch_adopts_controller_published_during_launch_lock_contention (rpc.rs:14009) and project_controller::tests::dispatch_clears_stale_supervisor_pause_when_named_pid_is_dead_after_reboot (project_controller.rs:3889). Failure count varies run to run, so they share mutable process-global state. Make them deterministic (SimWorld or per-test isolation) so make check has a clean signal.
 - [ ] [#patchretryidem] #patchretryidem #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). NARROWED 2026-07-19 by the #fzmutloss fix: the mutation half and the body half were never in one transaction, so this is NOT 'both halves lost together' - the body half is re-applied non-idempotently by the retry while the mutation half took a different path. Remaining question is only the body-half idempotency. Needs a reproduction of the CAS race; do not guess at the idempotency boundary.
 - [ ] [#respidxrealtime] Source exchange response nodes from the realtime document model instead of re-parsing a &str. closeout_signal::ResponseIndex::build now parses ONCE per guard invocation (was N x (1 + M) tree-sitter parses for N ids and M archives, #respidxparse), but it still parses from rc.doc_content() bytes. The live model already holds these nodes - agent-doc-markdown-ast::crdt::OverlayCrdtDoc, and the SeqCrdt exchange-node direction AGENTS.md commits to. Reading nodes from the realtime model removes the parse entirely and generalizes past this guard to every string-scanning consumer of exchange structure. Operator-raised 2026-07-19.
 - [ ] [#jbroutasync] #agent-doc-bug Move editor_route onto the async accept-on-admission controller endpoint and honor submit.deadline_ms. handle_editor_command_submit_async_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:5381) already exists, spawns a worker, and logs editor_command_async_completed; validate_async_editor_command_payload (rpc.rs:5427) whitelists only sync_tmux_layout/focus_document_pane so editor_route is rejected as unsupported. The plugin already has resolveCommandSubmitAcceptedData (CpcRouteClient.kt:414) for the accepted shape. Separately the controller never reads submit.deadline_ms, so routed_cycle_ack_timeout (30s with a live child, dispatch.rs:2092) outlives the client's 15s deadline: the operator sees a timeout while the route keeps running. Biggest remaining perceived-latency win.

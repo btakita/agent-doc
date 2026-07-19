@@ -168,7 +168,27 @@ Measured: `typecheck:browser` 45 → **36**, which is the exact pre-existing bas
 **One incidental effect I did not go looking for.** The reinstall also collapsed two other duplicate resolutions the lockfile was carrying — `marked 13.0.3` alongside `17.0.4` (the `#yalcdrift` split) and `esbuild 0.25.12` alongside `0.28.1`. Single copies of all three now. I have **not** marked `#yalcdrift` done: its specific claim is that a *from-scratch* install re-splits marked, and my install was incremental, so that claim is untested. It needs a `rm -rf node_modules` reinstall to confirm either way.
 
 Check run `29672498182` was still in progress at closeout — recorded, not waited on.
-<!-- agent:boundary:621e4f06 -->
+
+### Re: #ctxredtests — seven independent defects, not one — opus-4-8
+
+> **Queue prompt:** do [#ctxredtests]
+
+All seven exit 0. Pushed as `b254e4739` plus six submodule commits; gitlink bumped. `#rhonouvu` is closed with it.
+
+The item framed these as a category ("red before the sweep"). They are not one problem, and two of them were tests that had **never** passed rather than tests that broke:
+
+- **google** — `(...opts_a)` then `{ ...opts_a }` spreads an *array* into an object, so `opts.GOOGLE_TRACKING_ID` was always `undefined` and the function always threw. All four call sites in the package also passed an object as `missing_argument__throw`'s **message** parameter, which is why the failure printed `[object Object]` instead of naming the key.
+- **relysjs** — `test` invoked a `check-dts` that is neither a script nor a dependency, so it exited 1 *after* 76 passing tests. Replaced with the sibling `test:types`/`test:unit` pair.
+- **rhonojs** (`#rhonouvu`) — one file imported `bun:test` while the runner is uvu, killing the entire run. Ported it. The test had also **copied** the duck-type predicate instead of importing it, so it was verifying a duplicate of the logic rather than the logic; I extracted `hono__is` from `server/app` so it now exercises production code. 91 pass.
+- **rebuildjs-tailwindcss** — two stacked failures: `typescript: next` pulled a TS 6.0.0-dev whose `lib.dom.d.ts` conflicts with bun-types, and `test:unit` ran under node+tsx+esmock while importing Bun-only APIs. No test in the package uses esmock; that harness was vestigial.
+- **auth0** — `@sinonjs/fake-timers` 15 ships its own declarations, which win over `@types/`; the bundled name is `Clock`, not `InstalledClock`. Separately, `AUTH0_URL` still pointed at auth0-js **9.30.1** after the sweep moved the dependency to 10.2.0. That test was doing its job. I verified the 10.2.0 CDN bundle returns 200 before repointing rather than assuming the URL existed.
+- **search** — same fake-timers rename.
+- **preprocess** — `index.d.ts` references `Buffer` with no node types declared, so it failed against its own published declarations.
+
+**One finding that matters more than the seven fixes.** Midway through, `auth0`, `preprocess` and `search` flipped from green to red across nothing but a reinstall. I checked whether my own change caused it — reverted my typescript pin, reinstalled, still red — so it was not mine. The cause is `typescript: next`: auth0's `tsc` resolved **7.1.0-dev.20260717.1**. A suite whose colour depends on when you last ran `bun install` is not a gate no matter how many of its packages are green, so `#tsnextpin` is the load-bearing item here, not a cleanup. I fixed the three properly (the defects are real under any compiler) rather than leaving them attributed to install churn.
+
+Not done: the other ~183 packages still carry `typescript: next`. That is `#tsnextpin`, still queued.
+<!-- agent:boundary:8bec58f6 -->
 <!-- /agent:exchange -->
 
 ## Queue

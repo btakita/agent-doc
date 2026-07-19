@@ -11,9 +11,8 @@ queue: go
 ## Status
 
 <!-- agent:status patch=replace -->
-**Follow-ups complete (2026-07-06):**
 
-Deliverable files are in the working tree (resume + mail are submodules — uncommitted; say the word to commit them). Session doc recovered via direct-write + git commit because the editor IPC transport is wedged (stale/dead editor → `already_applied` deadlock).
+
 <!-- /agent:status -->
 
 ## Exchange
@@ -171,8 +170,6 @@ Built the gRPC leg. Then it caught a bug in my own benchmark that invalidated ev
 
 `make check` green, grpcpool passes `-race`. Pushed: `c290d2e` + `9cd9db7`, gitlinks bumped.
 ❯ I'm deferring to DESIGN.md and focusing haiven-websocket-hub-takehome-v2.md on salient design aspects + load test-driven design evolution. Please review. I need the highlights of the benchmarks. Please print them here. If we need to redo any benchmarks, please do so. I have until tomorrow morning.
-❯ I'm deferring to DESIGN.md and focusing haiven-websocket-hub-takehome-v2.md on salient design aspects + load test-driven design evolution. Please review. I need the highlights of the benchmarks. Please print them here. If we need to redo any benchmarks, please do so. I have until tomorrow morning.
-❯ I'm deferring to DESIGN.md and focusing haiven-websocket-hub-takehome-v2.md on salient design aspects + load test-driven design evolution. Please review. I need the highlights of the benchmarks. Please print them here. If we need to redo any benchmarks, please do so. I have until tomorrow morning.
 ### Re: benchmark highlights + v2 review — opus-4-8
 
 Deferring to DESIGN.md **changes my earlier review**, so start there: I previously told you to lift the missing assignment sections (backpressure, fan-out, heartbeat, edge cases, envelope, metrics, defer, team questions) into v2. Ignore that. If v2 points at DESIGN.md, those sections stay there and v2 gets to be one argument instead of a table of contents. DESIGN.md is now clean enough to carry them — 664→510 lines, gorilla/readPump/writePump gone, every required section intact.
@@ -271,12 +268,83 @@ Invert it: lead with the reasoning, let the prototype land as **validation**. "I
 And the strongest asset you have is the one that isn't in v2 at all: **four measurement bugs, every one flattering the control**, caught by one rule — *measure the control, not just the subject; never vary shedding or offered load alongside latency.* Most candidates submit numbers. Almost none submit "here's how I found my numbers were lying." That deserves its own short section, not a footnote.
 
 **Repo:** `31d0871` (settle/handled), `9ee0b04` (pacing + matched-load table), `dc12bc0` (DESIGN.md). 198 tests pass, vet clean, **unpushed** — say the word.
-<!-- agent:boundary:01bdeb44 -->
+Should we have a priority queue for messages. Perhaps deprioritizing fan-out messages but escalate priority over time?
+Also, have the fanout to active users be high priority and inactive users be low priority.
+
+### Re: priority queue for messages, and activity-tiered fan-out — opus-4-8
+
+Two different axes here, and it's worth separating them before answering, because conflating them is how this gets over-built.
+
+- **Q1 is *scheduling order within one connection's queue*** — which frame goes out first.
+- **Q2 is *ordering across recipients of one fan-out*** — whose queue gets written to first.
+
+`sendQueue` owns the first. The `for _, c := range members` loop in `SendToTopic` (`hub/hub.go:200`) owns the second. Different code, different costs, different risks.
+
+---
+
+## Q1 — priority queue with aging: **no as posed, yes in a narrower form**
+
+**Why the general version doesn't earn its place.** Your queue is already prioritized — just on a different dimension. `PolicyTable` prioritizes by *what survives* when full (conflate/drop-oldest/spill/disconnect), not by *what goes first*. Priority scheduling only pays when the queue is deep and drains slowly. Yours is neither: cap is small, and the drain is the `AsyncWrite` self-clocking chain, so depth is typically 0–2. Reordering a 2-deep queue buys nothing you can measure.
+
+Three concrete objections:
+
+1. **Ordering is a contract you already sold.** DESIGN §3 says a websocket is one ordered stream; §6.2 says at-least-once classes carry per-service monotonic `seq` and the client dedups/reorders on it. Reordering chat behind a priority scheme breaks the invariant that seq gaps are *losses* rather than *arrivals-out-of-order*. If you do any priority work, the hard constraint is: **a service may never span bands.** Priority across services only.
+
+2. **Fan-out is 1 frame per connection, not N.** The scenario priority is meant to fix — a broadcast burst delaying your interactive frame — mostly doesn't occur, because a 5000-member topic contributes exactly one frame to each recipient's queue. Plus conflation already stops presence/typing from occupying N slots. The burst you're defending against is largely designed out.
+
+3. **It fights your headline number.** 740 B/conn is the result the whole submission rests on, and it comes from lazy allocation — idle conns carry no list node, no map header, no bucket. A heap adds per-conn allocation and swaps O(1) list ops for O(log n).
+
+**What I'd actually do: two bands, strict, no aging, no heap.**
+
+Two `list.List`s — interactive and bulk — drained high-then-low, each FIFO internally. ~30 lines, still O(1), both lazily allocated so the per-conn number doesn't move.
+
+- **Interactive**: anything a human is synchronously waiting on — acks, chat directed at you, moderation/kick.
+- **Bulk**: passive broadcast — presence, typing, topic chatter you're a bystander to.
+
+**And skip the aging.** Aging is the textbook starvation fix, but starvation requires the high band to saturate the link indefinitely. Yours can't: interactive traffic is bounded by human action rate, and the queue is bounded at `cap` regardless — a bulk frame that sits too long gets **dropped by policy, not starved forever**. Aging would add a per-frame timestamp plus a re-heapify pass on the hot path to solve a case the bounded queue already resolves. You can get the entire benefit for free by keeping the bulk band on `DropOldest`/`ConflateByEntity`, which bounds staleness *by construction* instead of by a timer.
+
+That's the same move as the typing fix: choose a policy that makes the bad state unrepresentable rather than a mechanism that corrects it later.
+
+---
+
+## Q2 — active-priority fan-out: **yes, and it's the stronger of the two ideas**
+
+Note "offline" isn't the interesting case — offline users aren't in `members`, so they already get nothing (or spill). The real case is **connected but idle/backgrounded**, which is exactly the revision you made.
+
+Two mechanisms, and the second matters more than the first:
+
+1. **Order the fan-out loop by activity.** Partition the `members` snapshot so active recipients enqueue first. One pass over a slice you're already iterating, zero memory cost, and it cuts p99 for the only people who'd notice.
+
+2. **Downgrade the *class policy* per recipient, don't just resequence.** An idle user's presence/typing frames are worthless — stale before they look. Push those toward conflate-hard or drop for inactive conns while chat still spills. **This removes work rather than reordering it**, which is why it beats #1: reordering redistributes latency, dropping reclaims CPU and bytes.
+
+**Three traps, in ascending order of how much they'd cost you:**
+
+- **Defining "active" cheaply.** It must come from something you already track or you've added a hot-path lookup per message. Use one atomic on the conn — `lastClientFrameAt`, last inbound frame — read lock-free. Anything richer (tab focus) means a client-reported signal: new envelope class, new trust question, not worth it.
+
+- **Flapping.** Activity is a threshold on a continuous variable and users cross it constantly. Without hysteresis (promote at 30s, demote at 120s) you'll thrash between bands and land *worse* than no prioritization.
+
+- **This makes `#friendsnapshot` a prerequisite, not a nice-to-have.** If you demote an inactive user's presence to drop, then at the moment they become active they hold no correct state and — being at-most-once — get no replay. They stare at a stale roster until the next tick. That is precisely the bug already filed as `#friendsnapshot`. **Activity-tiered fan-out is only safe once snapshot-on-resume exists.** Worth stating explicitly in the design; it's the kind of second-order catch that reads well.
+
+---
+
+## For the write-up
+
+Both answers have the same shape, and it's the shape the brief rewards: **the mechanism you'd reach for first (priority queue, aging) is more machinery than the constraint justifies, and the cheaper structural choice — bounded + conflated, policy-per-class — already dominates it.** Saying "I considered a priority queue with aging and rejected it because the bounded queue already bounds staleness" is a stronger signal than shipping one.
+
+The one place I'd genuinely spend complexity is activity-tiered *policy downgrade*, because it deletes work instead of resequencing it — and I'd note the `#friendsnapshot` dependency as the reason it isn't free.
+
+**Repo state:** `05d4bf1`, clean, nothing unpushed — the earlier `31d0871`/`9ee0b04`/`dc12bc0` note was from a response that never landed (see below).
+
+**Session note:** preflight was wedged on a 2-day-old orphaned response (2026-07-17) that failed the replay guard — it carried both `patch:status` and `patch:exchange` markers, which classifies as a full-document dump. Its content was stale (claimed unpushed commits that are now merged and clean), so I answered from the live probe instead. Blocked payload is preserved at `.agent-doc/repair-blocked/`. Also: `agent:queue` still carries the `go` marker while frontmatter says `queue: start`; `go` wins, so heads will auto-drain if any becomes drainable.
+<!-- agent:boundary:573c7397 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
+- do [#fanoutpri]
+- do [#activepri]
+- 📌 **Throughput unaffected:** ~3.3–3.6 M/s framed vs ~3.6 M/s unbounded. (One 1.59 M/s outlier was noise; reruns gave 3.60/3.58.)
 - ⏭️ /goal Implement backlog item(s): #b10a
 - ⏭️ /goal Implement backlog item(s): #yyzn
 - ⏭️ do [#friendsnapshot]
@@ -288,6 +356,8 @@ And the strongest asset you have is the one that isn't in v2 at all: **four meas
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#fanoutpri] haiven-websocket-hub: two-band send queue (interactive vs bulk) in hub/sendqueue.go — two lazily-allocated list.Lists drained high-then-low, each FIFO internally, O(1), no heap, so per-conn idle footprint (740 B) is unchanged. Interactive = acks, directed chat, moderation; bulk = presence/typing/passive topic traffic. HARD CONSTRAINT: a service may never span bands, or per-service monotonic seq (DESIGN §6.2) stops meaning 'loss' and client dedup/reorder breaks. Explicitly NO aging/escalation — bulk band stays DropOldest/ConflateByEntity, which bounds staleness by construction instead of by a timer.
+- [ ] [#activepri] haiven-websocket-hub: activity-tiered fan-out in SendToTopic (hub/hub.go:200) — (a) partition the members snapshot so active recipients enqueue first, (b) more importantly downgrade per-recipient class policy for inactive conns (presence/typing -> conflate-hard/drop, chat still spills) since that removes work rather than resequencing it. Define active from one lock-free atomic lastClientFrameAt on the conn, NOT a client-reported focus signal. Needs hysteresis (promote 30s / demote 120s) or conns thrash between bands. BLOCKED ON #friendsnapshot: demoting inactive presence to drop means a user who becomes active holds no correct state and gets no replay (at-most-once) — snapshot-on-resume must land first.
 - [ ] [#friendsnapshot] haiven-websocket-hub: a friend-frame needs a presence snapshot on frame change — presence is at-most-once + conflated, so a newly-framed friend produces no replay and renders 'offline' until their next tick. Add a 'give me current state for these K' query (design §6.1 already specifies snapshot-on-resume for at-most-once classes) + model frame paging (re-subscribe churn on scroll) in the realistic loadtest. This is the real work item behind -friends-frame, not the subscription cap.
 - [ ] 🚧 [#yyzn-clarify] Queue head '/goal Implement backlog item(s): #yyzn' references a backlog ID that does not exist in this document (backlog/icebox/done all lack it); the binary marks it skipped_queue_head_ids. Confirm the intended item or remove the head.
 - [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]

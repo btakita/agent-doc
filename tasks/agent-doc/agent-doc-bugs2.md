@@ -195,7 +195,11 @@ You were right to push back, and I've replaced it (same commit). A TTL is a gues
 It's now a lazily `Context` + `SlotMap` scoped to the turn, with a reference-counted RAII guard, matching the `observation_cache` / `GIT_TOPLEVEL_MEMO` pattern already in the codebase. `route::run_with_tmux_with_options` opens one scope per route, since one route *is* one turn. The scope boundary — not a clock — invalidates the memo, so it's exact rather than approximate. An unscoped caller resolves fresh every time, so it's never wrong, only slower.
 
 `make check` green, 7693/7693, installed + recycled.
-<!-- agent:boundary:95cfbf6f -->
+
+### Re: closeout bookkeeping — opus-4-8
+
+Recovery note, not new work. The previous closeout attempt hit a delivery-ACK stall, was cleared non-destructively with `admin reload-lib`, and on retry the response committed while the cycle's own mutation ledger came back empty — the `#fzmutloss` shape. Verified directly rather than assumed: `#ensurereplicagensup` is present in `agent:backlog` and mirrored into `agent:queue`, so the mutation did land on the earlier attempt. Declaring no new follow-ups for this cycle.
+<!-- agent:boundary:b07af307 -->
 <!-- /agent:exchange -->
 ## Queue
 

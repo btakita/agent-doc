@@ -147,14 +147,35 @@ Both fast-forward paths are exercised, not assumed: `merge --ff-only` on a branc
 ❯ Verified by rewinding real submodules rather than reasoning about it: `lib/array`, `lib/uuid`, `lib/rebuildjs` reset one commit back, then auto-rebase recovered all three and the re-check passed clean. For the diverged case I put a local-only commit on `lib/uuid` — auto-rebase skipped it, refused, and **the probe commit survived**. All three restored to their exact original SHAs afterward; no gitlink drift.
 
 ❯ One implementation note worth recording: the post-fast-forward re-check re-execs as `--after-rebase` rather than `--rebase`, so anything that failed to fast-forward refuses on the second pass instead of recursing into another attempt.
-<!-- agent:boundary:42e64931 -->
+
+### Re: #schemadts2 — it was never a schema-dts breaking change — opus-4-8
+
+> **Queue prompt:** do [#schemadts2]
+
+Done, and the item's diagnosis was wrong in a way worth stating plainly. Pushed as `4944afb` (+ two submodule commits), gitlink bumped.
+
+**schema-dts 2.0 is not a breaking change for this codebase, and rappstack was never the blocker.** The item recorded "Article, ItemList and VideoObject stop being assignable to Thing" and concluded the jsonld/rdfa helpers in `@rappstack/domain--server` had to be updated first. Neither half holds:
+
+- Compiled `const t: Thing = a` for `Article`, `ItemList`, `ListItem` and `VideoObject` against **both** 1.1.5 and 2.0.0 in isolation. Both clean. The assignability the item says 2.0 removed is intact.
+- The real cause was a **version split inside this repo**: `app/brookebrodack-site` pinned `schema-dts ^1.1.5` while `lib/ui--server--brookebrodack` had been bumped to `^2.0.0`. Both resolved simultaneously, so `Thing` in the rappstack helper signature came from one copy and `Article` at the call site from the other. Nominal mismatch — the same shape as `#rappts` (drizzle 0.32 vs 0.45) and `#yalcdrift` (marked 13 vs 17), not an API change.
+
+That is why the errors looked exotic: `TS2321 excessive stack depth comparing 'ItemList' and 'Thing'` is what a cross-copy comparison of a deep recursive union produces, not what a renamed type produces.
+
+**The fix was one line** — align `app/brookebrodack-site` to `^2.0.0`. I bumped rappstack's five `schema-dts` devDependency pins first while testing the item's stated theory, measured that they had no effect on consumer resolution (they are devDeps; consumers never install them), and **reverted them** rather than leaving an unnecessary cross-repo change behind.
+
+Measured: `typecheck:browser` 45 → **36**, which is the exact pre-existing baseline, with **0** schema-dts errors and 0 errors in `ui--server--brookebrodack`. Edge `typecheck` 0. `test` 67 pass, `test:dom` 9 pass, lint clean.
+
+**One incidental effect I did not go looking for.** The reinstall also collapsed two other duplicate resolutions the lockfile was carrying — `marked 13.0.3` alongside `17.0.4` (the `#yalcdrift` split) and `esbuild 0.25.12` alongside `0.28.1`. Single copies of all three now. I have **not** marked `#yalcdrift` done: its specific claim is that a *from-scratch* install re-splits marked, and my install was incremental, so that claim is untested. It needs a `rm -rf node_modules` reinstall to confirm either way.
+
+Check run `29672498182` was still in progress at closeout — recorded, not waited on.
+<!-- agent:boundary:621e4f06 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
 - do [#oidcnpm]
-- do [#schemadts2]
+- ~~do [#schemadts2]~~
 - do [#ctxredtests]
 - do [#rappdeps]
 - do [#rhonouvu]
@@ -178,7 +199,6 @@ Both fast-forward paths are exercised, not assumed: `merge --ff-only` on a branc
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#schemadts2] schema-dts 2.0 is a real breaking change for this codebase, not a routine bump: Article, ItemList and VideoObject stop being assignable to Thing, plus TS2321 excessive stack depth in brookers__doc_html.ts. Measured 8 new errors in lib/ui--server--brookebrodack, so it was reverted to ^1.1.5. Revisit when the jsonld/rdfa helpers in @rappstack/domain--server are updated for schema-dts 2 typing. KEPT OPEN: blocked on rappstack — the helpers that produce these Thing-typed values live there, so this cannot be fixed from brookebrodack-dev
 - [ ] [#rappdeps] rappstack is at /home/brian/work/rappstack/dev (github rappstack/dev). Run the same dependency sweep, and ALIGN DRIZZLE: 4 packages pin drizzle-orm ^0.32.0 while domain--server pins ^0.45.1, which is the whole 15-error youtube cluster in brookebrodack-dev (#rappts) — a table type and a db handle from two different drizzle universes. Also has an uncommitted working tree (bun.lockb, lib/dev-bin, lib/domain--any--blog) to resolve first
 - [ ] [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface. KEPT OPEN: not started — sequence after #pushctxcore so it does not stack a second uncommitted sweep on top of the unpushed dependency sweep
 - [ ] [#rhonouvu] rhonojs test:unit is red at HEAD and unrelated to dependencies: server/app/hono_duck_type.test.ts calls describe() (bun's runner) while test:unit runs uvu, so the file dies with 'Cannot use describe outside of the test runner'. Either port the file to uvu or move rhonojs to bun test
@@ -241,4 +261,5 @@ Both fast-forward paths are exercised, not assumed: `merge --ff-only` on a branc
 - 2026-07-18 [#ciappts2] Now that Check is green and gates lint + edge typecheck, revisit adding the two remaining type-check steps (bun run typecheck:browser, and app/brookebrodack-site typecheck). Both are still red ONLY on @rappstack sources — 15 drizzle-split errors plus the marked 13/17 split. Gate them the same cycle #rappdeps lands, not before
 - 2026-07-18 [#pushctxcore] Push the ctx-core-dev dependency sweep: 188 per-package submodule commits + superproject 31ad9151a are committed LOCALLY and unpushed on purpose (~190 public repos in one motion). Working tree is clean. Needs operator go, then push each submodule and the superproject
 - 2026-07-18 [#sweepstale] The monorepo dependency sweep computes updates against whatever the submodule checkout happens to be, so on a stale checkout it silently REVERTS newer upstream work rather than updating it. Seen concretely: lib/rebuildjs (8 behind, sweep based on 0.70.45) would have reintroduced a removed elysia dep, dropped bun-types, and reverted typescript ^7.0.2 back to next; lib/rebuildjs-tailwindcss (4 behind) would have dropped @tailwindcss/postcss. Make ctx_core__monorepo_pnpm__dependencies__update.sh fetch and refuse to run (or auto-rebase) when any workspace submodule is behind its upstream
+- 2026-07-18 [#schemadts2] schema-dts 2.0 is a real breaking change for this codebase, not a routine bump: Article, ItemList and VideoObject stop being assignable to Thing, plus TS2321 excessive stack depth in brookers__doc_html.ts. Measured 8 new errors in lib/ui--server--brookebrodack, so it was reverted to ^1.1.5. Revisit when the jsonld/rdfa helpers in @rappstack/domain--server are updated for schema-dts 2 typing. KEPT OPEN: blocked on rappstack — the helpers that produce these Thing-typed values live there, so this cannot be fixed from brookebrodack-dev
 <!-- /agent:done -->

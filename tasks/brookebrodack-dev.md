@@ -139,14 +139,30 @@ Done. Pinned all 190 `typescript: next` declarations in ctx-core-dev to `^7.0.2`
 **Commits:** 190 per-package submodule commits plus the ctx-core-dev superproject commit, all local. I did **not** push — this is the same ~190-public-repo motion as `#pushctxcore`, which you gated on an explicit go. Backlog item filed for that.
 
 One note: `lib/rmemo` has an uncommitted `README.md` edit and an untracked `bench/` directory from the concurrent O(n)-propagation-drain work. I committed only the pin there and left the rest untouched.
-<!-- agent:boundary:71f55a46 -->
+
+### Re: do [#4s08] — opus-4-8
+
+Retired it. `lib/solid-start` → `dormant/solid-start`, and `lib/*` + `tools/*` now type-check clean end to end (0 failing).
+
+**How I picked among the three options:**
+
+I looked at what the package actually is first. It is three type aliases (`FetchEvent_w_ctx_T`, `PageEvent_w_ctx_T`, `APIEvent_w_ctx_T`) over solid-start's event types, plus one AWS Lambda entry template. `index.js` is a single re-export line. Grepping `@ctx-core/solid-start` across every package.json in the monorepo returns exactly one hit — its own.
+
+- **Migrate to `@solidjs/start`** — the whole value of these aliases is intersecting solid-start's event types with a `ctx` local. `@solidjs/start` restructured that surface, so this is a rewrite, not a port. With zero consumers it would be speculative work.
+- **Pin a compatible `@solidjs/router`** — makes the type-check green while keeping a dead framework on life support. It fixes the symptom and leaves the package just as unusable.
+- **Retire to `dormant/`** — what I did. `dormant/` already holds five superseded packages (markdown, polka-types, shell, style, strip__logger), and it sits outside the root `workspaces` globs (`lib/*`, `tools/*`, `vendor/*`), so the package leaves the build and type-check without being deleted. The published 1.1.217 stays on npm; nothing breaks for anyone who already depends on it.
+
+**One thing worth flagging:** `git mv` on a submodule updates the `path` but leaves the `[submodule "..."]` section name at the old value. All 197 other entries have name == path, so I finished the rename by hand — moved `.git/modules/.../lib/solid-start` to `.../dormant/solid-start`, rewrote the submodule's `.git` gitdir pointer, and updated the section name in both `.gitmodules` and `.git/config`. Verified afterwards that the submodule still resolves its history (`git log` inside it works, `git submodule status` is clean).
+
+**Also worth knowing:** while I was working, a concurrent session committed `0eaf394a5 docs(rmemo): propagation benchmarks, algorithm notes, restored ts pin` and swept my staged rename into it along with its own `lib/ctx-core` and `lib/rmemo` gitlink bumps. The content is correct and the typescript pins survived intact — I re-checked, and there are zero `"typescript": "next"` declarations left. My follow-up commit `8ab6a51` carries only the `.gitmodules` section-name line.
+<!-- agent:boundary:5e40baac -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#mc4f]
 - do [#4s08]
+- do [#mc4f]
 - ~~do [#tsnextpin]~~
 - do [#lzeffectvoid]
 - do [#tsappclean]

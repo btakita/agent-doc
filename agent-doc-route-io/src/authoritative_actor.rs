@@ -553,6 +553,18 @@ pub fn wait_for_authoritative_actor_ready(
     }
 
     while Instant::now() < deadline {
+        // `#adobsiter`: memoize tmux's read-only structural answers for the
+        // duration of ONE poll iteration, not the whole wait. A single
+        // iteration re-asks `list-panes` style questions several times
+        // (`load_authoritative_actor_binding` alone does `pane_alive` plus a
+        // binding load), and at a 100ms interval over a 15s budget that is up
+        // to 150 iterations of duplicate ~20ms subprocess scans. Scoping per
+        // iteration keeps liveness live — the memo is discarded before the next
+        // observation — which a wait-for-change loop requires. `capture-pane`
+        // is excluded from the cache, so prompt-readiness proof stays fresh
+        // even within an iteration.
+        let _tmux_observations = agent_doc_tmux_io::begin_observation_scope();
+        let _pane_snapshot = tmux_router::begin_pane_snapshot_scope();
         if let Some(refreshed) = load_authoritative_actor_binding(
             tmux, file, session_id, file_path, harness, false, false,
         )? {

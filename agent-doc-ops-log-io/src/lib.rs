@@ -75,11 +75,53 @@ pub fn log_op(file: &Path, message: &str) {
     let _ = try_log_op(file, message);
 }
 
-fn try_log_op(file: &Path, message: &str) -> Option<()> {
+/// Process-local cache of the project root owning a document path.
+///
+/// A document's project root is immutable for the life of a process, but
+/// resolving it costs a `canonicalize` plus an upward directory walk on *every*
+/// log line. Route paths emit these by the hundred.
+static PROJECT_ROOT_CACHE: LazyLock<Mutex<HashMap<PathBuf, PathBuf>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn cached_project_root(file: &Path) -> Option<PathBuf> {
+    let key = file.to_path_buf();
+    if let Ok(cache) = PROJECT_ROOT_CACHE.lock()
+        && let Some(root) = cache.get(&key)
+    {
+        return Some(root.clone());
+    }
     let canonical = file.canonicalize().ok()?;
-    let project_root = agent_doc_project_root_io::project_root_containing(&canonical)?;
-    let doc_stem = file.file_stem().and_then(|n| n.to_str());
-    let session = cached_session_id(file);
+    let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
+    if let Ok(mut cache) = PROJECT_ROOT_CACHE.lock() {
+        cache.insert(key, root.clone());
+    }
+    Some(root)
+}
+
+/// How long a resolved turn id stays reusable for log attribution.
+///
+/// `#adturnidttl`: resolving the turn id replays the whole `state_events`
+/// ledger and re-hashes the document, and `log_op` is called ~170 times on one
+/// route. The turn id is stable within a cycle, so a short TTL keeps
+/// attribution effectively exact (a new cycle is picked up within the window)
+/// while collapsing hundreds of full ledger replays into a handful. This is a
+/// log-attribution cache only — nothing decides control flow from it.
+const TURN_ID_CACHE_TTL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// A turn id resolved at an instant, so the TTL can be checked on read.
+type CachedTurnId = (std::time::Instant, Option<String>);
+
+static TURN_ID_CACHE: LazyLock<Mutex<HashMap<PathBuf, CachedTurnId>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn cached_turn_id(file: &Path) -> Option<String> {
+    let key = file.to_path_buf();
+    if let Ok(cache) = TURN_ID_CACHE.lock()
+        && let Some((recorded_at, turn)) = cache.get(&key)
+        && recorded_at.elapsed() < TURN_ID_CACHE_TTL
+    {
+        return turn.clone();
+    }
     let turn = agent_doc_cycle_state_io::load_closeout_projection(file)
         .ok()
         .flatten()
@@ -90,6 +132,30 @@ fn try_log_op(file: &Path, message: &str) -> Option<()> {
                 .flatten()
                 .map(|cs| cs.cycle_id)
         });
+    if let Ok(mut cache) = TURN_ID_CACHE.lock() {
+        cache.insert(key, (std::time::Instant::now(), turn.clone()));
+    }
+    turn
+}
+
+/// Drop the memoized project-root and turn-id attribution caches.
+///
+/// Tests that rebuild a document's cycle state under the same path need the
+/// next log line to re-resolve instead of reusing the previous turn id.
+pub fn reset_ops_log_attribution_cache() {
+    if let Ok(mut cache) = PROJECT_ROOT_CACHE.lock() {
+        cache.clear();
+    }
+    if let Ok(mut cache) = TURN_ID_CACHE.lock() {
+        cache.clear();
+    }
+}
+
+fn try_log_op(file: &Path, message: &str) -> Option<()> {
+    let project_root = cached_project_root(file)?;
+    let doc_stem = file.file_stem().and_then(|n| n.to_str());
+    let session = cached_session_id(file);
+    let turn = cached_turn_id(file);
     append_ops_log_at_project(
         &project_root,
         message,
@@ -346,6 +412,75 @@ mod tests {
         let doc = root.join("session.md");
         std::fs::write(&doc, "---\n---\n").unwrap();
         doc
+    }
+
+    /// `#adopenfast`: the project root behind a document is immutable, so the
+    /// second `log_op` for the same path must not re-walk the filesystem — and
+    /// it must still attribute the line to the same project.
+    #[test]
+    fn project_root_resolution_is_memoized_per_document_path() {
+        // No global reset here: tests share a process, so clearing the whole
+        // cache would race a parallel test. Each test uses a unique temp path,
+        // which is the cache key.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+
+        let first = cached_project_root(&doc).expect("project root resolves");
+        assert!(
+            PROJECT_ROOT_CACHE.lock().unwrap().contains_key(&doc),
+            "first resolution must populate the memo"
+        );
+
+        // Removing the marker directory proves the second call served the memo
+        // rather than re-walking: an unmemoized lookup would now fail.
+        std::fs::remove_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let second = cached_project_root(&doc).expect("memoized root survives");
+        assert_eq!(first, second);
+    }
+
+    /// `#adturnidttl`: resolving a turn id replays the whole state ledger, so a
+    /// burst of log lines inside one cycle must reuse the resolved value.
+    #[test]
+    fn turn_id_resolution_is_reused_within_the_ttl_window() {
+        // No global reset here: tests share a process, so clearing the whole
+        // cache would race a parallel test. Each test uses a unique temp path,
+        // which is the cache key.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+
+        let first = cached_turn_id(&doc);
+        let recorded_at = {
+            let cache = TURN_ID_CACHE.lock().unwrap();
+            cache.get(&doc).expect("turn id cached").0
+        };
+
+        let second = cached_turn_id(&doc);
+        assert_eq!(first, second);
+        let unchanged = {
+            let cache = TURN_ID_CACHE.lock().unwrap();
+            cache.get(&doc).expect("turn id still cached").0
+        };
+        assert_eq!(
+            recorded_at, unchanged,
+            "a within-TTL hit must not re-resolve the turn id"
+        );
+
+        // Past the TTL the entry is stale and must be resolved again, so a new
+        // cycle is picked up rather than pinned forever.
+        {
+            let mut cache = TURN_ID_CACHE.lock().unwrap();
+            let entry = cache.get_mut(&doc).unwrap();
+            entry.0 = std::time::Instant::now() - (TURN_ID_CACHE_TTL * 2);
+        }
+        let _ = cached_turn_id(&doc);
+        let refreshed = {
+            let cache = TURN_ID_CACHE.lock().unwrap();
+            cache.get(&doc).expect("turn id re-cached").0
+        };
+        assert!(
+            refreshed > recorded_at,
+            "an expired entry must be re-resolved"
+        );
     }
 
     #[test]

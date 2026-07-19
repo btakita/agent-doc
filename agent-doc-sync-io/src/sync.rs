@@ -4433,8 +4433,13 @@ fn git_toplevel_memoized(dir: &Path) -> Option<PathBuf> {
 /// same-repo owner resolution. See `#cross-repo-owner-guard`.
 fn pane_in_foreign_git_repo(tmux: &Tmux, pane_id: &str, file: &Path) -> bool {
     let doc_repo = document_git_repo(file);
-    let pane_repo = agent_doc_tmux_io::pane_current_path(tmux, pane_id)
-        .and_then(|cwd| agent_doc_git_io::dirs::git_toplevel_at(&cwd));
+    // `#adpanetopmemo`: the pane side went through a raw `git rev-parse
+    // --show-toplevel` spawn per candidate while only the document side was
+    // memoized, so scanning N candidate panes cost N git spawns even when they
+    // shared a working directory. A directory's owning repo is immutable for
+    // our purposes, so the same memo applies unchanged.
+    let pane_repo =
+        agent_doc_tmux_io::pane_current_path(tmux, pane_id).and_then(|cwd| git_toplevel_memoized(&cwd));
     git_repos_are_foreign(doc_repo.as_deref(), pane_repo.as_deref())
 }
 

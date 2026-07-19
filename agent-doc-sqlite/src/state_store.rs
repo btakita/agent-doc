@@ -360,13 +360,52 @@ pub fn open_state_db(project_root: &Path) -> Result<Connection> {
     })
 }
 
+/// Paths whose schema this process has already converged (`#adopenfast`).
+///
+/// Schema convergence is idempotent and declared entirely by this binary, so
+/// repeating it on every open buys nothing while costing a large `execute_batch`
+/// plus eight `PRAGMA table_info` probes. Poll loops (routed-cycle ack at 200ms,
+/// `log_op`) open the same db hundreds of times per request, which made that
+/// per-open cost the dominant redundant work on the route path. Converge once
+/// per path per process; a concurrently-upgraded schema from another binary
+/// would carry columns this process does not know about anyway.
+static STATE_DB_SCHEMA_CONVERGED: std::sync::Mutex<Option<std::collections::BTreeSet<PathBuf>>> =
+    std::sync::Mutex::new(None);
+
+fn schema_already_converged(path: &Path) -> bool {
+    STATE_DB_SCHEMA_CONVERGED
+        .lock()
+        .map(|guard| {
+            guard
+                .as_ref()
+                .is_some_and(|converged| converged.contains(path))
+        })
+        .unwrap_or(false)
+}
+
+fn mark_schema_converged(path: &Path) {
+    if let Ok(mut guard) = STATE_DB_SCHEMA_CONVERGED.lock() {
+        guard
+            .get_or_insert_with(std::collections::BTreeSet::new)
+            .insert(path.to_path_buf());
+    }
+}
+
+/// Forget this process's convergence memo. Tests that rebuild a database under
+/// the same path need the next open to re-declare the schema.
+pub fn reset_state_db_schema_convergence_memo() {
+    if let Ok(mut guard) = STATE_DB_SCHEMA_CONVERGED.lock() {
+        *guard = None;
+    }
+}
+
 fn open_and_init_state_db(path: &Path) -> Result<Connection> {
     let conn =
         Connection::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
     let started = Instant::now();
     loop {
-        match initialize_state_db(&conn) {
+        match initialize_state_db_memoizing_shape(&conn, path) {
             Ok(()) => break,
             Err(error)
                 if is_state_db_lock_error(&error) && started.elapsed() < STATE_DB_BUSY_TIMEOUT =>
@@ -395,16 +434,44 @@ fn is_state_db_lock_error(error: &anyhow::Error) -> bool {
 }
 
 pub fn initialize_state_db(conn: &Connection) -> Result<()> {
+    declare_canonical_shape(conn)?;
+    converge_state_db_data(conn)
+}
+
+/// The shape half: table/column/index declarations only.
+///
+/// This is what the per-process memo may skip — it depends solely on this
+/// binary's declarations, so re-running it against a database this process
+/// already converged is a guaranteed no-op.
+fn declare_canonical_shape(conn: &Connection) -> Result<()> {
     create_canonical_tables(conn)?;
     // One canonical declaration (`#canonicalschema`): `create_canonical_tables`
     // states the full current shape, and these converge an existing database
     // onto it from the same declarations.
     converge_added_columns(conn)?;
-    ensure_canonical_indexes(conn)?;
+    ensure_canonical_indexes(conn)
+}
+
+/// The data half: convergence over *rows*, which other processes keep writing.
+///
+/// This must run on **every** open. Unlike the shape, these steps are not
+/// idempotent with respect to time: another binary (or an older one) can append
+/// a retired event variant after our first open, and skipping retirement would
+/// let that row reach a parser that rejects it.
+fn converge_state_db_data(conn: &Connection) -> Result<()> {
     converge_state_event_document_versions(conn)?;
     run_state_event_retention_if_due(conn);
     retire_removed_state_event_variants(conn)?;
     Ok(())
+}
+
+/// `#adopenfast`: converge the shape once per path per process, the data always.
+fn initialize_state_db_memoizing_shape(conn: &Connection, path: &Path) -> Result<()> {
+    if !schema_already_converged(path) {
+        declare_canonical_shape(conn)?;
+        mark_schema_converged(path);
+    }
+    converge_state_db_data(conn)
 }
 
 /// The canonical schema: every table at its **full current shape**.
@@ -3705,6 +3772,71 @@ pub fn layout_scope_exists(conn: &Connection, scope: &str) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#adopenfast`: the second open of the same path must skip schema
+    /// convergence, and a path this process has never converged must not
+    /// inherit another path's memo.
+    #[test]
+    fn repeat_open_skips_schema_convergence_but_still_converges_each_new_path() -> Result<()> {
+        // Unique temp paths are the cache key, so no global reset is needed —
+        // and a reset would race the other tests in this process.
+        let dir = tempfile::TempDir::new()?;
+        let first = dir.path().join("first");
+        let second = dir.path().join("second");
+
+        let path = state_db_path(&first);
+        assert!(!schema_already_converged(&path), "no memo before first open");
+        let conn = open_state_db(&first)?;
+        drop(conn);
+        assert!(
+            schema_already_converged(&path),
+            "first open must record convergence for this path"
+        );
+
+        // A repeat open reuses the memo and must still hand back a usable,
+        // fully-converged connection.
+        let reopened = open_state_db(&first)?;
+        let documents: i64 =
+            reopened.query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))?;
+        assert_eq!(documents, 0);
+
+        // The memo covers the *shape* only. Row-level convergence must still
+        // run on every open, because another process can append a retired event
+        // variant after we first converged this path. Simulate that: rewind the
+        // retirement migration and plant a legacy fact, then reopen.
+        reopened.execute(
+            "DELETE FROM state_schema_migrations WHERE migration_id = ?1",
+            [RETIRE_PENDING_RESPONSE_FACTS_MIGRATION],
+        )?;
+        reopened.execute(
+            "INSERT INTO state_events
+                 (event_id, document_hash, domain, fact_type, payload_json, timestamp)
+             VALUES ('legacy-1', 'doc', 'response', 'pending_response_captured', '{}', 0)",
+            [],
+        )?;
+        drop(reopened);
+
+        let after_reopen = open_state_db(&first)?;
+        let legacy: i64 = after_reopen.query_row(
+            "SELECT COUNT(*) FROM state_events WHERE fact_type = 'pending_response_captured'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(
+            legacy, 0,
+            "a memoized-shape reopen must still retire removed event variants"
+        );
+        drop(after_reopen);
+
+        // A different database is a different key: it must converge on its own.
+        assert!(!schema_already_converged(&state_db_path(&second)));
+        let other = open_state_db(&second)?;
+        let documents: i64 =
+            other.query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))?;
+        assert_eq!(documents, 0);
+        assert!(schema_already_converged(&state_db_path(&second)));
+        Ok(())
+    }
 
     #[test]
     fn concurrent_state_db_schema_initializers_converge_without_replacing_authority() -> Result<()>

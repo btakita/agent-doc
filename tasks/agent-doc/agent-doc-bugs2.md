@@ -370,16 +370,27 @@ Sync epochs are deliberately excluded from the witness: they advance on every ke
 Verification: 7775 tests pass, clippy clean, `make check` exit 0, `make install` done. Four new regressions cover unchanged-witness suppression, immediate re-arm on each witness change, the wide-pid case, and clear-on-healthy-observation.
 
 CI on main is red, but from the pre-existing `#ay80` failure (`finalize_skips_ignored_untracked_session_doc`, GHA-only, passes locally) — not this change. It needs a CI round-trip to reproduce, so I left it in the backlog rather than stall the drain.
-<!-- agent:boundary:b6ea4121 -->
+
+### Re: replica self-heal TTL — queue head consumption — opus-4-8
+
+> **Queue prompt:** We should use lazily instead of a TTL. Prefer the realtime document model over rebuilding from disk.
+> > Descending instead of bailing means the caller *continues* — so every later read site re-paid the 3×6s self-heal that a bail used to pay once. That turned a ~57s compact/commit into ~152s and was failing two tests. I added a short-TTL memory of a just-exhausted self-heal, which collapses the burst without weakening recovery.
+
+Already delivered in the previous cycle (`agent-doc@adefcda0a`, committed as `cycle-1784497929629`); this cycle only consumes the head, which my earlier echo failed to quote exactly.
+
+The TTL memo is replaced by `EditorReplicaLivenessWitness`, keyed on the Lazily reliable-sync liveness projection rather than a clock: the retry loop is suppressed only while the witness is unchanged, and a registration landing re-arms the self-heal immediately. The `u32::try_from(reg.pid)` narrowing you flagged is fixed to the plane's native `u64`. 7775 tests pass, clippy clean, `make install` done.
+
+The naming question is parked as `#selfhealpolarity`, now tagged `[operator-verify]` so the drain defers to you instead of me picking a rename you did not choose.
+<!-- agent:boundary:b43a7634 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#selfhealpolarity]
 ---
 🚧 We should use lazily instead of a TTL. Prefer the realtime document model over rebuilding from disk.
 > Descending instead of bailing means the caller *continues* — so every later read site re-paid the 3×6s self-heal that a bail used to pay once. That turned a ~57s compact/commit into ~152s and was failing two tests. I added a short-TTL memory of a just-exhausted self-heal, which collapses the burst without weakening recovery.
 ---
+- ~~do [#selfhealpolarity]~~
 - ~~do [#lazilynottl]~~
 - ~~do [#c8tb]~~
 - ~~do [#wsflake2]~~
@@ -389,7 +400,7 @@ We should immediately self-heal. Make all self-healing real-time, not turn-based
 > Heads now render as list items. `parse_spans` still accepts the legacy bare form, so existing documents round-trip and self-heal on the next render rather than needing migration. There's a regression asserting every rendered head is a list item, and that healing is idempotent.
 ---
 - ~~do [#orphandrain]~~
-- 📌 do [#jbrouteasyncchannel]
+- ⏭️ 📌 do [#jbrouteasyncchannel]
 - 📌 do [#jbedtledgerverify]
 - 📌 do [#fmgc]
 - 📌 do [#0dsr]

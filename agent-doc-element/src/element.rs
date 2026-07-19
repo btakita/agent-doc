@@ -995,6 +995,83 @@ fn byte_in_ranges(offset: usize, ranges: &[(usize, usize)]) -> bool {
         .any(|&(start, end)| offset >= start && offset < end)
 }
 
+/// Repair a boundary marker whose same-line `-->` terminator was lost, splicing
+/// the trailing remainder back onto its own line (`#boundarysplice`).
+///
+/// A CRDT cell merge can drop the terminator and weld the following line onto the
+/// marker, producing `<!-- agent:boundary:72eb14f4> **Queue prompt:**`. That trips
+/// [`malformed_agent_comment_reason`], and because the integrity gate refuses the
+/// canonical *before* any repair runs, the document wedges permanently: every
+/// closeout is retained, and the guidance to "retry only `session-check`" can
+/// never converge because nothing rewrites the text.
+///
+/// This is safe to repair automatically precisely because a boundary marker is
+/// transient binary-owned scaffolding, not operator prose — `reposition_boundary_*`
+/// and `collapse_adjacent_boundary_markers` already rewrite it at will. The repair
+/// is also lossless: the terminator is restored and every trailing byte is
+/// preserved on the following line rather than discarded.
+///
+/// Deliberately scoped to `agent:boundary` only. A truncated *component* marker
+/// (`<!-- agent:exchange`, `<!-- /agent:exchange`) carries attributes and
+/// structural meaning, so guessing its split could silently reshape the document;
+/// those still fail closed.
+pub fn repair_malformed_boundary_comment(doc: &str) -> Option<String> {
+    const PREFIX: &str = "<!-- agent:boundary:";
+    let code_ranges = find_code_ranges(doc);
+    let quoted_ranges = find_quoted_ranges(doc);
+
+    let mut out = String::with_capacity(doc.len() + 16);
+    let mut repaired = false;
+    let mut offset = 0usize;
+
+    for raw_line in doc.split_inclusive('\n') {
+        let line_start = offset;
+        offset += raw_line.len();
+
+        let line = raw_line.trim_end_matches(['\n', '\r']);
+        let newline = &raw_line[line.len()..];
+        let leading = line.len() - line.trim_start_matches([' ', '\t']).len();
+        let trimmed = &line[leading..];
+
+        let malformed = trimmed.starts_with(PREFIX)
+            && !trimmed.contains("-->")
+            && !byte_in_ranges(line_start + leading, &code_ranges)
+            && !byte_in_ranges(line_start + leading, &quoted_ranges);
+
+        if !malformed {
+            out.push_str(raw_line);
+            continue;
+        }
+
+        let rest = &trimmed[PREFIX.len()..];
+        let id_len = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':')))
+            .unwrap_or(rest.len());
+        let (id, remainder) = rest.split_at(id_len);
+        if id.is_empty() {
+            out.push_str(raw_line);
+            continue;
+        }
+
+        repaired = true;
+        out.push_str(&line[..leading]);
+        out.push_str(PREFIX);
+        out.push_str(id);
+        out.push_str(" -->");
+
+        let remainder = remainder.strip_prefix(' ').unwrap_or(remainder);
+        if remainder.is_empty() {
+            out.push_str(newline);
+        } else {
+            out.push('\n');
+            out.push_str(remainder);
+            out.push_str(newline);
+        }
+    }
+
+    repaired.then_some(out)
+}
+
 /// Detect agent-looking HTML comment markers that were truncated before their
 /// same-line `-->` terminator. The normal parser only sees complete comments,
 /// so a CRDT/editor split like `<!-- /agent:exchange --` can otherwise be
@@ -2567,6 +2644,68 @@ Fix applied to skip non-agent <!-- sequences.
     fn structural_corruption_ignores_truncated_agent_comment_inside_code_fence() {
         let doc = "```md\n<!-- /agent:queue ->\n<!-- /agent:exchange --\n```\n";
         assert_eq!(structural_corruption_reason(doc), None);
+    }
+
+    /// `#boundarysplice`: the exact live corruption — a CRDT cell merge dropped
+    /// the boundary terminator and welded the next line onto the marker, wedging
+    /// every closeout behind the integrity gate with no self-heal.
+    #[test]
+    fn repair_malformed_boundary_comment_splits_welded_remainder_losslessly() {
+        let doc = "<!-- agent:exchange patch=append -->\n### Re: topic\n\nBody.\n<!-- agent:boundary:72eb14f4> **Queue prompt:**\n<!-- /agent:exchange -->\n";
+        let repaired =
+            repair_malformed_boundary_comment(doc).expect("welded boundary must be repaired");
+
+        assert!(
+            repaired.contains("<!-- agent:boundary:72eb14f4 -->\n> **Queue prompt:**\n"),
+            "terminator restored and remainder preserved on its own line: {repaired}"
+        );
+        assert_eq!(
+            structural_corruption_reason(&repaired),
+            None,
+            "repaired document must clear the integrity gate: {repaired}"
+        );
+        // Lossless: every non-marker character survives.
+        assert!(repaired.contains("**Queue prompt:**"));
+        assert!(repaired.contains("Body."));
+        assert!(repaired.contains("<!-- /agent:exchange -->"));
+    }
+
+    #[test]
+    fn repair_malformed_boundary_comment_handles_bare_truncation_and_summary_ids() {
+        let bare = "<!-- agent:boundary:abc123\n";
+        let repaired = repair_malformed_boundary_comment(bare).expect("bare truncation repaired");
+        assert_eq!(repaired, "<!-- agent:boundary:abc123 -->\n");
+
+        let summary = "<!-- agent:boundary:deadbeef:before-compact> tail\n";
+        let repaired =
+            repair_malformed_boundary_comment(summary).expect("summary-suffix id repaired");
+        assert_eq!(
+            repaired,
+            "<!-- agent:boundary:deadbeef:before-compact -->\n> tail\n"
+        );
+    }
+
+    #[test]
+    fn repair_malformed_boundary_comment_leaves_sound_and_out_of_scope_documents_alone() {
+        // Already well-formed.
+        assert_eq!(
+            repair_malformed_boundary_comment("<!-- agent:boundary:abc123 -->\n"),
+            None
+        );
+        // Component markers carry attributes and structure — still fail closed.
+        assert_eq!(
+            repair_malformed_boundary_comment("<!-- agent:exchange patch=append\n"),
+            None
+        );
+        assert_eq!(
+            repair_malformed_boundary_comment("<!-- /agent:exchange --\n"),
+            None
+        );
+        // Inside a fence it is documentation, not scaffolding.
+        assert_eq!(
+            repair_malformed_boundary_comment("```md\n<!-- agent:boundary:abc123> x\n```\n"),
+            None
+        );
     }
 
     #[test]

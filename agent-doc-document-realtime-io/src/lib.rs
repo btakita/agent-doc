@@ -2409,10 +2409,17 @@ pub fn normalize_recoverable_response_replay_duplication(content: &str) -> Optio
     if agent_projection_integrity_valid(content) {
         return None;
     }
-    let mut normalized = agent_doc_merge::response_cell::deduplicate_response_cells(content)
+    // `#boundarysplice`: restore a boundary terminator a cell merge welded into
+    // the following line BEFORE the other repairs, since a malformed agent
+    // comment makes the document unparseable and blocks every one of them. The
+    // boundary is transient binary-owned scaffolding and the repair is lossless,
+    // so this cannot touch operator prose.
+    let mut normalized = agent_doc_element::element::repair_malformed_boundary_comment(content)
+        .unwrap_or_else(|| content.to_string());
+    normalized = agent_doc_merge::response_cell::deduplicate_response_cells(&normalized)
         .ok()
         .flatten()
-        .unwrap_or_else(|| content.to_string());
+        .unwrap_or(normalized);
     if !agent_projection_integrity_valid(&normalized)
         && let Some(repaired) = remove_stale_standalone_exchange_boundary(&normalized)
     {

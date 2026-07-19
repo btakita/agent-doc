@@ -119,10 +119,43 @@ That is the real reorder, and it is committed. Cheapest-and-unblocked first (`#t
 I don't know whether that placement was deliberate — a decision to park the whole cutover track — or drift from an earlier compaction. Both are plausible and they call for opposite actions, so I'm not going to move forty items on a guess. If you want the cutover track live, say so and I'll promote the three launch items into the backlog in the custody → secrets → DNS order that their dependencies require, and leave the rest iceboxed.
 
 **Also still true:** the queue block is empty and preflight's backlog→queue mirror has failed to persist on every cycle tonight — `editor_attached_model_missing`, the JetBrains plugin holding an attachment for this file with no CRDT model behind it. Responses and backlog mutations write fine through the realtime backbone; only queue maintenance is discarded. `admin reload-lib` clears it, then it returns. Closing and reopening this file's tab in the IDE should fix it properly, after which the three backlog items will mirror into the queue in the order above.
-<!-- agent:boundary:4ff751ef -->
+
+### Re: do #tmo-getlender-verify — opus-4-8
+
+Done, and closed with stronger evidence than the backlog item asked for.
+
+The item said "UI only, ~2 min: open the reconcile modal and read the badge." I did not open a browser — I drove the shipped chain instead, which observes the same thing and leaves a repeatable artifact:
+
+`tmo_lss_lender_R_` (live `GET /LSS.svc/GetLender`) → `tmo_lender_roster_` → `tmo_lender_roster_confirm_` → `vesting_reconcile_state_` → `RECONCILE_STATE_LABELS`. That is every function `admin_tmo_lenders_GET_` and the modal call, in order.
+
+**Against the real sandbox** (`001-8553-000-Equity Funding - Sandbox`):
+
+| account | roster flags | badge |
+|---|---|---|
+| `L-TEST067` | `in_los=false in_efs=true in_lss=true` | **In TMO · no funding yet** |
+| `L-TEST067 --funded` | `in_los=true` | Reconciled |
+| `L-TEST1` | `in_lss=false` | Unconfirmed in TMO |
+| `L-NOPE999` | `in_lss=false` | Unconfirmed in TMO |
+
+The `confirmed_no_funding` branch is confirmed live, and the L-TEST1 suspicion in the backlog note holds: a funding `Account` string is not guaranteed to resolve as an LSS lender record, and a vesting pointing at it correctly falls to the degraded branch rather than claiming confirmation.
+
+**The gap that actually mattered was not the label.** Every existing test proved the composition with synthetic records. None of them proved the normalizer reads the field names TMO really sends — if `tmo_lender_summary_` had looked for `LenderAccount` while TMO sends `Account`, all 14 tests still pass while the live path returns null, `in_lss` stays false, and a legitimately-confirmed lender reads "Unconfirmed in TMO" forever. That link was unobserved until now. The live payload carries `Account` / `FullName` / `RecID` / `EmailAddress` (plus `AccountNumber` agreeing with `Account`), which is exactly what the normalizer reads.
+
+So I pinned it. `tests/tmo-getlender-confirm.test.ts` now carries the verbatim live key set as a fixture, plus the degraded-branch case and a guard that the tool drives the real client instead of reimplementing the fetch — and that it never touches the LSS write surface.
+
+**Shipped** (EFS `16cabbad`, pushed):
+- `bin/tmo-getlender-verify.ts` — read-only, `--account` / `--funded` / `--expect <state>`, non-zero exit on mismatch. Re-run any time with `TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-getlender-verify.ts --expect confirmed_no_funding`.
+- 4 new tests. Full suite green: **2028 pass, 0 fail**, `make check` exit 0.
+
+Committed via the temp-index compare-and-swap — a concurrent session has `AGENTS.md` dirty, and only my two files went in.
+
+One note on the queue: `preflight` reported `queue_active: false` with 0 drainable heads even though the block is marked `go` and now holds two items. That is the same `editor_attached_model_missing` condition I flagged last cycle — queue maintenance is still being computed and discarded, so the queue text you see is stale state, not live state. `#efs-do-hibernation` is sitting in the queue behind this one and will not auto-drain until that clears. Closing and reopening this file's tab in the IDE is the fix.
+<!-- agent:boundary:7350f3a5 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#tmo-getlender-verify]
+- do [#efs-do-hibernation]
 <!-- /agent:queue -->
 
 ## Backlog

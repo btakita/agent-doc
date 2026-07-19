@@ -95,43 +95,6 @@ pub fn clear_self_kill_request(file: &Path) {
     }
 }
 
-#[cfg(unix)]
-fn read_proc_args(pid: u32) -> Option<Vec<String>> {
-    let cmdline = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
-    let args: Vec<String> = cmdline
-        .split(|byte| *byte == 0)
-        .filter(|arg| !arg.is_empty())
-        .map(|arg| String::from_utf8_lossy(arg).to_string())
-        .collect();
-    if args.is_empty() { None } else { Some(args) }
-}
-
-/// Canonical owned-document path for a running supervisor pid, resolving a relative
-/// cmdline path against the process's `/proc/<pid>/cwd`. `None` if `pid` is not a
-/// `start --route-owned` supervisor or its path cannot be resolved.
-#[cfg(unix)]
-fn supervisor_doc_canonical(pid: u32) -> Option<PathBuf> {
-    let args = read_proc_args(pid)?;
-    let doc = agent_doc_supervisor::selfkill::start_route_owned_doc_from_args(&args)?;
-    if doc.is_absolute() {
-        doc.canonicalize().ok()
-    } else {
-        let cwd = std::fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
-        cwd.join(doc).canonicalize().ok()
-    }
-}
-
-/// Does `pid` own `target` (same canonical document)? Used to verify a kill target
-/// before signalling — never SIGKILL a pid whose cmdline is not the expected
-/// supervisor for this exact document.
-#[cfg(unix)]
-fn supervisor_pid_matches_doc(pid: u32, target: &Path) -> bool {
-    match (supervisor_doc_canonical(pid), target.canonicalize().ok()) {
-        (Some(doc), Some(want)) => doc == want,
-        _ => false,
-    }
-}
-
 /// `pid`'s parent pid from `/proc/<pid>/stat`. The `comm` field (2nd) may contain
 /// spaces/parens, so split after the last `)`; ppid is the 2nd whitespace field
 /// after that.
@@ -182,32 +145,10 @@ fn process_is_alive(pid: u32) -> bool {
     ret == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-/// Scan `/proc` for the live `start --route-owned` supervisor owning `target`.
-#[cfg(unix)]
-pub fn supervisor_pid_for_doc(target: &Path) -> Option<u32> {
-    let self_pid = std::process::id();
-    let entries = std::fs::read_dir("/proc").ok()?;
-    for entry in entries.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-            continue;
-        };
-        let Ok(pid) = name.parse::<u32>() else {
-            continue;
-        };
-        if pid == self_pid {
-            continue;
-        }
-        if supervisor_pid_matches_doc(pid, target) {
-            return Some(pid);
-        }
-    }
-    None
-}
-
-#[cfg(not(unix))]
-pub fn supervisor_pid_for_doc(_target: &Path) -> Option<u32> {
-    None
-}
+/// Supervisor process discovery lives in [`crate::process`] — it answers a
+/// liveness question ("is there a supervisor at all?"), not a kill-path one.
+/// Re-exported so existing kill-path callers keep working.
+pub use crate::process::supervisor_pid_for_doc;
 
 /// `#supkill-b` — verified force-kill of a supervisor pid: SIGTERM, brief wait, then
 /// SIGKILL if still alive. Re-verifies the cmdline before *each* signal so a recycled
@@ -218,7 +159,7 @@ pub fn force_kill_verified_supervisor_pid(target: &Path, pid: u32) -> bool {
     if pid == std::process::id() || pid_is_self_or_ancestor(pid) {
         return false;
     }
-    if !supervisor_pid_matches_doc(pid, target) {
+    if !crate::process::supervisor_pid_matches_doc(pid, target) {
         return false;
     }
     unsafe {
@@ -231,7 +172,7 @@ pub fn force_kill_verified_supervisor_pid(target: &Path, pid: u32) -> bool {
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    if supervisor_pid_matches_doc(pid, target) {
+    if crate::process::supervisor_pid_matches_doc(pid, target) {
         unsafe {
             libc::kill(pid as libc::pid_t, libc::SIGKILL);
         }

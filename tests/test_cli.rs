@@ -19564,10 +19564,18 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "orchestration idle_watch must not re-own pure supervisor idle-watch policy: {forbidden_snippet}"
         );
     }
+    // Supervisor process DISCOVERY moved out of the kill path into
+    // `agent-doc-supervisor-io/src/process.rs`: "which pid supervises this doc?"
+    // is a liveness question (no supervisor => no idle-queue watch => an active
+    // `queue: go` document cannot self-drain), not a kill-path concern. The guard
+    // still pins the same invariant — the supervisor IO layer calls the focused
+    // pure cmdline parser DIRECTLY, with no facade in between.
+    let supervisor_process =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor-io/src/process.rs")).unwrap();
     assert!(
-        supervisor_selfkill
+        supervisor_process
             .contains("agent_doc_supervisor::selfkill::start_route_owned_doc_from_args"),
-        "supervisor selfkill IO should call focused route-owned cmdline parsing directly"
+        "supervisor process discovery IO should call focused route-owned cmdline parsing directly"
     );
     assert!(
         supervisor_selfkill

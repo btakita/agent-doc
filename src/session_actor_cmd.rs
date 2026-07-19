@@ -477,7 +477,58 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
         receipt.operator_receipt.receipt_id,
         receipt.background_started
     );
+    report_supervisor_replacement_outcome(&ctx.canonical_file, receipt.background_started);
     Ok(())
+}
+
+/// How long to wait for the background replacement worker to produce a live
+/// supervisor before reporting the request as unfulfilled.
+const SUPERVISOR_REPLACEMENT_PROOF_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(8);
+
+/// `#superviserrsilent`: `background_started=true` only means the worker THREAD
+/// spawned — not that a supervisor is live. The worker then runs asynchronously,
+/// and when it fails (for example `preserve_pane_blocked`, because the owner pane
+/// is a live agent TUI that must not be typed into) the error lands in the ops log
+/// long after the operator has been told the request was accepted.
+///
+/// That silence is expensive rather than cosmetic: with no supervisor there is no
+/// idle-queue watch, so a `queue: go` document with drainable heads stops
+/// self-draining entirely and only a human can advance it. Observed live —
+/// `agent-doc-bugs2.md` logged ZERO idle-watch ticks while six sibling documents
+/// logged thousands each, and every replacement attempt on it ended in
+/// `background_failed` while reporting success.
+///
+/// Wait briefly for proof of a live supervisor and say plainly what it means for
+/// the queue when there is none.
+fn report_supervisor_replacement_outcome(file: &Path, background_started: bool) {
+    if !background_started {
+        eprintln!(
+            "[session] warning: no background replacement worker started for {}; the supervisor was NOT replaced.",
+            file.display()
+        );
+        return;
+    }
+    let deadline = std::time::Instant::now() + SUPERVISOR_REPLACEMENT_PROOF_TIMEOUT;
+    while std::time::Instant::now() < deadline {
+        if let Some(pid) = agent_doc_supervisor_io::process::supervisor_pid_for_doc(file) {
+            println!("[session] supervisor replacement proven live (pid {pid}).");
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    eprintln!(
+        "[session] warning: no live supervisor for {} after {}s — the replacement request was accepted but did not produce one.",
+        file.display(),
+        SUPERVISOR_REPLACEMENT_PROOF_TIMEOUT.as_secs()
+    );
+    eprintln!(
+        "[session] warning: without a supervisor there is NO idle-queue watch, so an active `queue: go` document will not self-drain and needs a human to advance it."
+    );
+    eprintln!(
+        "[session] hint: check `controller_supervisor_replacement_background_failed` in .agent-doc/logs/ops.log for the reason; if it is `preserve_pane_blocked`, run `agent-doc session restart-supervisor {}` from a different pane.",
+        file.display()
+    );
 }
 
 /// "Stop Agent": kill the harness child while keeping the supervisor alive at its

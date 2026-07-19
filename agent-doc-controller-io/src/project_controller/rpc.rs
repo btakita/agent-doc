@@ -12015,7 +12015,7 @@ fn spawn_supervisor_replacement_worker(work: SupervisorReplacementWork) -> Resul
 
 #[cfg(not(any(test, feature = "test-support")))]
 fn drive_supervisor_replacement_background(work: SupervisorReplacementWork) -> Result<()> {
-    let initial_pid = agent_doc_supervisor_io::selfkill::supervisor_pid_for_doc(&work.file);
+    let initial_pid = agent_doc_supervisor_io::process::supervisor_pid_for_doc(&work.file);
     let initial_host_stale = host_supervisor_stale_warning_for_doc(&work.file).is_some();
     let socket = agent_doc_supervisor_io::ipc::socket_path(&work.project_root, &work.session_id);
     agent_doc_ops_log_io::log_op(
@@ -12206,7 +12206,7 @@ fn wait_for_supervisor_replacement_completion(
 ) -> bool {
     let deadline = Instant::now() + supervisor_replacement_wait_timeout();
     while Instant::now() < deadline {
-        let current_pid = agent_doc_supervisor_io::selfkill::supervisor_pid_for_doc(file);
+        let current_pid = agent_doc_supervisor_io::process::supervisor_pid_for_doc(file);
         if let (Some(initial), Some(current)) = (initial_pid, current_pid)
             && initial != current
         {

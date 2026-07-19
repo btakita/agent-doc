@@ -8,6 +8,7 @@ pub mod cwd;
 pub mod detection;
 pub mod env;
 pub mod ipc;
+pub mod process;
 pub mod recycle_request;
 pub mod selfkill;
 pub mod startup_miss;

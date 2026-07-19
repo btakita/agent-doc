@@ -227,3 +227,88 @@ mod tests {
         );
     }
 }
+
+/// `#crdtcasraced` — backoff policy for the CRDT write convergence loop.
+///
+/// The loop retries a write until the editor acknowledges convergence, backing
+/// off exponentially between attempts. It used to reset the backoff to its floor
+/// on *every* non-converged apply, on the theory that an applied write is
+/// progress. It is not: a write that keeps applying against a frontier that keeps
+/// moving (a live editor typing, or two writers contending) re-applies and races
+/// forever, and because each pass reset the floor the loop never actually backed
+/// off. Operator-reported symptom: a 60s convergence timeout with repeated
+/// `compare_and_swap_raced` at `backoff_ms=25` — hundreds of full merge+CAS
+/// attempts, each of which makes the contention it is retrying slightly worse.
+///
+/// Real progress is the canonical content actually changing. Reset the floor
+/// only then; otherwise keep doubling toward the cap, so a genuinely contended
+/// write degrades to a slow poll instead of a hot spin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CrdtWriteBackoff {
+    pub initial_ms: u64,
+    pub max_ms: u64,
+}
+
+impl CrdtWriteBackoff {
+    pub const fn new(initial_ms: u64, max_ms: u64) -> Self {
+        Self { initial_ms, max_ms }
+    }
+
+    /// Next backoff after an attempt that did not converge.
+    ///
+    /// `advanced` is whether this attempt moved the canonical content since the
+    /// previous attempt (compare the relay write's content hash).
+    pub fn next_ms(self, current_ms: u64, advanced: bool) -> u64 {
+        if advanced {
+            return self.initial_ms;
+        }
+        current_ms.saturating_mul(2).clamp(self.initial_ms, self.max_ms)
+    }
+}
+
+#[cfg(test)]
+mod crdt_write_backoff_tests {
+    use super::CrdtWriteBackoff;
+
+    const POLICY: CrdtWriteBackoff = CrdtWriteBackoff::new(25, 250);
+
+    #[test]
+    fn stalled_writes_back_off_toward_the_cap() {
+        // The regression: without this, every one of these stayed at 25ms.
+        let mut ms = POLICY.initial_ms;
+        let mut observed = vec![ms];
+        for _ in 0..6 {
+            ms = POLICY.next_ms(ms, false);
+            observed.push(ms);
+        }
+        assert_eq!(observed, vec![25, 50, 100, 200, 250, 250, 250]);
+    }
+
+    #[test]
+    fn real_progress_resets_the_floor() {
+        let stalled = POLICY.next_ms(POLICY.next_ms(25, false), false);
+        assert_eq!(stalled, 100);
+        assert_eq!(POLICY.next_ms(stalled, true), 25);
+    }
+
+    /// A contended 60s window must cost tens of attempts, not hundreds. This is
+    /// the whole point of the change, so pin it as a budget rather than trusting
+    /// the shape of the curve.
+    #[test]
+    fn a_fully_stalled_window_is_bounded_to_a_slow_poll() {
+        let mut elapsed = 0u64;
+        let mut ms = POLICY.initial_ms;
+        let mut attempts = 0u32;
+        while elapsed < 60_000 {
+            elapsed += ms;
+            attempts += 1;
+            ms = POLICY.next_ms(ms, false);
+        }
+        assert!(
+            (240..=250).contains(&attempts),
+            "stalled 60s window should settle into a ~250ms poll, got {attempts} attempts"
+        );
+        // Contrast: the old always-reset behaviour was 60_000 / 25 = 2400.
+        assert!(attempts * 4 < 2_400 + attempts);
+    }
+}

@@ -162,6 +162,12 @@ const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 2_500;
 const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 60_000;
 const CRDT_WRITE_BACKOFF_INITIAL_MS: u64 = 25;
 const CRDT_WRITE_BACKOFF_MAX_MS: u64 = 250;
+/// `#crdtcasraced`: shared pure backoff policy for the convergence loop.
+const CRDT_WRITE_BACKOFF_POLICY: agent_doc_document_realtime::convergence_gate::CrdtWriteBackoff =
+    agent_doc_document_realtime::convergence_gate::CrdtWriteBackoff::new(
+        CRDT_WRITE_BACKOFF_INITIAL_MS,
+        CRDT_WRITE_BACKOFF_MAX_MS,
+    );
 const CRDT_ACK_REPLAY_SIGNAL_INTERVAL_MS: u64 = 250;
 #[cfg(test)]
 const CRDT_ACK_FORCE_REFRESH_AFTER_MS: u64 = 500;
@@ -1814,6 +1820,10 @@ pub fn apply_canonical_replace_if_attached(
     // reason to abandon an already-accepted compact/finalize mutation.
     let mut deadline = DeadlineCore::new(CRDT_WRITE_CONVERGENCE_TIMEOUT_MS);
     let mut backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
+    // `#crdtcasraced`: the canonical hash of the last non-converged apply, so the
+    // backoff policy can tell a write that is genuinely advancing from one that
+    // is re-applying against a moving frontier and racing forever.
+    let mut last_applied_hash: Option<String> = None;
     let mut pending_target: Option<String> = None;
     let mut pending_write: Option<agent_doc_crdt_relay_io::CpcRelayWrite> = None;
     let mut ack_recovery = AckRecoveryState::default();
@@ -2167,9 +2177,17 @@ pub fn apply_canonical_replace_if_attached(
                             Ok(Some(relay_write)) => {
                                 wait_state = CrdtConvergenceState::DeliveryAckPending;
                                 pending_target = Some(effective_target);
+                                // `#crdtcasraced`: an apply is only progress if it
+                                // actually moved the canonical content. Resetting the
+                                // floor on every apply kept a contended write pinned at
+                                // 25ms for the whole 60s budget (~2400 merge+CAS
+                                // attempts, each worsening the contention it retried).
+                                let advanced =
+                                    last_applied_hash.as_deref() != Some(relay_write.content_hash.as_str());
+                                last_applied_hash = Some(relay_write.content_hash.clone());
+                                backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, advanced);
                                 pending_write = Some(relay_write);
                                 ack_recovery.reset();
-                                backoff_ms = CRDT_WRITE_BACKOFF_INITIAL_MS;
                             }
                             Err(err) => {
                                 let detail = format!("{err:#}");
@@ -2221,7 +2239,7 @@ pub fn apply_canonical_replace_if_attached(
         if !sleep_for.is_zero() {
             std::thread::sleep(sleep_for);
         }
-        backoff_ms = backoff_ms.saturating_mul(2).min(CRDT_WRITE_BACKOFF_MAX_MS);
+        backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, false);
     }
 }
 

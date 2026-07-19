@@ -111,12 +111,44 @@ Worth knowing before choosing: `op_log` **already has** a `(document_path, lampo
 **What this does not solve.** Telemetry facts have no consumer to ack — nobody ever says "I have seen `document_authority_observed` through version N". So `document_authority_observed` and `crash_recovery_markers` keep count caps regardless. The end state is one generic watermark rule plus two caps, not zero rules.
 
 **Sequencing.** Queued as `#retentionversion` immediately before `#fmgc`, because the version column is mechanical, testable in isolation, and useful on its own — whereas the ack table plus liveness eviction is where the real design risk sits. Doing them as one item would mean landing the risky half to get the safe half.
-<!-- agent:boundary:f94dc4db -->
+/goal agent-doc did not add #retentionversion or #fmgc to the backlog or queue. Fix this issue. Also implement #retentionversion + #fmgc.
+
+### Re: do [#sk47] + declarative schema sync instead of migrations — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#sk47]
+
+**`#sk47` shipped** (`b4fb7aea9`). `state_events` now carries `document_version`, assigned in the same statement as the insert — SQLite serializes writers, so the `MAX + 1` subquery and the insert cannot interleave with another connection's append; there is no read-modify-write window to lose. Deliberately *not* unique-constrained: `INSERT OR IGNORE` targets `event_id`, and a second unique index could silently drop a legitimate event instead of the intended duplicate.
+
+One property worth pinning, because it looks like a bug and is not: the sequence is monotonic and unique per document but **not gapless**. Retention deletes superseded rows and leaves holes — the live ledger shows one document at 5,397 rows with a high-water mark of 5,408. A watermark only ever asks "at or below version N", so holes are irrelevant to it, and renumbering to close them would move rows *below* a version a peer had already acked. That is the exact corruption the column exists to prevent, so the reasoning is documented at the site.
+
+Verified on a `.backup` of the live 12,424-row / 20-document ledger: every row assigned, versions unique per document, **zero ordering violations** against `id` order. `make check` green — 7666 run, 7666 passed, 240 skipped. Retention rules still key off `id`; flipping them is `#fmgc`'s job.
+
+### On declarative schema sync — the concern is right, but the diagnosis needs splitting
+
+**The mature tools in this space are Go, not Rust.** [sqldef](https://github.com/sqldef/sqldef) (plain SQL DDL in, diff and apply out) and [Atlas](https://atlasgo.io/getting-started/sqlite-declarative-sql) (schema-as-code, HCL or SQL) both do exactly what you are describing and both support SQLite. On the Rust side I found [`sqlmodel-schema`](https://docs.rs/sqlmodel-schema/latest/sqlmodel_schema/) (diff engine comparing desired vs. actual) and [`database-schema`](https://docs.rs/database-schema/latest/database_schema/) (Rails-style schema dump), plus `diesel migration generate --diff-schema` and the experimental `sqlx database diff` — but I have no operational confidence in the two small crates and would not put the authoritative ledger behind them on my say-so. [David Rothlis's writeup](https://david.rothlis.net/declarative-schema-migration-for-sqlite/) is the clearest description of the pattern if we end up hand-rolling it.
+
+**The SQLite-specific catch is the one that matters here.** SQLite's `ALTER TABLE` only really does `ADD COLUMN` and `RENAME` (plus a limited `DROP COLUMN` since 3.35). Everything else requires the [12-step table rebuild](https://www.sqlite.org/lang_altertable.html): create a new table, copy rows, drop, rename. So on SQLite a declarative differ is a *table-rewriting* tool for most changes — and this codebase holds "state.db is the authoritative state-machine ledger; never replace it on the normal execution path" as a hard invariant, precisely so captured intent cannot be silently discarded. A differ that rebuilds `state_events` at startup is in direct tension with that. It is not disqualifying, but it is the thing to design against rather than discover.
+
+**And the accumulation problem is smaller than it looks, because this codebase mostly already does what you want.** There is no numbered migration directory. What exists is:
+
+- **22 `CREATE TABLE IF NOT EXISTS`** plus **12 `ensure_column` calls** — idempotent, self-converging DDL. This is already declarative in effect: it states the desired shape and converges to it, it just does not *diff*, so it can only ever add.
+- **2 rows in `state_schema_migrations`** — `retire_pending_response_fact_variants_v1` and my `backfill_state_event_document_version_v1`.
+
+Those two are the point. Neither is a schema change a differ could generate: one **deletes rows** whose fact variants left the ABI, the other **computes data** (numbering existing events in replay order). No schema-diffing tool infers either from a table definition. So adopting one would not eliminate the ledger — it would split maintenance across two mechanisms, declarative for DDL and a once-only ledger for data, where today there is one.
+
+My recommendation, in order of value:
+
+1. **Consolidate the DDL into one canonical schema declaration** rather than 22 scattered `CREATE TABLE IF NOT EXISTS` blocks plus 12 `ensure_column` calls. That captures most of what you want — one place that states the truth — with no new dependency and no table rewriting.
+2. **Keep the once-only ledger strictly for data migrations**, and treat it as **prunable**. This is the actual answer to "accumulating for the life of the project": once no supported version predates a migration, delete the record *and its code*. A data migration is not permanent; it has a support floor. Two entries is not a burden, and the discipline keeps it that way.
+3. **Revisit a differ only if the DDL genuinely starts needing destructive changes** (column type changes, drops). We have not needed one yet — every schema change so far has been additive, which is exactly the subset `ensure_column` already handles safely.
+<!-- agent:boundary:8efa8e27 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#sk47]
+- ~~do [#sk47]~~
 - do [#fmgc]
 - do [#eqmvscroll]
 - do [#0dsr]
@@ -163,7 +195,6 @@ Worth knowing before choosing: `op_log` **already has** a `(document_path, lampo
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#sk47] Phase 1 of the watermark work (id=retentionversion), prerequisite for the per-peer ack watermark item directly below. Give `state_events` a first-class monotonic version column per document instead of the three ad-hoc encodings retention parses today: `id` (per-database AUTOINCREMENT, NOT peer-comparable), version smeared into `event_id` strings (`turn-intent-checkpoint:<doc>:<cycle>:561:<hash>` sequence, `document-authority-<doc>-1784424488871912-<src>` micros, `crdt-recovery:<doc>:17:<hash>` generation), and `payload_json` fields (`model_revision`, `intent_id`/`target_hash`). Land this ALONE and testable before the ack table — it is mechanical and it is what lets the six fact-specific retention rules collapse into one generic delete-below-watermark. Substrate note: `op_log` already has a `(document_path, lamport, actor)` clock, but live data is 1120 rows / lamport 1-323 / a SINGLE actor 'user', so it is a single-writer counter today, not a multi-actor clock — extend it with actor discipline rather than introducing a second ULID scheme, but do not assume it is ready as-is.
 - [ ] [#fmgc] Per-peer ack watermark for replay-state retention (#retentionwatermark). Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: `reliable_sync_outbox_cursor`/`reliable_sync_inbox_cursor` are `PRIMARY KEY (document_hash)` holding ONE scalar `acked_through` — there is no per-peer ack vector to take a MIN over, and `reliable_sync_liveness_journal.source_key` is a document hash, not a peer id. Needs: (a) a `(document_hash, peer_key)` ack table keyed by the PID-scoped editor registration; (b) retention keyed off `MIN(acked_version)` across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps stay as a backstop rather than being replaced. `PushChannel::flush` (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via `outbox.ack_through(ack)`; generalize that, do not rebuild it.
 - [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.
 - [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean

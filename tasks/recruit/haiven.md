@@ -336,14 +336,52 @@ The one place I'd genuinely spend complexity is activity-tiered *policy downgrad
 **Repo state:** `05d4bf1`, clean, nothing unpushed — the earlier `31d0871`/`9ee0b04`/`dc12bc0` note was from a response that never landed (see below).
 
 **Session note:** preflight was wedged on a 2-day-old orphaned response (2026-07-17) that failed the replay guard — it carried both `patch:status` and `patch:exchange` markers, which classifies as a full-document dump. Its content was stale (claimed unpushed commits that are now merged and clean), so I answered from the live probe instead. Blocked payload is preserved at `.agent-doc/repair-blocked/`. Also: `agent:queue` still carries the `go` marker while frontmatter says `queue: start`; `go` wins, so heads will auto-drain if any becomes drainable.
-<!-- agent:boundary:573c7397 -->
+
+### Re: #activepri — activity-banded fan-out, implemented — opus-4-8
+
+Done, `205f7a0`. 212 tests pass, vet clean, race-clean.
+
+**The trap I warned about last cycle was real in this codebase**, and it would have made the whole feature a silent no-op:
+
+`Feed` bumps `lastActivity` on *any* inbound bytes — pongs included (`hub/conn.go`, and the comment at the `OpPong` case says so explicitly: *"a pong proves liveness; lastActivity already bumped"*). That field answers **"is this socket alive"**. Band on it and every ping-answering client reads as active forever — which is precisely the population the feature exists to catch. Nothing would have failed; the numbers just wouldn't have moved.
+
+So the band reads a separate signal, `lastClientFrame`, bumped only in `onMessage` once a complete application message decodes. That's the closest thing to *"a human did something"* the hub can observe without trusting a client-reported focus signal. There's a regression test that demotes a conn through five minutes of pong-only traffic — it fails loudly if anyone ever repoints banding at `lastActivity`.
+
+## What landed
+
+**Hysteresis came out structural rather than tuned.** I'd proposed promote-at-30s / demote-at-120s, but promotion is event-driven — any application frame promotes immediately — and demotion is sweep-driven after `InactiveAfter` of silence. That's already asymmetric, so re-demotion always costs another full silent window and a conn can't flap. One threshold instead of two, and no clock read on the delivery path: the band is a latched atomic, maintained at the edges, read with a single `Load()`.
+
+**Suppression is gated on repair, which resolves the `#friendsnapshot` ordering problem.** Rather than blocking this on that item, suppression is simply disabled unless a `Snapshotter` is installed. No snapshotter → ordering only, zero behavior change. That inverts the dependency: `#friendsnapshot` becomes the thing that *unlocks* the valuable half instead of the thing that blocks the work. `Snapshotter` is the interface it has to satisfy — one method, and its contract forbids blocking, since it's called from the poller goroutine that owns the promoting connection.
+
+**Staleness is a per-class bit, not a per-entity set.** This is the part I'd have gotten wrong without thinking about it: remembering *which* entities a nobody-is-watching client missed is memory linear in entity count for exactly the connections you're trying to stop spending on — it would have quietly reintroduced the unbounded per-conn growth the friend-frame work removed. One `uint64` mask, promotion asks the state owner for that class wholesale, which is the same snapshot-on-resume query §6.1 already needs after a reconnect.
+
+**Ordering is stable.** `partitionActiveFirst` preserves relative order within each band and returns the input untouched when everything is active (the common case, zero work). Arbitrary reordering would make delivery counts and latency traces irreproducible between load-test runs — and the load-test numbers are the argument, so that mattered more than the last few percent.
+
+## Cost, honestly
+
+**+24 B/conn — 224 → 248 B struct, ~3% of the 740 B/conn headline.** I measured both sides rather than estimating (stash, `unsafe.Sizeof`, restore). That buys dropping presence/typing fan-out to idle clients entirely, so it pays for itself the moment a meaningful share of a topic is idle — but it is a real regression against the number the submission leads with, and it should be quoted with the tradeoff attached rather than buried.
+
+Two safety properties that are asserted, not assumed:
+- **Event-like classes are never suppressible.** A suppressed chat message is a lost chat message and no snapshot brings it back. `SuppressWhenIdle` is on presence and typing only, and a test pins that chat reaches an idle client.
+- **Class indices are stable across policy overrides.** Re-`Set`ting a class keeps its mask bit, or a connection's in-flight stale mask would start pointing at a different class. Also tested.
+
+`InactiveAfter` defaults to 2 minutes and is deliberately far longer than the read deadline: the read deadline asks *is this socket dead*, this asks *is anyone looking*, and answering the second too eagerly bills a snapshot round-trip to a user who merely paused to read. Zero disables banding entirely.
+
+DESIGN.md §4.4 documents it, including the +24 B and the pongs trap.
+
+## What I did not do
+
+`#fanoutpri` (the two-band send queue) is still open and still the weaker of the two ideas — it resequences work where this removes it. Worth doing if you want the pair, but it earns less.
+
+**And the caveat from last cycle stands:** the brief says limit AI use and judges your reasoning. This is a working implementation you can point at, but the design-decision log entry — *pongs make liveness the wrong signal for engagement* — is the part that's worth anything in the write-up, and that's yours to write.
+<!-- agent:boundary:cf7e139e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- do [#fanoutpri]
 - do [#activepri]
+- do [#fanoutpri]
 - 📌 **Throughput unaffected:** ~3.3–3.6 M/s framed vs ~3.6 M/s unbounded. (One 1.59 M/s outlier was noise; reruns gave 3.60/3.58.)
 - ⏭️ /goal Implement backlog item(s): #b10a
 - ⏭️ /goal Implement backlog item(s): #yyzn

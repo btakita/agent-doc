@@ -1442,7 +1442,15 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             }
         }
     }
-    let exchange_prompt_preempts_queue = !user_intent_prompt_changes.is_empty();
+    // `#qgoalstall`: only a prompt authored OUTSIDE the active queue preempts the
+    // drain. An operator adding a directive to `agent:queue` under go mode is
+    // queueing work, not competing with the queue, and must not stall it.
+    let exchange_prompt_preempts_queue =
+        agent_doc_workflow::session_cycle::prompt_changes_preempt_queue(
+            &user_intent_prompt_changes,
+            queue_state.queue_active == Some(true),
+            &queue_state.queue_prompts,
+        );
 
     // #codex-owned-pane-prompt-miss-followups: surface a structured owner-pane
     // self-invocation contract so Codex guidance can drive an in-pane response

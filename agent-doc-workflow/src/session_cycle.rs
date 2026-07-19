@@ -111,6 +111,53 @@ pub fn compute_user_intent_prompt_changes(
         .collect()
 }
 
+/// Normalize a queue-head-shaped line so an operator-authored queue addition and
+/// the queue head the binary reports for it compare equal.
+fn normalized_queue_head_text(text: &str) -> String {
+    let trimmed = text.trim();
+    let without_bullet = trimmed
+        .strip_prefix("- ")
+        .or_else(|| trimmed.strip_prefix("-\t"))
+        .unwrap_or(trimmed);
+    agent_doc_element_queue::strip_priority_markers(without_bullet.trim())
+        .trim()
+        .to_string()
+}
+
+/// Whether this cycle's user-intent prompt changes preempt an active queue drain.
+///
+/// `#qgoalstall`: a prompt-bearing change that IS an active queue head is queue
+/// *continuation*, not an exchange prompt competing with the queue. The operator
+/// adding a directive **to `agent:queue`** while go mode is active is asking for
+/// more queued work, so it must not drop `queue_continuation_required` and stall
+/// the drain — only a prompt typed outside the queue preempts.
+///
+/// `change_is_managed_state_only` cannot make this call on its own: it is
+/// text-shape-based and only recognizes `- do ...` heads, so every **free-text**
+/// queue head (`- /goal ...`, `- JB Run Agent Doc still stalls ...`) fell through
+/// as fresh exchange intent and silently halted go mode.
+pub fn prompt_changes_preempt_queue(
+    user_intent_prompt_changes: &[agent_doc_diff::PromptBearingChange],
+    queue_active: bool,
+    queue_prompts: &[String],
+) -> bool {
+    if user_intent_prompt_changes.is_empty() {
+        return false;
+    }
+    if !queue_active {
+        return true;
+    }
+    let heads: std::collections::HashSet<String> = queue_prompts
+        .iter()
+        .map(|prompt| normalized_queue_head_text(prompt))
+        .filter(|prompt| !prompt.is_empty())
+        .collect();
+    user_intent_prompt_changes.iter().any(|change| {
+        let normalized = normalized_queue_head_text(&change.text);
+        normalized.is_empty() || !heads.contains(&normalized)
+    })
+}
+
 /// Derive the turn-scope manifest for prompts answered by this cycle.
 ///
 /// The queue driver is resolved from prompt target ids, while the exchange tail
@@ -605,6 +652,76 @@ fn extract_hashtag_tokens(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#qgoalstall`: the live stall this fixes. The operator added a free-text
+    /// directive to `agent:queue` while go mode was active. It is not a `- do ...`
+    /// head, so `change_is_managed_state_only` let it through as fresh exchange
+    /// intent, `exchange_prompt_preempts_queue` went true, and
+    /// `queue_continuation_required` was forced false — the drain stalled with 10
+    /// drainable heads still queued.
+    #[test]
+    fn a_free_text_head_added_to_the_active_queue_does_not_preempt_the_drain() {
+        let queue_prompts = vec![
+            "/goal Fix all contributing factors to queue go mode stall".to_string(),
+            "do [#fr79backfill]".to_string(),
+        ];
+        let changes = vec![prompt_change(
+            "- /goal Fix all contributing factors to queue go mode stall",
+        )];
+
+        assert!(
+            !prompt_changes_preempt_queue(&changes, true, &queue_prompts),
+            "an operator queueing more work must not stall the queue"
+        );
+    }
+
+    /// The queue head the operator authored and the head the binary reports for
+    /// it differ by bullet and priority markers; both must still compare equal.
+    #[test]
+    fn queue_head_matching_ignores_bullet_and_priority_markers() {
+        let queue_prompts = vec!["do [#fr79backfill]".to_string()];
+        let changes = vec![prompt_change("- 📌 do [#fr79backfill]")];
+
+        assert!(!prompt_changes_preempt_queue(&changes, true, &queue_prompts));
+    }
+
+    /// The fix is not a blank cheque: a prompt typed OUTSIDE the queue is real
+    /// exchange intent and still takes precedence over the drain.
+    #[test]
+    fn a_prompt_outside_the_queue_still_preempts_the_drain() {
+        let queue_prompts = vec!["do [#fr79backfill]".to_string()];
+        let changes = vec![prompt_change("Actually, stop and explain the design first.")];
+
+        assert!(
+            prompt_changes_preempt_queue(&changes, true, &queue_prompts),
+            "a real mid-turn user prompt must still preempt the queue"
+        );
+    }
+
+    /// With no active queue there is nothing to preempt *into* — any user intent
+    /// is ordinary exchange work.
+    #[test]
+    fn an_inactive_queue_leaves_preemption_to_user_intent_alone() {
+        assert!(prompt_changes_preempt_queue(
+            &[prompt_change("do something")],
+            false,
+            &[]
+        ));
+        assert!(!prompt_changes_preempt_queue(&[], false, &[]));
+    }
+
+    /// A mixed cycle — one queued head plus one genuine exchange prompt — must
+    /// preempt, because the exchange prompt deserves precedence.
+    #[test]
+    fn a_mixed_cycle_preempts_on_the_non_queue_prompt() {
+        let queue_prompts = vec!["do [#fr79backfill]".to_string()];
+        let changes = vec![
+            prompt_change("- do [#fr79backfill]"),
+            prompt_change("wait, hold off on that one"),
+        ];
+
+        assert!(prompt_changes_preempt_queue(&changes, true, &queue_prompts));
+    }
 
     fn prompt_change(text: &str) -> agent_doc_diff::PromptBearingChange {
         agent_doc_diff::PromptBearingChange {

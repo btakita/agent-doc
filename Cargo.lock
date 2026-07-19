@@ -595,6 +595,7 @@ version = "0.35.6"
 dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-element-queue",
  "agent-doc-frontmatter",
  "agent-doc-markdown-ast",
  "agent-doc-prompt-lines",
@@ -2595,6 +2596,7 @@ version = "0.35.6"
 dependencies = [
  "agent-doc-diff",
  "agent-doc-element-backlog",
+ "agent-doc-element-queue",
  "agent-doc-frontmatter",
  "agent-doc-hash",
  "agent-doc-markdown-ast",

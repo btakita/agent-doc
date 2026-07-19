@@ -12802,6 +12802,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
     for expected in [
         "agent-doc-diff",
         "agent-doc-element-backlog",
+        "agent-doc-element-queue",
         "agent-doc-frontmatter",
         "agent-doc-hash",
         "agent-doc-markdown-ast",
@@ -12824,6 +12825,7 @@ fn test_agent_doc_workflow_owns_cross_cutting_workflow_kernel() {
             dependency.as_str(),
             "agent-doc-diff"
                 | "agent-doc-element-backlog"
+                | "agent-doc-element-queue"
                 | "agent-doc-frontmatter"
                 | "agent-doc-hash"
                 | "agent-doc-markdown-ast"

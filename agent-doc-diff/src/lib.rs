@@ -142,6 +142,7 @@ use serde::{Deserialize, Serialize};
 use similar::{ChangeTag, TextDiff};
 
 use agent_doc_element::element;
+use agent_doc_element_queue as element_queue;
 use agent_doc_prompt_lines::{
     APPROVAL_WORDS, line_looks_like_fresh_prompt_after_response,
     line_looks_like_markdown_list_item, line_looks_like_plain_response_after_prompt,
@@ -1293,8 +1294,34 @@ fn line_is_managed_state_only(line: &str) -> bool {
     {
         return true;
     }
-    // Queue body lines: `- do ...`, `- ~do ...~` (strikethrough)
-    if trimmed.starts_with("- do ") || trimmed.starts_with("- ~do ") {
+    // Queue body lines: `- do ...`, `- ~do ...~` / `- ~~do ...~~` (strikethrough).
+    //
+    // `#qgoalstall`: markdown strikethrough is `~~`, which is what the queue
+    // actually renders (`- ~~do [#id]~~`) and what an operator types to strike a
+    // head. Matching only the single-tilde form let every real strike fall
+    // through as fresh user intent and preempt the go-mode drain. Priority
+    // markers (`📌`/`⏭️`/`🚧`) may precede the directive, so compare against the
+    // marker-stripped line rather than the raw prefix.
+    // Strikethrough tildes and priority markers can nest in either order
+    // (`- ~~📌 do ...~~` as well as `- 📌 ~~do ...~~`), so peel both to a fixed
+    // point instead of assuming one layout.
+    let mut queue_body = trimmed.strip_prefix("- ").unwrap_or(trimmed).trim().to_string();
+    loop {
+        let peeled = element_queue::strip_priority_markers(queue_body.trim_start_matches('~').trim())
+            .trim()
+            .to_string();
+        if peeled == queue_body {
+            break;
+        }
+        queue_body = peeled;
+    }
+    // Only the **item alias** form carries the `do ` prefix (`do [#id]`). A
+    // free-text operator head may legitimately begin with "do " ("do the refactor
+    // now") and must stay fresh user intent, so match the alias, not the verb.
+    if queue_body
+        .strip_prefix("do ")
+        .is_some_and(|rest| rest.trim_start().starts_with("[#"))
+    {
         return true;
     }
     // Backlog/review/done item lines: `- [ ] [#id] ...`, `- [/]`, `- [x]`, `- [-]`
@@ -4925,6 +4952,42 @@ Done.\n\
             PromptBearingChangeKind::PromptTarget,
             "- ~do [#consumed]~"
         )));
+    }
+
+    /// `#qgoalstall`: markdown strikethrough is `~~`, and that is the form the
+    /// queue actually renders. Matching only `- ~do ` let every real strike read
+    /// as fresh user intent, which preempted and stalled the go-mode drain.
+    #[test]
+    fn change_is_managed_state_only_accepts_double_tilde_and_prioritized_queue_strikes() {
+        for line in [
+            "- ~~do [#consumed]~~",
+            "- ~~📌 do [#consumed]~~",
+            "- 📌 do [#pinned]",
+            "- ⏭️ do [#deferred]",
+            "- 🚧 do [#inprogress]",
+        ] {
+            assert!(
+                change_is_managed_state_only(&pbc(PromptBearingChangeKind::PromptTarget, line)),
+                "queue bookkeeping must not read as fresh user intent: {line}"
+            );
+        }
+    }
+
+    /// Only the item **alias** carries the `do ` prefix. A free-text operator
+    /// head that happens to start with the verb "do" is real intent and must not
+    /// be swallowed as queue bookkeeping.
+    #[test]
+    fn change_is_managed_state_only_rejects_free_text_heads_beginning_with_do() {
+        for line in [
+            "- do the refactor now",
+            "- do not ship this yet",
+            "- ~~do the refactor now~~",
+        ] {
+            assert!(
+                !change_is_managed_state_only(&pbc(PromptBearingChangeKind::ContentEdit, line)),
+                "free-text head must stay user intent: {line}"
+            );
+        }
     }
 
     #[test]

@@ -3397,6 +3397,30 @@ mod tests {
         }
     }
 
+    /// `#17jk`: an ordered list of free-text leaves already executes in order —
+    /// no dependency edges required.
+    ///
+    /// The item frames id-less free-text leaves as unable to "compile to
+    /// dependency edges at all", which is true, but for the driving use case
+    /// (`#dagdraingate`/`#queuenest` ordered lists) edges are not what provides
+    /// the ordering: the queue drains in document order, and the DAG sort
+    /// returns `None` here precisely because there is nothing to reorder.
+    ///
+    /// Pinned so a future `after=` syntax addition is justified by a real
+    /// cross-reference need rather than by an ordering problem that does not
+    /// exist.
+    #[test]
+    fn ordered_free_text_leaves_execute_in_document_order_without_edges() {
+        let entries = parse("- first step\n- second step\n- third step\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let deps = std::collections::HashMap::new();
+        assert!(
+            sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
+                .is_none(),
+            "ordered free-text leaves need no reordering; document order is the order"
+        );
+    }
+
     #[test]
     fn dag_cycle_does_not_drop_prompts() {
         // a after b, b after a → cycle; both still emitted (priority order).

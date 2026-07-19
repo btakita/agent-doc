@@ -85,7 +85,7 @@ Restructured to order the phases explicitly rather than hope: the caller signals
 Verified rather than assumed: 6 consecutive full-crate runs green (195 passed each), and the **full workspace suite now reports zero FAILED results** — first clean run this session. Committed and pushed as `b235d03ce`.
 
 Worth noting for `#ensurereplicagen`: with the suite clean, a red `make check` is now a real signal again, which it was not while these two were flapping.
-<!-- agent:boundary:a7a05e27 -->
+<!-- agent:boundary:56a65020 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -98,7 +98,7 @@ Worth noting for `#ensurereplicagen`: with the suite clean, a red `make check` i
 - ~~do [#staleplugindeploy]~~
 - ~~do [#jblocalhistverify]~~
 - ⏭️ do [#patchretryidem]
-- do [#mtds]
+- ⏭️ do [#mtds]
 - 🚧 equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
 - do [#queuecontmirror]
 - ⏭️ do [#ensurereplicagen]

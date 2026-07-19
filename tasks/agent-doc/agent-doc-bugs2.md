@@ -39,11 +39,59 @@ done
 Compacted content:
 - Archived 5 response topic(s): do [#eqmv]; state.db GC + binary-owned reconciliation; automatically prune the retained state; 2 more
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): #px82 / #bn41
-<!-- agent:boundary:c17bd776 -->
+
+### Re: replay-state lifetime, reap triggers, and a peer watermark — opus-4-8
+
+**Nothing is kept by time.** There is no age-based expiry anywhere in the ledger. Every rule is either a supersession cap or a watermark, and the trigger is simply *any process opening the ledger*.
+
+**What triggers a reap.** `open_state_db` → `initialize_state_db` → `run_state_event_retention_if_due`. The first open of a given database in a process always prunes; after that, at most once per 15 minutes for that database. `agent-doc gc` (and the once-a-day preflight auto-gc) runs the same pass plus `reclaim_state_db_free_space` — worth separating, because pruning frees SQLite *pages* but only `VACUUM` returns them to the filesystem, and it needs ≥25% of the file reclaimable before it will rewrite.
+
+**What each rule actually keeps:**
+
+| state | rule |
+|---|---|
+| `response_captured` | newest **3** per document |
+| `turn_intent_checkpointed` | newest 2 per document |
+| `document_baseline_checkpointed` | newest 2 per document |
+| `crdt_recovery_projection_checkpointed` | newest 2 per document |
+| `visible_write_commit_candidate_observed` | newest per *(document, candidate hash)* |
+| `document_write_deferred` | **watermark** — everything at or below the newest converged intent |
+| `document_authority_observed` | newest 5,000 globally |
+| `crash_recovery_markers` | newest 20,000 |
+
+So for the state that actually matters to replay: an **unconverged write intent is kept indefinitely** — no cap, no timer. It is dropped when its ACK arrives, never because it got old. Convergence is the reap trigger, which is the property you want.
+
+### Yes — and that is the right generalization
+
+The watermark rule is already the one I trust most, and `#deferredintentretention` is a degenerate single-peer instance of exactly what you are describing. `PushChannel::flush` (`agent-doc-reliable-sync-io/src/push.rs:90`) does it explicitly: push a frame, prune the outbox through the ack the transport returns, retain-and-stop on failure. Moving the baseline up and deleting everything below it beats a count cap, because a count cap is a guess about how much history someone might need while a watermark is a *proof* that nobody needs it.
+
+**The blocker is in the schema, and I checked rather than assumed.** `reliable_sync_outbox_cursor` and `reliable_sync_inbox_cursor` are both `PRIMARY KEY (document_hash)` holding a single scalar `acked_through`. One cursor per document, not per peer — so there is nothing to take a `MIN` over. `reliable_sync_liveness_journal.source_key` looks like a peer identity but is not; its values are document content hashes (they match the `.agent-doc/baselines/*.md` filenames).
+
+Making it min-across-peers needs three things, and the third decides whether it is safe:
+
+1. A `(document_hash, peer_key)` ack table, with `peer_key` being the PID-scoped editor registration.
+2. Retention keyed off `MIN(acked_version)` across peers.
+3. **A liveness eviction rule.** A crashed IDE that never acks would pin the watermark forever and stop retention *entirely* — unbounded growth, which is worse than the count caps we have now. So a peer must drop out of the `MIN` once its registration lease expires, and the count caps stay as a backstop rather than being replaced by the watermark.
+
+Queued as `#retentionwatermark` with that design and a pointer to the existing single-consumer implementation to generalize rather than rebuild.
+
+### Also fixed this cycle — two holes in the periodic pass itself
+
+Your first question is what exposed them.
+
+**The interval stamp was process-global.** A single process opens more than one project's `state.db` — the cross-project controller sweeps walk every project root in one run — so the first project consumed the window and every other project went unpruned. That is the *same* one-prune-per-process gap I set out to close two commits ago, just sliced by project instead of by time. It is now keyed by database path.
+
+**`crash_recovery_markers` still had its own once-per-process latch** — the table whose 11.5M-row / 3.5GB blowup on a long-lived controller is documented at its own retention site. Same append-mostly trail, same long-lived-writer failure mode; it now runs on the same interval.
+
+The regression test seeds an over-cap database, clones the *file* into two fresh project roots, and asserts the second still prunes despite the first having just claimed a window. Seeding before the first open matters — my first attempt inserted the rows *after* `open_state_db` and passed for the wrong reason, since retention had already run before the rows existed.
+
+`make check` green: 7664 tests run, 7664 passed, 240 skipped. Committed `2f8930bac`, pushed, installed. The controller had exited during this cycle, so the response write initially failed with `editor_attached_model_missing`; recovered non-destructively via `session restart-supervisor` rather than `--force-disk`.
+<!-- agent:boundary:b36952f6 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#fmgc]
 - do [#eqmvscroll]
 - do [#0dsr]
 - do [#17jk]
@@ -89,6 +137,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#fmgc] Per-peer ack watermark for replay-state retention (#retentionwatermark). Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: `reliable_sync_outbox_cursor`/`reliable_sync_inbox_cursor` are `PRIMARY KEY (document_hash)` holding ONE scalar `acked_through` — there is no per-peer ack vector to take a MIN over, and `reliable_sync_liveness_journal.source_key` is a document hash, not a peer id. Needs: (a) a `(document_hash, peer_key)` ack table keyed by the PID-scoped editor registration; (b) retention keyed off `MIN(acked_version)` across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps stay as a backstop rather than being replaced. `PushChannel::flush` (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via `outbox.ack_through(ack)`; generalize that, do not rebuild it.
 - [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.
 - [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean
 - [ ] [#17jk] Give free-text queue/backlog leaves stable ids so they can be after= targets (#dagdraingate/#queuenest gap found in plan review): after= targets resolve only through ids (id_to_idx built from entry_do_id, document_queue.rs:1271-1276; collect_after_deps reads only tracked items, backlog_sync.rs:341-358), so an ordered list of id-less free-text leaves cannot compile to dependency edges at all. Prefer minting ids the same way backlog items already get them over introducing HTML tags in the queue body — an HTML container would break the markdown-list model, the byte-preserving insert-only splice, and line-oriented CRDT merge

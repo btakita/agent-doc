@@ -5,30 +5,20 @@ use anyhow::Result;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-/// `#crdtpushdrain`: how often route re-requests an urgent CRDT delivery drain
-/// while the current transition stays `delivery_pending`. Bounded well under the
-/// route `max_wait` budget so a drain that applies nothing gets several attempts
-/// instead of one, while staying far coarser than the 100ms observe poll.
-const URGENT_DRAIN_RETRY_INTERVAL: Duration = Duration::from_millis(750);
+/// `#crdtpushdrain` / `#routeprogresswait` policy is shared with the preflight
+/// pre-mutation wait so both paths pull a pending delivery and reset their
+/// no-progress deadline on an advancing frontier. See `agent_doc_debounce`.
+///
+/// The JetBrains `Run Agent Doc` action writes its prompt marker into the
+/// document *first* (`active_exchange_prompt_marker ... status=applied_ack_pending`),
+/// so route then waits for the convergence of a write the same action just
+/// issued. Under load that ACK round trip can exceed a flat `debounce * 10`
+/// (5000ms), and route deferred with "Lazily current transition remained
+/// delivery_pending for 5000ms" even though the frontier was converging normally.
+use agent_doc_debounce::{SettleAction, SettleBudget, SettleDeferReason, SettleTimers};
 
-/// `#routeprogresswait`: how much longer route may wait when the Lazily frontier
-/// is *actively advancing*, as a multiple of the no-progress budget.
-///
-/// `max_wait` is the right deadline for a **wedged** transition, but it was also
-/// being applied to a healthy one. The JetBrains `Run Agent Doc` action writes
-/// its prompt marker into the document *first* (`active_exchange_prompt_marker
-/// ... status=applied_ack_pending`), so route then waits for the convergence of
-/// a write the same action just issued. Under load that ACK round trip can
-/// exceed a flat `debounce * 10` (5000ms), and route deferred with "Lazily
-/// current transition remained delivery_pending for 5000ms" even though the
-/// frontier was converging normally and reached `delivery_converged=true`
-/// moments later.
-///
-/// Observed text changing between polls is positive evidence of progress, so the
-/// no-progress timer resets on every change and only genuine stalls hit the
-/// deadline. This ceiling bounds the pathological case where the document is
-/// edited continuously and never quiesces.
-const PROGRESS_WAIT_CEILING_MULTIPLIER: u32 = 6;
+#[cfg(test)]
+const URGENT_DRAIN_RETRY_INTERVAL: Duration = agent_doc_debounce::URGENT_DRAIN_RETRY_INTERVAL;
 
 /// Wait for Lazily's current-document transition to settle.
 ///
@@ -63,7 +53,7 @@ where
     Observe: FnMut(&Path, &str) -> Result<Option<CurrentText>>,
     Signal: FnMut(&Path, CrdtReplicaEventReason, usize) -> Result<()>,
 {
-    let poll_interval = Duration::from_millis(100);
+    let poll_interval = agent_doc_debounce::SETTLE_POLL_INTERVAL;
     let start = Instant::now();
     let _ = debounce;
     let mut last_urgent_drain: Option<Instant> = None;
@@ -72,7 +62,7 @@ where
     // wall-clock alone.
     let mut last_progress = Instant::now();
     let mut last_observed: Option<String> = None;
-    let progress_ceiling = max_wait.saturating_mul(PROGRESS_WAIT_CEILING_MULTIPLIER);
+    let budget = SettleBudget::from_no_progress(max_wait);
 
     loop {
         let current = observe(file, "route_startup_current_transition");
@@ -95,11 +85,6 @@ where
             Ok(Some(CurrentText::EditorSyncPending)) => (false, "current_pending", None),
             Err(_) => (false, "authority_unavailable", None),
         };
-        if ready {
-            eprintln!("[route] Lazily current transition settled ({state})");
-            return Ok(());
-        }
-
         if observed_text.is_some() && observed_text != last_observed {
             if last_observed.is_some() {
                 last_progress = Instant::now();
@@ -107,50 +92,57 @@ where
             last_observed = observed_text;
         }
 
-        // #crdtpushdrain: re-request on a bounded cadence rather than once. A single
-        // urgent drain can legitimately apply nothing — `drainRemoteUpdatesFor`
-        // returns early while the path has pending local edits or is mid editor
-        // apply, and the forwarder may not be registered yet. Its only follow-up is
-        // the *gated* `requestRemoteDrain`, which an idle document's escalated no-op
-        // backoff suppresses, so a one-shot latch left the remaining budget polling a
-        // frontier nobody would pull and route deferred at `max_wait`.
-        let urgent_drain_due = last_urgent_drain
-            .is_none_or(|last| last.elapsed() >= URGENT_DRAIN_RETRY_INTERVAL);
-        if let Some(targets) = drain_targets.filter(|_| urgent_drain_due) {
-            last_urgent_drain = Some(Instant::now());
-            let reason = CrdtReplicaEventReason::AckRecoveryForceRefresh;
-            match signal(file, reason, targets) {
-                Ok(()) => eprintln!(
-                    "[route] requested urgent CRDT delivery drain (reason={} targets={targets})",
-                    reason.token()
-                ),
-                Err(error) => eprintln!(
-                    "[route] urgent CRDT delivery drain request failed (reason={} targets={targets} error={error:#})",
-                    reason.token()
-                ),
+        let timers = SettleTimers {
+            stalled_for: last_progress.elapsed(),
+            total_elapsed: start.elapsed(),
+            since_last_urgent_drain: last_urgent_drain.map(|last| last.elapsed()),
+        };
+        match agent_doc_debounce::settle_step(ready, drain_targets.is_some(), timers, budget) {
+            SettleAction::Ready => {
+                eprintln!("[route] Lazily current transition settled ({state})");
+                return Ok(());
             }
-        }
-
-        // `#routeprogresswait`: defer only on a genuinely stalled transition. A
-        // frontier that keeps advancing is converging — deferring it discards a
-        // healthy dispatch and makes `Run Agent Doc` fail against its own
-        // just-written prompt marker. The absolute ceiling still bounds a
-        // document that never quiesces.
-        let stalled_for = last_progress.elapsed();
-        if stalled_for >= max_wait || start.elapsed() >= progress_ceiling {
-            let detail = if start.elapsed() >= progress_ceiling && stalled_for < max_wait {
-                format!(
-                    "kept advancing without converging for {}ms (progress ceiling)",
-                    start.elapsed().as_millis()
-                )
-            } else {
-                format!("remained {} for {}ms", state, stalled_for.as_millis())
-            };
-            anyhow::bail!(
-                "route deferred for {}: Lazily current transition {}; retry after it settles",
-                file.display(),
-                detail
-            );
+            SettleAction::Defer { reason } => {
+                let detail = match reason {
+                    SettleDeferReason::ProgressCeiling => format!(
+                        "kept advancing without converging for {}ms (progress ceiling)",
+                        timers.total_elapsed.as_millis()
+                    ),
+                    SettleDeferReason::NoProgress => {
+                        format!("remained {} for {}ms", state, timers.stalled_for.as_millis())
+                    }
+                };
+                anyhow::bail!(
+                    "route deferred for {}: Lazily current transition {}; retry after it settles",
+                    file.display(),
+                    detail
+                );
+            }
+            SettleAction::Wait {
+                request_urgent_drain,
+            } => {
+                // #crdtpushdrain: re-request on a bounded cadence rather than once. A single
+                // urgent drain can legitimately apply nothing — `drainRemoteUpdatesFor`
+                // returns early while the path has pending local edits or is mid editor
+                // apply, and the forwarder may not be registered yet. Its only follow-up is
+                // the *gated* `requestRemoteDrain`, which an idle document's escalated no-op
+                // backoff suppresses, so a one-shot latch left the remaining budget polling a
+                // frontier nobody would pull and route deferred at `max_wait`.
+                if let Some(targets) = drain_targets.filter(|_| request_urgent_drain) {
+                    last_urgent_drain = Some(Instant::now());
+                    let reason = CrdtReplicaEventReason::AckRecoveryForceRefresh;
+                    match signal(file, reason, targets) {
+                        Ok(()) => eprintln!(
+                            "[route] requested urgent CRDT delivery drain (reason={} targets={targets})",
+                            reason.token()
+                        ),
+                        Err(error) => eprintln!(
+                            "[route] urgent CRDT delivery drain request failed (reason={} targets={targets} error={error:#})",
+                            reason.token()
+                        ),
+                    }
+                }
+            }
         }
 
         std::thread::sleep(poll_interval);

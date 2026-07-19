@@ -4676,6 +4676,46 @@ fn observation_is_missing_replica_family(
     }
 }
 
+/// How long a just-exhausted replica self-heal is remembered so repeated reads
+/// do not each re-pay it.
+const EDITOR_REPLICA_SELF_HEAL_BACKOFF_TTL: std::time::Duration =
+    std::time::Duration::from_secs(10);
+
+/// Files whose replica self-heal was recently exhausted without recovering.
+static EDITOR_REPLICA_SELF_HEAL_EXHAUSTED: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, std::time::Instant>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// `true` when this file's self-heal was exhausted inside the TTL, so the retry
+/// loop should be skipped and resolution should fall through immediately.
+///
+/// Reads used to BAIL when the editor could not answer, so the self-heal was
+/// paid at most once per operation. Now that reads descend to disk and the
+/// caller continues, every later read site would re-pay the full loop —
+/// measured as 3 attempts x a 6s IPC receipt timeout each, which turned a ~57s
+/// compact/commit into ~152s. Remembering a just-failed self-heal collapses
+/// that burst without weakening recovery: the TTL is short, and the binary's own
+/// asynchronous re-registration continues regardless.
+fn editor_replica_self_heal_recently_exhausted(file: &std::path::Path) -> bool {
+    let Ok(map) = EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock() else {
+        return false;
+    };
+    map.get(file)
+        .is_some_and(|at| at.elapsed() < EDITOR_REPLICA_SELF_HEAL_BACKOFF_TTL)
+}
+
+fn record_editor_replica_self_heal_exhausted(file: &std::path::Path) {
+    if let Ok(mut map) = EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock() {
+        map.insert(file.to_path_buf(), std::time::Instant::now());
+    }
+}
+
+fn clear_editor_replica_self_heal_exhausted(file: &std::path::Path) {
+    if let Ok(mut map) = EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock() {
+        map.remove(file);
+    }
+}
+
 fn reobserve_missing_editor_replica_with_reregistration(
     file: &std::path::Path,
     source: &str,
@@ -4683,6 +4723,21 @@ fn reobserve_missing_editor_replica_with_reregistration(
     observed: Result<agent_doc_crdt_relay_io::CurrentText>,
 ) -> Result<agent_doc_crdt_relay_io::CurrentText> {
     if !observation_is_missing_replica_family(file, &observed) {
+        // A healthy observation means the editor is answering again; drop any
+        // remembered exhaustion so the next failure gets a full retry.
+        clear_editor_replica_self_heal_exhausted(file);
+        return observed;
+    }
+    if editor_replica_self_heal_recently_exhausted(file) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "editor_replica_reregister_skipped file={} source={} reason=self_heal_exhausted_within_ttl ttl_secs={}",
+                file.display(),
+                source,
+                EDITOR_REPLICA_SELF_HEAL_BACKOFF_TTL.as_secs(),
+            ),
+        );
         return observed;
     }
     let attempts = editor_replica_reobserve_attempts();
@@ -4735,9 +4790,13 @@ fn reobserve_missing_editor_replica_with_reregistration(
         );
         current = reobserved;
         if !observation_is_missing_replica_family(file, &current) {
+            clear_editor_replica_self_heal_exhausted(file);
             return current;
         }
     }
+    // Every attempt was spent without recovering. Remember that briefly so the
+    // next read in this operation falls through instead of re-paying the loop.
+    record_editor_replica_self_heal_exhausted(file);
     current
 }
 
@@ -4888,33 +4947,180 @@ fn try_resolve_current_doc_with_disk_inner(
             record_disk_replica_authority(file, source, &disk);
             Ok(resolve_detached_current_doc(file, &disk))
         }
+        // Read-path precedence is **editor buffer, then disk** — and only those
+        // two tiers (no git tier).
+        //
+        // Both arms below mean "an editor is attached but cannot answer right
+        // now": its replica is missing, or its sync has not converged. These
+        // used to bail, which wedged every READ of the document behind a
+        // transient editor condition even though the last saved disk image was
+        // available and adequate to read.
+        //
+        // The descent is deliberately scoped to READS. Commit authority is a
+        // SEPARATE guard (`agent-doc-commit-io`, "editor is the current
+        // authority ... was not used as commit authority") and is intentionally
+        // left fail-closed: reading a slightly stale disk image is recoverable,
+        // but *committing* one while the editor holds newer unsaved text
+        // destroys operator edits — the `content_ours` clobber class the write
+        // path exists to refuse. So a read may descend to disk; a write may not.
+        //
+        // Disk is still marked a replica (`record_disk_replica_authority`), so
+        // nothing downstream mistakes this for editor-authoritative text.
         agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "realtime_doc_resolve_deferred file={} source=crdt_relay reason=missing_replica",
-                    file.display(),
-                ),
-            );
-            anyhow::bail!(
-                "document model startup/reconciliation for {} returned editor_attached_model_missing; disk is a non-authoritative replica and was not read",
-                file.display()
-            );
+            resolve_editor_unavailable_disk_read_fallback(file, disk, source, "missing_replica")
         }
         agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "realtime_doc_resolve_deferred file={} source=crdt_relay reason=sync_pending",
-                    file.display(),
-                ),
-            );
-            anyhow::bail!(
-                "document model startup/reconciliation for {} returned editor_sync_pending; disk is a non-authoritative replica and was not read",
-                file.display()
-            );
+            resolve_editor_unavailable_disk_read_fallback(file, disk, source, "sync_pending")
         }
     }
+}
+
+/// Read-path resolution when an attached editor cannot answer.
+///
+/// Precedence is `editor buffer -> disk`, with **rebuild before descent**: if an
+/// editor buffer is available, rebuild the document model from it rather than
+/// dropping a tier. Disk is the fallback for when the rebuild cannot produce a
+/// live model, not the immediate next step.
+///
+/// This matters because the editor buffer is the only tier that can hold unsaved
+/// operator text. Descending to disk on the first unavailable observation would
+/// silently read *past* edits that are still live in the editor, and a
+/// recoverable transient (a replica still registering, a sync mid-flight) would
+/// be treated as a lost tier. Rebuilding turns most of those transients back
+/// into an editor-authoritative read.
+///
+/// Used only for resolving current text. Commit authority never descends here.
+fn resolve_editor_unavailable_disk_read_fallback(
+    file: &std::path::Path,
+    disk: Option<&str>,
+    source: &str,
+    reason: &str,
+) -> Result<Reconciliation> {
+    // Tier 1 retry: rebuild the model from the live editor buffer.
+    //
+    // Two preconditions:
+    //
+    // 1. Lazily still reports the editor open — the "there is an editor buffer
+    //    available" precondition. With no editor there is nothing to rebuild
+    //    from and this is an ordinary detached read.
+    // 2. The observation is `sync_pending`. The missing-replica family is
+    //    ALREADY self-healed upstream by
+    //    `reobserve_missing_editor_replica_with_reregistration` (#bn41/#px82),
+    //    which re-registers and re-observes with backoff before we ever get
+    //    here. Rebuilding it again duplicates that work at real cost — measured
+    //    ~28s per read site, which multiplied across the several resolutions a
+    //    single compact/commit performs and pushed those tests past their
+    //    timeout. Sync-pending has no upstream self-heal, so the rebuild is the
+    //    only attempt there, and it is where it demonstrably recovers the editor
+    //    tier instead of reading past unsaved text.
+    let rebuild_eligible = reason == "sync_pending" && observe_editor_open(file);
+    if rebuild_eligible {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "realtime_doc_resolve_editor_model_rebuild_attempt file={} source={} reason={} \
+                 precedence=editor_then_disk",
+                file.display(),
+                source,
+                reason,
+            ),
+        );
+        match ensure_document_model_through_authority(file, source) {
+            Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                text,
+                live_editors,
+                delivery_converged,
+            }) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "realtime_doc_resolve_editor_model_rebuilt file={} source={} reason={} \
+                         tier=editor_buffer live_editors={} delivery_converged={}",
+                        file.display(),
+                        source,
+                        reason,
+                        live_editors,
+                        delivery_converged,
+                    ),
+                );
+                // The rebuild restored the editor tier — resolve as editor
+                // authority and never touch disk.
+                record_editor_relay_authority(file, source, &text);
+                let reconciliation = Reconciliation {
+                    authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
+                    content: text,
+                    diverged: false,
+                    reason: "crdt_relay_current",
+                };
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "realtime_doc_resolve authority={} reason={} diverged={} file={} \
+                         source=crdt_relay live_editors={} delivery_converged={} \
+                         recovery=editor_model_rebuilt",
+                        reconciliation.authority.as_str(),
+                        reconciliation.reason,
+                        reconciliation.diverged,
+                        file.display(),
+                        live_editors,
+                        delivery_converged,
+                    ),
+                );
+                return Ok(reconciliation);
+            }
+            Ok(other) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "realtime_doc_resolve_editor_model_rebuild_incomplete file={} source={} \
+                         reason={} status={}",
+                        file.display(),
+                        source,
+                        reason,
+                        current_text_status(&other),
+                    ),
+                );
+            }
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "realtime_doc_resolve_editor_model_rebuild_failed file={} source={} \
+                         reason={} error={}",
+                        file.display(),
+                        source,
+                        reason,
+                        format!("{err:#}").replace('\n', "\\n"),
+                    ),
+                );
+            }
+        }
+    }
+
+    // Tier 2: the rebuild could not restore a live model — read the disk replica.
+    let disk = match disk {
+        Some(disk) => disk.to_string(),
+        None => std::fs::read_to_string(file).with_context(|| {
+            format!(
+                "read {} from disk after the attached editor was unavailable ({reason})",
+                file.display()
+            )
+        })?,
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "realtime_doc_resolve_disk_read_fallback file={} source={} reason={} tier=disk \
+             precedence=editor_then_disk scope=read_only after_rebuild_attempt={} disk_len={}",
+            file.display(),
+            source,
+            reason,
+            rebuild_eligible,
+            disk.len(),
+        ),
+    );
+    record_disk_replica_authority(file, source, &disk);
+    Ok(resolve_detached_current_doc(file, &disk))
 }
 
 /// Resolve the detached-editor fallback path.
@@ -7583,19 +7789,46 @@ mod tests {
         );
     }
 
+    /// Read-path precedence is `editor buffer -> disk`, with no git tier.
+    ///
+    /// This previously bailed. An attached-but-unanswering editor (missing
+    /// replica) wedged every READ of the document behind a transient condition,
+    /// even though the last saved disk image was right there and adequate to
+    /// read. Reads now descend one tier.
+    ///
+    /// The invariant the old bail actually protected is preserved and asserted
+    /// below: disk must not become COMMIT authority. That is a separate guard
+    /// (`agent-doc-commit-io`), because reading a slightly stale image is
+    /// recoverable while committing one over unsaved editor text destroys
+    /// operator edits.
     #[test]
-    fn current_resolve_refuses_disk_when_editor_model_missing() {
+    fn current_resolve_falls_back_to_disk_for_reads_when_editor_model_missing() {
         let disk = "plain disk body\n";
         let (dir, file, _canonical) = temp_doc(disk);
         seed_reliable_sync_open(&file, "test-editor-authority-message");
 
-        let error = try_resolve_current_doc_from_file(&file).unwrap_err();
-        assert!(error.to_string().contains("editor_attached_model_missing"));
+        let resolved = try_resolve_current_doc_from_file(&file).unwrap();
+        assert_eq!(
+            resolved.authority,
+            agent_doc_document_realtime::DocAuthority::Disk,
+            "an unanswering editor descends to the disk replica for reads"
+        );
+        assert_eq!(resolved.content, disk);
+        // The descent is read-only: it must not write the document.
         assert_eq!(std::fs::read_to_string(&file).unwrap(), disk);
+
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            !log.contains("realtime_doc_resolve_disk_fallback"),
-            "an attached editor with a missing model must never demote to disk:\n{log}"
+            log.contains("realtime_doc_resolve_disk_read_fallback")
+                && log.contains("reason=missing_replica")
+                && log.contains("scope=read_only"),
+            "the descent must be recorded as a read-scoped disk tier:\n{log}"
+        );
+        // Disk is still recorded as a REPLICA, so nothing downstream mistakes
+        // this for editor-authoritative text.
+        assert!(
+            !log.contains("authority=editor_buffer reason=missing_replica"),
+            "the disk tier must never be labelled editor-authoritative:\n{log}"
         );
     }
 
@@ -7656,7 +7889,7 @@ mod tests {
     }
 
     #[test]
-    fn current_resolve_refuses_disk_when_editor_sync_pending() {
+    fn current_resolve_rebuilds_editor_model_when_sync_pending() {
         let disk = "plain disk body\n";
         let (dir, file, _canonical) = temp_doc(disk);
         let owner = "test-editor-authority-sync-pending";
@@ -7673,17 +7906,50 @@ mod tests {
         })
         .unwrap();
 
-        let error = try_resolve_current_doc_from_file(&file).unwrap_err();
-        assert!(error.to_string().contains("editor_sync_pending"));
+        // Rebuild BEFORE descent: an available editor buffer is rebuilt into a
+        // live model rather than dropping a tier. This is the better outcome —
+        // the editor's unconverged edit stays authoritative instead of the read
+        // silently seeing past it to a stale disk image.
+        let resolved = try_resolve_current_doc_from_file(&file).unwrap();
+        assert_eq!(
+            resolved.authority,
+            agent_doc_document_realtime::DocAuthority::EditorBuffer,
+            "a sync-pending editor with an available buffer is REBUILT, not demoted to disk"
+        );
+        // Resolution is still read-only: nothing is written to the document.
         assert_eq!(std::fs::read_to_string(&file).unwrap(), disk);
+
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            !log.contains("realtime_doc_resolve_disk_fallback"),
-            "an attached editor with a sync-pending model must never demote to disk:\n{log}"
+            log.contains("realtime_doc_resolve_editor_model_rebuild_attempt")
+                && log.contains("reason=sync_pending"),
+            "the rebuild attempt must be recorded:\n{log}"
         );
         assert!(
-            !log.contains("document_model_ensure_start"),
-            "current-doc sync-pending resolution must not enter model ensure:\n{log}"
+            !log.contains("realtime_doc_resolve_disk_read_fallback"),
+            "a successful rebuild must NOT fall through to the disk tier:\n{log}"
+        );
+    }
+
+    /// The precedence chain has exactly TWO tiers — editor buffer, then disk.
+    /// There is no git tier: a read never reaches for committed content.
+    #[test]
+    fn read_fallback_has_no_git_tier() {
+        let disk = "plain disk body\n";
+        let (dir, file, _canonical) = temp_doc(disk);
+        seed_reliable_sync_open(&file, "test-no-git-tier");
+
+        let resolved = try_resolve_current_doc_from_file(&file).unwrap();
+        assert_eq!(
+            resolved.authority,
+            agent_doc_document_realtime::DocAuthority::Disk,
+            "the descent stops at disk"
+        );
+
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !log.to_lowercase().contains("tier=git") && !log.contains("authority=git"),
+            "read resolution must never descend to a git tier:\n{log}"
         );
     }
 

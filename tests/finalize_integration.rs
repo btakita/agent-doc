@@ -543,7 +543,16 @@ fn attached_model_missing_does_not_merge_from_stale_recovery_projection() {
         )
         .assert()
         .failure()
-        .stderr(predicates::str::contains("editor_attached_model_missing"));
+        // The WRITE must still refuse — that is the invariant. Its reason moved:
+        // read resolution now descends `editor buffer -> disk` for reads, so the
+        // read no longer bails with `editor_attached_model_missing`; the refusal
+        // now comes from the write/endpoint guard, which is intentionally still
+        // fail-closed. Reads may descend a tier; writes may not. The substantive
+        // assertions below (no merge, operator text intact, HEAD unmoved, no
+        // filesystem inbox) are what actually pin the anti-clobber behaviour.
+        .stderr(predicates::str::contains(
+            "no registered Lazily editor endpoint accepted the write",
+        ));
 
     let content = fs::read_to_string(&doc).unwrap();
     assert!(

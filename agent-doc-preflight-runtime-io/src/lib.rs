@@ -644,8 +644,18 @@ mod tests {
             }]);
     }
 
+    /// Preflight's current-document resolution is a READ, so it follows the
+    /// `editor buffer -> disk` precedence and descends instead of pausing.
+    ///
+    /// This is a deliberate behavioural change from the previous pause: an
+    /// attached-but-unanswering editor no longer wedges the cycle before it
+    /// starts. The anti-clobber protection is unchanged and lives where it
+    /// belongs — commit authority (`agent-doc-commit-io`) is a separate guard
+    /// and still refuses to treat disk as authoritative while an editor is
+    /// attached. So a stale read can begin a cycle, but it cannot silently
+    /// commit over unsaved editor text.
     #[test]
-    fn preflight_missing_editor_model_pauses_without_reading_disk_authority() {
+    fn preflight_missing_editor_model_reads_disk_tier_without_pausing() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("session.md");
@@ -656,21 +666,34 @@ mod tests {
         let owner = "preflight-missing-editor-model-test";
         seed_reliable_sync_open(&file, owner);
 
-        let error = resolve_current_preflight_document(&file, "test")
-            .expect_err("an attached editor with a missing model must pause");
-        assert!(format!("{error:#}").contains("editor_attached_model_missing"));
+        let resolved = resolve_current_preflight_document(&file, "test")
+            .expect("a read descends to the disk tier instead of pausing");
+        assert!(
+            resolved.contains("body"),
+            "preflight must read the disk replica: {resolved:?}"
+        );
+
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            !ops_log.contains("realtime_doc_resolve_disk_fallback"),
-            "preflight must not demote an attached editor to disk when its model is missing:\n{ops_log}"
+            ops_log.contains("realtime_doc_resolve_disk_read_fallback")
+                && ops_log.contains("scope=read_only"),
+            "the descent must be recorded as a read-scoped disk tier:\n{ops_log}"
+        );
+        // Recover BEFORE descent. For the MISSING-REPLICA family that recovery
+        // is the upstream self-heal (`#bn41`/`#px82`), which re-registers and
+        // re-observes with backoff before resolution ever reaches the disk tier.
+        // The read-path model rebuild is deliberately NOT run again here — it
+        // would duplicate that work at ~28s per read site, which multiplied
+        // across a compact/commit's several resolutions and blew their timeout.
+        // The rebuild is scoped to sync-pending, which has no upstream self-heal
+        // (see `current_resolve_rebuilds_editor_model_when_sync_pending`).
+        assert!(
+            ops_log.contains("editor_replica_reregister_attempt"),
+            "the disk tier must be preceded by the upstream replica self-heal:\n{ops_log}"
         );
         assert!(
-            !ops_log.contains("document_model_ensure_start"),
-            "preflight current-doc reads must not enter document-model ensure:\n{ops_log}"
-        );
-        assert!(
-            !ops_log.contains("preflight_current_document_local_relay_unavailable"),
-            "preflight should report the shared authority error directly:\n{ops_log}"
+            ops_log.contains("after_rebuild_attempt=false"),
+            "missing-replica must not re-run the read-path rebuild:\n{ops_log}"
         );
     }
 

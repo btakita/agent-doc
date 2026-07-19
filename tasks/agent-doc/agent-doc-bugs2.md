@@ -57,12 +57,18 @@ Making the composer authoritative also exposed something the old footer proxy st
 **State.** `make check` green, 7687/7687. Installed, pushed as `17848a927`, supervisor marked for recycle at the next idle boundary. CI is in progress on that commit — recorded, not waited on.
 
 **I did not reroute acadian-take-home.md.** Its pane holds your unsubmitted draft, and injecting would concatenate onto it. Submit or clear `keep the uv.lock` and the reroute will go through on the fresh binary.
-<!-- agent:boundary:a4fcea86 -->
+
+### Re: consuming the acadian-take-home reroute head — opus-4-8
+
+> **Queue prompt:** JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+
+Answered in the response above: the `timed_out` was not a slow boot but the permission-mode footer masking the composer, fixed in `17848a927`. The prior echo abbreviated this prompt, so the head stayed queued — quoting it verbatim here to consume it.
+<!-- agent:boundary:11591078 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+- ~~JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt~~
 - JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.
 - equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
 - do [#bbdcompactnocommit]

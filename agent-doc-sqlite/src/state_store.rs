@@ -18,7 +18,6 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const STATE_DB_FILE: &str = "state.db";
@@ -661,9 +660,17 @@ ON queue_document_state(state_kind);
 /// process still prunes immediately.
 const STATE_EVENT_RETENTION_INTERVAL: Duration = Duration::from_secs(900);
 
-/// Monotonic millis of the last retention pass in this process, or `u64::MAX`
-/// when no pass has run yet (so the first open is always due).
-static STATE_EVENT_RETENTION_LAST_RUN_MS: AtomicU64 = AtomicU64::new(u64::MAX);
+/// Monotonic millis of the last retention pass, **keyed by database path**.
+///
+/// A single process opens more than one project's `state.db`: the cross-project
+/// controller sweeps (`reap_orphaned_preparing_controllers_all_projects`) walk
+/// every project root in one run. A process-global stamp would let the first
+/// project consume the interval window and leave every other project unpruned —
+/// the same "one process, one prune" gap this whole change exists to close, just
+/// sliced by project instead of by time. A missing entry means "never ran for
+/// this database" and is always due.
+static STATE_EVENT_RETENTION_LAST_RUN_MS: std::sync::Mutex<Option<BTreeMap<String, u64>>> =
+    std::sync::Mutex::new(None);
 
 /// Process start, used as the monotonic origin for the retention interval.
 /// `Instant` is not `const`-constructible, so the origin is created lazily.
@@ -699,18 +706,26 @@ pub fn state_event_retention_due(last_run_ms: u64, now_ms: u64, interval: Durati
 /// whole interval.
 fn run_state_event_retention_if_due(conn: &Connection) {
     let now_ms = state_event_retention_elapsed_ms();
-    let last_run_ms = STATE_EVENT_RETENTION_LAST_RUN_MS.load(Ordering::Relaxed);
-    if !state_event_retention_due(last_run_ms, now_ms, STATE_EVENT_RETENTION_INTERVAL) {
-        return;
-    }
+    // Key by database path so each project gets its own interval. `None` (an
+    // in-memory or path-less connection) shares one key, which is correct: they
+    // are all the same anonymous database from retention's point of view.
+    let key = conn.path().unwrap_or_default().to_string();
     // Claim the window before doing the work so concurrent opens in the same
     // process do not all scan `state_events` at once.
-    if STATE_EVENT_RETENTION_LAST_RUN_MS
-        .compare_exchange(last_run_ms, now_ms, Ordering::Relaxed, Ordering::Relaxed)
-        .is_err()
-    {
-        return;
-    }
+    let last_run_ms = {
+        let Ok(mut guard) = STATE_EVENT_RETENTION_LAST_RUN_MS.lock() else {
+            // A poisoned lock is a maintenance-scheduling concern only; skipping
+            // this pass is always safe, and the next open retries.
+            return;
+        };
+        let stamps = guard.get_or_insert_with(BTreeMap::new);
+        let last_run_ms = stamps.get(&key).copied().unwrap_or(u64::MAX);
+        if !state_event_retention_due(last_run_ms, now_ms, STATE_EVENT_RETENTION_INTERVAL) {
+            return;
+        }
+        stamps.insert(key.clone(), now_ms);
+        last_run_ms
+    };
     let mut clean = true;
     for (label, outcome) in [
         (
@@ -757,14 +772,24 @@ fn run_state_event_retention_if_due(conn: &Connection) {
             "document_write_deferred",
             prune_converged_document_write_intents(conn),
         ),
+        // Not a `state_events` fact, but the same retention concern and the same
+        // interval: an append-mostly audit trail on a long-lived controller.
+        ("crash_recovery_markers", prune_crash_recovery_markers(conn)),
     ] {
         if let Err(err) = outcome {
             clean = false;
             eprintln!("[agent-doc] warning: failed to prune {label} events: {err:#}");
         }
     }
-    if !clean {
-        STATE_EVENT_RETENTION_LAST_RUN_MS.store(last_run_ms, Ordering::Relaxed);
+    if !clean && let Ok(mut guard) = STATE_EVENT_RETENTION_LAST_RUN_MS.lock() {
+        // Restore the previous stamp so a transient failure retries at the next
+        // open instead of waiting out the whole interval.
+        let stamps = guard.get_or_insert_with(BTreeMap::new);
+        if last_run_ms == u64::MAX {
+            stamps.remove(&key);
+        } else {
+            stamps.insert(key, last_run_ms);
+        }
     }
 }
 
@@ -1733,9 +1758,6 @@ fn ensure_queue_head_columns(conn: &Connection) -> Result<()> {
 /// an 11.5M-row / 3.5GB table was a burst that was days, not hours, old.
 const CRASH_RECOVERY_MARKER_MAX_ROWS: i64 = 20_000;
 
-/// Guards the once-per-process `crash_recovery_markers` retention prune so the
-/// per-request `open_state_db` path does not rescan the table on every RPC.
-static CRASH_RECOVERY_MARKERS_PRUNED: AtomicBool = AtomicBool::new(false);
 
 fn ensure_crash_recovery_marker_columns(conn: &Connection) -> Result<()> {
     ensure_column(
@@ -1751,17 +1773,11 @@ fn ensure_crash_recovery_marker_columns(conn: &Connection) -> Result<()> {
         WHERE dedupe_key IS NOT NULL;
         "#,
     )?;
-    // `open_state_db` is called per request handler, so pruning on every open
-    // would rescan the table on every RPC. Prune once per process instead: the
-    // controller opens this on startup, drains the backlog, then serves cheaply.
-    // Retention is best-effort maintenance — never fail state-db open on it — but
-    // allow a later open to retry rather than latching the miss.
-    if !CRASH_RECOVERY_MARKERS_PRUNED.swap(true, Ordering::Relaxed)
-        && let Err(err) = prune_crash_recovery_markers(conn)
-    {
-        CRASH_RECOVERY_MARKERS_PRUNED.store(false, Ordering::Relaxed);
-        eprintln!("[agent-doc] warning: failed to prune crash_recovery_markers: {err:#}");
-    }
+    // Retention for this table runs in `run_state_event_retention_if_due`, on
+    // the same interval as the `state_events` passes (`#retentionperiodic`).
+    // It used to have its own once-per-process latch, which left exactly the gap
+    // this table's own 11.5M-row blowup came from: `controller serve` pruned at
+    // startup and then accumulated for the rest of its multi-day life.
     Ok(())
 }
 
@@ -4420,6 +4436,65 @@ mod tests {
                 "b-c1-r1".to_string(),
             ],
             "one row survives per (document, commit_candidate_hash): highest revision, last on a tie"
+        );
+        Ok(())
+    }
+
+    /// `#retentionperiodic`: the interval stamp is keyed by database path. A
+    /// single process opens several projects' `state.db` (the cross-project
+    /// controller sweeps walk every root), so a process-global stamp would let
+    /// the first project consume the window and leave every other project
+    /// unpruned — the same one-prune-per-process gap, sliced by project.
+    #[test]
+    fn retention_interval_is_tracked_per_database_not_per_process() -> Result<()> {
+        // Build one over-cap database, then clone the FILE into two fresh
+        // project roots. Retention runs on open, so the rows must already exist
+        // before the first `open_state_db` for each path.
+        let seed = tempfile::TempDir::new()?;
+        {
+            let conn = open_state_db(seed.path())?;
+            for i in 0..(DOCUMENT_AUTHORITY_OBSERVED_MAX_ROWS + 25) {
+                conn.execute(
+                    "INSERT INTO state_events (event_id, document_hash, domain, fact_type, payload_json, timestamp) \
+                     VALUES (?1, 'docA', 'document', 'document_authority_observed', '{}', 0)",
+                    [format!("obs-{i}")],
+                )?;
+            }
+        }
+
+        let clone_seed = |root: &Path| -> Result<()> {
+            let target = state_db_path(root);
+            std::fs::create_dir_all(target.parent().expect("state db has a parent"))?;
+            std::fs::copy(state_db_path(seed.path()), &target)?;
+            Ok(())
+        };
+        let observations = |conn: &Connection| -> Result<i64> {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM state_events WHERE fact_type = 'document_authority_observed'",
+                [],
+                |row| row.get(0),
+            )?)
+        };
+
+        let first = tempfile::TempDir::new()?;
+        let second = tempfile::TempDir::new()?;
+        clone_seed(first.path())?;
+        clone_seed(second.path())?;
+
+        // Both opens land well inside one interval. Per-database keying means the
+        // SECOND project still prunes rather than inheriting the first's
+        // freshly-claimed window.
+        let first_conn = open_state_db(first.path())?;
+        assert_eq!(
+            observations(&first_conn)?,
+            DOCUMENT_AUTHORITY_OBSERVED_MAX_ROWS,
+            "the first database is pruned to its cap on open"
+        );
+        let second_conn = open_state_db(second.path())?;
+        assert_eq!(
+            observations(&second_conn)?,
+            DOCUMENT_AUTHORITY_OBSERVED_MAX_ROWS,
+            "a second database opened in the same process must not inherit the first's interval window"
         );
         Ok(())
     }

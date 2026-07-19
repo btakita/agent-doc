@@ -349,21 +349,42 @@ That rules out the design I filed an hour ago, which assumed the CP observation 
 **Which makes this a cross-language change**, not a Rust edit: remove the TTL, add coalescing in Kotlin, bump the plugin, and the behaviour only takes effect after an IDE restart — so the final proof is operator-gated regardless of when it lands.
 
 I have updated the item with that finding, including the design I ruled out and why, so the next cycle starts from the right place instead of re-deriving it. I am not starting the Kotlin half now: this is the replica/generation plane, where fencing a live generation has real consequences, and I caused a dispatch storm in adjacent code earlier in this same session. Starting it fresh is a deliberate choice, not a punt — the item is fully specified and it is the next thing I pick up on your word.
-<!-- agent:boundary:428027ad -->
+Do you recommendation for #lazilynottl. #spec-test-build-install-commit-push
+
+### Re: use lazily instead of a TTL for replica self-heal — opus-4-8
+
+> **Queue prompt:** We should use lazily instead of a TTL. Prefer the realtime document model over rebuilding from disk.
+
+Done — `agent-doc@adefcda0a`. The 10s TTL memo is gone; the missing-replica self-heal is now gated on the Lazily reliable-sync liveness projection.
+
+**Why the TTL was the wrong shape.** A clock answers "did this fail recently?", which is only a *guess* about whether the replica came back. It gets both directions wrong: it keeps suppressing recovery for the rest of the window after the editor is already back, and it re-pays the full 3×6s loop once the window lapses even when nothing has changed.
+
+**What replaced it.** `EditorReplicaLivenessWitness` — the document's `live` flag plus its sorted editor registrations, read from `reliable_sync_editor_registrations_for_file`. The memo suppresses the retry loop only while that witness is *unchanged*, so the question becomes "has anything changed since it failed?" instead of "how long ago did it fail?". A registration landing re-arms the self-heal immediately, with no timer to wait out — which is also what the "self-heal should be real-time, not turn based" item was asking for. Reading the witness is one in-memory projection read (cold processes hydrate the durable journal once), so it costs nothing next to the IPC round-trip it guards.
+
+Sync epochs are deliberately excluded from the witness: they advance on every keystroke, and an edit is not evidence that a missing replica returned. The exhaustion is recorded against the witness as of the *end* of the loop, so a registration that lands mid-retry is already accounted for and only genuinely newer state re-arms.
+
+**On `u32::try_from(reg.pid).unwrap_or(u32::MAX)` — you were right, that was a bug, now fixed in the same commit.** `Pid` is `u64` (`liveness.rs:37`), so the narrowing was both unnecessary and wrong: the witness is compared by equality, so a saturating conversion could map two distinct editors onto the same value and suppress a recovery that must re-arm. It also swallowed a fallible conversion, against the no-`let _ =` convention. Panicking would have been the wrong direction too — a large pid shouldn't abort a resolve on a recovery path. Keeping the native `u64` means there is no failure mode to handle at all. There's a regression pinning it (`self_heal_memo_distinguishes_pids_beyond_u32`).
+
+**On flipping to `should_continue_editor_replica_self_heal`** — I'd like your call before renaming rather than churning it, so it's queued as `#selfhealpolarity`. The decision-shaped name is more useful and more testable, and it matches the "shared pure decision fn" idiom used elsewhere. The cost is polarity: the sole call site is currently `if already_exhausted_for(witness) { skip }` with zero negations, and `should_continue_*` turns that into `if !should_continue_*(...)`. So it trades a clearer *name* for a negated *guard*. My preference is to keep the current polarity, but if you want the decision-shaped name I'll rename and flip the guard body together. Say which and I'll apply it.
+
+Verification: 7775 tests pass, clippy clean, `make check` exit 0, `make install` done. Four new regressions cover unchanged-witness suppression, immediate re-arm on each witness change, the wide-pid case, and clear-on-healthy-observation.
+
+CI on main is red, but from the pre-existing `#ay80` failure (`finalize_skips_ignored_untracked_session_doc`, GHA-only, passes locally) — not this change. It needs a CI round-trip to reproduce, so I left it in the backlog rather than stall the drain.
+<!-- agent:boundary:f7ddbc1b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#selfhealpolarity]
+---
+🚧 We should use lazily instead of a TTL. Prefer the realtime document model over rebuilding from disk.
+> Descending instead of bailing means the caller *continues* — so every later read site re-paid the 3×6s self-heal that a bail used to pay once. That turned a ~57s compact/commit into ~152s and was failing two tests. I added a short-TTL memory of a just-exhausted self-heal, which collapses the burst without weakening recovery.
+---
 - ~~do [#lazilynottl]~~
 - ~~do [#c8tb]~~
 - ~~do [#wsflake2]~~
 - ~~do [#patchretryidem]~~
 - ~~📌 do [#jbroutasync]~~
-- ~~do [#coinedid]~~
----
-🚧 We should use lazily instead of a TTL. Prefer the realtime document model over rebuilding from disk.
-> Descending instead of bailing means the caller *continues* — so every later read site re-paid the 3×6s self-heal that a bail used to pay once. That turned a ~57s compact/commit into ~152s and was failing two tests. I added a short-TTL memory of a just-exhausted self-heal, which collapses the burst without weakening recovery.
----
 We should immediately self-heal. Make all self-healing real-time, not turn-based...if possible.
 > Heads now render as list items. `parse_spans` still accepts the legacy bare form, so existing documents round-trip and self-heal on the next render rather than needing migration. There's a regression asserting every rendered head is a list item, and that healing is idempotent.
 ---
@@ -402,6 +423,7 @@ We should immediately self-heal. Make all self-healing real-time, not turn-based
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#selfhealpolarity] Rename decision on the replica self-heal memo guard: keep `editor_replica_self_heal_exhausted_for_witness` (zero negations at the sole call site) vs flip to `should_continue_editor_replica_self_heal` (decision-shaped name, but forces `if !should_continue_*`). Operator picked the question; apply the rename AND flip the guard body together if the decision-shaped name wins. agent-doc-document-realtime-io/src/lib.rs
 - [ ] [#lazilynottl] #lazilynottl Replace the process-local TTL cooldown gating replica re-registration with realtime-model state. SITE: `REPLICA_REREGISTER_COOLDOWN` + `replica_reregister_cooldown_elapsed` (agent-doc-crdt-relay-io/src/lib.rs:236-260), consumed at :987 when an ensure observes `EditorAttachedMissingReplica`. DEFECT: a `static Mutex<HashMap<doc_hash, Instant>>` is process-local, and agent-doc CLI invocations are short-lived processes — each preflight starts empty, so it collapses bursts only WITHIN one process and does nothing across them, which is where the storm comes from. Its own comment says preflights arrive ~1/sec during a drain; those are separate processes. Same class as the reverted #orphandrain in-memory backoff. WHERE THE FIX BELONGS (investigated): `signal_crdt_replica_event_counting` sends `DeliverCrdtRemote` DIRECTLY to the editor pid over IPC and never routes through the controller, so there is no controller coalescing point; `replica_identity_registry()` and `global_liveness_plane()` are process-local too. The only long-lived owner of the realtime model on this path is the EDITOR PLUGIN, which already knows whether its replica is registered and at what generation. So: drop the Rust TTL and let the plugin ignore a redundant force-refresh (Kotlin change + plugin version bump; needs an IDE restart to take effect, so final proof is operator-gated). DO NOT substitute a state.db coordination lease — still a TTL, misses the point.
 - [ ] [#orphandrain] [recommended] Controller-side drain for documents with NO supervisor. Shipped then REVERTED same session (revert of 'feat(controller): drain go-mode queues that have no supervisor') after it caused a dispatch storm: 15 dispatches for one doc in ~60s despite a 90s backoff, ~31 contending controller processes. Two faults, both in the effects half: (1) run_editor_route called from INSIDE the controller re-enters the controller ('timed out after 5.0s waiting for project controller response') — Run Agent Doc calls it from OUTSIDE; (2) the backoff lived in an in-memory HashMap in the controller, so every failed dispatch caused a restart that wiped it, permitting immediate re-dispatch. Redesign: dispatch from OUTSIDE the controller event loop (detached child, not a self-call) and persist per-document backoff in state.db next to the drain lease. The pure policy module (agent-doc-controller/src/orphan_drain.rs, 9 tests, gates correct) was sound — recover it from git history rather than rewriting. Underlying gap remains OPEN: a doc whose owner pane is a live agent TUI can never get a supervisor (preserve_pane_blocked), so it has no idle-queue watch and its go-mode queue only advances when a human triggers Run Agent Doc.
 - [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.

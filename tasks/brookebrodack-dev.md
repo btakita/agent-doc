@@ -111,15 +111,18 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 Compacted content:
 - Archived 2 response topic(s): do [#tsnextpin]; do [#4s08]
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): do [#rappsqlite]
-<!-- agent:boundary:8642d71f -->
+<!-- agent:boundary:1cfc1767 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- ~~do [#tsappclean]~~
+- 🚧 do [#ciappts]
+- do [#yalcdrift]
+- do [#gbdeploy1]
 - do [#mc4f]
-- do [#lzeffectvoid]
-- do [#tsappclean]
+- ⏭️ do [#lzeffectvoid]
 - do [#sbv9]
 - do [#nd8n]
 - do [#fhmig]
@@ -139,7 +142,7 @@ Compacted content:
 <!-- agent:backlog priority queue -->
 - [ ] [#mc4f] Push the ctx-core-dev typescript pin sweep: 190 per-package submodule commits + superproject are committed LOCALLY and unpushed. Same ~190-public-repo motion as #pushctxcore, so it needs operator go before pushing each submodule and the superproject
 - [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit
-- [ ] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
+- [ ] 🚧 [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
 - [ ] [#yalcdrift] CONFIRMED, with a measurement: a fresh bun install re-resolves marked 13.0.3 alongside 17.0.4 and the two ctx/*.ts Marked errors (Marked<string, string> vs Marked) come back, taking the app type-check to 62 with 2 in its own sources. Verified this is resolution churn and NOT caused by any version bump — reverted both package.json files to HEAD, reinstalled, measured 62/2 identically. Root cause: one yalc'd @rappstack package pins marked ^13.0.2 while two pin ^17.0.4. Fix belongs in rappstack alongside the drizzle alignment (#rappdeps)
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant

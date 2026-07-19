@@ -38,12 +38,42 @@ done
 
 Compacted content:
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): JB Run Agent Doc latency, clone cost, the AST question, and th...
-<!-- agent:boundary:aa6053cc -->
+
+### Re: do [#donestrikeextra] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#donestrikeextra]
+
+
+Fixed, plus the wedge you called out mid-turn.
+
+**#donestrikeextra** — the strike set was answering the wrong question. `explicit_queue_completion_ids` exists to answer *authorization* ("did this cycle address the head?"), and `--backlog-edit` legitimately belongs there — narrowing the head's text proves you dealt with it. But the same list was also feeding `mark_completed_queue_prompts_for_done_ids`, which answers *resolution* ("which ids are finished?"). `--backlog-edit` is explicitly the "keep/narrow it" flag — the queue-skip diagnostic offers it as the alternative to reaping — so an edited id is by definition still open. Added `explicit_queue_resolution_ids` (done / gate / review-resolve only) and pointed the strike and consume paths at it. Authorization scope is unchanged. Regression test pins exactly what you asked: `--backlog-edit B` must never strike B when only A is `--done`.
+
+**The wedge — you were right that last turn stopped at diagnosis.** It handed you "close the tab in JetBrains", which is not a fix. Root cause, from the logs rather than a guess:
+
+`ensure_document_model` was waiting for an editor republish **it never requested**. It sends an *observation* request ("what is your current text") — and an editor that holds the document with no replica has nothing to answer with. So every attempt died at the 400ms window, `window_extended=false`, forever. The `#bn41` self-heal that does request re-registration lives in a different function this path bails out of first: zero `editor_replica_reregister_attempt` lines in the whole ops log. The wedge only ever cleared when the plugin's own periodic sweep happened to run (~100s later) or you ran `admin reload-lib` — which works only because `ReloadLibrary` calls `forceRefreshOpenDocumentReplicas`.
+
+Landed, verified live at each step:
+
+1. **ensure now actively nudges** (`AckRecoveryForceRefresh`), scoped to the missing-replica case — `EditorSyncPending` is a live mid-flush hub and nudging it would discard un-flushed ops.
+2. **Honest diagnostics.** `signal_crdt_replica_event` returned `Ok(())` even when it sent *zero* messages, and callers logged that as `reregister=requested`. That false positive reads as "the binary nudged the editor and the editor ignored it" — it is what pointed last turn's diagnosis at the plugin. Now `requested:N` vs `no_live_registration`. Live it reports `requested:1`, so the nudge really is reaching your IDE.
+3. **Plugin 0.2.279** — `ack_recovery_force_refresh` only *drained*, and there is nothing to drain into when there is no replica. It now re-establishes the replica, guarded by `hasOpenDocumentReplica` so an existing replica is still only drained, never replaced (that guard is deliberate — `CrdtReplicaAckFrontierTest` forbids replacing live editor authority; I tightened that test rather than deleting it).
+4. **Bounded the churn I introduced.** Once the plugin started answering, ensure re-registered once per second, fencing a live generation each time. Per-document cooldown added.
+
+**What is still broken — I am not calling this closed.** After your restart, the plugin does the entire happy path per nudge: `transport.register ok=true` -> `atomically replaced cached forwarder` -> `open-document-attach ~290ms`, and the controller logs the matching `crdt_replica_register`. The next observation *still* reads `editor_attached_model_missing`, and `hasOpenDocumentReplica` still reads false. A replica is being registered and its forwarder cached, yet neither the binary reader nor the plugin's own map sees it — so this is a layer below the one I fixed. Two concrete suspects (generation fencing vs. path keying) are written up in `#ensurereplicagen` at the top of the backlog with the exact log evidence.
+
+So: the "operator must close the tab" step is gone and the recovery is binary-driven, but the underlying wedge needs one more cycle at the generation/keying layer.
+
+`make check` green apart from two controller-io tests that are flaky on a clean tree too — 3 stashed runs gave 1, 1, 2 failures. Filed as `#ctrliotestflake` rather than waved off. Committed and pushed as `44769325c`; plugin 0.2.279 installed.
+<!-- agent:boundary:c93968ba -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#donestrikeextra]
+- do [#ensurereplicagen]
+- do [#ctrliotestflake]
+- ~~do [#donestrikeextra]~~
 - do [#crdtcasraced]
 - do [#jbedtledger]
 - do [#jbroutasync]
@@ -98,7 +128,8 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#donestrikeextra] #agent-doc-bug A single --done struck ANOTHER open item's queue head. This cycle passed exactly one --done (fzmutloss) plus a --backlog-edit on patchretryidem, and the write logged: '[queue] marked 2 completed item(s) by done id: ["do [#fzmutloss]", "do [#patchretryidem]"]'. The #patchretryidem BACKLOG item correctly stayed [ ] open, but its queue head was struck, so an unfinished item silently left the drain - the operator only sees it if they diff the queue. Suspect the done-id queue matcher is keyed off the same-cycle mutation set (which --backlog-edit joins) rather than strictly the --done id set. Restored the head manually this cycle. Regression coverage must pin: --backlog-edit on id B must never strike B's queue head when only A is --done.
+- [ ] [#ensurereplicagen] #agent-doc-bug The missing-replica wedge SURVIVES a successful re-registration. With #ensurereregister live (binary nudges, plugin 0.2.279 re-establishes), idea.log shows the full happy path per nudge: transport.register ok=true, register elapsed ~170ms, 'atomically replaced cached forwarder for agent-doc-bugs2.md', open-document-attach elapsed ~290ms force_refresh=true. Controller logs the matching crdt_replica_register bootstrap_bytes=290970 generation_fenced=true superseded_generations_pruned=1. Yet the very next observation still reads editor_attached_model_missing, AND CrdtReplicaManager.hasOpenDocumentReplica(file) still reads false (proven: the guard keeps letting the nudge through). So a replica is registered and its forwarder cached, but neither the binary reader nor the plugin's own forwarders map sees it. Two suspects: (a) generation fencing - each register fences the prior generation, and the reader may be resolving against a superseded/fenced generation; (b) path keying - forwarders is keyed by the plugin's RESOLVED file.path while the guard/reader use the binary's canonical path string. Start by logging both keys and the resolved-vs-fenced generation at read time.
+- [ ] [#ctrliotestflake] agent-doc-controller-io has 2 order-dependent/flaky tests, PRE-EXISTING (proven: 3 runs on a clean stashed tree gave 1,1,2 failures). project_controller::rpc::tests::connect_or_launch_adopts_controller_published_during_launch_lock_contention (rpc.rs:14009) and project_controller::tests::dispatch_clears_stale_supervisor_pause_when_named_pid_is_dead_after_reboot (project_controller.rs:3889). Failure count varies run to run, so they share mutable process-global state. Make them deterministic (SimWorld or per-test isolation) so make check has a clean signal.
 - [ ] [#patchretryidem] #patchretryidem #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). NARROWED 2026-07-19 by the #fzmutloss fix: the mutation half and the body half were never in one transaction, so this is NOT 'both halves lost together' - the body half is re-applied non-idempotently by the retry while the mutation half took a different path. Remaining question is only the body-half idempotency. Needs a reproduction of the CAS race; do not guess at the idempotency boundary.
 - [ ] [#respidxrealtime] Source exchange response nodes from the realtime document model instead of re-parsing a &str. closeout_signal::ResponseIndex::build now parses ONCE per guard invocation (was N x (1 + M) tree-sitter parses for N ids and M archives, #respidxparse), but it still parses from rc.doc_content() bytes. The live model already holds these nodes - agent-doc-markdown-ast::crdt::OverlayCrdtDoc, and the SeqCrdt exchange-node direction AGENTS.md commits to. Reading nodes from the realtime model removes the parse entirely and generalizes past this guard to every string-scanning consumer of exchange structure. Operator-raised 2026-07-19.
 - [ ] [#jbroutasync] #agent-doc-bug Move editor_route onto the async accept-on-admission controller endpoint and honor submit.deadline_ms. handle_editor_command_submit_async_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:5381) already exists, spawns a worker, and logs editor_command_async_completed; validate_async_editor_command_payload (rpc.rs:5427) whitelists only sync_tmux_layout/focus_document_pane so editor_route is rejected as unsupported. The plugin already has resolveCommandSubmitAcceptedData (CpcRouteClient.kt:414) for the accepted shape. Separately the controller never reads submit.deadline_ms, so routed_cycle_ack_timeout (30s with a live child, dispatch.rs:2092) outlives the client's 15s deadline: the operator sees a timeout while the route keeps running. Biggest remaining perceived-latency win.

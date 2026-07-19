@@ -265,11 +265,46 @@ Three things make it a backup rather than a bigger snapshot:
 **Not verified, and the honest edge:** the simulator's `AddAttachment` echoes whatever fields you post, so the round trip seeds `Document` (what `GetLoanAttachment` returns) rather than `Content` (what real `AddAttachment` accepts). The capture reads `Document` and the restore plan writes `Content`, both per `docs/TMO/`, but only the read half faces a server that behaves like TMO. Recorded in `docs/TMO/backup.md` rather than left for someone to discover mid-restore.
 
 The CLI plans a restore, never applies one — writing a replay into a live TMO is the same class of action as `#tmo-sandbox-purge-apply` and belongs behind an explicit operator step, not a flag on the backup tool.
-<!-- agent:boundary:0963084c -->
+❯ 🚧 Does `passage equityfundingsource/tmo/sandbox/api` have the key?
+
+### Re: Does `passage equityfundingsource/tmo/sandbox/api` have the key? — opus-4-8
+
+**Yes** — 32-char hex on line 1, plus metadata: `database: 001-8553-000-Equity Funding - Sandbox`, `host: https://api.themortgageoffice.com`, organized 2026-07-18. The entry also records that the token value is **identical** in `tmo/live/api` and `tmo/sandbox/api` — TMO issues one token reaching both databases, and only the `Database` header selects the environment. Rotating means updating both paths.
+
+So I ran the backup against the real sandbox. **It failed, and the failures were real.**
+
+First run: `0/20 attachments captured`, `complete=false`. Three defects, none of which any unit test could have caught:
+
+1. **`GetLoanAttachment` returns `Document` as a JSON array of raw byte values** — `[37, 80, 68, 70, ...]`, which is `%PDF-`. Not base64. `docs/TMO/get-loan-attachment.md` types it only as "array/string/null", so I wrote the normalizer to read element 0 of that array as a base64 string. Every attachment decoded to nothing while all 22 tests stayed green.
+2. **`LOS.svc/GetPaymentSchedule` does not exist.** Neither does `GetLoanPaymentSchedule`, `GetLoanSchedule`, `GetPaymentSchedules`, `GetLoanPayments`, or `GetSchedule` — all 404, and `GetLoan` carries no schedule field either. TMO exposes no payment-schedule read at all.
+3. **`LOS.svc/GetBorrowers` does not exist** either. Borrowers ride inline on each `GetLoan`.
+
+`LSS.svc/GetLenders` works fine — the one endpoint I'd have bet against.
+
+**`bin/tmo-snapshot.ts` calls both dead endpoints too.** That is the whole of `#tmo-snapshot-verify`: the snapshot tool could never report `complete=true` because it was always waiting on two 404s. Fixed in the same pass, so both tools now skip them and collect borrowers from the loan records, deduped by `RecID` — a borrower on several loans replayed once per loan would create duplicates on restore.
+
+After the fixes, against the real sandbox:
+
+```
+[tmo-backup] loans=18 fundings=5 attachments=20/20 bytes=56636 lenders=1 borrowers=16
+[tmo-backup] self-verify digests=20 ok=true
+[tmo-backup] complete=true
+```
+
+`bin/tmo-snapshot.ts` reports `complete=true` there for the first time as well.
+
+I did not stop at the tool's own report. Magic-byte check on the artifact: 12 PDFs, 4 PNGs, 1 JPG, 3 text files, each matching its extension. The bytes are real documents, not plausible blobs. `--verify` re-passes on the written file offline.
+
+Regression coverage is the shape that broke it: the simulator echoes whatever you post, so the test seeds `Document` as a byte array and drives the real capture path end to end, plus direct cases for non-UTF-8 bytes and the borrower dedup. `bun run check` green at 1998.
+
+Pushed as `915fa803`.
+
+**Still unverified: the restore path.** `--restore-plan` is generated and asserted, but no op has been replayed into TMO, so the request bodies are only as correct as `docs/TMO/`. Given that the docs were wrong about `Document` and wrong about two endpoints, I would not assume they are right about `AddAttachment` taking `Content`. A first restore belongs on the sandbox, one loan, with a fresh backup taken immediately before — filed as `#tmo-restore-apply`.
+<!-- agent:boundary:8b942a0e -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#tmo-backup-command]
+- ~~do [#tmo-backup-command]~~
 - ~~do [#tmo-reconcile-binder-ui]~~
 - do [#efs-prod-secret-parity]
 - do [#tmo-orphan-cache]
@@ -277,13 +312,12 @@ The CLI plans a restore, never applies one — writing a replay into a live TMO 
 - do [#efs-prod-seed]
 - do [#efs-dns-cutover]
 - do [#tmo-getlender-verify]
-- do [#tmo-snapshot-verify]
+- ~~do [#tmo-snapshot-verify]~~
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#tmo-backup-command] Add a backup command for the TMO system and test the backup against the TMO sandbox. Operator request (verbatim: "Please add a backup command to backup the TMO system. Test backup on the sandbox."). Scope: a bin/ command that captures a restorable snapshot of TMO state (lenders, borrowers, loans, fundings) via the documented LSS/LOS API surface, written to a versioned artifact; dry-run + apply split like bin/tmo-snapshot.ts; verify a full backup+restore round trip on the sandbox tenant. Blocked-ish: no real TMO token locally — see #tmo-snapshot-verify.
 - [ ] [#tmo-snapshot-verify] [operator-verify] Run bin/tmo-snapshot.ts against the real TMO sandbox with the operator token (TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)") and confirm the sweep reports complete=true. The tool, its pure manifest/coverage layer, and its tests shipped 2026-07-18 (#tmo-orphan-reconcile-exec cycle) but no run has ever touched real TMO, so the endpoint set is unverified — in particular LSS.svc/GetLenders and LOS.svc/GetBorrowers are inferred from the documented API surface and are NOT covered by docs/TMO/*.md. If either 404s, drop it from the sweep or correct the path. This is the precondition for #tmo-sandbox-purge-apply. Spec: docs/TMO/snapshot.md.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#efs-prod-secret-parity] Production is missing secrets staging has and .dev.vars cannot supply (values are only in Cloudflare and cannot be read back out): DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN gate document sync. AUTH_SECRET, ADMIN_GLOBAL_PASSWORD, CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ACCOUNT_ID are already set (2026-07-18); TMO_API_TOKEN / TMO_DATABASE are intentionally unset so production runs split (#tmo-split-launch). AWS_*/S3_BUCKET_NAME are local bin/assets-*.sh only and are NOT needed in the worker. Compare with 'bun run cf:secrets:list' vs 'bun run cf:secrets:list:production'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.

@@ -152,28 +152,55 @@ No git tier, as you specified.
 **A performance trap this surfaced.** Descending instead of bailing means the caller *continues* — so every later read site re-paid the 3×6s self-heal that a bail used to pay once. That turned a ~57s compact/commit into ~152s and was failing two tests. I added a short-TTL memory of a just-exhausted self-heal, which collapses the burst without weakening recovery. That's what made the whole suite faster than before.
 
 **Also finished `#fr79`** (`51206d10b`): the orphan strike is wired and gated on provenance, so a dangling mirror-created head finally stops holding the drain position. I filed `#fr79backfill` for the one gap — heads that were already dangling before the provenance table have no row, so `#sy71` and friends still need a decision on backfill-vs-manual.
-<!-- agent:boundary:6dc895b3 -->
+
+### Re: JB `Run Agent Doc` still stalls on agent-doc-bugs2.md — opus-4-8
+
+> **Queue prompt:**
+> JB `Run Agent Doc` still stalls on agent-doc-bugs2.md. I have to run agent-doc manually in the Claude Code session.
+
+Reproduced it on my own first command this session, which made the root cause obvious. Fixed and shipped.
+
+**What you were seeing.** `agent-doc preflight` failed twice with `Lazily current authority remained delivery_pending for 3000ms`, and `session-check` reported the authority/disk divergence behind it. That bail comes from `wait_for_lazily_current_before_mutation` (`agent-doc-preflight-io/src/debounce.rs`) and propagates with `?` out of preflight step 0 — so the *entire* cycle aborts. From the JB side that is indistinguishable from "nothing happened."
+
+**Root cause: route was fixed, preflight was not.** `agent-doc-route-io/src/startup_debounce.rs` already carried two mitigations for exactly this pending-transition case:
+
+- `#crdtpushdrain` — re-request an urgent CRDT delivery drain on a bounded 750ms cadence while the transition stays `delivery_pending`, because a single drain can legitimately apply nothing.
+- `#routeprogresswait` — reset the no-progress deadline whenever the observed frontier advances, because JB `Run Agent Doc` writes its prompt marker into the document *first* and then waits on the convergence of a write it just issued.
+
+Preflight's pre-mutation wait had **neither**. It polled every 100ms and hard-failed on wall clock. So a dispatch that cleared the route wait was killed one step later: nobody pulled the frontier, and a converging-but-slow ACK round trip was deferred anyway. Route got the fix; the path immediately downstream of it kept the bug.
+
+**The fix.** Rather than copy the two mitigations a second time (and let them drift again), I extracted the shared decision into `agent_doc_debounce::settle_step` — a pure, dependency-free function returning `Ready` / `Wait { request_urgent_drain }` / `Defer { reason }` — and drove **both** waits from it. Route keeps its existing behavior and messages; preflight now inherits the drain requests and the progress-aware deadline.
+
+**Verification.**
+
+- 7 new unit tests on `settle_step` (drain cadence, advancing frontier, stalled frontier, absolute ceiling).
+- 3 new preflight regression tests with injected effects, mirroring route's: it must request the drain, must not defer an advancing frontier, and must still fail closed on a genuinely wedged one.
+- `make check`: **7739 passed, 0 failed** (EXIT=0 captured directly — RTK masks the exit code).
+- Committed + pushed to agent-doc `main`; `make install` clean; supervisor recycled onto the fresh build.
+
+**CI.** Latest run is red, but on the known pre-existing `#ay80` failure — `finalize_skips_ignored_untracked_session_doc` (`tests/finalize_integration.rs:248`), CI-only, passes locally. Not related to this change and not introduced by it.
+
+No version bump, tag, or publish — per the standing hold on agent-doc releases until per-cell CRDT merge lands. Install + recycle are done, so this session and the JB action are already running the fixed binary. I filed the live-editor eyeball as a non-blocking `[operator-verify]` item.
+<!-- agent:boundary:89aba5e1 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#fr79backfill]
-- ~~do [#ctrlchkptiso]~~
-- ⏭️ do [#c8tb]
 - ~~do [#wsflake2]~~
+- ~~do [#patchretryidem]~~
 - ~~📌 do [#jbroutasync]~~
-- ~~JB Run Agent Doc stalls. `- ~~JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.~~` was duplicated in the queue.~~
+- ~~JB `Run Agent Doc` still stalls on agent-doc-bugs2.md. I have to run agent-doc manually in the Claude Code session.~~
+- do [#fr79backfill]
+- ⏭️ do [#c8tb]
 - ⏭️ do [#jbrouteasyncchannel]
 - ⏭️ do [#jbedtledgerverify]
 - ⏭️ 📌 do [#fmgc]
 - ⏭️ 📌 do [#0dsr]
-- ~~📌 do [#f1s3]~~
-- ~~📌 do [#fr79]~~
 - ⏭️ 📌 do [#30p6]
 - ⏭️ 📌 do [#n39j]
 - ⏭️ 📌 do [#f6j3]
 - ⏭️ 📌 do [#promptselect]
-- 🚧 📌 do [#realtimesalient]
+- ⏭️ 📌 do [#realtimesalient]
 - 📌 do [#syncobscache2]
 - 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
@@ -189,9 +216,6 @@ No git tier, as you specified.
 - 📌 do [#ipcverhandshake]
 - 📌 do [#ipcpostcommitinv]
 - 📌 do [#5qjj]
-- ~~do [#fzmutloss]~~
-- ~~do [#patchretryidem]~~
-- ~~JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.~~
 <!-- /agent:queue -->
 
 ## Notes
@@ -202,6 +226,7 @@ No git tier, as you specified.
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#5pn7] [operator-verify] Live #preflightsettleparity proof: trigger JB `Run Agent Doc` on tasks/agent-doc/agent-doc-bugs2.md while an editor holds the buffer. Expect the cycle to start (preflight past step 1) instead of aborting with `preflight deferred ... Lazily current authority remained delivery_pending`. Fixed + shipped in agent-doc; only the live human eyeball remains.
 - [ ] [#fr79backfill] [recommended] #fr79 retroactive cleanup: heads that were ALREADY dangling before f931e1132 have no provenance row, so the orphan strike (51206d10b) never fires for them — the mechanism is forward-looking. #sy71 is the known example. Either accept that they need manual striking, or add a one-time backfill that walks git history of the document's backlog component and records provenance for ids that once existed there. Decide deliberately; do not widen the strike rule to cover them, since 'no tracked item' cannot mean 'orphaned' (that is exactly what deleted real work and failed 12 preflight tests).
 - [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.
 - [ ] [#jbrouteasyncchannel] [focused-cycle] #agent-doc-bug Move editor_route onto the async accept-on-admission endpoint — BLOCKED on a completion channel, do NOT just add it to the whitelist. Tagged [focused-cycle] because it needs a clean design cycle, not an in-loop drain: it surfaced as the drain head 3x and was correctly declined each time. Split from #jbroutasync. The mechanical change is small: validate_async_editor_command_payload (rpc.rs:5465) whitelists only sync_tmux_layout/focus_document_pane, so adding an editor_route arm would route it through handle_editor_command_submit_async_rpc. DO NOT DO THAT ALONE — it silently destroys every Run Agent Doc failure notification. resolveCommandSubmitAcceptedData (CpcRouteClient.kt:431) returns CpcEditorRouteResult(0, output) — exit code 0 = SUCCESS — for status submitted/accepted/running/applied. The entire classification chain in TerminalUtil keys off a NON-ZERO exit: BUSY_RUNNING -> notifyRunAgentDocStillRunning, QUEUED_PENDING -> notifyRunAgentDocQueued, RETRYABLE_STARTING retries, DISPATCH_START_UNPROVEN, and the catch-all notifyPersistentRouteFailure (TerminalUtil.kt:490-566). Accept-on-admission returns 0 immediately so none can fire, and every click would report success. This is the exact feedback path verified working 2026-07-19 when a busy pane correctly refused to inject on brookebrodack-dev.md. PREREQUISITE: a completion channel so the plugin learns the real outcome after acceptance (poll the command projection by command_id — the accept response already carries a projection with per-command status/terminal fields — or a controller->plugin completion event), with the classification chain running against THAT rather than the submit response. Only then is the latency win safe.
@@ -228,7 +253,7 @@ No git tier, as you specified.
 - [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).
 - [ ] [#ay80] CI red on main, pre-existing and unrelated to #jbsteerinterrupt: `finalize_skips_ignored_untracked_session_doc` (tests/finalize_integration.rs:248) fails in GitHub Actions with `Unexpected stderr, failed var.contains(skipped ignored untracked path scratch/session.md)` but PASSES locally (7627/7627 green). Run 29657026491 on b7e17f4d5. Likely a CI-environment gitignore/tmpdir difference; reproduce with the CI runner git config.
 - [ ] [#promptselect] #agent-doc-feature Selection-scoped `Run Agent Doc`: send ONLY the editor text selection as the prompt. Needs (a) a dedicated CLI verb — `agent-doc prompt "<text>"` (or `steer`; `run` is taken) accepting multi-line via stdin/cat, (b) JB+VSCode `Run Agent Doc` hooked to it so a non-empty selection routes through `prompt` instead of the whole-document trigger, (c) acknowledgement: agent-doc echoes the prompt into the document with the prompt prefix plus salient response, (d) responses attached UNDER their originating prompt — a threaded prompt->response layer in the Document Tree rather than a flat exchange tail. Must compose with realtime steering (#realtime-steering-verbatim) since a selection sent mid-turn IS steering. Design pass needed before implementation.
-- [ ] 🚧 [#realtimesalient] #agent-doc-feature Write salient responses into the document in REAL TIME rather than buffering until finalize. Today only complete `### Re:` sections cross response-checkpoint and partial output is console-only (SKILL.md: "stream incomplete progress only to the console"). Requires deciding what counts as salient mid-turn, and preserving the invariant that incomplete token prefixes never become authoritative document text — so likely a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it. Pairs with #promptselect threading.
+- [ ] [#realtimesalient] #agent-doc-feature Write salient responses into the document in REAL TIME rather than buffering until finalize. Today only complete `### Re:` sections cross response-checkpoint and partial output is console-only (SKILL.md: "stream incomplete progress only to the console"). Requires deciding what counts as salient mid-turn, and preserving the invariant that incomplete token prefixes never become authoritative document text — so likely a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it. Pairs with #promptselect threading.
 - [ ] [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.
 - [ ] [#syncobscache2] #syncobscache follow-up (the rest of the focus-sync win): extend the command-scoped observation cache into ../tmux-router. After the agent-doc-side cache: 109 -> 80 subprocess spawns, 2225 -> 2031ms (~9% only). list-panes barely moved (35 -> 34) because tmux-router spawns from 47 sites directly via its own Command builder, bypassing TmuxCommandRunner. Dominant remainder: `list-panes -a -F #{pane_id} #{pane_dead}` run 18x identically — pane_dead_flag lists ALL panes and scans for one, once per pane. Fix: move the scope into tmux-router and/or batch pane_dead_flag into one map fetch. Re-measure with the PATH-shim spawn counter.
 - [ ] [#jbrunsteering] #agent-doc-bug JB `Run Agent Doc` while a turn is already running should feed the prompt in as realtime steering (#realtime-steering-verbatim / #realtime-steering-aggregate) instead of interrupting the active turn. Operator-reported: invoking it mid-turn produced "Interrupted · What should Claude do instead?" rather than surfacing the new prompt to the running turn. NOT STARTED.

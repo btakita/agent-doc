@@ -4676,37 +4676,84 @@ fn observation_is_missing_replica_family(
     }
 }
 
-/// How long a just-exhausted replica self-heal is remembered so repeated reads
-/// do not each re-pay it.
-const EDITOR_REPLICA_SELF_HEAL_BACKOFF_TTL: std::time::Duration =
-    std::time::Duration::from_secs(10);
+/// The realtime liveness state a self-heal exhaustion was recorded against.
+///
+/// Derived entirely from the Lazily reliable-sync plane, so it changes exactly
+/// when the document's editor registration set changes — an editor attaching,
+/// detaching, or re-registering. Sync epochs are deliberately excluded: those
+/// advance on every keystroke, and an edit is not evidence that a missing
+/// replica came back.
+#[derive(Clone, PartialEq, Eq)]
+struct EditorReplicaLivenessWitness {
+    live: bool,
+    /// `(pid, editor_id, registration timestamp)`, sorted for a stable identity.
+    ///
+    /// `pid` keeps the plane's native [`agent_doc_reliable_sync_io::liveness::Pid`]
+    /// width. Narrowing it would be lossy in the one operation this type exists
+    /// for: the witness is compared by equality, so any saturating conversion
+    /// could map two distinct editors onto the same value and suppress a
+    /// recovery that should have re-armed.
+    registrations: Vec<(agent_doc_reliable_sync_io::liveness::Pid, String, u64)>,
+}
 
-/// Files whose replica self-heal was recently exhausted without recovering.
+/// Observe the current realtime liveness witness for `file`.
+///
+/// This is one in-memory projection read on the hot path (a cold process
+/// hydrates the durable journal once), so it is cheap enough to consult on
+/// every resolve — unlike the IPC receipt round-trip it guards.
+fn editor_replica_liveness_witness(file: &std::path::Path) -> EditorReplicaLivenessWitness {
+    let mut registrations: Vec<(agent_doc_reliable_sync_io::liveness::Pid, String, u64)> =
+        agent_doc_crdt_relay_io::reliable_sync_editor_registrations_for_file(file)
+            .into_iter()
+            .map(|reg| (reg.pid, reg.editor_id, reg.timestamp_ms))
+            .collect();
+    registrations.sort();
+    EditorReplicaLivenessWitness {
+        live: observe_editor_open(file),
+        registrations,
+    }
+}
+
+/// Files whose replica self-heal was exhausted without recovering, remembered
+/// against the liveness witness that was current when it failed.
 static EDITOR_REPLICA_SELF_HEAL_EXHAUSTED: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, std::time::Instant>>,
+    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, EditorReplicaLivenessWitness>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
-/// `true` when this file's self-heal was exhausted inside the TTL, so the retry
-/// loop should be skipped and resolution should fall through immediately.
+/// `true` when this file's self-heal already failed against exactly this
+/// liveness witness, so the retry loop is provably futile and resolution should
+/// fall through immediately.
 ///
 /// Reads used to BAIL when the editor could not answer, so the self-heal was
 /// paid at most once per operation. Now that reads descend to disk and the
 /// caller continues, every later read site would re-pay the full loop —
 /// measured as 3 attempts x a 6s IPC receipt timeout each, which turned a ~57s
-/// compact/commit into ~152s. Remembering a just-failed self-heal collapses
-/// that burst without weakening recovery: the TTL is short, and the binary's own
-/// asynchronous re-registration continues regardless.
-fn editor_replica_self_heal_recently_exhausted(file: &std::path::Path) -> bool {
+/// compact/commit into ~152s.
+///
+/// This memo is invalidated by the realtime document model rather than by a
+/// clock. A TTL answers "did this fail recently?", which is a guess about
+/// whether the replica returned: it keeps suppressing recovery for the rest of
+/// the window after the editor is already back, and it re-pays the whole loop
+/// once the window lapses even when nothing changed. Keying on the Lazily
+/// liveness witness answers the question that actually matters — "has anything
+/// changed since it failed?" — so recovery is immediate when a registration
+/// lands and free when it has not.
+fn editor_replica_self_heal_exhausted_for_witness(
+    file: &std::path::Path,
+    witness: &EditorReplicaLivenessWitness,
+) -> bool {
     let Ok(map) = EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock() else {
         return false;
     };
-    map.get(file)
-        .is_some_and(|at| at.elapsed() < EDITOR_REPLICA_SELF_HEAL_BACKOFF_TTL)
+    map.get(file).is_some_and(|recorded| recorded == witness)
 }
 
-fn record_editor_replica_self_heal_exhausted(file: &std::path::Path) {
+fn record_editor_replica_self_heal_exhausted(
+    file: &std::path::Path,
+    witness: EditorReplicaLivenessWitness,
+) {
     if let Ok(mut map) = EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock() {
-        map.insert(file.to_path_buf(), std::time::Instant::now());
+        map.insert(file.to_path_buf(), witness);
     }
 }
 
@@ -4728,14 +4775,16 @@ fn reobserve_missing_editor_replica_with_reregistration(
         clear_editor_replica_self_heal_exhausted(file);
         return observed;
     }
-    if editor_replica_self_heal_recently_exhausted(file) {
+    if editor_replica_self_heal_exhausted_for_witness(
+        file,
+        &editor_replica_liveness_witness(file),
+    ) {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "editor_replica_reregister_skipped file={} source={} reason=self_heal_exhausted_within_ttl ttl_secs={}",
+                "editor_replica_reregister_skipped file={} source={} reason=self_heal_exhausted_for_unchanged_liveness_witness",
                 file.display(),
                 source,
-                EDITOR_REPLICA_SELF_HEAL_BACKOFF_TTL.as_secs(),
             ),
         );
         return observed;
@@ -4794,9 +4843,11 @@ fn reobserve_missing_editor_replica_with_reregistration(
             return current;
         }
     }
-    // Every attempt was spent without recovering. Remember that briefly so the
-    // next read in this operation falls through instead of re-paying the loop.
-    record_editor_replica_self_heal_exhausted(file);
+    // Every attempt was spent without recovering. Remember the liveness witness
+    // as of the END of the loop: a registration that landed while we were
+    // retrying is already reflected here, so only genuinely newer realtime state
+    // re-arms the retry. Later reads in this operation fall through for free.
+    record_editor_replica_self_heal_exhausted(file, editor_replica_liveness_witness(file));
     current
 }
 
@@ -5181,6 +5232,112 @@ mod tests {
         });
         assert!(!controller_document_mutation_in_progress());
         assert!(!agent_doc_document_realtime::write_authority::within_owner_scope());
+    }
+
+    fn witness(
+        live: bool,
+        registrations: &[(agent_doc_reliable_sync_io::liveness::Pid, &str, u64)],
+    ) -> EditorReplicaLivenessWitness {
+        EditorReplicaLivenessWitness {
+            live,
+            registrations: registrations
+                .iter()
+                .map(|(pid, id, ts)| (*pid, (*id).to_string(), *ts))
+                .collect(),
+        }
+    }
+
+    /// The self-heal memo suppresses the retry loop only while the realtime
+    /// liveness witness is unchanged — the burst-collapse the TTL used to buy.
+    #[test]
+    fn self_heal_memo_suppresses_retry_while_liveness_witness_is_unchanged() {
+        let file = std::path::Path::new("/tmp/agent-doc-self-heal-unchanged.md");
+        clear_editor_replica_self_heal_exhausted(file);
+        let observed = witness(true, &[(4242, "jetbrains-a", 1_000)]);
+
+        assert!(
+            !editor_replica_self_heal_exhausted_for_witness(file, &observed),
+            "a file with no recorded exhaustion must be allowed a full retry"
+        );
+
+        record_editor_replica_self_heal_exhausted(file, observed.clone());
+        assert!(
+            editor_replica_self_heal_exhausted_for_witness(file, &observed),
+            "an unchanged liveness witness must keep suppressing the futile retry loop"
+        );
+
+        clear_editor_replica_self_heal_exhausted(file);
+    }
+
+    /// The realtime replacement for the TTL: a changed liveness witness re-arms
+    /// the self-heal IMMEDIATELY, with no timer to wait out. Each shape below
+    /// would have stayed suppressed for the remainder of a 10s TTL window.
+    #[test]
+    fn self_heal_memo_rearms_immediately_when_liveness_witness_changes() {
+        let file = std::path::Path::new("/tmp/agent-doc-self-heal-changed.md");
+        let exhausted_at = witness(false, &[]);
+
+        for (label, current) in [
+            (
+                "an editor registration appearing",
+                witness(false, &[(4242, "jetbrains-a", 1_000)]),
+            ),
+            ("the document going live", witness(true, &[])),
+        ] {
+            clear_editor_replica_self_heal_exhausted(file);
+            record_editor_replica_self_heal_exhausted(file, exhausted_at.clone());
+            assert!(
+                !editor_replica_self_heal_exhausted_for_witness(file, &current),
+                "{label} must re-arm the self-heal immediately, not wait out a TTL"
+            );
+        }
+
+        // A re-registration by the SAME editor pid is a new registration
+        // timestamp, which is exactly the "replica came back" signal.
+        let stale = witness(true, &[(4242, "jetbrains-a", 1_000)]);
+        let reregistered = witness(true, &[(4242, "jetbrains-a", 2_000)]);
+        clear_editor_replica_self_heal_exhausted(file);
+        record_editor_replica_self_heal_exhausted(file, stale);
+        assert!(
+            !editor_replica_self_heal_exhausted_for_witness(file, &reregistered),
+            "a fresh registration timestamp for the same pid must re-arm the self-heal"
+        );
+
+        clear_editor_replica_self_heal_exhausted(file);
+    }
+
+    /// Pids keep the plane's native `u64` width. Narrowing them to `u32` with a
+    /// saturating conversion would map both editors below onto `u32::MAX`,
+    /// making two distinct registrations compare equal and suppressing a
+    /// self-heal that must re-arm.
+    #[test]
+    fn self_heal_memo_distinguishes_pids_beyond_u32() {
+        let file = std::path::Path::new("/tmp/agent-doc-self-heal-wide-pid.md");
+        let exhausted_at = witness(true, &[(u64::from(u32::MAX) + 1, "jetbrains-a", 1_000)]);
+        let different_editor = witness(true, &[(u64::from(u32::MAX) + 2, "jetbrains-a", 1_000)]);
+
+        clear_editor_replica_self_heal_exhausted(file);
+        record_editor_replica_self_heal_exhausted(file, exhausted_at);
+        assert!(
+            !editor_replica_self_heal_exhausted_for_witness(file, &different_editor),
+            "distinct pids above u32::MAX must not collapse into one witness"
+        );
+
+        clear_editor_replica_self_heal_exhausted(file);
+    }
+
+    /// A healthy observation drops the memo outright, so the next failure gets a
+    /// full retry rather than inheriting a stale suppression.
+    #[test]
+    fn self_heal_memo_is_cleared_by_a_healthy_observation() {
+        let file = std::path::Path::new("/tmp/agent-doc-self-heal-cleared.md");
+        let observed = witness(true, &[(4242, "jetbrains-a", 1_000)]);
+        record_editor_replica_self_heal_exhausted(file, observed.clone());
+        clear_editor_replica_self_heal_exhausted(file);
+        assert!(
+            !editor_replica_self_heal_exhausted_for_witness(file, &observed),
+            "clearing the memo must restore a full retry for the same witness"
+        );
     }
 
     /// `#idlewatchctrlbackoff` — recording controller degradation must flip

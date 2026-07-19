@@ -1888,6 +1888,12 @@ pub(crate) fn error_requests_retry_without_disk(err: &anyhow::Error) -> bool {
             || message.contains("disk is not consulted until the editor is detached")
             || message.contains("disk is not consulted as a fallback")
             || message.contains("disk remained non-authoritative")
+            // `#fzmutloss`: any failure that retains its change for retry must
+            // also retain the same closeout's backlog/status mutations. A CRDT
+            // convergence timeout says exactly that and used to fall through
+            // here, so the response landed on retry while its `--done` was
+            // silently dropped and the item stayed queued.
+            || message.contains(agent_doc_document_realtime_io::RETAINED_FOR_RETRY_MARKER)
     })
 }
 
@@ -2366,6 +2372,39 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    /// `#fzmutloss`: a CRDT convergence timeout retains its change for retry,
+    /// so it must also retain the SAME closeout's backlog/status mutations.
+    ///
+    /// Operator-reported 2026-07-19 (brookebrodack-dev.md): finalize timed out
+    /// at 60s with repeated `compare_and_swap_raced`, the binary resumed and
+    /// committed the response — but the `--done` was gone, so the item stayed
+    /// `[ ]` and queued despite the response having landed. The timeout error
+    /// says "pending change retained for retry" and matched none of the four
+    /// disk-authority substrings this classifier keyed off, so
+    /// `write_outcome_retains_closeout_mutations` returned false and
+    /// `apply_pending_and_status_mutations` was skipped.
+    #[test]
+    fn crdt_convergence_timeout_retains_closeout_mutations() {
+        let timeout = anyhow::anyhow!(
+            "finalize: CRDT convergence for /tmp/session.md did not settle within 60000ms \
+             (reason=TypingQuiescence); {}",
+            agent_doc_document_realtime_io::RETAINED_FOR_RETRY_MARKER,
+        );
+        assert!(
+            error_requests_retry_without_disk(&timeout),
+            "a failure that retains its change for retry must retain its mutations too"
+        );
+
+        // The marker is the contract, so a wrapped cause still classifies.
+        let wrapped = timeout.context("write --commit failed");
+        assert!(error_requests_retry_without_disk(&wrapped));
+
+        // A genuine hard failure retains nothing and must stay unclassified,
+        // or a real error would silently apply mutations it never earned.
+        let hard = anyhow::anyhow!("finalize: refusing to mutate a non-git document");
+        assert!(!error_requests_retry_without_disk(&hard));
+    }
 
     #[test]
     fn response_cell_fast_path_accepts_only_one_exchange_operation() {

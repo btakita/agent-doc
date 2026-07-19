@@ -42,6 +42,12 @@ pub fn run_with_tmux_with_options(
     effects: RouteCommandEffects,
 ) -> Result<()> {
     tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
+    // `#adturnscope`: one route is one turn, so resolve its ops-log turn id once
+    // for the whole route instead of per log line. `log_op` runs ~170 times here
+    // and each unscoped resolution replays the entire `state_events` ledger and
+    // re-hashes the document. The scope — not a clock — bounds the memo, so a
+    // later turn can never log under this turn's id.
+    let _turn_attribution = agent_doc_ops_log_io::begin_turn_attribution_scope();
     // Clean stale registry entries before lookup, but stay on the editor-driven
     // fast path: use `SkipExpensiveStashCleanup` so the pre-lookup prune does NOT
     // scan stash panes. The expensive stash-pane purge re-resolves every live

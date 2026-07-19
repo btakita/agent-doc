@@ -11,6 +11,7 @@ publish = false
 name = "agent_doc_ops_log_io"
 
 [dependencies]
+lazily = "0.41.0"
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.6" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.6" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.6" }

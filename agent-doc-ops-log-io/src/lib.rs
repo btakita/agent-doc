@@ -101,37 +101,81 @@ fn cached_project_root(file: &Path) -> Option<std::sync::Arc<Path>> {
     Some(root)
 }
 
-/// How long a resolved turn id stays reusable for log attribution.
+/// Turn-scoped attribution memo (`#adturnscope`).
 ///
-/// `#adturnidttl`: resolving the turn id replays the whole `state_events`
-/// ledger and re-hashes the document, and `log_op` is called ~170 times on one
-/// route. The turn id is stable within a cycle, so a short TTL keeps
-/// attribution effectively exact (a new cycle is picked up within the window)
-/// while collapsing hundreds of full ledger replays into a handful. This is a
-/// log-attribution cache only — nothing decides control flow from it.
-const TURN_ID_CACHE_TTL: std::time::Duration = std::time::Duration::from_millis(250);
-
-/// A turn id resolved at an instant, so the TTL can be checked on read.
+/// Resolving a turn id replays the whole `state_events` ledger and re-hashes
+/// the document, and `log_op` runs ~170 times on one route. A TTL would only
+/// *guess* at how long a turn lasts — too short and the work comes back, too
+/// long and a new cycle logs under the old id. A lazily `Context` scoped to the
+/// turn is exact: the memo lives precisely as long as the turn does, and the
+/// scope boundary — not a clock — is what invalidates it.
 ///
-/// The id is an `Arc<str>`, not a `String`: a cache HIT must be a refcount
-/// bump, not a fresh heap allocation + memcpy. `log_op` runs ~170 times per
-/// route, so cloning the buffer on every hit would trade one redundant cost for
-/// another. Callers only ever need `&str`.
-type CachedTurnId = (std::time::Instant, Option<std::sync::Arc<str>>);
+/// Outside a scope, `cached_turn_id` resolves every call. That is correct, just
+/// slower, so an unscoped caller is never wrong.
+struct TurnAttributionScopeState {
+    ctx: lazily::Context,
+    turn_ids: lazily::SlotMap<PathBuf, Option<std::sync::Arc<str>>>,
+    depth: usize,
+}
 
-static TURN_ID_CACHE: LazyLock<Mutex<HashMap<PathBuf, CachedTurnId>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn cached_turn_id(file: &Path) -> Option<std::sync::Arc<str>> {
-    let key = file.to_path_buf();
-    if let Ok(cache) = TURN_ID_CACHE.lock()
-        && let Some((recorded_at, turn)) = cache.get(&key)
-        && recorded_at.elapsed() < TURN_ID_CACHE_TTL
-    {
-        // Pointer clone: bumps the refcount, copies no bytes.
-        return turn.clone();
+impl TurnAttributionScopeState {
+    fn new() -> Self {
+        let ctx = lazily::Context::new();
+        let turn_ids = lazily::SlotMap::new(&ctx);
+        Self {
+            ctx,
+            turn_ids,
+            depth: 1,
+        }
     }
-    let turn: Option<std::sync::Arc<str>> = agent_doc_cycle_state_io::load_closeout_projection(file)
+}
+
+thread_local! {
+    static TURN_ATTRIBUTION_SCOPE: std::cell::RefCell<Option<TurnAttributionScopeState>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII guard for an open turn-attribution scope. Nested opens are
+/// reference-counted, so an inner scope does not discard the outer memo.
+#[must_use = "the turn attribution memo is active only while the guard is alive"]
+pub struct TurnAttributionScope {
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+/// Open a turn-scoped attribution memo on this thread.
+pub fn begin_turn_attribution_scope() -> TurnAttributionScope {
+    TURN_ATTRIBUTION_SCOPE.with(|scope| {
+        let mut scope = scope.borrow_mut();
+        match scope.as_mut() {
+            Some(state) => state.depth += 1,
+            None => *scope = Some(TurnAttributionScopeState::new()),
+        }
+    });
+    TurnAttributionScope {
+        _not_send: std::marker::PhantomData,
+    }
+}
+
+impl Drop for TurnAttributionScope {
+    fn drop(&mut self) {
+        TURN_ATTRIBUTION_SCOPE.with(|scope| {
+            let mut scope = scope.borrow_mut();
+            let finished = match scope.as_mut() {
+                Some(state) => {
+                    state.depth -= 1;
+                    state.depth == 0
+                }
+                None => false,
+            };
+            if finished {
+                *scope = None;
+            }
+        });
+    }
+}
+
+fn resolve_turn_id(file: &Path) -> Option<std::sync::Arc<str>> {
+    agent_doc_cycle_state_io::load_closeout_projection(file)
         .ok()
         .flatten()
         .and_then(|projection| projection.cycle_id)
@@ -141,22 +185,30 @@ fn cached_turn_id(file: &Path) -> Option<std::sync::Arc<str>> {
                 .flatten()
                 .map(|cs| cs.cycle_id)
         })
-        .map(std::sync::Arc::from);
-    if let Ok(mut cache) = TURN_ID_CACHE.lock() {
-        cache.insert(key, (std::time::Instant::now(), turn.clone()));
-    }
-    turn
+        .map(std::sync::Arc::from)
 }
 
-/// Drop the memoized project-root and turn-id attribution caches.
+fn cached_turn_id(file: &Path) -> Option<std::sync::Arc<str>> {
+    TURN_ATTRIBUTION_SCOPE.with(|scope| {
+        let scope = scope.borrow();
+        let Some(state) = scope.as_ref() else {
+            // No turn scope open: resolve fresh, which is always correct.
+            return resolve_turn_id(file);
+        };
+        let probe = file.to_path_buf();
+        state
+            .turn_ids
+            .get_or_insert_with(&state.ctx, file.to_path_buf(), move |_| {
+                resolve_turn_id(&probe)
+            })
+    })
+}
+
+/// Drop the memoized project-root attribution cache.
 ///
-/// Tests that rebuild a document's cycle state under the same path need the
-/// next log line to re-resolve instead of reusing the previous turn id.
+/// The turn id needs no reset hook — its memo is bounded by the turn scope.
 pub fn reset_ops_log_attribution_cache() {
     if let Ok(mut cache) = PROJECT_ROOT_CACHE.lock() {
-        cache.clear();
-    }
-    if let Ok(mut cache) = TURN_ID_CACHE.lock() {
         cache.clear();
     }
 }
@@ -448,49 +500,49 @@ mod tests {
         assert_eq!(first, second);
     }
 
-    /// `#adturnidttl`: resolving a turn id replays the whole state ledger, so a
-    /// burst of log lines inside one cycle must reuse the resolved value.
+    /// `#adturnscope`: inside a turn scope the id resolves once; the scope
+    /// boundary, not a clock, is what invalidates it.
     #[test]
-    fn turn_id_resolution_is_reused_within_the_ttl_window() {
-        // No global reset here: tests share a process, so clearing the whole
-        // cache would race a parallel test. Each test uses a unique temp path,
-        // which is the cache key.
+    fn turn_id_resolves_once_inside_a_scope_and_again_after_it_closes() {
         let tmp = tempfile::TempDir::new().unwrap();
         let doc = make_project(tmp.path());
 
-        let first = cached_turn_id(&doc);
-        let recorded_at = {
-            let cache = TURN_ID_CACHE.lock().unwrap();
-            cache.get(&doc).expect("turn id cached").0
-        };
-
-        let second = cached_turn_id(&doc);
-        assert_eq!(first, second);
-        let unchanged = {
-            let cache = TURN_ID_CACHE.lock().unwrap();
-            cache.get(&doc).expect("turn id still cached").0
-        };
-        assert_eq!(
-            recorded_at, unchanged,
-            "a within-TTL hit must not re-resolve the turn id"
-        );
-
-        // Past the TTL the entry is stale and must be resolved again, so a new
-        // cycle is picked up rather than pinned forever.
         {
-            let mut cache = TURN_ID_CACHE.lock().unwrap();
-            let entry = cache.get_mut(&doc).unwrap();
-            entry.0 = std::time::Instant::now() - (TURN_ID_CACHE_TTL * 2);
+            let _scope = begin_turn_attribution_scope();
+            let first = cached_turn_id(&doc);
+            let second = cached_turn_id(&doc);
+            assert_eq!(first, second);
+            // Same Arc allocation, not merely equal contents — proof the second
+            // call served the memo rather than re-resolving.
+            match (first, second) {
+                (Some(a), Some(b)) => assert!(std::sync::Arc::ptr_eq(&a, &b)),
+                (None, None) => {}
+                _ => panic!("memo must be stable within a scope"),
+            }
         }
-        let _ = cached_turn_id(&doc);
-        let refreshed = {
-            let cache = TURN_ID_CACHE.lock().unwrap();
-            cache.get(&doc).expect("turn id re-cached").0
-        };
-        assert!(
-            refreshed > recorded_at,
-            "an expired entry must be re-resolved"
-        );
+
+        // Nested scopes are reference counted: the inner drop must not discard
+        // the outer memo.
+        {
+            let _outer = begin_turn_attribution_scope();
+            let outer_first = cached_turn_id(&doc);
+            {
+                let _inner = begin_turn_attribution_scope();
+                let _ = cached_turn_id(&doc);
+            }
+            let outer_again = cached_turn_id(&doc);
+            match (outer_first, outer_again) {
+                (Some(a), Some(b)) => assert!(
+                    std::sync::Arc::ptr_eq(&a, &b),
+                    "an inner scope drop must not clear the outer memo"
+                ),
+                (None, None) => {}
+                _ => panic!("outer memo must survive the inner scope"),
+            }
+        }
+
+        // Outside any scope resolution is always fresh, which is correct.
+        assert_eq!(cached_turn_id(&doc), resolve_turn_id(&doc));
     }
 
     #[test]

@@ -146,6 +146,16 @@ const CRDT_POST_PROOF_REBASE_LIMIT: usize = 3;
 const CRDT_WRITE_SETTLE_MS: u64 = 10;
 #[cfg(not(test))]
 const CRDT_WRITE_SETTLE_MS: u64 = 500;
+/// Marker every error that RETAINS its change for a later retry must carry.
+///
+/// `#fzmutloss`: a write that fails but retains its intent must also retain the
+/// SAME closeout's backlog/status mutations, or the response lands on retry
+/// while its `--done` is silently dropped — which is exactly what a CRDT
+/// convergence timeout used to do. The classifier in `agent-doc-write-runtime-io`
+/// keys off this shared constant instead of guessing from prose, so a producer
+/// and its classifier cannot drift.
+pub const RETAINED_FOR_RETRY_MARKER: &str = "pending change retained for retry";
+
 #[cfg(test)]
 const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 2_500;
 #[cfg(not(test))]
@@ -1826,10 +1836,11 @@ pub fn apply_canonical_replace_if_attached(
                 ),
             );
             anyhow::bail!(
-                "{source}: CRDT convergence for {} did not settle within {}ms (reason={}); pending change retained for retry",
+                "{source}: CRDT convergence for {} did not settle within {}ms (reason={}); {}",
                 file.display(),
                 CRDT_WRITE_CONVERGENCE_TIMEOUT_MS,
                 wait_state,
+                RETAINED_FOR_RETRY_MARKER,
             );
         }
 

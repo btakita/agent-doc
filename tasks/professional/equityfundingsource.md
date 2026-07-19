@@ -330,7 +330,7 @@ The three that changed are the ones already documented as unrestorable: `RecID` 
 On the applier itself: `restore_apply_()` threads the RecID TMO assigns `NewLoan` into `NewBorrower`'s `LoanRecID`, skips a loan's dependents when the loan itself fails (sending them anyway either 404s or attaches them to whatever loan already holds that number), and treats a `200` carrying an `ErrorMessage` as a failure — TMO does that on rejected writes, so HTTP status alone would report a failed restore as successful.
 
 `--restore` is a dry run by default. `--apply` refuses any database whose name lacks "Sandbox", checked on both the target and the artifact's origin, so restoring into production isn't reachable from this tool.
-❯ 🚧 Please make restore sync in case there is existing data in the TMO but was somehow corrupted. Would you recommend not deleting any records in the restore?
+❯ Please make restore sync in case there is existing data in the TMO but was somehow corrupted. Would you recommend not deleting any records in the restore?
 
 ### Re: make restore sync; would you recommend not deleting any records? — opus-4-8
 
@@ -354,7 +354,7 @@ So `--sync` is **additive and corrective only**. `sync_plan_` emits nothing but 
 - **The safety property, on real data:** I added a document *after* the backup was taken, then synced. It was reported `EXTRA_IN_TMO … NOT removed` and survived. Sandbox is back to its original 18 loans, no residue.
 
 **One case sync deliberately will not fix by itself:** an attachment present under the same name with a *different* digest. TMO has no attachment update, so the only moves are adding a second copy under the same name or deleting the bad one — both worse than telling you. That's reported as a `conflict` with both digests, and it's your call.
-<!-- agent:boundary:428219da -->
+<!-- agent:boundary:1eaf04c6 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

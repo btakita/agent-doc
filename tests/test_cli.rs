@@ -18747,6 +18747,32 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
             "document realtime must allow direct relay access only inside the CPC-owned document mutation scope: {required_snippet}"
         );
     }
+    // `#ensurereplicagen`: queue maintenance runs in the short-lived preflight CLI
+    // process, where `hub_registry()` is always empty because only the controller
+    // ever populates it. Reading or writing the relay directly from there can only
+    // ever miss — it reported `editor_attached_model_missing` forever, and once the
+    // read was fixed the *write* still compare-and-swapped against a stale durable
+    // projection and failed with a permanently unsatisfiable `retry_crdt_merge`.
+    // Both halves must be routed through the hub-owning controller, guarded by the
+    // embedded-relay check so in-process callers keep the direct path.
+    let preflight_io =
+        fs::read_to_string(manifest_dir.join("agent-doc-preflight-io/src/lib.rs")).unwrap();
+    for required_snippet in [
+        "fn ensure_document_model_via_authority(",
+        "agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file)",
+        "current_text_via_controller_model_for_doc(",
+        "apply_cpc_write_via_controller_model_for_doc(",
+    ] {
+        assert!(
+            preflight_io.contains(required_snippet),
+            "queue maintenance must reach the relay through the hub-owning controller: {required_snippet}"
+        );
+    }
+    assert!(
+        !preflight_io.contains("let ensured = agent_doc_crdt_relay_io::ensure_document_model(file, source);"),
+        "queue maintenance must not ensure the document model against this process's empty local hub registry"
+    );
+
     let main_source = fs::read_to_string(manifest_dir.join("src/main.rs")).unwrap();
     assert!(
         main_source.contains("with_controller_document_mutation(||"),

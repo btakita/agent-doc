@@ -4436,6 +4436,44 @@ fn queue_maintenance_head_label(current: &agent_doc_crdt_relay_io::CurrentText) 
     }
 }
 
+/// `#ensurereplicagen` — drive the model-ensure transition through whichever
+/// process actually owns the relay hub.
+///
+/// This is the root of the long-running `editor_attached_model_missing` wedge.
+/// `agent_doc_crdt_relay_io::ensure_document_model` observes
+/// `current_text_for_file*`, which resolves against `hub_registry()` — a
+/// PROCESS-LOCAL map that only the project controller ever populates
+/// (`replica_register` is served by the controller RPC). Queue maintenance runs
+/// in the short-lived preflight CLI process, so it was asking its own always-empty
+/// registry. Once durable liveness reports the editor attached, that miss reads
+/// as `EditorAttachedMissingReplica` **every single time, for the life of the
+/// process** — no editor behaviour can ever clear it.
+///
+/// Proof from a live wedge: the JetBrains plugin registered successfully
+/// (`transport.register ok=true`, forwarder cached) and the controller recorded
+/// `controller_crdt_replica_handled method=replica_register data_kind=ok`, while
+/// `crdt_current_text_unavailable ... reason=missing_replica process_pid=<CLI>`
+/// was logged from a pid that was not the controller. The replica existed the
+/// whole time; the reader was simply asking the wrong process.
+///
+/// `idle_watch.rs` already documents this hazard and routes around it, and
+/// `document-realtime-io` has the same controller-routed shape. Queue
+/// maintenance was the remaining direct caller.
+fn ensure_document_model_via_authority(
+    file: &Path,
+    source: &str,
+) -> Result<agent_doc_crdt_relay_io::CurrentText> {
+    if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
+        return agent_doc_crdt_relay_io::ensure_document_model(file, source);
+    }
+    match agent_doc_controller_io::project_controller::current_text_via_controller_model_for_doc(
+        file, source,
+    )? {
+        Some(current) => Ok(current),
+        None => Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica),
+    }
+}
+
 /// `#px82`/`#bn41` — retry `ensure_document_model` with an explicit replica
 /// re-registration between attempts.
 ///
@@ -4461,7 +4499,7 @@ fn ensure_document_model_with_replica_reregistration(
             Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
         };
         std::thread::sleep(QUEUE_AUTHORITY_RETRY_BACKOFF);
-        let retried = agent_doc_crdt_relay_io::ensure_document_model(file, source);
+        let retried = ensure_document_model_via_authority(file, source);
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -4509,7 +4547,10 @@ pub(crate) fn persist_queue_maintenance_doc(
     // the head is still not ready. `ensure_document_model` observes relay state
     // only and never elects a disk/sidecar projection while an editor is attached,
     // so this stays fail-closed against clobbering a live buffer.
-    let observed = agent_doc_crdt_relay_io::current_text_for_file(file)?;
+    // `#ensurereplicagen`: observe through the hub-owning process, not this
+    // CLI process's always-empty local registry.
+    let observed = current_text_via_preflight_authority_retrying(file, source)?
+        .unwrap_or(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica);
     let current = match queue_maintenance_head_action(&observed, false) {
         QueueMaintenanceHeadAction::EnsureThenReobserve => {
             // `#ensurewindowsize`: log the outcome on BOTH paths. This log used to
@@ -4517,7 +4558,7 @@ pub(crate) fn persist_queue_maintenance_doc(
             // to debug — recorded no before/after label at all, and the ops.log
             // showed a bare `document_model_ensure_failed` with no queue-side
             // context.
-            let ensured = agent_doc_crdt_relay_io::ensure_document_model(file, source);
+            let ensured = ensure_document_model_via_authority(file, source);
             match &ensured {
                 Ok(ensured) => agent_doc_ops_log_io::log_op(
                     file,
@@ -4560,12 +4601,31 @@ pub(crate) fn persist_queue_maintenance_doc(
                 text == expected_current,
                 "{source}: Lazily head advanced during queue maintenance"
             );
-            let write = agent_doc_crdt_relay_io::apply_cpc_write_for_file(
-                file,
-                expected_current,
-                content,
-                source,
-            )?;
+            // `#ensurereplicagen`: the write is the symmetric half of the read
+            // fix above and must land in the hub-owning process too.
+            // `apply_cpc_write_for_file` is process-local: with no hub in this
+            // short-lived CLI it recovers one from the durable `.yrs` projection
+            // and compare-and-swaps against THAT. The projection is the
+            // last-known canonical, so once it lags the controller's live model
+            // the CAS fails with a *stable* hash mismatch — identical
+            // expected/current hashes on every retry, `recovery=retry_crdt_merge`
+            // that no retry can ever satisfy. Route through the controller, whose
+            // model is the real current.
+            let write = if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
+                agent_doc_crdt_relay_io::apply_cpc_write_for_file(
+                    file,
+                    expected_current,
+                    content,
+                    source,
+                )?
+            } else {
+                agent_doc_controller_io::project_controller::apply_cpc_write_via_controller_model_for_doc(
+                    file,
+                    expected_current,
+                    content,
+                    source,
+                )?
+            };
             anyhow::ensure!(
                 write.is_some(),
                 "{source}: attached Lazily write was not applied"

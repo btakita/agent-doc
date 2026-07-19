@@ -196,14 +196,52 @@ That closes the loop on the whole type-check thread: `bun run typecheck` is **0*
 **The Check workflow was red, and not for the reason `#chkci` predicted.** Run `29668807479` failed every single `app/brookebrodack-site` test on `Cannot find module '../../public/assets/images/brooke-brodack-logo.jpg'` — not `#yalcdrift`. `public/assets` is 119 MB of media, gitignored on purpose and served from Contabo S3; `config.ts` imports the logo from it, so a clean checkout cannot boot the app at all. The deploy workflow has always downloaded the bucket before building — Check had not. It does now, same step, same secrets. So the workflow I added last cycle could never have gone green as written, which is worth saying plainly.
 
 **Verification.** `typecheck` 0 errors; `test` 67 pass / 0 fail; `test:dom` 9 pass / 0 fail; `bun run build` green and still emitting `dist/browser`. Pushed as `61ad8f3` (ui--browser), `7671b07` (ui--server), `d31de57` and `36c60bb` (parent), gitlink bumped at `82af6ec13`. Check run `29670229183` and the Pages deploy were still queued at closeout — `#chkci` carries the confirmation, now with a specific thing to confirm.
-<!-- agent:boundary:3c8aa228 -->
+❯ 🚧 Please update esbuild in rebuildjs + rhonojs. Update all dependencies in the projects. Is there a way I can release from my machine without needing to 2 factor?
+
+### Re: esbuild, dependency sweep, and releasing without 2FA — opus-4-8
+
+**On the 2FA question first, because it has a deadline.** Yes, you can publish from your machine without 2FA today — and that door is closing on a published schedule. npm is retiring 2FA-bypass tokens: they lose account-management operations in **early August 2026**, and lose **direct publishing around January 2027**, after which a token can only *stage* a publish for human approval. Your local token is moot anyway — `npm whoami` currently 401s here, so nothing publishes from this machine as it stands.
+
+The path that survives is Trusted Publishing (OIDC) from Actions, which you picked. I ported lazily-js's `release.yml` into rebuildjs (`bfe2707`) — it had no CI at all. Tag-triggered, no `NPM_TOKEN` anywhere, no 2FA per release. **One thing is left and only you can do it:** on npmjs.com, set the Trusted Publisher on the `rebuildjs` package to org `rebuildjs`, repo `rebuildjs`, workflow `release.yml`. That single browser step needs 2FA once; every release after it needs none. npm has no "pending publisher", so the package must already exist — rebuildjs does. This is also exactly the step lazily-js skipped, which is why its publish died on `E404` rather than an auth error.
+
+**esbuild.** `^0.27.3` in a caret range **cannot** reach 0.28 — carets do not cross a minor on 0.x. So the pin was not merely stale, it was pinned shut. Now `^0.28.1` in all ten packages that peer it: `ctx-core`, `esmcss`, `hyop`, `rebuildjs`, `@rebuildjs/tailwindcss`, `relysjs`, `rhonojs`, and the three esbuild plugins.
+
+`rhonojs` turned out to be `ctx-core-dev/lib/rhonojs` — a plain directory in the monorepo, not a submodule, which is why `btakita/rhonojs` 404s and nothing was cloned locally. The checkout was 13 commits behind and did not have it yet.
+
+**rebuildjs had a second problem I fixed while I was in there.** `bun run test` was red *before* my bump — I verified that against pristine HEAD rather than assume it. `bun-types` ships declarations TypeScript 7 rejects (TS2309 in `extensions.d.ts`), so `tsc --noEmit` failed on a *dependency's* `.d.ts`. Because `prepublishOnly` runs the suite, **rebuildjs could not be published at all**, which is a sharp thing to discover in the same breath as "how do I release this". `skipLibCheck` in tsconfig, and `typescript: next` pinned to `^7.0.2` — `next` was silently tracking a 7.1 dev build, and that is what the uncommitted `>=5.0.0` edit in your old checkout was reaching for. 56/56 unit tests green. `publint` and `attw` both clean.
+
+**The monorepo sweep.** I used the repo's own `monorepo_pnpm__dependencies__update` rather than hand-editing: **561 updates across 191 packages**, including majors (auth0-js 9→10, auth0 5→6, sinon 21→22, c8 11→12). Then I tested every package that has a test script:
+
+- **184 pass, 7 fail.**
+- All 7 — `auth0`, `google`, `preprocess`, `rebuildjs-tailwindcss`, `relysjs`, `rhonojs`, `search` — I re-ran individually against stashed HEAD. **Every one was already red before the sweep. Zero regressions.**
+
+Committed as 188 per-package commits plus `31ad9151a` on the superproject. Worth naming: `rhonojs`'s own failure is a test-harness mismatch, not a dependency — `server/app/hono_duck_type.test.ts` calls `describe`, which is bun's runner, while `test:unit` runs uvu. Queued as `#rhonouvu`.
+
+**I did not push the monorepo, and I want your go before I do.** That is ~190 public repositories in one motion, and pushing is the irreversible part. Everything is committed locally and the tree is clean, so it is one command whenever you say. Queued as `#pushctxcore`.
+
+**I also did not create changesets or bump versions.** The registry sweep is the dependency half; `changeset-version-COMMIT_EDITMSG → publish--force` would version and publish all 190 packages, which is a release decision, not a dependency one — and it is gated on the npm auth and Trusted Publisher work above regardless.
+
+**On the rest of the graph.** rappstack is at `/home/brian/work/rappstack/dev` (`rappstack/dev`), and it is where last cycle's 39 type errors actually live: 4 packages pin `drizzle-orm ^0.32.0` while `domain--server` pins `^0.45.1` — that split is the entire 15-error youtube cluster in brookebrodack-dev. Its working tree also has uncommitted changes I did not touch. Queued as `#rappdeps` (sweep + drizzle alignment) and `#bbdeps` (brookebrodack-dev + its lib submodules). Separately, **186 of 190 ctx-core packages carry `typescript: next`** — the exact footgun that broke rebuildjs's type-check. Queued as `#tsnextpin`.
+
+`#lzeffectvoid` is still queued and untouched: your prompt took this cycle, and widening lazily-js's `EffectRun` is a published-package change across the binding family rather than a tail-end edit.
+
+**Verification.** rebuildjs: type-check clean, 56/56 unit, publint + attw clean, pushed `c8e30a9` + `bfe2707`. ctx-core-dev: 184/191 packages green, 7 pre-existing failures each confirmed red at HEAD, committed locally through `31ad9151a`, unpushed by choice.
+<!-- agent:boundary:2ea698ae -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- do [#pushctxcore]
+- do [#oidcnpm]
+- do [#rappdeps]
+- do [#bbdeps]
+- do [#tsnextpin]
+- do [#rhonouvu]
+- do [#ctxredtests]
+- do [#lzeffectvoid]
 - do [#tsappclean]
-- do [#tsbrowser]
+- ~~do [#tsbrowser]~~
 - do [#sbv9]
 - do [#nd8n]
 - do [#fhmig]
@@ -221,6 +259,13 @@ That closes the loop on the whole type-check thread: `bun run typecheck` is **0*
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#pushctxcore] Push the ctx-core-dev dependency sweep: 188 per-package submodule commits + superproject 31ad9151a are committed LOCALLY and unpushed on purpose (~190 public repos in one motion). Working tree is clean. Needs operator go, then push each submodule and the superproject
+- [ ] [#oidcnpm] Configure the npm Trusted Publisher on the rebuildjs package at npmjs.com (org rebuildjs, repo rebuildjs, workflow release.yml). Workflow is committed (bfe2707); this browser step needs 2FA ONCE and then no release needs it again. npm retires 2FA-bypass tokens for account ops early Aug 2026 and for direct publishing ~Jan 2027. Repeat for rhonojs/relysjs/ctx-core once their release workflows land. Note lazily-js's E404 publish failure was this same missing step
+- [ ] [#rappdeps] rappstack is at /home/brian/work/rappstack/dev (github rappstack/dev). Run the same dependency sweep, and ALIGN DRIZZLE: 4 packages pin drizzle-orm ^0.32.0 while domain--server pins ^0.45.1, which is the whole 15-error youtube cluster in brookebrodack-dev (#rappts) — a table type and a db handle from two different drizzle universes. Also has an uncommitted working tree (bun.lockb, lib/dev-bin, lib/domain--any--blog) to resolve first
+- [ ] [#bbdeps] Dependency sweep for brookebrodack-dev and its lib/** submodules — the third project in the graph the operator named. Do after #rappdeps so the @rappstack versions it resolves are already aligned
+- [ ] [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface
+- [ ] [#rhonouvu] rhonojs test:unit is red at HEAD and unrelated to dependencies: server/app/hono_duck_type.test.ts calls describe() (bun's runner) while test:unit runs uvu, so the file dies with 'Cannot use describe outside of the test runner'. Either port the file to uvu or move rhonojs to bun test
+- [ ] [#ctxredtests] 7 ctx-core-dev packages have test scripts that were already red before the dependency sweep: auth0, google, preprocess, rebuildjs-tailwindcss, relysjs, rhonojs (#rhonouvu), search. relysjs is a missing check-dts script. Triage and fix so the workspace suite is a usable gate
 - [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts
 - [ ] [#rappts] 24 of the remaining type errors are in yalc/npm-linked @rappstack/* SOURCES, not this repo (they ship .ts, so skipLibCheck does not apply): 17 in ui--any/md/MarkedPlaintextRenderer.ts (written against marked 13's Renderer signature, now resolving marked 17), 3 in domain--server--blog/post/Post__schema.ts (zod errorMap), plus dl/, rdfa/, jsonld/, breadcrumb/. SEPARATELY, 15 errors in lib/domain--server--brookebrodack/youtube/ have a single rappstack root cause: @rappstack/domain--server--youtube pins drizzle-orm ^0.32.0 while @rappstack/domain--server pins ^0.45.1, so youtube_video_tbl is a 0.32 table type and drizzle_db_(ctx) is a 0.45 db handle and every query between them is a nominal mismatch. Bumping this repo's pin cannot fix it. Align both packages on one drizzle major and republish; that unblocks #ciappts and gating typecheck:browser
 - [ ] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
@@ -272,4 +317,5 @@ That closes the loop on the whole type-check thread: `bun run typecheck` is **0*
 - 2026-07-18 [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
 - 2026-07-18 [#tsappsub] app/brookebrodack-site/tsconfig.json carries the SAME TS5110 defect just fixed in the root (module esnext + moduleResolution nodenext), so the submodule's own type-check has also never run. It is a separate repo (brookebrodack-site) — fix it there, not from here
 - 2026-07-18 [#tsappclean] the app/brookebrodack-site type-check now runs and reports 267 errors — the honest state of a package that had never been checked, not a regression. Dominated by build.ts (esbuild used but not a direct dependency, implicit anys in plugin callbacks) and app/index.ts (a hono ErrorHandler returning void where it must return Response). Separate repo (brookebrodack-site); do it there. Pairs with #tsbrowser for the lib/ half of the parent repo
+- 2026-07-18 [#tsbrowser] type-check the browser half: lib/** and test/guestbook-hyop.test.ts are not covered by tsconfig.json, because @cloudflare/workers-types replaces Response with the Workers one and browser code fails against it on every element. A separate DOM-lib config measures 56 errors today — mostly in lib/domain--server--brookebrodack (sig/ctx generic mismatches) plus a missing image-module declaration in the app submodule. Needs the config split plus those fixes, or an explicit decision that lib/ is checked by its own workspace package instead
 <!-- /agent:done -->

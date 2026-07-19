@@ -132,13 +132,27 @@ After rebasing onto `origin/main` and syncing gitlinks, the checker exits 0.
 Both fast-forward paths are exercised, not assumed: `merge --ff-only` on a branch checkout (`lib/rebuildjs`, on `main`) and `checkout --detach` on a detached one (`lib/array`) — each run for real and restored.
 
 **One incidental finding.** The first run reported `lib/addtocalendar.com` and `lib/auth0-ui-solid` as unresolvable. They are not uninitialized — they are declared in `.gitmodules` with **no gitlink in the tree at all**, so `git submodule update --init` cannot materialize them and never could. Removed the two stanzas rather than leaving the checker reporting two permanent phantoms.
-<!-- agent:boundary:b0974c06 -->
+❯ Please auto-rebase. I'm not working on these submodules.
+
+### Re: auto-rebase by default — opus-4-8
+
+❯ > ❯ Please auto-rebase. I'm not working on these submodules.
+
+❯ Flipped. Pushed as `d53389423`, gitlink bumped.
+
+❯ Fast-forwarding is now the default; `--check-only` reports without changing anything. Your reason is the better one and I should have reached it myself: these 191 submodules are *consumed*, not developed in, so a behind checkout is a sync problem to fix, not a decision worth stopping a dependency sweep to ask about. Refusing by default made the guard cost you a manual step on every run to protect against a case that does not arise in this repo.
+
+❯ **What I kept.** A **diverged** submodule — local commits upstream does not have — is still never rewritten; it is reported and the sweep refuses. That is not the case you were describing. Fast-forwarding is recoverable; silently discarding unpushed local work is not, and the flag that does it should never be the one you get by default.
+
+❯ Verified by rewinding real submodules rather than reasoning about it: `lib/array`, `lib/uuid`, `lib/rebuildjs` reset one commit back, then auto-rebase recovered all three and the re-check passed clean. For the diverged case I put a local-only commit on `lib/uuid` — auto-rebase skipped it, refused, and **the probe commit survived**. All three restored to their exact original SHAs afterward; no gitlink drift.
+
+❯ One implementation note worth recording: the post-fast-forward re-check re-execs as `--after-rebase` rather than `--rebase`, so anything that failed to fast-forward refuses on the second pass instead of recursing into another attempt.
+<!-- agent:boundary:42e64931 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#sweepstale]
 - do [#oidcnpm]
 - do [#schemadts2]
 - do [#ctxredtests]
@@ -226,4 +240,5 @@ Both fast-forward paths are exercised, not assumed: `merge --ff-only` on a branc
 - 2026-07-18 [#chkci] Confirm Check run 29671085390 went green. Progress so far: run 29668807479 failed all 67 app tests on the missing gitignored asset (fixed, 36c60bb); run 29670229183 then failed 20 on ConnectionRefused because routes.test.ts spawns the production start.ts with no build and no migrated db (fixed, 6762d07 adds Initialize database + Build). If this run is still red the next cause is new
 - 2026-07-18 [#ciappts2] Now that Check is green and gates lint + edge typecheck, revisit adding the two remaining type-check steps (bun run typecheck:browser, and app/brookebrodack-site typecheck). Both are still red ONLY on @rappstack sources — 15 drizzle-split errors plus the marked 13/17 split. Gate them the same cycle #rappdeps lands, not before
 - 2026-07-18 [#pushctxcore] Push the ctx-core-dev dependency sweep: 188 per-package submodule commits + superproject 31ad9151a are committed LOCALLY and unpushed on purpose (~190 public repos in one motion). Working tree is clean. Needs operator go, then push each submodule and the superproject
+- 2026-07-18 [#sweepstale] The monorepo dependency sweep computes updates against whatever the submodule checkout happens to be, so on a stale checkout it silently REVERTS newer upstream work rather than updating it. Seen concretely: lib/rebuildjs (8 behind, sweep based on 0.70.45) would have reintroduced a removed elysia dep, dropped bun-types, and reverted typescript ^7.0.2 back to next; lib/rebuildjs-tailwindcss (4 behind) would have dropped @tailwindcss/postcss. Make ctx_core__monorepo_pnpm__dependencies__update.sh fetch and refuse to run (or auto-rebase) when any workspace submodule is behind its upstream
 <!-- /agent:done -->

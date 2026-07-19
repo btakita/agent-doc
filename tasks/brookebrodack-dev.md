@@ -7,7 +7,6 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: start
 prompt_presets:
   '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
@@ -16,6 +15,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
+queue: go
 ---
 
 # brookebrodack-dev — Session Summary
@@ -285,14 +285,30 @@ I then regenerated `bun.lockb` against the corrected submodules and confirmed th
 Both checkouts are synced to `6201622` with clean trees. `rappstack/dev` shows only an untracked `.idea/`, which I left alone. I did not touch the `agent-loop` superproject — it has ~30 modified paths from concurrent sessions, and none of this turn's work belongs there.
 
 Two caveats carried forward unchanged. `better-sqlite3` still fails its native build against Node v26, so installs need `--ignore-scripts`; and whether this clears `#rappts`'s 15-error youtube cluster still needs a typecheck in brookebrodack-dev, which I can't run from this side.
-<!-- agent:boundary:cd86cf4a -->
+rappstack uses bun.
+
+### Re: rappstack uses bun — opus-4-8
+
+> **Queue prompt:** 📌 rappstack uses bun.
+
+Noted and verified — everything I ran last cycle was bun. `bun install`, `bun install --force`, `bun install --ignore-scripts`, and `bun pm ls` for the resolution check; the committed lockfile is `bun.lockb`. No npm, pnpm, or yarn command touched the repo.
+
+I confirmed the tree agrees rather than taking my own word for it: `bun.lockb` is the only lockfile in `rappstack/dev` or any of its submodules — no stray `package-lock.json`, `pnpm-lock.yaml`, or `yarn.lock` — and the workspace uses `workspace:*` protocol deps throughout.
+
+One phrase of mine is worth disambiguating, since it reads like a contradiction. The submodule commits I rebased and pushed were titled *"bump version to 0.1.0 for npm publishing"*, and `#rappsnippetarchive` repeats that wording. That is the upstream commit author's phrasing and refers to the **npm registry** — the place bun publishes *to* — not the npm CLI. `bun publish` targets the same registry. Nothing in that work implies switching package managers.
+
+The pin does sharpen one open item, so I filed it as `#rappsqlite`. `better-sqlite3` fails its node-gyp native build against Node v26, which is what made `bun install` abort partway through linking and leave stale package symlinks behind — the exact mechanism that silently recreated the drizzle 0.32.2/0.45.2 split universe I spent last cycle chasing. `--ignore-scripts` is a workaround, not a fix, and it will bite again on any clean install. The real fix stays inside bun: a `better-sqlite3` release with Node 26 prebuilds, a pinned toolchain Node for installs, or dropping it if it is only a transitive dev dependency.
+
+Exchange is at 183 lines across 8 response sections; queue is active so I am not stalling to compact.
+<!-- agent:boundary:3290799a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- do [#rappsqlite]
+- ~~📌 rappstack uses bun.~~
 - do [#rappsnippetarchive]
-- ~~do [#rappgitlink]~~
 - do [#tsnextpin]
 - do [#lzeffectvoid]
 - do [#tsappclean]
@@ -313,6 +329,7 @@ Two caveats carried forward unchanged. `better-sqlite3` still fails its native b
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rappsqlite] better-sqlite3 fails its node-gyp native build against Node v26 in rappstack/dev (v8::Global ctor arity mismatch in better_sqlite3.o), so every 'bun install' aborts mid-link and leaves stale package symlinks — that is what silently reproduced the drizzle 0.32.2/0.45.2 split universe. Workaround today is 'bun install --ignore-scripts'. Fix properly: bump better-sqlite3 to a release with Node 26 prebuilds, pin the toolchain Node version for installs, or drop it if only a transitive dev dep. Stays in bun (see pinned note: rappstack uses bun)
 - [ ] [#rappsnippetarchive] btakita/snippet--rappstack is ARCHIVED on GitHub (read-only), so its unpushed 'bump version to 0.1.0' commit a61f06b can never be published. rappstack/dev's gitlink now points at the existing remote main 94e07aa and the local bump is dropped (preserved as tag backup/pre-rappgitlink in agent-loop/src/rappstack-dev/lib/snippet--rappstack). Decide: unarchive the repo and re-push the bump, move the package to a new remote, or leave it pinned at 94e07aa. Note its remote main also carries a relysjs->rhonojs migration the local branch never had
 - [ ] [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface. KEPT OPEN: not started — sequence after #pushctxcore so it does not stack a second uncommitted sweep on top of the unpushed dependency sweep
 - [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit

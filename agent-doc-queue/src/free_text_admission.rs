@@ -122,6 +122,7 @@ impl PreparedFreeTextAdmission {
                             crate::document_queue::QueuePrompt {
                                 text: command,
                                 multiline: false,
+                                indent: 0,
                             },
                         ),
                     );
@@ -524,6 +525,7 @@ mod tests {
             crate::document_queue::QueuePrompt {
                 text: "❯ Implement checkout setup".to_string(),
                 multiline: false,
+                indent: 0,
             },
         )];
 
@@ -565,6 +567,7 @@ mod tests {
             crate::document_queue::QueuePrompt {
                 text: command,
                 multiline: false,
+                indent: 0,
             },
         )];
 
@@ -574,6 +577,7 @@ mod tests {
             crate::document_queue::QueuePrompt {
                 text: "/goal Implement [#abc123] and [#def456]".to_string(),
                 multiline: false,
+                indent: 0,
             },
         )];
         assert!(goal_command_already_queued(&bracketed, &ids));

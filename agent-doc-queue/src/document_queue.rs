@@ -61,6 +61,33 @@ pub enum QueueEntry {
 pub struct QueuePrompt {
     pub text: String,
     pub multiline: bool,
+    /// Source indentation width in spaces for a nested queue item (`#queuenest`
+    /// / `#f1s3`). `0` is a top-level `- item`; a deeper value is a child of the
+    /// nearest preceding entry with a smaller indent.
+    ///
+    /// Retained so `render` can reproduce the operator's list shape **byte for
+    /// byte**. `#queueatcreate` is the precedent that makes this mandatory: a
+    /// parse -> render round-trip silently rewrote `- /goal complete the entire
+    /// queue` to `/goal ...`, dropping the operator's list marker. Nesting makes
+    /// round-trips both more tempting and more damaging, so indentation is data,
+    /// never something render re-derives.
+    pub indent: usize,
+}
+
+impl QueuePrompt {
+    /// A top-level single-line prompt — the overwhelmingly common shape.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            multiline: false,
+            indent: 0,
+        }
+    }
+
+    /// `true` when this prompt is nested under a parent item.
+    pub fn is_nested(&self) -> bool {
+        self.indent > 0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -228,6 +255,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 QueueEntry::Prompt(QueuePrompt {
                     text: trimmed.to_string(),
                     multiline: false,
+                    indent: 0,
                 }),
                 span(start_i, start_i + 1),
             ));
@@ -244,11 +272,20 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
             Some(rest) if rest.starts_with("- ") => rest,
             _ => line,
         };
-        if let Some(rest) = item_line.strip_prefix("- ") {
+        // `#queuenest` / `#f1s3`: accept an INDENTED `- <text>` as a nested item
+        // and retain its indentation. Before this, `strip_prefix("- ")` required
+        // column 0, so every child line fell through to `Freeform` — preserved
+        // verbatim but invisible to strike/consume/sync. Indentation is captured
+        // as data so `render` reproduces the operator's shape byte for byte
+        // rather than re-deriving it (#queueatcreate).
+        let indent = item_line.len() - item_line.trim_start_matches(' ').len();
+        let dedented = &item_line[indent..];
+        if let Some(rest) = dedented.strip_prefix("- ") {
             let entry = if let Some(completed) = parse_completed_inline(rest) {
                 QueueEntry::Completed(QueuePrompt {
                     text: completed.to_string(),
                     multiline: false,
+                    indent,
                 })
             } else if is_reference_directive(rest) {
                 // Optional-`do` grammar (Stage 1): a `re [#id]` / `re #id` line
@@ -259,6 +296,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                 QueueEntry::Prompt(QueuePrompt {
                     text: rest.to_string(),
                     multiline: false,
+                    indent,
                 })
             };
             entries.push((entry, span(start_i, start_i + 1)));
@@ -317,6 +355,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     let prompt = QueuePrompt {
                         text,
                         multiline: true,
+                        indent: 0,
                     };
                     let entry = if completed {
                         QueueEntry::Completed(prompt)
@@ -347,6 +386,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                         QueueEntry::Prompt(QueuePrompt {
                             text,
                             multiline: true,
+                            indent: 0,
                         }),
                         span(start_i, close_idx + 1),
                     ));
@@ -376,6 +416,7 @@ pub fn parse_spans(body: &str) -> Result<Vec<(QueueEntry, std::ops::Range<usize>
                     QueueEntry::Prompt(QueuePrompt {
                         text,
                         multiline: true,
+                        indent: 0,
                     }),
                     span(start_i, close_idx + 1),
                 ));
@@ -414,6 +455,11 @@ pub fn render(entries: &[QueueEntry]) -> String {
                     out.push_str(p.text.trim());
                     out.push('\n');
                 } else {
+                    // `#queuenest`: replay the captured indentation so a nested
+                    // item round-trips byte-identically (#queueatcreate).
+                    for _ in 0..p.indent {
+                        out.push(' ');
+                    }
                     out.push_str("- ");
                     out.push_str(&p.text);
                     out.push('\n');
@@ -432,6 +478,9 @@ pub fn render(entries: &[QueueEntry]) -> String {
                     // item renders struck-through in the editor (#queue-strike-on-complete).
                     // The parser (`parse_completed_inline`) reads back both `~x~`
                     // and `~~x~~`, so legacy single-tilde residue still resolves.
+                    for _ in 0..p.indent {
+                        out.push(' ');
+                    }
                     out.push_str("- ~~");
                     out.push_str(&p.text);
                     out.push_str("~~\n");
@@ -600,6 +649,7 @@ fn do_prompt_entry(id: &str) -> QueueEntry {
     QueueEntry::Prompt(QueuePrompt {
         text: format!("do [#{id}]"),
         multiline: false,
+        indent: 0,
     })
 }
 
@@ -1689,11 +1739,53 @@ fn strip_malformed_true_suffix(value: &str) -> Option<&str> {
 pub fn prompts(entries: &[QueueEntry]) -> Vec<&QueuePrompt> {
     entries
         .iter()
-        .filter_map(|e| match e {
-            QueueEntry::Prompt(p) => Some(p),
+        .enumerate()
+        .filter_map(|(idx, e)| match e {
+            // `#queuenest` / `#f1s3`: leaf-only execution. A parent item is the
+            // epic/group LABEL and is never executable, so it must not surface
+            // as a runnable head.
+            QueueEntry::Prompt(p) if !entry_is_group_parent(entries, idx) => Some(p),
             _ => None,
         })
         .collect()
+}
+
+/// `true` when the entry at `idx` is a nesting PARENT — it has at least one
+/// more-deeply-indented item beneath it before the list returns to its own depth
+/// (`#queuenest` / `#f1s3`).
+///
+/// Parents are descriptive group labels, never executable units. Scanning
+/// forward from the entry is what makes this positional rather than a property
+/// of the prompt itself: the same text is a leaf in a flat queue and a parent
+/// once a child is indented under it.
+///
+/// A flat queue has every `indent == 0`, so no entry is ever a parent and this
+/// is a no-op — the pre-nesting behaviour is preserved exactly.
+pub fn entry_is_group_parent(entries: &[QueueEntry], idx: usize) -> bool {
+    let Some(own_indent) = entries.get(idx).and_then(entry_indent) else {
+        return false;
+    };
+    for later in entries.iter().skip(idx + 1) {
+        match entry_indent(later) {
+            // Deeper than us before we returned to our own depth: we are a parent.
+            Some(indent) if indent > own_indent => return true,
+            // Back to our depth or shallower: our subtree ended without a child.
+            Some(_) => return false,
+            // Non-item entries (fences, presets, freeform) neither open nor close
+            // a subtree; keep scanning past them.
+            None => continue,
+        }
+    }
+    false
+}
+
+/// Indentation of an item-shaped entry, or `None` for entries that carry no list
+/// depth (fences, presets, dispatch, freeform).
+fn entry_indent(entry: &QueueEntry) -> Option<usize> {
+    match entry {
+        QueueEntry::Prompt(p) | QueueEntry::Completed(p) => Some(p.indent),
+        _ => None,
+    }
 }
 
 /// Collapse duplicate live `Prompt` entries that target the same queue identity,
@@ -1894,6 +1986,7 @@ pub fn dedup_pin_variant_do_heads(entries: &[QueueEntry]) -> Option<Vec<QueueEnt
                 QueueEntry::Prompt(QueuePrompt {
                     text: text.clone(),
                     multiline: false,
+                    indent: 0,
                 })
             }
             _ => entry.clone(),
@@ -2476,6 +2569,7 @@ pub fn converge_queue_via_lifecycle(
                 converged.push(QueueEntry::Prompt(QueuePrompt {
                     text: text.clone(),
                     multiline: false,
+                    indent: 0,
                 }));
             }
             _ => converged.push(entry.clone()),
@@ -2486,8 +2580,10 @@ pub fn converge_queue_via_lifecycle(
 }
 
 pub fn first_prompt(entries: &[QueueEntry]) -> Option<&QueuePrompt> {
-    entries.iter().find_map(|e| match e {
-        QueueEntry::Prompt(p) => Some(p),
+    // Leaf-only (`#queuenest` / `#f1s3`): skip group parents so the drain head is
+    // always an executable unit, never an epic label.
+    entries.iter().enumerate().find_map(|(idx, e)| match e {
+        QueueEntry::Prompt(p) if !entry_is_group_parent(entries, idx) => Some(p),
         _ => None,
     })
 }
@@ -3458,6 +3554,7 @@ mod tests {
         let entries = vec![QueueEntry::Completed(QueuePrompt {
             text: "do [#x]".to_string(),
             multiline: false,
+            indent: 0,
         })];
         let rendered = render(&entries);
         assert_eq!(rendered, "- ~~do [#x]~~\n");
@@ -3963,6 +4060,7 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix1".to_string(),
                 multiline: false,
+                indent: 0,
             })
         );
         assert_eq!(
@@ -3970,6 +4068,7 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix2".to_string(),
                 multiline: false,
+                indent: 0,
             })
         );
         assert_eq!(
@@ -3977,6 +4076,7 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "run tests".to_string(),
                 multiline: false,
+                indent: 0,
             })
         );
     }
@@ -3991,6 +4091,7 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "Review the changes in src/.\nCheck for edge cases.".to_string(),
                 multiline: true,
+                indent: 0,
             })
         );
     }
@@ -4005,6 +4106,7 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "Review the changes.\nThen run cargo test.".to_string(),
                 multiline: true,
+                indent: 0,
             })
         );
     }
@@ -4033,6 +4135,7 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "There is significant blocking with the sync pipeline.".to_string(),
                 multiline: false,
+                indent: 0,
             })
         );
         assert!(matches!(&entries[1], QueueEntry::Prompt(p) if p.text == "run tests"));
@@ -4302,6 +4405,7 @@ mod tests {
         let entries = vec![QueueEntry::Prompt(QueuePrompt {
             text: "do #fix1".to_string(),
             multiline: false,
+            indent: 0,
         })];
         assert_eq!(render(&entries), "- do #fix1\n");
     }
@@ -4311,6 +4415,7 @@ mod tests {
         let entries = vec![QueueEntry::Prompt(QueuePrompt {
             text: "Review changes.\nRun tests.".to_string(),
             multiline: true,
+            indent: 0,
         })];
         assert_eq!(render(&entries), "---\nReview changes.\nRun tests.\n---\n");
     }
@@ -4339,11 +4444,13 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix1".to_string(),
                 multiline: false,
+                indent: 0,
             }),
             QueueEntry::StopFence,
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix2".to_string(),
                 multiline: false,
+                indent: 0,
             }),
         ];
         assert_eq!(render(&entries), "- do #fix1\n--- stop\n- do #fix2\n");
@@ -4356,10 +4463,12 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix1".to_string(),
                 multiline: false,
+                indent: 0,
             }),
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix2".to_string(),
                 multiline: false,
+                indent: 0,
             }),
         ];
         let result = mark_first_prompt_completed(&entries);
@@ -4374,10 +4483,12 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix1".to_string(),
                 multiline: false,
+                indent: 0,
             }),
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix2".to_string(),
                 multiline: false,
+                indent: 0,
             }),
         ];
         let result = mark_first_prompt_completed(&entries);
@@ -4404,11 +4515,13 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "task1".to_string(),
                 multiline: false,
+                indent: 0,
             }),
             QueueEntry::StopFence,
             QueueEntry::Prompt(QueuePrompt {
                 text: "task2".to_string(),
                 multiline: false,
+                indent: 0,
             }),
         ];
         let p = prompts(&entries);
@@ -4424,6 +4537,7 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "task1".to_string(),
                 multiline: false,
+                indent: 0,
             }),
         ];
         assert_eq!(first_prompt(&entries).unwrap().text, "task1");
@@ -4442,10 +4556,12 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "task1".to_string(),
                 multiline: false,
+                indent: 0,
             }),
             QueueEntry::Prompt(QueuePrompt {
                 text: "task2".to_string(),
                 multiline: false,
+                indent: 0,
             }),
         ];
         let result = remove_first_prompt(&entries);
@@ -4464,6 +4580,7 @@ mod tests {
             QueueEntry::Prompt(QueuePrompt {
                 text: "do #fix1".to_string(),
                 multiline: false,
+                indent: 0,
             })
         );
     }
@@ -4481,6 +4598,7 @@ mod tests {
         QueueEntry::Prompt(QueuePrompt {
             text: text.to_string(),
             multiline: false,
+            indent: 0,
         })
     }
 
@@ -5030,18 +5148,124 @@ mod tests {
         }
     }
 
+    // ---- Nested queue lists (`#queuenest` / `#f1s3`) ----
+
+    /// Indented items parse as real nested prompts, retaining their depth.
+    /// Before this they failed `strip_prefix("- ")` at column 0 and fell through
+    /// to inert `Freeform`.
+    #[test]
+    fn nested_items_parse_with_indent() {
+        let body = "- parent epic\n  - first child\n  - second child\n- another top level\n";
+        let entries = parse(body).unwrap();
+
+        let items: Vec<(&str, usize)> = entries
+            .iter()
+            .filter_map(|e| match e {
+                QueueEntry::Prompt(p) => Some((p.text.as_str(), p.indent)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            items,
+            vec![
+                ("parent epic", 0),
+                ("first child", 2),
+                ("second child", 2),
+                ("another top level", 0),
+            ]
+        );
+    }
+
+    /// The plan's hard constraint: render must be byte-preserving. `#queueatcreate`
+    /// is the precedent — a round-trip once silently dropped an operator's list
+    /// marker.
+    #[test]
+    fn nested_list_round_trips_byte_for_byte() {
+        for body in [
+            "- parent\n  - child\n",
+            "- parent\n  - child\n    - grandchild\n- sibling\n",
+            "- flat one\n- flat two\n",
+            "- parent\n  - ~~struck child~~\n",
+            "- a\n    - deeply indented child\n- b\n",
+        ] {
+            let rendered = render(&parse(body).unwrap());
+            assert_eq!(rendered, body, "round-trip must preserve bytes for {body:?}");
+        }
+    }
+
+    /// Leaf-only execution: a parent is the group label and never yields a
+    /// runnable head; its children do.
+    #[test]
+    fn group_parents_are_not_executable() {
+        let body = "- parent epic\n  - child one\n  - child two\n";
+        let entries = parse(body).unwrap();
+
+        let runnable: Vec<&str> = prompts(&entries).iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(
+            runnable,
+            vec!["child one", "child two"],
+            "the parent label must not be executable"
+        );
+        assert_eq!(
+            first_prompt(&entries).map(|p| p.text.as_str()),
+            Some("child one"),
+            "the drain head must skip the group label"
+        );
+    }
+
+    /// An item is a parent only by POSITION — the same text is a leaf until
+    /// something is indented under it.
+    #[test]
+    fn parenthood_is_positional_not_textual() {
+        let flat = parse("- do the thing\n- next\n").unwrap();
+        assert!(!entry_is_group_parent(&flat, 0));
+        assert_eq!(prompts(&flat).len(), 2, "a flat queue has no parents");
+
+        let nested = parse("- do the thing\n  - sub step\n").unwrap();
+        assert!(entry_is_group_parent(&nested, 0));
+
+        // A LATER sibling at the same depth does not make an earlier item a parent.
+        let siblings = parse("- first\n- second\n  - only second has a child\n").unwrap();
+        assert!(!entry_is_group_parent(&siblings, 0));
+        assert!(entry_is_group_parent(&siblings, 1));
+    }
+
+    /// Regression guard: a flat queue — every existing document — must behave
+    /// exactly as it did before nesting existed.
+    #[test]
+    fn flat_queue_behaviour_is_unchanged_by_nesting_support() {
+        let body = "- do [#alpha]\n- ~~do [#beta]~~\n- do [#gamma]\n";
+        let entries = parse(body).unwrap();
+
+        assert_eq!(render(&entries), body);
+        assert_eq!(
+            prompts(&entries)
+                .iter()
+                .map(|p| p.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["do [#alpha]", "do [#gamma]"]
+        );
+        assert!(
+            (0..entries.len()).all(|i| !entry_is_group_parent(&entries, i)),
+            "no entry in a flat queue is a group parent"
+        );
+    }
+
     // ---- Unified SM-driven convergence (`#cgfx` / `#queuestatemachine2`) ----
 
     fn p(text: &str) -> QueueEntry {
         QueueEntry::Prompt(QueuePrompt {
             text: text.to_string(),
             multiline: false,
+            indent: 0,
         })
     }
     fn c(text: &str) -> QueueEntry {
         QueueEntry::Completed(QueuePrompt {
             text: text.to_string(),
             multiline: false,
+            indent: 0,
         })
     }
 
@@ -5331,10 +5555,12 @@ mod tests {
                     QueueEntry::Prompt(QueuePrompt {
                         text: ":round_pushpin: switch actor\nroute error body".into(),
                         multiline: true,
+                        indent: 0,
                     }),
                     QueueEntry::Prompt(QueuePrompt {
                         text: ":round_pushpin: switch actor\nroute error body".into(),
                         multiline: true,
+                        indent: 0,
                     }),
                 ],
                 vec![],

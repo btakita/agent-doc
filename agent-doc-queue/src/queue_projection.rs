@@ -218,6 +218,7 @@ mod tests {
         QueueEntry::Prompt(QueuePrompt {
             text: text.to_string(),
             multiline: false,
+            indent: 0,
         })
     }
 

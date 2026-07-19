@@ -567,6 +567,7 @@ mod tests {
         QueueEntry::Prompt(crate::document_queue::QueuePrompt {
             text: text.to_string(),
             multiline: false,
+            indent: 0,
         })
     }
 

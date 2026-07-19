@@ -6812,12 +6812,14 @@ fn brtc_reemit_storm_converges_to_one_item_per_identity_and_preserves_operator_p
         QueueEntry::Prompt(QueuePrompt {
             text: text.to_string(),
             multiline: false,
+            indent: 0,
         })
     }
     fn multi(text: &str) -> QueueEntry {
         QueueEntry::Prompt(QueuePrompt {
             text: text.to_string(),
             multiline: true,
+            indent: 0,
         })
     }
 

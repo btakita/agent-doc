@@ -206,6 +206,7 @@ pub fn merge_visible_queue_additions_into_content_ours(
             appended.push(QueueEntry::Prompt(document_queue::QueuePrompt {
                 text: text.clone(),
                 multiline: false,
+                indent: 0,
             }));
             *content_ours_counts.entry(text).or_insert(0) += 1;
         }

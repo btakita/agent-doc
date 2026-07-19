@@ -173,6 +173,7 @@ pub fn prepare_route_dispatch_queue_update(
                     } else {
                         let new_prompt = QueueEntry::Prompt(QueuePrompt {
                             multiline: prompt_text.contains('\n'),
+                            indent: 0,
                             text: prompt_text.clone(),
                         });
                         if priority {
@@ -194,6 +195,7 @@ pub fn prepare_route_dispatch_queue_update(
                 unparseable_queue_error = Some(parse_err.to_string());
                 let new_rendered = render(std::slice::from_ref(&QueueEntry::Prompt(QueuePrompt {
                     multiline: prompt_text.contains('\n'),
+                    indent: 0,
                     text: prompt_text.clone(),
                 })));
                 if body.lines().any(|line| line.trim() == new_rendered.trim())
@@ -333,6 +335,7 @@ fn activate_queue_component_marker(content: &str) -> Result<String> {
 fn insert_queue_component(content: &str, prompt_text: &str) -> Result<String> {
     let body = render(&[QueueEntry::Prompt(QueuePrompt {
         multiline: prompt_text.contains('\n'),
+        indent: 0,
         text: prompt_text.to_string(),
     })]);
     let block = format!("<!-- agent:queue go -->\n{}<!-- /agent:queue -->\n\n", body);

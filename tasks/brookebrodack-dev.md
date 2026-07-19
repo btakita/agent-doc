@@ -132,7 +132,7 @@ After rebasing onto `origin/main` and syncing gitlinks, the checker exits 0.
 Both fast-forward paths are exercised, not assumed: `merge --ff-only` on a branch checkout (`lib/rebuildjs`, on `main`) and `checkout --detach` on a detached one (`lib/array`) — each run for real and restored.
 
 **One incidental finding.** The first run reported `lib/addtocalendar.com` and `lib/auth0-ui-solid` as unresolvable. They are not uninitialized — they are declared in `.gitmodules` with **no gitlink in the tree at all**, so `git submodule update --init` cannot materialize them and never could. Removed the two stanzas rather than leaving the checker reporting two permanent phantoms.
-<!-- agent:boundary:cd5971b9 -->
+<!-- agent:boundary:b0974c06 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -164,7 +164,6 @@ Both fast-forward paths are exercised, not assumed: `merge --ff-only` on a branc
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#sweepstale] The monorepo dependency sweep computes updates against whatever the submodule checkout happens to be, so on a stale checkout it silently REVERTS newer upstream work rather than updating it. Seen concretely: lib/rebuildjs (8 behind, sweep based on 0.70.45) would have reintroduced a removed elysia dep, dropped bun-types, and reverted typescript ^7.0.2 back to next; lib/rebuildjs-tailwindcss (4 behind) would have dropped @tailwindcss/postcss. Make ctx_core__monorepo_pnpm__dependencies__update.sh fetch and refuse to run (or auto-rebase) when any workspace submodule is behind its upstream
 - [ ] [#schemadts2] schema-dts 2.0 is a real breaking change for this codebase, not a routine bump: Article, ItemList and VideoObject stop being assignable to Thing, plus TS2321 excessive stack depth in brookers__doc_html.ts. Measured 8 new errors in lib/ui--server--brookebrodack, so it was reverted to ^1.1.5. Revisit when the jsonld/rdfa helpers in @rappstack/domain--server are updated for schema-dts 2 typing. KEPT OPEN: blocked on rappstack — the helpers that produce these Thing-typed values live there, so this cannot be fixed from brookebrodack-dev
 - [ ] [#rappdeps] rappstack is at /home/brian/work/rappstack/dev (github rappstack/dev). Run the same dependency sweep, and ALIGN DRIZZLE: 4 packages pin drizzle-orm ^0.32.0 while domain--server pins ^0.45.1, which is the whole 15-error youtube cluster in brookebrodack-dev (#rappts) — a table type and a db handle from two different drizzle universes. Also has an uncommitted working tree (bun.lockb, lib/dev-bin, lib/domain--any--blog) to resolve first
 - [ ] [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface. KEPT OPEN: not started — sequence after #pushctxcore so it does not stack a second uncommitted sweep on top of the unpushed dependency sweep

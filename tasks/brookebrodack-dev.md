@@ -269,24 +269,46 @@ Worth saying plainly: **the readiness guard I added last cycle is why this took 
 - **2 `as any` casts**, both reading a `video_url` field the declared post-meta type does not carry. Narrowed to `Record<string, unknown>`: same behaviour, and the rest of `meta` keeps its typing.
 
 **Verification.** lint clean; `typecheck` 0; `typecheck:browser` steady at 15 (all the `@rappstack` drizzle split, untouched); `test` 67/0; `test:dom` 9/0; build green. Pushed `b04644e` (ui--server), `aa0f0f1` (ui--browser), `d21a842` and `aa29ca0` (parent), gitlinks `da0383feb` / `07fd0061e`. Run `29671488535` — the first with the lint gate in it — was queued at closeout.
-<!-- agent:boundary:75c1140b -->
+
+### Re: #pushctxcore — 188 repos pushed, and two rebases that would have silently reverted work — opus-4-8
+
+> **Queue prompt:** do [#pushctxcore]
+
+You moved this to the head of the go-queue, so I took that as the go and pushed. **188 pushed, 0 failed, 3 skipped** (nothing to push). Superproject `3e58c682e` pushed and in sync.
+
+**I surveyed before pushing rather than firing 190 pushes and reading the wreckage.** All 191 submodules were on `main` with upstreams; 188 were `ahead 1, behind 0`; **6 were behind** and a plain push would have been rejected: `dev-tools` (3), `hyop` (1), `monorepo` (2), `rebuildjs` (8), `rebuildjs-tailwindcss` (4), `relysjs` (6). Rebased each onto `origin/main` first. No force-push anywhere.
+
+**Two of those rebases conflicted, and this is the part worth your attention.** The dependency sweep had been computed against *stale* submodule checkouts, so replaying it verbatim would have quietly undone real work:
+
+- **`lib/rebuildjs` was 8 commits behind** — behind, among other things, the two commits I pushed to that same repo earlier this session. Its sweep was computed against version **0.70.45** and would have reintroduced the removed `elysia` dependency, dropped `bun-types`, and reverted `typescript` from the deliberate `^7.0.2` pin **back to `next`** — the exact footgun I fixed two cycles ago, silently reinstated by a "dependency update".
+- **`lib/rebuildjs-tailwindcss` was 4 behind**, computed against 0.10.60, and would have dropped `@tailwindcss/postcss` entirely.
+
+I resolved both to upstream **plus only the genuinely newer versions** — so rebuildjs keeps `typescript ^7.0.2`, `bun-types`, and no elysia, while taking `@typescript-eslint` 8.64.0, eslint 10.7.0, esmock 2.7.6, tsx 4.23.1, picomatch 4.0.5. That is the difference between a merge and a revert, and an automated tool cannot tell them apart.
+
+**Re-tested after rebasing:** `dev-tools`, `hyop`, `monorepo`, `rebuildjs` all pass. `rebuildjs-tailwindcss` and `relysjs` are still red — and both were on the pre-existing-red list before any of this touched them, so nothing regressed.
+
+**`rhonojs` verified on the remote:** `peerDependencies.esbuild` reads `^0.28.1`. That closes the original ask end to end — esbuild is updated in rebuildjs *and* rhonojs, and it is live rather than sitting in a local commit.
+
+**Also, both Check runs went green.** `29671439782` (the dev-bundle fix) and `29671488535` — the first run with the lint gate in it — plus the Cloudflare Pages deploy. The lint gate holds in CI, not just locally.
+
+What is left of the original request: `#oidcnpm` is the one step I genuinely cannot do — it needs an authenticated npmjs.com browser session with 2FA. Everything else in the graph (`#rappdeps`, `#tsnextpin`, `#ctxredtests`) is queued and unblocked.
+<!-- agent:boundary:42e64931 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#eslintflat]
-- do [#schemadts2]
-- ~~do [#bbdeps]~~
-- do [#ctxredtests]
+- do [#sweepstale]
+- ~~do [#pushctxcore]~~
 - do [#oidcnpm]
-- do [#pushctxcore]
+- ~~do [#ciappts2]~~
+- do [#schemadts2]
+- do [#ctxredtests]
 - do [#rappdeps]
 - do [#rhonouvu]
 - do [#tsnextpin]
 - do [#lzeffectvoid]
 - do [#tsappclean]
-- ~~do [#tsbrowser]~~
 - do [#sbv9]
 - do [#nd8n]
 - do [#fhmig]
@@ -304,10 +326,8 @@ Worth saying plainly: **the readiness guard I added last cycle is why this took 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#ciappts2] Now that Check is green and gates lint + edge typecheck, revisit adding the two remaining type-check steps (bun run typecheck:browser, and app/brookebrodack-site typecheck). Both are still red ONLY on @rappstack sources — 15 drizzle-split errors plus the marked 13/17 split. Gate them the same cycle #rappdeps lands, not before
-- [ ] [#schemadts2] schema-dts 2.0 is a real breaking change for this codebase, not a routine bump: Article, ItemList and VideoObject stop being assignable to Thing, plus TS2321 excessive stack depth in brookers__doc_html.ts. Measured 8 new errors in lib/ui--server--brookebrodack, so it was reverted to ^1.1.5. Revisit when the jsonld/rdfa helpers in @rappstack/domain--server are updated for schema-dts 2 typing
-- [ ] [#eslintflat] eslint and @typescript-eslint are pinned at 9 / 7 in brookebrodack-dev and nothing runs them (no lint script, no CI step). eslint 10 dropped .eslintrc.json support, which is the config this repo has. Either delete the three dead devDeps or migrate to eslint.config.js and add a lint step to check.yml — do not bump without picking one
-- [ ] [#pushctxcore] Push the ctx-core-dev dependency sweep: 188 per-package submodule commits + superproject 31ad9151a are committed LOCALLY and unpushed on purpose (~190 public repos in one motion). Working tree is clean. Needs operator go, then push each submodule and the superproject
+- [ ] [#sweepstale] The monorepo dependency sweep computes updates against whatever the submodule checkout happens to be, so on a stale checkout it silently REVERTS newer upstream work rather than updating it. Seen concretely: lib/rebuildjs (8 behind, sweep based on 0.70.45) would have reintroduced a removed elysia dep, dropped bun-types, and reverted typescript ^7.0.2 back to next; lib/rebuildjs-tailwindcss (4 behind) would have dropped @tailwindcss/postcss. Make ctx_core__monorepo_pnpm__dependencies__update.sh fetch and refuse to run (or auto-rebase) when any workspace submodule is behind its upstream
+- [ ] [#schemadts2] schema-dts 2.0 is a real breaking change for this codebase, not a routine bump: Article, ItemList and VideoObject stop being assignable to Thing, plus TS2321 excessive stack depth in brookers__doc_html.ts. Measured 8 new errors in lib/ui--server--brookebrodack, so it was reverted to ^1.1.5. Revisit when the jsonld/rdfa helpers in @rappstack/domain--server are updated for schema-dts 2 typing. KEPT OPEN: blocked on rappstack — the helpers that produce these Thing-typed values live there, so this cannot be fixed from brookebrodack-dev
 - [ ] [#oidcnpm] Configure the npm Trusted Publisher on the rebuildjs package at npmjs.com (org rebuildjs, repo rebuildjs, workflow release.yml). Workflow is committed (bfe2707); this browser step needs 2FA ONCE and then no release needs it again. npm retires 2FA-bypass tokens for account ops early Aug 2026 and for direct publishing ~Jan 2027. Repeat for rhonojs/relysjs/ctx-core once their release workflows land; lazily-js's E404 publish failure was this same missing step. KEPT OPEN: operator-only — requires an authenticated npmjs.com browser session with 2FA
 - [ ] [#rappdeps] rappstack is at /home/brian/work/rappstack/dev (github rappstack/dev). Run the same dependency sweep, and ALIGN DRIZZLE: 4 packages pin drizzle-orm ^0.32.0 while domain--server pins ^0.45.1, which is the whole 15-error youtube cluster in brookebrodack-dev (#rappts) — a table type and a db handle from two different drizzle universes. Also has an uncommitted working tree (bun.lockb, lib/dev-bin, lib/domain--any--blog) to resolve first
 - [ ] [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface. KEPT OPEN: not started — sequence after #pushctxcore so it does not stack a second uncommitted sweep on top of the unpushed dependency sweep
@@ -317,7 +337,6 @@ Worth saying plainly: **the readiness guard I added last cycle is why this took 
 - [ ] [#rappts] 24 of the remaining type errors are in yalc/npm-linked @rappstack/* SOURCES, not this repo (they ship .ts, so skipLibCheck does not apply): 17 in ui--any/md/MarkedPlaintextRenderer.ts (written against marked 13's Renderer signature, now resolving marked 17), 3 in domain--server--blog/post/Post__schema.ts (zod errorMap), plus dl/, rdfa/, jsonld/, breadcrumb/. SEPARATELY, 15 errors in lib/domain--server--brookebrodack/youtube/ have a single rappstack root cause: @rappstack/domain--server--youtube pins drizzle-orm ^0.32.0 while @rappstack/domain--server pins ^0.45.1, so youtube_video_tbl is a 0.32 table type and drizzle_db_(ctx) is a 0.45 db handle and every query between them is a nominal mismatch. Bumping this repo's pin cannot fix it. Align both packages on one drizzle major and republish; that unblocks #ciappts and gating typecheck:browser
 - [ ] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
 - [ ] [#yalcdrift] CONFIRMED, with a measurement: a fresh bun install re-resolves marked 13.0.3 alongside 17.0.4 and the two ctx/*.ts Marked errors (Marked<string, string> vs Marked) come back, taking the app type-check to 62 with 2 in its own sources. Verified this is resolution churn and NOT caused by any version bump — reverted both package.json files to HEAD, reinstalled, measured 62/2 identically. Root cause: one yalc'd @rappstack package pins marked ^13.0.2 while two pin ^17.0.4. Fix belongs in rappstack alongside the drizzle alignment (#rappdeps)
-- [ ] [#chkci] Confirm Check run 29671085390 went green. Progress so far: run 29668807479 failed all 67 app tests on the missing gitignored asset (fixed, 36c60bb); run 29670229183 then failed 20 on ConnectionRefused because routes.test.ts spawns the production start.ts with no build and no migrated db (fixed, 6762d07 adds Initialize database + Build). If this run is still red the next cause is new
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
 - [ ] [#nd8n] Add cgroup limits for the bwrap sandbox path in src/freehold via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin. Confirmed still absent: mem_limit_mb exists on PluginSpec but no systemd-run/cgroup call site
@@ -366,4 +385,8 @@ Worth saying plainly: **the readiness guard I added last cycle is why this took 
 - 2026-07-18 [#tsappclean] the app/brookebrodack-site type-check now runs and reports 267 errors — the honest state of a package that had never been checked, not a regression. Dominated by build.ts (esbuild used but not a direct dependency, implicit anys in plugin callbacks) and app/index.ts (a hono ErrorHandler returning void where it must return Response). Separate repo (brookebrodack-site); do it there. Pairs with #tsbrowser for the lib/ half of the parent repo
 - 2026-07-18 [#tsbrowser] type-check the browser half: lib/** and test/guestbook-hyop.test.ts are not covered by tsconfig.json, because @cloudflare/workers-types replaces Response with the Workers one and browser code fails against it on every element. A separate DOM-lib config measures 56 errors today — mostly in lib/domain--server--brookebrodack (sig/ctx generic mismatches) plus a missing image-module declaration in the app submodule. Needs the config split plus those fixes, or an explicit decision that lib/ is checked by its own workspace package instead
 - 2026-07-18 [#bbdeps] Dependency sweep for brookebrodack-dev and its lib/** submodules — the third project in the graph the operator named. Do after #rappdeps so the @rappstack versions it resolves are already aligned
+- 2026-07-18 [#eslintflat] eslint and @typescript-eslint are pinned at 9 / 7 in brookebrodack-dev and nothing runs them (no lint script, no CI step). eslint 10 dropped .eslintrc.json support, which is the config this repo has. Either delete the three dead devDeps or migrate to eslint.config.js and add a lint step to check.yml — do not bump without picking one
+- 2026-07-18 [#chkci] Confirm Check run 29671085390 went green. Progress so far: run 29668807479 failed all 67 app tests on the missing gitignored asset (fixed, 36c60bb); run 29670229183 then failed 20 on ConnectionRefused because routes.test.ts spawns the production start.ts with no build and no migrated db (fixed, 6762d07 adds Initialize database + Build). If this run is still red the next cause is new
+- 2026-07-18 [#ciappts2] Now that Check is green and gates lint + edge typecheck, revisit adding the two remaining type-check steps (bun run typecheck:browser, and app/brookebrodack-site typecheck). Both are still red ONLY on @rappstack sources — 15 drizzle-split errors plus the marked 13/17 split. Gate them the same cycle #rappdeps lands, not before
+- 2026-07-18 [#pushctxcore] Push the ctx-core-dev dependency sweep: 188 per-package submodule commits + superproject 31ad9151a are committed LOCALLY and unpushed on purpose (~190 public repos in one motion). Working tree is clean. Needs operator go, then push each submodule and the superproject
 <!-- /agent:done -->

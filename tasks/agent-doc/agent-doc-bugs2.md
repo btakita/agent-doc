@@ -351,7 +351,29 @@ One observation worth recording: the original 500ms window was not a careless nu
 While verifying, `dirs::tests::resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path` failed once under full-workspace load with `fallback cwd should be the process cwd or an existing path`. That is one of the originally-named `#wsflake2` tests and is unrelated to this change.
 
 Worth noting for whoever takes that item: the obvious hypothesis — a sibling `set_current_dir` guard — does not hold here. Those guards live in `agent-doc-prompt-io`, `agent-doc-project-root-io` and `agent-doc-sync-io`, which each run in their own test process and cannot reach `agent-doc-git-io`'s CWD. So this one is **not** the process-CWD-mutation pattern, and I have added that ruling-out to the item rather than leaving the next person to re-derive and discard it.
-<!-- agent:boundary:62193272 -->
+
+### Re: do [#fr79] — opus-4-8
+
+Partly done, and I am leaving it **open** — the second half cannot be built safely as specified, and I have the failing evidence rather than an opinion.
+
+First, the semantic-completion warning claiming `#id`/`#qauthorder` already resolves this is wrong. `#qauthorder` is about preserving operator-authored queue *order*; `#fr79` is about queue↔backlog *drift*. Different concerns.
+
+**The backlog→queue half is already done.** `sync_backlog_into_queue` runs on every preflight, is idempotent, and always restores a head for an open queue-attr backlog id. That direction is already self-healing rather than write-order dependent, which is what the item asked for.
+
+**The reverse half is partly done and cannot be finished the obvious way.** Heads are struck when their id reaches `agent:done` or a gated review, but not when the id ceases to exist entirely — the dangling `[#id]` shape (`#sy71`). So I implemented exactly that: a live tracked-id inventory across backlog/icebox/pending, and an orphan predicate for ids absent from all of tracked/done/gated.
+
+Wiring it into the strike pass broke 12 preflight tests. Not incidentally — it struck **real heads**. `preflight_rebases_active_queue_head_change_without_mid_edit_evidence` lost `do [#newhead]` to `source=orphaned_no_tracked_item`. The tests are right and my rule was wrong:
+
+> A queue head is not required to have a backlog item.
+
+Operators author `do [#id]` heads directly, and a document need not carry a backlog component at all. So "no tracked item" cannot by itself mean "orphaned" — applying it deletes legitimate queued work, which is a far worse failure than the drift it fixes. I reverted the wiring rather than weakening the tests to fit.
+
+What the reverse direction actually needs is head **provenance**: distinguishing a head the mirror created (where a vanished backlog id really is drift) from one an operator authored (authoritative on its own, per `#qauthorder`). The queue does not record that today, so provenance is the prerequisite, not an add-on to the strike pass.
+
+I kept the two building blocks with tests since they are correct and will be needed once provenance exists, and left `#fr79` open with that prerequisite named. Pushed as `40fe9aa6a`; full workspace suite green.
+
+Worth noting this is the second item this cycle-run where the queued description was achievable in one direction and unsafe in the other, and the way I found out was implementing it and reading what broke — not reasoning about it. The 12 failures were the useful artifact.
+<!-- agent:boundary:2c2ddcb0 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -380,7 +402,7 @@ Worth noting for whoever takes that item: the obvious hypothesis — a sibling `
 - ⏭️ 📌 do [#0dsr]
 - ⏭️ 📌 do [#17jk]
 - ⏭️ 📌 do [#f1s3]
-- 📌 do [#fr79]
+- 🚧 📌 do [#fr79]
 - 📌 do [#05r0]
 - 📌 do [#a45a]
 - 📌 do [#30p6]
@@ -431,7 +453,7 @@ Worth noting for whoever takes that item: the obvious hypothesis — a sibling `
 - [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean
 - [ ] [#17jk] Give free-text queue/backlog leaves stable ids so they can be after= targets (#dagdraingate/#queuenest gap found in plan review): after= targets resolve only through ids (id_to_idx built from entry_do_id, document_queue.rs:1271-1276; collect_after_deps reads only tracked items, backlog_sync.rs:341-358), so an ordered list of id-less free-text leaves cannot compile to dependency edges at all. Prefer minting ids the same way backlog items already get them over introducing HTML tags in the queue body — an HTML container would break the markdown-list model, the byte-preserving insert-only splice, and line-oriented CRDT merge
 - [ ] [#f1s3] Implement nested queue lists per tasks/agent-doc/plan-queue-nested-list-grouping.md (#queuenest): indent-aware document_queue::parse retaining depth + marker kind, leaf-only execution (parents are epic/group labels and never yield do-heads), nested ol compiles to after= edges at ingress, nested ul = related-but-unordered. Render MUST stay insert-only/byte-preserving — a parse->render round-trip already corrupted an operator line once (#queueatcreate). Key decision recorded in the plan: ol is sugar that compiles to after=, which stays the single source of truth, so reordering an ol re-derives edges and there is nothing to reject or revert
-- [ ] [#fr79] Auto-reconcile queue with backlog when the backlog carries a queue attribute: a periodic/preflight pass ensuring every open queue-attr backlog id has a queue head and vice versa, so the two cannot drift even if an individual write's enqueue is lost. Complements #queueatcreate (which covers the creating write) by making the invariant self-healing rather than write-order dependent
+- [ ] 🚧 [#fr79] Auto-reconcile queue with backlog — HALF DONE, do not close (blocks on head provenance). DONE/ALREADY TRUE: the backlog→queue direction is self-healing — sync_backlog_into_queue runs every preflight, is idempotent, and always restores a head for an open queue-attr backlog id. PARTLY DONE: the reverse direction strikes heads whose id reached agent:done or gated review (preflight auto-strike), but NOT heads whose id ceased to exist entirely (operator deletion, rename, lost write) — the dangling [#id] shape, e.g. #sy71. BUILDING BLOCKS LANDED (40fe9aa6a, tested, currently unwired): agent_doc_queue::queue_continuation::active_tracked_ids (live id inventory across backlog/icebox/pending) and queue_head_id_is_orphaned (absent from tracked+done+gated). BLOCKED — DO NOT simply wire these into the preflight strike pass: doing so struck REAL heads and failed 12 preflight tests, e.g. preflight_rebases_active_queue_head_change_without_mid_edit_evidence lost 'do [#newhead]' to source=orphaned_no_tracked_item. Root reason: a queue head is NOT required to have a backlog item — operators author 'do [#id]' heads directly and a document need not carry a backlog component at all, so 'no tracked item' cannot mean 'orphaned' without deleting legitimate queued work. PREREQUISITE: record head PROVENANCE so a mirror-created head (vanished backlog id = real drift, safe to strike) is distinguishable from an operator-authored head (authoritative on its own per #qauthorder, never strike). Build provenance first, then reuse the two helpers above.
 - [ ] [#05r0] Second probe checking enqueue fallback persistence path
 - [ ] [#a45a] Confirm the queueatcreate persistence fallback lands a do-head under a missing editor replica
 - [ ] [#30p6] Go-mode idle-queue dispatch adds the agent-doc run to the agent composer but never submits it (#agent-doc-bug), so the queue stalls with the trigger sitting as an unsubmitted draft. Operator-reported 2026-07-18. NOT yet root-caused — do not guess. Starting evidence: a resubmit path already exists (idle_queue_resubmit_pending_payload / idle_queue_pending_payload_needs_enter_resubmit in agent-doc-start-runtime-io/src/idle_watch.rs) gated on tmux_submit_profile_for_harness(..).pending_draft_enter_resubmit(), which currently returns true unconditionally — so that gate is NOT the filter and the miss is upstream: check drain_dispatch_dedup_skip(payload_already_pending) and already_resubmitted (a stale latch would suppress the Enter), and whether shared.inject_pane resolves for a go-mode drain. Distinct from #jbtsiftnosub2, which covers the JB fresh-pane case only. Reproduce with a go-mode queue and watch the composer after injection

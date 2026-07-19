@@ -111,22 +111,104 @@ Not a bug — the route made the right call. Pane `%9` is running a Claude turn 
 `composer_draft=false` is the part that rules out the failure mode worth worrying about: nothing was left stranded unsubmitted in the composer, so this is not the `#jbtsiftnosub2` class. Had it injected anyway it would have interrupted that running turn — the `#jbsteerinterrupt` bug.
 
 I also checked the notification path, since a silent no-op would have been a real gap: exhausted `RETRYABLE_STARTING` falls through to `notifyPersistentRouteFailure` at `TerminalUtil.kt:554`, so an IDE Event Log entry should have been raised. If you did not see one, say so and I will treat *that* as the bug. Otherwise: wait for that turn to finish and trigger again.
-<!-- agent:boundary:ea1c508c -->
+
+### Re: equityfundingsource backlog priority queue not adding items — opus-4-8
+
+> **Queue prompt:** equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
+
+Same root cause as `#ensurereplicagen`, and already fixed by that change — this was not an equityfundingsource-specific bug.
+
+The backlog→queue mirror is computed during preflight queue maintenance and then written under a compare-and-swap. That whole step was failing on every run because it read and wrote the relay from the short-lived CLI process, whose `hub_registry()` is always empty (only the controller populates it). Maintenance was recomputed correctly every time and then discarded wholesale, so newly-added backlog ids never reached `agent:queue` — exactly the symptom you reported.
+
+Confirmed on your document specifically, from `ops.log`:
+
+- `06:55:25`, `07:00:29`, `07:02:22` — `document_model_ensure_failed ... editor_attached_model_missing`
+- fix installed ~`07:03`
+- `07:07:49`, `07:08:14` — `write_authority action=compare_and_swap authority=lazily surface=queue_maintenance` **succeeding**
+
+So the mirror is persisting there again; no action needed on that document.
+
+One related gap I did **not** fix, filed as `#ensurereplicagensup`: the remaining `document_model_ensure_failed` lines for equityfundingsource carry `source=controller_recycle_request:background`, and the `crdt_current_text_unavailable` reads show pids `2761972` / `458607` / `503509` — supervisor processes, not the controller (`3811498`). That is the same process-local-registry class in a different caller. It does not affect the queue mirror (that path is fixed and proven), but it will keep producing misleading `editor_attached_model_missing` noise in the supervisor recycle path until it is routed the same way.
+### Re: JB Run Agent Doc latency, clone cost, the AST question, and the brookebrodack corruption — opus-4-8
+
+> **Queue prompt:** JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.
+
+Four commits, `make check` green each time, 7692/7692, installed + recycled.
+
+**Where the time goes.** The click spawns no `agent-doc` process — it is 2 socket RPCs. The wall clock is the controller handling `editor_command_submit` *synchronously*: it runs the whole route before replying. Inside that window the dominant cost was work repeated hundreds of times per request, not the proof waits.
+
+Landed (`e6744da1e`, `83da10c15`):
+
+- **`state.db` re-converged its full schema on every open** — a large `execute_batch` plus 8 `PRAGMA table_info` probes, on every 200ms ack poll (up to 150/request) and every `log_op`. Split shape from data: shape is memoized per path per process; row convergence (retired-variant retirement, retention) still runs on **every** open. That split matters — my first cut memoized all of it and the suite caught it immediately, because retirement must still purge a legacy fact another process appended after our first open.
+- **`log_op` replayed the entire `state_events` ledger to resolve a turn id**, plus a `canonicalize` and a project-root walk, ~170× per route. Now memoized (root) and TTL-cached at 250ms (turn id).
+- **The readiness poll re-spawned identical tmux scans every iteration** — scoped the observation cache *per iteration*, so duplicates inside an iteration collapse while liveness stays live across them. `capture-pane` is excluded, so prompt-readiness proof is unaffected.
+- **`pane_in_foreign_git_repo` spawned a raw `git rev-parse` per candidate pane** while only the document side was memoized.
+
+### On `turn.clone()`
+
+Heap. `String::clone` allocates a fresh buffer and memcpys — so my cache *hit* path was still allocating ~170 times per route. I traded one redundant cost for a smaller one and left it there, which is exactly the thing I'd just spent the turn removing. Fixed in `83da10c15`: the memos now store `Arc<str>` / `Arc<Path>`, so a hit is a refcount bump. Callers only ever needed `&str` / `&Path`.
+
+### On using the AST
+
+You were right, and it landed in `d51cf6d4f`. My first cut of the response-loss fix was a hand-rolled line scanner tracking "am I inside a response section" via `starts_with('#')` and component-marker prefixes — string mangling to answer a structural question, in a repo that already ships `agent-doc-markdown-ast`. It now uses `overlay::components` to bound the exchange component (code-fence aware, which my scanner was not) and `parse_exchange_nodes` to split it into `Prompt`/`Response` turns, searching only `Response` turns. Queue/backlog and user prompt turns are excluded *structurally* instead of by heuristic.
+
+### On the realtime model as the base
+
+**No — and that's the honest gap.** I parse from a `&str` (`rc.doc_content()`), so the AST is rebuilt from bytes. Worse, both entry points re-parsed `content` *and every archive* per id: an N-id cycle with M archives paid N × (1 + M) tree-sitter parses of the same bytes. I fixed the multiplier now (`ResponseIndex` parses once per guard invocation, queried per id), but the parse itself shouldn't exist. The realtime document model already holds these exchange nodes — `OverlayCrdtDoc`, and the SeqCrdt exchange-node direction AGENTS.md already commits to. Sourcing the nodes from the live model instead of re-parsing a string is the real fix. Queued as `#respidxrealtime`, and it generalizes well beyond this guard.
+
+### The brookebrodack-dev.md corruption
+
+I read the actual region rather than guess. It is worse than a stray marker — the response is **spliced**:
+
+- `> **Queue prompt:** / > do [#rappsqlite]` appears **twice**: once correctly at the top of the response (line 117), and again at the very end (line 141), after the response body had already concluded.
+- Then a bare ` -->` on its own line (line 145), immediately before `<!-- agent:boundary:bc6abbf0 -->`.
+
+That ` -->` is the tail of a `<!-- /patch:exchange -->` marker whose opening was consumed — partial-terminator debris preserved as content, the `#boundarysplice` class your last two commits were already fighting. The duplicated blockquote is the tell: the response tail was applied **twice, non-idempotently**, and the second application landed mid-marker. That matches your other report exactly — a CRDT convergence timeout with repeated `compare_and_swap_raced`, then the binary "resuming and committing". The retry re-applies rather than replaces.
+
+So I think your three glitches and this one are **one bug, not four**: a post-CAS-race retry that re-applies a partial patch. `#fzmutloss` (the dropped `--done`) is the same retry losing the mutation half while re-applying the body half. I did not attempt that fix — I have no reproduction of the race, and guessing at the retry/idempotency boundary would produce something worse than the current failure.
+
+I did **not** touch brookebrodack-dev.md — it is foreign-owned by pane %9. It still carries the corruption and needs a repair from its owning session.
+
+One more: this cycle's preflight reported `queue_maintenance_not_persisted` (`editor_attached_model_missing`), so the recomputed queue was **not** applied — freshly-added backlog ids may be missing from the queue you see.
+### Re: do [#fzmutloss] — the dropped `--done` is a one-line classification gap — opus-4-8
+
+Found and fixed it — no reproduction of the CAS race needed, because the mutation loss isn't in the race at all. It's downstream, and it's exact.
+
+**Mechanism.** `write_outcome_retains_closeout_mutations` (`agent-doc-write-runtime-io/src/lib.rs:1068`) decides whether to run `apply_pending_and_status_mutations`. It says yes when the write succeeded, or when `error_requests_retry_without_disk` matches — and that predicate matched exactly four substrings, all about disk authority (`retry_without_disk_write`, `disk is not consulted…`, `disk remained non-authoritative`).
+
+The CRDT convergence timeout bails with:
+
+> `finalize: CRDT convergence for … did not settle within 60000ms (reason=…); pending change retained for retry`
+
+It matches **none** of them. So the predicate returned false, `apply_pending_and_status_mutations` was skipped entirely, and your `--done` was dropped — while the response capture was retained through the separate `state.db` intent path and committed on resume. Response lands, closeout silently lost, item stays `[ ]` and queued. Exactly what you saw.
+
+The error literally announces that it retains its change for retry. The classifier just wasn't listening.
+
+**Fix** (`3fcf9bea5`): I did not add a fifth magic substring — that's how this drifted in the first place. Producer and classifier now share one constant, `RETAINED_FOR_RETRY_MARKER`, so a new retaining error can't silently fail to be classified. Regression test pins all three cases: the bare timeout, a wrapped cause, and a genuine hard failure that must *not* classify (a hard error must never apply mutations it didn't earn).
+
+This also means `#patchretryidem` is likely narrower than I wrote it: the mutation half and the body half were never in one transaction, so they weren't "lost together" — they were on two different paths, and only one of them was retained.
+
+### On the TTL cache
+
+You were right to push back, and I've replaced it (same commit). A TTL is a guess at how long a turn lasts: too short and the ledger replay comes straight back, too long and a new cycle logs under the previous turn's id — a correctness bug traded for speed, which is a bad trade in an attribution path.
+
+It's now a lazily `Context` + `SlotMap` scoped to the turn, with a reference-counted RAII guard, matching the `observation_cache` / `GIT_TOPLEVEL_MEMO` pattern already in the codebase. `route::run_with_tmux_with_options` opens one scope per route, since one route *is* one turn. The scope boundary — not a clock — invalidates the memo, so it's exact rather than approximate. An unscoped caller resolves fresh every time, so it's never wrong, only slower.
+
+`make check` green, 7693/7693, installed + recycled.
+<!-- agent:boundary:c70c0a11 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#patchretryidem]
-- ⏭️ do [#mtds]
-- ~~equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.~~ — auto-struck: answered this cycle (#ftstrike)
-- ⏭️ do [#queuecontmirror]
-- ~~do [#ensurereplicagen]~~
-- ⏭️ do [#crdtcasraced]
-- ⏭️ do [#jbedtledger]
-- ⏭️ do [#jbroutasync]
-- ⏭️ do [#jbsockdeadline]
-- ⏭️ do [#respidxrealtime]
-- ⏭️ do [#bbdcompactnocommit]
+- do [#donestrikeextra]
+- do [#crdtcasraced]
+- do [#jbedtledger]
+- do [#jbroutasync]
+- do [#jbsockdeadline]
+- do [#respidxrealtime]
+- equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
+- do [#bbdcompactnocommit]
+- do [#bbdqprio]
 - do [#fmgc]
 - do [#eqmvscroll]
 - do [#0dsr]
@@ -137,13 +219,17 @@ I also checked the notification path, since a silent no-op would have been a rea
 - do [#a45a]
 - do [#30p6]
 - do [#n39j]
+- do [#bn41]
+- do [#px82]
 - do [#f6j3]
 - do [#promptselect]
 - do [#realtimesalient]
 - do [#syncobscache2]
-- do [#capturebacklogatomic]
-- do [#opcapturelazily]
-- do [#jbtsiftnosub2verify]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
+- ⏭️ do [#jbtsiftnosub2verify]
+- 🚧 do [#5bzd]
 - do [#sidecarstate]
 - do [#64we]
 - do [#adstatechart2]
@@ -154,9 +240,183 @@ I also checked the notification path, since a silent no-op would have been a rea
 - do [#ipcliveness]
 - do [#ipcverhandshake]
 - do [#ipcpostcommitinv]
+- do [#staleplugindeploy]
 - do [#5qjj]
-- do [#capturebacklogatomic]
-- do [#opcapturelazily]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
+- ~~do [#fzmutloss]~~
+- do [#jbedtledger]
+- do [#jbroutasync]
+- do [#jbsockdeadline]
+- ~~do [#patchretryidem]~~
+- do [#respidxrealtime]
+- ~~JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.~~
+- equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
+- do [#bbdcompactnocommit]
+- do [#bbdqprio]
+- do [#fmgc]
+- do [#eqmvscroll]
+- do [#0dsr]
+- do [#17jk]
+- do [#f1s3]
+- do [#fr79]
+- do [#05r0]
+- do [#a45a]
+- do [#30p6]
+- do [#n39j]
+- do [#bn41]
+- do [#px82]
+- do [#f6j3]
+- do [#promptselect]
+- do [#realtimesalient]
+- do [#syncobscache2]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
+- ⏭️ do [#jbtsiftnosub2verify]
+- 🚧 do [#5bzd]
+- do [#sidecarstate]
+- do [#64we]
+- do [#adstatechart2]
+- do [#adstatechart3]
+- do [#adstatechartkt]
+- do [#adstatechartjs]
+- do [#ipcauthority]
+- do [#ipcliveness]
+- do [#ipcverhandshake]
+- do [#ipcpostcommitinv]
+- do [#staleplugindeploy]
+- do [#5qjj]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
+- do [#jbedtledger]
+- do [#jbroutasync]
+- do [#jbsockdeadline]
+- do [#respidxrealtime]
+- equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
+- do [#bbdcompactnocommit]
+- do [#bbdqprio]
+- do [#fmgc]
+- do [#eqmvscroll]
+- do [#0dsr]
+- do [#17jk]
+- do [#f1s3]
+- do [#fr79]
+- do [#05r0]
+- do [#a45a]
+- do [#30p6]
+- do [#n39j]
+- do [#bn41]
+- do [#px82]
+- do [#f6j3]
+- do [#promptselect]
+- do [#realtimesalient]
+- do [#syncobscache2]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
+- ⏭️ do [#jbtsiftnosub2verify]
+- 🚧 do [#5bzd]
+- do [#sidecarstate]
+- do [#64we]
+- do [#adstatechart2]
+- do [#adstatechart3]
+- do [#adstatechartkt]
+- do [#adstatechartjs]
+- do [#ipcauthority]
+- do [#ipcliveness]
+- do [#ipcverhandshake]
+- do [#ipcpostcommitinv]
+- do [#staleplugindeploy]
+- do [#5qjj]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
+- do [#jbedtledger]
+- do [#jbroutasync]
+- do [#jbsockdeadline]
+- do [#respidxrealtime]
+- equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
+- do [#bbdcompactnocommit]
+- do [#bbdqprio]
+- do [#fmgc]
+- do [#eqmvscroll]
+- do [#0dsr]
+- do [#17jk]
+- do [#f1s3]
+- do [#fr79]
+- do [#05r0]
+- do [#a45a]
+- do [#30p6]
+- do [#n39j]
+- do [#bn41]
+- do [#px82]
+- do [#f6j3]
+- do [#promptselect]
+- do [#realtimesalient]
+- do [#syncobscache2]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
+- ⏭️ do [#jbtsiftnosub2verify]
+- 🚧 do [#5bzd]
+- do [#sidecarstate]
+- do [#64we]
+- do [#adstatechart2]
+- do [#adstatechart3]
+- do [#adstatechartkt]
+- do [#adstatechartjs]
+- do [#ipcauthority]
+- do [#ipcliveness]
+- do [#ipcverhandshake]
+- do [#ipcpostcommitinv]
+- do [#staleplugindeploy]
+- do [#5qjj]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
+- ~~JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.~~
+- equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
+- do [#bbdcompactnocommit]
+- do [#bbdqprio]
+- do [#fmgc]
+- do [#eqmvscroll]
+- do [#0dsr]
+- do [#17jk]
+- do [#f1s3]
+- do [#fr79]
+- do [#05r0]
+- do [#a45a]
+- do [#30p6]
+- do [#n39j]
+- do [#bn41]
+- do [#px82]
+- do [#f6j3]
+- do [#promptselect]
+- do [#realtimesalient]
+- do [#syncobscache2]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
+- ⏭️ do [#jbtsiftnosub2verify]
+- 🚧 do [#5bzd]
+- do [#sidecarstate]
+- do [#64we]
+- do [#adstatechart2]
+- do [#adstatechart3]
+- do [#adstatechartkt]
+- do [#adstatechartjs]
+- do [#ipcauthority]
+- do [#ipcliveness]
+- do [#ipcverhandshake]
+- do [#ipcpostcommitinv]
+- do [#staleplugindeploy]
+- do [#5qjj]
+- ⏭️ do [#jblocalhistverify]
+- ⏭️ do [#capturebacklogatomic]
+- ⏭️ do [#opcapturelazily]
 <!-- /agent:queue -->
 
 ## Notes
@@ -167,7 +427,95 @@ I also checked the notification path, since a silent no-op would have been a rea
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#donestrikeextra] #agent-doc-bug A single --done struck ANOTHER open item's queue head. This cycle passed exactly one --done (fzmutloss) plus a --backlog-edit on patchretryidem, and the write logged: '[queue] marked 2 completed item(s) by done id: ["do [#fzmutloss]", "do [#patchretryidem]"]'. The #patchretryidem BACKLOG item correctly stayed [ ] open, but its queue head was struck, so an unfinished item silently left the drain - the operator only sees it if they diff the queue. Suspect the done-id queue matcher is keyed off the same-cycle mutation set (which --backlog-edit joins) rather than strictly the --done id set. Restored the head manually this cycle. Regression coverage must pin: --backlog-edit on id B must never strike B's queue head when only A is --done.
 - [ ] [#patchretryidem] #patchretryidem #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). NARROWED 2026-07-19 by the #fzmutloss fix: the mutation half and the body half were never in one transaction, so this is NOT 'both halves lost together' - the body half is re-applied non-idempotently by the retry while the mutation half took a different path. Remaining question is only the body-half idempotency. Needs a reproduction of the CAS race; do not guess at the idempotency boundary.
+- [x] [#fzmutloss] #agent-doc-bug A finalize CRDT-convergence timeout can land the response but SILENTLY DROP its backlog mutation. Operator-reported 2026-07-19 on brookebrodack-dev.md: finalize timed out at 60s with repeated compare_and_swap_raced, the binary resumed and committed the response, but the --done mutation was lost so the item stayed [ ] and queued despite the response having landed; repaired manually with agent-doc write --commit --done. Violates the response-closeout-is-atomic rule (response + queue-head consumption + backlog/done mutations + snapshot + commit succeed as one transaction or none). Retained-intent replay must carry the backlog/done mutation set with the response capture, not just the response body. Likely the same root cause as #patchretryidem.
+- [ ] [#respidxrealtime] Source exchange response nodes from the realtime document model instead of re-parsing a &str. closeout_signal::ResponseIndex::build now parses ONCE per guard invocation (was N x (1 + M) tree-sitter parses for N ids and M archives, #respidxparse), but it still parses from rc.doc_content() bytes. The live model already holds these nodes - agent-doc-markdown-ast::crdt::OverlayCrdtDoc, and the SeqCrdt exchange-node direction AGENTS.md commits to. Reading nodes from the realtime model removes the parse entirely and generalizes past this guard to every string-scanning consumer of exchange structure. Operator-raised 2026-07-19.
+- [ ] [#jbroutasync] #agent-doc-bug Move editor_route onto the async accept-on-admission controller endpoint and honor submit.deadline_ms. handle_editor_command_submit_async_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:5381) already exists, spawns a worker, and logs editor_command_async_completed; validate_async_editor_command_payload (rpc.rs:5427) whitelists only sync_tmux_layout/focus_document_pane so editor_route is rejected as unsupported. The plugin already has resolveCommandSubmitAcceptedData (CpcRouteClient.kt:414) for the accepted shape. Separately the controller never reads submit.deadline_ms, so routed_cycle_ack_timeout (30s with a live child, dispatch.rs:2092) outlives the client's 15s deadline: the operator sees a timeout while the route keeps running. Biggest remaining perceived-latency win.
+- [ ] [#jbsockdeadline] #agent-doc-bug CpcRouteClient socket read has no deadline and the RUN_AGENT_DOC registry slot is never released on hang. SocketChannel.open (CpcRouteClient.kt:440) sets no connect/read timeout and reader.readLine() (:447) blocks indefinitely; the 15s is only a server-side deadline hint in the payload. A wedged controller hangs the route thread forever while the editorCommandRegistry slot (TerminalUtil.kt:447,372) stays held, so every later click dedupes out with no user-visible outcome. Likely the real mechanism behind 'Run Agent Doc does nothing'. Fix: real read deadline plus a finally that releases the slot.
+- [ ] [#jbedtledger] JB plugin: move Run Agent Doc work off the EDT. RunAgentDocAttemptLedger.writeStage (RunAgentDocAttemptLedger.kt:122-161) does mkdirs + full readLines + PluginManager lookup + full writeText per stage, and 5 stages run synchronously on the EDT (SubmitAction.kt:31,49,59; TerminalUtil.kt:367,444). Also fdm.saveDocument on the EDT (SubmitAction.kt:58), and resolveProject resolves the same file twice via FFI (SubmitAction.kt:29 and TerminalUtil.kt:362) with the first result discarded. Needs a plugin version bump + rebuild.
+- [ ] [#crdtcasraced] Optimize CRDT convergence on the finalize path and take pressure off finalize with streaming salient responses. Operator-reported: 60s convergence timeout with repeated compare_and_swap_raced. Two directions: (a) reduce the CAS retry churn itself, (b) let semantic response checkpoints (agent-doc response-checkpoint) carry more of the response before finalize so the final seal converges a smaller delta. Relates to #realtimesalient. Pairs with #patchretryidem and #fzmutloss - those are consequences of this timeout path.
+- [ ] [#mtds] [operator-verify] #panedraftunblocker live proof: on a Claude pane whose footer reads `⏵⏵ bypass permissions on · 1 shell · ← for agents` (the variant without `(shift+tab to cycle)`), with an EMPTY composer and no active turn, trigger JB Run Agent Doc. Expect dispatch to succeed instead of refusing with `timed_out` / `unblocker=wait_for_dispatch_ready_prompt`. Then repeat with unsent text typed in the composer and expect the new refusal naming the draft with `unblocker=submit_or_clear_pane_draft`, and NO injection over that text. Finally confirm a genuinely mid-turn pane (live spinner, bare `❯`) still refuses as busy. Fixed in 17848a927, installed 0.35.6; needs the supervisor idle-boundary recycle to pick up the fresh binary.
+- [ ] [#queuecontmirror] #agent-doc-bug queue_continuation_required stays true on a queue that is entirely bulk-mirrored [operator-verify] / [focused-cycle] / [future-separate] backlog heads (observed: 43 drainable heads on agent-doc-bugs2.md, none in-session drainable). SKILL.md defines the signal as false when every remaining head is operator-gated or inert, and #mirrorall explicitly mirrors operator-verify heads 'deferred from auto-drain' — but the drainability filter counts them anyway, so the in-session loop is told to keep draining work it must not drain. This is what kept re-selecting the same stale mirror set every cycle and what fed the #planmassdone footgun its 26 ids. Fix: apply the same deferral predicate #mirrorall uses when mirroring to the drainable-head count, so mirrored operator-gated heads raise queue_active without raising queue_continuation_required.
+- [ ] [#bbdcompactnocommit] #agent-doc-bug Compact Exchange applied but did not commit on brookebrodack-dev.md while the operator deleted queue lines mid-compact. CONFIRMED from ops.log: operator editor deletes landed 03:29:36-37, then at 03:29:43 'crdt_commit_barrier ready=true delivery_required=true delivery_converged=false live_editors=1' and 'controller_compact_document component=exchange commit=true barrier_ready=false'. The compacted document + its archive are on disk; only the commit is missing, so nothing is lost. Note handle_compact_document_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:4650) only LOGS barrier_ready and calls compact_document unconditionally, so the barrier is not what skipped the commit — find the actual skip inside compact_document's commit leg and make a commit=true compact that cannot commit either retry to convergence or fail loudly. Silently applying the compaction and leaving it uncommitted forced the operator to notice by hand.
+- [ ] [#fmgc] Per-peer ack watermark for replay-state retention (#retentionwatermark). Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: `reliable_sync_outbox_cursor`/`reliable_sync_inbox_cursor` are `PRIMARY KEY (document_hash)` holding ONE scalar `acked_through` — there is no per-peer ack vector to take a MIN over, and `reliable_sync_liveness_journal.source_key` is a document hash, not a peer id. Needs: (a) a `(document_hash, peer_key)` ack table keyed by the PID-scoped editor registration; (b) retention keyed off `MIN(acked_version)` across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps stay as a backstop rather than being replaced. `PushChannel::flush` (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via `outbox.ack_through(ack)`; generalize that, do not rebuild it.
+- [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.
+- [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean
+- [ ] [#17jk] Give free-text queue/backlog leaves stable ids so they can be after= targets (#dagdraingate/#queuenest gap found in plan review): after= targets resolve only through ids (id_to_idx built from entry_do_id, document_queue.rs:1271-1276; collect_after_deps reads only tracked items, backlog_sync.rs:341-358), so an ordered list of id-less free-text leaves cannot compile to dependency edges at all. Prefer minting ids the same way backlog items already get them over introducing HTML tags in the queue body — an HTML container would break the markdown-list model, the byte-preserving insert-only splice, and line-oriented CRDT merge
+- [ ] [#f1s3] Implement nested queue lists per tasks/agent-doc/plan-queue-nested-list-grouping.md (#queuenest): indent-aware document_queue::parse retaining depth + marker kind, leaf-only execution (parents are epic/group labels and never yield do-heads), nested ol compiles to after= edges at ingress, nested ul = related-but-unordered. Render MUST stay insert-only/byte-preserving — a parse->render round-trip already corrupted an operator line once (#queueatcreate). Key decision recorded in the plan: ol is sugar that compiles to after=, which stays the single source of truth, so reordering an ol re-derives edges and there is nothing to reject or revert
+- [ ] [#fr79] Auto-reconcile queue with backlog when the backlog carries a queue attribute: a periodic/preflight pass ensuring every open queue-attr backlog id has a queue head and vice versa, so the two cannot drift even if an individual write's enqueue is lost. Complements #queueatcreate (which covers the creating write) by making the invariant self-healing rather than write-order dependent
+- [ ] [#05r0] Second probe checking enqueue fallback persistence path
+- [ ] [#a45a] Confirm the queueatcreate persistence fallback lands a do-head under a missing editor replica
+- [ ] [#30p6] Go-mode idle-queue dispatch adds the agent-doc run to the agent composer but never submits it (#agent-doc-bug), so the queue stalls with the trigger sitting as an unsubmitted draft. Operator-reported 2026-07-18. NOT yet root-caused — do not guess. Starting evidence: a resubmit path already exists (idle_queue_resubmit_pending_payload / idle_queue_pending_payload_needs_enter_resubmit in agent-doc-start-runtime-io/src/idle_watch.rs) gated on tmux_submit_profile_for_harness(..).pending_draft_enter_resubmit(), which currently returns true unconditionally — so that gate is NOT the filter and the miss is upstream: check drain_dispatch_dedup_skip(payload_already_pending) and already_resubmitted (a stale latch would suppress the Enter), and whether shared.inject_pane resolves for a go-mode drain. Distinct from #jbtsiftnosub2, which covers the JB fresh-pane case only. Reproduce with a go-mode queue and watch the composer after injection
+- [ ] [#n39j] SimWorld coverage for #queuepersiststall: preflight must report PROBED drainability when queue maintenance fails to persist, never QueueState::default(). Fixed + verified live (0 -> 14 drainable on brookebrodack-dev.md) but has no deterministic test — reproducing it needs a simulated editor-authority failure (editor_attached_model_missing), which is a SimWorld job rather than a mock. Add a SimWorld case that forces the persist failure and asserts preflight still reports the real drainable head count, so the loop-gate contract cannot silently regress to zeros
+- [ ] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
+- [ ] [#f6j3] [recommended] Stale branch fix/editor-authority-no-disk-repair (worktree src/agent-doc-editor-authority-fix) has 2 unmerged commits targeting the editor-authority blocker, but is 5 days / 50 commits behind main and still carries the OLD error wording ('bounded publish-live-buffer request', 'reload or save the editor buffer') where main now says 'bounded Lazily-current observation request ... operator_action=none'. Main has already reworked that area. Decide explicitly: rebase and salvage, or delete the branch+worktree. Do NOT merge as-is
+- [ ] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
+- [ ] 🚧 [#mrnh] Bootstrap size is NOT the cause of the ensure wedge — hypothesis falsified, do not re-run it. `d131457ab` cut the live `crdt_replica_register` bootstrap from 1,312,802 to 261,174 bytes (5.0x) and `queue_maintenance_not_persisted` is COMPLETELY UNCHANGED. The 400ms missing-replica window is therefore not failing on transfer size. Next probe should target why the ensure-path observer never sees a replica the controller already reports as `current live_editors=1 delivery_converged=true` — likely generation fencing on re-register, not payload volume.
+- [ ] [#f4d5] Destructive cascade: a queue-maintenance persist failure erases the operator's queue activation. Reported live from a second session on brookebrodack-dev.md: operator flips frontmatter to `queue: start`, preflight reads the (unpersisted, therefore empty) queue body as drained and strips the activation back to `queue: stop`. Path: `agent-doc-preflight-io/src/lib.rs:3485` — `queue_has_prompts`/`drained_residue` feed `need_clear_active` and `need_clear_drained_body`, all computed from a queue body that a PREVIOUS cycle failed to persist. Deactivating on known-stale data is unsafe: when this cycle could not persist queue maintenance, preflight must preserve operator activation rather than infer 'drained'. Not fixed here — activation logic is safety-critical and I did not have the failing document's state to verify against.
+- [ ] [#5d9f] Second session observed that finalize's commit boundary persists queue maintenance through a path standalone `agent-doc queue sync` never reaches — the queue landed on the next write after three straight sync failures plus an `admin reload-lib`. Two persistence paths with different reachability is itself the bug surface. Determine why the commit path succeeds where queue sync fails, and route queue sync through whatever the commit boundary does. Result: queue text populates but stays UNARMED (`queue_drainable_head_count: 0`, `queue_continuation_required: false`), so the auto-loop still never gets the head.
+- [ ] [#7n20] Finish the ensure-window liveness fix across the CLI/controller process boundary. `bbc50c26e` extends the 400ms missing-replica ensure window when a `crdt_replica_register` proves the editor is alive, but the counter is process-global: on the split path the register lands controller-side while `ensure_document_model` runs CLI-side, so live telemetry still shows `window_extended=false` and the wedge persists. Two options: carry the liveness proof across IPC, or run the ensure controller-side where the registration already is. Do NOT route preflight's initial current-doc resolve through the ensure path — tried in this cycle and reverted; it violates `preflight_missing_editor_model_pauses_without_reading_disk_authority` and made preflight resolve to DISK content instead of waiting for the attached editor.
+- [ ] [#42xb] Bootstrap size is the wedge's real driver — investigate shrinking it. Live `crdt_replica_register` on agent-doc-bugs2.md carries 1,312,802 bytes for a 47KB document, i.e. ~28x the text in accumulated CRDT history, and the failures began when bootstrap crossed ~1.3MB (earlier registers at 358-437KB succeeded). Even a corrected ensure window only buys time; compaction/GC of replica history would remove the pressure. Check whether `agent-doc compact` reduces the register bootstrap, and whether superseded-generation pruning actually reclaims history.
+- [ ] [#zq8e] Editor-authority wedge blocks ALL queue maintenance (root of the #goal drain stall). Evidence in ops.log for this doc: at 19:32:45 `controller_crdt_current_text source=preflight_queue_maintenance` returns `status=current live_editors=1 delivery_converged=true`; 2s later the SAME queue_maintenance path logs `document_model_ensure_start initial_state=editor_attached_model_missing`, a `crdt_replica_register` succeeds (`data_kind=ok generation_fenced=true bootstrap_bytes=1312802`), then `document_model_ensure_republish_observer_not_ready` -> `document_model_ensure_failed` after 5s. EVERY `document_model_ensure_start` this session reports missing-replica across unrelated sources (queue_maintenance, pending_add_sync, controller_recycle_request) while the controller consistently reports current. Two observers of one document disagree; the ensure-path observer does not see a replica the controller demonstrably has. NOTE: likely already owned by the `src/agent-doc-editor-authority-fix` worktree (commits `preserve attached editor authority during retry`, `bound idle authority replay`) — coordinate before landing a rival fix in src/agent-doc.
+- [ ] [#a2zx] Queue/backlog opening-tag attribute duplication: the live doc now carries `<!-- agent:queue priority preset="..." priority go -->` and `<!-- agent:backlog priority priority queue -->` — `priority` twice in both. Verified NOT from `ensure_queue_priority_attr` (its `attrs.contains_key("priority")` guard is idempotent; reproduced clean against the real tag). `set_auto_in_queue_tag`/`rewrite_queue_tag_attrs` normalize `key=true`->`key` but never dedup boolean tokens, so any writer that appends an already-present flag accumulates duplicates permanently. Fix: dedup boolean attrs when rebuilding the tag (they are flags; a repeat carries no information), then find the appending writer. Suspect it rides the failed queue-convergence path above.
+- [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).
+- [ ] [#ay80] CI red on main, pre-existing and unrelated to #jbsteerinterrupt: `finalize_skips_ignored_untracked_session_doc` (tests/finalize_integration.rs:248) fails in GitHub Actions with `Unexpected stderr, failed var.contains(skipped ignored untracked path scratch/session.md)` but PASSES locally (7627/7627 green). Run 29657026491 on b7e17f4d5. Likely a CI-environment gitignore/tmpdir difference; reproduce with the CI runner git config.
+- [ ] [#promptselect] #agent-doc-feature Selection-scoped `Run Agent Doc`: send ONLY the editor text selection as the prompt. Needs (a) a dedicated CLI verb — `agent-doc prompt "<text>"` (or `steer`; `run` is taken) accepting multi-line via stdin/cat, (b) JB+VSCode `Run Agent Doc` hooked to it so a non-empty selection routes through `prompt` instead of the whole-document trigger, (c) acknowledgement: agent-doc echoes the prompt into the document with the prompt prefix plus salient response, (d) responses attached UNDER their originating prompt — a threaded prompt->response layer in the Document Tree rather than a flat exchange tail. Must compose with realtime steering (#realtime-steering-verbatim) since a selection sent mid-turn IS steering. Design pass needed before implementation.
+- [ ] [#realtimesalient] #agent-doc-feature Write salient responses into the document in REAL TIME rather than buffering until finalize. Today only complete `### Re:` sections cross response-checkpoint and partial output is console-only (SKILL.md: "stream incomplete progress only to the console"). Requires deciding what counts as salient mid-turn, and preserving the invariant that incomplete token prefixes never become authoritative document text — so likely a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it. Pairs with #promptselect threading.
+- [ ] [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.
+- [ ] [#syncobscache2] #syncobscache follow-up (the rest of the focus-sync win): extend the command-scoped observation cache into ../tmux-router. After the agent-doc-side cache: 109 -> 80 subprocess spawns, 2225 -> 2031ms (~9% only). list-panes barely moved (35 -> 34) because tmux-router spawns from 47 sites directly via its own Command builder, bypassing TmuxCommandRunner. Dominant remainder: `list-panes -a -F #{pane_id} #{pane_dead}` run 18x identically — pane_dead_flag lists ALL panes and scans for one, once per pane. Fix: move the scope into tmux-router and/or batch pane_dead_flag into one map fetch. Re-measure with the PATH-shim spawn counter.
+- [ ] [#jbrunsteering] #agent-doc-bug JB `Run Agent Doc` while a turn is already running should feed the prompt in as realtime steering (#realtime-steering-verbatim / #realtime-steering-aggregate) instead of interrupting the active turn. Operator-reported: invoking it mid-turn produced "Interrupted · What should Claude do instead?" rather than surfacing the new prompt to the running turn. NOT STARTED.
+- [ ] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
+- [ ] [#supboundarylivelock] #agent-doc-bug Supervisor idle-boundary recycle can livelock, leaving a stale binary mapped indefinitely. supervisor_recycle_action (agent-doc-supervisor/src/lifecycle.rs:124) returns None on `!turn_boundary` for everything except write_wedged/editor_delivery_stale, and turn_boundary = prompt_visible && !turn_active (idle_watch.rs:1898) never holds for a continuously-active pane. The only bypass, stale_recycle_safe_checkpoint (idle_watch.rs:136) = supervisor_stale && inflight_handlers == 0, is gated on staleness, so an explicit `admin recycle` on a NON-stale busy supervisor can never be consumed and silently expires at DEFAULT_RECYCLE_REQUEST_TTL_SECS=900 (recycle_request.rs:17) with the ledger phase left Requested. --force does not help: rpc.rs:5905 only changes the reason string, and idle_watch.rs:2403 collapses the request to a plain bool. MAX_CYCLE_OPEN_DEFER_TICKS escalation cannot rescue it either (idle_watch.rs:2253 only accrues the streak AT a boundary). OBSERVED 2026-07-18: supervisor pid 2040014 stayed stale across this whole session even though it IS stale (so the checkpoint bypass should apply and inflight_connection_handlers is an in-process RAII-guarded atomic that cannot leak) - the stale-side path needs its own trace. Fixing the non-stale side means a mid-turn execve, which is exactly what the boundary gate exists to prevent, so this needs a design decision (manufacture a boundary via the recycle-yield path? bound the defer? re-arm instead of expiring?), not a quick patch. Related shipped fixes: #dispatchgateleak + #authorityfactretention (submodule 566a72f6d).
+- [ ] [#statedbvacuum] [recommended] #agent-doc-feature One-time reclaim + ongoing compaction for .agent-doc/state.db. #authorityfactretention (566a72f6d) bounds future growth (170,215 -> 5,000 document_authority_observed rows on the live db), but SQLite reuses freed pages rather than shrinking: agent-loop state.db is still 477MB on disk with ~47,000 free pages and state_events holding 288MB across 73,822 pages for only 11,056 rows. Reclaiming needs a VACUUM, which takes an exclusive lock and must not run under a live controller. Add a bounded maintenance path (an `agent-doc admin vacuum` gated on no live controller/supervisor, or PRAGMA incremental_vacuum wired into an idle boundary) instead of leaving operators to run sqlite3 by hand.
+- [ ] [#qdonestrikeverify] #agent-doc-bug #qdonestrike-durable follow-up: confirm resolved queue heads actually clear once the project controller runs a build containing agent-doc submodule 4faed5b01. Fix shipped: persist_queue_maintenance_doc now drives the bounded ensure_document_model and re-observes before failing closed, so a missing/pending replica no longer discards the whole queue-maintenance plan (the auto-strike of agent:done heads was recomputed and thrown away every preflight). NOT yet provable live: controller serve pid 1501201 + route-owned supervisor pid 2040014 still map the pre-fix binary, and preflight now reports the honest underlying state (editor authority stayed in editor_attached_model_missing after a bounded observation; recovery=retry_without_disk_write). Controller kill was deliberately NOT done because it is project-scoped and tasks/professional/equityfundingsource.md is foreign-owned by a concurrent pane %31. Verify after an idle-boundary recycle: preflight should log queue_maintenance_model_ensure and the struck heads (📌 do [#jblocalhistverify], do [#5bzd]) should disappear from agent:queue instead of being re-logged as auto-struck every run.
+- [ ] [#crashresiliencelograce] test-hygiene: crash_resilience::tests::log_panic_to_file_appends_without_panicking fails under a parallel workspace run (cargo test --workspace) at src/crash_resilience.rs:173 but passes in isolation and under make check. The panic-log append test shares a fixed path across concurrently-running crate test binaries. Give it a per-test temp path so the suite is order-independent.
+- [ ] [#compacttombgc] [recommended] Add a fenced Compact Exchange CRDT epoch: rebootstrap attached replicas from the compacted snapshot, reject or component-rebase older-epoch deltas, expose the all-replica stability frontier, then run TextCrdt tombstone GC.
+- [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
+- [ ] [#5qjj] steeringmirrorverify|[operator-verify] Restart IntelliJ IDEA 2026.1 to activate plugin 0.2.258 (if stale bytecode appears, uninstall, restart, reinstall the signed local zip, and restart); during an active turn, make multiple exchange edits and verify the JetBrains banner and VS Code status item report the aggregate count/full hover, then run agent-doc once after editing and confirm the handoff queues without submitting a partial edit.
+- [ ] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.
+- [ ] [#crde] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978030079-4 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
+  evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978020608-2 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof)
+- [ ] [#steeringobservableset] #agent-doc-bug Phase 6 durable graph adoption: back RealtimeSteeringSet with a lazily reactive OBSERVABLE SET (not a drain-one-head QueueCell) keyed on the body-aware identity (Phase 3.1), reconciled on the reliable-sync plane; session-check reads set-emptiness (all directives settled) instead of re-diffing HEAD↔buffer. Plan: src/agent-doc/tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md (Phase 6). [recommended]
+- [ ] [#capturebacklogatomic] [focused-cycle] #agent-doc-bug A finalize that captures the response but fails before recording backlog mutations strands in response_captured with requires_backlog_capture=true + pending_added_this_cycle=false; preflight then refuses closeout and errors "still response_captured after recovery", forcing a manual mv-aside because replaying the capture re-trips the backlog gate. Fix: capture the whole cycle intent (response + backlog mutations) atomically, and let preflight supersede an uncommittable capture instead of looping. Exposed by this turn. Plan: tasks/agent-doc/plan-capture-includes-backlog-mutations.md
+- [ ] [#opcapturelazily] [focused-cycle] #sidecarstate op-capture (.agent-doc/op-capture/<doc-hash>.json, agent-doc-op-capture-io #qnodemerge4) is a bespoke JSON sidecar source of truth: durable ordered EditorOps + base_hash that preflight repair / CRDT merge REPLAY as authority then consume+clear (base-hash-guarded so safe). Because it is a separate replay source, clearing captures/ + state/cycles/ aside did not stop the churn this turn. Migrate onto the lazily state backbone (co-located with cycle-phase state) so captured-op authority is one coherent atomically-clearable model. 96-ref cross-crate surface; folds into #sidecarstate. Plan: tasks/agent-doc/plan-op-capture-lazily-state-migration.md
+- [ ] [#jbtsiftnosub2verify] [operator-verify] #jbtsiftnosub2 live proof (0.34.74): with NO tmux pane for a doc, trigger JB Run Agent Doc and confirm the reopen trigger SUBMITS (or auto-resubmits) instead of sitting typed-but-unsubmitted; ops.log shows fresh_route_stranded_trigger_resubmit + fresh_route_start_acknowledged_after_resubmit; a stuck submit now fails closed with a visible FreshStart startup-miss.
+- [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Plan: tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md
+- [ ] [#64we] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=supervisor_dispatch_start_proof pane=%156 actor_generation=1039 editor_attempt_id=1783140065173-1 dispatch_proof_state=none elapsed_ms=10134 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783140083790-supervisor_dispatch_start_unproven-codex-_156-ad5c195b73fc.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=supervisor_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/supervisor_dispatch_start_proof content_hash=sha256:503e36d813c831fce9bfe367973c345adce5a2f2620dccc4fa0be6e4363b5087]
+- [ ] [#adstatechart2] [focused-cycle] #agent-doc-feature Phase E rung 2 (observability): wire session-check/status to READ adstatechart configuration() as an advisory named-snapshot (transport.x editor_sync.x closeout.x supervisor) alongside today's ops.log markers. No behavior change to closeout. Guard semantics must match whatever A-D shipped. PRD: tasks/agent-doc/prd-adstatechart-local-process-statechart.md
+- [ ] [#adstatechart3] [focused-cycle] #agent-doc-feature Phase E rung 3 (load-bearing): switch adstatechart to the typed lazily 0.19 ChartBuilder, bump agent-doc-state-backbone to lazily 0.19, use ThreadSafeStateChart for cross-thread status observation, and replace the ad-hoc editor_synced check at the finalize/commit site with chart send(commit, guards) plus a fail-closed fallback when the feature is off. SimWorld: N wedged-finalize->direct-commit cycles never commit from stale disk. Live editor proof gated behind decomposition + install. PRD rung 3.
+- [ ] [#adstatechartkt] [focused-cycle] lazily-kt 0.9.0 SHIPPED (ChartBuilder + ThreadSafeStateChart + shared fromStates + context-free engine; GitHub Packages via release.yml, tag v0.9.0; full test suite green). REMAINING: bump the JetBrains plugin's lazily-kt dependency to 0.9.0 and consume ChartBuilder/ThreadSafeStateChart for the merge-ownership state machine (#mergestatemachine3 fold-in).
+- [ ] [#adstatechartjs] [focused-cycle] lazily-js 1.1.0 SHIPPED (ChartBuilder + statechart.d.ts builder types + shared fromStates; tag v1.1.0; 169/169 tests green). No thread-safe/async chart in js (no reactive Context, no threads). REMAINING: npm publish is operator-2FA-gated (#lzjsnpmpub: npm login then npm publish --access public), then bump the VS Code plugin @lazily/js dep to 1.1.0 and consume ChartBuilder.
+- [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
+- [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
+- [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
+- [ ] [#ipcpostcommitinv] [focused-cycle] #agent-doc-bug IPC root-cause C: structural invariants enforced on wrong write path. #boundaryaccum root fix landed (git.rs unconditional snapshot collapse) but needs a POST-COMMIT verification gate that fails loudly/self-heals if HEAD carries more than one boundary or a duplicated scaffold. Reuse ipc_corruption.rs detect_duplicated_scaffold. Touches git.rs, ipc_corruption.rs, flow/closeout.rs. Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md.
+- [ ] [#vscsaveproj] #agent-doc-bug VS Code save_document observability parity: processSaveDocumentSignal (editors/vscode/src/extension.ts) only writes outcomes to outputChannel, while JB saveDocumentViaDocument records StateProjectionBridge surface ops for missing_file/missing_document/saved/failed. Add the VS Code state-projection surface-op analogue so save_document outcomes are observable in the state mirror (not just the log), plus a behavioral test driving processSaveDocumentSignal end-to-end (open doc -> signal -> save -> ack-content).
+- [ ] [#restartbleednonroute] #agent-doc-bug Harden auto-install child stdio against fd2==pane: run_auto_install_steps_once (project_controller/rpc.rs) blindly dups fd2 via auto_install_child_stdio_plan(); when SupervisorStderrRedirect is inactive (non-route-owned TUI, or route-owned but maybe_start fell back to inactive on error) fd2 is the agent pane and make-install output still bleeds. Open the session project_root .agent-doc/logs/supervisor-stderr.log and pass its fd to auto_install_child_stdio_plan_to_fd(log_fd) so build output is off-pane regardless of route ownership; add a redirect-inactive regression.
+- [ ] [#r4gq] [operator-verify] Live JB Run Agent Doc dispatch-hang proof (#kjw0 fix, shipped 0.34.66 build): after the recycled build is running, trigger Run Agent Doc into a BUSY codex pane (mid-turn, 'esc to interrupt' visible) and confirm it returns FAST with a queued-behind-active-turn outcome (pane shows queued status) instead of hanging ~21s then a dispatch-start-unproven notification. Grep ops.log for route_dispatch_start_queued_behind_active_turn (present on success) and confirm accepted_without_dispatch_start_proof is ABSENT for the busy case. Root cause: route injected the trigger into a mid-turn pane; codex queued it behind the active turn so the UserPromptSubmit hook could not advance within the 10s proof budget, and the direct-pane path paid TWO 10s waits (initial + late-resubmit) then filed a false bug. Fix: short_circuit_dispatch_start_when_pane_busy in route/dispatch.rs detects busy_proof_line and returns RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn (accepted, not fail-closed).
+- [ ] [#af88] [focused-cycle] #agent-doc-bug IPC wedge hardening follow-ups from the 2026-07-01 audit (wedges C + A FIXED this cycle: supervisor IPC listener now spawns per-connection threads so a half-open client cannot freeze all supervisor dispatch; editor IPC send now has set_send_timeout). Remaining: (E) pty.rs stdin.lock() held across the blocking read — evaluate a raw-fd read that preserves the restart/quit-prompt stdin coexistence in start.rs; (B/D) editor IPC listener per-connection read_line has no timeout (thread/fd leak under a persistent half-open client) — add a bounded backstop; (F) connect_sync has no connect timeout (mitigated today by the 3s wait_for_controller deadline loop). Also decide the AGENTS.md 'No async' convention nuance for the server-scale roadmap.
+- [ ] [#claimnewpane] [focused-cycle] #agent-doc-feature Claim for Tmux Pane should open a new document in a fresh pane in the SAME tmux session (never replace the current pane or move the window to another session). Plan: tasks/agent-doc/plan-claim-new-pane-same-session.md
+- [ ] [#boundaryaccum1] [focused-cycle] #agent-doc-bug Scattered agent:boundary markers accumulate in committed content (3 in this doc: d0dd7c4e, qactsync1, ftimm0001) — violates the exactly-one-boundary invariant. Root cause: reposition_boundary_in_snapshot (git.rs:1613) hands the collapse to the finalize/IPC path via the active-run guard AND delegates the working-tree rewrite to the IDE plugin via the IPC-listener guard; when finalize wedges on stale_install and the response lands via direct commit (and the stale plugin never applies the IPC reposition signal), nothing re-enforces the single-boundary invariant on the binary's own staged/committed blob, so one boundary accretes per wedged cycle. Fix: always collapse boundaries in the binary-owned snapshot/staged blob independent of the guards (git stages a snapshot, not the live editor buffer, so it never races user text) and scope the guards to the working-tree disk rewrite only; add a post-commit invariant check that reconciles or fails loudly if HEAD carries >1 boundary; promote the aspirational reposition_boundary_removes_stale/apply_patches_boundary_invariant tests to real regressions + SimWorld coverage for N wedged-finalize→direct-commit cycles. Distinct from #fullboundary (convergence gate reduces the wedge trigger; this makes the invariant self-healing regardless of write path). Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md
+- [ ] [#qactsync] [focused-cycle] #agent-doc-feature Bidirectional realtime sync of queue-activation state: when the operator adds/removes go on agent:queue OR changes the queue: frontmatter value, the realtime system converges BOTH representations to the operator edit (operator-authoritative, never revert). Today explicit_queue_go_mode reads both but they are not synced, so halting needs editing both (go-marker churn). Define a canonical QueueActivation state + edit-provenance propagation; deterministic on two-sided conflict; fixed-point on synced input. SimWorld both directions + conflict; make tmux-ci + live editor proof. Plan: tasks/agent-doc/plan-queue-activation-state-sync.md
+- [ ] [#ftimmediate] #agent-doc-feature Free-text prompts begin work immediately: a free-text exchange/queue prompt is an executable directive that should start work at once; if the agent determines a dedicated/fresh session is needed (high accretion or focused-cycle scope), it should auto /clear or request a PCP restart and RUN the work, not park it as an operator-gated defer. Tighten the #drain-no-defer / #qfocsup boundary so focused-cycle free-text prompts get run-after-clear rather than left for the operator.
+- [ ] [#qeditrace] [focused-cycle] #agent-doc-bug Pre-run queue edits partially reverted: when the operator adds multiple queue heads before a run (or JB Run Agent Doc) with no active turn, only the FIRST added head survives and the rest revert to the pre-edit queue. Distinct from the during-turn race - the preflight queue-maintenance reconcile drops all-but-first operator addition. Investigate preflight/maintenance.rs: queue_journal record + record_live_buffer (#qftloss mode-6), #mirrorall backlog-to-queue mirror, #rz3a freshly-added hold-out, #7r2s manual-add pin, #qdedupsync dedup - hypothesis is convergence keeps the first new head (pin/anchor match) but journals-without-replaying the rest. Repro 2026-07-01 reitrades.md; live dup heads in bugs2 (do #tmuxsynccrashlog x2, do #60ev x2). Add SimWorld coverage for multi-line pre-run operator-add survival + fail-closed recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
+- [ ] [#jbcompactcommit] [operator-verify] Live JB Compact Exchange no-uncommitted-changes proof: after the fixed binary is installed + recycled, run JB Compact Exchange on a large session doc and confirm HEAD lands the compacted content (no green git gutter / no snapshot>visible drift on next preflight). Grep ops.log for compact_commit_head_mismatch (must be ABSENT on success; present = the new fail-closed guard fired with a reset --from-current recovery). Rust fix shipped in agent-doc-orchestration/src/compact.rs commit_compacted_authoritative (#jb-compact-commit-left-uncommitted).
+- [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md
+- [ ] [#60ev] plan-dynamic-context-injection-ledger.md
+- [ ] [#2y8j] [operator-verify] #qbasehashmemo live typing proof: after the supervisor auto-installs 0.34.49 and recycles, type a sustained burst in a large doc (equityfundingsource.md or agent-doc-bugs2.md) in the JB editor and confirm typing is smooth; grep ops.log to confirm crdt_merge_base no longer fires per keystroke during a typing burst.
+- [ ] [#cdtcutover] [focused-cycle] #agent-doc-feature FUTURE/SEPARATE rung — wire the evented CellDocTree model into the live finalize/write path (replace whole-tree reconcile at finalize with update_to per-node deltas; expose SemTree queries to preflight/supervisor drainable computations). Large, live-supervisor-critical, gated, own focused cycle + operator live proof. Plan: tasks/agent-doc/plan-celldoctree-evented-reflection.md
+- [ ] [#coredecomp] [focused-cycle] Keep the former `agent-doc-core` God-crate surface decomposed into owned pure crates. Audit `pending.rs`, `queue_item_lifecycle.rs`, `template.rs`, `crdt_sync.rs`, `component.rs`, and related modules; move element-local semantics into `agent-doc-element-*`, document composition into `agent-doc-document`, merge/CRDT merge policy into `agent-doc-merge`, and FFI ABI into `agent-doc-ffi`. Do not recreate `agent-doc-core` as a compatibility facade or migration alias, and do not move runtime IO, snapshots, commits, IPC, tmux, or controller effects into pure crates.
+- [ ] [#orchdecomp] [focused-cycle] Decompose the `agent-doc-orchestration` God crate along effect boundaries. Audit turn lifecycle, document realtime scheduling, queue/exchange lifecycle, closeout/commit, editor IPC, supervisor/controller state, tmux integration, recovery/repair, and session routing; move stable responsibilities into `agent-doc-turn`, `agent-doc-document`/document-realtime, `agent-doc-supervisor`/controller-state crates, `agent-doc-editor`, `agent-doc-tmux`, and narrow closeout/recovery crates as appropriate. Leave `agent-doc-orchestration` as a shrinking effect adapter only, not a deprecated compatibility facade; callers should move directly to the owning focused crate and pure merge/document code should stay out of orchestration.
+- [ ] [#skillharnessplugin] [focused-cycle] Create the agent-doc integration plugin for `skill-harness`: implement an agent-doc-owned `SkillHarnessPlugin` adapter, define its detection and skill-path contract without depending on `agent-doc-core`, register/document the integration path, and add tests proving `skill-harness` can resolve agent-doc through the plugin boundary after `agent-doc-core` removal.
+- [ ] [#crdtauth6] [operator-verify] CRDT authority live proof: verify the existing JB DocumentListener -> CrdtReplicaForwarder.forwardLocalDelta path, Kotlin Unix-socket ReplicaTransport, VS Code koffi replica seam, and Rust fan-out stay connected in a live editor session. This is proof/parity work only; operator-visible text is already authoritative and must not wait on this item. Plan: tasks/agent-doc/plan-crdt-authority-model.md
+- [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
+- [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
+- [ ] [#agentsignals] [future/separate] Add a realtime agent:signals element after core realtime convergence is stable. Start with deterministic built-in signals for tests, queue, supervisor, and ipc; design custom user-defined signals as plugin-backed tracked work with Rust as the first target and future multi-language support; use tasks/software/realtime-signals-patchboard.md as the GUI/semi-programmatic reference; keep MLP enhancement optional/experimental and not load-bearing for deterministic states.
+- [ ] [#elementgraphprd] [future/separate] Define the single-document element layout for both single-model sessions and multi-harness orchestration, including typed graph/workers/jobs/schedule elements plus an advisory perceptron graph that scores visible signals without directly mutating runnable work. PRD: tasks/agent-doc/prd-element-layout-perceptron-graph.md
+- [ ] [#ensurereplicagensup] #agent-doc-bug Same process-local hub_registry class as #ensurereplicagen, remaining callers. Proof: document_model_ensure_failed for equityfundingsource.md with source=controller_recycle_request:background, and crdt_current_text_unavailable reason=missing_replica from process_pid 2761972/458607/503509 — supervisor pids, NOT the controller (3811498). hub_registry() is only ever populated by the controller, so any supervisor/CLI caller of current_text_for_file* / ensure_document_model / apply_cpc_write_for_file can only miss, permanently. #ensurereplicagen fixed the preflight queue-maintenance caller (proven: queue CAS now succeeds); this covers the rest. Audit every direct caller outside the controller and route through current_text_via_controller_model_for_doc / apply_cpc_write_via_controller_model_for_doc behind the embedded_relay_is_available_for_file guard, then EXTEND the test_cli CPC-boundary forbidden-crate list to cover them (agent-doc-preflight-io was missing from it, which is how the original escaped).
+- [ ] [#patchretryidem] #patchretryidem #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). NARROWED 2026-07-19 by the #fzmutloss fix: the mutation half and the body half were never in one transaction, so this is NOT 'both halves lost together' - the body half is re-applied non-idempotently by the retry while the mutation half took a different path. Remaining question is only the body-half idempotency. Needs a reproduction of the CAS race; do not guess at the idempotency boundary.
+- [x] [#fzmutloss] #agent-doc-bug A finalize CRDT-convergence timeout can land the response but SILENTLY DROP its backlog mutation. Operator-reported 2026-07-19 on brookebrodack-dev.md: finalize timed out at 60s with repeated compare_and_swap_raced, the binary resumed and committed the response, but the --done mutation was lost so the item stayed [ ] and queued despite the response having landed; repaired manually with agent-doc write --commit --done. Violates the response-closeout-is-atomic rule (response + queue-head consumption + backlog/done mutations + snapshot + commit succeed as one transaction or none). Retained-intent replay must carry the backlog/done mutation set with the response capture, not just the response body. Likely the same root cause as #patchretryidem.
+- [ ] [#fzmutloss] #agent-doc-bug A finalize CRDT-convergence timeout can land the response but SILENTLY DROP its backlog mutation. Operator-reported 2026-07-19 on brookebrodack-dev.md: finalize timed out at 60s with repeated compare_and_swap_raced, the binary resumed and committed the response, but the --done mutation was lost so the item stayed [ ] and queued despite the response having landed; repaired manually with agent-doc write --commit --done. Violates the response-closeout-is-atomic rule (response + queue-head consumption + backlog/done mutations + snapshot + commit succeed as one transaction or none). Retained-intent replay must carry the backlog/done mutation set with the response capture, not just the response body. Likely the same root cause as #patchretryidem.
 - [ ] [#respidxrealtime] Source exchange response nodes from the realtime document model instead of re-parsing a &str. closeout_signal::ResponseIndex::build now parses ONCE per guard invocation (was N x (1 + M) tree-sitter parses for N ids and M archives, #respidxparse), but it still parses from rc.doc_content() bytes. The live model already holds these nodes - agent-doc-markdown-ast::crdt::OverlayCrdtDoc, and the SeqCrdt exchange-node direction AGENTS.md commits to. Reading nodes from the realtime model removes the parse entirely and generalizes past this guard to every string-scanning consumer of exchange structure. Operator-raised 2026-07-19.
 - [ ] [#jbroutasync] #agent-doc-bug Move editor_route onto the async accept-on-admission controller endpoint and honor submit.deadline_ms. handle_editor_command_submit_async_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:5381) already exists, spawns a worker, and logs editor_command_async_completed; validate_async_editor_command_payload (rpc.rs:5427) whitelists only sync_tmux_layout/focus_document_pane so editor_route is rejected as unsupported. The plugin already has resolveCommandSubmitAcceptedData (CpcRouteClient.kt:414) for the accepted shape. Separately the controller never reads submit.deadline_ms, so routed_cycle_ack_timeout (30s with a live child, dispatch.rs:2092) outlives the client's 15s deadline: the operator sees a timeout while the route keeps running. Biggest remaining perceived-latency win.
 - [ ] [#jbsockdeadline] #agent-doc-bug CpcRouteClient socket read has no deadline and the RUN_AGENT_DOC registry slot is never released on hang. SocketChannel.open (CpcRouteClient.kt:440) sets no connect/read timeout and reader.readLine() (:447) blocks indefinitely; the 15s is only a server-side deadline hint in the payload. A wedged controller hangs the route thread forever while the editorCommandRegistry slot (TerminalUtil.kt:447,372) stays held, so every later click dedupes out with no user-visible outcome. Likely the real mechanism behind 'Run Agent Doc does nothing'. Fix: real read deadline plus a finally that releases the slot.

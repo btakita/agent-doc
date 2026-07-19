@@ -6,6 +6,7 @@ agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
+queue: go
 ---
 
 ## Status
@@ -74,14 +75,17 @@ Built, verified end-to-end, and pushed to **`btakita/acadian-take-home`** (commi
 `make check` is green across the board: 29 backend tests, mypy clean, 9 frontend tests, typecheck, production build.
 
 Two notes worth your attention. The repo is **private**, so the reviewer will need an invite or a zip before submission. And the plan file proposed the name `mag7-returns`, but I used `acadian-take-home` per your queue item — the app title inside is still "MAG7 Return Viewer".
-<!-- agent:boundary:d39e57fa -->
+Add a dev uv task to start the dev server.
+commit + push
+<!-- agent:boundary:8363abd4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- Create a private gh repo btakita/acadian-take-home. Add as a submodule in src/acadian-take-home
-- /goal do tasks/recruit/acadian/plan.md
+- ~~Create a private gh repo btakita/acadian-take-home. Add as a submodule in src/acadian-take-home~~
+- ~~/goal do tasks/recruit/acadian/plan.md~~
+- 📌 Add a dev uv task to start the dev server.
 <!-- /agent:queue -->
 
 ## Backlog

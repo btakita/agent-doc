@@ -271,6 +271,8 @@ mod tests {
             "claude",
             "/usr/bin/claude",
             "claude --continue",
+            // The exact cmdline observed in the hijacked pane (tmux 1:0).
+            "/opt/claude-code/bin/claude --resume",
             "codex",
             "opencode",
         ] {

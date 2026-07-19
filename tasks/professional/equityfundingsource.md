@@ -71,7 +71,28 @@ That item was waiting on you to name a TMO lender account "created but never fun
 So the `GetLender` success path is no longer unobserved against real data — `L-TEST067` is precisely the `in_lss && !in_los` state the `confirmed_no_funding` branch models. What's left is only the UI assertion: point a vesting at `L-TEST067`, open the reconcile modal, confirm it reads "In TMO · no funding yet."
 
 The inversion in that table is worth noting on its own. All 5 sandbox fundings belong to `L-TEST1`, and `L-TEST1` does **not** resolve as an LSS lender at all. A funding `Account` string is not guaranteed to be a real lender record — so a vesting pointing at `L-TEST1` would correctly fall through to the degraded "Unconfirmed in TMO" branch. Both branches now have a named real-data fixture to test against. I've recorded both on the item.
-<!-- agent:boundary:0878baff -->
+❯ Add backlogs into the queue in priority order.
+
+### Re: Add backlogs into the queue in priority order — opus-4-8
+
+
+Reordered the backlog head so the mirror produces a launch-first queue. The old order had a cost optimization on top and the actual launch gate buried 70 lines down.
+
+**New priority order, and why this sequence:**
+
+1. **`#efs-cf-account-custody`** — first because it *invalidates* work done before it. Secrets are per-account, D1 and R2 can't move between accounts, and API tokens are account-owned. Anything provisioned in the personal account has to be redone after the move. This is the constraint that orders everything below it.
+2. **`#efs-prod-secrets`** — the 9 missing secrets, pushed into whichever account ends up owning the environment. Straight after custody, never before.
+3. **`#efs-dns-cutover`** — the actual remaining gate on launch. Needs a resolvable domain, and NS propagation has latency you can't compress, so it wants to start as early as its dependencies allow.
+4. **`#tmo-getlender-verify`** — now cheap. `L-TEST067` is the fixture, the endpoint half is proven, only the modal assertion is left.
+5. **`#tmo-sandbox-purge-apply`** — unblocked but destructive, so it sits behind the launch path rather than in it. No reason to spend an irreversible `DeleteLoan` before cutover.
+6. **`#efs-do-hibernation`** — real money (~82% of the included GB-s on a single always-on room) but it costs nothing to defer past launch, and it touches three Durable Object classes. Not worth destabilizing a cutover for.
+
+Everything below that keeps its existing relative order. No new items — this was ordering work, not capture.
+
+**One thing did not land: the queue block itself is still empty.** Preflight's backlog→queue mirror has failed to persist on every cycle tonight with the same cause — `editor_attached_model_missing`, the wedge where the JetBrains plugin holds an attachment for this file but no CRDT model behind it. Responses and backlog mutations write fine (they go through the realtime backbone); only queue maintenance is discarded. `admin reload-lib` clears it temporarily, and it comes back.
+
+So the backlog is now in the order you asked for, but the queue won't populate from it until that wedge is cleared for real. Closing and reopening this file's tab in the IDE should do it — after that, the next preflight will mirror all six into the queue in this sequence.
+<!-- agent:boundary:8444401b -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

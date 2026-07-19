@@ -1466,3 +1466,105 @@ mod tests {
         assert_eq!(extract_head_id("no id here"), None);
     }
 }
+
+/// `#fr79` — every active tracked-work id the document still knows about, across
+/// `backlog`, `icebox` and `pending`, lowercased.
+///
+/// Used to reconcile the queue in the direction the backlog→queue mirror cannot:
+/// finding `do [#id]` heads whose id no longer exists anywhere in the document.
+pub fn active_tracked_ids(content: &str) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    let Ok(components) = element::parse(content) else {
+        return ids;
+    };
+    for comp in &components {
+        if !matches!(comp.name.as_str(), "backlog" | "icebox" | "pending") {
+            continue;
+        }
+        let body = &content[comp.open_end..comp.close_start];
+        for (id, _ctx) in backlog::active_item_execution_contexts(body) {
+            ids.insert(id.to_ascii_lowercase());
+        }
+    }
+    ids
+}
+
+/// `#fr79` — decide whether an id-backed queue head is *orphaned*: its id is not
+/// an active tracked item, not reaped into `agent:done`, and not a gated review
+/// item.
+///
+/// The backlog→queue mirror is self-healing in one direction (an open
+/// queue-attr backlog id always regains a head) and the auto-strike covers ids
+/// resolved into `done`/review. Neither covers a head whose id has simply
+/// ceased to exist — an operator deletion, a renamed id, or a lost write. Such a
+/// head is undrainable forever: nothing can resolve it, and it occupies the
+/// drain position on every cycle.
+///
+/// Deliberately conservative. It fires only when the id is absent from ALL
+/// three sets, so an id that is merely deferred, gated, iceboxed or pending is
+/// never treated as orphaned; when in doubt the head is kept.
+pub fn queue_head_id_is_orphaned(
+    id: &str,
+    active_tracked: &HashSet<String>,
+    done_ids: &HashSet<String>,
+    gated_ids: &HashSet<String>,
+) -> bool {
+    let id = id.trim().to_ascii_lowercase();
+    if id.is_empty() {
+        return false;
+    }
+    !active_tracked.contains(&id) && !done_ids.contains(&id) && !gated_ids.contains(&id)
+}
+
+#[cfg(test)]
+mod fr79_orphan_reconcile_tests {
+    use super::*;
+
+    fn set(items: &[&str]) -> HashSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_head_whose_id_vanished_is_orphaned() {
+        assert!(queue_head_id_is_orphaned(
+            "sy71",
+            &set(&["other"]),
+            &set(&[]),
+            &set(&[])
+        ));
+    }
+
+    #[test]
+    fn open_done_and_gated_ids_are_never_orphaned() {
+        let active = set(&["open1"]);
+        let done = set(&["done1"]);
+        let gated = set(&["gated1"]);
+        for id in ["open1", "done1", "gated1"] {
+            assert!(
+                !queue_head_id_is_orphaned(id, &active, &done, &gated),
+                "{id} is still known to the document and must keep its head"
+            );
+        }
+    }
+
+    #[test]
+    fn matching_is_case_insensitive_and_ignores_empty_ids() {
+        assert!(!queue_head_id_is_orphaned("OPEN1", &set(&["open1"]), &set(&[]), &set(&[])));
+        assert!(!queue_head_id_is_orphaned("  ", &set(&[]), &set(&[]), &set(&[])));
+    }
+
+    /// `active_tracked_ids` must span every component that can hold a live item,
+    /// or reconciliation would strike heads for iceboxed/pending work.
+    #[test]
+    fn active_tracked_ids_span_backlog_icebox_and_pending() {
+        let doc = concat!(
+            "<!-- agent:backlog -->\n- [ ] [#inbacklog] work\n<!-- /agent:backlog -->\n",
+            "<!-- agent:icebox -->\n- [ ] [#inicebox] later\n<!-- /agent:icebox -->\n",
+            "<!-- agent:pending -->\n- [ ] [#inpending] soon\n<!-- /agent:pending -->\n",
+        );
+        let ids = active_tracked_ids(doc);
+        for id in ["inbacklog", "inicebox", "inpending"] {
+            assert!(ids.contains(id), "{id} must count as tracked; got {ids:?}");
+        }
+    }
+}

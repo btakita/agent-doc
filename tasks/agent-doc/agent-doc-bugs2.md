@@ -143,7 +143,29 @@ My recommendation, in order of value:
 1. **Consolidate the DDL into one canonical schema declaration** rather than 22 scattered `CREATE TABLE IF NOT EXISTS` blocks plus 12 `ensure_column` calls. That captures most of what you want — one place that states the truth — with no new dependency and no table rewriting.
 2. **Keep the once-only ledger strictly for data migrations**, and treat it as **prunable**. This is the actual answer to "accumulating for the life of the project": once no supported version predates a migration, delete the record *and its code*. A data migration is not permanent; it has a support floor. Two entries is not a burden, and the discipline keeps it that way.
 3. **Revisit a differ only if the DDL genuinely starts needing destructive changes** (column type changes, drops). We have not needed one yet — every schema change so far has been additive, which is exactly the subset `ensure_column` already handles safely.
-<!-- agent:boundary:8efa8e27 -->
+
+### Re: do your recommendation — opus-4-8
+
+Both actionable items shipped (`d629360c4`). Item 3 was "don't adopt a differ yet", so there was nothing to build.
+
+**1. One canonical declaration (`#canonicalschema`).** `CANONICAL_ADDED_COLUMNS` is now the single declaration of every column added after its table's original release. `create_canonical_tables` states the full current shape for new databases; `converge_added_columns` walks the *same list* to `ALTER` existing ones. Later-added indexes likewise collapse into one `ensure_canonical_indexes` instead of living in whichever function happened to introduce them. The four per-table `ensure_*_columns` wrappers are gone.
+
+The hand-maintenance had already failed, which I only found by looking: **four of the twelve added columns were missing from their own canonical `CREATE TABLE`** — `projection_diagnostics.{source_generation, intended_hash, retry_status}` and `state_events.document_version`, the last of which I added an hour ago. A fresh database only ever received them through the `ALTER` path, so the declared schema did not describe reality. Completely silent, because both paths run on every open.
+
+Two tests pin it, and I mutation-tested both by re-introducing the drift and confirming they fail with the offending column named. Worth noting because my first attempt was wrong: asserting against an *initialized* database proves nothing — convergence would have already added any missing column, and SQLite rewrites `sqlite_master.sql` on `ADD COLUMN`, so even the recorded DDL looks correct. The declaration is only testable by running the `CREATE TABLE` path in isolation.
+
+**2. The migration ledger is prunable — and I pruned one (`#migrationfloor`).** Each migration now carries the release it shipped in and the floor past which the record *and its code* should be deleted.
+
+More importantly, `backfill_state_event_document_version_v1` is **retired outright**, and the reason is a real bug in my own `#sk47` design from earlier today rather than a tidiness argument. It ran once, recorded itself, and was therefore structurally unable to repair rows that arrived *afterwards*. A concurrently running older binary kept appending events at the column's `DEFAULT 0` — **55 such rows on the live ledger, at ids 205755–205913, newer than the migration record itself**. A watermark would have read every one of them as version 0 and deleted them. That is exactly the data loss `#sk47` exists to prevent, introduced by `#sk47`.
+
+It is replaced by `converge_state_event_document_versions`: idempotent, guarded by an indexed existence probe so the per-RPC open path stays cheap, repairing stragglers on any open. Nothing to record, nothing to accumulate. **Prefer convergence to a one-shot migration whenever the invariant can be re-established from the data itself** — which is your original point, arriving from a different direction than either of us expected.
+
+One subtlety I documented carefully because `#fmgc` could get it wrong: straggler repair numbers rows *above* the document's high-water mark, never at their `id` position, so a version can never be assigned below one already handed out. The cost is that version order no longer matches `id` order across a repair boundary — 2 such inversions live after repairing the 55 rows. Replay order is `id`, not `document_version`, so nothing depends on it, and the doc comment now separates the guaranteed invariant (a version never decreases) from the one that does not hold.
+
+**Verified on a `.backup` of the live ledger:** 55 unversioned rows → 0, migration ledger 2 → 1 entries, all 12,551 rows intact. `make check` green — 7669 run, 7669 passed, 240 skipped. Installed, pushed, supervisor recycling. CI run `29671387383` is pending; the standing red remains the pre-existing `#ay80` capture read-back miss.
+
+On item 3: still no reason to adopt a differ. Every schema change so far has been additive, which is the subset this now handles declaratively, and the SQLite 12-step rebuild a differ would need for anything else is in direct tension with never rewriting the authoritative ledger.
+<!-- agent:boundary:a44c9d27 -->
 <!-- /agent:exchange -->
 ## Queue
 

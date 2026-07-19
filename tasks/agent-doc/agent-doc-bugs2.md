@@ -34,88 +34,12 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260719-034056.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260719-044303.md`*
 
 Compacted content:
-- Archived 6 response topic(s): compact exchange deletes the boundary tag; the second bug your report tripped over; why `.unwrap()` on `create_dir_all` when nothing is bound; 3 more
-- Prior summary/context: Compact exchange commits but then deletes the agent:boundary tag above...leaving the deletion in an uncommitted state.
-
-### Re: #editormodelmissing after the IntelliJ restart — opus-4-8
-
-> **Queue prompt:**
->
-> do #editormodelmissing: I restarted Idea
-
-
-The restart is the most useful thing you could have done, because it falsifies the fix I filed last cycle. I had this as plugin-side model lifecycle — close/reopen the tab forces `CrdtReplicaManager` to build a model. You restarted the whole IDE and preflight still reports `editor_attached_model_missing`. So that was wrong, and it is not a plugin model-rebuild problem.
-
-**What it actually is: a one-way latch in editor-attachment state.**
-
-`TransportProjection.editor_generation` (`agent-doc-state-backbone/src/lib.rs:3394`) is set on `StateFact::OwnerGenerationChanged` and **never cleared**. I checked the whole `StateFact` enum — there is no editor-detach, editor-closed, or generation-ended fact of any kind. Nothing can unset it.
-
-`document_has_live_editor_transport` (`crdt_authority.rs:165`) then reads:
-
-```rust
-if projection.transport.editor_generation.is_none() { return false; }
-match projection.transport.patches.iter().next_back() {
-    Some((_, patch)) => !matches!(patch.phase, TransportPatchPhase::ForceDiskFallback),
-    None => true,
-}
-```
-
-No liveness proof anywhere. Once an editor has ever attached, the document is `MultiReplica` **forever**. And the file's own doc comment knows this is a hazard — it flags raw `Attached` as "the ambiguous `#6b5h` state (a connectable listener that may be a *stale* listener with no editor behind it)" and points callers at `authority_from_liveness` (line 122), which resolves it via pid liveness. This path never calls it.
-
-**Three things fall out, and all three match what you observed.**
-
-The wedge survives `admin recycle`, `reload-lib`, and an IDE restart because none of them touch the ledger — the latch is in persisted state, not in the IDE. The only predicate that flips it false is `TransportPatchPhase::ForceDiskFallback`, which is precisely why `--force-disk` was the one escape you kept being offered and kept correctly declining. And the two wedged documents are the two long-lived ones — `agent-doc-bugs2` at gen 1518, `equityfundingsource` at gen 1452, against 14–82 for every healthy document in the fleet. Long life, more attachment events, more chance the latch caught.
-
-**What I am not doing, deliberately.** I am not shipping the demotion. There is a second candidate latch with an identical presentation — `observe_editor_open`'s durable reliable-sync receiver journal may be replaying a stale editor-open assertion across the restart, and `resolve_closed_editor_disk_fallback_current_doc` bails only when that reports open. Both latches produce exactly this symptom and the correct fix differs by which one is firing. A wrong guess here demotes a *live* editor to disk authority and lets the binary overwrite your buffer — the single failure every guard on this path exists to prevent. Shipping that on a coin flip to close an item faster is a bad trade.
-
-The item now carries the decisive experiment instead: log `editor_generation` and `observe_editor_open` together at the `EditorAttachedMissingReplica` branch (`agent-doc-crdt-relay-io/src/lib.rs:696`) and read which one is lying. That is a one-line instrumentation change, it needs your live wedged session to produce a reading, and then the fix is unambiguous.
-
-**One thing worth fixing regardless of the answer:** `admin detect` told me "No fleet anomalies detected in /home/brian/work/btakita/agent-loop" while two of its seven documents were hard-wedged and unrecoverable. That is a detector gap independent of the root cause — attached-with-no-replica across repeated observations should be a reported anomaly, not something you discover by noticing your queue prose went stale. Noted on the item.
-
-Gated rather than done, and the `[operator-verify]` tag is now carrying real weight: the reading has to come from your wedged session, because a fresh document will not reproduce it.
-### Re: many of these items are stale — opus-4-8
-
-You are right, and the way I found out is worth more than the triage itself.
-
-**The plan told me to close 26 items in one command.** `required_commands` came back as a single finalize carrying `--done crdtauth6 --done nsfz --done suprestassoc-live …` for 26 ids. `SKILL.md` tells agents to treat the plan as the execution contract, so an agent following it literally would have closed `#sidecarstate`, `#ipcauthority`, `#adstatechart2/3`, `#capturebacklogatomic`, and twenty more — none of which this turn touched.
-
-The mechanism: `plan` builds one `ResolveExisting` mutation per `do [#id]` queue head, and `finalize_command` emits one `--done` per mutation, unconditionally. That is fine when you queue one item. It is destructive after `#mirrorall` mirrors every open tracked-work head into the queue at once, because `plan` cannot tell "the operator asked for these" from "these were mirrored in bulk."
-
-Fixed and shipped as `#planmassdone`. Past a small cap the `--done` flags are dropped, the bare finalize skeleton survives, and a warning names the suppressed ids so they get adjudicated individually. `ExpectAdd` placeholders are spared — they add tracked work and cannot lose history. Verified against this exact document: 26 flags before, zero after, with the warning listing all 26. Full suite 7676 passed, installed, pushed, recycled.
-
-**The triage you asked for.** Of the 26, only two are genuinely closable, and I closed those two rather than the batch:
-
-- `#staleplugindeploy` — its blocker was "installing would deploy the uncommitted decomposition WIP as the live binary." That condition is gone: commit `9b38d017` is an ancestor of main, the tree is clean, and I ran `make install` + push three times this session against that clean tree. Closed.
-- `#bn41` — self-describes as "RESOLVED by admin recycle + admin reload-lib." Closed as superseded, with one caveat worth recording: that resolution claim is itself now stale, because this session proved recycle and reload-lib do **not** clear the current instance of that failure. The living version of the class is `#editormodelmissing`.
-
-The other 24 split three ways. Five are `[operator-verify]` and need your eyes, not mine (`crdtauth6`, `nsfz`, `suprestassoc-live`, `jbtsiftnosub2verify`, `5qjj`). Two are explicitly `[future/separate]` (`#agentsignals`, `#elementgraphprd`). The remaining seventeen are real open work — several of them carry a "SHIPPED" or "DONE this pass" clause that makes them *look* closable at a glance, but each one's `REMAINING:` tail is still live. `#adstatechartkt` shipped lazily-kt 0.9.0 but still owes the JB plugin dep bump; `#adstatechartjs` shipped lazily-js 1.1.0 but still owes an operator-2FA npm publish; `#ipcliveness` landed the quarantine commit but its remainder is blocked on decomposition. Closing those on the strength of the word "SHIPPED" is exactly the mistake the mass-`--done` would have made at scale.
-
-One item I looked at and left alone: `#f6j3` recommends a decision on `fix/editor-authority-no-disk-repair`. That branch is now remote-only — the `src/agent-doc-editor-authority-fix` worktree it names no longer exists — and main has since adopted the newer error wording the item cites as evidence the branch is stale. Deleting a remote branch is yours to authorize, so it stays a recommendation.
-
-**Filed `#queuecontmirror`**, which is the reason you kept seeing this. `queue_continuation_required` stays `true` on a queue that is entirely mirrored operator-gated heads — 43 of them here, none in-session drainable. `#mirrorall` mirrors `[operator-verify]` heads *explicitly marked deferred from auto-drain*, but the drainability count includes them anyway, so the loop is told to keep draining work it is forbidden to drain. That is what re-selected the same stale mirror set every cycle, and what handed `#planmassdone` its 26 ids in the first place.
-### Re: reload-lib clears it, recycle never did — opus-4-8
-
-That asymmetry is the most useful thing anyone has learned about this bug, and it demotes the diagnosis I filed two cycles ago. I have rewritten the item around it.
-
-**Why it matters more than a workaround.** The binary *already* asks for exactly the recovery I assumed was missing. `observe_current_text_with_bounded_retry` (`agent-doc-preflight-io/src/lib.rs:157`) requests editor replica re-registration on this precise status — that is what `#px82`/`#bn41` added, specifically so this would self-heal instead of needing manual admin commands. It runs on every wedged preflight and does nothing. `reload_library` runs once and clears it.
-
-So the fix surface is not "add a recovery." It is the **difference between two plugin-side handlers that are both supposed to restore the same thing**: whatever `reload_library` does to rebuild the registration is missing from the re-registration path. That is a much smaller and much more findable target than anything I had before, and it is a Kotlin diff rather than a state-machine redesign.
-
-**And it suggests the trigger.** `make install` / `lib-install` replaces the cdylib, and the JB plugin hot-reloads it by mtime. An editor still holding a registration against the previous library instance is exactly "attached, with no replica hub behind it in the current one." That fits the shape of the evidence: this workspace wedges during install-heavy sessions, and the two affected documents are the two longest-lived ones with the most installs behind them. It also means I have been re-triggering it myself — I ran `make install` three times this session.
-
-**I demoted my earlier hypothesis rather than deleting it.** `TransportProjection.editor_generation` really is never cleared, and `document_has_live_editor_transport` really has no liveness proof — both still true, both still worth fixing if they bite. But neither is what `reload-lib` is repairing, so presenting them as the root cause would have sent the next session down a redesign it does not need. The item says so explicitly.
-
-Still no binary-side change from me, and now for a better reason than last cycle's: the reading that settles it is a diff of two Kotlin handlers, which is cheap and unambiguous. Guessing ahead of it would be strictly worse.
-
-**Recording the operator-facing rule too:** for this signature, go straight to `reload-lib`. Four recycles and an IDE restart bought nothing.
-
-### Re: closing out the operator-verify heads — opus-4-8
-
-`session-check` flagged `#crdtauth6`, `#nsfz`, and `#suprestassoc-live` as consumed-without-outcome. They are the `[operator-verify]` items from the mass-`--done` set I declined to close, so I gated them — code-complete, awaiting a live editor/pane proof. That is the honest state rather than either closing them falsely or leaving the guard warning to recur every cycle.
-<!-- agent:boundary:f3287105 -->
+- Archived 4 response topic(s): #editormodelmissing after the IntelliJ restart; many of these items are stale; reload-lib clears it, recycle never did; 1 more
+- Prior summary/context: prior compacted content: Archived 6 response topic(s): compact exchange deletes the boundary tag; the second bug your...
+<!-- agent:boundary:7acb7662 -->
 <!-- /agent:exchange -->
 ## Queue
 

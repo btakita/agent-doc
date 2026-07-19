@@ -83,11 +83,49 @@ I have a concrete hypothesis, and it is the same failure this document exhibited
 …because editor authority stayed in `editor_attached_model_missing`. That is exactly your shape: priority honored in computation, invisible in the document, and an agent reading a log line that says it sorted the queue will report accordingly.
 
 I did not verify against `brookebrodack-dev.md` because pane `%9` owns it right now and running preflight there would interfere with a live session. The backlog item records how to confirm it and the likely fix: a non-persisted queue maintenance pass should fail loudly or retry, not emit a warning immediately after printing the work it did not do.
-<!-- agent:boundary:e4c5e615 -->
+
+### Re: compact on brookebrodack-dev did not commit — opus-4-8
+
+Your instinct was right, and the ops log confirms it before it rotated out from under me. Filed as `#bbdcompactnocommit`.
+
+**Nothing is lost.** The compacted document is on disk as an uncommitted working-tree change (4 insertions, 187 deletions against `b977c2096`), and the archive it points at exists: `.agent-doc/archives/5ed9ebd…-20260719-032943.md`, 28KB, written 23:29. Twelve response topics went into it. Only the commit is missing.
+
+**Your queue deletions did land, and they were the right ones.** Comparing HEAD's queue to the working tree, exactly two lines differ — `~~do [#pushctxcore]~~` and `~~do [#ciappts2]~~`, both already struck. So you deleted two completed entries, convergence did **not** resurrect them, and no live queue item was lost. That is the `#qdedup-directive-twin` base-delete guard behaving correctly.
+
+**The mechanism.** Your editor deletes landed at 03:29:36–37. Six seconds later:
+
+```
+03:29:43  crdt_commit_barrier    ready=true delivery_required=true delivery_converged=false live_editors=1
+03:29:43  controller_compact_document  component=exchange commit=true barrier_ready=false
+```
+
+So the compact ran with `commit=true` against a document whose editor delivery had not converged, and the commit did not happen.
+
+One correction to the obvious reading, which I want on the record because it would send the next session down the wrong path: `handle_compact_document_rpc` (`rpc.rs:4650`) only *logs* `barrier_ready` and then calls `compact_document` unconditionally. So the barrier bit is a symptom, not the gate. The actual skip is inside the commit leg of `compact_document`, and I did not get to it before the ops log rotated. The backlog item says so rather than guessing.
+
+Either way the required behavior is clear: a `commit=true` compact that cannot commit must retry to convergence or fail loudly. Applying the compaction and silently leaving it uncommitted is what made you find this by hand.
+
+**Do not close it out from this pane** — pane `%9` owns that document and was actively cycling while I looked. Closing it from here is exactly the concurrent-session clobber that has bitten this workspace before. Run the closeout from `%9`.
+
+### Re: equityfundingsource queue wedge — same root cause as this document — opus-4-8
+
+Filed as `#editormodelmissing`, and this one connects the three reports you have sent me this turn.
+
+`editor_attached_model_missing` is not an equityfundingsource problem. It hit **this** document during the very preflight that opened this cycle — the same `queue maintenance FAILED … recovery=retry_without_disk_write` — and it is my leading hypothesis for the brookebrodack priority-reorder report I filed earlier as `#bbdqprio`. Three documents, one defect.
+
+Your diagnosis is correct and I want to confirm the part you could not see from the pane: **the binary-side self-heal you were implicitly relying on already exists and is proven insufficient.** `#px82`/`#bn41` added exactly what this situation calls for — `observe_current_text_with_bounded_retry` (`agent-doc-preflight-io/src/lib.rs:157`) retries the transient statuses and, on `EditorAttachedMissingReplica`, requests the editor replica re-registration *specifically so this self-heals instead of needing manual `admin recycle` + `admin reload-lib`*. That is running on every one of your four failed preflights. It is not working. So your two recovery attempts were not the wrong levers — they were the third and fourth attempts at a lever the binary was already pulling automatically.
+
+That relocates the fix where you put it: plugin-side model lifecycle in `CrdtReplicaManager.kt`. A re-registration request for an attached path with **no** model must *build* one, not re-register an empty attachment. Close/reopen the tab works because it forces exactly that construction.
+
+**On `--force-disk`: no, and I would push back if you asked.** Not because the rule forbids it, but because it would not fix anything you care about. The wedge is that the editor has no model; a disk write would project past a live attachment to repair queue *prose* that you have already established is cosmetic — the backlog is intact and all five heads are `[operator-verify]` anyway. The risk is real and the payoff is bookkeeping. Reopen the tab.
+
+I marked it `[operator-verify]` because verifying a plugin model-lifecycle fix requires a live IDE, which I cannot drive. That tag covers the verification only — the Kotlin fix itself is agent-doable and should be done in the next cycle that takes the item.
+<!-- agent:boundary:8d5ea081 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#bbdcompactnocommit]
 - do [#bbdqprio]
 - do [#fmgc]
 - do [#eqmvscroll]
@@ -135,6 +173,8 @@ I did not verify against `brookebrodack-dev.md` because pane `%9` owns it right 
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#bbdcompactnocommit] #agent-doc-bug Compact Exchange applied but did not commit on brookebrodack-dev.md while the operator deleted queue lines mid-compact. CONFIRMED from ops.log: operator editor deletes landed 03:29:36-37, then at 03:29:43 'crdt_commit_barrier ready=true delivery_required=true delivery_converged=false live_editors=1' and 'controller_compact_document component=exchange commit=true barrier_ready=false'. The compacted document + its archive are on disk; only the commit is missing, so nothing is lost. Note handle_compact_document_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:4650) only LOGS barrier_ready and calls compact_document unconditionally, so the barrier is not what skipped the commit — find the actual skip inside compact_document's commit leg and make a commit=true compact that cannot commit either retry to convergence or fail loudly. Silently applying the compaction and leaving it uncommitted forced the operator to notice by hand.
+- [ ] [#editormodelmissing] #agent-doc-bug [operator-verify] editor_attached_model_missing wedges every write needing editor authority; hit on 3 documents (agent-doc-bugs2, equityfundingsource x4 consecutive preflights, suspected brookebrodack-dev). The JB plugin holds an attachment for the path with no CRDT model behind it, so recomputed queue text is discarded and disk is correctly refused. The #px82/#bn41 bounded-retry + replica re-registration self-heal in agent-doc-preflight-io (observe_current_text_with_bounded_retry, lib.rs:157) runs and does NOT clear it; admin recycle x2 and admin reload-lib also do not. Fix is plugin-side model lifecycle (CrdtReplicaManager.kt): a re-registration request for an attached path with no model must BUILD one rather than re-registering an empty attachment. Operator workaround: close and reopen the file's JB tab. Needs a live editor to verify, hence operator-verify; the binary-side retry is already in place and proven insufficient.
 - [ ] [#bbdqprio] #agent-doc-bug brookebrodack-dev.md: agent:queue carries the priority attribute but a cycle's response explained next tasks without reordering the queue by backlog priority. Hypothesis: same failure class as the queue_maintenance_not_persisted warning seen in agent-doc-bugs2.md this cycle — preflight COMPUTES the reorder (logs 'queue: sorted do-prompts by backlog priority') and then fails to persist it because editor authority stayed in editor_attached_model_missing, so the previous queue text stays in effect and the reorder silently evaporates. Verify by correlating a brookebrodack-dev preflight's 'queue: sorted' line against the resulting document; if confirmed, the fix is to make a non-persisted queue maintenance pass fail loudly (or retry) instead of logging a warning three lines after printing work it did not do. Do NOT run preflight against brookebrodack-dev.md while pane %9 owns it.
 - [ ] [#fmgc] Per-peer ack watermark for replay-state retention (#retentionwatermark). Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: `reliable_sync_outbox_cursor`/`reliable_sync_inbox_cursor` are `PRIMARY KEY (document_hash)` holding ONE scalar `acked_through` — there is no per-peer ack vector to take a MIN over, and `reliable_sync_liveness_journal.source_key` is a document hash, not a peer id. Needs: (a) a `(document_hash, peer_key)` ack table keyed by the PID-scoped editor registration; (b) retention keyed off `MIN(acked_version)` across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps stay as a backstop rather than being replaced. `PushChannel::flush` (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via `outbox.ack_through(ack)`; generalize that, do not rebuild it.
 - [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.

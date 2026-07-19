@@ -425,7 +425,7 @@ Shipped the mitigation (`651f63517`): the error no longer says "retry after it s
 **I did not ship the real fix**, deliberately. It is to exclude a non-ACKing member from the convergence cut the way a disconnected one already is. But `delivery_converged()` is the invariant the entire write path rests on, `is_live` is a reactive cell with no ACK clock to measure staleness against, and a threshold set too eagerly would let a write clobber a slow-but-live editor's buffer — strictly worse than the wedge it fixes. That is a design decision needing its own cycle, filed as `#deliveryackcut` at the top of the backlog with the full diagnosis.
 
 Also note `state.db` corrupted **again**, ~30 minutes after the clean rebuild — same `2nd reference to page` signature, same b-tree. So it is reproducing, not a one-off. I quarantined it (`.agent-doc/_corrupt-state-db-aside-recur2/`) and rebuilt; `539d94152` makes corruption survivable by reporting the recovery steps instead of a bare `database disk image is malformed`. The cause is still unknown and I have not invented one.
-<!-- agent:boundary:db0a6d72 -->
+<!-- agent:boundary:b216d423 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -443,7 +443,7 @@ We should immediately self-heal. Make all self-healing real-time, not turn-based
 ---
 - ~~⏭️ do [#lazilynottl]~~
 - ~~do [#orphandrain]~~
-- do [#c8tb]
+- ~~do [#c8tb]~~
 - do [#jbrouteasyncchannel]
 - do [#wsflake2]
 - do [#patchretryidem]

@@ -64,6 +64,87 @@ Session deltas, all measured against clean baselines:
 `ChildContext` vs disposing by hand, per node: build 156.9 → 72.5 ns @1024,
 teardown 61.1 → 56.1 ns @65,536.
 
+## Load test strategy — ≥1M fan-out
+
+Every binding gets this before its port is called done. The whole reason five
+defects hid for so long is that `benches/scale.rs` measures scale as *node
+count* and fixes fan-out at 2, so width was never a variable.
+
+### Why ≥1M is the floor
+
+Two things only become visible there:
+
+- **The quadratic becomes fatal rather than slow.** Building a width-N topic
+  with an unconditional scan is ~N²/2 comparisons. At 4,096 that is 8M and
+  looks like a 20% regression; at 1M it is 5×10¹¹ and takes minutes; at 100M it
+  is 5×10¹⁵ and never returns. A ladder that stops at 65k cannot tell "slower"
+  from "impossible".
+- **The workload goes memory-bound.** On this box, notify jumps 60 → 151 ns/sub
+  between 65k and 1M — exactly where the working set (15 MiB → 236 MiB) crosses
+  the 128 MiB L3. Any optimisation measured only below that boundary is
+  measuring a different machine than production.
+
+### Method: climb, project, refuse
+
+Never jump straight to the target. At each rung measure bytes/subscriber,
+project the next rung from *that measurement*, and abort if the projection
+would not leave a floor free. `pubsub_load` does this
+(`LAZILY_PUBSUB_MEM_FLOOR_GIB`, default 16); it printed
+
+```
+stopping before width N: projected X GiB from the last rung's Y B/subscriber,
+but only Z GiB available with a 16 GiB floor
+```
+
+which is what makes a 23.5 GiB run safe to start. This is haiven's method: it
+proved 698 B/conn flat from 5M to 100M *before* attempting 100M. A wrong guess
+at this scale takes the machine down.
+
+Rung shape that worked: `32, 64, 96, 128, 129, 160, 256, 1k, 4k, 64k, 1M, 10M,
+100M`. The cluster around the promote threshold is not decoration — it is what
+exposed the 371 ns/sub demotion thrash at exactly threshold+1, invisible at any
+other width.
+
+### What to assert, not just print
+
+A load test that only prints numbers gets skimmed. Each of these has an answer
+that could embarrass the library:
+
+| assertion | why |
+|---|---|
+| build ns/sub grows < 2× from 1k → 1M | linear build; catches any surviving O(n²) |
+| bytes/sub flat within ~20% across the ladder | capacity planning is only possible if per-entity cost is flat — haiven's central finding |
+| churn returns to baseline RSS (≈0 B/cycle) | catches the disposal leak; needs disposal to exist first |
+| every survivor observes the final publish | a stale index entry shows up as a missed update, not a crash |
+| notify unchanged by an edge-index change | propagation walks bare ids; if it moves, the model is wrong |
+
+### Per-binding targets
+
+1M is the common floor. Above it is per-binding and must be *measured*, not
+assumed — Rust reaches 100M at 247 B/subscriber in 23.5 GiB, and nothing else
+should be expected to match that without evidence.
+
+| binding | expect | watch for |
+|---|---|---|
+| rs, cpp, zig | 10M–100M | flat bytes/sub is the headline claim |
+| go | 10M | GC pause during the ladder; measure with GC stats on |
+| kt | 1M–10M | JVM needs an explicit heap flag; object header inflates bytes/sub |
+| py | 1M | per-object overhead is large; 10M may be impractical and that is a fine result to report |
+| js, dart | 1M–10M | V8/Dart old-space cap; `--max-old-space-size` needed past ~1M |
+
+A binding that cannot reach 1M should say so with the measured ceiling and the
+limiting factor. That is a real finding, not a failure.
+
+### Out of scope
+
+Do not port haiven's shed, backpressure, or latency-percentile suites. A
+reactive graph has no queue, no admission control and no client — under load
+`get` simply takes longer. Deliveries/sec has no analogue either; criterion
+measures per-operation cost better than a load generator would.
+
+These runs are minutes long and allocate tens of GiB. Keep them **manual and
+on-demand**, like haiven's, not in CI. `make benchmark-check` stays the CI gate.
+
 ## What was wrong, and what it cost to find
 
 Worth reading before touching the other bindings, because every one of these is

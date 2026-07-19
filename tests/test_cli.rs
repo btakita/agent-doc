@@ -9777,10 +9777,37 @@ fn test_agent_doc_queue_owns_drain_owner_lease_policy() {
 
     let drain_owner_source =
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/drain_owner.rs")).unwrap();
+    let lease_policy = fs::read_to_string(manifest_dir.join("agent-doc-lease/src/lib.rs")).unwrap();
+    for required in [
+        "pub const DRAIN_OWNER_SCOPE",
+        "pub fn drain_owner_ttl(",
+    ] {
+        assert!(
+            lease_policy.contains(required),
+            "drain-owner lease scope/TTL policy must live in the dependency-free lease crate so \
+             both the claiming loop and the reading controller share one definition: {required}"
+        );
+    }
+    let lease_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-lease/Cargo.toml")).unwrap();
+    let lease_manifest: toml::Value = toml::from_str(&lease_manifest).unwrap();
+    assert!(
+        lease_manifest
+            .get("dependencies")
+            .and_then(toml::Value::as_table)
+            .is_none_or(|dependencies| dependencies.is_empty()),
+        "agent-doc-lease is shared lease policy and must stay dependency-free"
+    );
     for required in [
         "pub const DRAIN_OWNER_CLAUDE_LOOP",
         "pub struct DrainOwnerLease",
-        "pub fn drain_owner_ttl(",
+        // Re-exported from the dependency-free `agent-doc-lease` rather than
+        // defined here: the controller must READ this lease to know an in-session
+        // loop already owns the drain, and `agent-doc-queue-io` depends on
+        // `agent-doc-controller-io`, so the dependency cannot be reversed. One
+        // shared definition is what stops the two drainers from drifting into
+        // double-driving the same queue (`#orphandrain`).
+        "pub use agent_doc_lease::drain_owner_ttl;",
         "pub fn refresh_drain_owner_lease(",
         "pub fn read_drain_owner_lease(",
         "pub fn fresh_drain_owner_lease(",

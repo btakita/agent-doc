@@ -77,3 +77,44 @@ mod tests {
         assert!(unload_idx < host_idx);
     }
 }
+
+/// Scope key for the queue drain-owner coordination lease (`#kp5z` / `#qflood`).
+///
+/// Lives here, in a dependency-free crate, because BOTH sides need it and they
+/// cannot depend on each other: `agent-doc-queue-io` claims/refreshes the lease
+/// (and depends on `agent-doc-controller-io` to persist it), while the controller
+/// must READ it to know an in-session loop already owns the drain. Duplicating
+/// the scope key or the TTL in the controller would let the two silently drift
+/// into double-driving the same queue.
+pub const DRAIN_OWNER_SCOPE: &str = "queue_drain";
+
+/// Env override for the drain-owner lease TTL.
+pub const DRAIN_OWNER_TTL_SECS_ENV: &str = "AGENT_DOC_DRAIN_OWNER_TTL_SECS";
+
+const DEFAULT_DRAIN_OWNER_TTL_SECS: u64 = 90;
+
+/// TTL for the drain-owner lease. Deliberately short and self-expiring: if the
+/// owning loop stops without releasing it, ownership must return to the
+/// unattended drainer on its own rather than stranding the queue.
+pub fn drain_owner_ttl() -> Duration {
+    let secs = std::env::var(DRAIN_OWNER_TTL_SECS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_DRAIN_OWNER_TTL_SECS);
+    Duration::from_secs(secs.max(1))
+}
+
+#[cfg(test)]
+mod drain_owner_tests {
+    use super::*;
+
+    #[test]
+    fn drain_owner_ttl_is_short_and_positive() {
+        let ttl = drain_owner_ttl();
+        assert!(ttl >= Duration::from_secs(1));
+        assert!(
+            ttl <= Duration::from_secs(600),
+            "a long-lived drain lease would strand the queue when a loop stops"
+        );
+    }
+}

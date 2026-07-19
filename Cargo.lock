@@ -501,6 +501,7 @@ dependencies = [
  "agent-doc-harness",
  "agent-doc-hash",
  "agent-doc-ipc-io",
+ "agent-doc-lease",
  "agent-doc-merge",
  "agent-doc-ops-log-io",
  "agent-doc-process-owner-io",

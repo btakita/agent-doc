@@ -85,22 +85,29 @@ Restructured to order the phases explicitly rather than hope: the caller signals
 Verified rather than assumed: 6 consecutive full-crate runs green (195 passed each), and the **full workspace suite now reports zero FAILED results** — first clean run this session. Committed and pushed as `b235d03ce`.
 
 Worth noting for `#ensurereplicagen`: with the suite clean, a red `make check` is now a real signal again, which it was not while these two were flapping.
-<!-- agent:boundary:a7458992 -->
+<!-- agent:boundary:73640036 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#ctrliotestflake]~~
-- do [#ensurereplicagen]
-- ~~do [#donestrikeextra]~~
-- do [#crdtcasraced]
-- do [#jbedtledger]
-- do [#jbroutasync]
-- do [#jbsockdeadline]
-- do [#respidxrealtime]
+- ~~do [#bbdqprio]~~
+- ~~do [#bn41]~~
+- ~~do [#px82]~~
+- ~~do [#jblocalhistverify]~~
+- ~~do [#5bzd]~~
+- ~~do [#staleplugindeploy]~~
+- ~~do [#jblocalhistverify]~~
+- 🚧 do [#patchretryidem]
+- do [#mtds]
 - equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
-- do [#bbdcompactnocommit]
-- do [#bbdqprio]
+- do [#queuecontmirror]
+- ⏭️ do [#ensurereplicagen]
+- ⏭️ do [#crdtcasraced]
+- ⏭️ do [#jbedtledger]
+- ⏭️ do [#jbroutasync]
+- ⏭️ do [#jbsockdeadline]
+- ⏭️ do [#respidxrealtime]
+- ⏭️ do [#bbdcompactnocommit]
 - do [#fmgc]
 - do [#eqmvscroll]
 - do [#0dsr]
@@ -111,17 +118,13 @@ Worth noting for `#ensurereplicagen`: with the suite clean, a red `make check` i
 - do [#a45a]
 - do [#30p6]
 - do [#n39j]
-- do [#bn41]
-- do [#px82]
 - do [#f6j3]
 - do [#promptselect]
 - do [#realtimesalient]
 - do [#syncobscache2]
-- ⏭️ do [#jblocalhistverify]
-- ⏭️ do [#capturebacklogatomic]
-- ⏭️ do [#opcapturelazily]
-- ⏭️ do [#jbtsiftnosub2verify]
-- 🚧 do [#5bzd]
+- do [#capturebacklogatomic]
+- do [#opcapturelazily]
+- do [#jbtsiftnosub2verify]
 - do [#sidecarstate]
 - do [#64we]
 - do [#adstatechart2]
@@ -132,11 +135,9 @@ Worth noting for `#ensurereplicagen`: with the suite clean, a red `make check` i
 - do [#ipcliveness]
 - do [#ipcverhandshake]
 - do [#ipcpostcommitinv]
-- do [#staleplugindeploy]
 - do [#5qjj]
-- ⏭️ do [#jblocalhistverify]
-- ⏭️ do [#capturebacklogatomic]
-- ⏭️ do [#opcapturelazily]
+- do [#capturebacklogatomic]
+- do [#opcapturelazily]
 <!-- /agent:queue -->
 
 ## Notes
@@ -148,7 +149,7 @@ Worth noting for `#ensurereplicagen`: with the suite clean, a red `make check` i
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#ensurereplicagen] #agent-doc-bug The missing-replica wedge SURVIVES a successful re-registration. With #ensurereregister live (binary nudges, plugin 0.2.279 re-establishes), idea.log shows the full happy path per nudge: transport.register ok=true, register elapsed ~170ms, 'atomically replaced cached forwarder for agent-doc-bugs2.md', open-document-attach elapsed ~290ms force_refresh=true. Controller logs the matching crdt_replica_register bootstrap_bytes=290970 generation_fenced=true superseded_generations_pruned=1. Yet the very next observation still reads editor_attached_model_missing, AND CrdtReplicaManager.hasOpenDocumentReplica(file) still reads false (proven: the guard keeps letting the nudge through). So a replica is registered and its forwarder cached, but neither the binary reader nor the plugin's own forwarders map sees it. Two suspects: (a) generation fencing - each register fences the prior generation, and the reader may be resolving against a superseded/fenced generation; (b) path keying - forwarders is keyed by the plugin's RESOLVED file.path while the guard/reader use the binary's canonical path string. Start by logging both keys and the resolved-vs-fenced generation at read time.
-- [ ] [#patchretryidem] #patchretryidem #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). NARROWED 2026-07-19 by the #fzmutloss fix: the mutation half and the body half were never in one transaction, so this is NOT 'both halves lost together' - the body half is re-applied non-idempotently by the retry while the mutation half took a different path. Remaining question is only the body-half idempotency. Needs a reproduction of the CAS race; do not guess at the idempotency boundary.
+- [ ] 🚧 [#patchretryidem] #patchretryidem #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). NARROWED 2026-07-19 by the #fzmutloss fix: the mutation half and the body half were never in one transaction, so this is NOT 'both halves lost together' - the body half is re-applied non-idempotently by the retry while the mutation half took a different path. Remaining question is only the body-half idempotency. Needs a reproduction of the CAS race; do not guess at the idempotency boundary.
 - [ ] [#respidxrealtime] Source exchange response nodes from the realtime document model instead of re-parsing a &str. closeout_signal::ResponseIndex::build now parses ONCE per guard invocation (was N x (1 + M) tree-sitter parses for N ids and M archives, #respidxparse), but it still parses from rc.doc_content() bytes. The live model already holds these nodes - agent-doc-markdown-ast::crdt::OverlayCrdtDoc, and the SeqCrdt exchange-node direction AGENTS.md commits to. Reading nodes from the realtime model removes the parse entirely and generalizes past this guard to every string-scanning consumer of exchange structure. Operator-raised 2026-07-19.
 - [ ] [#jbroutasync] #agent-doc-bug Move editor_route onto the async accept-on-admission controller endpoint and honor submit.deadline_ms. handle_editor_command_submit_async_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:5381) already exists, spawns a worker, and logs editor_command_async_completed; validate_async_editor_command_payload (rpc.rs:5427) whitelists only sync_tmux_layout/focus_document_pane so editor_route is rejected as unsupported. The plugin already has resolveCommandSubmitAcceptedData (CpcRouteClient.kt:414) for the accepted shape. Separately the controller never reads submit.deadline_ms, so routed_cycle_ack_timeout (30s with a live child, dispatch.rs:2092) outlives the client's 15s deadline: the operator sees a timeout while the route keeps running. Biggest remaining perceived-latency win.
 - [ ] [#jbsockdeadline] #agent-doc-bug CpcRouteClient socket read has no deadline and the RUN_AGENT_DOC registry slot is never released on hang. SocketChannel.open (CpcRouteClient.kt:440) sets no connect/read timeout and reader.readLine() (:447) blocks indefinitely; the 15s is only a server-side deadline hint in the payload. A wedged controller hangs the route thread forever while the editorCommandRegistry slot (TerminalUtil.kt:447,372) stays held, so every later click dedupes out with no user-visible outcome. Likely the real mechanism behind 'Run Agent Doc does nothing'. Fix: real read deadline plus a finally that releases the slot.
@@ -170,7 +171,7 @@ Worth noting for `#ensurereplicagen`: with the suite clean, a red `make check` i
 - [ ] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
 - [ ] [#f6j3] [recommended] Stale branch fix/editor-authority-no-disk-repair (worktree src/agent-doc-editor-authority-fix) has 2 unmerged commits targeting the editor-authority blocker, but is 5 days / 50 commits behind main and still carries the OLD error wording ('bounded publish-live-buffer request', 'reload or save the editor buffer') where main now says 'bounded Lazily-current observation request ... operator_action=none'. Main has already reworked that area. Decide explicitly: rebase and salvage, or delete the branch+worktree. Do NOT merge as-is
 - [ ] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
-- [ ] 🚧 [#mrnh] Bootstrap size is NOT the cause of the ensure wedge — hypothesis falsified, do not re-run it. `d131457ab` cut the live `crdt_replica_register` bootstrap from 1,312,802 to 261,174 bytes (5.0x) and `queue_maintenance_not_persisted` is COMPLETELY UNCHANGED. The 400ms missing-replica window is therefore not failing on transfer size. Next probe should target why the ensure-path observer never sees a replica the controller already reports as `current live_editors=1 delivery_converged=true` — likely generation fencing on re-register, not payload volume.
+- [ ] [#mrnh] Bootstrap size is NOT the cause of the ensure wedge — hypothesis falsified, do not re-run it. `d131457ab` cut the live `crdt_replica_register` bootstrap from 1,312,802 to 261,174 bytes (5.0x) and `queue_maintenance_not_persisted` is COMPLETELY UNCHANGED. The 400ms missing-replica window is therefore not failing on transfer size. Next probe should target why the ensure-path observer never sees a replica the controller already reports as `current live_editors=1 delivery_converged=true` — likely generation fencing on re-register, not payload volume.
 - [ ] [#f4d5] Destructive cascade: a queue-maintenance persist failure erases the operator's queue activation. Reported live from a second session on brookebrodack-dev.md: operator flips frontmatter to `queue: start`, preflight reads the (unpersisted, therefore empty) queue body as drained and strips the activation back to `queue: stop`. Path: `agent-doc-preflight-io/src/lib.rs:3485` — `queue_has_prompts`/`drained_residue` feed `need_clear_active` and `need_clear_drained_body`, all computed from a queue body that a PREVIOUS cycle failed to persist. Deactivating on known-stale data is unsafe: when this cycle could not persist queue maintenance, preflight must preserve operator activation rather than infer 'drained'. Not fixed here — activation logic is safety-critical and I did not have the failing document's state to verify against.
 - [ ] [#5d9f] Second session observed that finalize's commit boundary persists queue maintenance through a path standalone `agent-doc queue sync` never reaches — the queue landed on the next write after three straight sync failures plus an `admin reload-lib`. Two persistence paths with different reachability is itself the bug surface. Determine why the commit path succeeds where queue sync fails, and route queue sync through whatever the commit boundary does. Result: queue text populates but stays UNARMED (`queue_drainable_head_count: 0`, `queue_continuation_required: false`), so the auto-loop still never gets the head.
 - [ ] [#7n20] Finish the ensure-window liveness fix across the CLI/controller process boundary. `bbc50c26e` extends the 400ms missing-replica ensure window when a `crdt_replica_register` proves the editor is alive, but the counter is process-global: on the split path the register lands controller-side while `ensure_document_model` runs CLI-side, so live telemetry still shows `window_extended=false` and the wedge persists. Two options: carry the liveness proof across IPC, or run the ensure controller-side where the registration already is. Do NOT route preflight's initial current-doc resolve through the ensure path — tried in this cycle and reverted; it violates `preflight_missing_editor_model_pauses_without_reading_disk_authority` and made preflight resolve to DISK content instead of waiting for the attached editor.

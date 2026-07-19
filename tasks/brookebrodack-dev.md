@@ -131,7 +131,7 @@ One deliberate asymmetry. The devDependencies go to `^12.11.1`, but the *optiona
 **Proven end to end from a virgin clone,** not from my working tree: fresh `git clone --recurse-submodules` (24 submodules, no errors) → full `bun install` **with scripts** (591 packages, zero gyp output) → `require('better-sqlite3')` opens a DB and returns a row on v12.11.1. Drizzle also still resolves to a single hoisted 0.45.2 with no split store entries, so a complete install no longer regenerates the hazard.
 
 Both checkouts are on `ff06980` with clean trees; `rappstack/dev` shows only the untracked `.idea/` I keep leaving alone. That clears the last open item on this repo.
-<!-- agent:boundary:bc6abbf0 -->
+<!-- agent:boundary:bd8c1320 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -158,7 +158,6 @@ Both checkouts are on `ff06980` with clean trees; `rappstack/dev` shows only the
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#rappsqlite] better-sqlite3 fails its node-gyp native build against Node v26 in rappstack/dev (v8::Global ctor arity mismatch in better_sqlite3.o), so every 'bun install' aborts mid-link and leaves stale package symlinks — that is what silently reproduced the drizzle 0.32.2/0.45.2 split universe. Workaround today is 'bun install --ignore-scripts'. Fix properly: bump better-sqlite3 to a release with Node 26 prebuilds, pin the toolchain Node version for installs, or drop it if only a transitive dev dep. Stays in bun (see pinned note: rappstack uses bun)
 - [ ] [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface. KEPT OPEN: not started — sequence after #pushctxcore so it does not stack a second uncommitted sweep on top of the unpushed dependency sweep
 - [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit
 - [ ] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear

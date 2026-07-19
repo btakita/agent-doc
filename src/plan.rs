@@ -342,6 +342,10 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     }
 
     if !exchange_compaction_requested && matches!(handoff, HandoffTarget::None) {
+        let speculative_done = speculative_done_ids(&pending_mutations);
+        if speculative_done.len() > MAX_SPECULATIVE_DONE_IDS {
+            warnings.push(mass_done_suppression_warning(&speculative_done));
+        }
         required_commands.extend(finalize_placeholder_commands(file, &fm, &pending_mutations));
     }
 
@@ -419,13 +423,52 @@ fn plan_backlog_only_deferral_warning(
     ))
 }
 
+/// Above this many `ResolveExisting` ids, a pre-filled `--done` list stops being
+/// an ergonomic placeholder and becomes a footgun (`#planmassdone`).
+///
+/// A turn realistically completes one to a few queued items. A larger set only
+/// appears when a backlog→queue mirror (`#mirrorall`) puts every open tracked-work
+/// head in the queue at once, and `plan` cannot distinguish "the operator asked me
+/// to do these" from "these were mirrored in bulk". `SKILL.md` tells agents to
+/// treat `required_commands` as the execution contract, so emitting one `--done`
+/// per mirrored head proposes closing the entire backlog — including
+/// `[focused-cycle]`, `[future/separate]`, and `[operator-verify]` items the turn
+/// never touched. Observed live at 26 ids, of which only a handful were actually
+/// complete.
+const MAX_SPECULATIVE_DONE_IDS: usize = 3;
+
+fn speculative_done_ids(pending_mutations: &[PendingMutationPlan]) -> Vec<&str> {
+    pending_mutations
+        .iter()
+        .filter(|mutation| mutation.kind == PendingMutationKind::ResolveExisting)
+        .map(|mutation| mutation.id.as_str())
+        .collect()
+}
+
+/// Warning emitted when the speculative `--done` list is suppressed, so the
+/// suppression is visible rather than looking like plan simply found no work.
+fn mass_done_suppression_warning(ids: &[&str]) -> String {
+    format!(
+        "suppressed {} pre-filled `--done` flag(s) from required_commands (#planmassdone): a plan cannot know which tracked-work items this turn actually completed, and a bulk backlog→queue mirror makes that list the whole open backlog. Adjudicate each id individually and pass only the ones this turn genuinely resolved: [{}]",
+        ids.len(),
+        ids.join(", ")
+    )
+}
+
 fn finalize_placeholder_commands(
     file: &Path,
     fm: &frontmatter::Frontmatter,
     pending_mutations: &[PendingMutationPlan],
 ) -> Vec<String> {
+    // `#planmassdone`: past the cap, drop the `ResolveExisting` ids entirely and
+    // leave the bare finalize skeleton. `ExpectAdd` placeholders are unaffected —
+    // they add tracked work rather than closing it, so they cannot lose history.
+    let suppress_done = speculative_done_ids(pending_mutations).len() > MAX_SPECULATIVE_DONE_IDS;
     let pending = pending_mutations
         .iter()
+        .filter(|mutation| {
+            !(suppress_done && mutation.kind == PendingMutationKind::ResolveExisting)
+        })
         .map(|mutation| FinalizePendingMutation {
             kind: match mutation.kind {
                 PendingMutationKind::ResolveExisting => {
@@ -859,6 +902,86 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::TempDir;
+
+    fn template_frontmatter() -> frontmatter::Frontmatter {
+        let doc = "---\nagent_doc_session: t\nagent_doc_format: template\nagent_doc_write: crdt\n---\n\nbody\n";
+        frontmatter::parse(doc).unwrap().0
+    }
+
+    fn resolve_existing(id: &str) -> PendingMutationPlan {
+        PendingMutationPlan {
+            kind: PendingMutationKind::ResolveExisting,
+            id: id.to_string(),
+            text: format!("item {id}"),
+            target_files: Vec::new(),
+        }
+    }
+
+    /// `#planmassdone`: a bulk backlog→queue mirror must not produce a
+    /// `required_commands` entry that closes the whole backlog. Observed live at
+    /// 26 ids, only a handful of which the turn had actually completed.
+    #[test]
+    fn finalize_placeholder_suppresses_mass_speculative_done_flags() {
+        let fm = template_frontmatter();
+        let file = Path::new("plan.md");
+        let many: Vec<PendingMutationPlan> = (0..26)
+            .map(|i| resolve_existing(&format!("id{i}")))
+            .collect();
+
+        let commands = finalize_placeholder_commands(file, &fm, &many);
+        let command = commands.first().expect("finalize placeholder command");
+        assert!(
+            !command.contains("--done"),
+            "a 26-id mirror must not pre-fill --done flags: {command}"
+        );
+        assert!(
+            command.contains("agent-doc finalize") && command.contains("--stream"),
+            "the finalize skeleton itself must survive suppression: {command}"
+        );
+
+        let warning = mass_done_suppression_warning(&speculative_done_ids(&many));
+        assert!(warning.contains("26"), "{warning}");
+        assert!(warning.contains("#planmassdone"), "{warning}");
+    }
+
+    /// The ergonomic case is untouched: a turn that resolves one or a few named
+    /// items still gets its `--done` flags pre-filled.
+    #[test]
+    fn finalize_placeholder_keeps_small_done_flag_lists() {
+        let fm = template_frontmatter();
+        let file = Path::new("plan.md");
+        let few = vec![resolve_existing("abc1"), resolve_existing("def2")];
+
+        let commands = finalize_placeholder_commands(file, &fm, &few);
+        let command = commands.first().expect("finalize placeholder command");
+        assert!(command.contains("--done abc1"), "{command}");
+        assert!(command.contains("--done def2"), "{command}");
+    }
+
+    /// Suppression targets only backlog-CLOSING flags. `ExpectAdd` placeholders
+    /// add tracked work, so they can never lose history and must survive.
+    #[test]
+    fn finalize_placeholder_suppression_spares_expect_add_placeholders() {
+        let fm = template_frontmatter();
+        let file = Path::new("plan.md");
+        let mut mutations: Vec<PendingMutationPlan> = (0..26)
+            .map(|i| resolve_existing(&format!("id{i}")))
+            .collect();
+        mutations.push(PendingMutationPlan {
+            kind: PendingMutationKind::ExpectAdd,
+            id: "newitem".to_string(),
+            text: "add me".to_string(),
+            target_files: vec!["tasks/other.md".to_string()],
+        });
+
+        let commands = finalize_placeholder_commands(file, &fm, &mutations);
+        let command = commands.first().expect("finalize placeholder command");
+        assert!(!command.contains("--done"), "{command}");
+        assert!(
+            command.contains("--pending-add-to tasks/other.md"),
+            "expect-add placeholders must survive suppression: {command}"
+        );
+    }
 
     struct EnvGuard {
         key: &'static str,

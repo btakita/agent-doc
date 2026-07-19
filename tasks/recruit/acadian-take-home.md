@@ -6,7 +6,7 @@ agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -93,15 +93,12 @@ cd backend && uv run dev
 `make dev-backend` now delegates to `uv run dev` instead of spelling out the uvicorn invocation, and the README documents the task and its flags.
 
 Two things worth flagging. `uv run` generated `backend/uv.lock` (1306 lines) and I committed it — for an application that's the right call, since it pins the resolved dependency set for whoever clones the repo, but say the word if you'd rather it stay untracked. And `make check` is green after the change: 29 backend tests, mypy clean across 9 source files now, 9 frontend tests, typecheck, production build.
-<!-- agent:boundary:9a6bf411 -->
+<!-- agent:boundary:2bad436d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~Create a private gh repo btakita/acadian-take-home. Add as a submodule in src/acadian-take-home~~
-- ~~/goal do tasks/recruit/acadian/plan.md~~
-- 📌 Add a dev uv task to start the dev server.
 <!-- /agent:queue -->
 
 ## Backlog

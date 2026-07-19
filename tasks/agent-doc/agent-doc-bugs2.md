@@ -349,7 +349,7 @@ That rules out the design I filed an hour ago, which assumed the CP observation 
 **Which makes this a cross-language change**, not a Rust edit: remove the TTL, add coalescing in Kotlin, bump the plugin, and the behaviour only takes effect after an IDE restart — so the final proof is operator-gated regardless of when it lands.
 
 I have updated the item with that finding, including the design I ruled out and why, so the next cycle starts from the right place instead of re-deriving it. I am not starting the Kotlin half now: this is the replica/generation plane, where fencing a live generation has real consequences, and I caused a dispatch storm in adjacent code earlier in this same session. Starting it fresh is a deliberate choice, not a punt — the item is fully specified and it is the next thing I pick up on your word.
-<!-- agent:boundary:f4170320 -->
+<!-- agent:boundary:f28985e8 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -364,7 +364,7 @@ I have updated the item with that finding, including the design I ruled out and 
 🚧 We should use lazily instead of a TTL. Prefer the realtime document model over rebuilding from disk.
 > Descending instead of bailing means the caller *continues* — so every later read site re-paid the 3×6s self-heal that a bail used to pay once. That turned a ~57s compact/commit into ~152s and was failing two tests. I added a short-TTL memory of a just-exhausted self-heal, which collapses the burst without weakening recovery.
 ---
-- do [#orphandrain]
+- ~~do [#orphandrain]~~
 - ⏭️ 📌 do [#jbrouteasyncchannel]
 - ⏭️ 📌 do [#jbedtledgerverify]
 - ⏭️ 📌 do [#fmgc]

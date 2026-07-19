@@ -150,18 +150,18 @@ So I pinned it. `tests/tmo-getlender-confirm.test.ts` now carries the verbatim l
 Committed via the temp-index compare-and-swap — a concurrent session has `AGENTS.md` dirty, and only my two files went in.
 
 One note on the queue: `preflight` reported `queue_active: false` with 0 drainable heads even though the block is marked `go` and now holds two items. That is the same `editor_attached_model_missing` condition I flagged last cycle — queue maintenance is still being computed and discarded, so the queue text you see is stale state, not live state. `#efs-do-hibernation` is sitting in the queue behind this one and will not auto-drain until that clears. Closing and reopening this file's tab in the IDE is the fix.
-<!-- agent:boundary:7ecc85de -->
+<!-- agent:boundary:8c8cde1d -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#tmo-getlender-verify]
-- do [#efs-do-hibernation]
+- ~~do [#tmo-getlender-verify]~~
+- 🚧 do [#efs-do-hibernation]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
+- [ ] 🚧 [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). UNBLOCKED 2026-07-19: #tmo-snapshot-verify passed — the snapshot tool ran against real TMO sandbox and reported complete=true (loans=18 fundings=5 attachment_metas=20 lenders=1 borrowers=16, zero errors), so the gate command 'bun ./bin/tmo-snapshot.ts --covers <the 16> --out tmp/tmo-before-purge.json' is now known-good. Take that snapshot immediately before purging. Still held on operator go ONLY because DeleteLoan is permanent with no TMO-side undo. Note the snapshot is evidence, not a restore: attachment BYTES are not captured (20 attachment metas across 554466/AVW580/MBQ435/SRV532/TST766 would be unrecoverable), and RecIDs do not round-trip. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
 <!-- /agent:backlog -->
 

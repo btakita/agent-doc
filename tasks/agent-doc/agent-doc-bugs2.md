@@ -39,12 +39,50 @@ done
 Compacted content:
 - Archived 6 response topic(s): compact exchange deletes the boundary tag; the second bug your report tripped over; why `.unwrap()` on `create_dir_all` when nothing is bound; 3 more
 - Prior summary/context: Compact exchange commits but then deletes the agent:boundary tag above...leaving the deletion in an uncommitted state.
-<!-- agent:boundary:0e40effa -->
+
+### Re: #editormodelmissing after the IntelliJ restart — opus-4-8
+
+> **Queue prompt:**
+>
+> do #editormodelmissing: I restarted Idea
+
+
+The restart is the most useful thing you could have done, because it falsifies the fix I filed last cycle. I had this as plugin-side model lifecycle — close/reopen the tab forces `CrdtReplicaManager` to build a model. You restarted the whole IDE and preflight still reports `editor_attached_model_missing`. So that was wrong, and it is not a plugin model-rebuild problem.
+
+**What it actually is: a one-way latch in editor-attachment state.**
+
+`TransportProjection.editor_generation` (`agent-doc-state-backbone/src/lib.rs:3394`) is set on `StateFact::OwnerGenerationChanged` and **never cleared**. I checked the whole `StateFact` enum — there is no editor-detach, editor-closed, or generation-ended fact of any kind. Nothing can unset it.
+
+`document_has_live_editor_transport` (`crdt_authority.rs:165`) then reads:
+
+```rust
+if projection.transport.editor_generation.is_none() { return false; }
+match projection.transport.patches.iter().next_back() {
+    Some((_, patch)) => !matches!(patch.phase, TransportPatchPhase::ForceDiskFallback),
+    None => true,
+}
+```
+
+No liveness proof anywhere. Once an editor has ever attached, the document is `MultiReplica` **forever**. And the file's own doc comment knows this is a hazard — it flags raw `Attached` as "the ambiguous `#6b5h` state (a connectable listener that may be a *stale* listener with no editor behind it)" and points callers at `authority_from_liveness` (line 122), which resolves it via pid liveness. This path never calls it.
+
+**Three things fall out, and all three match what you observed.**
+
+The wedge survives `admin recycle`, `reload-lib`, and an IDE restart because none of them touch the ledger — the latch is in persisted state, not in the IDE. The only predicate that flips it false is `TransportPatchPhase::ForceDiskFallback`, which is precisely why `--force-disk` was the one escape you kept being offered and kept correctly declining. And the two wedged documents are the two long-lived ones — `agent-doc-bugs2` at gen 1518, `equityfundingsource` at gen 1452, against 14–82 for every healthy document in the fleet. Long life, more attachment events, more chance the latch caught.
+
+**What I am not doing, deliberately.** I am not shipping the demotion. There is a second candidate latch with an identical presentation — `observe_editor_open`'s durable reliable-sync receiver journal may be replaying a stale editor-open assertion across the restart, and `resolve_closed_editor_disk_fallback_current_doc` bails only when that reports open. Both latches produce exactly this symptom and the correct fix differs by which one is firing. A wrong guess here demotes a *live* editor to disk authority and lets the binary overwrite your buffer — the single failure every guard on this path exists to prevent. Shipping that on a coin flip to close an item faster is a bad trade.
+
+The item now carries the decisive experiment instead: log `editor_generation` and `observe_editor_open` together at the `EditorAttachedMissingReplica` branch (`agent-doc-crdt-relay-io/src/lib.rs:696`) and read which one is lying. That is a one-line instrumentation change, it needs your live wedged session to produce a reading, and then the fix is unambiguous.
+
+**One thing worth fixing regardless of the answer:** `admin detect` told me "No fleet anomalies detected in /home/brian/work/btakita/agent-loop" while two of its seven documents were hard-wedged and unrecoverable. That is a detector gap independent of the root cause — attached-with-no-replica across repeated observations should be a reported anomaly, not something you discover by noticing your queue prose went stale. Noted on the item.
+
+Gated rather than done, and the `[operator-verify]` tag is now carrying real weight: the reading has to come from your wedged session, because a fresh document will not reproduce it.
+<!-- agent:boundary:72eb14f4 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do #editormodelmissing: I restarted Idea
+- ~~do #editormodelmissing: I restarted Idea~~
+- JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
 - do [#bbdcompactnocommit]
 - do [#bbdqprio]
 - do [#fmgc]
@@ -94,7 +132,6 @@ Compacted content:
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#bbdcompactnocommit] #agent-doc-bug Compact Exchange applied but did not commit on brookebrodack-dev.md while the operator deleted queue lines mid-compact. CONFIRMED from ops.log: operator editor deletes landed 03:29:36-37, then at 03:29:43 'crdt_commit_barrier ready=true delivery_required=true delivery_converged=false live_editors=1' and 'controller_compact_document component=exchange commit=true barrier_ready=false'. The compacted document + its archive are on disk; only the commit is missing, so nothing is lost. Note handle_compact_document_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:4650) only LOGS barrier_ready and calls compact_document unconditionally, so the barrier is not what skipped the commit — find the actual skip inside compact_document's commit leg and make a commit=true compact that cannot commit either retry to convergence or fail loudly. Silently applying the compaction and leaving it uncommitted forced the operator to notice by hand.
-- [ ] [#editormodelmissing] #agent-doc-bug [operator-verify] editor_attached_model_missing wedges every write needing editor authority; hit on 3 documents (agent-doc-bugs2, equityfundingsource x4 consecutive preflights, suspected brookebrodack-dev). The JB plugin holds an attachment for the path with no CRDT model behind it, so recomputed queue text is discarded and disk is correctly refused. The #px82/#bn41 bounded-retry + replica re-registration self-heal in agent-doc-preflight-io (observe_current_text_with_bounded_retry, lib.rs:157) runs and does NOT clear it; admin recycle x2 and admin reload-lib also do not. Fix is plugin-side model lifecycle (CrdtReplicaManager.kt): a re-registration request for an attached path with no model must BUILD one rather than re-registering an empty attachment. Operator workaround: close and reopen the file's JB tab. Needs a live editor to verify, hence operator-verify; the binary-side retry is already in place and proven insufficient.
 - [ ] [#fmgc] Per-peer ack watermark for replay-state retention (#retentionwatermark). Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: `reliable_sync_outbox_cursor`/`reliable_sync_inbox_cursor` are `PRIMARY KEY (document_hash)` holding ONE scalar `acked_through` — there is no per-peer ack vector to take a MIN over, and `reliable_sync_liveness_journal.source_key` is a document hash, not a peer id. Needs: (a) a `(document_hash, peer_key)` ack table keyed by the PID-scoped editor registration; (b) retention keyed off `MIN(acked_version)` across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps stay as a backstop rather than being replaced. `PushChannel::flush` (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via `outbox.ack_through(ack)`; generalize that, do not rebuild it.
 - [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.
 - [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean
@@ -176,6 +213,7 @@ Compacted content:
 ## Review
  
 <!-- agent:review -->
+- [/] [#editormodelmissing] [operator-verify] #agent-doc-bug editor_attached_model_missing permanently wedges every write needing editor authority (agent-doc-bugs2 gen=1518, equityfundingsource gen=1452; healthy docs are gen 14-82). NARROWED 2026-07-18: survives admin recycle x2, admin reload-lib, AND a full IntelliJ restart, so it is NOT a plugin model-rebuild problem as first filed. Root cause is a one-way latch in editor-attachment state: TransportProjection.editor_generation (agent-doc-state-backbone/src/lib.rs:3394) is SET on StateFact::OwnerGenerationChanged (line ~1985) and never cleared — there is no editor-detach/close StateFact in the enum at all. document_has_live_editor_transport (agent-doc-document-realtime/src/crdt_authority.rs:165) therefore returns MultiReplica forever once an editor has ever attached, with NO liveness proof, even though the sibling authority_from_liveness (line 122) exists precisely to demote a stale listener via pid liveness. The ONLY predicate that flips it false is TransportPatchPhase::ForceDiskFallback — which is exactly why --force-disk is the sole escape the operator ever found. Second candidate latch, same shape: observe_editor_open's durable reliable-sync receiver journal may replay a stale editor-open assertion across an IDE restart (resolve_closed_editor_disk_fallback_current_doc, agent-doc-document-realtime-io/src/lib.rs:3774 bails only when it reports open). DECISIVE EXPERIMENT before coding: instrument which of the two reports attached — log editor_generation + observe_editor_open together at the EditorAttachedMissingReplica branch (agent-doc-crdt-relay-io/src/lib.rs:696). Both present identically, and the fix differs by which. DO NOT ship a speculative authority-demotion change: wrongly demoting a live editor lets the binary overwrite an operator buffer, which is the exact failure every guard on this path exists to prevent. Also worth shipping regardless: admin detect reported 'No fleet anomalies detected' while two documents were hard-wedged — add an attached-but-no-replica detector so this is visible instead of silent.
 - [/] [#bbdqprio] #agent-doc-bug brookebrodack-dev.md: agent:queue carries the priority attribute but a cycle's response explained next tasks without reordering the queue by backlog priority. Hypothesis: same failure class as the queue_maintenance_not_persisted warning seen in agent-doc-bugs2.md this cycle — preflight COMPUTES the reorder (logs 'queue: sorted do-prompts by backlog priority') and then fails to persist it because editor authority stayed in editor_attached_model_missing, so the previous queue text stays in effect and the reorder silently evaporates. Verify by correlating a brookebrodack-dev preflight's 'queue: sorted' line against the resulting document; if confirmed, the fix is to make a non-persisted queue maintenance pass fail loudly (or retry) instead of logging a warning three lines after printing work it did not do. Do NOT run preflight against brookebrodack-dev.md while pane %9 owns it.
 - [/] [#falsetyping-guard] #agent-doc-bug provenance-aware visible-write guard. INTEGRATED to main (merge on 5bcfc07b) + binary/cdylib installed + recycled; guard tests 7/7 green; JB 0.2.205 zip + VS Code 0.2.38 compiled. REMAINING (operator): install JB plugin zip (build/distributions/agent-doc-jetbrains-0.2.205.zip) + reload IDE, install VS Code 0.2.38, then live proof — type during replica churn (no wedge) + genuine unsaved edit still fails closed. NOTE: bugs2.md can still wedge until the IDE plugin is reloaded (loaded plugin still calls FFI v2 → conservative fail-closed).
 <!-- /agent:review -->

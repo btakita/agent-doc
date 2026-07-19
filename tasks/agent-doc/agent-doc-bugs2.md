@@ -181,16 +181,17 @@ Preflight's pre-mutation wait had **neither**. It polled every 100ms and hard-fa
 **CI.** Latest run is red, but on the known pre-existing `#ay80` failure — `finalize_skips_ignored_untracked_session_doc` (`tests/finalize_integration.rs:248`), CI-only, passes locally. Not related to this change and not introduced by it.
 
 No version bump, tag, or publish — per the standing hold on agent-doc releases until per-cell CRDT merge lands. Install + recycle are done, so this session and the JB action are already running the fixed binary. I filed the live-editor eyeball as a non-blocking `[operator-verify]` item.
-<!-- agent:boundary:89aba5e1 -->
+<!-- agent:boundary:a15bb28e -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#5pn7]
 - ~~do [#wsflake2]~~
 - ~~do [#patchretryidem]~~
 - ~~📌 do [#jbroutasync]~~
-- ~~JB `Run Agent Doc` still stalls on agent-doc-bugs2.md. I have to run agent-doc manually in the Claude Code session.~~
-- do [#fr79backfill]
+/goal Fix all contributing factors to queue go mode stall in agent-doc-bugs2.md. This turn stalled despite being run with agent-doc run and queue in go mode. This turn should continue to the next queue item once this task is complete.
+- ⏭️ do [#fr79backfill]
 - ⏭️ do [#c8tb]
 - ⏭️ do [#jbrouteasyncchannel]
 - ⏭️ do [#jbedtledgerverify]

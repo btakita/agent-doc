@@ -93,7 +93,30 @@ cd backend && uv run dev
 `make dev-backend` now delegates to `uv run dev` instead of spelling out the uvicorn invocation, and the README documents the task and its flags.
 
 Two things worth flagging. `uv run` generated `backend/uv.lock` (1306 lines) and I committed it — for an application that's the right call, since it pins the resolved dependency set for whoever clones the repo, but say the word if you'd rather it stay untracked. And `make check` is green after the change: 29 backend tests, mypy clean across 9 source files now, 9 frontend tests, typecheck, production build.
-<!-- agent:boundary:2bad436d -->
+❯ 🚧 Please allow me to drag a range on the graph itself. Ensure the sliders are synced. commit + push
+
+### Re: drag-to-zoom on the chart, synced sliders — fable-5
+
+> **Queue prompt:** Please allow me to drag a range on the graph itself. Ensure the sliders are synced. commit + push
+
+Done. Pushed as `156659e`; superproject gitlink at `48c2fd6e`.
+
+You can now press and drag anywhere across a chart's plot area to select a range. A shaded band previews the selection while you drag, and releasing zooms to it. A **Reset zoom** control appears in the card header once a chart is zoomed.
+
+**How the sliders stay synced.** The chart and its brush are driven by a single controlled index range: dragging on the plot writes that state, and the brush's `startIndex`/`endIndex` read from it, so the handles follow. The brush's `onChange` writes back to the same state, so dragging the handles rezooms the plot. One source of truth, both directions.
+
+One subtlety worth naming: the selection resolves through x-axis **labels**, not the chart's own point indices. Recharts reports indices relative to whatever window the brush currently shows, so index math would drift once you were already zoomed in — dates are unique across the whole series and don't have that problem. Right-to-left drags normalize to the same range, and a click without movement is ignored rather than collapsing the view.
+
+**Verified with real browser input**, not synthetic events — my first attempt with dispatched `MouseEvent`s silently failed to reach the brush's document-level listeners, so I drove actual CDP mouse events instead:
+
+- Dragged across the plot from x=372 to x=462: the chart narrowed from Mar 11–Jul 17 to Mar 12–Apr 29 and the slider handles landed at 371/458.
+- Dragged the left brush handle from 375 to 330: the chart widened back to Feb 19, confirming the reverse direction.
+- Reset zoom restored the full series, and the other six cards were unaffected — zoom is per-card.
+
+The screenshot also caught a flaw worth fixing: dragging was highlighting the axis labels as selected text. Added `user-select: none` on the chart container and confirmed the selection stays empty through a drag.
+
+`make check` is green: 29 backend tests, mypy clean, 22 frontend tests (13 new ones covering the range math — ordering, click rejection, unknown labels, and clamping stale indices), typecheck, production build.
+<!-- agent:boundary:088776c8 -->
 <!-- /agent:exchange -->
 
 ## Queue

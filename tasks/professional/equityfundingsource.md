@@ -330,11 +330,35 @@ The three that changed are the ones already documented as unrestorable: `RecID` 
 On the applier itself: `restore_apply_()` threads the RecID TMO assigns `NewLoan` into `NewBorrower`'s `LoanRecID`, skips a loan's dependents when the loan itself fails (sending them anyway either 404s or attaches them to whatever loan already holds that number), and treats a `200` carrying an `ErrorMessage` as a failure — TMO does that on rejected writes, so HTTP status alone would report a failed restore as successful.
 
 `--restore` is a dry run by default. `--apply` refuses any database whose name lacks "Sandbox", checked on both the target and the artifact's origin, so restoring into production isn't reachable from this tool.
-<!-- agent:boundary:d59e7cbb -->
+❯ 🚧 Please make restore sync in case there is existing data in the TMO but was somehow corrupted. Would you recommend not deleting any records in the restore?
+
+### Re: make restore sync; would you recommend not deleting any records? — opus-4-8
+
+**Yes — strongly recommend never deleting, and I built it so the tool cannot.** Shipped as `55b7541a`. `bun run check` green: 2016 tests.
+
+Four reasons, in the order I weight them:
+
+1. **`DeleteLoan` is permanent and TMO has no trash.** Driving an irreversible operation from a diff against a possibly-stale file is the wrong shape regardless of how good the file is.
+2. **A record absent from the backup is indistinguishable from one legitimately created after `captured_at`.** "Delete what the backup doesn't have" destroys exactly the newest work — the opposite of what you want during a recovery.
+3. **Delete-then-recreate loses everything if the recreate fails halfway**, and it churns RecIDs that EFS rows point at, turning a data problem into a referential one.
+4. **Corrupt data that is still present is evidence.** Deleting it throws away the ability to work out what went wrong.
+
+So `--sync` is **additive and corrective only**. `sync_plan_` emits nothing but `NewLoan` / `UpdateLoan` / `NewBorrower` / `AddLoanFunding` / `AddAttachment`, and a test asserts no plan can contain a delete no matter how far the two sides diverge. Extra records are reported and left for you.
+
+**How sync differs from restore.** Restore assumes the records are gone and replays everything. Sync re-captures the live database, diffs it against the artifact, and acts only on the difference: missing loan → create; drifted loan → `UpdateLoan` keyed by the **live** RecID (the captured one doesn't round-trip, so sending it would 404 or hit the wrong record); missing fundings/attachments → add only the ones TMO lacks. It's idempotent — a second run is a no-op. In a real incident this is the one to reach for.
+
+**Verified against the real sandbox, not just the simulator:**
+
+- Sync from a backup of the healthy 18-loan database: **0 ops, 0 reports, 18 loans already matching.** No false drift, which is the thing most likely to be quietly wrong — `RecID`, `SysTimeStamp`, and `Fields` ordering all vary between reads and are excluded deliberately.
+- Deliberate corruption on a throwaway loan (wrong `LoanAmount`/`NoteRate`/`ShortName`, document lost): sync planned `update_loan (4 fields drifted)` + `add_attachment`, applied both, and the re-capture matched the known-good state with a **byte-identical document sha256**. Re-running sync afterward planned 0 ops.
+- **The safety property, on real data:** I added a document *after* the backup was taken, then synced. It was reported `EXTRA_IN_TMO … NOT removed` and survived. Sandbox is back to its original 18 loans, no residue.
+
+**One case sync deliberately will not fix by itself:** an attachment present under the same name with a *different* digest. TMO has no attachment update, so the only moves are adding a second copy under the same name or deleting the bad one — both worse than telling you. That's reported as a `conflict` with both digests, and it's your call.
+<!-- agent:boundary:428219da -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#tmo-restore-apply]
+- ~~do [#tmo-restore-apply]~~
 - ~~do [#tmo-backup-command]~~
 - ~~do [#tmo-reconcile-binder-ui]~~
 - do [#efs-prod-secret-parity]
@@ -349,7 +373,6 @@ On the applier itself: `restore_apply_()` threads the RecID TMO assigns `NewLoan
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tmo-restore-apply] Verify the TMO restore path against the sandbox: replay one loan from a tmo-backup artifact (bun ./bin/tmo-backup.ts --restore-plan) through NewLoan -> NewBorrower -> AddLoanFunding -> AddAttachment, then re-capture and diff. --restore-plan is generated and unit-asserted but NO op has ever been sent to TMO, so the request bodies are only as correct as docs/TMO/ — and the 2026-07-18 sandbox run proved those docs wrong about the Document byte-array shape AND about two endpoints that do not exist (GetPaymentSchedule, GetBorrowers). Highest-risk unknown: AddAttachment is documented to take base64 in Content, unverified. Take a fresh backup immediately before, use one throwaway loan, sandbox database only. Spec: docs/TMO/backup.md.
 - [ ] [#tmo-snapshot-verify] [operator-verify] Run bin/tmo-snapshot.ts against the real TMO sandbox with the operator token (TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)") and confirm the sweep reports complete=true. The tool, its pure manifest/coverage layer, and its tests shipped 2026-07-18 (#tmo-orphan-reconcile-exec cycle) but no run has ever touched real TMO, so the endpoint set is unverified — in particular LSS.svc/GetLenders and LOS.svc/GetBorrowers are inferred from the documented API surface and are NOT covered by docs/TMO/*.md. If either 404s, drop it from the sweep or correct the path. This is the precondition for #tmo-sandbox-purge-apply. Spec: docs/TMO/snapshot.md.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#efs-prod-secret-parity] Production is missing secrets staging has and .dev.vars cannot supply (values are only in Cloudflare and cannot be read back out): DROPBOX_APP_KEY / DROPBOX_APP_SECRET / DROPBOX_REFRESH_TOKEN gate document sync. AUTH_SECRET, ADMIN_GLOBAL_PASSWORD, CLOUDFLARE_API_TOKEN, and CLOUDFLARE_ACCOUNT_ID are already set (2026-07-18); TMO_API_TOKEN / TMO_DATABASE are intentionally unset so production runs split (#tmo-split-launch). AWS_*/S3_BUCKET_NAME are local bin/assets-*.sh only and are NOT needed in the worker. Compare with 'bun run cf:secrets:list' vs 'bun run cf:secrets:list:production'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.

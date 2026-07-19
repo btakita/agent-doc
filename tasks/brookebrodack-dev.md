@@ -111,15 +111,44 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 Compacted content:
 - Archived 2 response topic(s): do [#tsnextpin]; do [#4s08]
 - Prior summary/context: prior compacted content: Archived 1 response topic(s): do [#rappsqlite]
-<!-- agent:boundary:1cfc1767 -->
+
+### Re: do [#ciappts] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#ciappts]
+
+
+I did the work this was waiting on, but I did **not** uncomment the steps — and the reason is worth reading, because I nearly shipped a red CI step.
+
+**What the item was waiting for.** `#ciappts` was gated on `#tsbrowser` and `#rappts` clearing. I measured rather than assumed: `typecheck:browser` was at 21 errors and the app type-check at 24, and **zero** of them were in code this repo owns. All of them were inside `node_modules/@rappstack/*`, which ships `.ts` sources, so `skipLibCheck` never applies. The drizzle cluster from the original note was already gone — `#rappdeps` had landed and rappstack is aligned on `drizzle-orm ^0.45.1` throughout.
+
+So the remaining blocker was upstream code, and I fixed it in `/home/brian/work/rappstack/dev`:
+
+- **`@rappstack/ui--any` — `MarkedPlaintextRenderer` (17 errors).** This is the substantive one. marked 13 handed each renderer method its already-rendered child strings; marked 17 hands it the token object and expects the method to render children itself via `this.parser`. Every method still had the 13 signature. That is not only a type error against the base class — none of those methods would have received what they expected at runtime either. I ported all of them: block methods parse their tokens (`blockquote`, `listitem`), inline ones use `parseInline`, and `list`/`table` now build their bodies from `token.items` and `token.header`/`token.rows`. Plaintext output is unchanged. Also dropped the second `parser.parse(tokens, loose)` argument — marked 17's instance method takes one.
+- **`domain--server--blog/post/Post__schema.ts` (3).** zod 4 removed `errorMap` in favour of `error`, and dropped the `invalid_date` issue code. Worth noting: that means the custom `'Wrong date format.'` message had **already silently stopped firing** — the handler could never match. Remapped to `invalid_type`.
+- **`domain--server/jsonld`, `rdfa`, `domain--server--blog/breadcrumb`, `ui--any/dl` (4).** `request_url__pathname_` returns `string | undefined` and `url__join` takes no undefined segments; asserted the same way the sibling `site__website_` calls already do. In `dl`, `typeof x === 'function'` cannot narrow a union that contains `Function` itself, so the recursion needed the explicit cast the rest of that file already uses.
+
+**Result against the local yalc store:** `typecheck`, `typecheck:browser`, and the app type-check are all green. Lint green. 67 tests + 9 dom tests pass. (The one `routes.test.ts` failure I hit first was the documented missing-`build` prerequisite, not a regression — it passes after `bun run build`, exactly as the workflow's own comment says.)
+
+**Why the steps are still commented out.** The `Resolve yalc dependencies to npm` step rewrites `file:.yalc/@rappstack/*` to `"^0.1.0"`, so **CI resolves the published packages, not my local fixes**. I didn't want to assert that from reasoning, so I reproduced it: copied the tracked tree to a scratch dir, applied the same `sed`, installed, and re-ran — **31 errors**. Gating now would have produced a red step on day one, which is the precise failure the original comment warned against.
+
+So the blocker has gone from "39 errors across two root causes" to one action: publish those three packages to npm. That needs 2FA, which is yours. I filed it, and gated `#ciappts` behind it.
+
+**One more thing I found:** rappstack has the same disease `#tsnextpin` just cured in ctx-core-dev — 13 packages pin `typescript: "*"`, 2 pin `"next"`, and the installed compiler is a **5.5.0-dev from April 2024** that hard-crashes `tsc` outright (`TypeError: Cannot read properties of undefined (reading 'flags')`). That is why these errors were only ever visible from downstream repos: rappstack cannot currently type-check itself. Filed separately.
+
+**Commits:** rappstack `7cde3f8`, plus two sibling package commits and superproject `9ddb68d`; brookebrodack-dev `86eef0f`. Nothing pushed.
+<!-- agent:boundary:5d323eb2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
+- do [#rjrh]
+- do [#nm8q]
 - ~~do [#tsappclean]~~
-- 🚧 do [#ciappts]
-- do [#yalcdrift]
+- ~~⏭️ do [#ciappts]~~
+- 🚧 do [#yalcdrift]
 - do [#gbdeploy1]
 - do [#mc4f]
 - ⏭️ do [#lzeffectvoid]
@@ -140,10 +169,11 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#rjrh] Publish @rappstack/ui--any, @rappstack/domain--server, and @rappstack/domain--server--blog to npm from /home/brian/work/rappstack/dev (fixes committed at 9ddb68d, currently only in the local yalc store). Needs npm 2FA. This is the sole remaining blocker on #ciappts — once published, uncomment the two type-check steps in brookebrodack-dev .github/workflows/check.yml
+- [ ] [#nm8q] rappstack/dev has the same typescript dist-tag problem #tsnextpin fixed in ctx-core-dev: 13 packages pin `typescript: "*"` and 2 pin `"next"`, and the installed compiler is a 5.5.0-dev from April 2024 that hard-crashes tsc (TypeError: Cannot read properties of undefined reading 'flags' in getCheckFlags). Pin the repo to ^7.0.2 so rappstack can type-check itself instead of relying on downstream repos to find its errors
 - [ ] [#mc4f] Push the ctx-core-dev typescript pin sweep: 190 per-package submodule commits + superproject are committed LOCALLY and unpushed. Same ~190-public-repo motion as #pushctxcore, so it needs operator go before pushing each submodule and the superproject
 - [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit
-- [ ] 🚧 [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
-- [ ] [#yalcdrift] CONFIRMED, with a measurement: a fresh bun install re-resolves marked 13.0.3 alongside 17.0.4 and the two ctx/*.ts Marked errors (Marked<string, string> vs Marked) come back, taking the app type-check to 62 with 2 in its own sources. Verified this is resolution churn and NOT caused by any version bump — reverted both package.json files to HEAD, reinstalled, measured 62/2 identically. Root cause: one yalc'd @rappstack package pins marked ^13.0.2 while two pin ^17.0.4. Fix belongs in rappstack alongside the drizzle alignment (#rappdeps)
+- [ ] 🚧 [#yalcdrift] CONFIRMED, with a measurement: a fresh bun install re-resolves marked 13.0.3 alongside 17.0.4 and the two ctx/*.ts Marked errors (Marked<string, string> vs Marked) come back, taking the app type-check to 62 with 2 in its own sources. Verified this is resolution churn and NOT caused by any version bump — reverted both package.json files to HEAD, reinstalled, measured 62/2 identically. Root cause: one yalc'd @rappstack package pins marked ^13.0.2 while two pin ^17.0.4. Fix belongs in rappstack alongside the drizzle alignment (#rappdeps)
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
 - [ ] [#nd8n] Add cgroup limits for the bwrap sandbox path in src/freehold via a transient systemd scope (systemd-run --user --scope -p MemoryMax= -p TasksMax=) — mem_limit_mb and pids caps are applied on the OCI paths only, so the default bwrap profile has no ceiling on a runaway plugin. Confirmed still absent: mem_limit_mb exists on PluginSpec but no systemd-run/cgroup call site
@@ -157,6 +187,7 @@ Compacted content:
 ## Review
 
 <!-- agent:review -->
+- [/] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
 - [/] [#oidcnpm] Configure the npm Trusted Publisher on the rebuildjs package at npmjs.com (org rebuildjs, repo rebuildjs, workflow release.yml). Workflow is committed (bfe2707); this browser step needs 2FA ONCE and then no release needs it again. npm retires 2FA-bypass tokens for account ops early Aug 2026 and for direct publishing ~Jan 2027. Repeat for rhonojs/relysjs/ctx-core once their release workflows land; lazily-js's E404 publish failure was this same missing step. KEPT OPEN: operator-only — requires an authenticated npmjs.com browser session with 2FA
 - [/] [#gpupol] Run ONE persistent local-inference server (vllm or ollama, both already installed) as the sole GPU owner, outside the sandbox. Model plugins reach it over the existing egress-proxy path with egress_hosts: ["127.0.0.1:<port>"] — no new mechanism, and /dev/nvidia* never enters the sandbox. Depends on #p0rw (the proxy must exist first). Start with ollama for its idle-unload behaviour; switch to vLLM only if sustained concurrency exceeds ~4-8 requests
 - [/] [#cy58] Add credit/billing to the OpenAI project holding brookebrodack/guestbook/OPENAI_API_KEY — the key authenticates and is scoped correctly, but every chat-completions call returns 429 `insufficient_quota`, so moderation cannot run

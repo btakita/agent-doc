@@ -129,6 +129,35 @@ pub fn pending_capture_recommendations_guard_result(
     }
 }
 
+/// `#coinedid` — the response invented `#id` tags that nothing records.
+///
+/// Distinct from the recommendation guard on purpose: that one estimates whether
+/// follow-up work went uncaptured and says "consider adding pending items", which
+/// is easy to skim past (it was, twice in the session that motivated this). This
+/// one NAMES the exact identifiers, so the correction is mechanical.
+///
+/// Warn, not error: a turn may legitimately mention a tag in passing, and a
+/// blocking closeout over prose would be worse than the problem. The durable
+/// damage happens when a coined id reaches a code comment or commit message —
+/// that is the case worth escalating once a mid-turn hook can see tool payloads.
+pub fn coined_ids_guard_result(coined: &[String]) -> GuardResult {
+    if coined.is_empty() {
+        return GuardResult::None;
+    }
+    GuardResult::Warn(vec![
+        format!(
+            "[session-check] warn: response coins new id(s) {} that are not in agent:backlog, agent:queue, agent:done, or agent:review",
+            coined
+                .iter()
+                .map(|id| format!("#{id}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        "[session-check] hint: file a backlog item for each coined id (`--backlog-add \"#<id> ...\"`) or reuse an existing id — an id in a commit message or code comment with no tracked item resolves to nothing later"
+            .to_string(),
+    ])
+}
+
 pub fn expect_done_or_gate_guard_result(
     file: &str,
     unresolved: &[String],

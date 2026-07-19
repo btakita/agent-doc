@@ -126,6 +126,57 @@ pub fn check_pending_capture_guard(file: &Path, rc: &CycleContext) -> Result<Gua
     )
 }
 
+/// `#coinedid` — the response invented `#id` tags that no tracked item records.
+///
+/// The known universe is every component EXCEPT `exchange`: after commit the
+/// response itself lives in `exchange`, so scanning the whole document would let
+/// a coined id vouch for itself and the guard would never fire.
+pub fn check_coined_ids_guard(file: &Path, _rc: &CycleContext) -> Result<GuardResult> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if state.is_open() {
+        return Ok(GuardResult::None);
+    }
+    let Some(capture_id) = state.capture_id.as_deref() else {
+        return Ok(GuardResult::None);
+    };
+    let Some(capture) = crate::captured_response_guard_evidence(file, &state, capture_id)? else {
+        return Ok(GuardResult::None);
+    };
+    if !capture.capture_committed {
+        return Ok(GuardResult::None);
+    }
+    let response_text =
+        agent_doc_turn::closeout_signal::response_text_for_guards(&capture.response_body);
+    if response_text.trim().is_empty() {
+        return Ok(GuardResult::None);
+    }
+    let Ok(content) = std::fs::read_to_string(file) else {
+        return Ok(GuardResult::None);
+    };
+    let Ok(components) = agent_doc_element::element::parse(&content) else {
+        return Ok(GuardResult::None);
+    };
+    let mut known = std::collections::BTreeSet::new();
+    // Every component EXCEPT `exchange` counts as tracked state. Allow-listing
+    // component names instead was too narrow: an id tracked in any other state
+    // component read as coined. `exchange` is excluded because after commit the
+    // response lives there, and an id must not be able to vouch for itself.
+    for component in components
+        .iter()
+        .filter(|component| component.name != "exchange")
+    {
+        known.extend(agent_doc_turn::coined_ids::extract_tags(
+            component.content(&content),
+        ));
+    }
+    let coined = agent_doc_turn::coined_ids::coined_ids(&response_text, &known);
+    Ok(agent_doc_workflow::session_check::coined_ids_guard_result(
+        &coined,
+    ))
+}
+
 pub fn check_pending_done_guard(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
     let mode = resolve_pending_done_guard_mode_with_context(file, rc)?;
     if mode == agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode::Off {

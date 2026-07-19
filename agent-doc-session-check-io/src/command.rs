@@ -917,6 +917,7 @@ fn inspect_with_warnings_inner(
         }
         for guard in [
             crate::check_pending_capture_guard(file, &rc)?,
+            crate::check_coined_ids_guard(file, &rc)?,
             crate::check_pending_done_guard(file, &rc)?,
             crate::check_expect_done_or_gate_guard(file, &rc)?,
             crate::check_partial_closeout_state_guard(file)?,

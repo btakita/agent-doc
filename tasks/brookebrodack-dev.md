@@ -134,7 +134,23 @@ Also queued `#tsappsub`: `app/brookebrodack-site/tsconfig.json` carries the iden
 Added a `typecheck` script, since the failure mode here was a check that stopped running without anyone noticing.
 
 **Session note:** preflight hard-failed this cycle with `editor_attached_model_missing` — `agent-doc admin reload-lib` cleared it (cdylib v0.35.6 to 1/1 endpoints) without a force-disk or repair. The document was also compacted externally between cycles (12 topics archived), and the supervisor is still mapping a stale binary with an auto-recycle deferred to the next idle boundary.
-<!-- agent:boundary:691a05a2 -->
+
+### Re: #tsappsub — fixed it in the submodule, and the second error was the interesting one — opus-4-8
+
+> **Queue prompt:** do [#tsappsub]
+
+Done in `brookebrodack-site` itself (`f23ed7e`), with the gitlink bumped here (`a3da157`). I had filed this as "fix it there, not from here" — which is a statement about which repo owns the commit, not a reason to leave it undone, and working in the submodule satisfies both.
+
+**TS5110 was only half of it.** With the module/moduleResolution pairing fixed, a second abort surfaced: TS2688, `types` listing `rebuildjs/types` for a package that was never a dependency of this one. It is pinned in the workspace root's `resolutions` — which pins a version *without installing anything* — so the entry silently failed to resolve, and tsc aborted before reading a source file either way. Fixing only TS5110 would have left the type-check exactly as dead as it was, with a different error code.
+
+**My first instinct was wrong and worth recording.** I removed the unresolvable entry, since nothing obviously needed it. Then I checked what it actually contains: the asset-module declarations (`*.jpg`, `*.png`, `*.css`) and a `/// <reference lib="dom" />`. This codebase imports images directly, so the entry is load-bearing — the fix is to install the package, not to delete the reference to it. Deleting it would have type-checked "clean" on that point while quietly removing the declarations that make the imports legal.
+
+The type-check now runs and reports **267 errors**. That is the honest state of a package that has never been checked, not a regression from this change — I verified the shape of it rather than assuming: `bun run build` is green and still produces `dist/browser`, which is what the deploy actually depends on. Queued as `#tsappclean`, dominated by `build.ts` (esbuild used without being a direct dependency; implicit anys in plugin callbacks) and `app/index.ts` (a hono `ErrorHandler` returning `void` where it must return a `Response` — a real bug).
+
+**One thing I deliberately did not commit:** `bun.lock`. Regenerating it rewrites the yalc-linked `@rappstack/*` entries from local `.yalc` state, stripping their dependency metadata — 213 deletions describing this machine rather than the project. CI installs through the npm fallback regardless. The gitlink bump carries the fix without carrying that.
+
+Parent repo re-verified after the bump: `typecheck` clean, 76 tests pass. The Pages deploy for the previous push (`#rak9`, `eeabb5e`) went green; the one for this push is still pending, so this closes on local evidence rather than waiting on it.
+<!-- agent:boundary:4d918395 -->
 <!-- /agent:exchange -->
 
 ## Queue

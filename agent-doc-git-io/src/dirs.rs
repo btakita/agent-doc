@@ -314,20 +314,49 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// `#wsflake2`: the process working directory is global to the whole test
+    /// binary, so a test that chdirs is visible to every test running in
+    /// parallel with it — restoring the value on drop only narrows the window,
+    /// it does not close it. `resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path`
+    /// reads the process cwd, so while a `ScopedCurrentDir` was active it saw the
+    /// OTHER test's TempDir, and once that TempDir was dropped the path no longer
+    /// existed — failing both halves of its assertion under load.
+    ///
+    /// Every test that sets OR reads the process cwd takes this lock, so the two
+    /// can never overlap. `unwrap_or_else(PoisonError::into_inner)` keeps one
+    /// failing test from cascading into spurious failures in the rest.
+    fn current_dir_lock() -> &'static std::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    fn lock_current_dir() -> std::sync::MutexGuard<'static, ()> {
+        current_dir_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     struct ScopedCurrentDir {
         previous: PathBuf,
+        _guard: std::sync::MutexGuard<'static, ()>,
     }
 
     impl ScopedCurrentDir {
         fn set(path: &Path) -> Self {
+            let guard = lock_current_dir();
             let previous = std::env::current_dir().unwrap();
             std::env::set_current_dir(path).unwrap();
-            Self { previous }
+            Self {
+                previous,
+                _guard: guard,
+            }
         }
     }
 
     impl Drop for ScopedCurrentDir {
         fn drop(&mut self) {
+            // Restore before the guard releases, so the next holder sees the
+            // original cwd rather than this test's TempDir.
             std::env::set_current_dir(&self.previous).unwrap();
         }
     }
@@ -726,6 +755,9 @@ mod tests {
         let non_git_file = dir.path().join("notes.md");
         fs::write(&non_git_file, "notes\n").unwrap();
 
+        // `#wsflake2`: this reads the process cwd, so it must not run while a
+        // sibling `ScopedCurrentDir` has moved it.
+        let _cwd_guard = lock_current_dir();
         let cwd = resolve_pane_cwd(&non_git_file);
 
         assert!(

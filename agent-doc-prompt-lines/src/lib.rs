@@ -329,15 +329,55 @@ pub fn normalize_imperative_candidate(line: &str) -> Option<String> {
         }
     }
 
+    let trimmed = strip_politeness_prefix(trimmed.trim_start_matches('❯').trim_start());
+
     let normalized = trimmed
-        .trim_start_matches('❯')
-        .trim_start()
         .trim_end_matches(|c: char| c.is_ascii_punctuation() && c != ']')
         .trim();
     if normalized.is_empty() {
         None
     } else {
         Some(normalized.to_string())
+    }
+}
+
+/// Strip a leading politeness marker so the imperative verb underneath is seen
+/// (`#politeimperative`).
+///
+/// `looks_like_imperative_directive` keys off the FIRST word, so "Add a backup
+/// command" classified as a directive while "Please add a backup command" did
+/// not — the operator's politeness silently demoted their own instruction. In a
+/// queue that meant a free-text head was never admitted as tracked backlog work,
+/// and an agent had to hand-rewrite the line to `do [#id]` (observed live
+/// 2026-07-18 on `equityfundingsource.md`). Politeness is not a mood change;
+/// "Please do X" is exactly as imperative as "Do X".
+///
+/// Only leading markers are stripped, so a mid-sentence "please" is untouched.
+fn strip_politeness_prefix(line: &str) -> &str {
+    // Longest-first so "can you please" wins over "can you".
+    const POLITENESS_PREFIXES: &[&str] = &[
+        "could you please ",
+        "would you please ",
+        "can you please ",
+        "could you ",
+        "would you ",
+        "can you ",
+        "please ",
+        "kindly ",
+        "pls ",
+    ];
+    let mut current = line;
+    // Loop so "Please can you fix X" also normalizes; bounded by the fact that
+    // every iteration consumes at least one prefix's worth of bytes.
+    loop {
+        let lower = current.to_ascii_lowercase();
+        let Some(prefix) = POLITENESS_PREFIXES
+            .iter()
+            .find(|prefix| lower.starts_with(**prefix))
+        else {
+            return current;
+        };
+        current = current[prefix.len()..].trim_start();
     }
 }
 
@@ -424,6 +464,52 @@ fn strip_prompt_prefix(line: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#politeimperative`: a polite instruction is still an instruction. The
+    /// live regression was a queue head that never became tracked backlog work
+    /// because the operator wrote "Please add ..." instead of "Add ...".
+    #[test]
+    fn politeness_prefixes_do_not_demote_an_imperative() {
+        let polite = "Please add a backup command to backup the TMO system. Test backup on the sandbox.";
+        assert!(
+            text_line_looks_like_prompt_target(polite),
+            "a polite instruction must still classify as a prompt target"
+        );
+        assert!(text_line_looks_like_prompt_target(&format!("- {polite}")));
+
+        for line in [
+            "Please fix the flaky test",
+            "pls run tests",
+            "Kindly commit and push",
+            "Can you add a retry?",
+            "Could you please build the index",
+            "Would you update the changelog",
+        ] {
+            assert!(
+                text_line_looks_like_prompt_target(line),
+                "must classify as a prompt target: {line}"
+            );
+        }
+
+        // The politeness marker is stripped from the normalized directive text.
+        assert_eq!(
+            normalize_imperative_candidate("Please add a backup command").as_deref(),
+            Some("add a backup command")
+        );
+        // Stacked markers collapse.
+        assert_eq!(
+            normalize_imperative_candidate("Please can you fix the guard").as_deref(),
+            Some("fix the guard")
+        );
+        // A mid-sentence "please" is untouched, and a non-directive stays one.
+        assert_eq!(
+            normalize_imperative_candidate("The retry will please nobody").as_deref(),
+            Some("The retry will please nobody")
+        );
+        assert!(!text_line_looks_like_prompt_target(
+            "The retry will please nobody"
+        ));
+    }
 
     #[test]
     fn slash_command_prompt_lines_are_prompt_targets() {

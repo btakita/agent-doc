@@ -1582,9 +1582,13 @@ fn finalize_prewrite_guard_failure_leaves_cycle_open_for_retry() {
     init_git_repo(tmp.path(), &doc);
     fs::write(snapshot_path(tmp.path(), &doc), &committed).unwrap();
 
+    // A QUESTION, not an imperative directive: this test covers the
+    // pending-capture pre-write gate, and an imperative prompt would instead
+    // trip the (stricter, earlier) execution-evidence guard — see
+    // `#politeimperative`, which made "Please update the backlog." imperative.
     let current = committed.replace(
         "<!-- agent:boundary:1234abcd -->",
-        "❯ Please update the backlog.\n<!-- agent:boundary:1234abcd -->",
+        "❯ What do you recommend for the backlog?\n<!-- agent:boundary:1234abcd -->",
     );
     fs::write(&doc, &current).unwrap();
 

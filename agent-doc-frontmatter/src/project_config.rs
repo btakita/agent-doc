@@ -26,15 +26,45 @@ use std::collections::BTreeMap;
 
 use crate::frontmatter::{FreeTextExecutionMode, Frontmatter, PendingCaptureGuardMode};
 
+/// Guard modes for `[guards]` in `.agent-doc/config.toml`.
+///
+/// `#guardkeyalias`: each field also accepts its **frontmatter** spelling as an
+/// alias. The same guard is named `pending_done_guard` in document frontmatter
+/// but `pending_done` here, and serde silently parses an unknown key to `None` —
+/// so writing the frontmatter spelling into `[guards]` produced no error, no
+/// warning, and no guard, and the next config rewrite dropped the key entirely
+/// (observed live 2026-07-18: `pending_done_guard = "warn"` was accepted by the
+/// file, ignored by the binary, then silently erased, and an agent had to
+/// hand-edit the file to the canonical key).
+///
+/// Accepting both spellings makes the binary own the reconciliation: either key
+/// parses, and serialization always re-emits the canonical short name, so the
+/// file self-heals on the next write instead of needing a manual edit.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GuardConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "pending_capture_guard",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pending_capture: Option<PendingCaptureGuardMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "pending_done_guard",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pending_done: Option<PendingCaptureGuardMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "review_done_guard",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub review_done: Option<PendingCaptureGuardMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "auto_done_guard",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub auto_done: Option<bool>,
 }
 
@@ -500,6 +530,37 @@ fn glob_match_segment(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod guard_resolution_tests {
     use super::*;
+
+    /// `#guardkeyalias`: the frontmatter spelling of each guard must parse in
+    /// `[guards]` and round-trip back out as the canonical short key, so the
+    /// binary reconciles the two names instead of an agent hand-editing the file.
+    #[test]
+    fn guard_config_accepts_frontmatter_key_spellings_and_normalizes_them() {
+        let cfg: GuardConfig = toml::from_str(
+            "pending_done_guard = \"warn\"\n\
+             pending_capture_guard = \"strict\"\n",
+        )
+        .expect("frontmatter-spelled guard keys must parse");
+        assert_eq!(cfg.pending_done, Some(PendingCaptureGuardMode::Warn));
+        assert_eq!(cfg.pending_capture, Some(PendingCaptureGuardMode::Strict));
+
+        // Serialization re-emits the canonical names, so the next config write
+        // self-heals the file.
+        let rendered = toml::to_string(&cfg).expect("guards must serialize");
+        assert!(
+            rendered.contains("pending_done = "),
+            "canonical key expected, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("pending_done_guard"),
+            "alias must not be re-emitted, got: {rendered}"
+        );
+
+        // The canonical spelling keeps working unchanged.
+        let canonical: GuardConfig =
+            toml::from_str("pending_done = \"warn\"\n").expect("canonical key must parse");
+        assert_eq!(canonical.pending_done, Some(PendingCaptureGuardMode::Warn));
+    }
 
     fn project_guards(guards: GuardConfig) -> ProjectConfig {
         ProjectConfig {

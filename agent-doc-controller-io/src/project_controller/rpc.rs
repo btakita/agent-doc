@@ -3587,9 +3587,19 @@ fn current_text_controller_initial_read_for_doc(
                 source,
             ),
         );
+        // `#ctrlrespawnenoent2`: resolve the real root even on the detached
+        // path. This used to hand back `PathBuf::new()` as a "not applicable"
+        // sentinel, but the field is a plain `PathBuf`, so nothing stopped a
+        // consumer from using it — and an empty path reaching a controller
+        // launch makes `Command::current_dir("")` fail with ENOENT, which reads
+        // as a missing binary rather than a bad root. Observed as
+        // `--project-root ` (empty) in a launch failure while `binary=` in the
+        // same message was correct.
+        let detached_project_root =
+            agent_doc_project_root_io::project_root_containing(&canonical).unwrap_or_default();
         return Ok(Some(ControllerCurrentTextRead {
             canonical,
-            project_root: PathBuf::new(),
+            project_root: detached_project_root,
             authority,
             current: agent_doc_crdt_relay_io::CurrentText::Detached,
         }));

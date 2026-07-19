@@ -491,7 +491,37 @@ I am closing `#respidxrealtime` rather than leaving it open, because as written 
 Two more distinct flaky tests surfaced while verifying, neither touchable by a comment-only change: `agent::codex::tests::required_ssh_capability_reports_alias_config_failure_when_direct_path_still_works` and `project_controller::rpc::tests::public_controller_serve_skips_when_authoritative_public_controller_exists`. One full run was clean; the next failed.
 
 That is now **six** distinct tests observed flaking across this session, in five different areas. The set grows every time I sample it, which says the problem is not a handful of bad tests but a general lack of isolation under parallel load. Added to `#wsflake2`.
-<!-- agent:boundary:7d47e063 -->
+
+### Re: do [#bbdcompactnocommit] — opus-4-8
+
+> **Queue prompt:**
+>
+> 📌 do [#bbdcompactnocommit]
+
+
+Found and fixed. The item's ruling-out of the barrier was right and saved the wrong search; the actual skip is in the commit gate itself:
+
+```rust
+if commit {
+    if dirty { commit_compacted_authoritative(...)?; }
+    // no else — returns Ok having committed nothing
+}
+```
+
+A `--commit` compact that could not observe committable state fell straight through and reported success.
+
+**The key insight is what `!dirty` means at that point.** It reads like "nothing to commit", but it cannot be: the genuine no-op already returned earlier (`targets.live == content && targets.committed == content`). So reaching the gate means the compaction *did* change something, and `!dirty` is a failure to **observe** the change rather than an absence of one.
+
+That matches your evidence exactly. With a live editor holding the buffer mid-compact, the on-disk re-read still equals the pre-compact content, and the snapshot need not have converged to HEAD-divergence yet either — `delivery_converged=false live_editors=1` in the log is precisely that window. The existing `#jb-compact-commit-editor-ipc-async` snapshot check was added for the lagging-disk half of this, but both signals can be cold at once, and then the gate silently did nothing.
+
+The gate now gives convergence a bounded chance (re-reading disk and snapshot), commits if the change becomes observable, and otherwise **fails loudly** with the state of the world and the recovery command — noting explicitly that the compacted document and archive are intact and only the commit is missing, which is the reassurance the operator had to work out by hand last time.
+
+Bounded deliberately: silently reporting success is the outcome that must not survive, but hanging on an editor that never settles is no better, so the budget has its own test. The other test pins that the unobservable branch both logs *and* bails — an easy thing to soften later into a warning, which would restore the original defect while looking like it still handles the case.
+
+Full workspace suite green. Pushed as `d9c3ca3ab`.
+
+One thing I could not do from here: reproduce the live race. The fix is derived from your ops.log evidence plus the code path, and the tests pin structure rather than the timing. If you compact again while editing mid-flight and it now fails loudly instead of going quiet, that is the fix working — the failure message is the intended outcome, not a new bug.
+<!-- agent:boundary:3d763088 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -514,7 +544,7 @@ That is now **six** distinct tests observed flaking across this session, in five
 - ~~⏭️ 📌 do [#jbroutasync]~~
 - ~~⏭️ 📌 do [#jbsockdeadline]~~
 - ~~⏭️ 📌 do [#respidxrealtime]~~
-- ⏭️ 📌 do [#bbdcompactnocommit]
+- ~~⏭️ 📌 do [#bbdcompactnocommit]~~
 - ⏭️ 📌 do [#fmgc]
 - ⏭️ 📌 do [#eqmvscroll]
 - ⏭️ 📌 do [#0dsr]
@@ -564,7 +594,6 @@ That is now **six** distinct tests observed flaking across this session, in five
 - [ ] [#jbroutasync] #agent-doc-bug Honor submit.deadline_ms in route dispatch (NARROWED — the async-endpoint half moved to #jbrouteasyncchannel). CONFIRMED: deadline_ms is only ever written (rpc.rs:1116, command_plane.rs:93) and never read by dispatch; routed_cycle_ack_timeout is 30s with a live child / 15s without (agent-doc-controller/src/dispatch.rs:2099-2103); the plugin sends deadlineMs = waitForReadySeconds*1000 for editor_route (CpcRouteClient.kt:281), observed as timeout_ms=15000 in ops.log. Net effect: with a live child the client gives up at 15s while the controller waits to 30s, so the operator sees a timeout while the route is still running. FIX: cap the ack wait at min(client deadline, routed_cycle_ack_timeout). PLUMBING REQUIRED (why this is not a one-liner): the deadline lives in the controller RPC layer but the wait happens in agent-doc-route-io at cycle_ack.rs:334, and no type in that crate carries a deadline. Thread an Option<Duration> through require_routed_cycle_ack (cycle_ack.rs:313) and its 3 call sites (authoritative_dispatch.rs:987, authoritative_dispatch.rs:1142, pane_resolution.rs) plus the controller→route boundary. NOTE test_cli.rs:16811 pins the exact expression 'routed_cycle_ack_timeout(live_child_for_file, cfg!(test))' and must be updated to pin the invariant, not the syntax. Verify with a live route against a busy pane: the client-side timeout and the controller-side give-up must coincide.
 - [ ] [#mtds] [operator-verify] #panedraftunblocker live proof: on a Claude pane whose footer reads `⏵⏵ bypass permissions on · 1 shell · ← for agents` (the variant without `(shift+tab to cycle)`), with an EMPTY composer and no active turn, trigger JB Run Agent Doc. Expect dispatch to succeed instead of refusing with `timed_out` / `unblocker=wait_for_dispatch_ready_prompt`. Then repeat with unsent text typed in the composer and expect the new refusal naming the draft with `unblocker=submit_or_clear_pane_draft`, and NO injection over that text. Finally confirm a genuinely mid-turn pane (live spinner, bare `❯`) still refuses as busy. Fixed in 17848a927, installed 0.35.6; needs the supervisor idle-boundary recycle to pick up the fresh binary.
 - [ ] [#queuecontmirror] #agent-doc-bug queue_continuation_required stays true on a queue that is entirely bulk-mirrored [operator-verify] / [focused-cycle] / [future-separate] backlog heads (observed: 43 drainable heads on agent-doc-bugs2.md, none in-session drainable). SKILL.md defines the signal as false when every remaining head is operator-gated or inert, and #mirrorall explicitly mirrors operator-verify heads 'deferred from auto-drain' — but the drainability filter counts them anyway, so the in-session loop is told to keep draining work it must not drain. This is what kept re-selecting the same stale mirror set every cycle and what fed the #planmassdone footgun its 26 ids. Fix: apply the same deferral predicate #mirrorall uses when mirroring to the drainable-head count, so mirrored operator-gated heads raise queue_active without raising queue_continuation_required.
-- [ ] [#bbdcompactnocommit] #agent-doc-bug Compact Exchange applied but did not commit on brookebrodack-dev.md while the operator deleted queue lines mid-compact. CONFIRMED from ops.log: operator editor deletes landed 03:29:36-37, then at 03:29:43 'crdt_commit_barrier ready=true delivery_required=true delivery_converged=false live_editors=1' and 'controller_compact_document component=exchange commit=true barrier_ready=false'. The compacted document + its archive are on disk; only the commit is missing, so nothing is lost. Note handle_compact_document_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:4650) only LOGS barrier_ready and calls compact_document unconditionally, so the barrier is not what skipped the commit — find the actual skip inside compact_document's commit leg and make a commit=true compact that cannot commit either retry to convergence or fail loudly. Silently applying the compaction and leaving it uncommitted forced the operator to notice by hand.
 - [ ] [#fmgc] Per-peer ack watermark for replay-state retention (#retentionwatermark). Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: `reliable_sync_outbox_cursor`/`reliable_sync_inbox_cursor` are `PRIMARY KEY (document_hash)` holding ONE scalar `acked_through` — there is no per-peer ack vector to take a MIN over, and `reliable_sync_liveness_journal.source_key` is a document hash, not a peer id. Needs: (a) a `(document_hash, peer_key)` ack table keyed by the PID-scoped editor registration; (b) retention keyed off `MIN(acked_version)` across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps stay as a backstop rather than being replaced. `PushChannel::flush` (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via `outbox.ack_through(ack)`; generalize that, do not rebuild it.
 - [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.
 - [ ] [#0dsr] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Preflight step 1 (the existing repair step, agent-doc-preflight-command-io/src/run.rs:296) already runs on every Run Agent Doc, and the durable pending-write journal (agent-doc-state-backbone/src/lib.rs:1433-1451) is NOT compact-specific — so replay retained pending writes generically there rather than adding per-operation --resume commands. Next run then self-heals with no new operator surface. Must be idempotent (a compact re-run must not double-archive). Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms (reason=delivery_ack_pending); pending change retained for retry'. Verified NOT damaged: byte-identical to HEAD, both exchange markers intact, archive DID land (.agent-doc/archives/71b0db3f...-214413.md) — it failed in the safe direction, and retention was real; only the drive was missing. Do NOT reorder to commit-before-converge: committing content the editor never accepted leaves HEAD and the live buffer diverged with no authority record — converge-then-commit is what kept the file clean

@@ -16635,6 +16635,22 @@ mod tests {
             .map(|(_, p)| p.clone())
             .unwrap_or_default();
         assert!(pids.contains(&100));
-        assert!(status.registrations.is_empty());
+        // `#wsflake2`: scope the "no registration" claim to THIS document. The
+        // liveness plane is process-global and shared by every test in this
+        // crate, so asserting the whole list is empty really asserts that no
+        // other test has registered yet — true when the crate runs alone, and
+        // false once CPU contention (a full `cargo test --workspace`) reorders
+        // the threads. The property under test is that the open set projects
+        // without a registration oracle for this document, which this states
+        // directly and which no sibling test can invalidate.
+        assert!(
+            !status
+                .registrations
+                .iter()
+                .any(|registration| registration.document_hash == "docwire-status"
+                    || registration.path.contains("docwire-status")),
+            "this document must project without a registration oracle; got {:?}",
+            status.registrations
+        );
     }
 }

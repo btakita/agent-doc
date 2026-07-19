@@ -289,6 +289,22 @@ pub fn process_serves_relay_hub() -> bool {
     PROCESS_SERVES_RELAY_HUB.load(std::sync::atomic::Ordering::SeqCst)
 }
 
+/// Pure deferral decision for the durable checkpoint, split out from
+/// [`process_serves_relay_hub`] so it is testable WITHOUT mutating the
+/// process-global role.
+///
+/// `#wsflake2`: the first version of this guard was covered by a test that
+/// flipped `PROCESS_SERVES_RELAY_HUB` to false and restored it. Five sibling
+/// tests in this crate call `checkpoint_durable_projection_for_file` and require
+/// it to actually checkpoint, so any of them scheduled inside that window
+/// observed a non-owner process and failed. That is a self-inflicted version of
+/// exactly the load-dependent flakiness `#wsflake2` is about: a test mutating
+/// process-global state is not hermetic no matter how carefully it restores the
+/// value afterward. Keep the decision pure and test it directly.
+pub(crate) fn durable_checkpoint_deferral_reason(serves_hub: bool) -> Option<&'static str> {
+    (!serves_hub).then_some("not_hub_owner")
+}
+
 /// Per-document count of editor replica registrations observed in this process.
 ///
 /// `#ensurewindowsize`: `ensure_document_model` gives a missing-replica editor
@@ -2166,18 +2182,18 @@ fn checkpoint_durable_projection_for_file_with_mode(
     // logged as an editor fault. Defer instead; the hub owner checkpoints at its
     // own boundaries, and the caller already treats `Deferred` as "continue
     // without trusting the stale projection".
-    if !process_serves_relay_hub() {
+    if let Some(reason) = durable_checkpoint_deferral_reason(process_serves_relay_hub()) {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_durable_checkpoint_deferred file={} source={} reason=not_hub_owner process_pid={} (#ensurereplicagensup)",
+                "crdt_durable_checkpoint_deferred file={} source={} reason={reason} process_pid={} (#ensurereplicagensup)",
                 file.display(),
                 source,
                 std::process::id(),
             ),
         );
         return Ok(DurableProjectionCheckpoint::Deferred {
-            reason: "not_hub_owner".to_string(),
+            reason: reason.to_string(),
         });
     }
 
@@ -4333,70 +4349,37 @@ mod tests {
         );
     }
 
-    /// Serializes tests that toggle the process-global relay-hub-owner role.
-    /// Without this the toggle leaks into siblings running in parallel in the
-    /// same test process.
-    fn hub_owner_role_test_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    #[test]
-    /// `#ensurereplicagensup` — a process that does not serve the relay hub must
-    /// defer the durable checkpoint instead of attempting it.
+    /// `#ensurereplicagensup` / `#wsflake2` — a process that does not serve the
+    /// relay hub must defer the durable checkpoint instead of attempting it.
     ///
     /// `hub_registry()` is process-local and only the controller populates it, so
-    /// a supervisor or short-lived CLI running this path reads an empty registry
+    /// a supervisor or short-lived CLI running that path reads an empty registry
     /// and — because durable liveness reports the editor attached — reports
     /// `editor_attached_model_missing` on every attempt. Observed live on
     /// equityfundingsource.md as repeating `document_model_ensure_failed ...
-    /// source=controller_recycle_request:background` from non-controller pids:
-    /// work that could never succeed, logged as if the editor were at fault.
+    /// source=controller_recycle_request:background` from non-controller pids.
     ///
-    /// The guard must be PROCESS-scoped, not document-scoped: the hub owner
-    /// seeing an empty registry is a real transient (replica not registered yet)
-    /// that must still be waited on and repaired, which the sibling test below
-    /// pins.
+    /// Tested through the pure decision rather than by toggling the
+    /// process-global role: five sibling tests in this crate call
+    /// `checkpoint_durable_projection_for_file` and need it to actually
+    /// checkpoint, so flipping the global under them turned THIS crate into a
+    /// source of load-dependent flakes.
     #[test]
     fn durable_checkpoint_defers_when_process_does_not_serve_the_hub() {
-        let _role = hub_owner_role_test_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_dir, doc) = temp_doc("durable-checkpoint-not-hub-owner.md");
-        let file_str = doc.display().to_string();
-        seed_live_reliable_sync_open(&file_str);
-        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        hub_registry().lock().unwrap().remove(&hash);
-
-        // Tests default to owner (they exercise hub mechanics in-process), so
-        // drop the role for the duration of this one.
-        let previously_owner = process_serves_relay_hub();
-        PROCESS_SERVES_RELAY_HUB.store(false, std::sync::atomic::Ordering::SeqCst);
-        let checkpoint = checkpoint_durable_projection_for_file_with_mode(
-            &doc,
-            "test_not_hub_owner",
-            DurableProjectionMode::Background,
+        assert_eq!(
+            durable_checkpoint_deferral_reason(false),
+            Some("not_hub_owner"),
+            "a non-owner must defer rather than attempt an impossible checkpoint"
         );
-        PROCESS_SERVES_RELAY_HUB.store(previously_owner, std::sync::atomic::Ordering::SeqCst);
-
-        match checkpoint.unwrap() {
-            DurableProjectionCheckpoint::Deferred { reason } => {
-                assert_eq!(reason, "not_hub_owner");
-            }
-            other => panic!("non-owner process must defer, got {other:?}"),
-        }
-        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
-        assert!(
-            log.contains("reason=not_hub_owner") && log.contains("(#ensurereplicagensup)"),
-            "the deferral must be diagnosable from ops.log, got:\n{log}"
-        );
-        assert!(
-            !log.contains("document_model_ensure_failed"),
-            "a non-owner must not attempt (and fail) the model ensure at all, got:\n{log}"
+        assert_eq!(
+            durable_checkpoint_deferral_reason(true),
+            None,
+            "the hub owner must still attempt it; an empty registry there is a real transient"
         );
     }
 
     #[test]
     fn durable_checkpoint_defers_missing_model_to_background_repair() {
-        let _role = hub_owner_role_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let (_dir, doc) = temp_doc("durable-checkpoint-deferred.md");
         let file_str = doc.display().to_string();
         seed_live_reliable_sync_open(&file_str);

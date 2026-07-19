@@ -18782,8 +18782,19 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
     let relay_io =
         fs::read_to_string(manifest_dir.join("agent-doc-crdt-relay-io/src/lib.rs")).unwrap();
     assert!(
-        relay_io.contains("if !process_serves_relay_hub() {"),
-        "the durable checkpoint must defer when this process does not serve the relay hub"
+        relay_io.contains("durable_checkpoint_deferral_reason(process_serves_relay_hub())"),
+        "the durable checkpoint must consult the process-role deferral decision"
+    );
+    // `#wsflake2`: keep that decision pure and keep the role out of tests. A test
+    // that flips `PROCESS_SERVES_RELAY_HUB` is not hermetic however carefully it
+    // restores the value — five sibling tests in that crate need the checkpoint to
+    // actually run, and any of them scheduled inside the window fail. Only the
+    // controller's own `mark_process_as_relay_hub_owner` may write the flag.
+    assert_eq!(
+        relay_io.matches("PROCESS_SERVES_RELAY_HUB.store(").count(),
+        1,
+        "only mark_process_as_relay_hub_owner may write the relay-hub-owner role; \
+         tests must exercise durable_checkpoint_deferral_reason directly instead"
     );
     for relative in [
         "agent-doc-preflight-io/src/lib.rs",

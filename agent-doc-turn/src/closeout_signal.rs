@@ -1056,10 +1056,18 @@ pub fn reaped_directive_ids_without_response(input: &ReapedResponseLossInput<'_>
 /// archive, so an N-id cycle with M archives paid N x (1 + M) tree-sitter parses
 /// of the same bytes. Build this once and query it per id instead.
 ///
-/// This is still a parse from a `&str`. The realtime document model already
-/// holds these exchange nodes (`agent-doc-markdown-ast::crdt::OverlayCrdtDoc`,
-/// and the SeqCrdt exchange-node direction in AGENTS.md); sourcing them from
-/// there would remove the parse entirely. See `#respidxrealtime`.
+/// This is still a parse from a `&str`, and — contrary to what this comment
+/// used to claim — there is currently nowhere else to get the nodes from.
+/// `OverlayCrdtDoc` is a single `markdown: String` field, not a node tree, and
+/// has no live instances; nothing in the workspace holds a persistent
+/// `Vec<ExchangeNode>`. Reading "from the realtime model" would therefore
+/// relocate the parse, not remove it.
+///
+/// Removing it needs the `SeqCrdt` exchange-node backing AGENTS.md names as a
+/// strategic *direction* — i.e. a model that actually holds the nodes and is
+/// updated incrementally. Until that exists this single per-invocation parse is
+/// the floor, and `#respidxparse` above already took the large win (N x (1 + M)
+/// parses down to one).
 pub struct ResponseIndex {
     exchange: Vec<String>,
     archive: Vec<String>,

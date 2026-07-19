@@ -8,6 +8,8 @@ import java.io.File
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 internal data class CpcEditorRouteResult(
     val exitCode: Int,
@@ -436,23 +438,68 @@ internal object CpcRouteClient {
 
     internal fun cpcSocket(projectRoot: String): File = File(projectRoot, ".agent-doc/controller.sock")
 
+    /// `#jbsockdeadline`: hard ceiling on a single controller request.
+    ///
+    /// This is a HANG GUARD, not a latency control, and the distinction sets the
+    /// value. A wedged controller previously blocked the route thread forever
+    /// (a blocking `SocketChannel` has no read-timeout API, so `readLine()` never
+    /// returns), which also stranded the RUN_AGENT_DOC registry slot so every
+    /// later click deduped away — the likely mechanism behind "Run Agent Doc does
+    /// nothing".
+    ///
+    /// It must stay comfortably ABOVE the longest legitimate server-side wait,
+    /// which is `routed_cycle_ack_timeout` at 30s with a live child. Setting it
+    /// near the client's 15s deadline hint would abort routes that are still
+    /// running correctly — the exact failure recorded in #jbroutasync.
+    private const val SOCKET_REQUEST_TIMEOUT_MS = 60_000L
+
+    private val socketWatchdog = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "agent-doc-cpc-socket-watchdog").apply { isDaemon = true }
+    }
+
     private fun sendRequestDataToSocket(socket: File, request: JsonObject): JsonObject {
         SocketChannel.open(UnixDomainSocketAddress.of(socket.toPath())).use { channel ->
-            val writer = Channels.newWriter(channel, Charsets.UTF_8)
-            writer.write(request.toString())
-            writer.write("\n")
-            writer.flush()
-
-            val reader = Channels.newReader(channel, Charsets.UTF_8).buffered()
-            val line = reader.readLine()
-                ?: throw IllegalStateException("Project Controller returned an empty response")
-            val root = JsonParser.parseString(line).asJsonObject
-            if (root.get("ok")?.asBoolean != true) {
-                throw IllegalStateException(root.get("error")?.asString ?: "Project Controller request failed")
+            // Closing the channel is what unblocks a stuck `readLine()`; there is
+            // no per-read timeout to set on a blocking channel.
+            val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
+            val watchdog = socketWatchdog.schedule({
+                timedOut.set(true)
+                try {
+                    channel.close()
+                } catch (_: Exception) { /* already closing */ }
+            }, SOCKET_REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            try {
+                return readRequestData(channel, request)
+            } catch (e: Exception) {
+                if (timedOut.get()) {
+                    throw IllegalStateException(
+                        "Project Controller did not respond within ${SOCKET_REQUEST_TIMEOUT_MS}ms " +
+                            "(socket=${socket.path}); the controller may be wedged",
+                        e,
+                    )
+                }
+                throw e
+            } finally {
+                watchdog.cancel(false)
             }
-            return root.get("data")?.takeIf { it.isJsonObject }?.asJsonObject
-                ?: throw IllegalStateException("Project Controller response missing data")
         }
+    }
+
+    private fun readRequestData(channel: SocketChannel, request: JsonObject): JsonObject {
+        val writer = Channels.newWriter(channel, Charsets.UTF_8)
+        writer.write(request.toString())
+        writer.write("\n")
+        writer.flush()
+
+        val reader = Channels.newReader(channel, Charsets.UTF_8).buffered()
+        val line = reader.readLine()
+            ?: throw IllegalStateException("Project Controller returned an empty response")
+        val root = JsonParser.parseString(line).asJsonObject
+        if (root.get("ok")?.asBoolean != true) {
+            throw IllegalStateException(root.get("error")?.asString ?: "Project Controller request failed")
+        }
+        return root.get("data")?.takeIf { it.isJsonObject }?.asJsonObject
+        ?: throw IllegalStateException("Project Controller response missing data")
     }
 
     private fun sendToSocket(socket: File, request: JsonObject): CpcEditorRouteResult {

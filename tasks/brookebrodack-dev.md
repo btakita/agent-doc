@@ -150,16 +150,38 @@ The type-check now runs and reports **267 errors**. That is the honest state of 
 **One thing I deliberately did not commit:** `bun.lock`. Regenerating it rewrites the yalc-linked `@rappstack/*` entries from local `.yalc` state, stripping their dependency metadata — 213 deletions describing this machine rather than the project. CI installs through the npm fallback regardless. The gitlink bump carries the fix without carrying that.
 
 Parent repo re-verified after the bump: `typecheck` clean, 76 tests pass. The Pages deploy for the previous push (`#rak9`, `eeabb5e`) went green; the one for this push is still pending, so this closes on local evidence rather than waiting on it.
-<!-- agent:boundary:75a33869 -->
+
+### Re: #tsappclean — 244 errors, 198 of them mine, and one that meant no error page ever rendered — opus-4-8
+
+> **Queue prompt:** do [#tsappclean]
+
+Done. `bun run typecheck` reports zero errors in files this package owns; build green, 76 tests pass. Pushed as `2fe17d2` (site), `b89f1e5`/`ab42dfd` (dev), gitlink `dc51511aa`.
+
+**The count moved before I touched anything.** The item said 267; the first run this cycle said 244. Installing `rebuildjs` last cycle changed what resolves, so the number was already stale — which is why I re-measured rather than working from the figure. Of the 244, **198 belonged to this package** and 46 did not.
+
+**190 of the 198 were one missing declaration.** `post/index.ts` imports 190 `*.md` posts. `rebuildjs/types` declares `*.png`, `*.css`, `*.html` — but not `*.md`. So every post import was an unresolved module. The fix worth noting is what I declared it *as*: `md_esbuild_plugin_` in `build.ts` emits a module with `meta_` and a default renderer, which is exactly `post_mod_T`. Declaring that shape types the imports; declaring `any` would have made the number go to zero while checking nothing. One file, 190 errors, real types.
+
+**The one that is a live bug: `app.onError` returned nothing.** Hono requires an error handler to return a `Response`. I verified the pre-fix behaviour instead of assuming it — `app.request('/__boom')` resolved to **`undefined`**, not to a 500. There was no response object at all on the error path. The status block in this document lists "graceful errors" as done; they were not, and the type-check is the only thing that would have said so. It now returns the error's own response when it carries one, else a 500 — confirmed live: status 500, gzipped `Internal Server Error` body.
+
+**On `esbuild`:** `build.ts` imported it without depending on it. I pinned `^0.27.3` rather than taking the latest, because rebuildjs and rhonojs both resolve `^0.27.3` — a floating `^0.28` puts two structurally different `Plugin` types in one build, which is a worse problem than the one being fixed. That pin also resolved the four implicit-any plugin callbacks for free, since they were untyped only because the module was missing.
+
+The remaining two were smaller: a promise array mixing `BuildContext` and `void`, and `config.ts` annotating `site` as `site_T` — which made the `social_a1` it genuinely defines look optional to `blog_site_T`, which requires it. `satisfies` keeps the check without widening the value away.
+
+**What I did not claim to fix.** 46 errors remain and none are in this package: 24 in the parent repo's `lib/**` (already tracked as `#tsbrowser`) and 22 in yalc-linked `@rappstack/*` **sources** — checked because those packages ship `.ts`, so `skipLibCheck` never applies. Queued as `#rappts`; it is a rappstack-repo fix.
+
+**The gap that actually caused all of this.** `deploy.yml` runs `bun install`, builds and ships — it never runs `typecheck` or `test`. That is how a tsconfig reached a state where the type-check had *never executed*. I added `.github/workflows/check.yml` running both on push, independent of the deploy. I deliberately left the app-level typecheck step out of it: it is red on the 46 errors above, and landing a step that is red on day one teaches everyone to ignore it. Queued as `#ciappts` for when `#tsbrowser` and `#rappts` clear.
+
+**Two things to watch.** Two `ctx/*.ts` Marked errors disappeared mid-cycle without my touching them — the local `.yalc` copy of `@rappstack/ui--server` had been refreshed to `marked ^17`. CI rewrites yalc paths to npm `^0.1.0`, so the published package may still pin `marked ^13` and bring them back; that is `#yalcdrift`. And I again did not commit `bun.lock` — the same 213-deletion yalc rewrite the last cycle refused; CI does not use `--frozen-lockfile`, so `esbuild` resolves from `package.json` regardless.
+
+The Pages deploy for the previous push (`#tsappsub`, `a3da157`) **went green**, which closes that item's open signal. This push's deploy and the first Check run (`29668807479`) were still in progress at closeout, so this closes on local evidence — `#chkci` carries the confirmation.
+<!-- agent:boundary:2c9489fb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
 - do [#tsappclean]
-- ~~do [#tsappsub]~~
 - do [#tsbrowser]
-- ~~do [#rak9]~~
 - do [#sbv9]
 - do [#nd8n]
 - do [#fhmig]
@@ -177,7 +199,10 @@ Parent repo re-verified after the bump: `typecheck` clean, 76 tests pass. The Pa
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#tsappclean] the app/brookebrodack-site type-check now runs and reports 267 errors — the honest state of a package that had never been checked, not a regression. Dominated by build.ts (esbuild used but not a direct dependency, implicit anys in plugin callbacks) and app/index.ts (a hono ErrorHandler returning void where it must return Response). Separate repo (brookebrodack-site); do it there. Pairs with #tsbrowser for the lib/ half of the parent repo
+- [ ] [#rappts] 22 of the app type-check's remaining errors are in yalc-linked @rappstack/* SOURCES, not this repo: 17 in ui--any/md/MarkedPlaintextRenderer.ts (renderer written against marked 13's Renderer signature, now resolving marked 17), 3 in domain--server--blog/post/Post__schema.ts, plus dl/, rdfa/, jsonld/, breadcrumb/. Checked because those packages ship .ts, so skipLibCheck does not apply. Fix in the rappstack repo and republish; not fixable from brookebrodack-dev
+- [ ] [#ciappts] Add the app/brookebrodack-site typecheck step to .github/workflows/check.yml. Left out because it is red on 46 errors this package does not own (#tsbrowser + #rappts). Add once both clear
+- [ ] [#yalcdrift] Local .yalc/@rappstack/ui--server now pins marked ^17.0.4, which silently cleared two ctx/*.ts Marked errors mid-cycle. CI rewrites yalc paths to npm ^0.1.0, so the published package may still pin marked ^13 and reintroduce them. Verify what npm resolves and pin or republish
+- [ ] [#chkci] Confirm the new Check workflow (run 29668807479) went green. Still in progress at closeout, and its first run resolves @rappstack from npm rather than local .yalc. If red, that IS the #yalcdrift signal
 - [ ] [#tsbrowser] type-check the browser half: lib/** and test/guestbook-hyop.test.ts are not covered by tsconfig.json, because @cloudflare/workers-types replaces Response with the Workers one and browser code fails against it on every element. A separate DOM-lib config measures 56 errors today — mostly in lib/domain--server--brookebrodack (sig/ctx generic mismatches) plus a missing image-module declaration in the app submodule. Needs the config split plus those fixes, or an explicit decision that lib/ is checked by its own workspace package instead
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage
 - [ ] [#sbv9] Author a seccomp BPF filter and pass it via bwrap --seccomp <fd> in src/freehold (crates/freehold-host/src/sandbox.rs). Outstanding condition on bwrap being the default sandbox — confirmed still absent (no seccomp reference anywhere in crates/). Until it lands a compromised plugin has no network/filesystem/caps/env but does have the full kernel syscall surface. Needs fd-passing through tokio Command (pre_exec/CommandExt); bwrap has no --seccomp-path variant
@@ -224,4 +249,5 @@ Parent repo re-verified after the bump: `typecheck` clean, 76 tests pass. The Pa
 - 2026-07-18 [#gpulease] [recommended] Host-side GPU admission lease in freehold-host: add a declared gpu field to PluginSpec and hold a semaphore across plugin spawn, so N model plugins cannot stampede the inference server. ~100 lines, no framework. Only worth building once more than one local-model plugin exists concurrently — until then #gpupol alone is sufficient
 - 2026-07-18 [#rak9] Pre-existing tsconfig error TS5110 in brookebrodack-dev: `module` must be NodeNext when `moduleResolution` is NodeNext. Not caused by the guestbook work, but it means `tsc -p tsconfig.json` never exits clean
 - 2026-07-18 [#tsappsub] app/brookebrodack-site/tsconfig.json carries the SAME TS5110 defect just fixed in the root (module esnext + moduleResolution nodenext), so the submodule's own type-check has also never run. It is a separate repo (brookebrodack-site) — fix it there, not from here
+- 2026-07-18 [#tsappclean] the app/brookebrodack-site type-check now runs and reports 267 errors — the honest state of a package that had never been checked, not a regression. Dominated by build.ts (esbuild used but not a direct dependency, implicit anys in plugin callbacks) and app/index.ts (a hono ErrorHandler returning void where it must return Response). Separate repo (brookebrodack-site); do it there. Pairs with #tsbrowser for the lib/ half of the parent repo
 <!-- /agent:done -->

@@ -19,7 +19,7 @@ prompt_presets:
   '#simworld': Strengthen Simworld tests.
   '#spec-test-build-install-commit-push': red-green-refactor. update spec + tests. build + install for local testing. commit + push
   '#spec-test-commit-push': red-green-refactor. update spec + tests. commit + push
-queue: start
+queue: go
 ---
 
 ## Status
@@ -76,16 +76,71 @@ The item now carries the decisive experiment instead: log `editor_generation` an
 **One thing worth fixing regardless of the answer:** `admin detect` told me "No fleet anomalies detected in /home/brian/work/btakita/agent-loop" while two of its seven documents were hard-wedged and unrecoverable. That is a detector gap independent of the root cause — attached-with-no-replica across repeated observations should be a reported anomaly, not something you discover by noticing your queue prose went stale. Noted on the item.
 
 Gated rather than done, and the `[operator-verify]` tag is now carrying real weight: the reading has to come from your wedged session, because a fresh document will not reproduce it.
-<!-- agent:boundary:f422ebb0 -->
+### Re: many of these items are stale — opus-4-8
+
+You are right, and the way I found out is worth more than the triage itself.
+
+**The plan told me to close 26 items in one command.** `required_commands` came back as a single finalize carrying `--done crdtauth6 --done nsfz --done suprestassoc-live …` for 26 ids. `SKILL.md` tells agents to treat the plan as the execution contract, so an agent following it literally would have closed `#sidecarstate`, `#ipcauthority`, `#adstatechart2/3`, `#capturebacklogatomic`, and twenty more — none of which this turn touched.
+
+The mechanism: `plan` builds one `ResolveExisting` mutation per `do [#id]` queue head, and `finalize_command` emits one `--done` per mutation, unconditionally. That is fine when you queue one item. It is destructive after `#mirrorall` mirrors every open tracked-work head into the queue at once, because `plan` cannot tell "the operator asked for these" from "these were mirrored in bulk."
+
+Fixed and shipped as `#planmassdone`. Past a small cap the `--done` flags are dropped, the bare finalize skeleton survives, and a warning names the suppressed ids so they get adjudicated individually. `ExpectAdd` placeholders are spared — they add tracked work and cannot lose history. Verified against this exact document: 26 flags before, zero after, with the warning listing all 26. Full suite 7676 passed, installed, pushed, recycled.
+
+**The triage you asked for.** Of the 26, only two are genuinely closable, and I closed those two rather than the batch:
+
+- `#staleplugindeploy` — its blocker was "installing would deploy the uncommitted decomposition WIP as the live binary." That condition is gone: commit `9b38d017` is an ancestor of main, the tree is clean, and I ran `make install` + push three times this session against that clean tree. Closed.
+- `#bn41` — self-describes as "RESOLVED by admin recycle + admin reload-lib." Closed as superseded, with one caveat worth recording: that resolution claim is itself now stale, because this session proved recycle and reload-lib do **not** clear the current instance of that failure. The living version of the class is `#editormodelmissing`.
+
+The other 24 split three ways. Five are `[operator-verify]` and need your eyes, not mine (`crdtauth6`, `nsfz`, `suprestassoc-live`, `jbtsiftnosub2verify`, `5qjj`). Two are explicitly `[future/separate]` (`#agentsignals`, `#elementgraphprd`). The remaining seventeen are real open work — several of them carry a "SHIPPED" or "DONE this pass" clause that makes them *look* closable at a glance, but each one's `REMAINING:` tail is still live. `#adstatechartkt` shipped lazily-kt 0.9.0 but still owes the JB plugin dep bump; `#adstatechartjs` shipped lazily-js 1.1.0 but still owes an operator-2FA npm publish; `#ipcliveness` landed the quarantine commit but its remainder is blocked on decomposition. Closing those on the strength of the word "SHIPPED" is exactly the mistake the mass-`--done` would have made at scale.
+
+One item I looked at and left alone: `#f6j3` recommends a decision on `fix/editor-authority-no-disk-repair`. That branch is now remote-only — the `src/agent-doc-editor-authority-fix` worktree it names no longer exists — and main has since adopted the newer error wording the item cites as evidence the branch is stale. Deleting a remote branch is yours to authorize, so it stays a recommendation.
+
+**Filed `#queuecontmirror`**, which is the reason you kept seeing this. `queue_continuation_required` stays `true` on a queue that is entirely mirrored operator-gated heads — 43 of them here, none in-session drainable. `#mirrorall` mirrors `[operator-verify]` heads *explicitly marked deferred from auto-drain*, but the drainability count includes them anyway, so the loop is told to keep draining work it is forbidden to drain. That is what re-selected the same stale mirror set every cycle, and what handed `#planmassdone` its 26 ids in the first place.
+<!-- agent:boundary:a762fa5b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#bbdqprio]~~
-- ~~do [#px82]~~
-- ~~do [#jblocalhistverify]~~
-- ~~do [#5bzd]~~
-- ~~do [#jblocalhistverify]~~
+- JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
+- JB Compact Exchange agent:boundary tag is committed, then the tag id is updated and in an uncommitted state.
+- do [#crdtauth6]
+- do [#nsfz]
+- do [#suprestassoc-live]
+- do [#agentsignals]
+- do [#elementgraphprd]
+- ⏭️ do [#bbdcompactnocommit]
+- ⏭️ do [#fmgc]
+- ⏭️ do [#eqmvscroll]
+- ⏭️ do [#0dsr]
+- ⏭️ do [#17jk]
+- ⏭️ do [#f1s3]
+- ⏭️ do [#fr79]
+- ⏭️ do [#05r0]
+- ⏭️ do [#a45a]
+- ⏭️ do [#30p6]
+- do [#n39j]
+- ~~do [#bn41]~~
+- do [#f6j3]
+- do [#promptselect]
+- do [#realtimesalient]
+- do [#syncobscache2]
+- do [#capturebacklogatomic]
+- do [#opcapturelazily]
+- do [#jbtsiftnosub2verify]
+- do [#sidecarstate]
+- do [#64we]
+- do [#adstatechart2]
+- do [#adstatechart3]
+- do [#adstatechartkt]
+- do [#adstatechartjs]
+- do [#ipcauthority]
+- do [#ipcliveness]
+- do [#ipcverhandshake]
+- do [#ipcpostcommitinv]
+- ~~do [#staleplugindeploy]~~
+- do [#5qjj]
+- do [#capturebacklogatomic]
+- do [#opcapturelazily]
 - do [#hvw0]
 - do [#bbpe]
 - 🚧 do [#mrnh]
@@ -126,46 +181,6 @@ Gated rather than done, and the `[operator-verify]` tag is now carrying real wei
 - do [#coredecomp]
 - do [#orchdecomp]
 - do [#skillharnessplugin]
-- ~~do #editormodelmissing: I restarted Idea~~
-- JB Run Agent Doc on acadian-take-home.md is wedged: dispatch-only claude reopen refused to inject into pane %38 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md because the latest run is still booting and never reached a dispatch-ready prompt (timed_out); wait for the pane to become ready and reroute again ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_dispatch_ready_prompt
-- do [#crdtauth6]
-- do [#nsfz]
-- do [#suprestassoc-live]
-- do [#agentsignals]
-- do [#elementgraphprd]
-- ⏭️ do [#bbdcompactnocommit]
-- ⏭️ do [#fmgc]
-- ⏭️ do [#eqmvscroll]
-- ⏭️ do [#0dsr]
-- ⏭️ do [#17jk]
-- ⏭️ do [#f1s3]
-- ⏭️ do [#fr79]
-- ⏭️ do [#05r0]
-- ⏭️ do [#a45a]
-- ⏭️ do [#30p6]
-- do [#n39j]
-- do [#bn41]
-- do [#f6j3]
-- do [#promptselect]
-- do [#realtimesalient]
-- do [#syncobscache2]
-- do [#capturebacklogatomic]
-- do [#opcapturelazily]
-- do [#jbtsiftnosub2verify]
-- do [#sidecarstate]
-- do [#64we]
-- do [#adstatechart2]
-- do [#adstatechart3]
-- do [#adstatechartkt]
-- do [#adstatechartjs]
-- do [#ipcauthority]
-- do [#ipcliveness]
-- do [#ipcverhandshake]
-- do [#ipcpostcommitinv]
-- do [#staleplugindeploy]
-- do [#5qjj]
-- do [#capturebacklogatomic]
-- do [#opcapturelazily]
 <!-- /agent:queue -->
 
 ## Notes
@@ -176,6 +191,7 @@ Gated rather than done, and the `[operator-verify]` tag is now carrying real wei
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#queuecontmirror] #agent-doc-bug queue_continuation_required stays true on a queue that is entirely bulk-mirrored [operator-verify] / [focused-cycle] / [future-separate] backlog heads (observed: 43 drainable heads on agent-doc-bugs2.md, none in-session drainable). SKILL.md defines the signal as false when every remaining head is operator-gated or inert, and #mirrorall explicitly mirrors operator-verify heads 'deferred from auto-drain' — but the drainability filter counts them anyway, so the in-session loop is told to keep draining work it must not drain. This is what kept re-selecting the same stale mirror set every cycle and what fed the #planmassdone footgun its 26 ids. Fix: apply the same deferral predicate #mirrorall uses when mirroring to the drainable-head count, so mirrored operator-gated heads raise queue_active without raising queue_continuation_required.
 - [ ] [#bbdcompactnocommit] #agent-doc-bug Compact Exchange applied but did not commit on brookebrodack-dev.md while the operator deleted queue lines mid-compact. CONFIRMED from ops.log: operator editor deletes landed 03:29:36-37, then at 03:29:43 'crdt_commit_barrier ready=true delivery_required=true delivery_converged=false live_editors=1' and 'controller_compact_document component=exchange commit=true barrier_ready=false'. The compacted document + its archive are on disk; only the commit is missing, so nothing is lost. Note handle_compact_document_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:4650) only LOGS barrier_ready and calls compact_document unconditionally, so the barrier is not what skipped the commit — find the actual skip inside compact_document's commit leg and make a commit=true compact that cannot commit either retry to convergence or fail loudly. Silently applying the compaction and leaving it uncommitted forced the operator to notice by hand.
 - [ ] [#fmgc] Per-peer ack watermark for replay-state retention (#retentionwatermark). Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: `reliable_sync_outbox_cursor`/`reliable_sync_inbox_cursor` are `PRIMARY KEY (document_hash)` holding ONE scalar `acked_through` — there is no per-peer ack vector to take a MIN over, and `reliable_sync_liveness_journal.source_key` is a document hash, not a peer id. Needs: (a) a `(document_hash, peer_key)` ack table keyed by the PID-scoped editor registration; (b) retention keyed off `MIN(acked_version)` across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps stay as a backstop rather than being replaced. `PushChannel::flush` (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via `outbox.ack_through(ack)`; generalize that, do not rebuild it.
 - [ ] [#eqmvscroll] [recommended] Preserve/replay tmux pane scrollback across a supervisor execve recycle. #eqmv took the other branch (defer routine stale recycle to a turn boundary), which removes the common case, but RecycleImmediate (wedge / admin / stale editor delivery) still recycles mid-turn by design and will still drop scrollback if execve falls back to clean-exit + child restart.
@@ -187,7 +203,6 @@ Gated rather than done, and the `[operator-verify]` tag is now carrying real wei
 - [ ] [#a45a] Confirm the queueatcreate persistence fallback lands a do-head under a missing editor replica
 - [ ] [#30p6] Go-mode idle-queue dispatch adds the agent-doc run to the agent composer but never submits it (#agent-doc-bug), so the queue stalls with the trigger sitting as an unsubmitted draft. Operator-reported 2026-07-18. NOT yet root-caused — do not guess. Starting evidence: a resubmit path already exists (idle_queue_resubmit_pending_payload / idle_queue_pending_payload_needs_enter_resubmit in agent-doc-start-runtime-io/src/idle_watch.rs) gated on tmux_submit_profile_for_harness(..).pending_draft_enter_resubmit(), which currently returns true unconditionally — so that gate is NOT the filter and the miss is upstream: check drain_dispatch_dedup_skip(payload_already_pending) and already_resubmitted (a stale latch would suppress the Enter), and whether shared.inject_pane resolves for a go-mode drain. Distinct from #jbtsiftnosub2, which covers the JB fresh-pane case only. Reproduce with a go-mode queue and watch the composer after injection
 - [ ] [#n39j] SimWorld coverage for #queuepersiststall: preflight must report PROBED drainability when queue maintenance fails to persist, never QueueState::default(). Fixed + verified live (0 -> 14 drainable on brookebrodack-dev.md) but has no deterministic test — reproducing it needs a simulated editor-authority failure (editor_attached_model_missing), which is a SimWorld job rather than a mock. Add a SimWorld case that forces the persist failure and asserts preflight still reports the real drainable head count, so the loop-gate contract cannot silently regress to zeros
-- [ ] [#bn41] Compact hit the same editor-authority family as #5d9f: compact_document retained the canonical write in CRDT+Lazily but found no registered editor replica (recovery=await_editor_replica_no_disk_write_then_session_check), and session-check then failed with editor_attached_model_missing. RESOLVED by admin recycle + admin reload-lib, after which session-check returned committed/ok with no data loss. Actor was state=starting gen=57 with controller+supervisor both fresh, so the replica — not the controller — was the missing piece. Make the binary attempt the replica re-registration it already reports as editor_replica_reregister=requested BEFORE surfacing the error, so this self-heals instead of needing two manual admin commands
 - [ ] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
 - [ ] [#f6j3] [recommended] Stale branch fix/editor-authority-no-disk-repair (worktree src/agent-doc-editor-authority-fix) has 2 unmerged commits targeting the editor-authority blocker, but is 5 days / 50 commits behind main and still carries the OLD error wording ('bounded publish-live-buffer request', 'reload or save the editor buffer') where main now says 'bounded Lazily-current observation request ... operator_action=none'. Main has already reworked that area. Decide explicitly: rebase and salvage, or delete the branch+worktree. Do NOT merge as-is
 - [ ] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
@@ -230,7 +245,6 @@ Gated rather than done, and the `[operator-verify]` tag is now carrying real wei
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
 - [ ] [#ipcpostcommitinv] [focused-cycle] #agent-doc-bug IPC root-cause C: structural invariants enforced on wrong write path. #boundaryaccum root fix landed (git.rs unconditional snapshot collapse) but needs a POST-COMMIT verification gate that fails loudly/self-heals if HEAD carries more than one boundary or a duplicated scaffold. Reuse ipc_corruption.rs detect_duplicated_scaffold. Touches git.rs, ipc_corruption.rs, flow/closeout.rs. Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md.
-- [ ] [#staleplugindeploy] After the module-decomposition refactor lands: make install + push the shipped #stale-plugin-detect change (submodule commit 9b38d017). Deferred this cycle: installing would deploy the uncommitted decomposition WIP as the live binary. Verify a live stale plugin then surfaces the stale_plugin preflight warning.
 - [ ] [#vscsaveproj] #agent-doc-bug VS Code save_document observability parity: processSaveDocumentSignal (editors/vscode/src/extension.ts) only writes outcomes to outputChannel, while JB saveDocumentViaDocument records StateProjectionBridge surface ops for missing_file/missing_document/saved/failed. Add the VS Code state-projection surface-op analogue so save_document outcomes are observable in the state mirror (not just the log), plus a behavioral test driving processSaveDocumentSignal end-to-end (open doc -> signal -> save -> ack-content).
 - [ ] [#restartbleednonroute] #agent-doc-bug Harden auto-install child stdio against fd2==pane: run_auto_install_steps_once (project_controller/rpc.rs) blindly dups fd2 via auto_install_child_stdio_plan(); when SupervisorStderrRedirect is inactive (non-route-owned TUI, or route-owned but maybe_start fell back to inactive on error) fd2 is the agent pane and make-install output still bleeds. Open the session project_root .agent-doc/logs/supervisor-stderr.log and pass its fd to auto_install_child_stdio_plan_to_fd(log_fd) so build output is off-pane regardless of route ownership; add a redirect-inactive regression.
 - [ ] [#r4gq] [operator-verify] Live JB Run Agent Doc dispatch-hang proof (#kjw0 fix, shipped 0.34.66 build): after the recycled build is running, trigger Run Agent Doc into a BUSY codex pane (mid-turn, 'esc to interrupt' visible) and confirm it returns FAST with a queued-behind-active-turn outcome (pane shows queued status) instead of hanging ~21s then a dispatch-start-unproven notification. Grep ops.log for route_dispatch_start_queued_behind_active_turn (present on success) and confirm accepted_without_dispatch_start_proof is ABSENT for the busy case. Root cause: route injected the trigger into a mid-turn pane; codex queued it behind the active turn so the UserPromptSubmit hook could not advance within the 10s proof budget, and the direct-pane path paid TWO 10s waits (initial + late-resubmit) then filed a false bug. Fix: short_circuit_dispatch_start_when_pane_busy in route/dispatch.rs detects busy_proof_line and returns RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn (accepted, not fail-closed).

@@ -77,7 +77,23 @@ Built, verified end-to-end, and pushed to **`btakita/acadian-take-home`** (commi
 Two notes worth your attention. The repo is **private**, so the reviewer will need an invite or a zip before submission. And the plan file proposed the name `mag7-returns`, but I used `acadian-take-home` per your queue item — the app title inside is still "MAG7 Return Viewer".
 Add a dev uv task to start the dev server.
 commit + push
-<!-- agent:boundary:8363abd4 -->
+
+### Re: uv dev task, committed and pushed — fable-5
+
+Added and verified. Pushed as `9c492fd`; superproject gitlink at `0d744741`.
+
+`uv` 0.11.28 has no `[tool.uv.tasks]` table — I probed it and it just tries to spawn the task name as a binary — so the idiomatic equivalent is a `[project.scripts]` entry point:
+
+```bash
+cd backend && uv run dev
+```
+
+`app/dev.py` exposes `main()`, registered as `dev = "app.dev:main"`. It starts uvicorn with autoreload and takes `--host`, `--port`, and `--no-reload`, reading `HOST`/`PORT` from the environment as defaults. Verified live: `uv run dev --port 8010` came up with the reloader active and `/health` answered `{"status":"ok"}`.
+
+`make dev-backend` now delegates to `uv run dev` instead of spelling out the uvicorn invocation, and the README documents the task and its flags.
+
+Two things worth flagging. `uv run` generated `backend/uv.lock` (1306 lines) and I committed it — for an application that's the right call, since it pins the resolved dependency set for whoever clones the repo, but say the word if you'd rather it stay untracked. And `make check` is green after the change: 29 backend tests, mypy clean across 9 source files now, 9 frontend tests, typecheck, production build.
+<!-- agent:boundary:9a6bf411 -->
 <!-- /agent:exchange -->
 
 ## Queue

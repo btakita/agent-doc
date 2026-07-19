@@ -301,13 +301,38 @@ If convergence ever *is* the bottleneck — a very large response, or a document
 Worth escalating `#wsflake2`: it is broader than the two tests I named. A full `cargo test --workspace --no-fail-fast` run is **green (7706 passed, 0 failed, 290 suites)**, but back-to-back plain runs intermittently report 1-3 failures in varying suites, including a 73-test suite I had not seen fail before. So the suite passes on its merits and the flakiness is purely parallel-load scheduling.
 
 That is a worse problem than the individual tests: `make check` currently cannot be trusted to distinguish a real regression from load noise, which matters much more now that the previously-red suite is otherwise clean. I did not fold this into the current item — it needs its own cycle, and I have updated `#wsflake2` to reflect the wider scope rather than leaving it scoped to two test names.
-<!-- agent:boundary:13e5f32d -->
+
+### Re: do [#wsflake2] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#wsflake2]
+
+
+Two flakes fixed, one of which I caused. Leaving the item **open** — there is at least one more and I am not going to close it on partial work.
+
+**The one I caused.** My `#ensurereplicagensup` test flipped the process-global `PROCESS_SERVES_RELAY_HUB` to false and restored it afterward. Five sibling tests in that crate call `checkpoint_durable_projection_for_file` and need it to actually checkpoint — any of them scheduled inside that window saw a non-owner process and failed. Restoring the value afterward does not make a global mutation hermetic; it just narrows the window. So the fix for a load-dependent flake class introduced a load-dependent flake, which is worth saying plainly rather than folding into a list.
+
+The deferral decision is now a pure function tested directly, no test writes the global, and `test_cli` pins that only the controller's `mark_process_as_relay_hub_owner` may write it — so this cannot recur by someone reaching for the same shortcut.
+
+**The pre-existing one.** `reliable_sync_status_projects_plane_open_set_without_sidecar_oracle` asserted `status.registrations.is_empty()`. The liveness plane is process-global and shared by every test in the crate, so that assertion really said "no other test has registered yet" — true when the crate runs alone, false once a full workspace run reorders threads under CPU contention. Now scoped to the document under test, which is the property actually being tested and which no sibling can invalidate.
+
+That pattern is the general lesson for the rest of this item: several of these tests assert **global** emptiness or counts when they mean something about *their own* fixture. Those assertions pass in isolation and encode an accidental dependency on nothing else having run yet.
+
+I also had to fix a `test_cli` assertion I wrote last cycle that pinned the literal expression `if !process_serves_relay_hub() {` instead of the invariant, so refactoring the guard broke it. Pinning syntax rather than behaviour is the same mistake in a different place.
+
+**Result:** repeated `cargo test --workspace` went from failing on *every* run to failing intermittently; `--no-fail-fast` is green (7705 passed, 290 suites).
+
+**Still open:** `session_actor_cmd::tests::status_context_refreshes_controller_lease_from_matching_live_supervisor`. It starts a real `SupervisorIpc` socket and asserts on lease state plus `transitions.len() == 2`, so it is a live-socket timing test rather than a shared-global assertion — a different class. I deliberately did not rush an edit into a concurrency-sensitive test at the end of a long cycle; it needs its own pass. `#wsflake2` stays open with that named as the remaining work.
+
+Pushed as `01b1eae3e`.
+<!-- agent:boundary:a5ebea3b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
 - ~~do [#crdtcaschkptdrive]~~
-- do [#wsflake2]
+- ~~do [#wsflake2]~~
 - do [#ctrlrespawnenoent]
 - ~~do [#crdtcasraced]~~
 - ~~do [#donestrikeextra]~~
@@ -367,7 +392,7 @@ That is a worse problem than the individual tests: `make check` currently cannot
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#wsflake2] Workspace test suite is unreliable under parallel load — BROADER than first scoped. A full 'cargo test --workspace --no-fail-fast' run is GREEN (7706 passed, 0 failed, 290 suites), but back-to-back plain 'cargo test --workspace' runs intermittently report 1-3 failures across VARYING suites (observed: dirs::tests::resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path, project_controller::rpc::tests::reliable_sync_status_projects_plane_open_set_without_sidecar_oracle, and a 73-test suite failing up to 3). Each named test passes 6/6 in isolation, and a clean stashed tree reproduces failures too, so this is pre-existing load-dependent scheduling, not a real regression. Impact: 'make check' cannot currently distinguish a real regression from load noise, which matters much more now the suite is otherwise green — it will eventually mask a genuine break. Fix by making the offending tests hermetic (per-test temp dirs/ports, no shared process-global mutable state, SimWorld where live tmux/sockets are involved) rather than by retrying or serializing the whole suite. Start by identifying every test that touches process-global state or a fixed path/port.
+- [ ] [#wsflake2] Workspace suite hermeticity — PARTIALLY DONE (01b1eae3e), do not close. FIXED: (1) my own #ensurereplicagensup test mutated process-global PROCESS_SERVES_RELAY_HUB, breaking 5 sibling tests that need checkpoint_durable_projection_for_file to succeed — decision is now a pure fn, no test writes the global, test_cli pins that only the controller may; (2) reliable_sync_status_projects_plane_open_set_without_sidecar_oracle asserted status.registrations.is_empty() against the process-global liveness plane shared by the whole crate — now scoped to its own document. Repeated 'cargo test --workspace' went from failing EVERY run to intermittent; --no-fail-fast green (7705 passed, 290 suites). REMAINING: session_actor_cmd::tests::status_context_refreshes_controller_lease_from_matching_live_supervisor (src/session_actor_cmd.rs:4951) — starts a real SupervisorIpc socket and asserts lease state plus ctx.operator_status.transitions.len()==2, so it is live-socket TIMING, not a shared-global assertion; needs its own careful pass (deterministic socket readiness or SimWorld), not a rushed edit. GENERAL PATTERN to sweep for: tests asserting GLOBAL emptiness/counts (is_empty(), len()==N over process-global registries) when they mean something about their own fixture — these pass in isolation and encode an accidental dependency on nothing else having run.
 - [ ] [#ctrlrespawnenoent] #agent-doc-bug The project controller can die during 'make install' and then fail to respawn. Observed 2026-07-19 on /home/brian/work/btakita/agent-loop: every agent-doc command failed with pre_write_guards -> editor_attached_model_missing, caused by 'failed to launch project controller (binary=/home/brian/.cargo/bin/agent-doc, spawn_attempts=6): No such file or directory (os error 2)'. The binary existed immediately afterward — cargo install had been mid-replacement of that path, so all 6 spawn attempts hit the ENOENT window and gave up. Recovery required manually starting 'agent-doc controller serve --project-root <root> --launch-mode lazy'. Fix: make spawn retry tolerate a transient ENOENT on the binary path (it is being replaced, not missing) with a bounded backoff spanning a realistic install window, rather than exhausting 6 fast attempts; and surface a clearer operator message than editor_attached_model_missing, which points diagnosis at the editor when the real cause is a missing controller.
 - [ ] [#patchretryidem] #patchretryidem #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). NARROWED 2026-07-19 by the #fzmutloss fix: the mutation half and the body half were never in one transaction, so this is NOT 'both halves lost together' - the body half is re-applied non-idempotently by the retry while the mutation half took a different path. Remaining question is only the body-half idempotency. Needs a reproduction of the CAS race; do not guess at the idempotency boundary.
 - [ ] [#respidxrealtime] Source exchange response nodes from the realtime document model instead of re-parsing a &str. closeout_signal::ResponseIndex::build now parses ONCE per guard invocation (was N x (1 + M) tree-sitter parses for N ids and M archives, #respidxparse), but it still parses from rc.doc_content() bytes. The live model already holds these nodes - agent-doc-markdown-ast::crdt::OverlayCrdtDoc, and the SeqCrdt exchange-node direction AGENTS.md commits to. Reading nodes from the realtime model removes the parse entirely and generalizes past this guard to every string-scanning consumer of exchange structure. Operator-raised 2026-07-19.

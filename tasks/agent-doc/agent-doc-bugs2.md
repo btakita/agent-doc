@@ -260,17 +260,40 @@ Heads now render as list items. `parse_spans` still accepts the legacy bare form
 Two test expectations changed rather than code, and both deserve to be called out: one pinned the bare slash-command rendering (the bug itself), and one of my own from earlier today wrongly asserted a *struck* `- ~~do the refactor now~~` stays user intent. The property that matters — an **unstruck** free-text head beginning with the verb "do" stays real intent — is still pinned.
 
 The drain is unblocked with 8 heads ready; `#5pn7` still needs your live JB eyeball.
-<!-- agent:boundary:d3c41511 -->
+### Re: Run Agent Doc triggered — #5pn7 verified — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#5pn7]
+
+
+**`#5pn7` passes.** Closing it.
+
+Evidence, not vibes:
+
+- **Zero `preflight_visible_mutation_deferred_lazily_current` entries since `19:08:37Z`.** Those final hits are my own failures from the start of this session, before `#preflightsettleparity` landed at ~19:20. Nothing since.
+- The log captures the exact transition that used to abort: at `20:04:12` the frontier was `delivery_converged=false`, and at `20:04:13` it was `true`. That one-second converging round trip is precisely what the old wall-clock bail killed. It now waits through it.
+- Your trigger dispatched `agent-doc <FILE>` into the owning pane and started a real cycle — the one writing this response.
+
+**On the stall: that one was mine, and the binary caught it.** This preflight emitted:
+
+```
+queue_stall_detected reason=no_valid_stop_with_continuation_required
+(prior cycle committed with 8 drainable head(s) but the loop neither
+ continued nor recorded a valid stop reason)
+```
+
+After the previous closeout I stopped to ask you about `#5pn7`. Asking a question is not a valid stop reason — `#drain-no-defer` is explicit that the right move was to file the operator-gated item and keep draining. `#qstallguard` Layer B did its job and named the stall. No code change warranted; the guard is correct and I was wrong.
+
+Worth noting what that means for the two fixes shipped earlier: they removed the *binary-caused* stalls (`#qgoalstall`, `#qstrikechurn`), and what remains is the guard correctly reporting an *agent-caused* one. Different failure, working detector.
+
+Resuming the drain — next head is `#c8tb`.
+<!-- agent:boundary:eb531cbc -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ⏭️ do [#5pn7]
-- ~~do [#wsflake2]~~
-- ~~do [#patchretryidem]~~
-- ~~📌 do [#jbroutasync]~~
-- ~~/goal Fix all contributing factors to queue go mode stall in agent-doc-bugs2.md. This turn stalled despite being run with agent-doc run and queue in go mode. This turn should continue to the next queue item once this task is complete.~~
-- ~~do [#fr79backfill]~~
+- ~~⏭️ do [#5pn7]~~
 - ⏭️ 📌 do [#c8tb]
 - ⏭️ 📌 do [#jbrouteasyncchannel]
 - ⏭️ 📌 do [#jbedtledgerverify]
@@ -284,7 +307,7 @@ The drain is unblocked with 8 heads ready; `#5pn7` still needs your live JB eyeb
 - ⏭️ 📌 do [#syncobscache2]
 - ⏭️ 📌 do [#capturebacklogatomic]
 - ⏭️ 📌 do [#opcapturelazily]
-- 📌 do [#jbtsiftnosub2verify]
+- ⏭️ 📌 do [#jbtsiftnosub2verify]
 - 📌 do [#sidecarstate]
 - 🚧 📌 do [#64we]
 - 📌 do [#adstatechart2]
@@ -306,7 +329,6 @@ The drain is unblocked with 8 heads ready; `#5pn7` still needs your live JB eyeb
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#5pn7] [operator-verify] Live #preflightsettleparity proof: trigger JB `Run Agent Doc` on tasks/agent-doc/agent-doc-bugs2.md while an editor holds the buffer. Expect the cycle to start (preflight past step 1) instead of aborting with `preflight deferred ... Lazily current authority remained delivery_pending`. Fixed + shipped in agent-doc; only the live human eyeball remains.
 - [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.
 - [ ] [#jbrouteasyncchannel] [focused-cycle] #agent-doc-bug Move editor_route onto the async accept-on-admission endpoint — BLOCKED on a completion channel, do NOT just add it to the whitelist. Tagged [focused-cycle] because it needs a clean design cycle, not an in-loop drain: it surfaced as the drain head 3x and was correctly declined each time. Split from #jbroutasync. The mechanical change is small: validate_async_editor_command_payload (rpc.rs:5465) whitelists only sync_tmux_layout/focus_document_pane, so adding an editor_route arm would route it through handle_editor_command_submit_async_rpc. DO NOT DO THAT ALONE — it silently destroys every Run Agent Doc failure notification. resolveCommandSubmitAcceptedData (CpcRouteClient.kt:431) returns CpcEditorRouteResult(0, output) — exit code 0 = SUCCESS — for status submitted/accepted/running/applied. The entire classification chain in TerminalUtil keys off a NON-ZERO exit: BUSY_RUNNING -> notifyRunAgentDocStillRunning, QUEUED_PENDING -> notifyRunAgentDocQueued, RETRYABLE_STARTING retries, DISPATCH_START_UNPROVEN, and the catch-all notifyPersistentRouteFailure (TerminalUtil.kt:490-566). Accept-on-admission returns 0 immediately so none can fire, and every click would report success. This is the exact feedback path verified working 2026-07-19 when a busy pane correctly refused to inject on brookebrodack-dev.md. PREREQUISITE: a completion channel so the plugin learns the real outcome after acceptance (poll the command projection by command_id — the accept response already carries a projection with per-command status/terminal fields — or a controller->plugin completion event), with the classification chain running against THAT rather than the submit response. Only then is the latency win safe.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.

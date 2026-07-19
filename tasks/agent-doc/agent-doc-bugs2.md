@@ -81,18 +81,44 @@ So I think your three glitches and this one are **one bug, not four**: a post-CA
 I did **not** touch brookebrodack-dev.md — it is foreign-owned by pane %9. It still carries the corruption and needs a repair from its owning session.
 
 One more: this cycle's preflight reported `queue_maintenance_not_persisted` (`editor_attached_model_missing`), so the recomputed queue was **not** applied — freshly-added backlog ids may be missing from the queue you see.
-<!-- agent:boundary:2a99ffc5 -->
+
+### Re: do [#fzmutloss] — the dropped `--done` is a one-line classification gap — opus-4-8
+
+Found and fixed it — no reproduction of the CAS race needed, because the mutation loss isn't in the race at all. It's downstream, and it's exact.
+
+**Mechanism.** `write_outcome_retains_closeout_mutations` (`agent-doc-write-runtime-io/src/lib.rs:1068`) decides whether to run `apply_pending_and_status_mutations`. It says yes when the write succeeded, or when `error_requests_retry_without_disk` matches — and that predicate matched exactly four substrings, all about disk authority (`retry_without_disk_write`, `disk is not consulted…`, `disk remained non-authoritative`).
+
+The CRDT convergence timeout bails with:
+
+> `finalize: CRDT convergence for … did not settle within 60000ms (reason=…); pending change retained for retry`
+
+It matches **none** of them. So the predicate returned false, `apply_pending_and_status_mutations` was skipped entirely, and your `--done` was dropped — while the response capture was retained through the separate `state.db` intent path and committed on resume. Response lands, closeout silently lost, item stays `[ ]` and queued. Exactly what you saw.
+
+The error literally announces that it retains its change for retry. The classifier just wasn't listening.
+
+**Fix** (`3fcf9bea5`): I did not add a fifth magic substring — that's how this drifted in the first place. Producer and classifier now share one constant, `RETAINED_FOR_RETRY_MARKER`, so a new retaining error can't silently fail to be classified. Regression test pins all three cases: the bare timeout, a wrapped cause, and a genuine hard failure that must *not* classify (a hard error must never apply mutations it didn't earn).
+
+This also means `#patchretryidem` is likely narrower than I wrote it: the mutation half and the body half were never in one transaction, so they weren't "lost together" — they were on two different paths, and only one of them was retained.
+
+### On the TTL cache
+
+You were right to push back, and I've replaced it (same commit). A TTL is a guess at how long a turn lasts: too short and the ledger replay comes straight back, too long and a new cycle logs under the previous turn's id — a correctness bug traded for speed, which is a bad trade in an attribution path.
+
+It's now a lazily `Context` + `SlotMap` scoped to the turn, with a reference-counted RAII guard, matching the `observation_cache` / `GIT_TOPLEVEL_MEMO` pattern already in the codebase. `route::run_with_tmux_with_options` opens one scope per route, since one route *is* one turn. The scope boundary — not a clock — invalidates the memo, so it's exact rather than approximate. An unscoped caller resolves fresh every time, so it's never wrong, only slower.
+
+`make check` green, 7693/7693, installed + recycled.
+<!-- agent:boundary:ea37a663 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- do [#patchretryidem]
-- do [#fzmutloss]
-- do [#respidxrealtime]
+- do [#crdtcasraced]
+- ~~do [#fzmutloss]~~
+- do [#jbedtledger]
 - do [#jbroutasync]
 - do [#jbsockdeadline]
-- do [#jbedtledger]
-- do [#crdtcasraced]
+- ~~do [#patchretryidem]~~
+- do [#respidxrealtime]
 - ~~JB Run Agent Doc is slow. Please optimize. Find all contributing bottlenecks and optimize them.~~
 - equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
 - do [#bbdcompactnocommit]
@@ -143,8 +169,7 @@ One more: this cycle's preflight reported `queue_maintenance_not_persisted` (`ed
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#patchretryidem] #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). Operator context: finalize timed out at 60s with repeated compare_and_swap_raced, then the binary resumed and committed. Hypothesis: this and #fzmutloss are ONE bug - the retry re-applies the body half non-idempotently while dropping the mutation half. Needs a reproduction of the CAS race first; do not guess at the idempotency boundary.
-- [ ] [#fzmutloss] #agent-doc-bug A finalize CRDT-convergence timeout can land the response but SILENTLY DROP its backlog mutation. Operator-reported 2026-07-19 on brookebrodack-dev.md: finalize timed out at 60s with repeated compare_and_swap_raced, the binary resumed and committed the response, but the --done mutation was lost so the item stayed [ ] and queued despite the response having landed; repaired manually with agent-doc write --commit --done. Violates the response-closeout-is-atomic rule (response + queue-head consumption + backlog/done mutations + snapshot + commit succeed as one transaction or none). Retained-intent replay must carry the backlog/done mutation set with the response capture, not just the response body. Likely the same root cause as #patchretryidem.
+- [ ] [#patchretryidem] #patchretryidem #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). NARROWED 2026-07-19 by the #fzmutloss fix: the mutation half and the body half were never in one transaction, so this is NOT 'both halves lost together' - the body half is re-applied non-idempotently by the retry while the mutation half took a different path. Remaining question is only the body-half idempotency. Needs a reproduction of the CAS race; do not guess at the idempotency boundary.
 - [ ] [#respidxrealtime] Source exchange response nodes from the realtime document model instead of re-parsing a &str. closeout_signal::ResponseIndex::build now parses ONCE per guard invocation (was N x (1 + M) tree-sitter parses for N ids and M archives, #respidxparse), but it still parses from rc.doc_content() bytes. The live model already holds these nodes - agent-doc-markdown-ast::crdt::OverlayCrdtDoc, and the SeqCrdt exchange-node direction AGENTS.md commits to. Reading nodes from the realtime model removes the parse entirely and generalizes past this guard to every string-scanning consumer of exchange structure. Operator-raised 2026-07-19.
 - [ ] [#jbroutasync] #agent-doc-bug Move editor_route onto the async accept-on-admission controller endpoint and honor submit.deadline_ms. handle_editor_command_submit_async_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:5381) already exists, spawns a worker, and logs editor_command_async_completed; validate_async_editor_command_payload (rpc.rs:5427) whitelists only sync_tmux_layout/focus_document_pane so editor_route is rejected as unsupported. The plugin already has resolveCommandSubmitAcceptedData (CpcRouteClient.kt:414) for the accepted shape. Separately the controller never reads submit.deadline_ms, so routed_cycle_ack_timeout (30s with a live child, dispatch.rs:2092) outlives the client's 15s deadline: the operator sees a timeout while the route keeps running. Biggest remaining perceived-latency win.
 - [ ] [#jbsockdeadline] #agent-doc-bug CpcRouteClient socket read has no deadline and the RUN_AGENT_DOC registry slot is never released on hang. SocketChannel.open (CpcRouteClient.kt:440) sets no connect/read timeout and reader.readLine() (:447) blocks indefinitely; the 15s is only a server-side deadline hint in the payload. A wedged controller hangs the route thread forever while the editorCommandRegistry slot (TerminalUtil.kt:447,372) stays held, so every later click dedupes out with no user-visible outcome. Likely the real mechanism behind 'Run Agent Doc does nothing'. Fix: real read deadline plus a finally that releases the slot.

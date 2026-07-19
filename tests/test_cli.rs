@@ -5495,7 +5495,10 @@ fn test_agent_doc_turn_owns_closeout_signal_policy() {
     )
     .unwrap();
     for required in [
-        "agent_doc_turn::closeout_signal::directive_response_source",
+        // `#respidxparse`: the per-id `directive_response_source` call was
+        // replaced by the parse-once index, which is the same focused policy in
+        // `agent_doc_turn::closeout_signal` — the ownership rule is unchanged.
+        "agent_doc_turn::closeout_signal::ResponseIndex",
         "agent_doc_turn::closeout_signal::reaped_directive_ids_without_response",
         "agent_doc_turn::closeout_signal::ReapedResponseLossInput",
     ] {

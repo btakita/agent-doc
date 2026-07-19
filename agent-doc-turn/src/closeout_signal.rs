@@ -928,66 +928,64 @@ pub fn directive_response_source(
     archives: &[String],
     id: &str,
 ) -> Option<ResponseSource> {
-    if content_has_re_heading_for_id(content, id) {
-        return Some(ResponseSource::Exchange);
-    }
-    if archives
-        .iter()
-        .any(|archive| content_has_re_heading_for_id(archive, id))
-    {
-        return Some(ResponseSource::Archive);
-    }
-    None
+    ResponseIndex::build(content, archives).source_for(id)
 }
 
-/// True when a `### Re:` response *section* in `content` references `#id`.
+/// True when a `### Re:` response node in `content` references `#id`.
 ///
 /// `#reheadingidoptional`: this used to require the id in the heading LINE, on
 /// the premise that a `do #id` response always renders as `### Re: ... #id`.
 /// That premise is false — `SKILL.md` asks for `### Re: <topic> — <model>`, and
 /// a topic named after the operator's question legitimately carries no id. The
-/// heading-only match then reported a response that is plainly present in the
-/// document as silently lost, alarming on a healthy closeout.
+/// heading-only match then reported a response plainly present in the document
+/// as silently lost, alarming on a healthy closeout.
 ///
-/// Matching the whole response section (heading + body) keeps the original
-/// anti-false-match intent: the scan still cannot see queue-prompt echoes or
-/// backlog lines, because a section ends at the next heading of any level *or*
-/// at the next component marker, and `agent:queue` / `agent:backlog` live in
-/// their own components.
+/// Scope comes from the exchange AST, not from scanning lines: `components`
+/// bounds the `exchange` component (ignoring markers inside code fences) and
+/// `parse_exchange_nodes` splits it into prompt and response turns. Only
+/// `Response` nodes are searched, so `agent:queue` / `agent:backlog` text and
+/// user prompt turns can never be read as a response body — the same
+/// anti-false-match intent the heading-only rule had, without the hand-rolled
+/// section tracking that made it wrong.
 pub fn content_has_re_heading_for_id(content: &str, id: &str) -> bool {
-    if id.is_empty() {
-        return false;
-    }
-    let needle = format!("#{}", id.to_ascii_lowercase());
-    let mut in_response_section = false;
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-        let is_re_heading = trimmed.starts_with("### Re:") || trimmed.starts_with("###Re");
-        if is_re_heading {
-            in_response_section = true;
-        } else if is_markdown_heading(trimmed)
-            || trimmed.starts_with("<!-- agent:")
-            || trimmed.starts_with("<!-- /agent:")
-        {
-            // Any other heading, or a component boundary, ends the section —
-            // so backlog/queue text can never be read as a response body.
-            in_response_section = false;
-        }
-        if !in_response_section {
-            continue;
-        }
-        if line_references_id(trimmed, &needle) {
-            return true;
-        }
-    }
-    false
+    ResponseIndex::build(content, &[]).source_for(id).is_some()
 }
 
-/// True for an ATX heading (`#` … `######` followed by a space), so a bare
-/// `#tag` inside a response body does not read as a section boundary.
-fn is_markdown_heading(line: &str) -> bool {
-    let hashes = line.chars().take_while(|c| *c == '#').count();
-    (1..=6).contains(&hashes) && line[hashes..].starts_with(' ')
+/// The regions of `content` that may contain response turns.
+///
+/// Normally that is the `exchange` component(s). A HEAD compact archive is a
+/// bare response run with no component wrapper, so when no `exchange` component
+/// exists we fall back to the content *outside* every other component — never
+/// the raw input, or a document carrying `agent:queue` / `agent:backlog` but no
+/// exchange would feed those items straight into the response scan.
+fn exchange_bodies(content: &str) -> Vec<String> {
+    let components = agent_doc_markdown_ast::overlay::components(content);
+    let bodies: Vec<String> = components
+        .iter()
+        .filter(|component| component.name == "exchange")
+        .filter_map(|component| content.get(component.start_byte..component.end_byte))
+        .map(str::to_string)
+        .collect();
+    if !bodies.is_empty() {
+        return bodies;
+    }
+    if components.is_empty() {
+        return vec![content.to_string()];
+    }
+    let mut outside = Vec::new();
+    let mut cursor = 0usize;
+    for component in &components {
+        if component.start_byte > cursor
+            && let Some(region) = content.get(cursor..component.start_byte)
+        {
+            outside.push(region.to_string());
+        }
+        cursor = cursor.max(component.end_byte);
+    }
+    if let Some(tail) = content.get(cursor..) {
+        outside.push(tail.to_string());
+    }
+    outside
 }
 
 /// True when `line` mentions `needle` (`#<id>`, lowercased) as a whole id.
@@ -1033,6 +1031,7 @@ pub struct ReapedResponseLossInput<'a> {
 /// live exchange `content` or in any HEAD compact `archives` entry. Order follows
 /// `directive_ids`; duplicates are collapsed.
 pub fn reaped_directive_ids_without_response(input: &ReapedResponseLossInput<'_>) -> Vec<String> {
+    let index = ResponseIndex::build(input.content, input.archives);
     let reaped: std::collections::HashSet<&str> =
         input.reaped_ids.iter().map(String::as_str).collect();
     let mut lost: Vec<String> = Vec::new();
@@ -1040,12 +1039,7 @@ pub fn reaped_directive_ids_without_response(input: &ReapedResponseLossInput<'_>
         if id.is_empty() || !reaped.contains(id.as_str()) {
             continue;
         }
-        let materialized = content_has_re_heading_for_id(input.content, id)
-            || input
-                .archives
-                .iter()
-                .any(|archive| content_has_re_heading_for_id(archive, id));
-        if materialized {
+        if index.source_for(id).is_some() {
             continue;
         }
         if !lost.iter().any(|existing| existing == id) {
@@ -1053,6 +1047,73 @@ pub fn reaped_directive_ids_without_response(input: &ReapedResponseLossInput<'_>
         }
     }
     lost
+}
+
+/// Response turns from the live exchange and the HEAD compact archives, parsed
+/// **once** so a multi-id cycle does not re-run the markdown AST per id.
+///
+/// `#respidxparse`: the per-id entry points each re-parsed `content` *and* every
+/// archive, so an N-id cycle with M archives paid N x (1 + M) tree-sitter parses
+/// of the same bytes. Build this once and query it per id instead.
+///
+/// This is still a parse from a `&str`. The realtime document model already
+/// holds these exchange nodes (`agent-doc-markdown-ast::crdt::OverlayCrdtDoc`,
+/// and the SeqCrdt exchange-node direction in AGENTS.md); sourcing them from
+/// there would remove the parse entirely. See `#respidxrealtime`.
+pub struct ResponseIndex {
+    exchange: Vec<String>,
+    archive: Vec<String>,
+}
+
+impl ResponseIndex {
+    /// Parse the live content and each archive into their response-turn bodies.
+    pub fn build(content: &str, archives: &[String]) -> Self {
+        Self {
+            exchange: response_bodies(content),
+            archive: archives
+                .iter()
+                .flat_map(|archive| response_bodies(archive))
+                .collect(),
+        }
+    }
+
+    /// Where `id`'s response materialized, if anywhere. Live exchange wins.
+    pub fn source_for(&self, id: &str) -> Option<ResponseSource> {
+        if id.is_empty() {
+            return None;
+        }
+        let needle = format!("#{}", id.to_ascii_lowercase());
+        if self
+            .exchange
+            .iter()
+            .any(|body| line_references_id(body, &needle))
+        {
+            return Some(ResponseSource::Exchange);
+        }
+        if self
+            .archive
+            .iter()
+            .any(|body| line_references_id(body, &needle))
+        {
+            return Some(ResponseSource::Archive);
+        }
+        None
+    }
+}
+
+/// The rendered text of every `### Re:` response turn in `content`.
+fn response_bodies(content: &str) -> Vec<String> {
+    exchange_bodies(content)
+        .iter()
+        .flat_map(|body| agent_doc_markdown_ast::exchange_tree::parse_exchange_nodes(body))
+        .filter(|node| {
+            matches!(
+                node.kind,
+                agent_doc_markdown_ast::exchange_tree::ExchangeNodeKind::Response { .. }
+            )
+        })
+        .map(|node| node.render())
+        .collect()
 }
 
 /// True when response text clearly completes `id`.
@@ -1286,14 +1347,17 @@ Archived them under the new layout. Closes #rappsnippetarchive.
         );
     }
 
-    /// The loosened match must not start reading queue/backlog text as a
-    /// response body, or a genuinely lost response stops being detected.
+    /// The loosened match must not start reading queue/backlog text or a user
+    /// prompt turn as a response body, or a genuinely lost response stops being
+    /// detected. Scope comes from the exchange AST, so this pins both bounds.
     #[test]
-    fn component_and_heading_boundaries_end_the_response_section() {
+    fn component_and_prompt_turns_are_not_response_bodies() {
         let after_component = "\
+<!-- agent:exchange -->
 ### Re: unrelated topic — opus-4-8
 
 Nothing to do with the reaped id.
+<!-- /agent:exchange -->
 
 <!-- agent:queue -->
 do [#lostid]
@@ -1301,31 +1365,36 @@ do [#lostid]
 ";
         assert!(
             !content_has_re_heading_for_id(after_component, "lostid"),
-            "a queue head after the component boundary is not a response"
+            "a queue head in its own component is not a response"
         );
 
-        let after_heading = "\
+        // A user prompt turn following the response is a Prompt node, not part
+        // of the response, so an id the operator merely asked about is not a
+        // materialized response.
+        let trailing_prompt = "\
+<!-- agent:exchange -->
 ### Re: unrelated topic — opus-4-8
 
 Nothing to do with the reaped id.
 
-## Backlog
-
-- [ ] #lostid still open
+❯ do [#lostid]
+<!-- /agent:exchange -->
 ";
         assert!(
-            !content_has_re_heading_for_id(after_heading, "lostid"),
-            "a later heading ends the response section"
+            !content_has_re_heading_for_id(trailing_prompt, "lostid"),
+            "a trailing prompt turn is not a response body"
         );
 
-        // A bare `#tag` inside the body is not a heading and must not end the
-        // section before a later id reference on the same response.
+        // A bare `#tag` inside the body must not truncate the search before a
+        // later id reference in the same response.
         let tagged = "\
+<!-- agent:exchange -->
 ### Re: unrelated topic — opus-4-8
 
 #sometag context line
 
 Closes #lostid.
+<!-- /agent:exchange -->
 ";
         assert!(content_has_re_heading_for_id(tagged, "lostid"));
     }

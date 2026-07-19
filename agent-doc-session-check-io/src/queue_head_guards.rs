@@ -129,9 +129,13 @@ pub fn check_reaped_queue_head_without_response(
     // captured this cycle, so a reproduced `#ipc-crdt-response-drift` (found=false)
     // is catchable from ops.log and a multi-id-under-one-heading cycle (found=true
     // for each id) proves no false positive — no live-verify needed.
+    // `#respidxparse`: parse the exchange AST ONCE for the whole cycle. This
+    // loop and the loss detector below both used to re-parse `content` and
+    // every archive per id.
+    let response_index =
+        agent_doc_turn::closeout_signal::ResponseIndex::build(&content, &archives);
     for id in &ordered_ids {
-        let source =
-            agent_doc_turn::closeout_signal::directive_response_source(&content, &archives, id);
+        let source = response_index.source_for(id);
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

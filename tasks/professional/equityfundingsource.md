@@ -300,7 +300,37 @@ Regression coverage is the shape that broke it: the simulator echoes whatever yo
 Pushed as `915fa803`.
 
 **Still unverified: the restore path.** `--restore-plan` is generated and asserted, but no op has been replayed into TMO, so the request bodies are only as correct as `docs/TMO/`. Given that the docs were wrong about `Document` and wrong about two endpoints, I would not assume they are right about `AddAttachment` taking `Content`. A first restore belongs on the sandbox, one loan, with a fresh backup taken immediately before — filed as `#tmo-restore-apply`.
-<!-- agent:boundary:75b4f69f -->
+
+### Re: do [#tmo-restore-apply] — opus-4-8
+
+Shipped and pushed as `f6020206`. `bun run check` green: 2005 tests, build, worker build.
+
+**The restore works. Verified end to end on the real sandbox, not just planned.**
+
+I created a throwaway loan (`BKTEST7706`) with a canary PDF, backed it up, **deleted it from TMO**, restored from the artifact, and re-captured:
+
+| Step | Result |
+|---|---|
+| Backup | `attachments=1/1 bytes=91`, `complete=true` |
+| `DeleteLoan` | gone — `GetLoan` returns "Loan not found." |
+| `--restore --apply` | `applied=2 failed=0 skipped=0` |
+| Re-capture + diff | document **sha256 identical**, 48 of 51 loan fields preserved |
+
+The three that changed are the ones already documented as unrestorable: `RecID` (new, server-assigned), `SysTimeStamp` (restore time), and `Fields` — reordered by TMO, but the same 25 entries with identical keys and values. Test loan deleted afterward; the sandbox is back to its original 18 loans with no `BKTEST` residue.
+
+**Two contract details this run pinned down, neither in `docs/TMO/`:**
+
+- **`AddAttachment` needs `TabName` present and EMPTY.** Omitting it throws `Object reference not set to an instance of an object`; any non-empty value this database doesn't know is `Incorrect tab name.` I tried `Documents`, `Loan`, `General`, `Attachments`, `Docs`, `Servicing`, `Origination` — all rejected. My plan already emitted `attachment.tab ?? ''`, which was correct, but only by luck until now. Pinned by a test so nobody widens it to pass a null through.
+- **The bytes go in `Content` as base64.** Sending the `Document` byte array that `GetLoanAttachment` hands back is rejected with `File content not found`. Upload and download shapes differ, which is precisely the asymmetry I flagged as unverified last cycle.
+
+`NewLoan` also requires a valid product `DocID` — my first attempt failed with `Loan Product not found`. Captured loans carry it, so a normal restore is fine; a hand-edited artifact is not. Added to the unrestorable list.
+
+**The simulator was hiding all of this.** Its `AddAttachment` echoed `Content` back unchanged, so an upload followed by a read returned no document — a restore round trip that could never have worked would still have passed in tests. I fixed the simulator to convert `Content` to the byte-array `Document` shape real TMO serves, and made `GetLoanAttachments` (plural) return `Document: null` like the real plural endpoint does. That second one matters: without it, a caller that never fetches the singular endpoint passes locally and comes back empty from TMO — the exact bug from last cycle.
+
+On the applier itself: `restore_apply_()` threads the RecID TMO assigns `NewLoan` into `NewBorrower`'s `LoanRecID`, skips a loan's dependents when the loan itself fails (sending them anyway either 404s or attaches them to whatever loan already holds that number), and treats a `200` carrying an `ErrorMessage` as a failure — TMO does that on rejected writes, so HTTP status alone would report a failed restore as successful.
+
+`--restore` is a dry run by default. `--apply` refuses any database whose name lacks "Sandbox", checked on both the target and the artifact's origin, so restoring into production isn't reachable from this tool.
+<!-- agent:boundary:d59e7cbb -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->

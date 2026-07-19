@@ -80,20 +80,23 @@ pub fn log_op(file: &Path, message: &str) {
 /// A document's project root is immutable for the life of a process, but
 /// resolving it costs a `canonicalize` plus an upward directory walk on *every*
 /// log line. Route paths emit these by the hundred.
-static PROJECT_ROOT_CACHE: LazyLock<Mutex<HashMap<PathBuf, PathBuf>>> =
+/// Stored as `Arc<Path>` so a hit is a refcount bump rather than a fresh
+/// `PathBuf` allocation on every log line.
+static PROJECT_ROOT_CACHE: LazyLock<Mutex<HashMap<PathBuf, std::sync::Arc<Path>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn cached_project_root(file: &Path) -> Option<PathBuf> {
+fn cached_project_root(file: &Path) -> Option<std::sync::Arc<Path>> {
     let key = file.to_path_buf();
     if let Ok(cache) = PROJECT_ROOT_CACHE.lock()
         && let Some(root) = cache.get(&key)
     {
-        return Some(root.clone());
+        return Some(std::sync::Arc::clone(root));
     }
     let canonical = file.canonicalize().ok()?;
-    let root = agent_doc_project_root_io::project_root_containing(&canonical)?;
+    let root: std::sync::Arc<Path> =
+        std::sync::Arc::from(agent_doc_project_root_io::project_root_containing(&canonical)?);
     if let Ok(mut cache) = PROJECT_ROOT_CACHE.lock() {
-        cache.insert(key, root.clone());
+        cache.insert(key, std::sync::Arc::clone(&root));
     }
     Some(root)
 }
@@ -109,20 +112,26 @@ fn cached_project_root(file: &Path) -> Option<PathBuf> {
 const TURN_ID_CACHE_TTL: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// A turn id resolved at an instant, so the TTL can be checked on read.
-type CachedTurnId = (std::time::Instant, Option<String>);
+///
+/// The id is an `Arc<str>`, not a `String`: a cache HIT must be a refcount
+/// bump, not a fresh heap allocation + memcpy. `log_op` runs ~170 times per
+/// route, so cloning the buffer on every hit would trade one redundant cost for
+/// another. Callers only ever need `&str`.
+type CachedTurnId = (std::time::Instant, Option<std::sync::Arc<str>>);
 
 static TURN_ID_CACHE: LazyLock<Mutex<HashMap<PathBuf, CachedTurnId>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn cached_turn_id(file: &Path) -> Option<String> {
+fn cached_turn_id(file: &Path) -> Option<std::sync::Arc<str>> {
     let key = file.to_path_buf();
     if let Ok(cache) = TURN_ID_CACHE.lock()
         && let Some((recorded_at, turn)) = cache.get(&key)
         && recorded_at.elapsed() < TURN_ID_CACHE_TTL
     {
+        // Pointer clone: bumps the refcount, copies no bytes.
         return turn.clone();
     }
-    let turn = agent_doc_cycle_state_io::load_closeout_projection(file)
+    let turn: Option<std::sync::Arc<str>> = agent_doc_cycle_state_io::load_closeout_projection(file)
         .ok()
         .flatten()
         .and_then(|projection| projection.cycle_id)
@@ -131,7 +140,8 @@ fn cached_turn_id(file: &Path) -> Option<String> {
                 .ok()
                 .flatten()
                 .map(|cs| cs.cycle_id)
-        });
+        })
+        .map(std::sync::Arc::from);
     if let Ok(mut cache) = TURN_ID_CACHE.lock() {
         cache.insert(key, (std::time::Instant::now(), turn.clone()));
     }

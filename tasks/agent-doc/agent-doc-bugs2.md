@@ -413,11 +413,24 @@ Restored tmux session 1 window 0 to 4 panes. I could not resurrect the killed pr
 `state.db` was genuinely corrupt (b-tree pages double-referenced). I rebuilt it via `sqlite3 .recover` — integrity now `ok`, 34.5MB from 73MB, with `op_log`, `actor_transitions`, `pending_mutations` and `queue_heads` intact. The corrupt original is preserved at `.agent-doc/_corrupt-state-db-aside-151817aaf/`, and 353 unattributable rows are in `lost_and_found`. **What corrupted it in the first place is still unknown** — the pragmas (WAL, 30s busy_timeout) are sound, so I have no root cause for that and did not invent one.
 
 7787 tests pass, tmux-router 134 pass, clippy clean, `make check` exit 0.
-<!-- agent:boundary:cfaf5f0a -->
+
+### Re: JB Compact Exchange did not compact — delivery_pending never settles — opus-4-8
+
+> **Queue prompt:** I ran JB `Compact Exchange` but the operation did not compact.
+
+Root-caused. `delivery_converged()` is true only when *every live member* has ACKed its queued fan-out. A replica that is registered and reported live but has stopped ACKing — a stale editor plugin — is a zombie: nothing ever advances it, so the typing-settle gate polls for the full 60s and fails the operation. Every later command pays the same timeout. That is the same wedge that blocked preflight, `write --commit`, and `session-check` repeatedly at the start of this session, and `agent-doc admin reload-lib` is what cleared it each time.
+
+Shipped the mitigation (`651f63517`): the error no longer says "retry after it settles" — for this shape that is advice that never comes true — and instead names `admin reload-lib`, which clears the wedge without touching the document.
+
+**I did not ship the real fix**, deliberately. It is to exclude a non-ACKing member from the convergence cut the way a disconnected one already is. But `delivery_converged()` is the invariant the entire write path rests on, `is_live` is a reactive cell with no ACK clock to measure staleness against, and a threshold set too eagerly would let a write clobber a slow-but-live editor's buffer — strictly worse than the wedge it fixes. That is a design decision needing its own cycle, filed as `#deliveryackcut` at the top of the backlog with the full diagnosis.
+
+Also note `state.db` corrupted **again**, ~30 minutes after the clean rebuild — same `2nd reference to page` signature, same b-tree. So it is reproducing, not a one-off. I quarantined it (`.agent-doc/_corrupt-state-db-aside-recur2/`) and rebuilt; `539d94152` makes corruption survivable by reporting the recovery steps instead of a bare `database disk image is malformed`. The cause is still unknown and I have not invented one.
+<!-- agent:boundary:52df74bc -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- do [#deliveryackcut]
 ---
 🚧 I ran JB `Compact Exchange` but the operation did not compact.
 ```
@@ -428,7 +441,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 We should immediately self-heal. Make all self-healing real-time, not turn-based...if possible.
 > Heads now render as list items. `parse_spans` still accepts the legacy bare form, so existing documents round-trip and self-heal on the next render rather than needing migration. There's a regression asserting every rendered head is a list item, and that healing is idempotent.
 ---
-- do [#lazilynottl]
+- ~~⏭️ do [#lazilynottl]~~
 - do [#orphandrain]
 - do [#c8tb]
 - do [#jbrouteasyncchannel]
@@ -516,6 +529,7 @@ We should immediately self-heal. Make all self-healing real-time, not turn-based
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#deliveryackcut] delivery_converged() requires every LIVE member to have ACKed, so a zombie replica (registered + reported live, but no longer ACKing) wedges every write until timeout. Exclude a non-ACKing member from the convergence cut the way a disconnected one already is (crdt_relay.rs delivery_converged/is_live). Needs a staleness signal — is_live is a reactive cell with no ACK clock — and a threshold conservative enough that a slow-but-live editor is never dropped, since dropping one clobbers operator edits. Root-caused 2026-07-19; mitigation shipped in 651f63517 (error now names `admin reload-lib`).
 - [ ] [#lazilynottl] #lazilynottl Replace the process-local TTL cooldown gating replica re-registration with realtime-model state. SITE: `REPLICA_REREGISTER_COOLDOWN` + `replica_reregister_cooldown_elapsed` (agent-doc-crdt-relay-io/src/lib.rs:236-260), consumed at :987 when an ensure observes `EditorAttachedMissingReplica`. DEFECT: a `static Mutex<HashMap<doc_hash, Instant>>` is process-local, and agent-doc CLI invocations are short-lived processes — each preflight starts empty, so it collapses bursts only WITHIN one process and does nothing across them, which is where the storm comes from. Its own comment says preflights arrive ~1/sec during a drain; those are separate processes. Same class as the reverted #orphandrain in-memory backoff. WHERE THE FIX BELONGS (investigated): `signal_crdt_replica_event_counting` sends `DeliverCrdtRemote` DIRECTLY to the editor pid over IPC and never routes through the controller, so there is no controller coalescing point; `replica_identity_registry()` and `global_liveness_plane()` are process-local too. The only long-lived owner of the realtime model on this path is the EDITOR PLUGIN, which already knows whether its replica is registered and at what generation. So: drop the Rust TTL and let the plugin ignore a redundant force-refresh (Kotlin change + plugin version bump; needs an IDE restart to take effect, so final proof is operator-gated). DO NOT substitute a state.db coordination lease — still a TTL, misses the point.
 - [ ] [#orphandrain] [recommended] Controller-side drain for documents with NO supervisor. Shipped then REVERTED same session (revert of 'feat(controller): drain go-mode queues that have no supervisor') after it caused a dispatch storm: 15 dispatches for one doc in ~60s despite a 90s backoff, ~31 contending controller processes. Two faults, both in the effects half: (1) run_editor_route called from INSIDE the controller re-enters the controller ('timed out after 5.0s waiting for project controller response') — Run Agent Doc calls it from OUTSIDE; (2) the backoff lived in an in-memory HashMap in the controller, so every failed dispatch caused a restart that wiped it, permitting immediate re-dispatch. Redesign: dispatch from OUTSIDE the controller event loop (detached child, not a self-call) and persist per-document backoff in state.db next to the drain lease. The pure policy module (agent-doc-controller/src/orphan_drain.rs, 9 tests, gates correct) was sound — recover it from git history rather than rewriting. Underlying gap remains OPEN: a doc whose owner pane is a live agent TUI can never get a supervisor (preserve_pane_blocked), so it has no idle-queue watch and its go-mode queue only advances when a human triggers Run Agent Doc.
 - [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.

@@ -1611,6 +1611,16 @@ fn run_command_inner(
             &options.review_resolve,
         );
         queue_completion_ids.extend(options.queue_completion_ids.iter().cloned());
+        // `#donestrikeextra`: the strike/consume set is the RESOLUTION set, which
+        // excludes `--backlog-edit`. Editing an item's text is the "keep/narrow
+        // it" outcome, so an edited id is still open; feeding it to the strike
+        // matcher silently removed unfinished items from the drain.
+        let mut queue_resolution_ids = agent_doc_queue::queue_heads::explicit_queue_resolution_ids(
+            &options.pending_done,
+            &options.pending_gate,
+            &options.review_resolve,
+        );
+        queue_resolution_ids.extend(options.queue_completion_ids.iter().cloned());
         let queue_consumption_allowed = queue_consumption_allowed_for_response(
             file,
             baseline.as_deref(),
@@ -1626,11 +1636,11 @@ fn run_command_inner(
                 &response_body,
                 &options.pending_done,
             )?
-            && !queue_completion_ids
+            && !queue_resolution_ids
                 .iter()
                 .any(|id| agent_doc_queue::queue_response::normalize_done_id(id) == head_id)
         {
-            queue_completion_ids.push(head_id);
+            queue_resolution_ids.push(head_id);
         }
         match commit_mode {
             CommitMode::None => {}
@@ -1638,14 +1648,14 @@ fn run_command_inner(
                 if queue_consumption_allowed {
                     if let Err(e) = consume_queue_prompts_for_done_ids_closeout(
                         file,
-                        &queue_completion_ids,
+                        &queue_resolution_ids,
                         options.force_disk,
                     ) {
                         eprintln!("[queue] warning: consumption failed: {}", e);
                     }
                     if let Err(e) = queue_consume::mark_completed_queue_prompts_for_done_ids(
                         file,
-                        &queue_completion_ids,
+                        &queue_resolution_ids,
                         options.force_disk,
                         queue_consume_writeback_effects(options.force_disk),
                     ) {
@@ -1654,7 +1664,7 @@ fn run_command_inner(
                 } else {
                     match queue_consume::mark_completed_queue_prompts_for_done_ids(
                         file,
-                        &queue_completion_ids,
+                        &queue_resolution_ids,
                         options.force_disk,
                         queue_consume_writeback_effects(options.force_disk),
                     ) {
@@ -1676,19 +1686,19 @@ fn run_command_inner(
                 if queue_consumption_allowed {
                     consume_queue_prompts_for_done_ids_closeout(
                         file,
-                        &queue_completion_ids,
+                        &queue_resolution_ids,
                         options.force_disk,
                     )?;
                     queue_consume::mark_completed_queue_prompts_for_done_ids(
                         file,
-                        &queue_completion_ids,
+                        &queue_resolution_ids,
                         options.force_disk,
                         queue_consume_writeback_effects(options.force_disk),
                     )?;
                 } else {
                     let marked = queue_consume::mark_completed_queue_prompts_for_done_ids(
                         file,
-                        &queue_completion_ids,
+                        &queue_resolution_ids,
                         options.force_disk,
                         queue_consume_writeback_effects(options.force_disk),
                     )?;

@@ -192,6 +192,11 @@ pub fn queue_head_has_explicit_completion_signal(
 
 /// Collect every explicit closeout id spelling that can authorize queue-head
 /// completion.
+///
+/// AUTHORIZATION ONLY (`#donestrikeextra`). `pending_edit` belongs here because
+/// narrowing the active head's text proves this cycle addressed that head, which
+/// is enough to let the head be consumed. It must NOT be used to decide which
+/// ids get STRUCK — see [`explicit_queue_resolution_ids`].
 pub fn explicit_queue_completion_ids(
     pending_done: &[String],
     pending_gate: &[String],
@@ -202,6 +207,39 @@ pub fn explicit_queue_completion_ids(
         .iter()
         .chain(pending_gate.iter())
         .chain(pending_edit.iter())
+        .chain(review_resolve.iter())
+        .map(|raw| {
+            raw.split_once('=')
+                .map(|(id, _)| id)
+                .unwrap_or(raw.as_str())
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// Ids this cycle actually RESOLVED, and may therefore strike from the queue.
+///
+/// `#donestrikeextra` — a single `--done A` alongside a `--backlog-edit B=...`
+/// struck B's queue head while the B backlog item correctly stayed `[ ]` open,
+/// so an unfinished item silently left the drain and the operator could only
+/// notice by diffing the queue. The cause is scope: the strike path reused
+/// [`explicit_queue_completion_ids`], whose whole job is the *authorization*
+/// question ("did this cycle address the head?"), for the very different
+/// *resolution* question ("which ids are finished?").
+///
+/// `--backlog-edit` is explicitly the "keep/narrow it" flag — the queue-skip
+/// diagnostic offers it as the alternative to reaping — so an edited id is by
+/// definition still open and must never be struck. Only `--done` (completed),
+/// `--pending-gate` (code-complete, awaiting review), and `--review-resolve`
+/// (review cleared) resolve an item.
+pub fn explicit_queue_resolution_ids(
+    pending_done: &[String],
+    pending_gate: &[String],
+    review_resolve: &[String],
+) -> Vec<String> {
+    pending_done
+        .iter()
+        .chain(pending_gate.iter())
         .chain(review_resolve.iter())
         .map(|raw| {
             raw.split_once('=')
@@ -580,6 +618,50 @@ mod tests {
                 "done".to_string(),
                 "gate".to_string(),
                 "edit".to_string(),
+                "review".to_string(),
+            ]
+        );
+    }
+
+    /// `#donestrikeextra` — the exact regression the bug report asks to pin:
+    /// `--backlog-edit` on id B must never put B in the strike set when only A
+    /// is `--done`.
+    #[test]
+    fn explicit_queue_resolution_ids_exclude_backlog_edits() {
+        let resolution = explicit_queue_resolution_ids(
+            &["fzmutloss".to_string()],
+            &[],
+            &[],
+        );
+        assert_eq!(resolution, vec!["fzmutloss".to_string()]);
+        assert!(
+            !resolution.contains(&"patchretryidem".to_string()),
+            "an edited-but-open id must never be struck from the queue"
+        );
+
+        // The authorization set still sees the edit — that scope is unchanged.
+        let authorization = explicit_queue_completion_ids(
+            &["fzmutloss".to_string()],
+            &[],
+            &["patchretryidem=rewritten".to_string()],
+            &[],
+        );
+        assert!(authorization.contains(&"patchretryidem".to_string()));
+    }
+
+    /// Gate and review-resolve DO resolve an item, so they stay in the strike
+    /// set: a gated `[/]` item is code-complete and legitimately leaves the drain.
+    #[test]
+    fn explicit_queue_resolution_ids_keep_gate_and_review_resolve() {
+        assert_eq!(
+            explicit_queue_resolution_ids(
+                &["done".to_string()],
+                &["gate".to_string()],
+                &["review".to_string()],
+            ),
+            vec![
+                "done".to_string(),
+                "gate".to_string(),
                 "review".to_string(),
             ]
         );

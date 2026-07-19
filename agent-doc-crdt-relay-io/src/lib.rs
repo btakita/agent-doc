@@ -223,6 +223,42 @@ const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 60;
 #[cfg(not(test))]
 const DOCUMENT_MODEL_ENSURE_MISSING_REPLICA_TIMEOUT_MS: u64 = 400;
 
+/// `#ensurereregister` — minimum spacing between missing-replica re-registration
+/// requests for one document.
+///
+/// The nudge is cheap to send but NOT cheap to serve: each one drives a full
+/// editor-side re-attach (observed ~250-300ms for a 60k-char document, with a
+/// fresh client id and the prior generation fenced). Ensure runs once per
+/// preflight, and preflights can arrive about once a second during a drain, so
+/// an unspaced nudge turns a persistent wedge into a re-registration storm that
+/// fences a live generation every second. Space them so a wedge that outlives
+/// one request degrades to occasional retries instead.
+const REPLICA_REREGISTER_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn replica_reregister_cooldown_gate() -> &'static Mutex<HashMap<String, std::time::Instant>> {
+    static LAST: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// True when a re-registration request for `file` is allowed now; records the
+/// attempt when it is.
+fn replica_reregister_cooldown_elapsed(file: &Path) -> bool {
+    let Ok(key) = agent_doc_fs::document_state_hash(file) else {
+        return true;
+    };
+    let Ok(mut gate) = replica_reregister_cooldown_gate().lock() else {
+        return true;
+    };
+    let now = std::time::Instant::now();
+    match gate.get(&key) {
+        Some(last) if now.duration_since(*last) < REPLICA_REREGISTER_COOLDOWN => false,
+        _ => {
+            gate.insert(key, now);
+            true
+        }
+    }
+}
+
 /// Per-document count of editor replica registrations observed in this process.
 ///
 /// `#ensurewindowsize`: `ensure_document_model` gives a missing-replica editor
@@ -886,6 +922,47 @@ fn ensure_document_model_with_current_text_observer_inner(
         source,
         std::time::Duration::from_millis(ensure_timeout_ms),
     )?;
+
+    // `#ensurereregister`: a missing-replica ensure used to wait for a republish
+    // it never asked for. An observation request only asks the editor "what is
+    // your current text" — an editor that holds the document but has NO replica
+    // has nothing to answer with, so it stays silent and every attempt fails at
+    // the short window. Observed live on agent-doc-bugs2.md: four back-to-back
+    // ensures a second apart, all `final_state=editor_attached_model_missing
+    // timeout_ms=400 window_extended=false`, then the plugin's own periodic
+    // sweep registered the replica ~100s later and the wedge cleared on its own.
+    // The binary must drive that re-registration instead of waiting for the
+    // sweep. `AckRecoveryForceRefresh` is the same typed intent `#bn41` already
+    // uses in the realtime resolve path, which never runs here because this
+    // function bails with `Err` first. `EditorSyncPending` is deliberately
+    // excluded: that hub exists and is mid-flush, and nudging it would discard
+    // un-flushed ops.
+    if matches!(first, CurrentText::EditorAttachedMissingReplica)
+        && replica_reregister_cooldown_elapsed(file)
+    {
+        let reregister = match signal_crdt_replica_event_counting(
+            file,
+            CrdtReplicaEventReason::AckRecoveryForceRefresh,
+            0,
+        ) {
+            // `notified=0` is the load-bearing case: Lazily reports the editor
+            // attached, yet the liveness plane holds no registration to send to.
+            // That is a stale-attachment wedge inside agent-doc, NOT an editor
+            // that ignored us, and the two demand opposite responses.
+            Ok(0) => "no_live_registration".to_string(),
+            Ok(notified) => format!("requested:{notified}"),
+            Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
+        };
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "document_model_ensure_replica_reregister file={} source={} reregister={} (#ensurereregister)",
+                file.display(),
+                source,
+                reregister,
+            ),
+        );
+    }
 
     // Bound how long we wait for the editor to republish. A persistent missing
     // replica must fail closed: neither disk nor a durable restart projection can
@@ -2802,6 +2879,24 @@ pub fn signal_crdt_replica_event(
     reason: CrdtReplicaEventReason,
     targets: usize,
 ) -> Result<()> {
+    signal_crdt_replica_event_counting(file, reason, targets).map(|_| ())
+}
+
+/// [`signal_crdt_replica_event`] reporting how many live editor registrations
+/// were actually notified.
+///
+/// `#ensurereregister` — the unit-returning form cannot distinguish "asked every
+/// live editor to re-register" from "there was nobody to ask": with an empty
+/// registration list the send loop simply never runs and it still returns
+/// `Ok(())`, which callers log as `reregister=requested`. That false-positive
+/// diagnostic is actively misleading during a missing-replica wedge, because it
+/// reads as "the binary nudged the editor and the editor ignored it" and points
+/// diagnosis at the editor plugin when in fact no message was ever sent.
+pub fn signal_crdt_replica_event_counting(
+    file: &Path,
+    reason: CrdtReplicaEventReason,
+    targets: usize,
+) -> Result<usize> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let _ = reliable_sync_editor_live_for_file(&canonical);
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
@@ -2811,6 +2906,7 @@ pub fn signal_crdt_replica_event(
         .projection()
         .live_registrations(&document_hash);
 
+    let mut notified = 0usize;
     for registration in registrations {
         let payload = serde_json::json!({
             "type": agent_doc_ipc_protocol::EditorIntent::DeliverCrdtRemote.as_str(),
@@ -2833,9 +2929,11 @@ pub fn signal_crdt_replica_event(
                     registration.pid,
                 ),
             );
+        } else {
+            notified += 1;
         }
     }
-    Ok(())
+    Ok(notified)
 }
 
 /// Controller-owned disk-change transition. The watcher already routes through
@@ -3868,6 +3966,92 @@ mod tests {
         assert!(
             (1..=4).contains(&polls),
             "missing-replica ensure should poll only within the short window, got {polls}"
+        );
+    }
+
+    /// `#ensurereregister` — a missing-replica ensure must ASK the editor to
+    /// re-register, not merely wait for a republish nobody requested.
+    ///
+    /// Live regression (agent-doc-bugs2.md): four back-to-back ensures a second
+    /// apart all failed at the short window with
+    /// `final_state=editor_attached_model_missing window_extended=false`, and the
+    /// wedge only cleared ~100s later when the JetBrains plugin ran its own
+    /// periodic registration sweep. Nothing in the ensure path had ever nudged
+    /// it, so queue maintenance could not persist for the whole interval.
+    #[test]
+    fn ensure_document_model_requests_replica_reregistration_for_missing_replica() {
+        let (_dir, doc) = temp_doc("ensure-model-reregister-missing-replica.md");
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        hub_registry().lock().unwrap().remove(&hash);
+
+        let err = ensure_document_model_with_current_text_observer(
+            &doc,
+            "test_reregister_missing_replica",
+            CurrentText::EditorAttachedMissingReplica,
+            || Ok(CurrentText::EditorAttachedMissingReplica),
+        )
+        .expect_err("a never-registering editor must still fail closed");
+        assert!(format!("{err:#}").contains("editor authority stayed"));
+
+        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("document_model_ensure_replica_reregister")
+                && log.contains("(#ensurereregister)"),
+            "missing-replica ensure must request replica re-registration, got:\n{log}"
+        );
+    }
+
+    /// `#ensurereregister` — a persistent wedge must not become a re-registration
+    /// storm. Each nudge costs the editor a full re-attach (~250-300ms, new
+    /// client id, prior generation fenced), and preflights arrive about once a
+    /// second during a drain, so back-to-back ensures for the same document must
+    /// collapse to a single request.
+    #[test]
+    fn ensure_document_model_spaces_repeated_replica_reregistration_requests() {
+        let (_dir, doc) = temp_doc("ensure-model-reregister-cooldown.md");
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        hub_registry().lock().unwrap().remove(&hash);
+
+        for _ in 0..3 {
+            let _ = ensure_document_model_with_current_text_observer(
+                &doc,
+                "test_reregister_cooldown",
+                CurrentText::EditorAttachedMissingReplica,
+                || Ok(CurrentText::EditorAttachedMissingReplica),
+            );
+        }
+
+        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let requests = log
+            .matches("document_model_ensure_replica_reregister")
+            .count();
+        assert_eq!(
+            requests, 1,
+            "three back-to-back ensures must send one nudge, got {requests}:\n{log}"
+        );
+    }
+
+    /// `#ensurereregister` — `EditorSyncPending` is a hub that already exists and
+    /// is mid-flush. Nudging it with a force-refresh would discard un-flushed
+    /// ops, so the re-registration request must be scoped to the missing-replica
+    /// case only.
+    #[test]
+    fn ensure_document_model_does_not_request_reregistration_while_sync_pending() {
+        let (_dir, doc) = temp_doc("ensure-model-reregister-sync-pending.md");
+        let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        hub_registry().lock().unwrap().remove(&hash);
+
+        let _ = ensure_document_model_with_current_text_observer(
+            &doc,
+            "test_reregister_sync_pending",
+            CurrentText::EditorSyncPending,
+            || Ok(CurrentText::EditorSyncPending),
+        );
+
+        let log = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            !log.contains("document_model_ensure_replica_reregister"),
+            "sync-pending ensure must not force-refresh a live mid-flush hub, got:\n{log}"
         );
     }
 

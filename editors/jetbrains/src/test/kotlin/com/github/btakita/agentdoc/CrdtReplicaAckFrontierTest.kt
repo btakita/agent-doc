@@ -82,7 +82,19 @@ class CrdtReplicaAckFrontierTest {
             deliveryBranch.contains("shouldUrgentDrainForRemoteEventUtil(reasonToken)") &&
                 deliveryBranch.contains("CrdtReplicaManager.requestUrgentRemoteDrain("),
         )
-        assertFalse(deliveryBranch.contains("forceRefreshOpenDocumentReplica("))
+        // #ensurereregister: a force-refresh on this path is allowed ONLY behind the
+        // no-replica guard. With a replica present it would re-establish (replace)
+        // live editor authority mid-flight, which is what this test has always
+        // forbidden; with NO replica there is no authority to replace, and
+        // re-establishing is the only escape from the binary's
+        // `editor_attached_model_missing` wedge (previously operator-only, via
+        // `admin reload-lib` or closing and reopening the tab).
+        if (deliveryBranch.contains("forceRefreshOpenDocumentReplica(")) {
+            assertTrue(
+                "force-refresh on the delivery path must be guarded by the no-replica check",
+                deliveryBranch.contains("!CrdtReplicaManager.hasOpenDocumentReplica(file)"),
+            )
+        }
     }
 
     /**

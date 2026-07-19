@@ -1745,6 +1745,22 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         fun isApplyingRemote(filePath: String): Boolean =
             instances.values.any { it.applyingRemote.contains(filePath) }
 
+        /**
+         * #ensurereregister: true when some open project already holds a CRDT
+         * replica (forwarder) for [filePath].
+         *
+         * This is the guard that keeps `ack_recovery_force_refresh` from
+         * replacing live editor authority. A force-refresh re-establishes the
+         * replica from the current document, which is destructive when a
+         * replica already exists and may be mid-flight — hence
+         * `CrdtReplicaAckFrontierTest` forbidding an unconditional
+         * force-refresh on the delivery path. When there is NO forwarder there
+         * is no authority to replace, and re-establishing is the only way out
+         * of the binary's `editor_attached_model_missing` wedge.
+         */
+        fun hasOpenDocumentReplica(filePath: String): Boolean =
+            instances.values.any { it.forwarders.containsKey(filePath) }
+
         fun isApplyingNonOperatorMutation(filePath: String): Boolean =
             applyingAgentMutations.contains(filePath) || isApplyingRemote(filePath)
 

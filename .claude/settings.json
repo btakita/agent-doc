@@ -1,15 +1,43 @@
 {
-  "permissions": {
-    "defaultMode": "bypassPermissions"
+  "enabledPlugins": {
+    "claude-mem@thedotmack": true,
+    "frontend-design@claude-plugins-official": true
   },
-  "model": "sonnet",
   "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "agent-doc hook coined-id-pre-tool-use",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "agent-doc turn-status idle",
+            "type": "command"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "tmux set-option -p pane-border-style 'fg=colour226' 2>/dev/null; tmux set-option -pu pane-active-border-style 2>/dev/null"
+            "command": "tmux set-option -p pane-border-style 'fg=colour226' 2>/dev/null; tmux set-option -pu pane-active-border-style 2>/dev/null",
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "agent-doc turn-status idle",
+            "type": "command"
           }
         ]
       }
@@ -18,15 +46,23 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "tmux set-option -p pane-border-style 'fg=colour39' 2>/dev/null; tmux set-option -pu pane-active-border-style 2>/dev/null"
+            "command": "tmux set-option -p pane-border-style 'fg=colour39' 2>/dev/null; tmux set-option -pu pane-active-border-style 2>/dev/null",
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "agent-doc turn-status active",
+            "type": "command"
           }
         ]
       }
     ]
   },
-  "enabledPlugins": {
-    "claude-mem@thedotmack": true,
-    "frontend-design@claude-plugins-official": true
+  "model": "sonnet",
+  "permissions": {
+    "defaultMode": "bypassPermissions"
   }
 }

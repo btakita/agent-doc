@@ -405,14 +405,38 @@ plan reconcile_cache=12  tombstone=6  push_funding=0  create_loan_then_funding=0
 That plan agrees with your directive. `push_funding=0` because `efs_fundings=0` — there is nothing to push into TMO, so the "orphans as fundings" path is a no-op on current data. The 6 tombstones (`TST217`, `TST254`, `TST374`, `TST723`, `TST762`, `TST999`) all match the planner's narrow rule: absent from TMO *and* with no EFS loan or funding behind them — pure test debris, not the "don't prune by default" class you flagged.
 
 **I did not apply it.** `--apply` mutates production D1 `tmo_cache_entities` irreversibly, and tombstoning is the exact operation your directive told me not to do by default. Filed as `#tmo-orphan-apply` with the command and the six loan numbers to review. Everything gating that decision — a working tool and a real plan — is now done; the decision itself is yours.
+What are TST217, TST254, TST374, TST723, TST762, TST999?
+
+### Re: What are TST217, TST254, TST374, TST723, TST762, TST999? — opus-4-8
+
+**They are dead cache rows. Not loans, not deals, not money — six rows in EFS's `tmo_cache_entities` that point at TMO loans which no longer exist.**
+
+Queried remote D1 and the live TMO sandbox to answer this rather than reasoning from the planner's label:
+
+| Check | Result |
+|---|---|
+| Row in `tmo_cache_entities` | yes, all six, `entity_type='loan'`, `deleted_at IS NULL` |
+| `efs_id` (the EFS deal it was cached against) | **NULL** on all six |
+| EFS `loans` rows referencing them | **0** |
+| EFS `funds` rows referencing them | **0** |
+| Present in TMO today | **no** — `GetLoan` returns "Loan not found." for all six |
+| Created / last updated | all identical: 2026-06-08 14:56 / 14:58 UTC |
+
+**Where they came from.** All six were written in a single cache sweep on 2026-06-08 at 14:56 UTC that captured 10 loan rows: `1010`, `TST042`, `TST113`, `TST217`, `TST254`, `TST374`, `TST388`, `TST723`, `TST762`, `TST999`. Only `TST042` got an `efs_id`; the other nine were cached with no EFS deal behind them. `TST###` is the EFS integration-test naming — these are test loans the integration created in the shared TMO sandbox.
+
+**What makes these six different from the rest of that batch.** `1010` (the TMO-seeded demo loan, protected in code), `TST113`, and `TST388` still exist in TMO, so the planner assigns them `reconcile_cache` — refresh the cached row against the live record. The six you asked about were deleted from TMO at some point after the sweep, and nothing cleaned up the EFS side. So they are stale pointers to nothing: they can't be reconciled (no TMO record), can't be pushed as fundings (no EFS funding — `efs_fundings=0`), and can't be attributed to a deal (no `efs_id`).
+
+That is exactly the narrow condition your directive carved out: *"tombstone only pure debris with no EFS deal."* They are not the class you told me not to prune — that class is orphan rows **with** an EFS deal behind them, which would get pushed into TMO as fundings instead. There are currently zero of those.
+
+**Deleting them costs nothing recoverable.** The tombstone is EFS-local — it marks the cache row, it does not touch TMO (nothing there to touch). Worst case if we're wrong: the cached metadata for a loan that no longer exists is lost, and any future TMO loan reusing that number would simply re-cache on next sync.
+
+I'd still rather you push the button, since it writes to production D1. `#tmo-orphan-apply` has the command.
+
+One housekeeping note: the queue still lists `do [#tmo-orphan-cache]` unstruck even though the backlog item was reaped last cycle — preflight has been reporting `queue_maintenance_not_persisted` (editor authority stuck in `editor_attached_model_missing`), so the recomputed queue text isn't landing. Cosmetic, but that's why a completed item is still showing as a head.
 <!-- agent:boundary:d9e41326 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#tmo-restore-apply]~~
-- ~~do [#tmo-backup-command]~~
-- ~~do [#tmo-reconcile-binder-ui]~~
-- ~~do [#efs-prod-secret-parity]~~
 - do [#tmo-orphan-cache]
 - do [#efs-cf-account-custody]
 - do [#efs-prod-seed]

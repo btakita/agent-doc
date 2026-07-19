@@ -229,7 +229,7 @@ Absence of a row means "operator-authored, never strike". That default is the sa
 No code changed this cycle, so no build or suite run was warranted; the item is closed as decided.
 
 Still open and genuinely needing you: `#5pn7`, the live JB `Run Agent Doc` eyeball. I left it queued rather than marking it done, since I can't supply that proof myself.
-<!-- agent:boundary:bb2c742a -->
+<!-- agent:boundary:ef471cf1 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -238,11 +238,11 @@ Still open and genuinely needing you: `#5pn7`, the live JB `Run Agent Doc` eyeba
 - ~~do [#wsflake2]~~
 - ~~do [#patchretryidem]~~
 - ~~📌 do [#jbroutasync]~~
-/goal Fix all contributing factors to queue go mode stall in agent-doc-bugs2.md. This turn stalled despite being run with agent-doc run and queue in go mode. This turn should continue to the next queue item once this task is complete.
+- ~~/goal Fix all contributing factors to queue go mode stall in agent-doc-bugs2.md. This turn stalled despite being run with agent-doc run and queue in go mode. This turn should continue to the next queue item once this task is complete.~~
 - ~~do [#fr79backfill]~~
-- ⏭️ do [#c8tb]
-- ⏭️ do [#jbrouteasyncchannel]
-- ⏭️ do [#jbedtledgerverify]
+- ⏭️ 📌 do [#c8tb]
+- ⏭️ 📌 do [#jbrouteasyncchannel]
+- ⏭️ 📌 do [#jbedtledgerverify]
 - ⏭️ 📌 do [#fmgc]
 - ⏭️ 📌 do [#0dsr]
 - ⏭️ 📌 do [#30p6]
@@ -251,11 +251,11 @@ Still open and genuinely needing you: `#5pn7`, the live JB `Run Agent Doc` eyeba
 - ⏭️ 📌 do [#promptselect]
 - ⏭️ 📌 do [#realtimesalient]
 - ⏭️ 📌 do [#syncobscache2]
-- 📌 do [#capturebacklogatomic]
+- ⏭️ 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
 - 📌 do [#jbtsiftnosub2verify]
 - 📌 do [#sidecarstate]
-- 📌 do [#64we]
+- 🚧 📌 do [#64we]
 - 📌 do [#adstatechart2]
 - 📌 do [#adstatechart3]
 - 📌 do [#adstatechartkt]
@@ -321,7 +321,7 @@ Still open and genuinely needing you: `#5pn7`, the live JB `Run Agent Doc` eyeba
 - [ ] [#opcapturelazily] [focused-cycle] #sidecarstate op-capture (.agent-doc/op-capture/<doc-hash>.json, agent-doc-op-capture-io #qnodemerge4) is a bespoke JSON sidecar source of truth: durable ordered EditorOps + base_hash that preflight repair / CRDT merge REPLAY as authority then consume+clear (base-hash-guarded so safe). Because it is a separate replay source, clearing captures/ + state/cycles/ aside did not stop the churn this turn. Migrate onto the lazily state backbone (co-located with cycle-phase state) so captured-op authority is one coherent atomically-clearable model. 96-ref cross-crate surface; folds into #sidecarstate. Plan: tasks/agent-doc/plan-op-capture-lazily-state-migration.md
 - [ ] [#jbtsiftnosub2verify] [operator-verify] #jbtsiftnosub2 live proof (0.34.74): with NO tmux pane for a doc, trigger JB Run Agent Doc and confirm the reopen trigger SUBMITS (or auto-resubmits) instead of sitting typed-but-unsubmitted; ops.log shows fresh_route_stranded_trigger_resubmit + fresh_route_start_acknowledged_after_resubmit; a stuck submit now fails closed with a visible FreshStart startup-miss.
 - [ ] [#sidecarstate] [focused-cycle] #agent-doc-bug Replace hot-path snapshot/cycle/live-buffer sidecars with the lazily state backbone for document authority, lifecycle recovery, and crash-reentrant pipeline stages; auto-start/reconcile the document model before preflight exposes missing CRDT replica errors; reconcile drift inside agent-doc on re-entry. Plan: tasks/agent-doc/plan-lazily-state-backbone-sidecar-retirement.md
-- [ ] [#64we] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=supervisor_dispatch_start_proof pane=%156 actor_generation=1039 editor_attempt_id=1783140065173-1 dispatch_proof_state=none elapsed_ms=10134 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783140083790-supervisor_dispatch_start_unproven-codex-_156-ad5c195b73fc.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=supervisor_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/supervisor_dispatch_start_proof content_hash=sha256:503e36d813c831fce9bfe367973c345adce5a2f2620dccc4fa0be6e4363b5087]
+- [ ] 🚧 [#64we] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=tasks/professional/equityfundingsource.md stage=supervisor_dispatch_start_proof pane=%156 actor_generation=1039 editor_attempt_id=1783140065173-1 dispatch_proof_state=none elapsed_ms=10134 diagnostic_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/route-submit/1783140083790-supervisor_dispatch_start_unproven-codex-_156-ad5c195b73fc.txt ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=supervisor_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/supervisor_dispatch_start_proof content_hash=sha256:503e36d813c831fce9bfe367973c345adce5a2f2620dccc4fa0be6e4363b5087]
 - [ ] [#adstatechart2] [focused-cycle] #agent-doc-feature Phase E rung 2 (observability): wire session-check/status to READ adstatechart configuration() as an advisory named-snapshot (transport.x editor_sync.x closeout.x supervisor) alongside today's ops.log markers. No behavior change to closeout. Guard semantics must match whatever A-D shipped. PRD: tasks/agent-doc/prd-adstatechart-local-process-statechart.md
 - [ ] [#adstatechart3] [focused-cycle] #agent-doc-feature Phase E rung 3 (load-bearing): switch adstatechart to the typed lazily 0.19 ChartBuilder, bump agent-doc-state-backbone to lazily 0.19, use ThreadSafeStateChart for cross-thread status observation, and replace the ad-hoc editor_synced check at the finalize/commit site with chart send(commit, guards) plus a fail-closed fallback when the feature is off. SimWorld: N wedged-finalize->direct-commit cycles never commit from stale disk. Live editor proof gated behind decomposition + install. PRD rung 3.
 - [ ] [#adstatechartkt] [focused-cycle] lazily-kt 0.9.0 SHIPPED (ChartBuilder + ThreadSafeStateChart + shared fromStates + context-free engine; GitHub Packages via release.yml, tag v0.9.0; full test suite green). REMAINING: bump the JetBrains plugin's lazily-kt dependency to 0.9.0 and consume ChartBuilder/ThreadSafeStateChart for the merge-ownership state machine (#mergestatemachine3 fold-in).

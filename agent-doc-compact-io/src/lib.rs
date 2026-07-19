@@ -1371,6 +1371,43 @@ fn run_component_compact_force_disk(
         .map(|targets| targets.committed)
 }
 
+/// Re-attach the exchange boundary marker at the end of the live compacted
+/// component content.
+///
+/// `#compactboundary`: compaction rebuilds the component body from scratch, and
+/// `split_component_content_at_boundary` / `parse_topic_sections_*` strip the
+/// marker out on the way in. When the live projection reaches the document
+/// through a patch-applying write it gets a fresh boundary re-inserted for free
+/// (`template.rs`, post-patch boundary repair), but the direct disk/detached
+/// projection has no such step — so a compact taken while the editor authority is
+/// degraded writes a boundary-less document. Commit still re-mints a boundary on
+/// the committed blob, so the operator is left with a permanent marker-only dirty
+/// diff that no later cycle heals (each subsequent compact reproduces it).
+///
+/// Carrying the existing marker id forward keeps the id stable across the
+/// compact; a component that genuinely had no boundary gets a fresh one, matching
+/// the write path's re-insert behavior. Placement is end-of-component, which is
+/// the boundary invariant every other write path maintains.
+///
+/// Non-exchange components have no boundary and are returned unchanged.
+fn append_boundary_marker(content: &str, target: &str, old_content: &str) -> String {
+    if target != "exchange" {
+        return content.to_string();
+    }
+    if agent_doc_document::compact_projection::boundary_marker_line(content).is_some() {
+        return content.to_string();
+    }
+    let marker = agent_doc_document::compact_projection::boundary_marker_line(old_content)
+        .unwrap_or_else(|| format!("<!-- agent:boundary:{} -->", uuid::Uuid::new_v4()));
+    let mut out = content.to_string();
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&marker);
+    out.push('\n');
+    out
+}
+
 /// Returns both the live compacted document and the committed snapshot. They differ
 /// only when unresolved input follows the exchange boundary.
 fn run_component_compact_with_options(
@@ -1428,6 +1465,11 @@ fn run_component_compact_with_options(
         visible_content.push_str(trailing.trim_end());
         visible_content.push('\n');
     }
+    // `#compactboundary`: the live projection must carry a boundary even when it
+    // reaches the document through the direct disk write instead of a
+    // patch-applying write. Commit re-mints one on the committed blob either way,
+    // so a boundary-less live document is a permanent marker-only dirty diff.
+    let visible_content = append_boundary_marker(&visible_content, target, old_content);
 
     let compacted = comp.replace_content(content, &visible_content);
     let mut compacted = agent_doc_template::repair_conversation_tail_outside_exchange(&compacted)?
@@ -1582,6 +1624,8 @@ fn run_component_compact_partial(
         new_content.push_str(trailing.trim_end());
         new_content.push('\n');
     }
+    // `#compactboundary`: same live-boundary rule as the full component compact.
+    let new_content = append_boundary_marker(&new_content, target, old_content);
 
     let compacted = comp.replace_content(content, &new_content);
     let mut compacted = agent_doc_template::repair_conversation_tail_outside_exchange(&compacted)?
@@ -2233,6 +2277,151 @@ mod tests {
         assert!(
             !archive.contains(prompt),
             "unresolved trailing prompt must not be archived:\n{archive}"
+        );
+    }
+
+    /// `#compactboundary`: compact rebuilds the exchange body, so the live
+    /// projection must carry the boundary marker forward even on the direct disk
+    /// write that has no post-patch boundary repair. Commit re-mints one on the
+    /// committed blob regardless, so a boundary-less live document is a permanent
+    /// marker-only dirty diff that no later cycle heals.
+    #[test]
+    fn full_exchange_compact_keeps_boundary_marker_in_live_document() {
+        let prompt = "Compact exchange must not orphan the boundary marker.";
+        let doc = format!(
+            concat!(
+                "---\nagent_doc_session: test-compact-boundary\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: archived topic\n\nResponse body.\n",
+                "<!-- agent:boundary:abc123 -->\n",
+                "{prompt}\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+            prompt = prompt
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, &doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_component_compact_force_disk(&file, &doc, "exchange", None, false).unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        let exchange = agent_doc_element::element::parse(&result)
+            .unwrap()
+            .into_iter()
+            .find(|component| component.name == "exchange")
+            .unwrap()
+            .content(&result)
+            .to_string();
+
+        // The existing marker id is carried forward rather than re-minted, so the
+        // compact does not churn the boundary identity.
+        let marker = "<!-- agent:boundary:abc123 -->";
+        let marker_at = exchange.find(marker).unwrap_or_else(|| {
+            panic!("live compacted exchange must keep the boundary marker:\n{exchange}")
+        });
+        let prompt_at = exchange
+            .find(prompt)
+            .expect("live compacted exchange must keep the unresolved prompt");
+        assert!(
+            prompt_at < marker_at,
+            "boundary must land at the end of the exchange, matching every other write path:\n{exchange}"
+        );
+        assert_eq!(
+            exchange.matches("<!-- agent:boundary:").count(),
+            1,
+            "compact must leave exactly one boundary marker:\n{exchange}"
+        );
+
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&file)
+            .unwrap()
+            .unwrap();
+        assert!(
+            !snapshot_after.contains(prompt),
+            "unresolved prompt must remain live drift:\n{snapshot_after}"
+        );
+    }
+
+    /// `#compactboundary`, partial (`--keep N`) variant.
+    #[test]
+    fn partial_exchange_compact_keeps_boundary_marker_in_live_document() {
+        let prompt = "Partial compact must not orphan the boundary marker.";
+        let doc = format!(
+            concat!(
+                "---\nagent_doc_session: test-partial-boundary\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: first topic\n\nResponse one.\n\n",
+                "### Re: second topic\n\nResponse two.\n",
+                "<!-- agent:boundary:def456 -->\n",
+                "{prompt}\n",
+                "<!-- /agent:exchange -->\n",
+            ),
+            prompt = prompt
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, &doc).unwrap();
+        let agent_doc_dir = dir.path().join(".agent-doc");
+        std::fs::create_dir_all(agent_doc_dir.join("snapshots")).unwrap();
+        std::fs::create_dir_all(agent_doc_dir.join("archives")).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        run_component_compact_partial(
+            &file,
+            &doc,
+            &doc,
+            PartialCompactOptions {
+                target: "exchange",
+                keep: 1,
+                message: None,
+                is_crdt: false,
+                force_disk: true,
+            },
+        )
+        .unwrap();
+
+        let result = std::fs::read_to_string(&file).unwrap();
+        let marker = "<!-- agent:boundary:def456 -->";
+        let marker_at = result
+            .find(marker)
+            .unwrap_or_else(|| panic!("partial compact must keep the boundary marker:\n{result}"));
+        let prompt_at = result
+            .find(prompt)
+            .expect("partial compact must keep the unresolved prompt");
+        assert!(
+            prompt_at < marker_at,
+            "boundary must land at the end of the exchange:\n{result}"
+        );
+        assert_eq!(
+            result.matches("<!-- agent:boundary:").count(),
+            1,
+            "partial compact must leave exactly one boundary marker:\n{result}"
+        );
+
+        let snapshot_after = agent_doc_snapshot_io::load_document_baseline(&file)
+            .unwrap()
+            .unwrap();
+        assert!(
+            !snapshot_after.contains(prompt),
+            "unresolved prompt must remain live drift:\n{snapshot_after}"
         );
     }
 

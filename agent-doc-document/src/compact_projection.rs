@@ -152,6 +152,20 @@ pub fn split_component_content_at_boundary(content: &str) -> (String, String) {
     (before, after)
 }
 
+/// Return the agent boundary marker line present in component content.
+///
+/// Compaction rebuilds the component body from scratch, so it has to carry the
+/// existing marker forward explicitly. Without it the committed projection (which
+/// re-inserts a boundary at commit time) and the live editor buffer (which does
+/// not) disagree, leaving the document permanently dirty by a marker-only diff
+/// (`#compactboundary`).
+pub fn boundary_marker_line(content: &str) -> Option<String> {
+    content
+        .lines()
+        .find(|line| line.starts_with("<!-- agent:boundary:"))
+        .map(|line| line.trim_end().to_string())
+}
+
 /// Return the sortable archive timestamp from a binary-generated compact
 /// exchange summary.
 ///

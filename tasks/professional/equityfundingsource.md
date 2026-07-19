@@ -102,7 +102,28 @@ The dry run printed its own proof: `database="001-8553-000-Equity Funding - Sand
 The gap is on the app side rather than the CLI. The worker reads its TMO database from a `TMO_DATABASE` Cloudflare secret, and secret values can't be read back — only listed. Listing turned up something you should know about: **production has 4 secrets; staging has 13.** Production is missing both `TMO_API_TOKEN` and `TMO_DATABASE`, plus all three AWS/S3 and all three Dropbox secrets. Every TMO, S3, and Dropbox call in production will fail closed until those are pushed. Filed as `#efs-prod-secret-parity`, sequenced *after* `#efs-cf-account-custody` — secrets are per-account and per-environment, so pushing them before the account move means pushing them twice.
 
 **`#efs-prod-seed` closed.** Staging is test data, so there's nothing to export or import: production launches empty and no R2 copy is needed. That also removes the sequencing constraint that had it waiting on the account move.
-<!-- agent:boundary:443a6720 -->
+❯ **production has 4 secrets; staging has 13.**: What are you defining as production? We only have staging...no production yet.
+
+### Re: What are you defining as production? — opus-4-8
+
+You're right and my wording was sloppy. Let me be precise about what exists.
+
+I was using "production" to mean **the Cloudflare Worker environment literally named `production`** — the `[env.production]` block in `wrangler.toml`. That environment is provisioned and has been deployed (7 deployments, 2 of them uploads, the rest secret changes), with its own D1 (`equityfundingsource-production`, `293f0a4d-…`, empty), its own three `-production` R2 buckets, and 4 secrets.
+
+But in the sense you mean — a thing serving real users — you're correct, **there is no production.** It has no DNS, no data, and no traffic. It's a provisioned cutover target, not a running system. So the two environments are:
+
+| | live/default env | `[env.production]` |
+|---|---|---|
+| D1 | `equityfundingsource` `280e1539…` — 33 users, 7 loans, 0 funds | `equityfundingsource-production` `293f0a4d…` — empty |
+| R2 | base buckets | `-production` buckets |
+| Secrets | 13 | 4 |
+| URL | `equityfundingsource.brian-takita.workers.dev` | none |
+| Serving anyone | no | no |
+
+**This forces a correction to what I told you last cycle.** I called the default env "staging" and leaned on that to argue `#tmo-orphan-apply` was low-risk. That was the wrong reason. Since there's only one real environment, the DB that `--apply` touches is *the* app's database, not a throwaway. The conclusion doesn't change, but it should rest on the actual evidence: you confirmed the data is test data, and the 6 rows are provably unreferenced — `efs_id NULL`, zero matching rows in `loans.tmo_loan_number`, zero in `funds`. That's why it's safe, not because of an environment label I got wrong.
+
+I've also rewritten `#efs-prod-secrets` to say what it actually is: a **cutover prerequisite, not a live outage**. Nothing is broken right now because nothing points at that environment. But if DNS were cut over today, every TMO, S3, and Dropbox call would fail closed, because those 9 secrets were never pushed there. It still sequences after the account move, since secrets are per-account and per-environment.
+<!-- agent:boundary:9622844a -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
@@ -111,6 +132,7 @@ The gap is on the app side rather than the CLI. The worker reads its TMO databas
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#efs-prod-secrets] [operator-verify] Cutover prerequisite, NOT a live outage — the [env.production] Cloudflare environment is provisioned and deployed but not launched (no DNS, empty D1, no traffic). It has 4 secrets; the live default env has 13. Present in [env.production]: ADMIN_GLOBAL_PASSWORD, AUTH_SECRET, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN. Missing: TMO_API_TOKEN, TMO_DATABASE, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL_S3, DROPBOX_APP_KEY, DROPBOX_APP_SECRET, DROPBOX_REFRESH_TOKEN, and one more. If DNS were cut over today, every TMO, S3, and Dropbox call would fail closed. Push with 'bun run cf:secrets:push:production'. Secrets are per-account AND per-environment, so do this AFTER #efs-cf-account-custody or it has to be redone. Discovered 2026-07-18.
 - [ ] [#tmo-snapshot-verify] [operator-verify] Run bin/tmo-snapshot.ts against the real TMO sandbox with the operator token (TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)") and confirm the sweep reports complete=true. The tool, its pure manifest/coverage layer, and its tests shipped 2026-07-18 (#tmo-orphan-reconcile-exec cycle) but no run has ever touched real TMO, so the endpoint set is unverified — in particular LSS.svc/GetLenders and LOS.svc/GetBorrowers are inferred from the documented API surface and are NOT covered by docs/TMO/*.md. If either 404s, drop it from the sweep or correct the path. This is the precondition for #tmo-sandbox-purge-apply. Spec: docs/TMO/snapshot.md.
 - [ ] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: `TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply` deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). SNAPSHOT FIRST (added 2026-07-18): TMO has no backup or restore and DeleteLoan is permanent, so gate the purge on `bun ./bin/tmo-snapshot.ts --covers <the 16 loan numbers> --out tmp/tmo-before-purge.json`, which exits non-zero unless every named loan was captured cleanly. Blocked on #tmo-snapshot-verify (the snapshot tool has never run against real TMO). Held pending operator go because DeleteLoan is permanent with no TMO-side undo. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code and cannot be selected. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.

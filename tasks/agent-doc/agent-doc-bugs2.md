@@ -85,23 +85,42 @@ Restructured to order the phases explicitly rather than hope: the caller signals
 Verified rather than assumed: 6 consecutive full-crate runs green (195 passed each), and the **full workspace suite now reports zero FAILED results** — first clean run this session. Committed and pushed as `b235d03ce`.
 
 Worth noting for `#ensurereplicagen`: with the suite clean, a red `make check` is now a real signal again, which it was not while these two were flapping.
-<!-- agent:boundary:56a65020 -->
+
+### Re: do [#ensurereplicagen] — opus-4-8
+
+Root cause found and fixed. Neither of the two suspects I filed was right — it was not generation fencing and not path keying. It was **process identity**.
+
+`hub_registry()` is a process-local map that only the project controller ever populates, because `replica_register` is served by the controller RPC. Queue maintenance runs in the short-lived preflight **CLI** process, so it was interrogating its own permanently-empty registry. Once durable liveness reported the editor attached, that miss read as `editor_attached_model_missing` on every single run for the life of the process — which is why no amount of editor restarting, `admin recycle`, or `admin reload-lib` ever touched it. Those were all refreshing layers that were never broken.
+
+The decisive evidence was one field I had not looked at. `crdt_current_text_unavailable` logs `process_pid`, and it read `3836671` — not the controller (`3811498`), but a CLI process that had already exited. The plugin registered fine, the controller recorded the register fine; the reader was simply asking the wrong process. `idle_watch.rs` already documents this exact hazard verbatim ("a supervisor asking its own registry can only ever miss... permanently, for the life of the process") and routes around it. Queue maintenance was the remaining direct caller.
+
+Fixing the read immediately exposed the symmetric write bug, which is worth recording because it looked like an unrelated failure. With no local hub, `apply_cpc_write_for_file` recovers one from the durable `.yrs` projection and compare-and-swaps against *that*. Once the projection lags the controller's live model, the CAS fails with a **stable** hash mismatch — byte-identical expected/current hashes on every retry. `recovery=retry_crdt_merge` reads as transient but no retry could ever satisfy it. Both halves now route through the controller, guarded by `embedded_relay_is_available_for_file` so in-process callers keep the direct path (the shape `document-realtime-io` already uses).
+
+Verified live: queue maintenance persisted on **3/3 consecutive preflights**, versus 0 for the entire session before this, with `write_authority action=compare_and_swap surface=queue_maintenance` succeeding and the pending auto-strikes finally landing. Full workspace suite green. Pushed as `c1c669ce0`.
+
+`test_cli`'s CPC-boundary test enumerates the crates forbidden from touching the relay directly and `agent-doc-preflight-io` was not on that list — that is how this escaped for so long. Added targeted assertions pinning both the routed read and the routed write.
+
+Worth noting in hindsight: the earlier `#ensurereregister` work (binary nudges the editor, plugin 0.2.279 re-establishes a missing replica) was real and is worth keeping, but it was treating a symptom. The plugin was healthy the entire time.
+
+### Re: Run Agent Doc on brookebrodack-dev.md did not submit — opus-4-8
+
+Not a bug — the route made the right call. Pane `%9` is running a Claude turn right now (`✻ Recombobulating… (27s)`), so `Run Agent Doc` waited for a dispatch-ready prompt, never got one, and deliberately refused to inject:
+
+`route_dispatch_only_starting_pane_not_ready pane=%9 outcome=timed_out composer_draft=false`
+
+`composer_draft=false` is the part that rules out the failure mode worth worrying about: nothing was left stranded unsubmitted in the composer, so this is not the `#jbtsiftnosub2` class. Had it injected anyway it would have interrupted that running turn — the `#jbsteerinterrupt` bug.
+
+I also checked the notification path, since a silent no-op would have been a real gap: exhausted `RETRYABLE_STARTING` falls through to `notifyPersistentRouteFailure` at `TerminalUtil.kt:554`, so an IDE Event Log entry should have been raised. If you did not see one, say so and I will treat *that* as the bug. Otherwise: wait for that turn to finish and trigger again.
+<!-- agent:boundary:ea1c508c -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
-- ~~do [#bbdqprio]~~
-- ~~do [#bn41]~~
-- ~~do [#px82]~~
-- ~~do [#jblocalhistverify]~~
-- ~~do [#5bzd]~~
-- ~~do [#staleplugindeploy]~~
-- ~~do [#jblocalhistverify]~~
 - ⏭️ do [#patchretryidem]
 - ⏭️ do [#mtds]
-- 🚧 equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.
-- do [#queuecontmirror]
-- ⏭️ do [#ensurereplicagen]
+- ~~equityfundingsource.md `backlog priority queue` is not adding items into the agent:queue.~~ — auto-struck: answered this cycle (#ftstrike)
+- ⏭️ do [#queuecontmirror]
+- ~~do [#ensurereplicagen]~~
 - ⏭️ do [#crdtcasraced]
 - ⏭️ do [#jbedtledger]
 - ⏭️ do [#jbroutasync]
@@ -148,7 +167,6 @@ Worth noting for `#ensurereplicagen`: with the suite clean, a red `make check` i
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#ensurereplicagen] #agent-doc-bug The missing-replica wedge SURVIVES a successful re-registration. With #ensurereregister live (binary nudges, plugin 0.2.279 re-establishes), idea.log shows the full happy path per nudge: transport.register ok=true, register elapsed ~170ms, 'atomically replaced cached forwarder for agent-doc-bugs2.md', open-document-attach elapsed ~290ms force_refresh=true. Controller logs the matching crdt_replica_register bootstrap_bytes=290970 generation_fenced=true superseded_generations_pruned=1. Yet the very next observation still reads editor_attached_model_missing, AND CrdtReplicaManager.hasOpenDocumentReplica(file) still reads false (proven: the guard keeps letting the nudge through). So a replica is registered and its forwarder cached, but neither the binary reader nor the plugin's own forwarders map sees it. Two suspects: (a) generation fencing - each register fences the prior generation, and the reader may be resolving against a superseded/fenced generation; (b) path keying - forwarders is keyed by the plugin's RESOLVED file.path while the guard/reader use the binary's canonical path string. Start by logging both keys and the resolved-vs-fenced generation at read time.
 - [ ] [#patchretryidem] #patchretryidem #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). NARROWED 2026-07-19 by the #fzmutloss fix: the mutation half and the body half were never in one transaction, so this is NOT 'both halves lost together' - the body half is re-applied non-idempotently by the retry while the mutation half took a different path. Remaining question is only the body-half idempotency. Needs a reproduction of the CAS race; do not guess at the idempotency boundary.
 - [ ] [#respidxrealtime] Source exchange response nodes from the realtime document model instead of re-parsing a &str. closeout_signal::ResponseIndex::build now parses ONCE per guard invocation (was N x (1 + M) tree-sitter parses for N ids and M archives, #respidxparse), but it still parses from rc.doc_content() bytes. The live model already holds these nodes - agent-doc-markdown-ast::crdt::OverlayCrdtDoc, and the SeqCrdt exchange-node direction AGENTS.md commits to. Reading nodes from the realtime model removes the parse entirely and generalizes past this guard to every string-scanning consumer of exchange structure. Operator-raised 2026-07-19.
 - [ ] [#jbroutasync] #agent-doc-bug Move editor_route onto the async accept-on-admission controller endpoint and honor submit.deadline_ms. handle_editor_command_submit_async_rpc (agent-doc-controller-io/src/project_controller/rpc.rs:5381) already exists, spawns a worker, and logs editor_command_async_completed; validate_async_editor_command_payload (rpc.rs:5427) whitelists only sync_tmux_layout/focus_document_pane so editor_route is rejected as unsupported. The plugin already has resolveCommandSubmitAcceptedData (CpcRouteClient.kt:414) for the accepted shape. Separately the controller never reads submit.deadline_ms, so routed_cycle_ack_timeout (30s with a live child, dispatch.rs:2092) outlives the client's 15s deadline: the operator sees a timeout while the route keeps running. Biggest remaining perceived-latency win.

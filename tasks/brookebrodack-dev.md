@@ -174,7 +174,29 @@ The remaining two were smaller: a promise array mixing `BuildContext` and `void`
 **Two things to watch.** Two `ctx/*.ts` Marked errors disappeared mid-cycle without my touching them — the local `.yalc` copy of `@rappstack/ui--server` had been refreshed to `marked ^17`. CI rewrites yalc paths to npm `^0.1.0`, so the published package may still pin `marked ^13` and bring them back; that is `#yalcdrift`. And I again did not commit `bun.lock` — the same 213-deletion yalc rewrite the last cycle refused; CI does not use `--frozen-lockfile`, so `esbuild` resolves from `package.json` regardless.
 
 The Pages deploy for the previous push (`#tsappsub`, `a3da157`) **went green**, which closes that item's open signal. This push's deploy and the first Check run (`29668807479`) were still in progress at closeout, so this closes on local evidence — `#chkci` carries the confirmation.
-<!-- agent:boundary:2c9489fb -->
+
+### Re: #tsbrowser — the browser half now type-checks, and every error left belongs to rappstack — opus-4-8
+
+> **Queue prompt:** do [#tsbrowser]
+
+The head of the queue was `do [#tsappclean]`, which is already answered and sitting in `agent:done` — preflight computed the auto-strike but could not persist it (the editor model was unreachable, and it correctly refused to fall back to disk). Rather than spend a fourth no-op closeout on stale bookkeeping I took the live head, `#tsbrowser`.
+
+**The split, shipped.** `tsconfig.browser.json` covers `lib/**` and `test/guestbook-hyop.test.ts` with the DOM lib and no Workers globals — the other side of the boundary `tsconfig.json` already documents. Wired as `bun run typecheck:browser`. It measured 30 errors in this repo's `lib/`; 15 are now gone and none of the survivors are fixable here.
+
+**What I fixed.**
+
+- **8 unresolved asset imports.** `lib/ui--server--brookebrodack` imports images directly and gets back the emitted URL. The app submodule gets those declarations from `rebuildjs/types` — but rebuildjs is not a dependency of the parent package, and naming it in `types` does not degrade gracefully: it aborts the entire check with TS2688 and reports exactly one error, which looks like success if you only read the count. Declared locally in `types/assets.d.ts` instead.
+- **4 `url__join` calls in `sitemap__xml.ts`.** `site__website_(ctx)` is `string | undefined` and `url__join` rejects that. Asserted, matching what the six `doc_html` modules next door already do — a sitemap with no website is not a recoverable state.
+- **3 effects in `guestbook__hyop.ts`.** lazily-js types `EffectRun` as `() => (() => void) | null | undefined`. A block-bodied arrow infers `void`, and TypeScript will not assign `void` to `undefined`, so an effect with no cleanup has to say `return undefined` out loud. Queued `#lzeffectvoid` — widening that return type to `| void` upstream is the real fix.
+
+**What I did not fix, and why it is not mine.** The 15 survivors are all in `lib/domain--server--brookebrodack/youtube/`, and they are one root cause, not fifteen: `@rappstack/domain--server--youtube` pins `drizzle-orm ^0.32.0` while `@rappstack/domain--server` pins `^0.45.1`. Both copies are installed. So `youtube_video_tbl` is a 0.32 table type and `drizzle_db_(ctx)` is a 0.45 db handle, and every `select`/`insert`/`onConflictDoUpdate` between them is a nominal mismatch. Bumping this repo's pin does not help — the table's type identity comes from whichever drizzle *that* package resolves. It is a rappstack-repo fix; I folded it into `#rappts` with the specific version pair.
+
+That closes the loop on the whole type-check thread: `bun run typecheck` is **0**, and across the browser config and the app config the remaining **39** errors are *all* in `@rappstack` sources, which ship `.ts` so `skipLibCheck` never applies. Nothing in this repository is unchecked or red anymore.
+
+**The Check workflow was red, and not for the reason `#chkci` predicted.** Run `29668807479` failed every single `app/brookebrodack-site` test on `Cannot find module '../../public/assets/images/brooke-brodack-logo.jpg'` — not `#yalcdrift`. `public/assets` is 119 MB of media, gitignored on purpose and served from Contabo S3; `config.ts` imports the logo from it, so a clean checkout cannot boot the app at all. The deploy workflow has always downloaded the bucket before building — Check had not. It does now, same step, same secrets. So the workflow I added last cycle could never have gone green as written, which is worth saying plainly.
+
+**Verification.** `typecheck` 0 errors; `test` 67 pass / 0 fail; `test:dom` 9 pass / 0 fail; `bun run build` green and still emitting `dist/browser`. Pushed as `61ad8f3` (ui--browser), `7671b07` (ui--server), `d31de57` and `36c60bb` (parent), gitlink bumped at `82af6ec13`. Check run `29670229183` and the Pages deploy were still queued at closeout — `#chkci` carries the confirmation, now with a specific thing to confirm.
+<!-- agent:boundary:cf80c7a4 -->
 <!-- /agent:exchange -->
 
 ## Queue

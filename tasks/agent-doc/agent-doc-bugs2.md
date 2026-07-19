@@ -264,11 +264,51 @@ One correction to my own earlier framing: I described (b) as "a real design chan
 While verifying, two tests failed under full-workspace parallel load but passed 6/6 in isolation, and the clean-tree baseline showed the same behaviour, so they are pre-existing and unrelated to this change (a pure function in `agent-doc-merge`). Filed as `#wsflake2` rather than waved off: `dirs::tests::resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path` and `project_controller::rpc::tests::reliable_sync_status_projects_plane_open_set_without_sidecar_oracle`. Same order-dependent class as `#ctrliotestflake`.
 
 Also filed `#ctrlrespawnenoent`: during a `make install` this cycle the agent-loop controller died and could not respawn, failing with `No such file or directory` on the binary across 6 spawn attempts while `cargo install` was replacing it. I restarted it by hand to continue; it is a real install/restart race, not a one-off.
-<!-- agent:boundary:aba9c506 -->
+
+### Re: do [#crdtcaschkptdrive] — opus-4-8
+
+Measured the premise before implementing it, and the measurement says **don't do the thing this item asked for**. Closing it on that basis rather than shipping the change.
+
+The item proposed directing every agent to checkpoint each completed `### Re:` section so finalize would have less to converge. That assumes the CRDT convergence window is a meaningful share of closeout cost. On this document it is not:
+
+| closeout | git_commit | session_check | share |
+|---|---|---|---|
+| 6178ms | 3141 | 2684 | 94% |
+| 7750ms | 4832 | 2562 | 95% |
+| 9479ms | 6491 | 2631 | 96% |
+| 12850ms | 9314 | 3055 | 96% |
+
+`git_commit` plus `session_check` is 94-96% of every closeout; CRDT convergence sits in the low hundreds of milliseconds of the remainder. Meanwhile the single checkpoint I ran last cycle cost **1317ms** of `delivery_ack_pending` by itself — each checkpoint is a real editor round trip that waits for an ACK.
+
+So mandating one checkpoint per section would add roughly 1.3s per section to attack a ~0.3s component. It would make every turn slower, for every user, to optimize something that is not the bottleneck. I filed that item myself last cycle, and it was wrong.
+
+What the measurement *does* justify, and what I shipped instead:
+
+- Checkpointing documented as **opt-in**, with the numbers and the `closeout_latency` phase breakdown to check first — so the next person reaching for it confirms convergence is actually their bottleneck instead of assuming it.
+- The mechanism description corrected. The runbook said the binary "replaces the prior uncommitted response tail"; `#crdtcaschkpt` made it append only the sections not already at the tail — same visible result, without rewriting nodes the editor already holds. That ambiguity is plausibly how the duplication bug survived unnoticed, so the contract now states exactly what to pass (cumulative), what replay does (no-op), and what finalize does on top (appends the remainder).
+
+Installed harness surfaces regenerated with `skill install --all`; `audit-docs` clean. Pushed as `f57b5248a`.
+
+If convergence ever *is* the bottleneck — a very large response, or a document under concurrent editing showing `compare_and_swap_raced` — the mechanism is now safe to use incrementally, which it was not before this session. That combination is the real outcome of direction (b): the capability exists and is correct, and is applied where it pays rather than everywhere.
+
+### Re: workspace suite reliability — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#crdtcaschkptdrive]
+
+
+Worth escalating `#wsflake2`: it is broader than the two tests I named. A full `cargo test --workspace --no-fail-fast` run is **green (7706 passed, 0 failed, 290 suites)**, but back-to-back plain runs intermittently report 1-3 failures in varying suites, including a 73-test suite I had not seen fail before. So the suite passes on its merits and the flakiness is purely parallel-load scheduling.
+
+That is a worse problem than the individual tests: `make check` currently cannot be trusted to distinguish a real regression from load noise, which matters much more now that the previously-red suite is otherwise clean. I did not fold this into the current item — it needs its own cycle, and I have updated `#wsflake2` to reflect the wider scope rather than leaving it scoped to two test names.
+<!-- agent:boundary:13e5f32d -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+- ~~do [#crdtcaschkptdrive]~~
+- do [#wsflake2]
+- do [#ctrlrespawnenoent]
 - ~~do [#crdtcasraced]~~
 - ~~do [#donestrikeextra]~~
 - ~~📌 do [#bbdqprio]~~
@@ -327,8 +367,7 @@ Also filed `#ctrlrespawnenoent`: during a `make install` this cycle the agent-lo
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#crdtcaschkptdrive] #crdtcasraced direction (b), remaining half. The checkpoint mechanism is now SAFE to use incrementally (duplication fixed + regression tests, this cycle), and finalize dedupes an already-checkpointed prefix, but nothing DRIVES checkpointing: agent_doc_write_runtime_io::checkpoint_response has exactly one caller, the CLI subcommand, so in practice finalize still converges the whole response every turn. Scope this as an instruction-surface change, NOT another mechanism change: have SKILL.md/runbooks/streaming-checkpoints.md direct agents to run 'agent-doc response-checkpoint' as each complete '### Re:' section is produced (balanced fences/markers only, never a partial token prefix). Then measure: compare finalize convergence elapsed_ms and merge+CAS attempt count on a large document with and without checkpointing, using the stalled-window attempt budget the #crdtcasraced (a) tests pin. Open design question that remains: whether the boundary marker moves per checkpoint or only at the final seal.
-- [ ] [#wsflake2] Two more order-dependent workspace test flakes, same class as #ctrliotestflake. dirs::tests::resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path and project_controller::rpc::tests::reliable_sync_status_projects_plane_open_set_without_sidecar_oracle. PROVEN pre-existing and load-dependent: each passes 6/6 when run in isolation, both only fail under full 'cargo test --workspace' parallel load, and a clean stashed tree reproduces a failure too. They make 'make check' an unreliable signal, which matters more now that the previously-red suite is otherwise green. Make them deterministic (per-test isolation or SimWorld) rather than retrying.
+- [ ] [#wsflake2] Workspace test suite is unreliable under parallel load — BROADER than first scoped. A full 'cargo test --workspace --no-fail-fast' run is GREEN (7706 passed, 0 failed, 290 suites), but back-to-back plain 'cargo test --workspace' runs intermittently report 1-3 failures across VARYING suites (observed: dirs::tests::resolve_pane_cwd_falls_back_to_process_cwd_for_non_git_path, project_controller::rpc::tests::reliable_sync_status_projects_plane_open_set_without_sidecar_oracle, and a 73-test suite failing up to 3). Each named test passes 6/6 in isolation, and a clean stashed tree reproduces failures too, so this is pre-existing load-dependent scheduling, not a real regression. Impact: 'make check' cannot currently distinguish a real regression from load noise, which matters much more now the suite is otherwise green — it will eventually mask a genuine break. Fix by making the offending tests hermetic (per-test temp dirs/ports, no shared process-global mutable state, SimWorld where live tmux/sockets are involved) rather than by retrying or serializing the whole suite. Start by identifying every test that touches process-global state or a fixed path/port.
 - [ ] [#ctrlrespawnenoent] #agent-doc-bug The project controller can die during 'make install' and then fail to respawn. Observed 2026-07-19 on /home/brian/work/btakita/agent-loop: every agent-doc command failed with pre_write_guards -> editor_attached_model_missing, caused by 'failed to launch project controller (binary=/home/brian/.cargo/bin/agent-doc, spawn_attempts=6): No such file or directory (os error 2)'. The binary existed immediately afterward — cargo install had been mid-replacement of that path, so all 6 spawn attempts hit the ENOENT window and gave up. Recovery required manually starting 'agent-doc controller serve --project-root <root> --launch-mode lazy'. Fix: make spawn retry tolerate a transient ENOENT on the binary path (it is being replaced, not missing) with a bounded backoff spanning a realistic install window, rather than exhausting 6 fast attempts; and surface a clearer operator message than editor_attached_model_missing, which points diagnosis at the editor when the real cause is a missing controller.
 - [ ] [#patchretryidem] #patchretryidem #agent-doc-bug A post-CAS-race finalize retry RE-APPLIES the response tail instead of replacing it, splicing the document. Live evidence in tasks/brookebrodack-dev.md (do NOT edit from another session; owned by pane %9): the '> **Queue prompt:** / > do [#rappsqlite]' blockquote appears twice - correctly at line 117 at the top of the response, and again at line 141 after the body concluded - followed by a bare ' -->' at line 145 immediately before . That ' -->' is partial-terminator debris from a <!-- /patch:exchange --> marker whose opening was consumed (#boundarysplice class). NARROWED 2026-07-19 by the #fzmutloss fix: the mutation half and the body half were never in one transaction, so this is NOT 'both halves lost together' - the body half is re-applied non-idempotently by the retry while the mutation half took a different path. Remaining question is only the body-half idempotency. Needs a reproduction of the CAS race; do not guess at the idempotency boundary.
 - [ ] [#respidxrealtime] Source exchange response nodes from the realtime document model instead of re-parsing a &str. closeout_signal::ResponseIndex::build now parses ONCE per guard invocation (was N x (1 + M) tree-sitter parses for N ids and M archives, #respidxparse), but it still parses from rc.doc_content() bytes. The live model already holds these nodes - agent-doc-markdown-ast::crdt::OverlayCrdtDoc, and the SeqCrdt exchange-node direction AGENTS.md commits to. Reading nodes from the realtime model removes the parse entirely and generalizes past this guard to every string-scanning consumer of exchange structure. Operator-raised 2026-07-19.

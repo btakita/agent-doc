@@ -106,202 +106,40 @@ All packages upgraded in `app/brookebrodack-site/package.json`:
 <!-- agent:exchange mode=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/5ed9ebdbe4a2edb795318ea94faf66a77813df7180cde01350e66214e980296b-20260719-004315.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/5ed9ebdbe4a2edb795318ea94faf66a77813df7180cde01350e66214e980296b-20260719-032943.md`*
 
 Compacted content:
-- Archived 12 response topic(s): queue strike of #gbmig3; #fhquorum2; #fhoneshot; 9 more
-- Prior summary/context: prior compacted content: Archived 8 response topic(s): GPU policy for local model plugins; #teah; a worker pool of Co...
+- Archived 8 response topic(s): #rak9; #tsappsub; #tsappclean; 5 more
+- Prior summary/context: prior compacted content: Archived 12 response topic(s): queue strike of #gbmig3; #fhquorum2; #fhoneshot; 9 more
 
-### Re: #rak9 — the type-check had never started, not merely never passed — opus-4-8
+### Re: #sweepstale — the guard caught the repo it was written about — opus-4-8
 
-> **Queue prompt:** do [#rak9]
+> **Queue prompt:** do [#sweepstale]
 
-Done. `bun run typecheck` exits clean, 76 tests pass, pushed as `eeabb5e`.
+Done. Pushed to `ctx-core/dev` as `8fac099f1` + `bd123379b`, gitlinks bumped in agent-loop.
 
-**The item understated it.** TS5110 is a *config* error, so tsc aborted before reading a single source file. `tsc -p tsconfig.json` had not been failing its checks — it had never run them. That distinction is the whole item, because it means everything the check would have caught has been accumulating unseen since the config was written.
+`bin/ctx_core__workspace_submodules__check_stale.sh` fetches every `lib/*`, `tools/*`, `vendor/*` submodule in parallel (191 of them, 7.6s at `--jobs 12`) and classifies each against `origin/HEAD` as equal / ahead / behind / diverged. The sweep now aborts on any behind-or-diverged one. `--rebase` fast-forwards them; `CTX_CORE_ALLOW_STALE_SUBMODULES=1` overrides.
 
-Sixty-seven errors were waiting, from two causes:
+**The first real run refused, and it was right to.** `src/ctx-core-dev` was 190 submodules behind — every one carrying the same `chore(deps): update dependencies to latest` commit, pushed from the *other* ctx-core-dev checkout at `~/work/ctx-core/`. Running the sweep here would have reverted the entire prior sweep. That is the failure mode the item describes, sitting live in the tree, and it is worth naming precisely: the danger is not one stale clone, it is **two clones of the same monorepo**, where the one you happen to be in has no way to know the other already did the work.
 
-- **`@cloudflare/workers-types` was never installed.** `D1Database`, `PagesFunction`, `Fetcher`, `DurableObject` — all unresolved, so every Pages Function parameter was an implicit `any`. The entire edge surface, the guestbook API included, was effectively untyped.
-- **A genuinely wrong handler signature.** `workers/guestbook-moderate` declares `scheduled(_event: ScheduledEvent, ...)`, but the runtime passes a `ScheduledController`, which is a different shape. Harmless in practice only because the argument is ignored — exactly the kind of thing that stays harmless until someone reads it.
+After rebasing onto `origin/main` and syncing gitlinks, the checker exits 0.
 
-**On the fix itself:** the error message suggests `module: nodenext`, and I used `moduleResolution: bundler` instead. Both clear TS5110 and I measured both — identical results. `bundler` is the one that matches reality: this runs on Bun and imports `.ts` extensions, which is what bundler resolution exists for, and it keeps `allowImportingTsExtensions` coherent rather than merely tolerated.
+**On the two things I did not simply follow the item on:**
 
-**What I deliberately did not do is make it look cleaner than it is.** `@cloudflare/workers-types` replaces `Response` with the Workers version, which is incompatible with the DOM's — so browser code checked against it fails on every element it passes around. One config cannot cover both halves. I scoped `tsconfig.json` to the edge surface (functions, workers, scripts, and the three tests that drive them), mirroring the split `package.json` already makes between `test` and `test:dom`. `lib/` and the DOM test are **not** checked yet, and I queued `#tsbrowser` with the measured count (56, mostly `sig`/`ctx` generic mismatches in `lib/domain--server--brookebrodack`) rather than shipping a second red config or quietly leaving the gap unnamed.
+- **Refuse, not auto-rebase.** The item allowed either. Auto-rebase silently rewrites ~190 checkouts as a side effect of asking for a dependency report, which is a much larger action than the one requested — so `--rebase` is opt-in and re-runs the check afterward rather than trusting its own loop.
+- **`--rebase` is fast-forward only.** A diverged submodule is reported for a human, never rewritten. Behind-only is recoverable; diverged means someone has local work, and losing it to a convenience flag is a worse outcome than the revert this guard exists to prevent.
 
-Also queued `#tsappsub`: `app/brookebrodack-site/tsconfig.json` carries the identical TS5110 defect, so that submodule's type-check has never run either. It is a separate repo, so it gets fixed there rather than from here.
+Both fast-forward paths are exercised, not assumed: `merge --ff-only` on a branch checkout (`lib/rebuildjs`, on `main`) and `checkout --detach` on a detached one (`lib/array`) — each run for real and restored.
 
-Added a `typecheck` script, since the failure mode here was a check that stopped running without anyone noticing.
-
-**Session note:** preflight hard-failed this cycle with `editor_attached_model_missing` — `agent-doc admin reload-lib` cleared it (cdylib v0.35.6 to 1/1 endpoints) without a force-disk or repair. The document was also compacted externally between cycles (12 topics archived), and the supervisor is still mapping a stale binary with an auto-recycle deferred to the next idle boundary.
-
-### Re: #tsappsub — fixed it in the submodule, and the second error was the interesting one — opus-4-8
-
-> **Queue prompt:** do [#tsappsub]
-
-Done in `brookebrodack-site` itself (`f23ed7e`), with the gitlink bumped here (`a3da157`). I had filed this as "fix it there, not from here" — which is a statement about which repo owns the commit, not a reason to leave it undone, and working in the submodule satisfies both.
-
-**TS5110 was only half of it.** With the module/moduleResolution pairing fixed, a second abort surfaced: TS2688, `types` listing `rebuildjs/types` for a package that was never a dependency of this one. It is pinned in the workspace root's `resolutions` — which pins a version *without installing anything* — so the entry silently failed to resolve, and tsc aborted before reading a source file either way. Fixing only TS5110 would have left the type-check exactly as dead as it was, with a different error code.
-
-**My first instinct was wrong and worth recording.** I removed the unresolvable entry, since nothing obviously needed it. Then I checked what it actually contains: the asset-module declarations (`*.jpg`, `*.png`, `*.css`) and a `/// <reference lib="dom" />`. This codebase imports images directly, so the entry is load-bearing — the fix is to install the package, not to delete the reference to it. Deleting it would have type-checked "clean" on that point while quietly removing the declarations that make the imports legal.
-
-The type-check now runs and reports **267 errors**. That is the honest state of a package that has never been checked, not a regression from this change — I verified the shape of it rather than assuming: `bun run build` is green and still produces `dist/browser`, which is what the deploy actually depends on. Queued as `#tsappclean`, dominated by `build.ts` (esbuild used without being a direct dependency; implicit anys in plugin callbacks) and `app/index.ts` (a hono `ErrorHandler` returning `void` where it must return a `Response` — a real bug).
-
-**One thing I deliberately did not commit:** `bun.lock`. Regenerating it rewrites the yalc-linked `@rappstack/*` entries from local `.yalc` state, stripping their dependency metadata — 213 deletions describing this machine rather than the project. CI installs through the npm fallback regardless. The gitlink bump carries the fix without carrying that.
-
-Parent repo re-verified after the bump: `typecheck` clean, 76 tests pass. The Pages deploy for the previous push (`#rak9`, `eeabb5e`) went green; the one for this push is still pending, so this closes on local evidence rather than waiting on it.
-
-### Re: #tsappclean — 244 errors, 198 of them mine, and one that meant no error page ever rendered — opus-4-8
-
-> **Queue prompt:** do [#tsappclean]
-
-Done. `bun run typecheck` reports zero errors in files this package owns; build green, 76 tests pass. Pushed as `2fe17d2` (site), `b89f1e5`/`ab42dfd` (dev), gitlink `dc51511aa`.
-
-**The count moved before I touched anything.** The item said 267; the first run this cycle said 244. Installing `rebuildjs` last cycle changed what resolves, so the number was already stale — which is why I re-measured rather than working from the figure. Of the 244, **198 belonged to this package** and 46 did not.
-
-**190 of the 198 were one missing declaration.** `post/index.ts` imports 190 `*.md` posts. `rebuildjs/types` declares `*.png`, `*.css`, `*.html` — but not `*.md`. So every post import was an unresolved module. The fix worth noting is what I declared it *as*: `md_esbuild_plugin_` in `build.ts` emits a module with `meta_` and a default renderer, which is exactly `post_mod_T`. Declaring that shape types the imports; declaring `any` would have made the number go to zero while checking nothing. One file, 190 errors, real types.
-
-**The one that is a live bug: `app.onError` returned nothing.** Hono requires an error handler to return a `Response`. I verified the pre-fix behaviour instead of assuming it — `app.request('/__boom')` resolved to **`undefined`**, not to a 500. There was no response object at all on the error path. The status block in this document lists "graceful errors" as done; they were not, and the type-check is the only thing that would have said so. It now returns the error's own response when it carries one, else a 500 — confirmed live: status 500, gzipped `Internal Server Error` body.
-
-**On `esbuild`:** `build.ts` imported it without depending on it. I pinned `^0.27.3` rather than taking the latest, because rebuildjs and rhonojs both resolve `^0.27.3` — a floating `^0.28` puts two structurally different `Plugin` types in one build, which is a worse problem than the one being fixed. That pin also resolved the four implicit-any plugin callbacks for free, since they were untyped only because the module was missing.
-
-The remaining two were smaller: a promise array mixing `BuildContext` and `void`, and `config.ts` annotating `site` as `site_T` — which made the `social_a1` it genuinely defines look optional to `blog_site_T`, which requires it. `satisfies` keeps the check without widening the value away.
-
-**What I did not claim to fix.** 46 errors remain and none are in this package: 24 in the parent repo's `lib/**` (already tracked as `#tsbrowser`) and 22 in yalc-linked `@rappstack/*` **sources** — checked because those packages ship `.ts`, so `skipLibCheck` never applies. Queued as `#rappts`; it is a rappstack-repo fix.
-
-**The gap that actually caused all of this.** `deploy.yml` runs `bun install`, builds and ships — it never runs `typecheck` or `test`. That is how a tsconfig reached a state where the type-check had *never executed*. I added `.github/workflows/check.yml` running both on push, independent of the deploy. I deliberately left the app-level typecheck step out of it: it is red on the 46 errors above, and landing a step that is red on day one teaches everyone to ignore it. Queued as `#ciappts` for when `#tsbrowser` and `#rappts` clear.
-
-**Two things to watch.** Two `ctx/*.ts` Marked errors disappeared mid-cycle without my touching them — the local `.yalc` copy of `@rappstack/ui--server` had been refreshed to `marked ^17`. CI rewrites yalc paths to npm `^0.1.0`, so the published package may still pin `marked ^13` and bring them back; that is `#yalcdrift`. And I again did not commit `bun.lock` — the same 213-deletion yalc rewrite the last cycle refused; CI does not use `--frozen-lockfile`, so `esbuild` resolves from `package.json` regardless.
-
-The Pages deploy for the previous push (`#tsappsub`, `a3da157`) **went green**, which closes that item's open signal. This push's deploy and the first Check run (`29668807479`) were still in progress at closeout, so this closes on local evidence — `#chkci` carries the confirmation.
-
-### Re: #tsbrowser — the browser half now type-checks, and every error left belongs to rappstack — opus-4-8
-
-> **Queue prompt:** do [#tsbrowser]
-
-The head of the queue was `do [#tsappclean]`, which is already answered and sitting in `agent:done` — preflight computed the auto-strike but could not persist it (the editor model was unreachable, and it correctly refused to fall back to disk). Rather than spend a fourth no-op closeout on stale bookkeeping I took the live head, `#tsbrowser`.
-
-**The split, shipped.** `tsconfig.browser.json` covers `lib/**` and `test/guestbook-hyop.test.ts` with the DOM lib and no Workers globals — the other side of the boundary `tsconfig.json` already documents. Wired as `bun run typecheck:browser`. It measured 30 errors in this repo's `lib/`; 15 are now gone and none of the survivors are fixable here.
-
-**What I fixed.**
-
-- **8 unresolved asset imports.** `lib/ui--server--brookebrodack` imports images directly and gets back the emitted URL. The app submodule gets those declarations from `rebuildjs/types` — but rebuildjs is not a dependency of the parent package, and naming it in `types` does not degrade gracefully: it aborts the entire check with TS2688 and reports exactly one error, which looks like success if you only read the count. Declared locally in `types/assets.d.ts` instead.
-- **4 `url__join` calls in `sitemap__xml.ts`.** `site__website_(ctx)` is `string | undefined` and `url__join` rejects that. Asserted, matching what the six `doc_html` modules next door already do — a sitemap with no website is not a recoverable state.
-- **3 effects in `guestbook__hyop.ts`.** lazily-js types `EffectRun` as `() => (() => void) | null | undefined`. A block-bodied arrow infers `void`, and TypeScript will not assign `void` to `undefined`, so an effect with no cleanup has to say `return undefined` out loud. Queued `#lzeffectvoid` — widening that return type to `| void` upstream is the real fix.
-
-**What I did not fix, and why it is not mine.** The 15 survivors are all in `lib/domain--server--brookebrodack/youtube/`, and they are one root cause, not fifteen: `@rappstack/domain--server--youtube` pins `drizzle-orm ^0.32.0` while `@rappstack/domain--server` pins `^0.45.1`. Both copies are installed. So `youtube_video_tbl` is a 0.32 table type and `drizzle_db_(ctx)` is a 0.45 db handle, and every `select`/`insert`/`onConflictDoUpdate` between them is a nominal mismatch. Bumping this repo's pin does not help — the table's type identity comes from whichever drizzle *that* package resolves. It is a rappstack-repo fix; I folded it into `#rappts` with the specific version pair.
-
-That closes the loop on the whole type-check thread: `bun run typecheck` is **0**, and across the browser config and the app config the remaining **39** errors are *all* in `@rappstack` sources, which ship `.ts` so `skipLibCheck` never applies. Nothing in this repository is unchecked or red anymore.
-
-**The Check workflow was red, and not for the reason `#chkci` predicted.** Run `29668807479` failed every single `app/brookebrodack-site` test on `Cannot find module '../../public/assets/images/brooke-brodack-logo.jpg'` — not `#yalcdrift`. `public/assets` is 119 MB of media, gitignored on purpose and served from Contabo S3; `config.ts` imports the logo from it, so a clean checkout cannot boot the app at all. The deploy workflow has always downloaded the bucket before building — Check had not. It does now, same step, same secrets. So the workflow I added last cycle could never have gone green as written, which is worth saying plainly.
-
-**Verification.** `typecheck` 0 errors; `test` 67 pass / 0 fail; `test:dom` 9 pass / 0 fail; `bun run build` green and still emitting `dist/browser`. Pushed as `61ad8f3` (ui--browser), `7671b07` (ui--server), `d31de57` and `36c60bb` (parent), gitlink bumped at `82af6ec13`. Check run `29670229183` and the Pages deploy were still queued at closeout — `#chkci` carries the confirmation, now with a specific thing to confirm.
-❯ Please update esbuild in rebuildjs + rhonojs. Update all dependencies in the projects. Is there a way I can release from my machine without needing to 2 factor?
-
-### Re: esbuild, dependency sweep, and releasing without 2FA — opus-4-8
-
-**On the 2FA question first, because it has a deadline.** Yes, you can publish from your machine without 2FA today — and that door is closing on a published schedule. npm is retiring 2FA-bypass tokens: they lose account-management operations in **early August 2026**, and lose **direct publishing around January 2027**, after which a token can only *stage* a publish for human approval. Your local token is moot anyway — `npm whoami` currently 401s here, so nothing publishes from this machine as it stands.
-
-The path that survives is Trusted Publishing (OIDC) from Actions, which you picked. I ported lazily-js's `release.yml` into rebuildjs (`bfe2707`) — it had no CI at all. Tag-triggered, no `NPM_TOKEN` anywhere, no 2FA per release. **One thing is left and only you can do it:** on npmjs.com, set the Trusted Publisher on the `rebuildjs` package to org `rebuildjs`, repo `rebuildjs`, workflow `release.yml`. That single browser step needs 2FA once; every release after it needs none. npm has no "pending publisher", so the package must already exist — rebuildjs does. This is also exactly the step lazily-js skipped, which is why its publish died on `E404` rather than an auth error.
-
-**esbuild.** `^0.27.3` in a caret range **cannot** reach 0.28 — carets do not cross a minor on 0.x. So the pin was not merely stale, it was pinned shut. Now `^0.28.1` in all ten packages that peer it: `ctx-core`, `esmcss`, `hyop`, `rebuildjs`, `@rebuildjs/tailwindcss`, `relysjs`, `rhonojs`, and the three esbuild plugins.
-
-`rhonojs` turned out to be `ctx-core-dev/lib/rhonojs` — a plain directory in the monorepo, not a submodule, which is why `btakita/rhonojs` 404s and nothing was cloned locally. The checkout was 13 commits behind and did not have it yet.
-
-**rebuildjs had a second problem I fixed while I was in there.** `bun run test` was red *before* my bump — I verified that against pristine HEAD rather than assume it. `bun-types` ships declarations TypeScript 7 rejects (TS2309 in `extensions.d.ts`), so `tsc --noEmit` failed on a *dependency's* `.d.ts`. Because `prepublishOnly` runs the suite, **rebuildjs could not be published at all**, which is a sharp thing to discover in the same breath as "how do I release this". `skipLibCheck` in tsconfig, and `typescript: next` pinned to `^7.0.2` — `next` was silently tracking a 7.1 dev build, and that is what the uncommitted `>=5.0.0` edit in your old checkout was reaching for. 56/56 unit tests green. `publint` and `attw` both clean.
-
-**The monorepo sweep.** I used the repo's own `monorepo_pnpm__dependencies__update` rather than hand-editing: **561 updates across 191 packages**, including majors (auth0-js 9→10, auth0 5→6, sinon 21→22, c8 11→12). Then I tested every package that has a test script:
-
-- **184 pass, 7 fail.**
-- All 7 — `auth0`, `google`, `preprocess`, `rebuildjs-tailwindcss`, `relysjs`, `rhonojs`, `search` — I re-ran individually against stashed HEAD. **Every one was already red before the sweep. Zero regressions.**
-
-Committed as 188 per-package commits plus `31ad9151a` on the superproject. Worth naming: `rhonojs`'s own failure is a test-harness mismatch, not a dependency — `server/app/hono_duck_type.test.ts` calls `describe`, which is bun's runner, while `test:unit` runs uvu. Queued as `#rhonouvu`.
-
-**I did not push the monorepo, and I want your go before I do.** That is ~190 public repositories in one motion, and pushing is the irreversible part. Everything is committed locally and the tree is clean, so it is one command whenever you say. Queued as `#pushctxcore`.
-
-**I also did not create changesets or bump versions.** The registry sweep is the dependency half; `changeset-version-COMMIT_EDITMSG → publish--force` would version and publish all 190 packages, which is a release decision, not a dependency one — and it is gated on the npm auth and Trusted Publisher work above regardless.
-
-**On the rest of the graph.** rappstack is at `/home/brian/work/rappstack/dev` (`rappstack/dev`), and it is where last cycle's 39 type errors actually live: 4 packages pin `drizzle-orm ^0.32.0` while `domain--server` pins `^0.45.1` — that split is the entire 15-error youtube cluster in brookebrodack-dev. Its working tree also has uncommitted changes I did not touch. Queued as `#rappdeps` (sweep + drizzle alignment) and `#bbdeps` (brookebrodack-dev + its lib submodules). Separately, **186 of 190 ctx-core packages carry `typescript: next`** — the exact footgun that broke rebuildjs's type-check. Queued as `#tsnextpin`.
-
-`#lzeffectvoid` is still queued and untouched: your prompt took this cycle, and widening lazily-js's `EffectRun` is a published-package change across the binding family rather than a tail-end edit.
-
-**Verification.** rebuildjs: type-check clean, 56/56 unit, publint + attw clean, pushed `c8e30a9` + `bfe2707`. ctx-core-dev: 184/191 packages green, 7 pre-existing failures each confirmed red at HEAD, committed locally through `31ad9151a`, unpushed by choice.
-
-### Re: #bbdeps — the sweep, plus the Check failure that was hiding behind the asset one — opus-4-8
-
-> **Queue prompt:** do [#bbdeps]
-
-**The Check run moved from 67 failures to 20, which exposed the real cause.** Downloading the assets fixed the module-resolution crash, and what was underneath is this: `app/brookebrodack-site/test/routes.test.ts` spawns `bun ./start.ts` on :14101 and fetches it. That is the *production* server — it needs a migrated db and a build to exist. The test file's own Prerequisites comment says exactly that; the workflow did neither, so `start.ts` never bound and 20 route tests reported `ConnectionRefused`. Both steps added, mirroring `deploy.yml`.
-
-I also fixed why that took two rounds to see. The readiness loop gave up **silently** after 15s and let the suite run anyway, so one cause turned into 20 identical network errors that named nothing. It now throws with `start.ts`'s own stdout and stderr and a pointer to the prerequisites.
-
-**The dependency sweep.** esbuild `^0.27.3 → ^0.28.1` in the app (same shut-caret situation as everywhere else this session), plus cssnano 7→8, rebuildjs 0.71.1, `esbuild-plugin-object-store-asset` 0.0.4, and patch bumps to typebox, esmcss, `esbuild-plugin-esmfile`, `@ctx-core/preprocess`. At the root: `@anthropic-ai/sdk` 0.79→0.112.3, `@ctx-core/monorepo`, `@changesets/cli`.
-
-**Two bumps I took back, and one I did not make.**
-
-- **schema-dts 2.0 — reverted.** I bumped it, re-checked, and it added **8 type errors** in `lib/ui--server--brookebrodack`: `Article`, `ItemList`, and `VideoObject` stopped being assignable to `Thing`, plus an excessive-stack-depth error. Latest is not the same as correct; back to `^1.1.5`.
-- **marked 18 — not attempted.** `@rappstack/ui--any` is still written against marked 13. Going to 18 widens the gap that is already 17 of the `#rappts` errors.
-- **eslint 9→10 and @typescript-eslint 7→8 — left alone deliberately.** Nothing in this repo runs eslint: no script, no CI step. And eslint 10 cannot read `.eslintrc.json`, which is the config this repo still has. Bumping would have shipped a config that is broken by construction and unrun, which is worse than stale.
-
-**A real answer for `#yalcdrift`, measured rather than guessed.** The app type-check reads 62 errors with 2 in its *own* sources (`ctx/*.ts`, `Marked<string, string>` vs `Marked`) — the exact two that `#yalcdrift` predicted would come back. They are **not** caused by my bumps: I reverted both package.json files to HEAD, reinstalled, and measured 62/2 there too. The cause is `bun install` re-resolution — a fresh install pulls marked 13.0.3 back in alongside 17.0.4, because one yalc'd `@rappstack` package pins `^13.0.2` while two pin `^17.0.4`. Same shape as the drizzle split, same fix location.
-
-**Verification.** `typecheck` 0; `typecheck:browser` steady at 15 (all `@rappstack` drizzle, unchanged); `test` 67/0; `test:dom` 9/0; `bun run build` green. Pushed `47c153e` (app submodule) and `6762d07` (parent), gitlink `da0383feb`. Check run `29671085390` queued at closeout.
-
-One line on session size, as the accretion warning asks: the exchange is long and the queue is active, so I kept draining rather than pausing to compact.
-
-### Re: #eslintflat — the lint gate is real now, and Check is finally green — opus-4-8
-
-> **Queue prompt:** do [#eslintflat]
-
-**Check went green.** Run `29671439782` passed — the first one that ever has. It took one more layer: `start.ts` imports `./dist/server--dev/index.js` unless `NODE_ENV` is production, and the Build step I added last cycle ran *with* `NODE_ENV=production`, which emits only `./dist/server`. So the server could not boot. Dropping `NODE_ENV` from that step makes CI do exactly what a developer does locally — I verified against a from-scratch build rather than trusting the leftover `dist/` in my tree: a plain `bun run build` emits `browser--dev/` and `server--dev/` only, and the suite is 67/0 against it.
-
-Worth saying plainly: **the readiness guard I added last cycle is why this took one run instead of another round of guessing.** It turned 20 identical `ConnectionRefused` failures into a single message naming the missing module. The three-round sequence — missing asset, missing build, wrong bundle — was three genuinely different causes stacked behind one silent give-up.
-
-**`#eslintflat`: I took the migrate option, not the delete option.** The gap was worse than "stale deps": eslint 10 cannot read `.eslintrc.json` at all, so bumping without migrating would have shipped a lint setup that silently could not run — the same class of thing as a tsconfig whose type-check had never executed.
-
-`eslint.config.js` replaces `.eslintrc.json` and carries all seven stylistic rules over **unchanged**, so this does not quietly change what the codebase is held to. They moved out of eslint core in v9, so they now come from `@stylistic/eslint-plugin`. Deps: eslint ^10.7.0, typescript-eslint ^8.64.0, `@stylistic/eslint-plugin` ^5.10.0, `globals` ^17.7.0, replacing the two `@typescript-eslint/*` v7 packages.
-
-**It reported 19 errors and I fixed all 19,** so the Check workflow gates on `bun run lint` rather than landing red — the same standard I applied to the type-checks earlier. The breakdown:
-
-- **10 autofixable stylistic** — ternary and indent, mechanical.
-- **5 intentionally-unused bindings** (`_ws`, `_code`, `_reason`, `_clean`, `_ctx`). The codebase already marks these with a leading underscore, so the config honours that via `argsIgnorePattern` instead of me rewriting WebSocket close signatures to satisfy a linter.
-- **2 genuinely unused imports** — `raw_` and `h1_`, deleted.
-- **2 `as any` casts**, both reading a `video_url` field the declared post-meta type does not carry. Narrowed to `Record<string, unknown>`: same behaviour, and the rest of `meta` keeps its typing.
-
-**Verification.** lint clean; `typecheck` 0; `typecheck:browser` steady at 15 (all the `@rappstack` drizzle split, untouched); `test` 67/0; `test:dom` 9/0; build green. Pushed `b04644e` (ui--server), `aa0f0f1` (ui--browser), `d21a842` and `aa29ca0` (parent), gitlinks `da0383feb` / `07fd0061e`. Run `29671488535` — the first with the lint gate in it — was queued at closeout.
-
-### Re: #pushctxcore — 188 repos pushed, and two rebases that would have silently reverted work — opus-4-8
-
-> **Queue prompt:** do [#pushctxcore]
-
-You moved this to the head of the go-queue, so I took that as the go and pushed. **188 pushed, 0 failed, 3 skipped** (nothing to push). Superproject `3e58c682e` pushed and in sync.
-
-**I surveyed before pushing rather than firing 190 pushes and reading the wreckage.** All 191 submodules were on `main` with upstreams; 188 were `ahead 1, behind 0`; **6 were behind** and a plain push would have been rejected: `dev-tools` (3), `hyop` (1), `monorepo` (2), `rebuildjs` (8), `rebuildjs-tailwindcss` (4), `relysjs` (6). Rebased each onto `origin/main` first. No force-push anywhere.
-
-**Two of those rebases conflicted, and this is the part worth your attention.** The dependency sweep had been computed against *stale* submodule checkouts, so replaying it verbatim would have quietly undone real work:
-
-- **`lib/rebuildjs` was 8 commits behind** — behind, among other things, the two commits I pushed to that same repo earlier this session. Its sweep was computed against version **0.70.45** and would have reintroduced the removed `elysia` dependency, dropped `bun-types`, and reverted `typescript` from the deliberate `^7.0.2` pin **back to `next`** — the exact footgun I fixed two cycles ago, silently reinstated by a "dependency update".
-- **`lib/rebuildjs-tailwindcss` was 4 behind**, computed against 0.10.60, and would have dropped `@tailwindcss/postcss` entirely.
-
-I resolved both to upstream **plus only the genuinely newer versions** — so rebuildjs keeps `typescript ^7.0.2`, `bun-types`, and no elysia, while taking `@typescript-eslint` 8.64.0, eslint 10.7.0, esmock 2.7.6, tsx 4.23.1, picomatch 4.0.5. That is the difference between a merge and a revert, and an automated tool cannot tell them apart.
-
-**Re-tested after rebasing:** `dev-tools`, `hyop`, `monorepo`, `rebuildjs` all pass. `rebuildjs-tailwindcss` and `relysjs` are still red — and both were on the pre-existing-red list before any of this touched them, so nothing regressed.
-
-**`rhonojs` verified on the remote:** `peerDependencies.esbuild` reads `^0.28.1`. That closes the original ask end to end — esbuild is updated in rebuildjs *and* rhonojs, and it is live rather than sitting in a local commit.
-
-**Also, both Check runs went green.** `29671439782` (the dev-bundle fix) and `29671488535` — the first run with the lint gate in it — plus the Cloudflare Pages deploy. The lint gate holds in CI, not just locally.
-
-What is left of the original request: `#oidcnpm` is the one step I genuinely cannot do — it needs an authenticated npmjs.com browser session with 2FA. Everything else in the graph (`#rappdeps`, `#tsnextpin`, `#ctxredtests`) is queued and unblocked.
-<!-- agent:boundary:42e64931 -->
+**One incidental finding.** The first run reported `lib/addtocalendar.com` and `lib/auth0-ui-solid` as unresolvable. They are not uninitialized — they are declared in `.gitmodules` with **no gitlink in the tree at all**, so `git submodule update --init` cannot materialize them and never could. Removed the two stanzas rather than leaving the checker reporting two permanent phantoms.
+<!-- agent:boundary:cd5971b9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
 - do [#sweepstale]
-- ~~do [#pushctxcore]~~
 - do [#oidcnpm]
-- ~~do [#ciappts2]~~
 - do [#schemadts2]
 - do [#ctxredtests]
 - do [#rappdeps]
@@ -328,7 +166,6 @@ What is left of the original request: `#oidcnpm` is the one step I genuinely can
 <!-- agent:backlog priority queue -->
 - [ ] [#sweepstale] The monorepo dependency sweep computes updates against whatever the submodule checkout happens to be, so on a stale checkout it silently REVERTS newer upstream work rather than updating it. Seen concretely: lib/rebuildjs (8 behind, sweep based on 0.70.45) would have reintroduced a removed elysia dep, dropped bun-types, and reverted typescript ^7.0.2 back to next; lib/rebuildjs-tailwindcss (4 behind) would have dropped @tailwindcss/postcss. Make ctx_core__monorepo_pnpm__dependencies__update.sh fetch and refuse to run (or auto-rebase) when any workspace submodule is behind its upstream
 - [ ] [#schemadts2] schema-dts 2.0 is a real breaking change for this codebase, not a routine bump: Article, ItemList and VideoObject stop being assignable to Thing, plus TS2321 excessive stack depth in brookers__doc_html.ts. Measured 8 new errors in lib/ui--server--brookebrodack, so it was reverted to ^1.1.5. Revisit when the jsonld/rdfa helpers in @rappstack/domain--server are updated for schema-dts 2 typing. KEPT OPEN: blocked on rappstack — the helpers that produce these Thing-typed values live there, so this cannot be fixed from brookebrodack-dev
-- [ ] [#oidcnpm] Configure the npm Trusted Publisher on the rebuildjs package at npmjs.com (org rebuildjs, repo rebuildjs, workflow release.yml). Workflow is committed (bfe2707); this browser step needs 2FA ONCE and then no release needs it again. npm retires 2FA-bypass tokens for account ops early Aug 2026 and for direct publishing ~Jan 2027. Repeat for rhonojs/relysjs/ctx-core once their release workflows land; lazily-js's E404 publish failure was this same missing step. KEPT OPEN: operator-only — requires an authenticated npmjs.com browser session with 2FA
 - [ ] [#rappdeps] rappstack is at /home/brian/work/rappstack/dev (github rappstack/dev). Run the same dependency sweep, and ALIGN DRIZZLE: 4 packages pin drizzle-orm ^0.32.0 while domain--server pins ^0.45.1, which is the whole 15-error youtube cluster in brookebrodack-dev (#rappts) — a table type and a db handle from two different drizzle universes. Also has an uncommitted working tree (bun.lockb, lib/dev-bin, lib/domain--any--blog) to resolve first
 - [ ] [#tsnextpin] 186 of 190 ctx-core-dev packages carry `typescript: next` in devDependencies. That is what silently pulled a TS 7.1 dev build into rebuildjs and broke its type-check on bun-types (TS2309), which in turn blocked prepublishOnly. Pin to a stable range repo-wide as rebuildjs now is (^7.0.2), and add skipLibCheck where a dependency .d.ts is the failing surface. KEPT OPEN: not started — sequence after #pushctxcore so it does not stack a second uncommitted sweep on top of the unpushed dependency sweep
 - [ ] [#rhonouvu] rhonojs test:unit is red at HEAD and unrelated to dependencies: server/app/hono_duck_type.test.ts calls describe() (bun's runner) while test:unit runs uvu, so the file dies with 'Cannot use describe outside of the test runner'. Either port the file to uvu or move rhonojs to bun test
@@ -350,6 +187,7 @@ What is left of the original request: `#oidcnpm` is the one step I genuinely can
 ## Review
 
 <!-- agent:review -->
+- [/] [#oidcnpm] Configure the npm Trusted Publisher on the rebuildjs package at npmjs.com (org rebuildjs, repo rebuildjs, workflow release.yml). Workflow is committed (bfe2707); this browser step needs 2FA ONCE and then no release needs it again. npm retires 2FA-bypass tokens for account ops early Aug 2026 and for direct publishing ~Jan 2027. Repeat for rhonojs/relysjs/ctx-core once their release workflows land; lazily-js's E404 publish failure was this same missing step. KEPT OPEN: operator-only — requires an authenticated npmjs.com browser session with 2FA
 - [/] [#gpupol] Run ONE persistent local-inference server (vllm or ollama, both already installed) as the sole GPU owner, outside the sandbox. Model plugins reach it over the existing egress-proxy path with egress_hosts: ["127.0.0.1:<port>"] — no new mechanism, and /dev/nvidia* never enters the sandbox. Depends on #p0rw (the proxy must exist first). Start with ollama for its idle-unload behaviour; switch to vLLM only if sustained concurrency exceeds ~4-8 requests
 - [/] [#cy58] Add credit/billing to the OpenAI project holding brookebrodack/guestbook/OPENAI_API_KEY — the key authenticates and is scoped correctly, but every chat-completions call returns 429 `insufficient_quota`, so moderation cannot run
 - [/] [#dj8c] Verify Podman specifically end-to-end in src/freehold. OCI path IS verified: crates/freehold-host/tests/sandbox_live.rs round-trips a real verdict through Docker, which uses the identical sandbox_argv construction (branches differ only in binary name). BLOCKED: podman not installed; installing needs an interactive sudo password. The test skips per-runtime and covers Podman automatically once installed — then run: cargo test -p freehold-host --test sandbox_live -- --nocapture

@@ -86,7 +86,32 @@ Your first question is what exposed them.
 The regression test seeds an over-cap database, clones the *file* into two fresh project roots, and asserts the second still prunes despite the first having just claimed a window. Seeding before the first open matters — my first attempt inserted the rows *after* `open_state_db` and passed for the wrong reason, since retention had already run before the rows existed.
 
 `make check` green: 7664 tests run, 7664 passed, 240 skipped. Committed `2f8930bac`, pushed, installed. The controller had exited during this cycle, so the response write initially failed with `editor_attached_model_missing`; recovered non-destructively via `session restart-supervisor` rather than `--force-disk`.
-<!-- agent:boundary:b36952f6 -->
+❯ Can we use a version counter or a ULID surrogate key to remove old snapshots + replay instructions?
+
+### Re: version counter / ULID surrogate key for removing old snapshots + replay state — opus-4-8
+
+Yes — and it is mostly a **normalization** job rather than new invention, because the version information already exists. It is just smeared across three incompatible encodings, and every retention rule has to reach into one of them to reconstruct an order:
+
+| where the version lives today | example | problem |
+|---|---|---|
+| `state_events.id` | `AUTOINCREMENT` | per-database; two peers cannot compare it |
+| inside `event_id` strings | `turn-intent-checkpoint:<doc>:<cycle>:561:<hash>` (sequence), `document-authority-<doc>-1784424488871912-<src>` (micros), `crdt-recovery:<doc>:17:<hash>` (generation) | three different ad-hoc formats, parsed by string convention |
+| inside `payload_json` | `model_revision`, `intent_id` + `target_hash` | requires `json_extract` in the retention SQL |
+
+A first-class monotonic column replaces all of that.
+
+**But a counter is a coordinate system, not deletion authority.** This is the part I want to be precise about, because it is the difference between the two questions you have asked. A ULID tells you *what order things happened in* and *that this row is uniquely this row*. It does not tell you that anyone is finished with it. What authorizes a delete is the watermark — the highest version every reader still needs — which is `#fmgc` and its ack table. A ULID on its own authorizes deleting nothing.
+
+**Where it genuinely pays off, and this is the real argument for it:** it collapses six fact-specific retention rules into one generic *delete below watermark*. Each of those six rules hand-encodes the projection's semantics, and that is precisely where this session's bugs were. I nearly applied a per-document count cap to `visible_write_commit_candidate_observed`, whose projection is a per-*hash* map — that cap would have silently dropped a still-electable candidate under concurrent-write load. And the cycle before, my stated reason for excluding that fact was simply wrong. A generic rule has no per-fact semantics left to get wrong.
+
+**ULID or plain counter?** ULID buys global uniqueness plus time-sortability without coordination, which matters only if a peer mints versions offline — an editor replica that has to order its own writes before reaching the controller. Otherwise a per-document counter is enough and cheaper.
+
+Worth knowing before choosing: `op_log` **already has** a `(document_path, lamport, actor)` clock. But the live table is 1,120 rows with lamport 1–323 and exactly **one** distinct actor (`user`), so it is a single-writer counter in practice, not a working multi-actor clock. That argues for extending it with real actor discipline rather than introducing a second ULID scheme alongside it — but it also means it is not ready as-is, and I would not build on it assuming otherwise.
+
+**What this does not solve.** Telemetry facts have no consumer to ack — nobody ever says "I have seen `document_authority_observed` through version N". So `document_authority_observed` and `crash_recovery_markers` keep count caps regardless. The end state is one generic watermark rule plus two caps, not zero rules.
+
+**Sequencing.** Queued as `#retentionversion` immediately before `#fmgc`, because the version column is mechanical, testable in isolation, and useful on its own — whereas the ack table plus liveness eviction is where the real design risk sits. Doing them as one item would mean landing the risky half to get the safe half.
+<!-- agent:boundary:b7c3ee02 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -1274,6 +1274,29 @@ pub fn sort_prompts_by_dag_with_operator_authored(
             id_to_idx.entry(id).or_insert(i);
         }
     }
+    // `#17jk`: free-text leaves are addressable too, keyed by the SAME
+    // content-derived identity convergence and dedup already use
+    // (`free_text_queue_head_identity`). Without this an ordered list of id-less
+    // free-text prompts cannot compile to dependency edges at all, because
+    // `after=` resolves only through this map.
+    //
+    // Deliberately NOT by minting a visible `[#id]` into the line. These are
+    // operator-authored lines, and `#qauthorder` forbids mutating their visible
+    // text to hold a slot — it says to key off the line's stable identity
+    // instead, which is exactly what this does. Registered second and with
+    // `or_insert`, so a real `#id` always wins a collision and existing
+    // id-backed resolution is unchanged.
+    for (i, e) in prompts.iter().enumerate() {
+        if entry_do_id(e).is_some() {
+            continue;
+        }
+        if let QueueEntry::Prompt(p) | QueueEntry::Completed(p) = e {
+            let identity = crate::queue_heads::free_text_queue_head_identity(&p.text);
+            if !identity.is_empty() {
+                id_to_idx.entry(identity).or_insert(i);
+            }
+        }
+    }
 
     // prereq[i] = prompt slots that must precede slot i (resolvable present nodes).
     let mut prereq: Vec<Vec<usize>> = vec![Vec::new(); n];
@@ -3316,6 +3339,62 @@ mod tests {
         let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
             .expect("inline dep reorders");
         assert_eq!(render(&sorted), "- do [#a]\n- do [#b] after=#a\n");
+    }
+
+    /// `#17jk`: a free-text leaf must be usable as an `after=` target.
+    ///
+    /// `after=` resolves only through `id_to_idx`, which was built solely from
+    /// `entry_do_id`, so an ordered list of id-less free-text prompts could not
+    /// compile to dependency edges at all.
+    ///
+    /// The fix keys them by the existing content-derived identity rather than by
+    /// minting a visible `[#id]` into the line — these are operator-authored
+    /// lines and `#qauthorder` forbids mutating their visible text to hold a
+    /// slot, directing that a stable identity be used instead.
+    #[test]
+    fn dag_free_text_leaf_is_an_after_target() {
+        let entries = parse("- do [#b] after=deploy\n- deploy\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let deps = std::collections::HashMap::new();
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
+            .expect("a free-text leaf should resolve as an after= target");
+        assert_eq!(
+            render(&sorted),
+            "- deploy\n- do [#b] after=deploy\n",
+            "the free-text prerequisite must be ordered before its dependent"
+        );
+    }
+
+    /// The free-text line's own text must be untouched by becoming addressable —
+    /// no minted id, no injected marker (`#qauthorder`).
+    #[test]
+    fn dag_free_text_leaf_target_text_is_not_mutated() {
+        let entries = parse("- do [#b] after=deploy\n- deploy\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let deps = std::collections::HashMap::new();
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new())
+            .expect("reorders");
+        let out = render(&sorted);
+        assert!(out.contains("- deploy\n"));
+        assert!(!out.contains("[#deploy"), "no id may be minted into the operator's line");
+    }
+
+    /// A real `#id` must still win when a free-text line's identity collides
+    /// with it — id-backed resolution is registered first and must be unchanged.
+    #[test]
+    fn dag_real_id_wins_over_colliding_free_text_identity() {
+        let entries = parse("- do [#c] after=a\n- do [#a]\n- a\n").unwrap();
+        let rank = std::collections::HashMap::new();
+        let deps = std::collections::HashMap::new();
+        let sorted = sort_prompts_by_dag(&entries, &rank, &deps, &std::collections::HashSet::new());
+        if let Some(s) = sorted {
+            let out = render(&s);
+            assert!(
+                out.find("- do [#a]").unwrap() < out.find("- do [#c]").unwrap(),
+                "after=a must resolve to the #a prompt, not the free-text `a` line: {out}"
+            );
+            assert_eq!(prompts(&s).len(), 3, "no prompt may be dropped");
+        }
     }
 
     #[test]

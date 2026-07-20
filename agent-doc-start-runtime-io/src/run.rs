@@ -119,6 +119,22 @@ pub fn run_with_reap_policy(
     route_owned: bool,
     route_owned_reap_policy: RouteOwnedReapPolicy,
 ) -> Result<()> {
+    run_with_reap_policy_and_resume(file, force, route_owned, route_owned_reap_policy, None)
+}
+
+/// [`run_with_reap_policy`] plus an `agent-doc start --resume` request.
+///
+/// The resume request shapes only the INITIAL launch. A later crash-restart
+/// keeps using `RestartBehavior`, which continues whatever conversation the
+/// child was actually in — re-applying the original id there would rewind the
+/// harness to where it started instead of resuming where it crashed.
+pub fn run_with_reap_policy_and_resume(
+    file: &Path,
+    force: bool,
+    route_owned: bool,
+    route_owned_reap_policy: RouteOwnedReapPolicy,
+    resume: Option<agent_doc_harness::ResumeRequest>,
+) -> Result<()> {
     let agent_doc_start_io::StartRuntime {
         session_id,
         fm,
@@ -209,7 +225,13 @@ pub fn run_with_reap_policy(
             session_log: &mut session_log,
             route_owned,
         };
-        build_harness_launch_spec(&fm, &global_config, &canonical, &mut launch_log)?
+        agent_doc_supervisor_process_io::build_harness_launch_spec_with_resume(
+            &fm,
+            &global_config,
+            &canonical,
+            &mut launch_log,
+            resume.as_ref(),
+        )?
     };
     let mut harness = initial_launch_spec.harness.clone();
     let mut base_args = initial_launch_spec.base_args.clone();

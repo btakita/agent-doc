@@ -171,6 +171,17 @@ pub fn build_harness_launch_spec(
     canonical: &Path,
     log: &mut dyn SupervisorLaunchLog,
 ) -> Result<HarnessLaunchSpec> {
+    build_harness_launch_spec_with_resume(fm, global_config, canonical, log, None)
+}
+
+/// [`build_harness_launch_spec`] plus an `agent-doc start --resume` request.
+pub fn build_harness_launch_spec_with_resume(
+    fm: &frontmatter::Frontmatter,
+    global_config: &agent_doc_config::Config,
+    canonical: &Path,
+    log: &mut dyn SupervisorLaunchLog,
+    resume: Option<&agent_doc_harness::ResumeRequest>,
+) -> Result<HarnessLaunchSpec> {
     let harness = HarnessConfig::from_context(fm, global_config);
     let resolved_agent_args = agent_doc_supervisor::config::resolve_agent_launch_args(
         &harness.binary,
@@ -198,6 +209,30 @@ pub fn build_harness_launch_spec(
                 &global_config.model,
             ));
         }
+    }
+    // Resume args go on before workspace-access/`--no-mcp` args so a
+    // subcommand-shaped resume (Codex: `resume <id>`) stays in argv position 0,
+    // where the CLI expects its subcommand.
+    let resolved_resume = agent_doc_harness::resolve_resume_request(resume, fm.resume.as_deref());
+    if agent_doc_harness::apply_resume_launch_args(
+        &harness,
+        &mut base_args,
+        resolved_resume.as_ref(),
+    ) {
+        log.start_console_status(&format!(
+            "[start] {} has no id-addressed resume; --resume degraded to continue-latest",
+            harness.binary
+        ));
+    }
+    if let Some(resolved) = resolved_resume.as_ref() {
+        log.log_event(&format!(
+            "{}_start_resume request={}",
+            harness.binary,
+            match resolved {
+                agent_doc_harness::ResumeRequest::Latest => "latest".to_string(),
+                agent_doc_harness::ResumeRequest::Id(id) => format!("id:{id}"),
+            }
+        ));
     }
     agent_doc_git_io::dirs::append_workspace_access_args(
         &harness.binary,

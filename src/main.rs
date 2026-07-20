@@ -1900,6 +1900,12 @@ enum Commands {
         /// owner already exists in another pane
         #[arg(long)]
         force: bool,
+        /// Resume the harness conversation instead of starting a fresh one.
+        /// Bare `--resume` resumes the id recorded in the document's `resume:`
+        /// frontmatter, falling back to the harness's continue-latest mode.
+        /// `--resume <ID>` resumes that conversation explicitly.
+        #[arg(long, value_name = "ID", num_args = 0..=1, default_missing_value = "")]
+        resume: Option<String>,
         /// Internal route-owned pane mode: exit and reap after the first
         /// binary-owned document cycle commits when the document has no
         /// continued-interaction signals.
@@ -3849,16 +3855,26 @@ fn try_main() -> anyhow::Result<()> {
         Commands::Start {
             file,
             force,
+            resume,
             route_owned,
             route_owned_reap_policy,
-        } => match route_owned_reap_policy {
-            agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto => {
-                agent_doc_start_runtime_io::run(&file, force, route_owned)
-            }
-            policy => {
-                agent_doc_start_runtime_io::run_with_reap_policy(&file, force, route_owned, policy)
-            }
-        },
+        } => {
+            let resume = resume.map(|id| {
+                let id = id.trim();
+                if id.is_empty() {
+                    agent_doc_harness::ResumeRequest::Latest
+                } else {
+                    agent_doc_harness::ResumeRequest::Id(id.to_string())
+                }
+            });
+            agent_doc_start_runtime_io::run_with_reap_policy_and_resume(
+                &file,
+                force,
+                route_owned,
+                route_owned_reap_policy,
+                resume,
+            )
+        }
         Commands::Route {
             file,
             dispatch_only,

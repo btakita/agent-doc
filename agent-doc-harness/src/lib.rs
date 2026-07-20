@@ -40,6 +40,33 @@ pub enum RestartBehavior {
     Prepend(Vec<String>),
 }
 
+/// How a harness expresses "resume conversation `<id>`" on its own CLI.
+///
+/// This is the id-addressed sibling of [`RestartBehavior`], which only knows how
+/// to continue the *most recent* conversation. `agent-doc start --resume <ID>`
+/// needs to name a specific one, and the harnesses disagree about the shape:
+/// Claude takes a flag, Codex takes a subcommand argument.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResumeBehavior {
+    /// `<binary> … <flag> <id>` (Claude: `--resume <id>`).
+    AppendFlag(String),
+    /// `<binary> <subcommand> <id> …` (Codex: `resume <id>`).
+    PrependSubcommand(String),
+    /// This harness has no id-addressed resume the binary can rely on, so
+    /// `--resume <ID>` degrades to [`RestartBehavior`]'s continue-latest args
+    /// rather than inventing a flag that may not exist.
+    Unsupported,
+}
+
+/// What `agent-doc start --resume` was asked to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResumeRequest {
+    /// Bare `--resume`: continue the most recent conversation.
+    Latest,
+    /// `--resume <ID>`: resume that specific conversation.
+    Id(String),
+}
+
 /// What the supervisor should do after a clean child exit (code 0).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CleanExitBehavior {
@@ -54,6 +81,8 @@ pub enum CleanExitBehavior {
 pub struct HarnessConfig {
     pub binary: String,
     pub restart_behavior: RestartBehavior,
+    /// How `--resume <ID>` names a specific conversation on this harness.
+    pub resume_behavior: ResumeBehavior,
     pub clean_exit_behavior: CleanExitBehavior,
     pub prompt_patterns: Vec<String>,
     /// Template for the trigger command sent via tmux send-keys.
@@ -70,6 +99,110 @@ pub struct HarnessConfig {
     pub tmux_session_fallback: String,
     /// Process names recognized as agent processes for lazy-claim gating.
     pub process_names: Vec<String>,
+}
+
+/// Resolve what a bare `--resume` should actually resume.
+///
+/// A session document already records its conversation id in frontmatter
+/// (`resume:`), and that is strictly better than "whatever the harness thinks is
+/// most recent" — the operator may have run the harness elsewhere since. So bare
+/// `--resume` prefers the document's own id and only falls back to
+/// continue-latest when the document has never recorded one.
+///
+/// An explicit `--resume <ID>` always wins over frontmatter.
+pub fn resolve_resume_request(
+    requested: Option<&ResumeRequest>,
+    frontmatter_resume: Option<&str>,
+) -> Option<ResumeRequest> {
+    match requested? {
+        ResumeRequest::Id(id) => Some(ResumeRequest::Id(id.clone())),
+        ResumeRequest::Latest => Some(
+            frontmatter_resume
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map_or(ResumeRequest::Latest, |id| {
+                    ResumeRequest::Id(id.to_string())
+                }),
+        ),
+    }
+}
+
+/// Fold a `--resume` request into a harness's launch args.
+///
+/// Pure so the arg shape is testable without a tmux pane or a live harness.
+///
+/// Rules:
+/// - `None` leaves `base_args` untouched — no `--resume` was requested.
+/// - [`ResumeRequest::Latest`] (bare `--resume`) applies [`RestartBehavior`],
+///   which is exactly "continue the most recent conversation".
+/// - [`ResumeRequest::Id`] applies [`ResumeBehavior`]. On
+///   [`ResumeBehavior::Unsupported`] it degrades to continue-latest rather than
+///   inventing a flag, and reports the degrade so the caller can say so out loud.
+/// - Operator-supplied args win: if `base_args` already carries the resume flag
+///   or subcommand (via `claude_args` / `agent_args`), nothing is added. This
+///   mirrors the existing `--model` guard.
+///
+/// Returns `true` when an id-addressed resume degraded to continue-latest.
+pub fn apply_resume_launch_args(
+    harness: &HarnessConfig,
+    base_args: &mut Vec<String>,
+    resume: Option<&ResumeRequest>,
+) -> bool {
+    let Some(resume) = resume else {
+        return false;
+    };
+    let id = match resume {
+        ResumeRequest::Latest => None,
+        ResumeRequest::Id(id) => Some(id.as_str()),
+    };
+    match (id, &harness.resume_behavior) {
+        (Some(id), ResumeBehavior::AppendFlag(flag)) => {
+            if !base_args.iter().any(|arg| arg == flag) {
+                base_args.push(flag.clone());
+                base_args.push(id.to_string());
+            }
+            false
+        }
+        (Some(id), ResumeBehavior::PrependSubcommand(subcommand)) => {
+            if !base_args.iter().any(|arg| arg == subcommand) {
+                base_args.insert(0, subcommand.clone());
+                base_args.insert(1, id.to_string());
+            }
+            false
+        }
+        (Some(_), ResumeBehavior::Unsupported) => {
+            apply_restart_launch_args(harness, base_args);
+            true
+        }
+        (None, _) => {
+            apply_restart_launch_args(harness, base_args);
+            false
+        }
+    }
+}
+
+/// Apply a harness's continue-the-latest-conversation args, idempotently.
+fn apply_restart_launch_args(harness: &HarnessConfig, base_args: &mut Vec<String>) {
+    match &harness.restart_behavior {
+        RestartBehavior::Append(args) => {
+            if let Some(head) = args.first()
+                && base_args.iter().any(|arg| arg == head)
+            {
+                return;
+            }
+            base_args.extend(args.iter().cloned());
+        }
+        RestartBehavior::Prepend(args) => {
+            if let Some(head) = args.first()
+                && base_args.iter().any(|arg| arg == head)
+            {
+                return;
+            }
+            for (offset, arg) in args.iter().enumerate() {
+                base_args.insert(offset, arg.clone());
+            }
+        }
+    }
 }
 
 pub fn normalize_harness_name(raw: &str) -> String {
@@ -92,6 +225,7 @@ impl HarnessConfig {
         Self {
             binary: "claude".into(),
             restart_behavior: RestartBehavior::Append(vec!["--continue".into()]),
+            resume_behavior: ResumeBehavior::AppendFlag("--resume".into()),
             clean_exit_behavior: CleanExitBehavior::PromptUser,
             prompt_patterns: vec!["❯".into(), "⏵".into()],
             trigger_command_template: "/agent-doc {file}".into(),
@@ -107,6 +241,7 @@ impl HarnessConfig {
         Self {
             binary: "codex".into(),
             restart_behavior: RestartBehavior::Prepend(vec!["resume".into(), "--last".into()]),
+            resume_behavior: ResumeBehavior::PrependSubcommand("resume".into()),
             clean_exit_behavior: CleanExitBehavior::RestartContinue,
             prompt_patterns: vec!["❯".into(), ">".into(), "›".into()],
             trigger_command_template: "agent-doc {file}".into(),
@@ -122,6 +257,10 @@ impl HarnessConfig {
         Self {
             binary: "opencode".into(),
             restart_behavior: RestartBehavior::Append(vec!["--continue".into()]),
+            // OpenCode's id-addressed resume flag is not verified against a
+            // released CLI, so `--resume <ID>` degrades to `--continue` rather
+            // than guessing a flag that may not exist.
+            resume_behavior: ResumeBehavior::Unsupported,
             clean_exit_behavior: CleanExitBehavior::RestartContinue,
             prompt_patterns: vec![">".into(), "›".into()],
             trigger_command_template: "/agent-doc {file}".into(),
@@ -3376,6 +3515,137 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
         assert!(!codex.supports_enable_tool_search);
     }
 
+    /// `--resume <ID>` must produce each harness's own id-addressed shape:
+    /// Claude takes a trailing flag, Codex takes a leading subcommand argument.
+    /// Getting this backwards launches a harness that ignores the id and starts
+    /// a fresh conversation, which is silent context loss.
+    #[test]
+    fn resume_id_uses_each_harness_own_arg_shape() {
+        let mut claude_args = vec!["--model".to_string(), "opus".to_string()];
+        let degraded = apply_resume_launch_args(
+            &HarnessConfig::claude(),
+            &mut claude_args,
+            Some(&ResumeRequest::Id("conv-42".into())),
+        );
+        assert!(!degraded);
+        assert_eq!(claude_args, ["--model", "opus", "--resume", "conv-42"]);
+
+        let mut codex_args = vec!["--model".to_string(), "gpt-5".to_string()];
+        let degraded = apply_resume_launch_args(
+            &HarnessConfig::codex(),
+            &mut codex_args,
+            Some(&ResumeRequest::Id("conv-42".into())),
+        );
+        assert!(!degraded);
+        assert_eq!(codex_args, ["resume", "conv-42", "--model", "gpt-5"]);
+    }
+
+    /// Bare `--resume` means "continue the most recent conversation", which is
+    /// exactly `RestartBehavior` — so it must reuse it rather than duplicate it.
+    #[test]
+    fn bare_resume_continues_latest_via_restart_behavior() {
+        let mut claude_args: Vec<String> = Vec::new();
+        apply_resume_launch_args(
+            &HarnessConfig::claude(),
+            &mut claude_args,
+            Some(&ResumeRequest::Latest),
+        );
+        assert_eq!(claude_args, ["--continue"]);
+
+        let mut codex_args = vec!["--model".to_string(), "gpt-5".to_string()];
+        apply_resume_launch_args(
+            &HarnessConfig::codex(),
+            &mut codex_args,
+            Some(&ResumeRequest::Latest),
+        );
+        assert_eq!(codex_args, ["resume", "--last", "--model", "gpt-5"]);
+    }
+
+    /// A harness with no verified id-addressed resume must degrade to
+    /// continue-latest and SAY so, not silently invent a flag the CLI may
+    /// reject (which would fail the launch) or ignore (silent context loss).
+    #[test]
+    fn unsupported_resume_id_degrades_to_continue_and_reports() {
+        let mut args: Vec<String> = Vec::new();
+        let degraded = apply_resume_launch_args(
+            &HarnessConfig::opencode(),
+            &mut args,
+            Some(&ResumeRequest::Id("conv-42".into())),
+        );
+        assert!(degraded, "degrade must be reported to the caller");
+        assert_eq!(args, ["--continue"]);
+    }
+
+    /// No `--resume` at all must not touch the launch args.
+    #[test]
+    fn absent_resume_leaves_args_untouched() {
+        let mut args = vec!["--model".to_string(), "opus".to_string()];
+        let degraded = apply_resume_launch_args(&HarnessConfig::claude(), &mut args, None);
+        assert!(!degraded);
+        assert_eq!(args, ["--model", "opus"]);
+    }
+
+    /// Operator-supplied args win. If `claude_args`/`agent_args` already carries
+    /// the resume flag or subcommand, adding a second one would either duplicate
+    /// the flag or contradict the operator's explicit id.
+    #[test]
+    fn resume_does_not_duplicate_operator_supplied_args() {
+        let mut claude_args = vec!["--resume".to_string(), "operator-id".to_string()];
+        apply_resume_launch_args(
+            &HarnessConfig::claude(),
+            &mut claude_args,
+            Some(&ResumeRequest::Id("conv-42".into())),
+        );
+        assert_eq!(claude_args, ["--resume", "operator-id"]);
+
+        let mut codex_args = vec!["resume".to_string(), "operator-id".to_string()];
+        apply_resume_launch_args(
+            &HarnessConfig::codex(),
+            &mut codex_args,
+            Some(&ResumeRequest::Id("conv-42".into())),
+        );
+        assert_eq!(codex_args, ["resume", "operator-id"]);
+
+        // Same guard for the continue-latest path.
+        let mut continued = vec!["--continue".to_string()];
+        apply_resume_launch_args(
+            &HarnessConfig::claude(),
+            &mut continued,
+            Some(&ResumeRequest::Latest),
+        );
+        assert_eq!(continued, ["--continue"]);
+    }
+
+    /// Bare `--resume` prefers the document's own recorded conversation id over
+    /// the harness's "most recent" guess — the operator may have run the harness
+    /// on something else since, and continue-latest would resume the wrong one.
+    #[test]
+    fn bare_resume_prefers_frontmatter_id_over_continue_latest() {
+        assert_eq!(
+            resolve_resume_request(Some(&ResumeRequest::Latest), Some("doc-conv-7")),
+            Some(ResumeRequest::Id("doc-conv-7".into()))
+        );
+        assert_eq!(
+            resolve_resume_request(Some(&ResumeRequest::Latest), None),
+            Some(ResumeRequest::Latest)
+        );
+        // Blank/whitespace frontmatter is not an id.
+        assert_eq!(
+            resolve_resume_request(Some(&ResumeRequest::Latest), Some("   ")),
+            Some(ResumeRequest::Latest)
+        );
+    }
+
+    /// An explicit id always wins over frontmatter, and no `--resume` stays None.
+    #[test]
+    fn explicit_resume_id_overrides_frontmatter() {
+        assert_eq!(
+            resolve_resume_request(Some(&ResumeRequest::Id("cli-id".into())), Some("fm-id")),
+            Some(ResumeRequest::Id("cli-id".into()))
+        );
+        assert_eq!(resolve_resume_request(None, Some("fm-id")), None);
+    }
+
     #[test]
     fn context_clear_command_uses_new_for_opencode_only() {
         assert_eq!(HarnessConfig::claude().context_clear_command(), "/clear");
@@ -3478,5 +3748,3 @@ Click to expand
         assert!(!h.is_idle_chrome_only_output(output));
     }
 }
-
-

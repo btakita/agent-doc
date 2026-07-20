@@ -185,7 +185,10 @@ mod tests {
             .expect("a .agent-doc ancestor resolves to its logs dir");
         std::fs::create_dir_all(&dir).unwrap();
 
-        log_panic_to_dir(&dir, "[agent-doc][panic] thread 'main' panicked at x.rs:1:1: boom");
+        log_panic_to_dir(
+            &dir,
+            "[agent-doc][panic] thread 'main' panicked at x.rs:1:1: boom",
+        );
         log_panic_to_dir(&dir, "[agent-doc][panic] second line");
 
         let contents = std::fs::read_to_string(dir.join("panic.log")).unwrap();

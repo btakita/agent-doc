@@ -267,14 +267,53 @@ The general lesson I am taking from this: `element.click()` proves a handler is 
 Pushed as `9eb3d0a` on `btakita/acadian-take-home`; superproject gitlink at `c794c0205`.
 
 Your next queue item — moving the date tooltips below the selector and keeping them legible and non-overlapping when the handles are close — is still queued and unstruck; I will take it on the next invocation.
-<!-- agent:boundary:658a81ae -->
+
+### Re: brush date labels, and mouse-driven zoom reset — opus-4-8
+
+> **Queue prompt:** Move the date selection tooltip below the selector. Make sure the tooltip is always legible and does not obscure other UI data. Also handle when the two sliders are close together. Make sure the date tooltips do not overlap.
+
+Done. Recharts draws those labels inline on the brush row, which is why they crowded the handles and ran under the reset control in your screenshot. They are hidden now and re-rendered in a row of their own below the brush.
+
+`placeBrushLabels()` owns the geometry as a pure function: centre each label under its handle, clamp inside the container, and — when the handles are close enough that the labels would collide — push them apart symmetrically about their midpoint and re-clamp, preserving *separation* over centring. If the container cannot fit both side by side, they pin to the two edges, which is the most legible degradation available. Handle positions are measured from the rendered SVG in a layout effect rather than derived from indices, so they stay correct regardless of the chart's internal margins.
+
+**Verification.** Recharts' brush does not respond to synthetic pointer events, so I forced narrow windows in code, measured, then reverted and confirmed the revert:
+
+| handle gap | position | label gap | overlap | in container |
+|---|---|---|---|---|
+| 4.2px | mid-chart | 6px | none | yes |
+| 4.3px | hard left | 6px | none | yes, `left inset 0` |
+| 4.2px | hard right | 6px | none | yes, `right inset 0` |
+| full range | — | 181.6px | none | yes |
+
+The unit tests also sweep every handle-position pair across the container and assert no overlap and no out-of-bounds, which is the part that generalises beyond the four cases I could stage by hand.
+
+> **Queue prompt:** What is UX best practice to support resetting the zoom from the mouse? Don't implement anything, just discuss.
+
+Discussion only — nothing implemented. Four conventions, roughly in order of how strongly I would argue for them here:
+
+**1. Double-click the plot to reset.** This is the closest thing to a standard in charting — Plotly, Highcharts, and TradingView all use it, and it is the one gesture users are most likely to try unprompted. It costs nothing in screen space, it is discoverable by accident, and it is safely reversible. The one caveat is that it must not fight the drag-to-zoom selection: the handler has to ignore the double-click if a drag actually moved, or a sloppy fast drag reads as a double-click.
+
+**2. Right-click / context menu to zoom out one step.** Common in desktop finance terminals. I would not reach for it in a browser app — overriding the browser context menu is a real cost, and web users do not expect it.
+
+**3. Escape key.** Not strictly a mouse gesture, but the natural keyboard partner to any of these, and cheap. Worth having regardless of what the mouse does, since it also serves keyboard-only users who cannot reach the icon without tabbing.
+
+**4. Scroll-wheel zoom, with reset as "scroll all the way out."** This is the most fluid model and the one people know from maps. It is also the most invasive: wheel-over-chart hijacks page scrolling, which is actively hostile on a page of seven stacked cards like this one. If it were ever added it should require a modifier (Ctrl/Cmd + wheel) so a plain scroll still moves the page.
+
+My recommendation for this dashboard specifically: **double-click on the plot, plus Escape, keeping the icon button.** The double-click covers the users who expect a gesture, Escape covers keyboard users, and the button stays because it is the only affordance that is *visible* — gestures are undiscoverable on their own, which is exactly why the icon should not be replaced by one. Worth noting that the button also doubles as the zoom-state indicator: it only appears when zoomed, so it tells you there is something to reset. A pure-gesture design loses that signal.
+
+The one thing I would avoid is making the gesture the *only* way out. A user who zooms in by accident and cannot find the way back is stuck with a chart they cannot read.
+
+`make check` is green: 33 backend tests, mypy clean, 51 frontend tests (9 new), typecheck, production build.
+
+Pushed as `41b0aba` on `btakita/acadian-take-home`; superproject gitlink at `d50a0c4f4`.
+<!-- agent:boundary:bc12bcfb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~Change the "Reset Zoom" button text into a reset icon. Move the Reset Zoom button to the right of the slider ![img_6.png](img_6.png). commit + push~~
-- Move the date selection tooltip below the selector ![img_7.png](img_7.png). Make sure the tooltip is always legible and does not obscure other UI data. Also handle when the two sliders are close together. Make sure the date tooltips do not overlap.
+- ~~Move the date selection tooltip below the selector ![img_7.png](img_7.png). Make sure the tooltip is always legible and does not obscure other UI data. Also handle when the two sliders are close together. Make sure the date tooltips do not overlap.~~
+- ~~What is UX best practice to support resetting the zoom from the mouse? Don't implement anything, just discuss.~~
 <!-- /agent:queue -->
 
 ## Backlog

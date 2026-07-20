@@ -58,6 +58,13 @@ the arena already is. So `SlotId`, `SlotValue`, and the slab vocabulary all stay
 and become accurate rather than legacy. Only the *reactive-value* sense of `Slot`
 goes, and it goes to `FormulaCell`.
 
+**Constructors collapse too** (§9.3): `source` / `formula` / `.drive()` replace
+`cell`, `merge_cell`, `computed`, `memo`, `slot`, `signal`, `get_signal`,
+`dispose_signal`. `formula` is guarded by default. The eager construction is
+`formula().drive()` — idempotent, returning the formula — which retires
+`Signal`, `SignalHandle`, and makes the `#lzsignaleager` clause-3 bug
+structurally unwritable.
+
 `Cell ≡ MergeCell<KeepLatest>` stops being a spec assertion and becomes a type
 alias with a default parameter.
 
@@ -362,6 +369,10 @@ execution.
 | ~~Could the **wire** id be `CellId`?~~ | **MOOT — `SlotId`/`SlotValue` stay (§5.0). A slot holds any node kind, so the occupant question never arises** |
 | **Re-count the reactive-value sense of `slot` per repo** | before scheduling; the old ~12,000 is now an upper bound (§11) |
 | A `feed_async(cell, producer)` convenience constructor? | **trigger: two real call sites** (§9.2) |
+| Does anything revert eager→lazy? (decides whether `undrive` exists) | measure before building `undrive` (§9.3.4) |
+| `formula` guarded by default | **DECIDED — guarded; behaviour change, migration note (§9.3)** |
+| Generation-tagged `SlotId` | proposed — closes the recycled-read hole and makes owner-keyed side tables sound (§9.3.5) |
+| Find the driver by id (side table) or by scanning dependents? | during the `lazily-rs` port (§9.3.3–4) |
 | ~~Async fold timing~~ | **RESOLVED — cells are the synchronous input layer, so merge is synchronous in `AsyncContext` too. Was overstated. See §9.1** |
 | Does the async scheduler coalesce N invalidations in a batch into one effect rerun? | **now tested by fixture 1** rather than assumed (§9.1) |
 | Wire vocabulary: does `SlotValue` become `CellValue`? | the wire names things, and `Cell` is a thing — so this is now coherent in a way `MemoValue` never was. Still a breaking wire change across 8 bindings **plus `agent-doc`'s IPC**; dual-accept applies |
@@ -579,6 +590,151 @@ Add a normative constraint: `MergePolicy::merge` **MUST NOT** block and **SHOULD
 be O(1)-ish in the size of `old`. Unenforceable by the corpus — it constrains
 implementations, not observable behaviour — so it is review-enforced, the same
 construction §7 uses for its documentation obligation.
+
+---
+
+## 9.3 The constructor surface, and the eager construction
+
+Three constructors, symmetric with the kernel:
+
+```rust
+ctx.source(v)                        // -> SourceCell<T, KeepLatest>; source::<Sum>(v) for other policies
+ctx.formula(f)                       // -> FormulaCell<T>
+ctx.formula(f).drive()               // -> FormulaCell<T>, now eager
+```
+
+`formula` replaces `computed` / `memo` / `slot` — three names for one thing. It
+**subsumes `cell` and `merge_cell`**: `source(v)` defaulting to `KeepLatest` is
+today's `cell`, `source::<M>(v)` is today's `merge_cell`. Another two names gone.
+
+**`formula` is guarded by default** — DECISION, and a behaviour change, not just a
+rename. Today `computed()` is unguarded and `memo()` guarded, both returning the
+same type; one `formula` must pick. It picks the guard: `lazily-react` already
+documents the guarded form as *"the default for derived state,"* the guard is the
+efficient choice (equal recomputes do not propagate), and the unguarded form's
+only justification is "the equality check costs more than the recompute." Code on
+`computed()` today gains suppression it did not have — usually an improvement,
+always a migration note.
+
+### 9.3.1 `.drive()` — idempotent, returns the formula
+
+`.drive()` **ensures the formula is driven**: it is a declarative state
+transition to eager, not an action that mints a driver. Idempotent — a second
+call is a no-op. This matters structurally: without it, `f.drive().drive()`
+attaches two drivers to one formula, doubling the eager compute — the same cost
+class as the `lazily-go` welded-eagerness bug, from a different direction.
+Idempotence makes that unrepresentable.
+
+It returns the **formula**, not a driver handle, so construction cannot be left
+half-done and the caller holds the thing it actually reads:
+
+```rust
+let f = ctx.formula(|c| …).drive();
+ctx.get(&f)                          // ordinary read — no get_signal
+```
+
+Note it returns the **same** handle, mutated, not a derived copy — driving is a
+side effect on the graph. Document that explicitly: `let g = f.drive()` gives `g
+== f`, both driven; it is not builder-style `with(…)`.
+
+### 9.3.2 This retires the entire `Signal` surface
+
+`Signal` was *"memo slot + puller effect"* (`reactive-graph.md:69`) — a
+composition needing its own handle type because it is two nodes. Under
+`formula().drive()` the composition is written out, so nothing is left to name:
+
+| retired | replaced by |
+|---|---|
+| `Signal` (concept) | a driven `FormulaCell` |
+| `SignalHandle` | `FormulaCell<T>` — read with ordinary `get` |
+| `get_signal`, `is_signal_active` | `get`, and the driven bit |
+| `dispose_signal` (API + corpus op) | `undrive`, if it exists (§9.3.4) — else nothing |
+
+**The `#lzsignaleager` clause-3 bug becomes unwritable.** `lazily-go` shipped
+`Signal` as a slot subclass overriding `onInvalidate` to re-pull, with no effect
+anywhere, correct values at N× compute, every fixture green. Under this design
+the eager construction *is* an effect and the coalescing comes from the scheduler
+(effects are scheduled, not inline), so the per-write puller cannot be
+constructed. A normative clause one binding silently violated for months becomes
+a structural property. It also deletes the `dispose_signal` corpus op, so §9.3's
+op-rename flag day in the superseded plan never happens.
+
+### 9.3.3 Storing the driver — bit on the node, id in a side table
+
+Associating the driver with its formula must not grow the common (lazy) node.
+Split the state:
+
+| state | where | cost |
+|---|---|---|
+| "am I driven?" | a `bool` on `SlotNode` | **free** — `SlotNode` already carries `dirty`/`force_recompute`/`in_progress` (`context.rs:409-414`), three bytes in an 8-byte-aligned padded region; a fourth bool lands in existing padding, the enum does not grow |
+| "which effect drives me?" | `driven_by: HashMap<SlotId, SlotId>` side table | one entry per **driven** formula, zero per lazy one |
+
+This is the `EdgeIndex` precedent exactly (`context.rs:433-434`): per-node state
+for the common case, a side table for the rare one, *"kept off the nodes so
+low-degree nodes cost nothing."* Driven formulas are rare, so the driver id does
+not belong on the node. Storing a `SlotId` (8 bytes) on `SlotNode` would grow the
+largest enum variant, hence every node including undriven ones.
+
+**Safety obligation — the side table is owner-keyed, the `recycled_id` hazard.**
+`recycled_id_inherits_nothing` warns that *"any owner-keyed side table will alias
+the disposed node's stale index onto the unrelated node that inherits the id."*
+So `driven_by` **must** be cleared on formula disposal, and this is why the
+generation-tagged `SlotId` (§9.3.5) is not optional decoration — it is what makes
+owner-keyed tables like this one sound. The edge index already lives under this
+rule; `driven_by` is one more table under it.
+
+The bit alone makes `.drive()` idempotent — no lookup. The side table is needed
+only for disposal-tears-down-driver (§9.3.4), and even then only if the driver is
+looked up by id rather than found by scanning the formula's dependents for the
+flagged one (O(dependents), tiny for a formula).
+
+### 9.3.4 Disposal owns the driver; and the clause-4 check
+
+Disposing a driven formula **must** tear down its driver — otherwise `.drive()`
+hands back a formula whose disposal strands a poisoned effect, the regression
+this design is meant to remove. The driven bit makes this trivially correct:
+dispose formula → if driven, tear down driver → clear the bit and the
+`driven_by` entry. The formula always knows whether it has a driver, so no
+survivor is stranded.
+
+**Open check that decides one method:** does anything in the family ever revert
+an eager value **back** to lazy? If yes, `f.undrive()` exists (the reverse
+transition, replacing `dispose_signal`) and the driver is disposable on demand.
+If no, `drive` is one-way, there is no `undrive`, and clause 4 was only ever a
+description of `Signal` being a pair — an implementation artifact, not a needed
+capability. **Measure before building `undrive`.**
+
+### 9.3.5 Generation-tagged `SlotId` — closes a hole in the current handle
+
+A `SlotHandle` is `{ id: SlotId, PhantomData<T> }` and `SlotId` is a bare `u64`
+(`src/slot.rs:10-12`) — no generation, no epoch. So a stale handle to a disposed
+id, after LIFO recycling hands that id to a new node, **looks up the new
+occupant and reads it successfully.** The only guard is the `type_id` check,
+which catches a stale handle of a *different* type but not same-type recycling —
+the likely case, since allocation patterns repeat.
+
+The corpus already forbids the outcome — `read_after_dispose_is_an_error` says a
+reader throws *"rather than silently observing a stale, default, or **recycled**
+value"* — but nothing in the implementation can detect the recycled case. That is
+a normative clause with no structural enforcement, the same shape as the
+`#lzsignaleager` gap.
+
+Fix, at no memory cost:
+
+```rust
+struct SlotId { index: u32, generation: u32 }   // still 8 bytes
+```
+
+Bump the generation when a slot is freed; a lookup compares it. `SlotId` stays
+`u64`, handles stay `Copy`, the arena design is untouched. This makes
+`read_after_dispose` enforceable in the recycled case, makes every owner-keyed
+side table (`driven_by`, the edge index) sound against recycling, and lets any
+handle operation report a gone node at lookup rather than as a wrong answer
+later. Proposed fixture, unwritable today: *a stale handle to a recycled id must
+error, not read the new occupant.*
+
+**Re-audit per binding** — the generation gap and the poisoning semantics may
+differ; measure each.
 
 ---
 

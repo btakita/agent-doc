@@ -546,7 +546,22 @@ Commits: `f245f69` in the hub and `d08d39e0e` for the parent gitlink.
 > ⏭️ do [#haivenwsopt]
 
 `#haivenwsopt` is implemented and committed, but agent-doc cannot safely persist its response while the open editor buffer differs from disk. Please save or reload `tasks/recruit/haiven.md`; I will then complete the retained closeout without overwriting your edits.
-<!-- agent:boundary:ba05a292 -->
+
+### Re: gnet transport O(1) refinements — gpt-5
+
+Implemented the transport refinements in `src/haiven-websocket-hub`.
+
+- Replaced the `OnTick` live-connection scan with one `antlabs/timer` timing-wheel node per upgraded connection. `OnTick` is now O(1) and only signals readiness.
+- Moved complete application-message decode and routing off the poller through a shared, nonblocking `ants` pool. Each connection has a bounded serial drain, so inbound order is preserved; saturation sheds that connection instead of blocking the poller.
+- Buffered HTTP upgrade headers across TCP segments, capped at 16 KiB, while preserving same-segment WebSocket bytes for `Conn.Feed`.
+- Added coverage for split handshakes, liveness scheduling and cleanup, dispatch ordering and saturation, and deferred fragmented messages. Updated the transport and design documentation.
+
+`make check` passes: `go vet ./...`, `go test -race ./...`, and all builds. This repository has no GitHub Actions workflow named `CI`, so there is no tmux CI result to inspect.
+
+Commits: hub `f245f69`; parent gitlink `d08d39e0e` (the current parent revision also points at `f245f69`).
+
+The exchange is at the session-accretion warning threshold; the active queue remains drainable, so I am continuing without compacting it.
+<!-- agent:boundary:a877bc9c -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -559,15 +574,14 @@ Commits: `f245f69` in the hub and `d08d39e0e` for the parent gitlink.
 - ~~/goal Implement backlog item(s): #yyzn~~
 - ~~do [#friendsnapshot]~~
 - ~~do [#yyzn-clarify]~~
-- ⏭️ do [#haivenwsopt]
-- 🚧 do [#tnpa]
+- ~~⏭️ do [#haivenwsopt]~~
+- ⏭️ do [#tnpa]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
-- [ ] 🚧 [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
+- [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -586,4 +600,5 @@ Commits: `f245f69` in the hub and `d08d39e0e` for the parent gitlink.
 - 2026-07-20 [#fanoutpri] haiven-websocket-hub: two-band send queue (interactive vs bulk) in hub/sendqueue.go — two lazily-allocated list.Lists drained high-then-low, each FIFO internally, O(1), no heap, so per-conn idle footprint (740 B) is unchanged. Interactive = acks, directed chat, moderation; bulk = presence/typing/passive topic traffic. HARD CONSTRAINT: a service may never span bands, or per-service monotonic seq (DESIGN §6.2) stops meaning 'loss' and client dedup/reorder breaks. Explicitly NO aging/escalation — bulk band stays DropOldest/ConflateByEntity, which bounds staleness by construction instead of by a timer.
 - 2026-07-20 [#friendsnapshot] haiven-websocket-hub: a friend-frame needs a presence snapshot on frame change — presence is at-most-once + conflated, so a newly-framed friend produces no replay and renders 'offline' until their next tick. Add a 'give me current state for these K' query (design §6.1 already specifies snapshot-on-resume for at-most-once classes) + model frame paging (re-subscribe churn on scroll) in the realistic loadtest. This is the real work item behind -friends-frame, not the subscription cap.
 - 2026-07-20 [#yyzn-clarify] Queue head '/goal Implement backlog item(s): #yyzn' references a backlog ID that does not exist in this document (backlog/icebox/done all lack it); the binary marks it skipped_queue_head_ids. Confirm the intended item or remove the head.
+- 2026-07-20 [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
 <!-- /agent:done -->

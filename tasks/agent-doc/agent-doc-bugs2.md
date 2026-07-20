@@ -863,7 +863,25 @@ So the verification is now actually performable, which it was not when the item 
 3. genuinely mid-turn pane (live spinner, bare `❯`) → still refuses as busy.
 
 Check 2 is the one worth watching closest: "no injection over that text" is the property that protects operator-typed content, and it is the failure mode that would be silent if it regressed.
-<!-- agent:boundary:2dd89572 -->
+
+### Re: write salient responses in real time — opus-4-8
+
+> **Queue prompt:** do [#realtimesalient]
+
+Gated on the same keystone as the last two items, and that pattern is now worth naming.
+
+The item's own design constraint is the blocker: preserving "incomplete token prefixes never become authoritative document text" while still showing progress "likely [requires] a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it". A distinct node kind with replace-not-append semantics is a **Document Tree** capability — Phase 2 of `plan-exchange-tree-seqcrdt-and-ipc-unify.md`, which is unstarted. Today the exchange is a flat append tail, which is exactly why the current rule is the blunt one: only complete `### Re:` sections cross the checkpoint, everything else is console-only.
+
+**Phase 2 is now the keystone under three tracked features**, all gated this session for the same reason:
+
+- `#steeringobservableset` — needs the body-aware node identity (Phase 3.1, itself behind Phase 3);
+- `#promptselect` — part (d), responses threaded under their originating prompt;
+- `#realtimesalient` — a progress/salient node replaced by the final response.
+
+Each was filed independently and each bottoms out in "the exchange has no node model". That makes Phase 2 considerably more valuable than its own line item suggests — it is not one refactor competing with three features, it is the thing that unblocks all three. Worth weighing against the `state.db` corruption and `#deliveryackcut`, which are the other two open threads with outsized blast radius.
+
+I did not start it here: replacing the exchange's storage model is the highest-risk change in the system (a wrong merge silently drops operator text), and it deserves a cycle that begins with the plan rather than ends with it.
+<!-- agent:boundary:b5f0c146 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -929,7 +947,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ do [#cdtcutover]
 - ⏭️ do [#coredecomp]
 - ⏭️ do [#orchdecomp]
-- do [#skillharnessplugin]
+- ⏭️ do [#skillharnessplugin]
 - do [#crdtauth6]
 - do [#nsfz]
 - do [#suprestassoc-live]
@@ -943,7 +961,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~📌 do [#n39j]~~
 - ~~📌 do [#f6j3]~~
 - ~~📌 do [#promptselect]~~
-- 🚧 📌 do [#realtimesalient]
+- ~~📌 do [#realtimesalient]~~
 - 📌 do [#syncobscache2]
 - 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
@@ -985,7 +1003,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#7n20] Finish the ensure-window liveness fix across the CLI/controller process boundary. `bbc50c26e` extends the 400ms missing-replica ensure window when a `crdt_replica_register` proves the editor is alive, but the counter is process-global: on the split path the register lands controller-side while `ensure_document_model` runs CLI-side, so live telemetry still shows `window_extended=false` and the wedge persists. Two options: carry the liveness proof across IPC, or run the ensure controller-side where the registration already is. Do NOT route preflight's initial current-doc resolve through the ensure path — tried in this cycle and reverted; it violates `preflight_missing_editor_model_pauses_without_reading_disk_authority` and made preflight resolve to DISK content instead of waiting for the attached editor.
 - [ ] [#zq8e] Editor-authority wedge blocks ALL queue maintenance (root of the #goal drain stall). Evidence in ops.log for this doc: at 19:32:45 `controller_crdt_current_text source=preflight_queue_maintenance` returns `status=current live_editors=1 delivery_converged=true`; 2s later the SAME queue_maintenance path logs `document_model_ensure_start initial_state=editor_attached_model_missing`, a `crdt_replica_register` succeeds (`data_kind=ok generation_fenced=true bootstrap_bytes=1312802`), then `document_model_ensure_republish_observer_not_ready` -> `document_model_ensure_failed` after 5s. EVERY `document_model_ensure_start` this session reports missing-replica across unrelated sources (queue_maintenance, pending_add_sync, controller_recycle_request) while the controller consistently reports current. Two observers of one document disagree; the ensure-path observer does not see a replica the controller demonstrably has. NOTE: likely already owned by the `src/agent-doc-editor-authority-fix` worktree (commits `preserve attached editor authority during retry`, `bound idle authority replay`) — coordinate before landing a rival fix in src/agent-doc.
 - [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).
-- [ ] 🚧 [#realtimesalient] #agent-doc-feature Write salient responses into the document in REAL TIME rather than buffering until finalize. Today only complete `### Re:` sections cross response-checkpoint and partial output is console-only (SKILL.md: "stream incomplete progress only to the console"). Requires deciding what counts as salient mid-turn, and preserving the invariant that incomplete token prefixes never become authoritative document text — so likely a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it. Pairs with #promptselect threading.
 - [ ] [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.
 - [ ] [#syncobscache2] #syncobscache follow-up (the rest of the focus-sync win): extend the command-scoped observation cache into ../tmux-router. After the agent-doc-side cache: 109 -> 80 subprocess spawns, 2225 -> 2031ms (~9% only). list-panes barely moved (35 -> 34) because tmux-router spawns from 47 sites directly via its own Command builder, bypassing TmuxCommandRunner. Dominant remainder: `list-panes -a -F #{pane_id} #{pane_dead}` run 18x identically — pane_dead_flag lists ALL panes and scans for one, once per pane. Fix: move the scope into tmux-router and/or batch pane_dead_flag into one map fetch. Re-measure with the PATH-shim spawn counter.
 - [ ] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
@@ -1033,6 +1050,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ## Review
  
 <!-- agent:review -->
+- [/] 🚧 [#realtimesalient] #agent-doc-feature Write salient responses into the document in REAL TIME rather than buffering until finalize. Today only complete `### Re:` sections cross response-checkpoint and partial output is console-only (SKILL.md: "stream incomplete progress only to the console"). Requires deciding what counts as salient mid-turn, and preserving the invariant that incomplete token prefixes never become authoritative document text — so likely a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it. Pairs with #promptselect threading.
 - [/] [#mtds] [operator-verify] #panedraftunblocker live proof: on a Claude pane whose footer reads `⏵⏵ bypass permissions on · 1 shell · ← for agents` (the variant without `(shift+tab to cycle)`), with an EMPTY composer and no active turn, trigger JB Run Agent Doc. Expect dispatch to succeed instead of refusing with `timed_out` / `unblocker=wait_for_dispatch_ready_prompt`. Then repeat with unsent text typed in the composer and expect the new refusal naming the draft with `unblocker=submit_or_clear_pane_draft`, and NO injection over that text. Finally confirm a genuinely mid-turn pane (live spinner, bare `❯`) still refuses as busy. Fixed in 17848a927, installed 0.35.6; needs the supervisor idle-boundary recycle to pick up the fresh binary.
 - [/] [#promptselect] #agent-doc-feature Selection-scoped `Run Agent Doc`: send ONLY the editor text selection as the prompt. Needs (a) a dedicated CLI verb — `agent-doc prompt "<text>"` (or `steer`; `run` is taken) accepting multi-line via stdin/cat, (b) JB+VSCode `Run Agent Doc` hooked to it so a non-empty selection routes through `prompt` instead of the whole-document trigger, (c) acknowledgement: agent-doc echoes the prompt into the document with the prompt prefix plus salient response, (d) responses attached UNDER their originating prompt — a threaded prompt->response layer in the Document Tree rather than a flat exchange tail. Must compose with realtime steering (#realtime-steering-verbatim) since a selection sent mid-turn IS steering. Design pass needed before implementation.
 - [/] [#agentsignals] [future/separate] Add a realtime agent:signals element after core realtime convergence is stable. Start with deterministic built-in signals for tests, queue, supervisor, and ipc; design custom user-defined signals as plugin-backed tracked work with Rust as the first target and future multi-language support; use tasks/software/realtime-signals-patchboard.md as the GUI/semi-programmatic reference; keep MLP enhancement optional/experimental and not load-bearing for deterministic states.

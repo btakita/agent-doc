@@ -1,6 +1,31 @@
 # Plan: retire `Slot` for `Memo`, add `Dependent`
 
-**Status:** designed 2026-07-20, not started. Supersedes §2 of
+> ## ⚠️ SUPERSEDED 2026-07-20 — do not execute
+>
+> Replaced by [`lazily-cell-kernel-design.md`](lazily-cell-kernel-design.md),
+> which deletes `Slot` along with five other names instead of renaming it to
+> `Memo`. **Do not run the ~12,000-site rename described below.**
+>
+> Three of this plan's premises failed under execution:
+>
+> - **`Memo` reads wrong on the wire**, whose variants all name *things*
+>   (`CellSet`, `SlotValue`, `NodeAdd`). A caching behaviour is not a thing.
+> - **§1's "the type moves to meet the constructor" is half-true** — `computed()`
+>   is unguarded and `memo()` guarded, both returning the same type, so the
+>   rename would produce a `Memo` with no memo guard.
+> - **§6's `Dependent` collides internally.** It is proposed for nodes with
+>   *incoming* edges, but `dependent_count` here means *"how many nodes depend on
+>   this"* — outgoing. `Dependent` already means downstream in this codebase.
+>
+> **Still valuable and lifted forward:** §5 (the partition), §7 (MergeCell fed
+> from a reactive), §8 and §8.1 (feedback termination analysis), §9.5
+> (verification discipline), §10b (the settled/open/declined feedback ledger).
+> The successor cites them rather than restating them.
+>
+> **Read on** for the measured corrections recorded in place — they are findings
+> about the codebase, not about the rename, and they survive it.
+
+**Status:** ~~designed 2026-07-20, not started~~ **superseded**. Supersedes §2 of
 [`lazily-signal-followups.md`](lazily-signal-followups.md).
 
 Two renames and one new internal trait. **No semantic change** — but not a pure

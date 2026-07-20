@@ -9,6 +9,12 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      # The 156-crate test graph exceeds the hosted runner disk when Cargo
+      # retains incremental state and full debug info for every test binary.
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     # #ci-per-test-timeout-guard: CI installs cargo-nextest (step below) so
     # `make check` takes the nextest path and every individual test inherits the
     # per-test deadlock guard in .config/nextest.toml (60s x 3 = 180s, then the

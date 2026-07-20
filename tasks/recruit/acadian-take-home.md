@@ -146,12 +146,42 @@ Identical to the fractional pixel — zero displacement. `aria-busy` flips `true
 Pushed as `dcaa862` on `btakita/acadian-take-home`, superproject gitlink at `31e33b562`. Also untracked `frontend/tsconfig.tsbuildinfo` (`a431a7e`) — a build cache that was dirtying the tree on every typecheck.
 
 One unrelated observation worth naming: on the default trailing-6-month range the backend returned only six symbols — MSFT was absent — while a shorter range returned all seven. The API drops a requested ticker silently rather than reporting it as unavailable. That is a backend data-contract gap, not a UI one; I have left it alone and queued it as a backlog item.
-<!-- agent:boundary:d83407f8 -->
+❯ 🚧 When I change the sorting in the Summary table, the columns resize. Please ensure consistent column widths.
+### Re: stable summary table column widths — opus-4-8
+
+Fixed, and the root cause turned out to be narrower than I first assumed.
+
+**What was actually moving:** the `↓`/`↑` glyph was appended only to the *active* header. Sorting by a different column removed the glyph from one header and added it to another, changing both headers' intrinsic widths — and under the browser's default `table-layout: auto`, that re-solves the layout for *every* column. Row reordering was innocent; the arrow was the whole story.
+
+I confirmed this rather than assuming it. Injecting the old unreserved-arrow behaviour back into the live page produced **5 distinct column layouts across 7 sort keys**. Restoring the reserved slot while leaving auto layout in place was already stable — so the arrow was necessary and sufficient to cause the jump.
+
+**The fix, two layers:**
+
+- The arrow now renders in a fixed-width `.sort-arrow` slot present in *every* header regardless of sort state (`aria-hidden`, since `aria-sort` already carries the semantics). This addresses the actual cause.
+- `table-layout: fixed` with an explicit `<colgroup>` declares the geometry outright instead of deriving it from cell content. This is the belt-and-braces guarantee — it makes the widths independent of the data too, so a longer ticker symbol or a four-digit day count can't shift things either. `min-width: 680px` keeps columns legible on narrow viewports, with `.summary-scroll` taking the overflow as before.
+
+**Verified live** across all 7 columns × both directions, with each render awaited (my first probe read the DOM synchronously after `click()` and was measuring pre-render state — worth flagging, since that probe would have reported a false pass):
+
+| | result |
+|---|---|
+| samples | 14 (7 columns × 2 directions) |
+| column-width mismatches vs baseline | 0 |
+| distinct row orders observed | 13 |
+| `aria-sort` tracking | correct, single active column |
+
+Widths held at `[190.117, 135.797, 190.117, 190.117, 190.117, 190.117, 271.617]` in every sample — identical to the fractional pixel — while 13 distinct row orders prove the sort is genuinely applying rather than the table having gone inert.
+
+`make check` is green: 29 backend tests, mypy clean, 32 frontend tests (4 new pinning the column-width contract), typecheck, production build.
+
+Pushed as `50ded3a` on `btakita/acadian-take-home`; superproject gitlink at `45ee7d6da`.
+<!-- agent:boundary:4512cfd0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- The tooltips are "dancing" around when I move the mouse over the line graph. Please keep the tooltips anchored to the mouse and with a fixed reference point (no dancing). Only change the position in relation to the mouse when the viewport would otherwise cut it off.
+- The selection slidebar background is not pleasing ![img_5.png](img_5.png). Please use ui best practices to ensure the color fits well with the background.
 <!-- /agent:queue -->
 
 ## Backlog

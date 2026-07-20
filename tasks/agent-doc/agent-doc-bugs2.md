@@ -59,16 +59,37 @@ let rebuild_eligible = reason == "sync_pending" && observe_editor_open(file);
 So the hole is not the missing tier; it is **what happens when that upstream self-heal exhausts**. The descent then reaches disk *with an editor still attached* — which is precisely how a stale/garbled disk image becomes authority, and it fits both symptoms: a fence gaining a leading space, and deleted heads coming back from an older image.
 
 Filed as `#missingreplicarebuild`, and it depends on `#deliveryackcut` — a live-but-non-ACKing replica is *why* the upstream heal exhausts. Fixing the zombie-replica case removes the exhaustion; hardening the descent removes the corruption when it still happens. I did not change read authority here: it is the most delicate path in the system, and I am deep enough in this session that I would rather hand you a precise diagnosis than a rushed edit to it.
-<!-- agent:boundary:142a5b7c -->
+
+### Re: standardize the rebuild order — confirmed, it is implemented twice — opus-4-8
+
+You were right, and the drift is already real rather than hypothetical.
+
+The order is implemented **twice, independently, under the same tags** (`#px82` / `#bn41`):
+
+1. `agent-doc-document-realtime-io` — `reobserve_missing_editor_replica_with_reregistration` + `resolve_editor_unavailable_disk_read_fallback`
+2. `agent-doc-preflight-io` — `current_text_via_preflight_authority_retrying` + `observe_current_text_with_bounded_retry`
+
+Both do the same thing in prose: bounded retry on the transient editor statuses, request a replica re-registration on `editor_attached_model_missing`, then give up. Two crates, two hand-written copies of one policy.
+
+**The proof they have already drifted:**
+
+- **Separate budgets and separate env overrides.** `DEFAULT_EDITOR_REPLICA_REOBSERVE_ATTEMPTS` / `AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS` versus `DEFAULT_QUEUE_AUTHORITY_ATTEMPTS` / `AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS`. Both happen to default to 3 today, but they are independently tunable — so tuning one silently leaves the other alone.
+- **And more directly: the fix I landed this morning only went into one of them.** `adefcda0a` replaced the TTL cooldown with the Lazily liveness-witness memo — `grep` for it in `agent-doc-preflight-io` returns **0**. The preflight copy still retries with no witness memo at all. I changed "the" self-heal policy and actually changed half of it, without noticing there was another.
+
+That is the strongest argument for your point: this duplication is not just untidy, it silently splits fixes.
+
+Filed as `#authoritydescentstd` — extract the order (realtime model → rebuild from plugin → disk, carrying the `missing_replica`/`sync_pending` distinction and the exhaustion rule from `#missingreplicarebuild`) into one pure decision function in `agent-doc-turn` or `agent-doc-flow`, with both sites consuming it. That matches the repo's own shared-pure-decision-fn idiom, and it is the prerequisite for `#missingreplicarebuild` — otherwise that fix lands in one copy too.
+<!-- agent:boundary:64044da9 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#missingreplicarebuild]
 - ~~do [#deliveryackcut]~~
 - ~~do [#orphandrain]~~
 - ~~do [#c8tb]~~
 - ⏭️ do [#lazilyscopeadopt]
-- do [#jbrouteasyncchannel]
+- ⏭️ do [#jbrouteasyncchannel]
 - do [#patchretryidem]
 - do [#hvw0]
 - do [#bbpe]
@@ -122,6 +143,7 @@ Filed as `#missingreplicarebuild`, and it depends on `#deliveryackcut` — a liv
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#authoritydescentstd] [focused-cycle] #agent-doc-bug Standardize the authority rebuild/descent order into ONE shared decision fn. It is currently implemented TWICE, independently, under the SAME tags (#px82/#bn41): (1) agent-doc-document-realtime-io reobserve_missing_editor_replica_with_reregistration + resolve_editor_unavailable_disk_read_fallback; (2) agent-doc-preflight-io current_text_via_preflight_authority_retrying + observe_current_text_with_bounded_retry. PROVEN DRIFT: separate budgets and env overrides (DEFAULT_EDITOR_REPLICA_REOBSERVE_ATTEMPTS/AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS vs DEFAULT_QUEUE_AUTHORITY_ATTEMPTS/AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS, both defaulting 3 but independently tunable), and the liveness-witness self-heal memo added in adefcda0a exists ONLY in the realtime-io copy (grep count in preflight-io = 0) — so a fix to the descent policy silently applies to one path and not the other. Extract the order (realtime model -> rebuild from plugin -> disk, with the missing_replica/sync_pending distinction and the exhaustion rule from #missingreplicarebuild) as a pure decision fn in agent-doc-turn or agent-doc-flow, with both call sites consuming it, per the repo's shared-pure-decision-fn idiom.
 - [ ] [#missingreplicarebuild] [focused-cycle] #agent-doc-bug Read authority descends to DISK while an editor is attached, on the missing_replica path. The operator's directive — realtime model, then rebuild from the plugin, then disk — is ALREADY the structure: resolve_editor_unavailable_disk_read_fallback has an explicit 'Tier 1 retry: rebuild the model from the live editor buffer' calling ensure_document_model_through_authority. But it is gated `rebuild_eligible = reason == "sync_pending" && observe_editor_open(file)`; missing_replica is EXCLUDED because reobserve_missing_editor_replica_with_reregistration self-heals it upstream (excluding it was a real fix: rebuilding twice measured ~28s per read site). The gap is what happens when that upstream self-heal EXHAUSTS — the descent then reaches disk with an editor still attached, which is the corruption vector (operator-observed: frontmatter closing fence gained a leading space, deleted queue heads resurrected). Fix direction: on missing_replica exhaustion, do NOT descend to disk while observe_editor_open(file) — request one plugin rebuild (the forceRefresh/re-register the runbook describes) and fail closed if it cannot answer, rather than adopting disk. Depends on #deliveryackcut: a live-but-non-ACKing replica is why the upstream heal exhausts in the first place.
 - [ ] [#lazilyscopeadopt] [focused-cycle] Adopt lazily 0.45's ctx.scope() -> TeardownScope at the sites that build long-lived reactives, now that the dependency is upgraded (66f71cb40). Before 0.45 nothing disposed reactives, so every cell/computed agent-doc created lived for the process lifetime; the upgrade makes disposal POSSIBLE but does not apply it. Start with the relay/liveness cores that build per-document reactive state (crdt_relay.rs build_liveness_core, editor_attach, editor_open_docs) since those are per-document and therefore unbounded in a long-lived controller. Verify with the edge-set-vs-observer-registry test: anything surviving an invalidation is not a graph edge. Needs its own cycle — changing reactive lifetimes in the liveness core is exactly where a wrong disposal shows up as a phantom live_editors=0.
 - [ ] [#deliveryackcut] [focused-cycle] delivery_converged() requires every LIVE member to have ACKed, so a zombie replica (registered + reported live, but no longer ACKing) wedges every write until timeout. Exclude a non-ACKing member from the convergence cut the way a disconnected one already is (crdt_relay.rs delivery_converged/is_live). Needs a staleness signal — is_live is a reactive cell with no ACK clock — and a threshold conservative enough that a slow-but-live editor is never dropped, since dropping one clobbers operator edits. Root-caused 2026-07-19; mitigation shipped in 651f63517.

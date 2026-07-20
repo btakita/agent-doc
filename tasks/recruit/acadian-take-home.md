@@ -306,14 +306,44 @@ The one thing I would avoid is making the gesture the *only* way out. A user who
 `make check` is green: 33 backend tests, mypy clean, 51 frontend tests (9 new), typecheck, production build.
 
 Pushed as `41b0aba` on `btakita/acadian-take-home`; superproject gitlink at `d50a0c4f4`.
-<!-- agent:boundary:bc12bcfb -->
+### Re: double-click zoom reset — opus-4-8
+
+> **Queue prompt:** Support double-click zoom reset.
+
+Done — double-clicking anywhere on the plot resets it. The icon button stays, since it is the only *visible* affordance and it doubles as the zoom-state indicator. The button's tooltip now reads `Reset zoom (or double-click the chart)`, which is how the gesture gets discovered.
+
+**The guard.** Drag-to-zoom and double-click-to-reset share the same pointer, so a zoom drag whose endpoints land close together would register as a double-click and immediately undo the zoom the user just made. The reset is therefore skipped when the preceding gesture travelled more than `DRAG_SLOP` (4px) — enough to absorb hand tremor in a real click, small enough that any deliberate selection clears it.
+
+**Two defects the verification caught**, both of which I would have shipped on a code read:
+
+*The guard never tripped.* I first derived travel distance from Recharts' `chartX`. Instrumenting the actual values showed `pressX: 100, latestX: 100` after a 100px drag — Recharts does not deliver `onMouseMove` while the button is held, so the travel distance stays pinned at its press value and **every** gesture classifies as a click. The guard was inert. It now reads native pointer coordinates from the container element, which is the right layer anyway: pointer travel is a DOM concern, not a chart concern.
+
+*The brush labels were missing on first paint.* Chasing the first defect, I noticed the labels I shipped last cycle were absent entirely — no `.brush-labels` element at all. `ResponsiveContainer` settles its width asynchronously, so the brush can render *after* my layout effect runs; the effect bailed when the handles were not there yet and then waited on a resize that never came. It now retries on the next animation frame. This was a live flake in the previous commit, not a new regression — worth flagging, because the first time I saw it I assumed it was hot-reload noise and moved on. It was not.
+
+**Verified end-to-end:**
+
+| gesture | result |
+|---|---|
+| 100px drag, then immediate double-click | zoom preserved |
+| stationary double-click (1px tremor) | resets to full range, button disappears |
+| double-click at full range | no-op |
+| labels after reload ×3 | present on all 7 cards |
+
+One process note: the shared browser was being actively driven by another session mid-verification — tabs opening and reindexing under me, and at one point my own reload landed on someone else's page. Rather than keep grabbing tabs, I launched an isolated headless Chromium on a separate debug port for the rest of the run and shut it down afterwards. Worth knowing if concurrent sessions here often share that browser.
+
+`make check` is green: 33 backend tests, mypy clean, 56 frontend tests (5 new), typecheck, production build.
+
+Pushed as `94c2bc9` on `btakita/acadian-take-home`; superproject gitlink at `6fc7b3362`.
+<!-- agent:boundary:55086ce2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
+<!-- agent:queue -->
 - ~~Move the date selection tooltip below the selector ![img_7.png](img_7.png). Make sure the tooltip is always legible and does not obscure other UI data. Also handle when the two sliders are close together. Make sure the date tooltips do not overlap.~~
 - ~~What is UX best practice to support resetting the zoom from the mouse? Don't implement anything, just discuss.~~
+- ~~Support double-click zoom reset.~~
+- Rename gh repo to mag7-viewer. Make sure documentation + code reflects new name. make repo public
 <!-- /agent:queue -->
 
 ## Backlog

@@ -454,9 +454,41 @@ pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Would this restart have to quit the pane the CALLER is running in?
+///
+/// `#restartselfpane`: an agent that runs `session restart-supervisor` for its
+/// own document is, by construction, mid-turn at that moment — it is executing
+/// the very command that asks. The controller then sends quit keys into a busy
+/// harness, which ignores them, and the restart can only ever time out. Observed
+/// 2026-07-20: a 10s `live_harness_quit_timeout` whose real cause was that the
+/// requester WAS the target.
+///
+/// `$TMUX_PANE` is the caller's own pane, so this is exact rather than heuristic.
+fn restart_would_quit_the_calling_pane(owner_pane: Option<&str>) -> bool {
+    let Some(owner_pane) = owner_pane.map(str::trim).filter(|pane| !pane.is_empty()) else {
+        return false;
+    };
+    std::env::var("TMUX_PANE")
+        .ok()
+        .map(|caller| caller.trim().to_string())
+        .filter(|caller| !caller.is_empty())
+        .is_some_and(|caller| caller == owner_pane)
+}
+
 pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
     let ctx = build_context(file)?;
     let tmux = Tmux::default_server();
+    let owner_pane = ctx
+        .actor_record
+        .as_ref()
+        .map(|record| record.pane_id.clone());
+    if restart_would_quit_the_calling_pane(owner_pane.as_deref()) {
+        anyhow::bail!(
+            "refusing to restart {}: this command is running IN that document's own pane ({}), so the restart would have to quit the session that is asking for it — and a mid-turn harness ignores the quit keys, so it can only time out. Run it from another pane, or use the editor's Restart Agent action.",
+            ctx.canonical_file.display(),
+            owner_pane.as_deref().unwrap_or("?"),
+        );
+    }
     if !force {
         guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Restart)?;
     }
@@ -3780,6 +3812,37 @@ fn timestamp_secs() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    /// `#restartselfpane`: an agent that runs `restart-supervisor` for its own
+    /// document is mid-turn by construction, so the controller's quit keys hit a
+    /// busy harness that ignores them and the restart can only time out. Refuse
+    /// up front with that reason instead of burning 10s on a mystery timeout.
+    #[test]
+    fn restart_refuses_when_the_caller_is_the_target_pane() {
+        // SAFETY: single-threaded test-local env mutation.
+        unsafe { std::env::set_var("TMUX_PANE", "%53") };
+        assert!(
+            super::restart_would_quit_the_calling_pane(Some("%53")),
+            "restarting from inside the owner pane must be refused"
+        );
+        assert!(
+            !super::restart_would_quit_the_calling_pane(Some("%54")),
+            "a different pane is the supported way to restart"
+        );
+        assert!(
+            !super::restart_would_quit_the_calling_pane(None),
+            "an unknown owner pane must not block a restart"
+        );
+        assert!(
+            !super::restart_would_quit_the_calling_pane(Some("  ")),
+            "a blank owner pane proves nothing"
+        );
+        unsafe { std::env::remove_var("TMUX_PANE") };
+        assert!(
+            !super::restart_would_quit_the_calling_pane(Some("%53")),
+            "outside tmux there is no calling pane to protect"
+        );
+    }
+
     use super::*;
     use parking_lot::Mutex;
     use std::sync::Arc;

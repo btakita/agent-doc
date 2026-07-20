@@ -319,6 +319,27 @@ pub fn apply_session_id_assignment(
 /// `Escape` first, always: `C-d` only quits from an EMPTY composer. With draft
 /// text present the harness treats it as delete-forward and the pane never
 /// exits, which would strand a restart half-done.
+/// Quit keys for a pane whose harness may be MID-TURN.
+///
+/// `#restartbusyquit`: `C-d` only quits an IDLE composer. A harness running a
+/// turn ignores it entirely, so the first `#restartlivepane` implementation
+/// timed out after 10s against a busy pane and reported a generic "did not exit
+/// to a shell" — observed 2026-07-20 on a live restart. Interrupt first, then
+/// quit.
+///
+/// Composes the real interrupt plan rather than restating it, so the
+/// Codex `C-g`-opens-the-editor rule (`#codex-interrupt-clear-ctrl-g-opens-editor`)
+/// cannot drift between the two paths.
+pub fn operator_quit_key_plan_for_state(harness: &str, busy: bool) -> Vec<&'static str> {
+    if !busy {
+        return operator_quit_key_plan(harness);
+    }
+    let mut plan =
+        agent_doc_turn_executor_tmux::context_clear::operator_interrupt_key_plan(harness, false);
+    plan.extend(operator_quit_key_plan(harness));
+    plan
+}
+
 pub fn operator_quit_key_plan(harness: &str) -> Vec<&'static str> {
     match harness {
         // OpenCode needs the doubled Escape its interrupt plan uses before the
@@ -3894,6 +3915,49 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
             None
         );
         assert_eq!(args, ["--session-id", "operator-uuid"]);
+    }
+
+    /// `#restartbusyquit`: a mid-turn harness ignores `C-d` outright, so a quit
+    /// plan that does not interrupt first can only ever time out. Observed on a
+    /// live restart: 10s of `Escape`,`C-d` against a busy pane did nothing.
+    #[test]
+    fn busy_quit_plan_interrupts_before_quitting() {
+        for harness in ["claude", "codex", "opencode"] {
+            let busy = operator_quit_key_plan_for_state(harness, true);
+            let idle = operator_quit_key_plan_for_state(harness, false);
+            assert_eq!(
+                idle,
+                operator_quit_key_plan(harness),
+                "{harness} idle plan must be the plain quit plan"
+            );
+            assert_eq!(
+                busy.last(),
+                Some(&"C-d"),
+                "{harness} busy plan must still end by quitting"
+            );
+            assert!(
+                busy.len() > idle.len(),
+                "{harness} busy plan must add interrupt keys, got {busy:?}"
+            );
+            let interrupt =
+                agent_doc_turn_executor_tmux::context_clear::operator_interrupt_key_plan(
+                    harness, false,
+                );
+            assert!(
+                busy.starts_with(&interrupt),
+                "{harness} busy plan must lead with the real interrupt plan {interrupt:?}, got {busy:?}"
+            );
+        }
+    }
+
+    /// The busy plan must compose the shared interrupt plan, not restate it, so
+    /// the Codex `C-g`-opens-the-editor rule cannot drift between the paths.
+    #[test]
+    fn busy_quit_plan_never_sends_ctrl_g_to_a_codex_composer() {
+        assert!(
+            !operator_quit_key_plan_for_state("codex", true).contains(&"C-g"),
+            "C-g opens the external editor in the Codex composer"
+        );
     }
 
     /// `#restartlivepane`: `C-d` only quits from an EMPTY composer    /// `#restartlivepane`: `C-d` only quits from an EMPTY composer — with draft

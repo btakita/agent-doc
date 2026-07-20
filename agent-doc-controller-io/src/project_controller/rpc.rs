@@ -12327,7 +12327,18 @@ fn quit_live_harness_pane_to_shell(
     pane_id: &str,
     harness_binary: &str,
 ) -> bool {
-    let plan = agent_doc_harness::operator_quit_key_plan(harness_binary);
+    // `#restartbusyquit`: a mid-turn harness ignores `C-d`, so interrupt first.
+    // Detected from the live capture rather than assumed, because interrupting an
+    // IDLE composer is not always harmless (Codex `C-g`, stray `C-c`).
+    let busy = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane_id)
+        .or_else(|_| agent_doc_tmux_io::capture_pane(tmux, pane_id))
+        .ok()
+        .is_some_and(|captured| {
+            agent_doc_harness::HarnessConfig::from_agent_name(harness_binary)
+                .dispatch_blocker_reason(&captured)
+                .is_some()
+        });
+    let plan = agent_doc_harness::operator_quit_key_plan_for_state(harness_binary, busy);
     for (index, key) in plan.iter().enumerate() {
         if index > 0 {
             std::thread::sleep(std::time::Duration::from_millis(150));
@@ -12403,7 +12414,7 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                     agent_doc_ops_log_io::log_op(
                         &work.file,
                         &format!(
-                            "controller_supervisor_replacement_preserve_pane_blocked mode={} session={} pane={} generation={} receipt_id={} reason=live_harness_quit_timeout harness={}",
+                            "controller_supervisor_replacement_preserve_pane_blocked mode={} session={} pane={} generation={} receipt_id={} reason=live_harness_quit_timeout harness={} (a mid-turn harness that ignores the quit keys reports here; see #restartbusyquit)",
                             work.mode,
                             work.session_id,
                             work.pane_id,

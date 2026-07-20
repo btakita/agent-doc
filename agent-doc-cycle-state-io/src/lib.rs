@@ -2378,14 +2378,31 @@ fn append_semantic_merge_ack_carried_forward_events(
     Ok(())
 }
 
+/// Resolve the ledger key for `file`, or `None` when the document has no
+/// resolvable path at all.
+///
+/// `#ay80ci`: this used to additionally require an existing `.agent-doc`
+/// ancestor and silently return `None` otherwise, which made every cycle-state
+/// write a no-op for a document whose project root had not been materialized
+/// yet. That is not what the surrounding code does: [`append_state_fact`]
+/// resolves its destination with `project_root_or_file_parent` (which falls
+/// back to the document's parent) and `open_state_db` creates `.agent-doc`
+/// there, and the reader
+/// (`agent_doc_repair_io::load_pending_response_state`) resolves the same way.
+/// So the guard did not prevent the directory from being created — it only made
+/// the write side disagree with the read side, and it swallowed the write.
+///
+/// The observable failure was CI-only because whether `.agent-doc` already
+/// exists by capture time depends on the environment: locally a global config
+/// or a live controller materializes the root earlier in the run, so the guard
+/// passed. On a clean runner nothing did, so `finalize` captured a response,
+/// silently dropped the durability write, then failed reading it back with
+/// `captured turn intent <id> was not projected as active`.
 fn cycle_document_hash(file: &Path) -> Result<Option<String>> {
     let canonical = match file.canonicalize() {
         Ok(path) => path,
         Err(_) => return Ok(None),
     };
-    if agent_doc_fs::find_project_root(&canonical).is_none() {
-        return Ok(None);
-    }
     Ok(Some(agent_doc_fs::document_state_hash(&canonical)?))
 }
 
@@ -3885,5 +3902,58 @@ mod tests {
         );
         // run_id stays stable across transitions (same cycle).
         assert_eq!(captured.to_pipeline().run_id, pipeline.run_id);
+    }
+}
+
+
+#[cfg(test)]
+mod project_root_symmetry_tests {
+    use super::*;
+    use std::fs;
+
+    /// `#ay80ci`: a cycle-state write must land for a document whose project
+    /// root has not been materialized yet.
+    ///
+    /// `append_state_fact` resolves its destination with
+    /// `project_root_or_file_parent` and lets `open_state_db` create
+    /// `.agent-doc` there, and the repair-side reader resolves the same way. If
+    /// the key derivation is stricter than either of them, the write is silently
+    /// skipped and the read-back fails — which is how CI kept losing
+    /// `finalize_skips_ignored_untracked_session_doc`.
+    #[test]
+    fn capture_write_lands_without_a_preexisting_agent_doc_ancestor() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // Deliberately NO `.agent-doc` anywhere: this is a document that
+        // `finalize` is legitimately operating on before the root exists.
+        fs::create_dir_all(dir.path().join("scratch")).unwrap();
+        let doc = dir.path().join("scratch/session.md");
+        fs::write(&doc, "---\nagent_doc_format: template\n---\n\nbody\n").unwrap();
+
+        let wrote = append_response_captured_body(
+            &doc,
+            CapturedResponseFactInput {
+                cycle_id: "c1",
+                capture_id: "c1",
+                response_sha256: "abc",
+                response_body: "captured body",
+                intent_body: Some("captured body"),
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        )
+        .unwrap();
+        assert!(
+            wrote,
+            "the captured-response fact must be durably written, not silently skipped",
+        );
+
+        // And it must be readable back through the same root resolution the
+        // repair path uses — write and read have to agree on the root.
+        let root = agent_doc_project_root_io::project_root_or_file_parent(&doc).unwrap();
+        assert!(
+            agent_doc_sqlite::state_store::state_db_path(&root).exists(),
+            "the write must have materialized the state db at the root the reader resolves",
+        );
     }
 }

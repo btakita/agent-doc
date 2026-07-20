@@ -1001,12 +1001,36 @@ The bump had to be **uniform**. Bumping only the root manifest left 22 member cr
 And the upgrade makes disposal **possible**, not applied. Since nothing before 0.45 disposed reactives, every cell/computed agent-doc creates has been living for the process lifetime — which matters most in the per-document relay/liveness cores inside a long-lived controller. Filed as `#lazilyscopeadopt` with those sites named.
 
 I left `src/lazily-rs`, `src/lazily-kt`, and `src/lazily-js` completely untouched — another session is publishing them, and their working-tree changes are that session's, not mine.
-<!-- agent:boundary:188f7942 -->
+
+### Re: focus-sync lag — bisected, and it no longer reproduces — opus-4-8
+
+> **Queue prompt:** do [#syncfocuslag]
+
+Both halves are resolved, and the second one is the interesting part.
+
+**The bisection the item asked for exists.** "NEXT: add permanent `log_sync_latency` phases inside that span" is done — the previously unmeasured stretch between `window_resolution` and the tmux_router reconcile is now split into `gap_pre_window`, `gap_window_to_ownership`, and `ownership_per_file_loop`, with the per-file loop further broken into `sa/sb/sc/sd` sub-segments reported by `ownership_per_file_loop_detail`. The item warned that "a blind line-insert attempt landed mid-expression and was reverted"; the landed version threads accumulators through the loop properly rather than inserting into an expression.
+
+**And the lag is gone.** Reading real measurements out of `.agent-doc/logs` rather than re-running a sync against the live tmux:
+
+```
+sync_lock_wait            0ms
+gap_pre_window            3–20ms
+window_resolution         3–5ms
+gap_window_to_ownership   4–6ms
+ownership_per_file_loop   28–43ms
+```
+
+That sums to roughly **40–75ms**, against the ~2.5s the item recorded with ~2.1s unaccounted. There is no unmeasured span left to bisect — every phase is instrumented and they now account for the whole wall clock.
+
+The item's core finding still stands and is worth keeping: spawn count was never the bottleneck (109→63 spawns moved wall clock not at all). Whatever the ~2.1s actually was, it is not present on the current binary, and the instrumentation that would catch a recurrence is permanent rather than ad-hoc — which is the durable win here.
+
+Marking done. A future slow sync is a new measurement against named phases, not a blind 2.1s hole.
+<!-- agent:boundary:e3aeaa4c -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#lazilyscopeadopt]
+- 🚧 do [#lazilyscopeadopt]
 ~~~done
 We should immediately self-heal. Make all self-healing real-time, not turn-based...if possible.
 > Heads now render as list items. `parse_spans` still accepts the legacy bare form, so existing documents round-trip and self-heal on the next render rather than needing migration. There's a regression asserting every rendered head is a list item, and that healing is idempotent.
@@ -1030,7 +1054,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#mtds]~~
 - ~~do [#queuecontmirror]~~
 - ⏭️ do [#hvw0]
-- do [#bbpe]
+- ⏭️ do [#bbpe]
 - ~~do [#mrnh]~~
 - ~~do [#f4d5]~~
 - ~~do [#5d9f]~~
@@ -1040,7 +1064,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#a2zx]~~
 - do [#dbj7]
 - ~~do [#ay80]~~
-- 🚧 do [#syncfocuslag]
+- ~~do [#syncfocuslag]~~
 - ~~do [#jbrunsteering]~~
 - do [#crdtpushdrainverify]
 - ~~do [#supboundarylivelock]~~
@@ -1108,7 +1132,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#lazilyscopeadopt] Adopt lazily 0.45's ctx.scope() -> TeardownScope at the sites that build long-lived reactives, now that the dependency is upgraded (66f71cb40). Before 0.45 nothing disposed reactives, so every cell/computed agent-doc created lived for the process lifetime; the upgrade makes disposal POSSIBLE but does not apply it. Start with the relay/liveness cores that build per-document reactive state (crdt_relay.rs build_liveness_core, editor_attach, editor_open_docs) since those are per-document and therefore unbounded in a long-lived controller. Verify with the edge-set-vs-observer-registry test: anything surviving an invalidation is not a graph edge.
+- [ ] 🚧 [#lazilyscopeadopt] Adopt lazily 0.45's ctx.scope() -> TeardownScope at the sites that build long-lived reactives, now that the dependency is upgraded (66f71cb40). Before 0.45 nothing disposed reactives, so every cell/computed agent-doc created lived for the process lifetime; the upgrade makes disposal POSSIBLE but does not apply it. Start with the relay/liveness cores that build per-document reactive state (crdt_relay.rs build_liveness_core, editor_attach, editor_open_docs) since those are per-document and therefore unbounded in a long-lived controller. Verify with the edge-set-vs-observer-registry test: anything surviving an invalidation is not a graph edge.
 - [ ] [#deliveryackcut] [focused-cycle] delivery_converged() requires every LIVE member to have ACKed, so a zombie replica (registered + reported live, but no longer ACKing) wedges every write until timeout. Exclude a non-ACKing member from the convergence cut the way a disconnected one already is (crdt_relay.rs delivery_converged/is_live). Needs a staleness signal — is_live is a reactive cell with no ACK clock — and a threshold conservative enough that a slow-but-live editor is never dropped, since dropping one clobbers operator edits. Root-caused 2026-07-19; mitigation shipped in 651f63517.
 - [ ] [#orphandrain] [recommended] Controller-side drain for documents with NO supervisor. Shipped then REVERTED same session (revert of 'feat(controller): drain go-mode queues that have no supervisor') after it caused a dispatch storm: 15 dispatches for one doc in ~60s despite a 90s backoff, ~31 contending controller processes. Two faults, both in the effects half: (1) run_editor_route called from INSIDE the controller re-enters the controller ('timed out after 5.0s waiting for project controller response') — Run Agent Doc calls it from OUTSIDE; (2) the backoff lived in an in-memory HashMap in the controller, so every failed dispatch caused a restart that wiped it, permitting immediate re-dispatch. Redesign: dispatch from OUTSIDE the controller event loop (detached child, not a self-call) and persist per-document backoff in state.db next to the drain lease. The pure policy module (agent-doc-controller/src/orphan_drain.rs, 9 tests, gates correct) was sound — recover it from git history rather than rewriting. Underlying gap remains OPEN: a doc whose owner pane is a live agent TUI can never get a supervisor (preserve_pane_blocked), so it has no idle-queue watch and its go-mode queue only advances when a human triggers Run Agent Doc.
 - [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.
@@ -1121,7 +1145,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
 - [ ] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
 - [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).
-- [ ] 🚧 [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.
 - [ ] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
 - [ ] [#compacttombgc] [recommended] Fenced Compact Exchange CRDT epoch — RE-SCOPED 2026-07-19 away from tombstone GC. The #bootstrapsize measurement (crdt_sync.rs) on a real 57KB document found 88,630 ops and ZERO tombstones, so TextCrdt tombstone GC would reclaim nothing on the observed shape; the payload is pre-compaction INSERT history. The valuable half is the epoch itself: rebootstrap attached replicas from the compacted snapshot and reject/component-rebase older-epoch deltas, which discards that insert history — the only mechanism that makes compaction actually shrink the register bootstrap. Keep tombstone GC as a trailing step for delete-heavy documents, not the headline. Still needs the all-replica stability frontier before any epoch fence is safe.
 - [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.

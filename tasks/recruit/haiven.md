@@ -466,7 +466,35 @@ I’d also keep a bounded chat frame on the client at all times. Initial load fe
 
 Friend presence follows the same bounded-frame idea, but the load path is different. When the friend frame changes, the client subscribes to the new page and requests current presence for those K friends. Presence is current state, while chat is durable ordered history.
 Understood. I’m holding document finalization while you edit. The implementation is committed and `make check` passes; the draft remains uncommitted until you’re finished.
-<!-- agent:boundary:65bdcda4 -->
+
+### Re: do [#friendsnapshot] — gpt-5
+
+Updated email draft:
+
+Thanks, Craig. One more thought I wanted to add.
+
+I’d keep inbound routing FIFO and put priority on each client’s outbound queue. Live chat and acknowledgements should drain ahead of initial chat-frame and presence-snapshot traffic. A queued frame’s age starts when its first message is added and does not reset as more messages fold in, so it still drains under steady live traffic. High-fanout work stays bounded separately rather than receiving priority.
+
+The hub can batch multiple chat messages into one WebSocket write, but each message still keeps its own ID, sequence, retry, and deduplication state.
+
+I’d also keep a bounded chat frame on the client at all times. Initial load fetches the latest K messages and a cursor for older history. New live messages fold into that frame by ID or sequence. Duplicate echoes collapse into the existing entry, new messages append in order, and old entries roll out of the visible frame but remain available through history paging.
+
+Friend presence follows the same bounded-frame idea, but the load path is different. When the friend frame changes, the client subscribes to the new page and requests current presence for those K friends. Presence is current state, while chat is durable ordered history.
+
+Recommendation: keep the two outbound lanes with aging; do not add ingress or global fan-out priority. Prioritizing an incoming high-fanout message can worsen overload by expanding the most expensive work first. FIFO service dispatch plus bounded fan-out workers/admission is the simpler correct model.
+
+Implemented `#friendsnapshot` in `haiven-websocket-hub`:
+
+- Added a bounded keyed snapshot protocol (`hub.snapshot`, up to 256 opaque keys) and a separate `KeyedSnapshotter` installation path, so frame queries do not accidentally enable whole-class idle suppression.
+- Routed returned state through the normal stamping, policy, conflation, and bounded send path.
+- Updated the realistic runner to page forward and back, re-subscribe, request current presence, and report page turns, subscription churn, and snapshot entity counts.
+- Specified the always-present bounded chat frame as a separate bulk `chat.history` ordering domain merged with live chat by durable message ID/sequence.
+- Kept inbound service ordering FIFO and documented that frame age begins with the first item and is preserved as later items are appended.
+
+Verification passed: targeted tests, race tests, a realistic paging run, and full `make check`.
+
+Submodule commits: `25b85f0` and `3e43140`. Parent gitlink is advanced on the current branch.
+<!-- agent:boundary:f7583fa1 -->
 <!-- /agent:exchange -->
 
 ## Queue

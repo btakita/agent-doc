@@ -943,7 +943,7 @@ I also sharpened what to watch for, because the interesting half is easy to miss
 The second check is unchanged and still worth doing: running `agent-doc` once after editing must queue the handoff **without submitting a partial edit**.
 
 Worth noting the code half already landed on 2026-07-12 — `all_unstarted_prompt_bearing_changes_from_diff` plus `RealtimeSteeringSet::verbatim_aggregate()`. So this is specifically the editor-surface proof that the aggregate reaches the operator's screen, not a check on whether aggregation works at all.
-<!-- agent:boundary:06c7f25c -->
+<!-- agent:boundary:83aa2ee4 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -1026,7 +1026,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~📌 do [#realtimesalient]~~
 - ~~📌 do [#syncobscache2]~~
 - ⏭️ 📌 do [#capturebacklogatomic]
-- 📌 do [#opcapturelazily]
+- ⏭️ 📌 do [#opcapturelazily]
 - 📌 do [#jbtsiftnosub2verify]
 - 📌 do [#sidecarstate]
 - ~~📌 do [#64we]~~

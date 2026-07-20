@@ -323,22 +323,21 @@ mod tests {
     /// existed — failing both halves of its assertion under load.
     ///
     /// Every test that sets OR reads the process cwd takes this lock, so the two
-    /// can never overlap. `unwrap_or_else(PoisonError::into_inner)` keeps one
-    /// failing test from cascading into spurious failures in the rest.
-    fn current_dir_lock() -> &'static std::sync::Mutex<()> {
-        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    /// can never overlap. `#relaylockpoison`: this is a `parking_lot::Mutex`, so a
+    /// failing test cannot poison the lock and cascade into spurious failures in
+    /// the rest.
+    fn current_dir_lock() -> &'static parking_lot::Mutex<()> {
+        static LOCK: std::sync::OnceLock<parking_lot::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| parking_lot::Mutex::new(()))
     }
 
-    fn lock_current_dir() -> std::sync::MutexGuard<'static, ()> {
-        current_dir_lock()
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    fn lock_current_dir() -> parking_lot::MutexGuard<'static, ()> {
+        current_dir_lock().lock()
     }
 
     struct ScopedCurrentDir {
         previous: PathBuf,
-        _guard: std::sync::MutexGuard<'static, ()>,
+        _guard: parking_lot::MutexGuard<'static, ()>,
     }
 
     impl ScopedCurrentDir {

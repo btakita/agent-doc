@@ -493,7 +493,7 @@ macro_rules! ffi_guard {
 /// pass null / 0 for a fresh empty replica). `replica_id` is also the yrs client
 /// id, so distinct live replicas MUST use distinct ids.
 ///
-/// Returns 0 on success, -1 on a poisoned registry, -2 on an invalid init state.
+/// Returns 0 on success, -2 on an invalid init state.
 ///
 /// # Safety
 /// If `init_state` is non-null, `init_len` bytes must be readable from it.
@@ -525,7 +525,7 @@ pub unsafe extern "C" fn agent_doc_replica_open(
 
 /// Apply a local edit to replica `replica_id` (the editor forwarding a local
 /// `Document` delta): delete `delete_len` chars at `offset`, then insert
-/// `insert`. Returns 0 ok, -1 poison, -2 bad UTF-8, -3 replica not open.
+/// `insert`. Returns 0 ok, -2 bad UTF-8, -3 replica not open.
 ///
 /// # Safety
 /// `insert` must be a valid NUL-terminated UTF-8 string (may be empty), or null.
@@ -558,7 +558,7 @@ pub unsafe extern "C" fn agent_doc_replica_apply_local(
     })
 }
 
-/// The current text of replica `replica_id`, or null if not open / poisoned.
+/// The current text of replica `replica_id`, or null if not open.
 /// Free with [`agent_doc_free_string`].
 ///
 /// # Safety
@@ -579,7 +579,7 @@ pub unsafe extern "C" fn agent_doc_replica_text(replica_id: u64) -> *mut c_char 
 
 /// The encoded state vector of replica `replica_id` (the compact causal summary a
 /// replica announces to a peer). Writes the length to `out_len`. Returns null
-/// (with `*out_len = 0`) if not open / poisoned. Free with [`agent_doc_free_state`].
+/// (with `*out_len = 0`) if not open. Free with [`agent_doc_free_state`].
 ///
 /// # Safety
 /// `out_len` must be a valid writable `usize` pointer, or null.
@@ -601,8 +601,8 @@ pub unsafe extern "C" fn agent_doc_replica_state_vector(
 
 /// The incremental update replica `replica_id` should send a peer whose state
 /// vector is `their_sv` — only the ops that peer is missing (a delta, not a
-/// snapshot). Writes length to `out_len`. Returns null on not-open / bad-sv /
-/// poison. Free with [`agent_doc_free_state`].
+/// snapshot). Writes length to `out_len`. Returns null on not-open / bad-sv.
+/// Free with [`agent_doc_free_state`].
 ///
 /// # Safety
 /// `their_sv` must point to `their_sv_len` readable bytes; `out_len` writable or null.
@@ -632,7 +632,7 @@ pub unsafe extern "C" fn agent_doc_replica_diff(
 }
 
 /// Apply a remote update to replica `replica_id` (the editor applying a peer's
-/// ops — idempotent and yrs causal-buffered). Returns 0 ok, -1 poison, -2 bad
+/// ops — idempotent and yrs causal-buffered). Returns 0 ok, -2 bad
 /// update bytes, -3 replica not open.
 ///
 /// # Safety
@@ -663,7 +663,7 @@ pub unsafe extern "C" fn agent_doc_replica_apply_update(
 
 /// The full encoded state of replica `replica_id` (a durable checkpoint, or the
 /// snapshot a peer needs on first contact). Writes length to `out_len`. Returns
-/// null if not open / poisoned. Free with [`agent_doc_free_state`].
+/// null if not open. Free with [`agent_doc_free_state`].
 ///
 /// # Safety
 /// `out_len` must be writable or null.
@@ -683,8 +683,8 @@ pub unsafe extern "C" fn agent_doc_replica_encode_state(
     })
 }
 
-/// Close (drop) replica `replica_id`. Returns 0 if it was open, -1 on poison,
-/// -3 if it was not open.
+/// Close (drop) replica `replica_id`. Returns 0 if it was open, -3 if it was
+/// not open.
 ///
 /// # Safety
 /// Always safe to call (no pointer arguments).
@@ -713,7 +713,7 @@ pub unsafe extern "C" fn agent_doc_replica_close(replica_id: u64) -> i32 {
 /// medium. The write is atomic (temp file + rename) so a crash mid-write cannot
 /// truncate the projection.
 ///
-/// Returns 0 on success, -1 on poison, -2 on a bad path / IO error, -3 if the
+/// Returns 0 on success, -2 on a bad path / IO error, -3 if the
 /// replica is not open.
 ///
 /// # Safety
@@ -748,7 +748,7 @@ pub unsafe extern "C" fn agent_doc_replica_persist(replica_id: u64, path: *const
 /// peers re-sync any newer ops via the normal state-vector exchange afterward, so
 /// the recovered projection is a starting point, not authority.
 ///
-/// Returns 0 on success, -1 on poison, -2 on a bad path / IO / decode error.
+/// Returns 0 on success, -2 on a bad path / IO / decode error.
 ///
 /// # Safety
 /// `path` must be a valid NUL-terminated UTF-8 string.

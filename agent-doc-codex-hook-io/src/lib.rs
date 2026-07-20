@@ -744,9 +744,7 @@ mod tests {
             format!("agent-doc {} #code-review", doc.display())
         );
 
-        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
-            .lock()
-            .unwrap();
+        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
         let loaded = agent_doc_harness::prompt_source::prompt_body_for_file(
@@ -804,9 +802,7 @@ agent-doc {}\n",
         let doc = write_doc(&dir);
         track_doc(&dir, &doc, "turn-1");
 
-        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
-            .lock()
-            .unwrap();
+        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
         let loaded = load_prompt_for_current_session(&doc).unwrap();

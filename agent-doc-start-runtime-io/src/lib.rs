@@ -122,13 +122,14 @@
 //!   (`#startupdeadline`).
 
 use anyhow::{Context, Result};
+use parking_lot::Mutex;
 use portable_pty::PtySize;
 use std::io;
 #[cfg(test)]
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use agent_doc_frontmatter::frontmatter;
@@ -551,7 +552,6 @@ fn route_owned_live_pane_busy_reason(
     if shared
         .actor_state
         .lock()
-        .unwrap()
         .is_some_and(|state| state == agent_doc_sqlite::state_store::ActorState::Ready)
     {
         return None;
@@ -708,7 +708,7 @@ fn auto_trigger_inject_command(
         return outcome;
     }
 
-    let Some(writer_arc) = shared.inject_writer.lock().unwrap().clone() else {
+    let Some(writer_arc) = shared.inject_writer.lock().clone() else {
         if let Some(key) = projection_key.as_deref() {
             shared.clear_prompt_dispatch_projection_on_failure(key);
         }
@@ -793,7 +793,7 @@ fn auto_trigger_clear_command(
         };
     }
 
-    let Some(writer_arc) = shared.inject_writer.lock().unwrap().clone() else {
+    let Some(writer_arc) = shared.inject_writer.lock().clone() else {
         return AutoTriggerOutcome::SendFailed;
     };
     if stop.load(Ordering::Relaxed) {
@@ -1871,7 +1871,7 @@ impl SupervisorShared {
     /// harness switch so IPC `state` reports the switched harness to the state
     /// backbone (`#actor-harness-switch-writeback`).
     fn current_harness(&self) -> String {
-        self.harness_binary.lock().unwrap().clone()
+        self.harness_binary.lock().clone()
     }
 
     /// Update the harness identity after an in-loop `agent:` switch spawned a fresh
@@ -1889,7 +1889,7 @@ impl SupervisorShared {
     /// that already spawned the new harness — but it is logged loudly rather than
     /// swallowed, since a silent failure reintroduces exactly this bug.
     fn set_current_harness(&self, harness_binary: &str) {
-        *self.harness_binary.lock().unwrap() = harness_binary.to_string();
+        *self.harness_binary.lock() = harness_binary.to_string();
         let Some(runtime) = self.actor_runtime.as_ref() else {
             return;
         };
@@ -1927,24 +1927,24 @@ impl SupervisorShared {
     }
 
     fn set_capability_proof_gate(&self, gate: CapabilityProofGate, error: Option<String>) {
-        *self.capability_proof_error.lock().unwrap() = error;
+        *self.capability_proof_error.lock() = error;
         if gate != CapabilityProofGate::Proven {
-            *self.capability_proof_contract.lock().unwrap() = None;
+            *self.capability_proof_contract.lock() = None;
         }
         self.capability_proof_gate
             .store(gate as u8, Ordering::Relaxed);
     }
 
     fn set_capability_proof_proven(&self, contract: String) {
-        *self.capability_proof_error.lock().unwrap() = None;
-        *self.capability_proof_contract.lock().unwrap() = Some(contract);
+        *self.capability_proof_error.lock() = None;
+        *self.capability_proof_contract.lock() = Some(contract);
         self.capability_proof_gate
             .store(CapabilityProofGate::Proven as u8, Ordering::Relaxed);
     }
 
     fn proven_capability_proof_contract(&self) -> Option<String> {
         (self.capability_proof_gate() == CapabilityProofGate::Proven)
-            .then(|| self.capability_proof_contract.lock().unwrap().clone())
+            .then(|| self.capability_proof_contract.lock().clone())
             .flatten()
     }
 
@@ -1979,7 +1979,7 @@ impl SupervisorShared {
         let Some(key) = self.prompt_dispatch_projection_key(source, bytes) else {
             return agent_doc_supervisor_io::ipc::PromptDispatchAdmission::Untracked;
         };
-        let mut projection = self.prompt_dispatch_projection.lock().unwrap();
+        let mut projection = self.prompt_dispatch_projection.lock();
         if projection
             .as_ref()
             .is_some_and(|current| current.key == key)
@@ -1996,13 +1996,12 @@ impl SupervisorShared {
     fn prompt_dispatch_grace_active(&self, grace: std::time::Duration) -> bool {
         self.prompt_dispatch_projection
             .lock()
-            .unwrap()
             .as_ref()
             .is_some_and(|projection| projection.admitted_at.elapsed() < grace)
     }
 
     fn clear_prompt_dispatch_projection_on_failure(&self, key: &str) {
-        let mut projection = self.prompt_dispatch_projection.lock().unwrap();
+        let mut projection = self.prompt_dispatch_projection.lock();
         if projection
             .as_ref()
             .is_some_and(|current| current.key == key)
@@ -2070,7 +2069,6 @@ impl SupervisorShared {
                 let detail = self
                     .capability_proof_error
                     .lock()
-                    .unwrap()
                     .clone()
                     .unwrap_or_else(|| "unknown error".to_string());
                 Some(format!(
@@ -2091,9 +2089,9 @@ impl SupervisorShared {
         };
         match runtime.transition(state, caller, reason) {
             Ok(record) => {
-                *self.actor_state.lock().unwrap() = Some(record.state);
+                *self.actor_state.lock() = Some(record.state);
                 if record.state == agent_doc_sqlite::state_store::ActorState::Ready {
-                    *self.prompt_dispatch_projection.lock().unwrap() = None;
+                    *self.prompt_dispatch_projection.lock() = None;
                 }
             }
             Err(err) => {
@@ -2149,19 +2147,17 @@ impl agent_doc_supervisor_io::detection::SupervisorDetectionState for Supervisor
     fn actor_known_non_ready(&self) -> bool {
         self.actor_state
             .lock()
-            .unwrap()
             .is_some_and(|state| state != agent_doc_sqlite::state_store::ActorState::Ready)
     }
 
     fn actor_ready(&self) -> bool {
         self.actor_state
             .lock()
-            .unwrap()
             .is_some_and(|state| state == agent_doc_sqlite::state_store::ActorState::Ready)
     }
 
     fn actor_busy_or_starting(&self) -> bool {
-        self.actor_state.lock().unwrap().is_some_and(|state| {
+        self.actor_state.lock().is_some_and(|state| {
             matches!(
                 state,
                 agent_doc_sqlite::state_store::ActorState::Busy
@@ -2357,7 +2353,7 @@ mod th {
 
     impl Write for RecordingWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
+            self.0.lock().extend_from_slice(buf);
             Ok(buf.len())
         }
 
@@ -2427,8 +2423,7 @@ mod tests {
     fn idle_queue_prompt_visible_trusts_ready_actor_over_stale_renderer_tail() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = agent_doc_harness::HarnessConfig::claude();
-        *shared.actor_state.lock().unwrap() =
-            Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        *shared.actor_state.lock() = Some(agent_doc_sqlite::state_store::ActorState::Ready);
         record_recent_output(&shared, b"turn committed, renderer tail has no composer\n");
 
         assert!(
@@ -2445,8 +2440,7 @@ mod tests {
     fn idle_queue_prompt_visible_keeps_blocker_over_ready_actor() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = agent_doc_harness::HarnessConfig::claude();
-        *shared.actor_state.lock().unwrap() =
-            Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        *shared.actor_state.lock() = Some(agent_doc_sqlite::state_store::ActorState::Ready);
         record_recent_output(
             &shared,
             concat!(
@@ -2483,8 +2477,7 @@ mod tests {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = agent_doc_harness::HarnessConfig::codex();
         shared.running.store(true, Ordering::Relaxed);
-        *shared.actor_state.lock().unwrap() =
-            Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        *shared.actor_state.lock() = Some(agent_doc_sqlite::state_store::ActorState::Ready);
         record_recent_output(&shared, "›\n".as_bytes());
         record_recent_output(&shared, b"Working...\n");
         record_recent_output(
@@ -2500,8 +2493,7 @@ mod tests {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         let harness = agent_doc_harness::HarnessConfig::codex();
         shared.running.store(true, Ordering::Relaxed);
-        *shared.actor_state.lock().unwrap() =
-            Some(agent_doc_sqlite::state_store::ActorState::Ready);
+        *shared.actor_state.lock() = Some(agent_doc_sqlite::state_store::ActorState::Ready);
         record_recent_output(&shared, "›\n".as_bytes());
         record_recent_output(&shared, b"tab to queue message\n");
         record_recent_output(
@@ -2597,7 +2589,7 @@ mod tests {
     fn prompt_visible_requires_ready_transition_after_busy_dispatch() {
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         shared.prompt_visible_once.store(true, Ordering::Relaxed);
-        *shared.actor_state.lock().unwrap() = Some(agent_doc_sqlite::state_store::ActorState::Busy);
+        *shared.actor_state.lock() = Some(agent_doc_sqlite::state_store::ActorState::Busy);
         assert!(
             prompt_visible_requires_ready_transition(&shared),
             "a busy actor that surfaces the prompt again must return to ready"
@@ -3228,9 +3220,9 @@ mod tests {
     fn auto_trigger_inject_command_writes_carriage_return() {
         let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         let written = Arc::new(Mutex::new(Vec::new()));
-        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-            Box::new(RecordingWriter(written.clone())),
-        ))));
+        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
+            RecordingWriter(written.clone()),
+        )))));
         let stop = AtomicBool::new(false);
 
         assert_eq!(
@@ -3243,7 +3235,7 @@ mod tests {
             AutoTriggerOutcome::Sent
         );
         assert_eq!(
-            written.lock().unwrap().as_slice(),
+            written.lock().as_slice(),
             b"agent-doc tasks/software/tsift.md\r"
         );
     }
@@ -3358,9 +3350,9 @@ mod tests {
             Some("network denied".to_string()),
         );
         let written = Arc::new(Mutex::new(Vec::new()));
-        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-            Box::new(RecordingWriter(written.clone())),
-        ))));
+        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
+            RecordingWriter(written.clone()),
+        )))));
         let stop = AtomicBool::new(false);
 
         assert_eq!(
@@ -3372,15 +3364,15 @@ mod tests {
             ),
             AutoTriggerOutcome::Sent
         );
-        assert_eq!(written.lock().unwrap().as_slice(), b"/clear\r");
+        assert_eq!(written.lock().as_slice(), b"/clear\r");
     }
     #[test]
     fn auto_trigger_inject_command_honors_late_cancel_before_write() {
         let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         let written = Arc::new(Mutex::new(Vec::new()));
-        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-            Box::new(RecordingWriter(written.clone())),
-        ))));
+        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
+            RecordingWriter(written.clone()),
+        )))));
         let stop = AtomicBool::new(true);
 
         assert_eq!(
@@ -3392,7 +3384,7 @@ mod tests {
             ),
             AutoTriggerOutcome::Cancelled
         );
-        assert!(written.lock().unwrap().is_empty());
+        assert!(written.lock().is_empty());
     }
     #[test]
     fn auto_trigger_inject_command_cancels_while_waiting_for_busy_writer_lock() {
@@ -3401,8 +3393,8 @@ mod tests {
         let writer = Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(RecordingWriter(
             written.clone(),
         )))));
-        let held = writer.lock().unwrap();
-        *shared.inject_writer.lock().unwrap() = Some(writer.clone());
+        let held = writer.lock();
+        *shared.inject_writer.lock() = Some(writer.clone());
 
         let stop = Arc::new(AtomicBool::new(false));
         let shared_for_thread = shared.clone();
@@ -3421,14 +3413,14 @@ mod tests {
         drop(held);
 
         assert_eq!(handle.join().unwrap(), AutoTriggerOutcome::Cancelled);
-        assert!(written.lock().unwrap().is_empty());
+        assert!(written.lock().is_empty());
     }
     #[test]
     fn auto_trigger_inject_command_reports_closed_writer_during_trigger_window() {
         let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
-        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-            Box::new(FailingWriter),
-        ))));
+        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
+            FailingWriter,
+        )))));
         let stop = AtomicBool::new(false);
 
         assert_eq!(

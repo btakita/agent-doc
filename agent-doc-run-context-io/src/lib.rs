@@ -679,17 +679,15 @@ impl<Schema: 'static> AgentDocContextExt for TypedContext<Schema> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parking_lot::{Mutex, MutexGuard};
     use std::path::Path;
     use std::process::Command;
-    use std::sync::{Mutex, MutexGuard};
     use tempfile::TempDir;
 
     static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn env_lock() -> MutexGuard<'static, ()> {
-        TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        TEST_ENV_LOCK.lock()
     }
 
     fn setup_project(dir: &Path) -> PathBuf {

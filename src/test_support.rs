@@ -2,8 +2,8 @@
 // cluster moved to `agent-doc-orchestration`; each crate's tests compile into a separate test
 // process, so the CLI shell's env-mutating tests serialize on this lock.
 #[cfg(test)]
-pub(crate) static TEST_ENV_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
-    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+pub(crate) static TEST_ENV_LOCK: std::sync::LazyLock<parking_lot::Mutex<()>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(()));
 
 #[cfg(test)]
 thread_local! {
@@ -12,7 +12,7 @@ thread_local! {
 
 #[cfg(test)]
 pub(crate) struct ProcessGlobalLockGuard {
-    _guard: Option<std::sync::MutexGuard<'static, ()>>,
+    _guard: Option<parking_lot::MutexGuard<'static, ()>>,
 }
 
 #[cfg(test)]
@@ -37,9 +37,7 @@ pub(crate) fn env_lock() -> ProcessGlobalLockGuard {
         return ProcessGlobalLockGuard { _guard: None };
     }
 
-    let guard = crate::test_support::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let guard = crate::test_support::TEST_ENV_LOCK.lock();
     ProcessGlobalLockGuard {
         _guard: Some(guard),
     }
@@ -84,9 +82,7 @@ mod tests {
     /// release deterministically (it would only hang if a guard leaked the lock
     /// forever) and yields immediately once no one holds it.
     fn assert_shared_lock_reobtainable() {
-        let reobtained = crate::test_support::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let reobtained = crate::test_support::TEST_ENV_LOCK.lock();
         drop(reobtained);
     }
 
@@ -94,7 +90,7 @@ mod tests {
     fn env_lock_uses_harness_prompt_lock() {
         let guard = super::env_lock();
         assert!(
-            crate::test_support::TEST_ENV_LOCK.try_lock().is_err(),
+            crate::test_support::TEST_ENV_LOCK.try_lock().is_none(),
             "test_support::env_lock must serialize with harness/session-check env guards"
         );
         drop(guard);
@@ -106,7 +102,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let scoped = super::ScopedCurrentDir::set(tmp.path());
         assert!(
-            crate::test_support::TEST_ENV_LOCK.try_lock().is_err(),
+            crate::test_support::TEST_ENV_LOCK.try_lock().is_none(),
             "ScopedCurrentDir must hold the shared process-global test lock"
         );
         drop(scoped);

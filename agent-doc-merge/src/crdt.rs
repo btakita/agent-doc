@@ -2152,7 +2152,7 @@ mod tests {
 
     #[test]
     fn lossless_tree_merge_gate_default_on_with_kill_switch() {
-        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
         unsafe {
             std::env::remove_var(LOSSLESS_MERGE_ENV);
         }
@@ -2181,7 +2181,7 @@ mod tests {
     /// *wins* when it byte-agrees, so no observable output changes.
     #[test]
     fn guarded_flip_preserves_merge_output_both_paths() {
-        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
         let base = "<!-- agent:status -->\nbase\n<!-- /agent:status -->\n\n<!-- agent:log -->\nbase log\n<!-- /agent:log -->\n";
         let state = CrdtDoc::from_text(base).encode_state();
         let ours = base.replace("base\n", "ours status\n");
@@ -3485,7 +3485,7 @@ Second answer line three.
         // With the cell-merge kill-switch off, the legacy keyed-child fallback must
         // still treat an operator-side queue delete as authoritative. The stale
         // agent side may have updated/struck the item, but it must not resurrect it.
-        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
         // SAFETY: serialized under the lock and restored before assertions.
         unsafe {
             std::env::set_var(crate::document_cell::CELL_MERGE_ENV, "0");
@@ -3890,11 +3890,11 @@ Second answer line three.
     /// drop. Serialized through the shared crate lock so it can't race the
     /// `document_cell` flag tests.
     struct CellMergeFlagOn {
-        _guard: std::sync::MutexGuard<'static, ()>,
+        _guard: parking_lot::MutexGuard<'static, ()>,
     }
     impl CellMergeFlagOn {
         fn on() -> Self {
-            let guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+            let guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
             // SAFETY: single-threaded under the lock; restored on drop.
             unsafe {
                 std::env::set_var(crate::document_cell::CELL_MERGE_ENV, "1");
@@ -4026,7 +4026,7 @@ Second answer line three.
         // strict no-op). We compute the legacy result by constructing the same
         // per-node merge the function would run without the seam. Per-cell merge is
         // default-ON, so the legacy path is exercised via the explicit kill-switch.
-        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
         // SAFETY: serialized under the lock.
         unsafe {
             std::env::set_var(crate::document_cell::CELL_MERGE_ENV, "0");

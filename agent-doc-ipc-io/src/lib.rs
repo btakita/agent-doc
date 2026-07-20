@@ -45,10 +45,11 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerOptions, ToFsName,
     traits::{Listener as _, Stream as _},
 };
+use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 pub mod editor_target;
@@ -428,10 +429,8 @@ struct ObserveLazilyCurrentGuard {
 
 impl Drop for ObserveLazilyCurrentGuard {
     fn drop(&mut self) {
-        if let Some(projection) = INFLIGHT_OBSERVE_LAZILY_CURRENT.get()
-            && let Ok(mut keys) = projection.lock()
-        {
-            keys.remove(&self.key);
+        if let Some(projection) = INFLIGHT_OBSERVE_LAZILY_CURRENT.get() {
+            projection.lock().remove(&self.key);
         }
     }
 }
@@ -456,9 +455,7 @@ fn begin_observe_lazily_current_projection(
     let Some(key) = observe_lazily_current_projection_key(project_root, message) else {
         return ObserveLazilyCurrentAdmission::Admitted(None);
     };
-    let mut keys = observe_lazily_current_projection()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut keys = observe_lazily_current_projection().lock();
     if keys.contains(&key) {
         ObserveLazilyCurrentAdmission::Duplicate { key }
     } else {
@@ -976,8 +973,7 @@ mod tests {
 
         let handler_calls = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let (started_tx, started_rx) = std::sync::mpsc::channel();
-        let release =
-            std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+        let release = std::sync::Arc::new((Mutex::new(false), parking_lot::Condvar::new()));
 
         let root_clone = root.clone();
         let file_for_listener = file.clone();
@@ -997,13 +993,10 @@ mod tests {
                 let _ = started_tx.send(());
 
                 let (lock, condvar) = &*release_for_listener;
-                let mut released = lock.lock().unwrap();
+                let mut released = lock.lock();
                 while !*released {
-                    let wait = condvar
-                        .wait_timeout(released, Duration::from_secs(2))
-                        .unwrap();
-                    released = wait.0;
-                    if wait.1.timed_out() {
+                    let wait = condvar.wait_for(&mut released, Duration::from_secs(2));
+                    if wait.timed_out() {
                         return Some(
                             serde_json::json!({
                                 "type":"receipt",
@@ -1051,7 +1044,7 @@ mod tests {
         );
 
         let (lock, condvar) = &*release;
-        *lock.lock().unwrap() = true;
+        *lock.lock() = true;
         condvar.notify_all();
         assert!(first.join().unwrap().unwrap());
 
@@ -1100,13 +1093,13 @@ mod tests {
         let root = dir.path().to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
 
-        let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
+        let captured = std::sync::Arc::new(Mutex::new(None::<serde_json::Value>));
         let captured_clone = captured.clone();
         let root_clone = root.clone();
         let server = thread::spawn(move || {
             start_listener(&root_clone, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                *captured_clone.lock().unwrap() = Some(v);
+                *captured_clone.lock() = Some(v);
                 Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             })
             .ok();
@@ -1124,11 +1117,7 @@ mod tests {
         .unwrap();
         assert!(ok, "save_document should succeed on an applied receipt");
 
-        let msg = captured
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("listener saw a message");
+        let msg = captured.lock().clone().expect("listener saw a message");
         assert_eq!(msg["type"], "save_document");
         assert_eq!(msg["file"], "/tmp/plan.md");
         assert_eq!(msg["patch_id"], "save-pid-123");

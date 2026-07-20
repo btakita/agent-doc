@@ -103,7 +103,8 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_waits_longer_for_live_child_cycle_ack() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -141,7 +142,7 @@ mod tests {
         let injects_for_ipc = injects.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
             IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
@@ -173,7 +174,7 @@ mod tests {
         .expect("route should tolerate a delayed but real live-child cycle start");
         assert_eq!(routed, pane);
         assert_eq!(
-            *injects.lock().unwrap(),
+            *injects.lock(),
             vec![
                 agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
                     &HarnessConfig::codex().trigger_command(&file_path)
@@ -192,7 +193,8 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_keeps_live_child_reroute_optimistic_when_cycle_ack_is_missing() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -233,7 +235,7 @@ mod tests {
                 "route-live-child-skip",
                 move |method| match method {
                     IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        injects_for_ipc.lock().unwrap().push(bytes.clone());
+                        injects_for_ipc.lock().push(bytes.clone());
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
                     IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
@@ -258,7 +260,7 @@ mod tests {
         )
         .expect("route should stay optimistic when the correct live Codex pane accepts the reopen");
         assert_eq!(resolved, pane);
-        let injects = injects.lock().unwrap().clone();
+        let injects = injects.lock().clone();
         assert!(
             !injects.is_empty()
                 && injects.iter().all(|inject| {
@@ -322,9 +324,9 @@ mod tests {
         let supervisor_instance_id = "busy-reroute-supervisor".to_string();
         let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
         let ipc_tmux = iso.clone();
-        let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
+        let injected_pane = Arc::new(parking_lot::Mutex::new(None::<String>));
         let injected_pane_for_ipc = injected_pane.clone();
-        *injected_pane.lock().unwrap() = Some(pane.clone());
+        *injected_pane.lock() = Some(pane.clone());
         let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             dir.path(),
             session_id,
@@ -345,7 +347,7 @@ mod tests {
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                 IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                    if let Some(target) = injected_pane_for_ipc.lock().clone() {
                         let _ = ipc_tmux.send_keys(&target, bytes.trim_end_matches('\n'));
                     }
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
@@ -424,8 +426,9 @@ mod tests {
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_restarts_fresh_before_dispatch_after_tracked_codex_clear() {
+        use parking_lot::Mutex;
         use std::sync::{
-            Arc, Mutex,
+            Arc,
             atomic::{AtomicBool, Ordering},
         };
 
@@ -507,7 +510,7 @@ mod tests {
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                 IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    injects_for_ipc.lock().unwrap().push(bytes.clone());
+                    injects_for_ipc.lock().push(bytes.clone());
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
@@ -569,7 +572,7 @@ mod tests {
             "route should request a fresh restart before dispatch"
         );
         let trigger = HarnessConfig::codex().trigger_command(&file_path);
-        let injects = injects.lock().unwrap().clone();
+        let injects = injects.lock().clone();
         assert!(
             injects
                 == vec![
@@ -1287,7 +1290,7 @@ mod tests {
         let supervisor_instance_id = "busy-reroute-supervisor".to_string();
         let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
         let ipc_tmux = iso.clone();
-        let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
+        let injected_pane = Arc::new(parking_lot::Mutex::new(None::<String>));
         let injected_pane_for_ipc = injected_pane.clone();
         let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             dir.path(),
@@ -1309,7 +1312,7 @@ mod tests {
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                 IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                    if let Some(target) = injected_pane_for_ipc.lock().clone() {
                         let _ = ipc_tmux.send_keys(&target, &bytes);
                     }
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))

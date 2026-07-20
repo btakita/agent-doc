@@ -7298,8 +7298,8 @@ fn controller_supervisor_watchdog_tick(
 
 /// M1/M1b (#stuckhandoff2) — runtime adapter for the pure controller watchdog policy.
 /// Reads the controller's own live bootstrap snapshot and supplies wall-clock/socket
-/// facts. A poisoned bootstrap lock is treated as "do not suicide" (the next external
-/// reaper pass still covers it).
+/// facts. A failed bootstrap snapshot is treated as "do not suicide" (the next
+/// external reaper pass still covers it).
 pub(crate) fn controller_self_watchdog_should_suicide(
     runtime: &ControllerRuntime,
     handoff_temp_socket: Option<&Path>,
@@ -7329,7 +7329,7 @@ const HANDOFF_SELF_PROMOTE_GRACE: Duration = Duration::from_secs(3);
 
 /// `#stuckhandoffselfheal` — runtime adapter for the pure self-promote policy. Reads
 /// the controller's live bootstrap snapshot and supplies wall-clock/socket facts. A
-/// poisoned lock reads as "no" (the stranded/suicide watchdog still covers the wedge).
+/// failed snapshot reads as "no" (the stranded/suicide watchdog still covers the wedge).
 pub(crate) fn controller_replacement_should_self_promote(
     runtime: &ControllerRuntime,
     handoff_temp_socket: &Path,
@@ -7369,10 +7369,7 @@ pub(crate) fn controller_self_promote_to_public(
             public_sock.display()
         )
     })?;
-    let mut state = runtime
-        .bootstrap
-        .lock()
-        .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
+    let mut state = runtime.bootstrap.lock();
     state.socket_path = public_sock.to_path_buf();
     state.handoff_state = ControllerHandoffState::Stable;
     state.handoff_started_at = None;
@@ -7402,7 +7399,8 @@ pub(crate) fn controller_self_watchdog_suicide(runtime: &ControllerRuntime, thre
     let generation = bootstrap.controller_generation;
     let age = timestamp_secs()
         .saturating_sub(bootstrap.handoff_started_at.unwrap_or_else(timestamp_secs));
-    if let Ok(mut state) = runtime.bootstrap.lock() {
+    {
+        let mut state = runtime.bootstrap.lock();
         state.handoff_state = ControllerHandoffState::Failed;
         state.handoff_started_at = None;
         // The per-project bootstrap state file is shared across controller
@@ -7550,9 +7548,8 @@ pub(crate) fn serve_client(
             if request_should_stop {
                 should_stop.store(true, Ordering::SeqCst);
                 let _ = std::fs::remove_file(sock);
-                if let Ok(bootstrap) = runtime.bootstrap.lock()
-                    && bootstrap.socket_path != sock
-                {
+                let bootstrap = runtime.bootstrap.lock();
+                if bootstrap.socket_path != sock {
                     let _ = std::fs::remove_file(&bootstrap.socket_path);
                 }
             }
@@ -7651,10 +7648,7 @@ pub(crate) fn handle_request_locked(
             ),
         )?),
         "prepare_handoff" => {
-            let mut state = runtime
-                .bootstrap
-                .lock()
-                .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
+            let mut state = runtime.bootstrap.lock();
             let already_in_flight = matches!(
                 state.handoff_state,
                 ControllerHandoffState::Preparing | ControllerHandoffState::Promoted
@@ -7667,10 +7661,7 @@ pub(crate) fn handle_request_locked(
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "abort_handoff" => {
-            let mut state = runtime
-                .bootstrap
-                .lock()
-                .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
+            let mut state = runtime.bootstrap.lock();
             if matches!(
                 state.handoff_state,
                 ControllerHandoffState::Preparing | ControllerHandoffState::Promoted
@@ -7689,10 +7680,7 @@ pub(crate) fn handle_request_locked(
             Ok(serde_json::to_string(&serde_json::json!({ "ok": true }))?)
         }
         "promote_handoff" => {
-            let mut state = runtime
-                .bootstrap
-                .lock()
-                .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
+            let mut state = runtime.bootstrap.lock();
             state.socket_path = socket_path(&state.project_root);
             state.handoff_state = ControllerHandoffState::Stable;
             state.handoff_started_at = None;
@@ -7701,10 +7689,7 @@ pub(crate) fn handle_request_locked(
         }
         "retire_after_handoff" => {
             {
-                let mut state = runtime
-                    .bootstrap
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))?;
+                let mut state = runtime.bootstrap.lock();
                 state.handoff_state = ControllerHandoffState::Retiring;
                 write_bootstrap_state(&state)?;
             }
@@ -8251,9 +8236,9 @@ fn controller_liveness_plane()
     agent_doc_reliable_sync_io::global_liveness_plane()
 }
 
-fn restored_reliable_sync_projects() -> &'static std::sync::Mutex<BTreeSet<PathBuf>> {
-    static RESTORED: std::sync::LazyLock<std::sync::Mutex<BTreeSet<PathBuf>>> =
-        std::sync::LazyLock::new(|| std::sync::Mutex::new(BTreeSet::new()));
+fn restored_reliable_sync_projects() -> &'static parking_lot::Mutex<BTreeSet<PathBuf>> {
+    static RESTORED: std::sync::LazyLock<parking_lot::Mutex<BTreeSet<PathBuf>>> =
+        std::sync::LazyLock::new(|| parking_lot::Mutex::new(BTreeSet::new()));
     &RESTORED
 }
 
@@ -8266,7 +8251,6 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
         .unwrap_or_else(|_| project_root.to_path_buf());
     if restored_reliable_sync_projects()
         .lock()
-        .map_err(|_| anyhow::anyhow!("reliable-sync restored-project set poisoned"))?
         .contains(&project_key)
     {
         return Ok(());
@@ -8309,10 +8293,7 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
             })
             .collect::<Vec<_>>()
     };
-    restored_reliable_sync_projects()
-        .lock()
-        .map_err(|_| anyhow::anyhow!("reliable-sync restored-project set poisoned"))?
-        .insert(project_key);
+    restored_reliable_sync_projects().lock().insert(project_key);
     // A process can die while the controller is down, so its exit watcher never
     // gets a chance to publish Alive(false). Reconcile those durable Open facts
     // once at hydration and record the death through the same durable LWW path
@@ -16587,9 +16568,9 @@ mod tests {
         assert_eq!(record.pane_id, "%162");
     }
 
-    fn reliable_sync_env_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        LOCK.lock().expect("reliable-sync env test lock")
+    fn reliable_sync_env_lock() -> parking_lot::MutexGuard<'static, ()> {
+        static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+        LOCK.lock()
     }
 
     fn reliable_sync_open_request(document_hash: &str) -> ControllerRequest {

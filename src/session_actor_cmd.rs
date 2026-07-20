@@ -483,8 +483,7 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
 
 /// How long to wait for the background replacement worker to produce a live
 /// supervisor before reporting the request as unfulfilled.
-const SUPERVISOR_REPLACEMENT_PROOF_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(8);
+const SUPERVISOR_REPLACEMENT_PROOF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
 /// `#superviserrsilent`: `background_started=true` only means the worker THREAD
 /// spawned — not that a supervisor is live. The worker then runs asynchronously,
@@ -3778,7 +3777,8 @@ fn timestamp_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use parking_lot::Mutex;
+    use std::sync::Arc;
 
     // `#stale-actor-pane-collision`: bugs2's supervised claude exited and its pane
     // %85 was reused by another Claude session while the stale actor record still
@@ -5242,7 +5242,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             agent_doc_supervisor_io::ipc::SupervisorIpc::start(dir.path(), "session-clear", {
                 move |method| match method {
                     IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        captured_for_ipc.lock().unwrap().push(bytes);
+                        captured_for_ipc.lock().push(bytes);
                         IpcResponse::ok_empty()
                     }
                     IpcMethod::State => IpcResponse::ok(serde_json::json!({
@@ -5277,7 +5277,7 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             .unwrap();
         assert_eq!(latest, "/clear");
         assert_eq!(
-            captured.lock().unwrap().as_slice(),
+            captured.lock().as_slice(),
             &[
                 agent_doc_tmux_commands::submitted_text_without_trailing_line_endings("/clear")
                     .to_string()

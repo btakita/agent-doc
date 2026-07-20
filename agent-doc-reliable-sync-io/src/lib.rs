@@ -307,7 +307,7 @@ pub fn reliable_sync_channel(
 mod tests {
     use super::*;
     use lazily::{Delta, Snapshot};
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     fn sample_messages() -> Vec<IpcMessage> {
         vec![
@@ -385,7 +385,7 @@ mod tests {
             if self.fail {
                 return Err(anyhow!("transport down"));
             }
-            self.sent.lock().unwrap().push(envelope.clone());
+            self.sent.lock().push(envelope.clone());
             Ok(())
         }
     }
@@ -402,7 +402,7 @@ mod tests {
         let sent = {
             // SAFETY: sink owns the transport; expose it for the assertion.
             let ReliableSyncSink { transport, .. } = &sink;
-            transport.sent.lock().unwrap().clone()
+            transport.sent.lock().clone()
         };
         assert_eq!(sent.len(), msgs.len());
         for (value, expected) in sent.iter().zip(&msgs) {

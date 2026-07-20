@@ -1373,7 +1373,7 @@ Done.
         );
 
         let call_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
+        let captured = std::sync::Arc::new(parking_lot::Mutex::new(None::<serde_json::Value>));
         let listener_root = dir.path().to_path_buf();
         let listener_count = call_count.clone();
         let captured_clone = captured.clone();
@@ -1382,7 +1382,7 @@ Done.
             let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 listener_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                *captured_clone.lock().unwrap() = Some(v.clone());
+                *captured_clone.lock() = Some(v.clone());
                 Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             });
         });
@@ -1415,7 +1415,7 @@ Done.
             "capability guard must block without requesting any live-buffer projection or repair IPC"
         );
         assert!(
-            captured.lock().unwrap().is_none(),
+            captured.lock().is_none(),
             "capability guard must not send a sidecar-era live-buffer request"
         );
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), bad_state);

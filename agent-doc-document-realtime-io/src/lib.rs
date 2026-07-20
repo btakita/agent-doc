@@ -20,10 +20,11 @@
 //! - `durable_buffer_state_none_when_no_editor_feed`
 //! - `repair_cas_projects_retained_target_when_editor_owner_has_zero_replicas`
 
+use parking_lot::Mutex;
 use std::cell::Cell;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -68,7 +69,7 @@ fn controller_document_mutation_in_progress() -> bool {
 
 #[cfg(test)]
 fn install_post_delivery_proof_hook(file: PathBuf, hook: impl FnOnce(&Path) + Send + 'static) {
-    *POST_DELIVERY_PROOF_HOOK.lock().unwrap() = Some((file, Box::new(hook)));
+    *POST_DELIVERY_PROOF_HOOK.lock() = Some((file, Box::new(hook)));
 }
 
 fn run_post_delivery_proof_hook(file: &Path) {
@@ -77,7 +78,7 @@ fn run_post_delivery_proof_hook(file: &Path) {
     #[cfg(test)]
     {
         let hook = {
-            let mut slot = POST_DELIVERY_PROOF_HOOK.lock().unwrap();
+            let mut slot = POST_DELIVERY_PROOF_HOOK.lock();
             if slot
                 .as_ref()
                 .is_some_and(|(hook_file, _)| hook_file == file)
@@ -234,20 +235,13 @@ pub struct ForceDiskAuthorityScope {
 
 impl Drop for ForceDiskAuthorityScope {
     fn drop(&mut self) {
-        match FORCE_DISK_MUTATION_BASELINES.lock() {
-            Ok(mut baselines) => {
-                if let Some(active) = baselines.get_mut(&self.file) {
-                    if active.holders > 1 {
-                        active.holders -= 1;
-                    } else {
-                        baselines.remove(&self.file);
-                    }
-                }
+        let mut baselines = FORCE_DISK_MUTATION_BASELINES.lock();
+        if let Some(active) = baselines.get_mut(&self.file) {
+            if active.holders > 1 {
+                active.holders -= 1;
+            } else {
+                baselines.remove(&self.file);
             }
-            Err(err) => eprintln!(
-                "[agent-doc] force-disk authority baseline lock poisoned while clearing {}: {err}",
-                self.file.display()
-            ),
         }
     }
 }
@@ -259,9 +253,7 @@ pub fn begin_force_disk_authority_scope(
     let file = file.to_path_buf();
     let owner = std::thread::current().id();
     {
-        let mut baselines = FORCE_DISK_MUTATION_BASELINES
-            .lock()
-            .map_err(|_| anyhow::anyhow!("force-disk authority baseline lock poisoned"))?;
+        let mut baselines = FORCE_DISK_MUTATION_BASELINES.lock();
         if let Some(active) = baselines.get_mut(&file) {
             if active.owner != owner {
                 anyhow::bail!(
@@ -283,9 +275,7 @@ pub fn begin_force_disk_authority_scope(
         )
     })?;
     let baseline = force_disk_mutation_fence(&current);
-    let mut baselines = FORCE_DISK_MUTATION_BASELINES
-        .lock()
-        .map_err(|_| anyhow::anyhow!("force-disk authority baseline lock poisoned"))?;
+    let mut baselines = FORCE_DISK_MUTATION_BASELINES.lock();
     if baselines.contains_key(&file) {
         anyhow::bail!(
             "another force-disk authorization is already active for {}; wait for it to finish instead of issuing concurrent closeout commands",
@@ -341,7 +331,6 @@ fn ensure_force_disk_mutation_authority(file: &Path) -> Result<()> {
     })?;
     let initial = FORCE_DISK_MUTATION_BASELINES
         .lock()
-        .map_err(|_| anyhow::anyhow!("force-disk authority baseline lock poisoned"))?
         .get(file)
         .map(|active| active.fence);
     let current_fence = force_disk_mutation_fence(&current);
@@ -2837,9 +2826,7 @@ fn record_document_authority(
         content_hash: content_hash.clone(),
         editor_id: editor_id.clone(),
     };
-    let mut observations = DOCUMENT_AUTHORITY_OBSERVATIONS
-        .lock()
-        .expect("document authority observation cache poisoned");
+    let mut observations = DOCUMENT_AUTHORITY_OBSERVATIONS.lock();
     if observations.get(&canonical) == Some(&observation) {
         return;
     }
@@ -4806,8 +4793,8 @@ fn editor_replica_liveness_witness(file: &std::path::Path) -> EditorReplicaLiven
 /// Files whose replica self-heal was exhausted without recovering, remembered
 /// against the liveness witness that was current when it failed.
 static EDITOR_REPLICA_SELF_HEAL_EXHAUSTED: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, EditorReplicaLivenessWitness>>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    Mutex<std::collections::HashMap<std::path::PathBuf, EditorReplicaLivenessWitness>>,
+> = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
 
 /// `true` when the retry loop should be paused for this file: the self-heal
 /// already failed against exactly this liveness witness, so another attempt is
@@ -4834,25 +4821,23 @@ fn should_pause_editor_replica_self_heal(
     file: &std::path::Path,
     witness: &EditorReplicaLivenessWitness,
 ) -> bool {
-    let Ok(map) = EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock() else {
-        return false;
-    };
-    map.get(file).is_some_and(|recorded| recorded == witness)
+    EDITOR_REPLICA_SELF_HEAL_EXHAUSTED
+        .lock()
+        .get(file)
+        .is_some_and(|recorded| recorded == witness)
 }
 
 fn record_editor_replica_self_heal_exhausted(
     file: &std::path::Path,
     witness: EditorReplicaLivenessWitness,
 ) {
-    if let Ok(mut map) = EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock() {
-        map.insert(file.to_path_buf(), witness);
-    }
+    EDITOR_REPLICA_SELF_HEAL_EXHAUSTED
+        .lock()
+        .insert(file.to_path_buf(), witness);
 }
 
 fn clear_editor_replica_self_heal_exhausted(file: &std::path::Path) {
-    if let Ok(mut map) = EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock() {
-        map.remove(file);
-    }
+    EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock().remove(file);
 }
 
 fn reobserve_missing_editor_replica_with_reregistration(

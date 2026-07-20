@@ -138,7 +138,8 @@ impl<'a, S: DocumentWriteQueueSubmitter + ?Sized> DocumentWriteQueue<'a, S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Barrier, Mutex};
+    use parking_lot::Mutex;
+    use std::sync::{Arc, Barrier};
     use std::thread;
 
     #[derive(Default)]
@@ -158,7 +159,7 @@ mod tests {
             R: Send + 'static,
             F: FnOnce() -> R + Send + 'static,
         {
-            let _guard = self.lock.lock().unwrap();
+            let _guard = self.lock.lock();
             Ok(job())
         }
     }
@@ -329,15 +330,12 @@ mod tests {
         let order: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
 
         let o = order.clone();
-        q.agent_write(move || o.lock().unwrap().push("agent"))
-            .unwrap();
+        q.agent_write(move || o.lock().push("agent")).unwrap();
         let o = order.clone();
-        q.supervisor_write(move || o.lock().unwrap().push("sup"))
-            .unwrap();
+        q.supervisor_write(move || o.lock().push("sup")).unwrap();
         let o = order.clone();
-        q.repair_write(move || o.lock().unwrap().push("repair"))
-            .unwrap();
+        q.repair_write(move || o.lock().push("repair")).unwrap();
 
-        assert_eq!(*order.lock().unwrap(), vec!["agent", "sup", "repair"]);
+        assert_eq!(*order.lock(), vec!["agent", "sup", "repair"]);
     }
 }

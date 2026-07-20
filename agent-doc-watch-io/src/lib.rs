@@ -83,7 +83,7 @@ pub fn observe_document_event(
         .as_ref()
         .map(|prov| WatchWriteProvenance::new(prov.actor.as_str(), prov.content_hash.as_str()));
     let delivery = {
-        let mut g = gate.lock().unwrap_or_else(|p| p.into_inner());
+        let mut g = gate.lock();
         g.observe(raw, &content_hash, write_provenance)
     };
     let state_event = match delivery {

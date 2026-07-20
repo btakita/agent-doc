@@ -36,9 +36,10 @@
 //! - streaming_stderr_on_success: subprocess exits zero with stderr warnings → logged to parent stderr, no error
 
 use anyhow::Result;
+use parking_lot::Mutex;
 use std::io::BufRead;
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use super::{Agent, AgentResponse};
 use agent_doc_turn_executor::agent_stream::{StreamChunk, StreamingAgent, parse_stream_line};
@@ -199,9 +200,7 @@ impl StreamingAgent for Claude {
                 let mut reader = std::io::BufReader::new(stderr);
                 let mut content = String::new();
                 let _ = reader.read_to_string(&mut content);
-                if let Ok(mut guard) = buf.lock() {
-                    *guard = content;
-                }
+                *buf.lock() = content;
             }))
         } else {
             None
@@ -294,10 +293,7 @@ impl StreamIterator {
         if let Some(handle) = self.stderr_handle.take() {
             let _ = handle.join();
         }
-        self.stderr_buf
-            .lock()
-            .map(|g| g.clone())
-            .unwrap_or_default()
+        self.stderr_buf.lock().clone()
     }
 }
 

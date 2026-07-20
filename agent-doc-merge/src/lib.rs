@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn cell_merge_is_exposed_as_a_pure_plan() {
-        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
         let prior_conflict_markers =
             std::env::var(crate::document_cell::CELL_MERGE_CONFLICT_MARKERS_ENV).ok();
         struct RestoreConflictMarkers(Option<String>);

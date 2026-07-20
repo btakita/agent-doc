@@ -1551,12 +1551,12 @@ mod tests {
     struct EnvGuard {
         key: &'static str,
         prev: Option<String>,
-        _lock: std::sync::MutexGuard<'static, ()>,
+        _lock: parking_lot::MutexGuard<'static, ()>,
     }
 
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
-            let lock = crate::test_support::TEST_ENV_LOCK.lock().unwrap();
+            let lock = crate::test_support::TEST_ENV_LOCK.lock();
             let prev = std::env::var(key).ok();
             unsafe { std::env::set_var(key, value) };
             Self {

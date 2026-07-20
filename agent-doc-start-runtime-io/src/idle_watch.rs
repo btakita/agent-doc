@@ -45,8 +45,8 @@ const CONTEXT_CLEAR_SOURCE_QUEUE_SLASH: &str = "queue_slash_command";
 const CONTEXT_CLEAR_SOURCE_BACKGROUND_RESET: &str = "supervisor_background_context_reset";
 const ZERO_REPLICA_IDLE_WATCH_BACKOFF: std::time::Duration = std::time::Duration::from_secs(30);
 static ZERO_REPLICA_IDLE_WATCH_LAST_PROBE: std::sync::LazyLock<
-    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, std::time::Instant>>,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    parking_lot::Mutex<std::collections::HashMap<std::path::PathBuf, std::time::Instant>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
 
 fn show_pane_message(
     pane: &str,
@@ -491,9 +491,7 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
     }
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     {
-        let mut probes = ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
-            .lock()
-            .expect("zero-replica idle-watch cache poisoned");
+        let mut probes = ZERO_REPLICA_IDLE_WATCH_LAST_PROBE.lock();
         if probes
             .get(&canonical)
             .is_some_and(|last| last.elapsed() < ZERO_REPLICA_IDLE_WATCH_BACKOFF)
@@ -514,11 +512,11 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
             delivery_converged,
             ..
         })) if live_editors > 0 => {
-            ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
-                .lock()
-                .expect("zero-replica idle-watch cache poisoned")
-                .remove(&canonical);
-            (text, IdleQueueTransition::from_converged(delivery_converged))
+            ZERO_REPLICA_IDLE_WATCH_LAST_PROBE.lock().remove(&canonical);
+            (
+                text,
+                IdleQueueTransition::from_converged(delivery_converged),
+            )
         }
         Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
             text,
@@ -527,9 +525,11 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
         })) => {
             ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
                 .lock()
-                .expect("zero-replica idle-watch cache poisoned")
                 .insert(canonical, std::time::Instant::now());
-            (text, IdleQueueTransition::from_converged(delivery_converged))
+            (
+                text,
+                IdleQueueTransition::from_converged(delivery_converged),
+            )
         }
         Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) => {
             return idle_watch_disk_queue_head(file);
@@ -542,7 +542,6 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
         | Err(_) => {
             ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
                 .lock()
-                .expect("zero-replica idle-watch cache poisoned")
                 .insert(canonical, std::time::Instant::now());
             return QueueHeadObservation::AuthorityUnavailable;
         }
@@ -1483,7 +1482,7 @@ pub(super) fn spawn_idle_queue_watch_thread(
                             // A harness change has no prior session in the NEW harness:
                             // request a FRESH restart (no `--continue`/`resume` args)
                             // rather than the default continue mode.
-                            *shared.restart_mode.lock().unwrap() = "fresh".to_string();
+                            *shared.restart_mode.lock() = "fresh".to_string();
                             shared.restart_requested.store(true, Ordering::Relaxed);
                             agent_change_restart_requested_for = Some(resolved.binary.clone());
                             agent_doc_ops_log_io::log_op(

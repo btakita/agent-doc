@@ -158,13 +158,11 @@ mod th {
     pub(crate) struct EnvGuard {
         key: &'static str,
         prev: Option<String>,
-        _lock: std::sync::MutexGuard<'static, ()>,
+        _lock: parking_lot::MutexGuard<'static, ()>,
     }
     impl EnvGuard {
         pub(crate) fn set(key: &'static str, value: &str) -> Self {
-            let lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
-                .lock()
-                .unwrap();
+            let lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
             let prev = std::env::var(key).ok();
             unsafe { std::env::set_var(key, value) };
             Self {

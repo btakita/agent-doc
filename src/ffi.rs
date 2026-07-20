@@ -840,17 +840,10 @@ fn record_editor_patch_receipt(
         },
     };
     let receipt_event = StateEvent::new(receipt_event_id, fact);
-    match state_ledger().lock() {
-        Ok(mut ledger) => {
-            ledger.append(generation_event.clone());
-            ledger.append(receipt_event.clone());
-        }
-        Err(err) => {
-            eprintln!(
-                "[state-projection] editor patch receipt rejected for {file_path}: ledger lock poisoned: {err}"
-            );
-            return 0;
-        }
+    {
+        let mut ledger = state_ledger().lock();
+        ledger.append(generation_event.clone());
+        ledger.append(receipt_event.clone());
     }
 
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(&canonical) else {
@@ -1603,11 +1596,11 @@ pub extern "C" fn agent_doc_version() -> *mut c_char {
 /// state-projection exports. Phase 1 of `tasks/software/plan-lazily-ffi-state-projection.md`
 /// (`#lzffistate1`): plugins become thin event-reporters + projection-renderers while
 /// the binary owns the durable FSMs. Default-initialized on first access.
-static STATE_LEDGER: std::sync::OnceLock<std::sync::Mutex<EventLedger>> =
+static STATE_LEDGER: std::sync::OnceLock<parking_lot::Mutex<EventLedger>> =
     std::sync::OnceLock::new();
 
-fn state_ledger() -> &'static std::sync::Mutex<EventLedger> {
-    STATE_LEDGER.get_or_init(|| std::sync::Mutex::new(EventLedger::new()))
+fn state_ledger() -> &'static parking_lot::Mutex<EventLedger> {
+    STATE_LEDGER.get_or_init(|| parking_lot::Mutex::new(EventLedger::new()))
 }
 
 /// Stamp a queue `StateFact` reported without an explicit `hosting_epoch` with
@@ -1659,22 +1652,14 @@ pub unsafe extern "C" fn agent_doc_state_projection(document_hash: *const c_char
             return CString::new("null").unwrap().into_raw();
         }
     };
-    let json = match state_ledger().lock() {
-        Ok(ledger) => match ledger.project().document(doc_hash) {
-            Some(doc) => serde_json::to_string(doc).unwrap_or_else(|err| {
-                eprintln!(
-                    "[state-projection] agent_doc_state_projection: serialize failed for {doc_hash}: {err}"
-                );
-                "null".to_string()
-            }),
-            None => "null".to_string(),
-        },
-        Err(err) => {
+    let json = match state_ledger().lock().project().document(doc_hash) {
+        Some(doc) => serde_json::to_string(doc).unwrap_or_else(|err| {
             eprintln!(
-                "[state-projection] agent_doc_state_projection: ledger lock poisoned: {err}"
+                "[state-projection] agent_doc_state_projection: serialize failed for {doc_hash}: {err}"
             );
             "null".to_string()
-        }
+        }),
+        None => "null".to_string(),
     };
     CString::new(json)
         .unwrap_or_else(|_| CString::new("null").unwrap())
@@ -1875,24 +1860,15 @@ pub unsafe extern "C" fn agent_doc_record_state_event(
             return 0;
         }
     };
-    match state_ledger().lock() {
-        Ok(mut ledger) => {
-            // `#xdocsuper3`: the binary owns the hosting-epoch gate (FFI-first).
-            // Queue facts reported by a live producer without an explicit
-            // `hosting_epoch` are stamped with the document's CURRENT hosting
-            // epoch, so a later host/switch makes them stale automatically and
-            // a producer never has to track the epoch itself.
-            stamp_queue_fact_hosting_epoch(&ledger, &mut event);
-            ledger.append(event);
-            1
-        }
-        Err(err) => {
-            eprintln!(
-                "[state-projection] agent_doc_record_state_event: ledger lock poisoned for {doc_hash}: {err}"
-            );
-            0
-        }
-    }
+    let mut ledger = state_ledger().lock();
+    // `#xdocsuper3`: the binary owns the hosting-epoch gate (FFI-first).
+    // Queue facts reported by a live producer without an explicit
+    // `hosting_epoch` are stamped with the document's CURRENT hosting
+    // epoch, so a later host/switch makes them stale automatically and
+    // a producer never has to track the epoch itself.
+    stamp_queue_fact_hosting_epoch(&ledger, &mut event);
+    ledger.append(event);
+    1
 }
 
 /// Subscribe to the agent-doc state projection for a document (`#lazilystatesync2`).
@@ -1937,32 +1913,27 @@ pub unsafe extern "C" fn agent_doc_state_subscribe(
             return CString::new("null").unwrap().into_raw();
         }
     };
-    let json = match state_ledger().lock() {
-        Ok(ledger) => {
-            // `#lzsync` 3B wire cutover (flipped): emit the canonical native lazily
-            // wire (`IpcMessage` Snapshot/Delta) instead of the bespoke base64
-            // `WireSubscribe` JSON. Plugins fold this through a generic lazily
-            // `GraphView`. `build_delta` still produces the internal `WireDelta`
-            // producer form; the state-wire bridge converts it here.
-            let wire = agent_doc_state_wire::subscribe(&ledger, doc_hash, last_epoch);
-            match agent_doc_state_wire::lazily_convert::wire_subscribe_to_ipc_message(&wire) {
-                Ok(message) => serde_json::to_string(&message).unwrap_or_else(|err| {
-                    eprintln!(
-                        "[state-projection] agent_doc_state_subscribe: serialize native IpcMessage failed: {err}"
-                    );
-                    "null".to_string()
-                }),
-                Err(err) => {
-                    eprintln!(
-                        "[state-projection] agent_doc_state_subscribe: wire→native conversion failed: {err}"
-                    );
-                    "null".to_string()
-                }
+    let json = {
+        let ledger = state_ledger().lock();
+        // `#lzsync` 3B wire cutover (flipped): emit the canonical native lazily
+        // wire (`IpcMessage` Snapshot/Delta) instead of the bespoke base64
+        // `WireSubscribe` JSON. Plugins fold this through a generic lazily
+        // `GraphView`. `build_delta` still produces the internal `WireDelta`
+        // producer form; the state-wire bridge converts it here.
+        let wire = agent_doc_state_wire::subscribe(&ledger, doc_hash, last_epoch);
+        match agent_doc_state_wire::lazily_convert::wire_subscribe_to_ipc_message(&wire) {
+            Ok(message) => serde_json::to_string(&message).unwrap_or_else(|err| {
+                eprintln!(
+                    "[state-projection] agent_doc_state_subscribe: serialize native IpcMessage failed: {err}"
+                );
+                "null".to_string()
+            }),
+            Err(err) => {
+                eprintln!(
+                    "[state-projection] agent_doc_state_subscribe: wire→native conversion failed: {err}"
+                );
+                "null".to_string()
             }
-        }
-        Err(err) => {
-            eprintln!("[state-projection] agent_doc_state_subscribe: ledger lock poisoned: {err}");
-            "null".to_string()
         }
     };
     CString::new(json)
@@ -1996,26 +1967,26 @@ pub unsafe extern "C" fn agent_doc_document_id_for_path(file_path: *const c_char
 /// stateless; each holds a durable `SqliteOutbox` so a push survives a plugin or
 /// controller recycle.
 static RELIABLE_SYNC_LIVENESS_ENDPOINTS: std::sync::LazyLock<
-    std::sync::Mutex<
+    parking_lot::Mutex<
         std::collections::HashMap<
             String,
             agent_doc_reliable_sync_io::push::LivenessPushEndpoint<lazily::SqliteOutbox>,
         >,
     >,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
 
 /// Per-file ordered channel for continuous document deltas and bounded reattach
 /// adopts. It deliberately uses a channel hash distinct from liveness so the
 /// controller's monotone reliable-sync cursor cannot make the two producers
 /// suppress one another.
 static RELIABLE_SYNC_DOCUMENT_ENDPOINTS: std::sync::LazyLock<
-    std::sync::Mutex<
+    parking_lot::Mutex<
         std::collections::HashMap<
             String,
             agent_doc_reliable_sync_io::push::FramePushEndpoint<lazily::SqliteOutbox>,
         >,
     >,
-> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
 
 fn reliable_sync_registry_key(project_root: &Path, document_hash: &str) -> String {
     format!("{}\u{0}{document_hash}", project_root.display())
@@ -2029,9 +2000,7 @@ fn with_liveness_push_endpoint<T>(
     ) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
     let key = reliable_sync_registry_key(project_root, document_hash);
-    let mut registry = RELIABLE_SYNC_LIVENESS_ENDPOINTS
-        .lock()
-        .map_err(|_| anyhow::anyhow!("reliable-sync liveness registry poisoned"))?;
+    let mut registry = RELIABLE_SYNC_LIVENESS_ENDPOINTS.lock();
     let endpoint = match registry.entry(key) {
         std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
         std::collections::hash_map::Entry::Vacant(entry) => {
@@ -2088,9 +2057,7 @@ fn with_document_push_endpoint<T>(
 ) -> anyhow::Result<T> {
     let channel_hash = document_op_channel_hash(file_path);
     let key = reliable_sync_registry_key(project_root, &channel_hash);
-    let mut registry = RELIABLE_SYNC_DOCUMENT_ENDPOINTS
-        .lock()
-        .map_err(|_| anyhow::anyhow!("reliable-sync document registry poisoned"))?;
+    let mut registry = RELIABLE_SYNC_DOCUMENT_ENDPOINTS.lock();
     let endpoint = match registry.entry(key) {
         std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
         std::collections::hash_map::Entry::Vacant(entry) => {

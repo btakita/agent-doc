@@ -264,8 +264,8 @@ pub fn answer_with_tmux(file: &Path, option_index: usize, tmux: &Tmux) -> Result
 mod tests {
     use super::*;
     use agent_doc_turn_executor_tmux::prompt::PromptOption;
+    use parking_lot::{Mutex, MutexGuard};
     use std::path::{Path, PathBuf};
-    use std::sync::{Mutex, MutexGuard};
     use std::time::{Duration, Instant};
 
     static TEST_ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -277,9 +277,7 @@ mod tests {
 
     impl ScopedCurrentDir {
         fn set(path: &Path) -> Self {
-            let env_guard = TEST_ENV_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let env_guard = TEST_ENV_LOCK.lock();
             let prev_cwd = std::env::current_dir()
                 .ok()
                 .filter(|cwd| cwd.exists())

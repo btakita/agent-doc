@@ -415,7 +415,7 @@ impl SupervisedChild for PtySupervisedChild {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     /// Deterministic fake child. Exit is operator-controlled via a shared cell
     /// so SimWorld tests drive lifecycle transitions without real processes.
@@ -430,17 +430,17 @@ mod tests {
             Some(self.pid)
         }
         fn is_alive(&self) -> bool {
-            self.exit.lock().unwrap().is_none()
+            self.exit.lock().is_none()
         }
         fn try_exit_code(&mut self) -> Option<i32> {
-            *self.exit.lock().unwrap()
+            *self.exit.lock()
         }
         fn write_stdin(&mut self, bytes: &[u8]) -> Result<()> {
-            self.stdin.lock().unwrap().extend_from_slice(bytes);
+            self.stdin.lock().extend_from_slice(bytes);
             Ok(())
         }
         fn kill(&mut self) -> Result<()> {
-            *self.exit.lock().unwrap() = Some(137);
+            *self.exit.lock() = Some(137);
             Ok(())
         }
     }
@@ -458,7 +458,7 @@ mod tests {
         Box::new(move |_with_continue| {
             // A freshly spawned child starts alive: clear the shared exit cell
             // the test mutates to drive the live child's lifecycle.
-            *ctrl.exit.lock().unwrap() = None;
+            *ctrl.exit.lock() = None;
             let n = ctrl.spawns.fetch_add(1, Ordering::SeqCst) + 1;
             Ok(Box::new(FakeChild {
                 pid: 1000 + n as u32,
@@ -523,7 +523,7 @@ mod tests {
         let pid_before = sup.pid();
 
         // Child crashes with a non-zero (transient) code.
-        *ctrl.exit.lock().unwrap() = Some(1);
+        *ctrl.exit.lock() = Some(1);
         let outcome = sup.tick_at(now);
         assert_eq!(
             outcome,
@@ -549,7 +549,7 @@ mod tests {
         // mark exit, tick (restart or halt), then the new child is alive.
         let mut halted = false;
         for _ in 0..12 {
-            *ctrl.exit.lock().unwrap() = Some(1);
+            *ctrl.exit.lock() = Some(1);
             match sup.tick_at(now) {
                 TickOutcome::Restarted { .. } => {}
                 TickOutcome::Halted { exit_code } => {
@@ -573,7 +573,7 @@ mod tests {
         let mut sup = InProcessSupervisor::spawn(fake_factory(ctrl.clone())).unwrap();
         let now = t0();
         sup.tick_at(now);
-        *ctrl.exit.lock().unwrap() = Some(0);
+        *ctrl.exit.lock() = Some(0);
         assert_eq!(
             sup.tick_at(now),
             TickOutcome::PromptOperator { exit_code: 0 }
@@ -586,7 +586,7 @@ mod tests {
         let ctrl = ChildController::default();
         let mut sup = InProcessSupervisor::spawn(fake_factory(ctrl.clone())).unwrap();
         sup.inject(b"do [#x]\n").unwrap();
-        assert_eq!(&*ctrl.stdin.lock().unwrap(), b"do [#x]\n");
+        assert_eq!(&*ctrl.stdin.lock(), b"do [#x]\n");
     }
 
     #[test]
@@ -597,7 +597,7 @@ mod tests {
 
         // Push into Degraded via a couple of flaps (not enough to halt).
         for _ in 0..2 {
-            *ctrl.exit.lock().unwrap() = Some(1);
+            *ctrl.exit.lock() = Some(1);
             let _ = sup.tick_at(now);
         }
 

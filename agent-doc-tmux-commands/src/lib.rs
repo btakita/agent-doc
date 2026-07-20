@@ -44,11 +44,7 @@ impl TmuxCommand {
         matches!(
             self.args.first().map(String::as_str),
             Some(
-                "display-message"
-                    | "list-panes"
-                    | "list-windows"
-                    | "list-sessions"
-                    | "has-session"
+                "display-message" | "list-panes" | "list-windows" | "list-sessions" | "has-session"
             )
         )
     }
@@ -583,7 +579,7 @@ pub mod input_diag {
     #[cfg(test)]
     mod tests {
         use super::*;
-        use std::sync::Mutex;
+        use parking_lot::Mutex;
 
         static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -642,7 +638,7 @@ pub mod input_diag {
 
         #[test]
         fn key_event_format_is_structured_and_sanitized() {
-            let _lock = ENV_LOCK.lock().unwrap();
+            let _lock = ENV_LOCK.lock();
             let _env = EnvSnapshot::capture(&[EDITOR_ROUTE_ATTEMPT_ID_ENV]);
             remove_env(EDITOR_ROUTE_ATTEMPT_ID_ENV);
 
@@ -664,7 +660,7 @@ pub mod input_diag {
 
         #[test]
         fn payload_event_hashes_text_without_exposing_it() {
-            let _lock = ENV_LOCK.lock().unwrap();
+            let _lock = ENV_LOCK.lock();
             let _env = EnvSnapshot::capture(&[EDITOR_ROUTE_ATTEMPT_ID_ENV]);
             remove_env(EDITOR_ROUTE_ATTEMPT_ID_ENV);
 
@@ -691,7 +687,7 @@ pub mod input_diag {
 
         #[test]
         fn input_events_include_editor_route_attempt_when_present() {
-            let _lock = ENV_LOCK.lock().unwrap();
+            let _lock = ENV_LOCK.lock();
             let _env = EnvSnapshot::capture(&[EDITOR_ROUTE_ATTEMPT_ID_ENV]);
             set_env(EDITOR_ROUTE_ATTEMPT_ID_ENV, "attempt 1/2");
 
@@ -780,7 +776,7 @@ pub mod input_diag {
 
         #[test]
         fn byte_transform_and_prompt_events_share_structured_policy() {
-            let _lock = ENV_LOCK.lock().unwrap();
+            let _lock = ENV_LOCK.lock();
             let _env = EnvSnapshot::capture(&[EDITOR_ROUTE_ATTEMPT_ID_ENV]);
             remove_env(EDITOR_ROUTE_ATTEMPT_ID_ENV);
 
@@ -819,7 +815,7 @@ pub mod input_diag {
 
         #[test]
         fn verbose_input_diagnostics_are_opt_in() {
-            let _lock = ENV_LOCK.lock().unwrap();
+            let _lock = ENV_LOCK.lock();
             let _env =
                 EnvSnapshot::capture(&["AGENT_DOC_TMUX_INPUT_DIAG", "AGENT_DOC_DEBUG_STDIN"]);
             remove_env("AGENT_DOC_TMUX_INPUT_DIAG");

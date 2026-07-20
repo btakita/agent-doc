@@ -1,8 +1,8 @@
 //! Shared test-only helpers for agent-doc crates that need process-global
 //! locks, temporary git documents, and fake editor IPC listeners.
 
+use parking_lot::MutexGuard;
 use std::path::{Path, PathBuf};
-use std::sync::MutexGuard;
 use std::time::{Duration, Instant};
 
 thread_local! {
@@ -38,34 +38,26 @@ pub fn env_lock() -> ProcessGlobalLockGuard {
         return ProcessGlobalLockGuard { _guard: None };
     }
 
-    let guard = agent_doc_harness::prompt_source::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let guard = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
     ProcessGlobalLockGuard {
         _guard: Some(guard),
     }
 }
 
-static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-static TMUX_INJECT_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-static ROUTE_BIN_ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static TMUX_START_MUTEX: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+static TMUX_INJECT_MUTEX: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+static ROUTE_BIN_ENV_MUTEX: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
-pub fn tmux_start_lock() -> std::sync::MutexGuard<'static, ()> {
-    TMUX_START_MUTEX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+pub fn tmux_start_lock() -> parking_lot::MutexGuard<'static, ()> {
+    TMUX_START_MUTEX.lock()
 }
 
-pub fn tmux_inject_lock() -> std::sync::MutexGuard<'static, ()> {
-    TMUX_INJECT_MUTEX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+pub fn tmux_inject_lock() -> parking_lot::MutexGuard<'static, ()> {
+    TMUX_INJECT_MUTEX.lock()
 }
 
-pub fn route_bin_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    ROUTE_BIN_ENV_MUTEX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+pub fn route_bin_env_lock() -> parking_lot::MutexGuard<'static, ()> {
+    ROUTE_BIN_ENV_MUTEX.lock()
 }
 
 pub struct ScopedCurrentDir {

@@ -12,6 +12,11 @@ name = "agent_doc_start_runtime_io"
 doctest = false
 
 [dependencies]
+# `#relaylockpoison`: locks here are parking_lot, not `std::sync` — the workspace
+# keeps `panic=unwind` so the cdylib's `catch_unwind` guards survive a panic in a
+# host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
+# turns a survivable panic into a permanent process-wide outage.
+parking_lot = "0.12"
 agent-doc-agent-io = { path = "../agent-doc-agent-io", version = "0.35.6" }
 agent-doc-codex-hook-io = { path = "../agent-doc-codex-hook-io", version = "0.35.6" }
 agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.6" }

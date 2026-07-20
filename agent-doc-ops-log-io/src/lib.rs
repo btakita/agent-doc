@@ -4,11 +4,12 @@ use agent_doc_turn::op_log::{
     IPC_PROOF_INSUFFICIENT_EVENT, is_write_completed_commit_missing_event, strip_timestamp_prefix,
 };
 use anyhow::Result;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 /// Structured cycle log entry for reproducible operation tracking.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,9 +49,7 @@ static SESSION_ID_CACHE: LazyLock<Mutex<HashMap<PathBuf, String>>> =
 /// Best-effort `agent_doc_session` for `file`, cached per process.
 fn cached_session_id(file: &Path) -> Option<String> {
     let key = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
-    if let Ok(cache) = SESSION_ID_CACHE.lock()
-        && let Some(sid) = cache.get(&key)
-    {
+    if let Some(sid) = SESSION_ID_CACHE.lock().get(&key) {
         return Some(sid.clone());
     }
     let content = std::fs::read_to_string(file).ok()?;
@@ -61,9 +60,7 @@ fn cached_session_id(file: &Path) -> Option<String> {
     if session.is_empty() {
         return None;
     }
-    if let Ok(mut cache) = SESSION_ID_CACHE.lock() {
-        cache.insert(key, session.clone());
-    }
+    SESSION_ID_CACHE.lock().insert(key, session.clone());
     Some(session)
 }
 
@@ -87,17 +84,16 @@ static PROJECT_ROOT_CACHE: LazyLock<Mutex<HashMap<PathBuf, std::sync::Arc<Path>>
 
 fn cached_project_root(file: &Path) -> Option<std::sync::Arc<Path>> {
     let key = file.to_path_buf();
-    if let Ok(cache) = PROJECT_ROOT_CACHE.lock()
-        && let Some(root) = cache.get(&key)
-    {
+    if let Some(root) = PROJECT_ROOT_CACHE.lock().get(&key) {
         return Some(std::sync::Arc::clone(root));
     }
     let canonical = file.canonicalize().ok()?;
-    let root: std::sync::Arc<Path> =
-        std::sync::Arc::from(agent_doc_project_root_io::project_root_containing(&canonical)?);
-    if let Ok(mut cache) = PROJECT_ROOT_CACHE.lock() {
-        cache.insert(key, std::sync::Arc::clone(&root));
-    }
+    let root: std::sync::Arc<Path> = std::sync::Arc::from(
+        agent_doc_project_root_io::project_root_containing(&canonical)?,
+    );
+    PROJECT_ROOT_CACHE
+        .lock()
+        .insert(key, std::sync::Arc::clone(&root));
     Some(root)
 }
 
@@ -208,9 +204,7 @@ fn cached_turn_id(file: &Path) -> Option<std::sync::Arc<str>> {
 ///
 /// The turn id needs no reset hook — its memo is bounded by the turn scope.
 pub fn reset_ops_log_attribution_cache() {
-    if let Ok(mut cache) = PROJECT_ROOT_CACHE.lock() {
-        cache.clear();
-    }
+    PROJECT_ROOT_CACHE.lock().clear();
 }
 
 fn try_log_op(file: &Path, message: &str) -> Option<()> {
@@ -489,7 +483,7 @@ mod tests {
 
         let first = cached_project_root(&doc).expect("project root resolves");
         assert!(
-            PROJECT_ROOT_CACHE.lock().unwrap().contains_key(&doc),
+            PROJECT_ROOT_CACHE.lock().contains_key(&doc),
             "first resolution must populate the memo"
         );
 

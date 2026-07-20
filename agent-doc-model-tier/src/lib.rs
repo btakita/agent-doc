@@ -696,7 +696,7 @@ pub fn parse_model_arg(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -886,9 +886,7 @@ mod tests {
 
     #[test]
     fn harness_detection_recognizes_cli_environment_aliases() {
-        let _env_lock = ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env_lock = ENV_LOCK.lock();
         let _restore = EnvRestore::clear(HARNESS_ENV_KEYS);
 
         // SAFETY: this test holds the shared env lock.

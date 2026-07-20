@@ -1,8 +1,9 @@
 //! Shared, interruptible writer for supervisor-owned PTYs.
 
+use parking_lot::Mutex;
 use std::io::{self, Write};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, TryLockError};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -139,19 +140,18 @@ impl Drop for SharedPtyWriter {
 pub fn lock_writer_interruptibly<'a>(
     writer_arc: &'a Arc<Mutex<SharedPtyWriter>>,
     stop: &AtomicBool,
-) -> Option<std::sync::MutexGuard<'a, SharedPtyWriter>> {
+) -> Option<parking_lot::MutexGuard<'a, SharedPtyWriter>> {
     loop {
         if stop.load(Ordering::Relaxed) {
             return None;
         }
         match writer_arc.try_lock() {
-            Ok(guard) => return Some(guard),
-            Err(TryLockError::WouldBlock) => {
+            Some(guard) => return Some(guard),
+            None => {
                 if !sleep_with_stop(stop, SHARED_WRITER_LOCK_POLL_INTERVAL) {
                     return None;
                 }
             }
-            Err(TryLockError::Poisoned(err)) => return Some(err.into_inner()),
         }
     }
 }
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn lock_writer_interruptibly_returns_none_after_stop() {
         let writer = Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(Vec::<u8>::new()))));
-        let guard = writer.lock().unwrap();
+        let guard = writer.lock();
         let stop = AtomicBool::new(true);
 
         assert!(lock_writer_interruptibly(&writer, &stop).is_none());

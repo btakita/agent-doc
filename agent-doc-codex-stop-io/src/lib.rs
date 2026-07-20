@@ -2170,9 +2170,7 @@ Done.\n\
         fs::write(&doc, &drifted).unwrap();
         track_doc(&dir, &doc, "turn-1");
 
-        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
-            .lock()
-            .unwrap();
+        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
 
@@ -2311,9 +2309,7 @@ Done.\n\
         })
         .unwrap();
 
-        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
-            .lock()
-            .unwrap();
+        let _lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
         let prev = std::env::var("CODEX_THREAD_ID").ok();
         unsafe { std::env::set_var("CODEX_THREAD_ID", "codex-session") };
 

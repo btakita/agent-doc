@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 // `agent-doc-sqlite::state_store`. Keep its storage/status types private to
 // this orchestration module; callers that need to name them should import the
 // focused crate directly.
+use parking_lot::{Condvar, Mutex};
 #[cfg(test)]
 use state_store::state_db_path;
 use state_store::{
@@ -54,7 +55,7 @@ use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{
-    Arc, Condvar, Mutex, OnceLock,
+    Arc, OnceLock,
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -489,30 +490,21 @@ impl ControllerRuntime {
     }
 
     fn bootstrap_snapshot(&self) -> Result<ControllerBootstrap> {
-        self.bootstrap
-            .lock()
-            .map_err(|_| anyhow::anyhow!("controller bootstrap lock poisoned"))
-            .map(|guard| guard.clone())
+        Ok(self.bootstrap.lock().clone())
     }
 
     fn actor_record(
         &self,
         document_id: &str,
     ) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
-        self.memory
-            .lock()
-            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))
-            .map(|memory| memory.actor_store.get(document_id).cloned())
+        Ok(self.memory.lock().actor_store.get(document_id).cloned())
     }
 
     fn refresh_memory(&self) -> Result<()> {
         let project_root = self.bootstrap_snapshot()?.project_root;
         let next = ControllerMemoryState::load(&project_root)?;
         let recycle = next.state_projection.project_supervisor_recycle();
-        let mut memory = self
-            .memory
-            .lock()
-            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
+        let mut memory = self.memory.lock();
         *memory = next;
         drop(memory);
         self.supervisor_recycle_graph.set(recycle);
@@ -522,10 +514,7 @@ impl ControllerRuntime {
 
     fn apply_state_event(&self, event: &agent_doc_state_backbone::StateEvent) -> Result<()> {
         let recycle = {
-            let mut memory = self
-                .memory
-                .lock()
-                .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
+            let mut memory = self.memory.lock();
             memory.state_ledger.append(event.clone());
             memory.state_projection.apply(event);
             memory.state_projection.project_supervisor_recycle()
@@ -540,12 +529,12 @@ impl ControllerRuntime {
         document_hash: &str,
         last_epoch: u64,
     ) -> Result<agent_doc_state_wire::WireSubscribe> {
-        self.memory
-            .lock()
-            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))
-            .map(|memory| {
-                agent_doc_state_wire::subscribe(&memory.state_ledger, document_hash, last_epoch)
-            })
+        let memory = self.memory.lock();
+        Ok(agent_doc_state_wire::subscribe(
+            &memory.state_ledger,
+            document_hash,
+            last_epoch,
+        ))
     }
 
     fn supervisor_recycle_projection(
@@ -558,10 +547,12 @@ impl ControllerRuntime {
         &self,
         document_hash: &str,
     ) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
-        self.memory
+        Ok(self
+            .memory
             .lock()
-            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))
-            .map(|memory| memory.state_projection.document(document_hash).cloned())
+            .state_projection
+            .document(document_hash)
+            .cloned())
     }
 
     fn wait_for_supervisor_recycle_settle(
@@ -569,10 +560,7 @@ impl ControllerRuntime {
         timeout: Duration,
     ) -> Result<agent_doc_state_backbone::SupervisorRecycleProjection> {
         let started = Instant::now();
-        let mut memory = self
-            .memory
-            .lock()
-            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
+        let mut memory = self.memory.lock();
         loop {
             let projection = memory.state_projection.project_supervisor_recycle();
             self.supervisor_recycle_graph.set(projection.clone());
@@ -589,19 +577,13 @@ impl ControllerRuntime {
                 );
             }
             let remaining = timeout.saturating_sub(elapsed);
-            let (next_memory, _wait) = self
-                .supervisor_recycle_waiters
-                .wait_timeout(memory, remaining)
-                .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
-            memory = next_memory;
+            self.supervisor_recycle_waiters
+                .wait_for(&mut memory, remaining);
         }
     }
 
     fn memory_categories(&self) -> Result<BTreeMap<String, usize>> {
-        let memory = self
-            .memory
-            .lock()
-            .map_err(|_| anyhow::anyhow!("controller memory lock poisoned"))?;
+        let memory = self.memory.lock();
         Ok(agent_doc_controller::status::status_categories([
             ("actor_records", memory.actor_store.len()),
             (
@@ -6591,9 +6573,7 @@ agent:queue\n\
         // controller listening, the recycle RPC no-ops but the project-scoped orphan
         // reap must still fire (`caller=recycle`), so a recycle no longer leaves the
         // zombie behind for M1's later self-watchdog tick to clear.
-        let _env = agent_doc_harness::prompt_source::TEST_ENV_LOCK
-            .lock()
-            .unwrap();
+        let _env = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
         unsafe { std::env::set_var(STALE_PREPARING_CONTROLLER_SECS_ENV, "1") };
 
         let dir = tempfile::TempDir::new().unwrap();

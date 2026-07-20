@@ -578,7 +578,7 @@ impl SyncRuntimeEffects for TestSyncRuntimeEffects {
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::sync::MutexGuard;
+    use parking_lot::MutexGuard;
 
     thread_local! {
         static PROCESS_GLOBAL_LOCK_DEPTH: std::cell::Cell<usize> =
@@ -609,9 +609,7 @@ pub(crate) mod test_support {
             return ProcessGlobalLockGuard { _guard: None };
         }
 
-        let guard = agent_doc_harness::prompt_source::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let guard = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
         ProcessGlobalLockGuard {
             _guard: Some(guard),
         }

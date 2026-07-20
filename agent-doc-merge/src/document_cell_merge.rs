@@ -2028,7 +2028,7 @@ Press Enter to restart, or 'q' to exit.
         // Serialize with the kill-switch tests (which mutate the process-global
         // flag env) and pin the flag ON, so this integration assertion never
         // races their env mutation under parallel test threads.
-        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
         // SAFETY: held under the shared env lock; absent var ⇒ default ON.
         unsafe {
             std::env::remove_var(crate::document_cell::CELL_MERGE_ENV);
@@ -2085,7 +2085,7 @@ Answer to A.
         // Heading-only identity treated the fresh turn as a duplicate of the prior
         // one and dropped it ("a cell-merge chose the existing content"); body-aware
         // identity keeps it while still collapsing true byte-identical duplicates.
-        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock().unwrap();
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
         // SAFETY: held under the shared env lock; absent var ⇒ default ON.
         unsafe {
             std::env::remove_var(crate::document_cell::CELL_MERGE_ENV);

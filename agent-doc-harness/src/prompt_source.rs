@@ -20,8 +20,8 @@
 use anyhow::Result;
 use std::path::Path;
 
-pub static TEST_ENV_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
-    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+pub static TEST_ENV_LOCK: std::sync::LazyLock<parking_lot::Mutex<()>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(()));
 
 pub fn synthetic_diff_for_file(
     file: &Path,
@@ -70,12 +70,12 @@ mod tests {
     struct EnvGuard {
         key: &'static str,
         prev: Option<String>,
-        _lock: std::sync::MutexGuard<'static, ()>,
+        _lock: parking_lot::MutexGuard<'static, ()>,
     }
 
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
-            let lock = super::TEST_ENV_LOCK.lock().unwrap();
+            let lock = super::TEST_ENV_LOCK.lock();
             let prev = std::env::var(key).ok();
             unsafe { std::env::set_var(key, value) };
             Self {
@@ -86,7 +86,7 @@ mod tests {
         }
 
         fn unset(key: &'static str) -> Self {
-            let lock = super::TEST_ENV_LOCK.lock().unwrap();
+            let lock = super::TEST_ENV_LOCK.lock();
             let prev = std::env::var(key).ok();
             unsafe { std::env::remove_var(key) };
             Self {

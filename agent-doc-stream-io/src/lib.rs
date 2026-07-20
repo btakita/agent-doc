@@ -68,10 +68,11 @@
 //! - content_ours_exchange_duplicates_without_replace: append mode (no override) → prompt duplicated (regression baseline)
 
 use anyhow::{Context, Result};
+use parking_lot::Mutex;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agent_doc_config::Config;
@@ -387,9 +388,9 @@ fn stream_loop(
                 Err(mpsc::RecvTimeoutError::Disconnected) => true,
             };
 
-            let text = timer_buffer.lock().unwrap().clone();
+            let text = timer_buffer.lock().clone();
             let thinking_text = if has_thinking {
-                timer_thinking.lock().unwrap().clone()
+                timer_thinking.lock().clone()
             } else {
                 String::new()
             };
@@ -468,18 +469,18 @@ fn stream_loop(
         if let Some(ref thinking) = chunk.thinking
             && thinking_cfg.is_some()
         {
-            let mut tbuf = thinking_buffer.lock().unwrap();
+            let mut tbuf = thinking_buffer.lock();
             *tbuf = thinking.clone();
         }
 
         if !chunk.text.is_empty() {
             let checkpoint_text = {
-                let mut buf = buffer.lock().unwrap();
+                let mut buf = buffer.lock();
                 // For assistant messages, the text is cumulative (full text so far)
                 // For result messages, it's the final full text
                 if thinking_cfg.is_some() && thinking_cfg.unwrap().target.is_none() {
                     // Interleave: prepend thinking as collapsible details
-                    let thinking_text = thinking_buffer.lock().unwrap().clone();
+                    let thinking_text = thinking_buffer.lock().clone();
                     *buf = render_interleaved_thinking_response(&thinking_text, &chunk.text);
                 } else {
                     *buf = chunk.text.clone();
@@ -512,7 +513,7 @@ fn stream_loop(
     eprintln!("\n[stream] Received {} chunks", chunk_count);
 
     // Final flush: ensure the complete response is written
-    let final_text = buffer.lock().unwrap().clone();
+    let final_text = buffer.lock().clone();
     if !final_text.is_empty() {
         // Save as pending for crash recovery
         effects.save_pending(file, &final_text)?;
@@ -526,7 +527,7 @@ fn stream_loop(
         if let Some(cfg) = thinking_cfg
             && let Some(ref tt) = cfg.target
         {
-            let final_thinking = thinking_buffer.lock().unwrap().clone();
+            let final_thinking = thinking_buffer.lock().clone();
             if !final_thinking.is_empty() && !timer_flushed_final.load(Ordering::Acquire) {
                 flush_to_document(file, &final_thinking, tt, baseline, effects.as_ref())?;
             }

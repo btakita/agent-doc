@@ -4,7 +4,7 @@
 //! owns the low-level terminal projection and bounded recent-output buffer that
 //! those decisions read.
 
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use portable_pty::PtySize;
 
@@ -31,7 +31,7 @@ impl SupervisorOutputState {
         if bytes.is_empty() {
             return;
         }
-        let mut recent = self.recent_output.lock().unwrap();
+        let mut recent = self.recent_output.lock();
         recent.extend_from_slice(bytes);
         if recent.len() > self.recent_output_bytes_max {
             let overflow = recent.len() - self.recent_output_bytes_max;
@@ -43,25 +43,25 @@ impl SupervisorOutputState {
         if bytes.is_empty() {
             return;
         }
-        self.terminal_screen.lock().unwrap().push(bytes);
+        self.terminal_screen.lock().push(bytes);
     }
 
     pub fn reset_terminal_screen(&self, size: PtySize) {
-        self.terminal_screen.lock().unwrap().reset(size);
+        self.terminal_screen.lock().reset(size);
     }
 
     pub fn resize_terminal_screen(&self, size: PtySize) {
-        self.terminal_screen.lock().unwrap().resize(size);
+        self.terminal_screen.lock().resize(size);
     }
 
     pub fn clear_recent_output(&self) {
-        self.recent_output.lock().unwrap().clear();
+        self.recent_output.lock().clear();
     }
 
     pub fn child_output_for_detection(&self) -> String {
-        let screen = self.terminal_screen.lock().unwrap().visible_text();
+        let screen = self.terminal_screen.lock().visible_text();
         if screen.trim().is_empty() {
-            let recent = self.recent_output.lock().unwrap();
+            let recent = self.recent_output.lock();
             String::from_utf8_lossy(&recent).into_owned()
         } else {
             screen
@@ -69,7 +69,7 @@ impl SupervisorOutputState {
     }
 
     pub fn with_recent_output<T>(&self, f: impl FnOnce(&[u8]) -> T) -> T {
-        let recent = self.recent_output.lock().unwrap();
+        let recent = self.recent_output.lock();
         f(&recent)
     }
 }

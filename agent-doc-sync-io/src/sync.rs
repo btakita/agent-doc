@@ -2564,10 +2564,16 @@ fn run_with_options_internal_at_root(
             SYNC_OWNERSHIP_PROOF_BUDGET,
             auto_start_mode,
         );
-        let (mut sa, mut sb, mut sc, mut sd) = (Duration::ZERO, Duration::ZERO, Duration::ZERO, Duration::ZERO);
+        let (mut sa, mut sb, mut sc, mut sd) = (
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::ZERO,
+        );
         let per_file_loop_start = Instant::now();
         for file_path in &all_files {
-            let mut seg_mark = Instant::now(); let _ = &seg_mark;
+            let mut seg_mark = Instant::now();
+            let _ = &seg_mark;
             if !file_path.exists() {
                 continue;
             }
@@ -2636,7 +2642,8 @@ fn run_with_options_internal_at_root(
                 auto_start_mode,
                 &proof_cache,
             );
-            sa += seg_mark.elapsed(); seg_mark = Instant::now();
+            sa += seg_mark.elapsed();
+            seg_mark = Instant::now();
             let registered_entry = lookup_registry_entry_for_file_session(file_path, &session_id);
             let registered_pane = authoritative_actor_pane
                 .or_else(|| registered_entry.as_ref().map(|entry| entry.pane.clone()));
@@ -2667,7 +2674,8 @@ fn run_with_options_internal_at_root(
                 agent_doc_supervisor_io::startup_miss::load_startup_miss(file_path)
                     .ok()
                     .flatten();
-            sb += seg_mark.elapsed(); seg_mark = Instant::now();
+            sb += seg_mark.elapsed();
+            seg_mark = Instant::now();
             if let Some(miss) = unresolved_startup_miss.as_ref()
                 && !tmux.pane_alive(&miss.pane_id)
             {
@@ -2742,7 +2750,8 @@ fn run_with_options_internal_at_root(
                 reserve_sync_pane(&claimed_sync_panes, pane_id, file_path);
                 continue;
             }
-            sb += seg_mark.elapsed(); seg_mark = Instant::now();
+            sb += seg_mark.elapsed();
+            seg_mark = Instant::now();
             let registered_live_owner = !skip_autostart_diagnostics
                 && registered_pane.as_ref().is_some_and(|pane| {
                     registered_pane_proves_live_owner(
@@ -2854,7 +2863,8 @@ fn run_with_options_internal_at_root(
                     ));
                 }
             }
-            sc += seg_mark.elapsed(); seg_mark = Instant::now();
+            sc += seg_mark.elapsed();
+            seg_mark = Instant::now();
             let has_alive_pane = claimed_owner.is_none()
                 && registered_pane
                     .as_ref()
@@ -3122,7 +3132,8 @@ fn run_with_options_internal_at_root(
             // alive pane in the target session is already running agent-doc
             // for this file (registry may have been pruned or stale).
             // This prevents creating duplicate panes.
-            sd += seg_mark.elapsed(); seg_mark = Instant::now();
+            sd += seg_mark.elapsed();
+            seg_mark = Instant::now();
             let associated_candidates = filter_associated_panes_for_document(
                 tmux,
                 file_path,
@@ -3426,7 +3437,10 @@ fn run_with_options_internal_at_root(
             "ownership_per_file_loop_detail files={} elapsed_ms={} sa_ms={} sb_ms={} sc_ms={} sd_ms={}",
             all_files.len(),
             per_file_loop_start.elapsed().as_millis(),
-            sa.as_millis(), sb.as_millis(), sc.as_millis(), sd.as_millis()
+            sa.as_millis(),
+            sb.as_millis(),
+            sc.as_millis(),
+            sd.as_millis()
         ));
         if matches!(auto_start_mode, AutoStartMode::SafePassive) {
             let newly_blocked = block_unresolved_safe_passive_managed_files(
@@ -3680,7 +3694,9 @@ fn run_with_options_internal_at_root(
     // deferred to the passes that are allowed to be slow and that actually act on
     // the result.
     if matches!(auto_start_mode, AutoStartMode::SafePassive) {
-        sync_log("post_sync_resync_skipped mode=safe-passive reason=report_only_off_hot_path (#passiveresyncdefer)");
+        sync_log(
+            "post_sync_resync_skipped mode=safe-passive reason=report_only_off_hot_path (#passiveresyncdefer)",
+        );
     } else if let Err(e) = resync::run(false, None, None) {
         eprintln!("[sync] warning: post-sync resync failed: {}", e);
     }
@@ -4438,8 +4454,8 @@ fn pane_in_foreign_git_repo(tmux: &Tmux, pane_id: &str, file: &Path) -> bool {
     // memoized, so scanning N candidate panes cost N git spawns even when they
     // shared a working directory. A directory's owning repo is immutable for
     // our purposes, so the same memo applies unchanged.
-    let pane_repo =
-        agent_doc_tmux_io::pane_current_path(tmux, pane_id).and_then(|cwd| git_toplevel_memoized(&cwd));
+    let pane_repo = agent_doc_tmux_io::pane_current_path(tmux, pane_id)
+        .and_then(|cwd| git_toplevel_memoized(&cwd));
     git_repos_are_foreign(doc_repo.as_deref(), pane_repo.as_deref())
 }
 

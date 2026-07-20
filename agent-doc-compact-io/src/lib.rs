@@ -4432,8 +4432,9 @@ mod tests {
     }
 
     fn start_component_patch_visible_write_listener(root: &Path) -> std::thread::JoinHandle<()> {
+        use parking_lot::Mutex;
         use std::collections::HashMap;
-        use std::sync::{Arc, Mutex};
+        use std::sync::Arc;
         let root = root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
@@ -4479,7 +4480,7 @@ mod tests {
                 }
 
                 if let Some(file_path) = payload.get("file").and_then(|value| value.as_str()) {
-                    let mut buffers = buffers.lock().unwrap();
+                    let mut buffers = buffers.lock();
                     if !buffers.contains_key(file_path) {
                         buffers.insert(
                             file_path.to_string(),
@@ -4512,8 +4513,9 @@ mod tests {
     /// a `save_document` message. The disk-writing `start_component_patch_visible_write_listener`
     /// hides `#jb-compact-editor-buffer-flush` because it saves on every patch.
     fn start_buffer_only_patch_listener(root: &Path) -> std::thread::JoinHandle<()> {
+        use parking_lot::Mutex;
         use std::collections::HashMap;
-        use std::sync::{Arc, Mutex};
+        use std::sync::Arc;
         let root = root.to_path_buf();
         std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
         std::thread::spawn(move || {
@@ -4544,7 +4546,6 @@ mod tests {
                             } => text,
                             _ => buffers
                                 .lock()
-                                .unwrap()
                                 .get(file_path)
                                 .map(|buffer| buffer.content.clone())
                                 .or_else(|| std::fs::read_to_string(file_path).ok())?,
@@ -4583,7 +4584,7 @@ mod tests {
                         if let Some(file_path) =
                             payload.get("file").and_then(|value| value.as_str())
                         {
-                            let mut buffers = buffers.lock().unwrap();
+                            let mut buffers = buffers.lock();
                             if !buffers.contains_key(file_path) {
                                 buffers.insert(
                                     file_path.to_string(),

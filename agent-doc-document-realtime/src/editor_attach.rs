@@ -38,8 +38,9 @@
 //! installs a fake watcher and drives synthetic exit events. The derived authority is
 //! therefore deterministically testable without real process death.
 
+use parking_lot::Mutex;
 use std::collections::BTreeSet;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use lazily::{CellHandle, SlotHandle, ThreadSafeCellMap, ThreadSafeContext};
 
@@ -126,15 +127,12 @@ impl EditorAttach {
     /// before it (or in a CLI that never installs one), `attach` is a no-op so consumers
     /// keep cold-missing to the durable lease.
     pub fn install_watcher(&self, watcher: std::sync::Arc<dyn ProcessExitWatcher>) {
-        *self.watcher.lock().expect("editor_attach watcher lock") = Some(watcher);
+        *self.watcher.lock() = Some(watcher);
     }
 
     /// Whether an OS process-exit watcher is installed in this process.
     pub fn has_watcher(&self) -> bool {
-        self.watcher
-            .lock()
-            .expect("editor_attach watcher lock")
-            .is_some()
+        self.watcher.lock().is_some()
     }
 
     fn bump_epoch(&self) {
@@ -168,7 +166,7 @@ impl EditorAttach {
     /// are reused by the OS, so a fresh attach always (re)asserts liveness).
     pub fn attach(&self, doc: &str, pid: u32) {
         let watcher = {
-            let guard = self.watcher.lock().expect("editor_attach watcher lock");
+            let guard = self.watcher.lock();
             match guard.as_ref() {
                 Some(w) => w.clone(),
                 None => return,
@@ -200,11 +198,7 @@ impl EditorAttach {
             }
         }
         if !freed_pids.is_empty()
-            && let Some(watcher) = self
-                .watcher
-                .lock()
-                .expect("editor_attach watcher lock")
-                .as_ref()
+            && let Some(watcher) = self.watcher.lock().as_ref()
         {
             for pid in freed_pids {
                 watcher.unwatch(pid);
@@ -290,9 +284,9 @@ pub fn editor_attach() -> &'static EditorAttach {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parking_lot::Mutex as StdMutex;
     use std::collections::BTreeMap;
     use std::sync::Arc;
-    use std::sync::Mutex as StdMutex;
 
     /// A fake OS watcher: records watched pids so a test can assert an attach requested a
     /// watch, and drive `process_exited` synthetically (the `SimWorld` exit-event source).
@@ -303,10 +297,10 @@ mod tests {
     }
     impl ProcessExitWatcher for FakeWatcher {
         fn watch(&self, pid: u32) {
-            self.watched.lock().unwrap().insert(pid);
+            self.watched.lock().insert(pid);
         }
         fn unwatch(&self, pid: u32) {
-            self.unwatched.lock().unwrap().insert(pid);
+            self.unwatched.lock().insert(pid);
         }
     }
 
@@ -336,10 +330,7 @@ mod tests {
         assert!(ea.is_tracked("plan.md"));
         assert!(ea.is_attached("plan.md"));
         assert_eq!(ea.attached_count(), 1);
-        assert!(
-            w.watched.lock().unwrap().contains(&1234),
-            "attach requested a watch"
-        );
+        assert!(w.watched.lock().contains(&1234), "attach requested a watch");
     }
 
     #[test]
@@ -384,7 +375,7 @@ mod tests {
         assert!(!ea.is_attached("plan.md"), "graceful close ⇒ detached");
         assert!(ea.is_tracked("plan.md"), "known-closed, not cold-miss");
         assert!(
-            w.unwatched.lock().unwrap().contains(&1234),
+            w.unwatched.lock().contains(&1234),
             "the last doc for the pid detached ⇒ release the OS watch"
         );
     }
@@ -402,13 +393,13 @@ mod tests {
             "b.md still attached to the live pid"
         );
         assert!(
-            !w.unwatched.lock().unwrap().contains(&100),
+            !w.unwatched.lock().contains(&100),
             "pid still owns b.md ⇒ watch not released yet"
         );
 
         ea.detach("b.md");
         assert!(
-            w.unwatched.lock().unwrap().contains(&100),
+            w.unwatched.lock().contains(&100),
             "last doc for the pid gone ⇒ watch released"
         );
     }

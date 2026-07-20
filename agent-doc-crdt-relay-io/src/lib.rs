@@ -3101,8 +3101,9 @@ pub fn route_disk_change_signal(file: &Path, delivery: &WatchDelivery) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parking_lot::Mutex;
     use std::io::Write;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
 
@@ -4072,7 +4073,7 @@ mod tests {
             "test_projection_recovery",
             CurrentText::EditorAttachedMissingReplica,
             || {
-                *poll_count_for_observer.lock().unwrap() += 1;
+                *poll_count_for_observer.lock() += 1;
                 Ok(CurrentText::EditorAttachedMissingReplica)
             },
             || {
@@ -4085,7 +4086,7 @@ mod tests {
         .expect_err("attached authority must wait for an exact live editor publish");
 
         assert!(
-            *poll_count.lock().unwrap() > 0,
+            *poll_count.lock() > 0,
             "ensure should poll the strict observer before recovery"
         );
         assert!(format!("{err:#}").contains("editor authority stayed"));
@@ -4110,7 +4111,7 @@ mod tests {
             "test_window_extend",
             CurrentText::EditorAttachedMissingReplica,
             move || {
-                let mut n = polls_for_observer.lock().unwrap();
+                let mut n = polls_for_observer.lock();
                 *n += 1;
                 if *n == 1 {
                     // The editor answers by registering, but its bootstrap is
@@ -4135,7 +4136,7 @@ mod tests {
             "expected the extended window to reach Current, got {current:?}"
         );
         assert!(
-            *polls.lock().unwrap() >= 4,
+            *polls.lock() >= 4,
             "the observer must keep polling past the short missing-replica window"
         );
     }
@@ -4167,7 +4168,7 @@ mod tests {
             "test_missing_replica_recycle",
             CurrentText::EditorAttachedMissingReplica,
             || {
-                *poll_count_for_observer.lock().unwrap() += 1;
+                *poll_count_for_observer.lock() += 1;
                 Ok(CurrentText::EditorAttachedMissingReplica)
             },
             || {
@@ -4185,7 +4186,7 @@ mod tests {
         // `DOCUMENT_MODEL_ENSURE_POLL_MS` = 25ms → ~2-3 polls), well under the full
         // `DOCUMENT_MODEL_ENSURE_TIMEOUT_MS` (150ms → ~6 polls), so a stale editor
         // cannot block the single-threaded controller for the full window.
-        let polls = *poll_count.lock().unwrap();
+        let polls = *poll_count.lock();
         assert!(
             (1..=4).contains(&polls),
             "missing-replica ensure should poll only within the short window, got {polls}"

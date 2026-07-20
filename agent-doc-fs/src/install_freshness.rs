@@ -151,7 +151,7 @@ pub fn agent_doc_install_artifacts(repo: &Path) -> Vec<(&'static str, Option<u64
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
     use tempfile::TempDir;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn cargo_bin_dir_honors_cargo_home() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         let _restore = EnvRestore::capture();
         unsafe {
             std::env::set_var("CARGO_HOME", "/tmp/agent-doc-cargo");
@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn cargo_bin_dir_falls_back_to_home() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         let _restore = EnvRestore::capture();
         unsafe {
             std::env::remove_var("CARGO_HOME");

@@ -369,34 +369,27 @@ pub fn open_state_db(project_root: &Path) -> Result<Connection> {
 /// per-open cost the dominant redundant work on the route path. Converge once
 /// per path per process; a concurrently-upgraded schema from another binary
 /// would carry columns this process does not know about anyway.
-static STATE_DB_SCHEMA_CONVERGED: std::sync::Mutex<Option<std::collections::BTreeSet<PathBuf>>> =
-    std::sync::Mutex::new(None);
+static STATE_DB_SCHEMA_CONVERGED: parking_lot::Mutex<Option<std::collections::BTreeSet<PathBuf>>> =
+    parking_lot::Mutex::new(None);
 
 fn schema_already_converged(path: &Path) -> bool {
     STATE_DB_SCHEMA_CONVERGED
         .lock()
-        .map(|guard| {
-            guard
-                .as_ref()
-                .is_some_and(|converged| converged.contains(path))
-        })
-        .unwrap_or(false)
+        .as_ref()
+        .is_some_and(|converged| converged.contains(path))
 }
 
 fn mark_schema_converged(path: &Path) {
-    if let Ok(mut guard) = STATE_DB_SCHEMA_CONVERGED.lock() {
-        guard
-            .get_or_insert_with(std::collections::BTreeSet::new)
-            .insert(path.to_path_buf());
-    }
+    STATE_DB_SCHEMA_CONVERGED
+        .lock()
+        .get_or_insert_with(std::collections::BTreeSet::new)
+        .insert(path.to_path_buf());
 }
 
 /// Forget this process's convergence memo. Tests that rebuild a database under
 /// the same path need the next open to re-declare the schema.
 pub fn reset_state_db_schema_convergence_memo() {
-    if let Ok(mut guard) = STATE_DB_SCHEMA_CONVERGED.lock() {
-        *guard = None;
-    }
+    *STATE_DB_SCHEMA_CONVERGED.lock() = None;
 }
 
 /// UNRESOLVED — `state.db` has been observed corrupting itself in the field.
@@ -867,8 +860,8 @@ const STATE_EVENT_RETENTION_INTERVAL: Duration = Duration::from_secs(900);
 /// the same "one process, one prune" gap this whole change exists to close, just
 /// sliced by project instead of by time. A missing entry means "never ran for
 /// this database" and is always due.
-static STATE_EVENT_RETENTION_LAST_RUN_MS: std::sync::Mutex<Option<BTreeMap<String, u64>>> =
-    std::sync::Mutex::new(None);
+static STATE_EVENT_RETENTION_LAST_RUN_MS: parking_lot::Mutex<Option<BTreeMap<String, u64>>> =
+    parking_lot::Mutex::new(None);
 
 /// Process start, used as the monotonic origin for the retention interval.
 /// `Instant` is not `const`-constructible, so the origin is created lazily.
@@ -911,11 +904,7 @@ fn run_state_event_retention_if_due(conn: &Connection) {
     // Claim the window before doing the work so concurrent opens in the same
     // process do not all scan `state_events` at once.
     let last_run_ms = {
-        let Ok(mut guard) = STATE_EVENT_RETENTION_LAST_RUN_MS.lock() else {
-            // A poisoned lock is a maintenance-scheduling concern only; skipping
-            // this pass is always safe, and the next open retries.
-            return;
-        };
+        let mut guard = STATE_EVENT_RETENTION_LAST_RUN_MS.lock();
         let stamps = guard.get_or_insert_with(BTreeMap::new);
         let last_run_ms = stamps.get(&key).copied().unwrap_or(u64::MAX);
         if !state_event_retention_due(last_run_ms, now_ms, STATE_EVENT_RETENTION_INTERVAL) {
@@ -979,7 +968,8 @@ fn run_state_event_retention_if_due(conn: &Connection) {
             eprintln!("[agent-doc] warning: failed to prune {label} events: {err:#}");
         }
     }
-    if !clean && let Ok(mut guard) = STATE_EVENT_RETENTION_LAST_RUN_MS.lock() {
+    if !clean {
+        let mut guard = STATE_EVENT_RETENTION_LAST_RUN_MS.lock();
         // Restore the previous stamp so a transient failure retries at the next
         // open instead of waiting out the whole interval.
         let stamps = guard.get_or_insert_with(BTreeMap::new);
@@ -1515,8 +1505,7 @@ fn converge_state_event_document_versions(conn: &Connection) -> Result<()> {
         "DELETE FROM state_schema_migrations WHERE migration_id = ?1",
         [RETIRED_BACKFILL_DOCUMENT_VERSION_MIGRATION],
     )?;
-    tx.commit()
-        .context("commit document-version convergence")?;
+    tx.commit().context("commit document-version convergence")?;
     Ok(())
 }
 
@@ -2087,8 +2076,16 @@ const CANONICAL_ADDED_COLUMNS: &[(&str, &str, &str)] = &[
         "source_generation",
         "source_generation INTEGER",
     ),
-    ("projection_diagnostics", "intended_hash", "intended_hash TEXT"),
-    ("projection_diagnostics", "retry_status", "retry_status TEXT"),
+    (
+        "projection_diagnostics",
+        "intended_hash",
+        "intended_hash TEXT",
+    ),
+    (
+        "projection_diagnostics",
+        "retry_status",
+        "retry_status TEXT",
+    ),
     ("queue_heads", "generation", "generation INTEGER"),
     (
         "queue_heads",
@@ -2145,7 +2142,6 @@ fn ensure_canonical_indexes(conn: &Connection) -> Result<()> {
 /// the table bounded regardless of write bursts — the failure mode that produced
 /// an 11.5M-row / 3.5GB table was a burst that was days, not hours, old.
 const CRASH_RECOVERY_MARKER_MAX_ROWS: i64 = 20_000;
-
 
 /// `#crashmarkerretention`: crash-recovery markers are an append-mostly audit
 /// trail (dispatch-receipt / supervisor-lease / controller-restart reconciles).
@@ -4034,7 +4030,10 @@ mod tests {
         let second = dir.path().join("second");
 
         let path = state_db_path(&first);
-        assert!(!schema_already_converged(&path), "no memo before first open");
+        assert!(
+            !schema_already_converged(&path),
+            "no memo before first open"
+        );
         let conn = open_state_db(&first)?;
         drop(conn);
         assert!(
@@ -4393,14 +4392,20 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(observations, 10, "telemetry must be capped to the retention limit");
+        assert_eq!(
+            observations, 10,
+            "telemetry must be capped to the retention limit"
+        );
 
         let durable: i64 = conn.query_row(
             "SELECT COUNT(*) FROM state_events WHERE fact_type = 'response_captured'",
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(durable, 3, "retention must never drop durable lifecycle facts");
+        assert_eq!(
+            durable, 3,
+            "retention must never drop durable lifecycle facts"
+        );
 
         // The NEWEST observations are the ones kept — `latest_authority` reads the tail.
         let newest: String = conn.query_row(
@@ -4797,7 +4802,11 @@ mod tests {
                 |row| row.get(0),
             )?)
         };
-        assert_eq!(count_for("docA")?, 2, "each document keeps its own newest N");
+        assert_eq!(
+            count_for("docA")?,
+            2,
+            "each document keeps its own newest N"
+        );
         assert_eq!(
             count_for("docB")?,
             2,
@@ -4853,7 +4862,11 @@ mod tests {
                 |row| row.get(0),
             )?)
         };
-        assert_eq!(count_for("docA")?, 2, "each document keeps its own newest N");
+        assert_eq!(
+            count_for("docA")?,
+            2,
+            "each document keeps its own newest N"
+        );
         assert_eq!(
             count_for("docB")?,
             1,
@@ -4893,7 +4906,11 @@ mod tests {
             [],
         )?;
 
-        prune_superseding_fact_to(&conn, "response_captured", RESPONSE_CAPTURES_KEPT_PER_DOCUMENT)?;
+        prune_superseding_fact_to(
+            &conn,
+            "response_captured",
+            RESPONSE_CAPTURES_KEPT_PER_DOCUMENT,
+        )?;
 
         let count_for = |doc: &str| -> Result<i64> {
             Ok(conn.query_row(
@@ -5207,7 +5224,10 @@ mod tests {
             [],
             |row| row.get(0),
         )?;
-        assert_eq!(fresh, 4, "appends resume above the backfilled high-water mark");
+        assert_eq!(
+            fresh, 4,
+            "appends resume above the backfilled high-water mark"
+        );
         Ok(())
     }
 
@@ -5395,7 +5415,13 @@ mod tests {
         deferred("a-d3", "docA", "i3", "t3", "crdt_delivery_ack_pending")?;
         // The external-disk lineage is independent — never drained by an
         // agent-lineage convergence, even though it is older than a-c2.
-        deferred("a-ext", "docA", "iext", "text", EXTERNAL_DISK_DEFERRAL_REASON)?;
+        deferred(
+            "a-ext",
+            "docA",
+            "iext",
+            "text",
+            EXTERNAL_DISK_DEFERRAL_REASON,
+        )?;
         // docB never converges anything: a busy neighbour must not drain it.
         deferred("b-d1", "docB", "j1", "u1", "crdt_delivery_ack_pending")?;
 
@@ -5411,11 +5437,7 @@ mod tests {
         survivors.sort();
         assert_eq!(
             survivors,
-            vec![
-                "a-d3".to_string(),
-                "a-ext".to_string(),
-                "b-d1".to_string()
-            ],
+            vec!["a-d3".to_string(), "a-ext".to_string(), "b-d1".to_string()],
             "converged prefix drops; unconverged, external-disk, and other documents survive"
         );
 
@@ -5455,5 +5477,4 @@ mod tests {
         assert_eq!(remaining, 1, "a lone checkpoint must never be pruned");
         Ok(())
     }
-
 }

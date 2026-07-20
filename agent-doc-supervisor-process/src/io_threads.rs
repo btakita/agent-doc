@@ -3,9 +3,10 @@
 //! This module owns the low-level thread loops. The caller supplies small
 //! observers for prompt/state decisions that still live above the process layer.
 
+use parking_lot::Mutex;
 use std::io::{Read, Write};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use agent_doc_harness::HarnessConfig;
 

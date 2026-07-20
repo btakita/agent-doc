@@ -36,10 +36,11 @@
 use agent_doc_hash::content_hash;
 use agent_doc_merge::crdt::EditorOp;
 use anyhow::Result;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
 
 /// Per-document memo of the last `current_base_hash` result, keyed by the
 /// durable-baseline content hash that produced it (`#qbasehashmemo`). No
@@ -60,9 +61,10 @@ fn base_hash_recomputes_by_doc_for_tests() -> &'static Mutex<HashMap<PathBuf, u6
 
 #[cfg(test)]
 fn record_base_hash_recompute_for_tests(doc: &Path) {
-    if let Ok(mut counts) = base_hash_recomputes_by_doc_for_tests().lock() {
-        *counts.entry(doc.to_path_buf()).or_insert(0) += 1;
-    }
+    *base_hash_recomputes_by_doc_for_tests()
+        .lock()
+        .entry(doc.to_path_buf())
+        .or_insert(0) += 1;
 }
 
 #[cfg(test)]
@@ -70,8 +72,8 @@ fn base_hash_recomputes_for_doc_for_tests(doc: &Path) -> u64 {
     let key = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
     base_hash_recomputes_by_doc_for_tests()
         .lock()
-        .ok()
-        .and_then(|counts| counts.get(&key).copied())
+        .get(&key)
+        .copied()
         .unwrap_or(0)
 }
 
@@ -203,8 +205,7 @@ where
     let fingerprint = content_hash(&baseline);
     let cache_key = doc.canonicalize().unwrap_or_else(|_| doc.to_path_buf());
 
-    if let Ok(cache) = base_hash_cache().lock()
-        && let Some((cached_fp, cached_hash)) = cache.get(&cache_key)
+    if let Some((cached_fp, cached_hash)) = base_hash_cache().lock().get(&cache_key)
         && *cached_fp == fingerprint
     {
         return Ok(cached_hash.clone());
@@ -219,9 +220,9 @@ where
         .unwrap_or_default();
     let hash = content_hash(&base_text);
 
-    if let Ok(mut cache) = base_hash_cache().lock() {
-        cache.insert(cache_key, (fingerprint, hash.clone()));
-    }
+    base_hash_cache()
+        .lock()
+        .insert(cache_key, (fingerprint, hash.clone()));
     Ok(hash)
 }
 

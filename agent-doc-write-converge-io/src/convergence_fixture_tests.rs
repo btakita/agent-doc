@@ -814,13 +814,13 @@ mod core_tests {
         let doc_str = doc.to_string_lossy().to_string();
         agent_doc_test_support::seed_reliable_sync_editor_registration(&doc, "jetbrains-old", &[]);
 
-        let captured = std::sync::Arc::new(std::sync::Mutex::new(None::<serde_json::Value>));
+        let captured = std::sync::Arc::new(parking_lot::Mutex::new(None::<serde_json::Value>));
         let captured_clone = captured.clone();
         let listener_root = dir.path().to_path_buf();
         let server = std::thread::spawn(move || {
             let _ = agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let v: serde_json::Value = serde_json::from_str(msg).ok()?;
-                *captured_clone.lock().unwrap() = Some(v.clone());
+                *captured_clone.lock() = Some(v.clone());
                 Some(serde_json::json!({"type": "receipt", "status": "applied"}).to_string())
             });
         });
@@ -832,7 +832,7 @@ mod core_tests {
             "an under-capable reliable registration must remain fail-closed"
         );
         assert!(
-            captured.lock().unwrap().is_none(),
+            captured.lock().is_none(),
             "the capability guard must not request a sidecar-era live-buffer publication"
         );
         assert_eq!(doc_str, doc.to_string_lossy());

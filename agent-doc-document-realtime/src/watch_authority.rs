@@ -25,10 +25,11 @@
 //! (the controller's writer arm into the editor) stays active.
 
 use crate::crdt_authority::CrdtAuthority;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Minimal classification of a raw filesystem event, mirroring the
 /// `notify::EventKind` subset the controller watcher reacts to.
@@ -232,7 +233,7 @@ impl WatcherRegistry {
     /// newly created (`true` only on the first registration). `file` is the
     /// document path this gate accepts raw events for.
     pub fn register(&self, doc_id: &str, file: &str) -> (Arc<Mutex<DocumentWatchGate>>, bool) {
-        let mut gates = self.gates.lock().unwrap_or_else(|p| p.into_inner());
+        let mut gates = self.gates.lock();
         if let Some(gate) = gates.get(doc_id) {
             return (Arc::clone(gate), false);
         }
@@ -243,24 +244,17 @@ impl WatcherRegistry {
 
     /// Whether `doc_id` is currently watched.
     pub fn is_watched(&self, doc_id: &str) -> bool {
-        self.gates
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .contains_key(doc_id)
+        self.gates.lock().contains_key(doc_id)
     }
 
     /// Drop the watch for `doc_id`, returning whether one existed.
     pub fn unregister(&self, doc_id: &str) -> bool {
-        self.gates
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(doc_id)
-            .is_some()
+        self.gates.lock().remove(doc_id).is_some()
     }
 
     /// Number of watched documents.
     pub fn len(&self) -> usize {
-        self.gates.lock().unwrap_or_else(|p| p.into_inner()).len()
+        self.gates.lock().len()
     }
 
     pub fn is_empty(&self) -> bool {

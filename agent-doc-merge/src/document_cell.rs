@@ -62,7 +62,7 @@ pub const CELL_MERGE_ENV: &str = "AGENT_DOC_CELL_MERGE";
 /// tests across modules (`document_cell`, `crdt`) must serialize through this single
 /// lock to avoid racing each other. `pub(crate)` so sibling test modules share it.
 #[cfg(test)]
-pub(crate) static CELL_MERGE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static CELL_MERGE_ENV_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
 
 /// Environment variable that opts a same-cell *both-sides-changed* divergence
 /// into the op-level [`TextCrdt`] 3-way merge (`#qcellmerge1` opcapture rung).
@@ -2603,7 +2603,7 @@ prior response.
         // queue is operator-owned (#provauth1/#provauth4), so the conflict
         // resolves THEIRS-wins (the operator's edit is authoritative) cleanly,
         // with the losing (ours) side not blended in-band.
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         let ours = BASE3.replace(
             "- do [#beta] second task\n",
             "- do [#beta] second task OURS-VERSION\n",
@@ -2676,7 +2676,7 @@ agent_doc_format: template
         assert!(out.fell_back, "structural divergence must fall back");
         assert!(out.merged_text.is_empty());
 
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         // And with the flag ON, the legacy crdt::merge path still returns a valid
         // doc for that input (the seam falls through transparently).
         // SAFETY: single-threaded test, restored immediately.
@@ -2763,7 +2763,7 @@ while I was typing the next queue item\n\
         );
         let base_state = crate::crdt::CrdtDoc::from_text(BASE3).encode_state();
 
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         // Flag explicitly OFF via the kill-switch.
         unsafe {
             std::env::set_var(CELL_MERGE_ENV, "0");
@@ -2785,7 +2785,7 @@ while I was typing the next queue item\n\
 
     #[test]
     fn document_cell_merge_enabled_default_on_with_kill_switch() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         // Default-ON: absent var ⇒ enabled.
         unsafe {
             std::env::remove_var(CELL_MERGE_ENV);
@@ -2812,7 +2812,7 @@ while I was typing the next queue item\n\
 
     #[test]
     fn cell_merge_opcapture_default_on_and_master_kill_switch_gates_it() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         // Default-ON: both vars absent ⇒ opcapture enabled.
         unsafe {
             std::env::remove_var(CELL_MERGE_ENV);
@@ -3045,7 +3045,7 @@ working on it
     /// recorded as exactly one `Content` conflict, ours-wins, theirs not present.
     #[test]
     fn genuine_same_level_content_conflict_is_recorded() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         let base = "<!-- agent:queue -->\n- do [#beta] orig\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- do [#beta] OURS-VERSION\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-VERSION\n<!-- /agent:queue -->\n";
@@ -3077,7 +3077,7 @@ working on it
     /// conflict, NOT silently dropped.
     #[test]
     fn both_sides_struck_different_text_is_a_content_conflict() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         let base = "<!-- agent:queue -->\n- do [#k] live\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- ~~do [#k] struck OURS~~\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- ~~do [#k] struck THEIRS~~\n<!-- /agent:queue -->\n";
@@ -3191,7 +3191,7 @@ working on it
     /// SAME exchange item converge with BOTH present and NO conflict.
     #[test]
     fn opcapture_on_disjoint_same_cell_edits_both_land_no_conflict() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         // A stable `#id`-keyed queue item: the identity survives a text edit on
         // EITHER side, so both edits land on the SAME item (the `(both changed)`
         // branch). ours edits the FRONT, theirs the BACK — disjoint regions.
@@ -3230,7 +3230,7 @@ working on it
     /// recorded `Content` conflict, ours-wins, theirs absent.
     #[test]
     fn opcapture_on_same_region_overlap_still_conflicts() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         let base = "<!-- agent:queue -->\n- do [#beta] original\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- do [#beta] OURS-ONLY\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- do [#beta] THEIRS-ONLY\n<!-- /agent:queue -->\n";
@@ -3272,7 +3272,7 @@ working on it
     /// even DISJOINT same-cell edits record a conflict and drop theirs.
     #[test]
     fn opcapture_off_legacy_owner_wins_unchanged() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         let base = "<!-- agent:queue -->\n- do [#beta] the original answer body here\n<!-- /agent:queue -->\n";
         let ours = "<!-- agent:queue -->\n- do [#beta] the EDITED answer body here\n<!-- /agent:queue -->\n";
         let theirs = "<!-- agent:queue -->\n- do [#beta] the original answer body THERE!\n<!-- /agent:queue -->\n";
@@ -3319,7 +3319,7 @@ working on it
         ours: &str,
         theirs: &str,
     ) -> CellMergeOutcome {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         // SAFETY: single-threaded under ENV_LOCK; restored before unlock.
         unsafe {
             match value {
@@ -3421,7 +3421,7 @@ working on it
         // Disjoint same-cell edits with opcapture ON: clean op-merge, no conflict,
         // so the conflict-marker gate has nothing to surface.
         {
-            let _g = ENV_LOCK.lock().unwrap();
+            let _g = ENV_LOCK.lock();
             let dbase = "<!-- agent:queue -->\n- do [#beta] the original answer body here\n<!-- /agent:queue -->\n";
             let dours = "<!-- agent:queue -->\n- do [#beta] the EDITED answer body here\n<!-- /agent:queue -->\n";
             let dtheirs = "<!-- agent:queue -->\n- do [#beta] the original answer body THERE!\n<!-- /agent:queue -->\n";
@@ -3521,7 +3521,7 @@ working on it
     /// (#provauth1/#provauth4 flipped the marker default to OFF).
     #[test]
     fn conflict_markers_gate_default_off_with_optin() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         // Master stays default-ON (absent) throughout the sub-gate checks.
         unsafe {
             std::env::remove_var(CELL_MERGE_ENV);
@@ -3754,7 +3754,7 @@ working on it
     /// branch's engine additions.
     #[test]
     fn op_routed_same_cell_inherits_conflict_surfacing() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         // Force the conflict-marker sub-gate ON deterministically.
         unsafe {
             std::env::set_var(CELL_MERGE_CONFLICT_MARKERS_ENV, "1");
@@ -3803,7 +3803,7 @@ working on it
     /// converge with BOTH preserved and NO conflict.
     #[test]
     fn op_routed_disjoint_same_cell_edits_inherit_op_level_merge() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = ENV_LOCK.lock();
         // Ensure the opcapture sub-gate is at its default-ON behavior.
         unsafe {
             std::env::remove_var(CELL_MERGE_OPCAPTURE_ENV);

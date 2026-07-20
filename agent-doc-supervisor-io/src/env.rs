@@ -139,7 +139,7 @@ impl Default for EnvSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn resolve_inherit_plus_overlay() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = ENV_LOCK.lock();
         let _g_keep = EnvGuard::set("AGENT_DOC_ENV_TEST_KEEP", "parent_value");
         let _g_over = EnvGuard::set("AGENT_DOC_ENV_TEST_OVERRIDE", "parent");
 
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn resolve_unset_removes_parent_key() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = ENV_LOCK.lock();
         let _g = EnvGuard::set("AGENT_DOC_ENV_TEST_DROP", "parent");
         let spec = EnvSpec {
             inherit_parent: true,
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn resolve_expansion_uses_parent_env() {
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = ENV_LOCK.lock();
         let _g = EnvGuard::set("AGENT_DOC_ENV_TEST_BASE", "/parent/base");
         let spec = EnvSpec {
             inherit_parent: true,
@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn resolve_sealed_drops_parent() {
         // Pick a key that is effectively always present in any test env.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = ENV_LOCK.lock();
         let _g = EnvGuard::set("AGENT_DOC_ENV_TEST_SEAL_WITNESS", "present");
         let spec = EnvSpec {
             inherit_parent: false,
@@ -294,7 +294,7 @@ mod tests {
         // Demonstrate that once resolve() has returned, the caller's map is
         // frozen — later parent-env mutations do not leak into it. This is
         // why state.rs should cache the resolved map across restarts.
-        let _env_lock = ENV_LOCK.lock().unwrap();
+        let _env_lock = ENV_LOCK.lock();
         let _env_guard = EnvGuard::unset("AGENT_DOC_ENV_TEST_POSTRESOLVE");
         let spec = EnvSpec {
             inherit_parent: true,

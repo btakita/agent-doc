@@ -36,10 +36,10 @@ impl agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState for SupervisorS
     }
 
     fn write_child_pty(&self, bytes: &[u8]) -> Result<(), String> {
-        let guard = self.inject_writer.lock().unwrap();
+        let guard = self.inject_writer.lock();
         match guard.as_ref() {
             Some(writer_arc) => {
-                let mut writer = writer_arc.lock().unwrap();
+                let mut writer = writer_arc.lock();
                 writer
                     .write_all_blocking(bytes)
                     .map_err(|err| format!("write error: {err}"))
@@ -79,7 +79,7 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
     }
 
     fn set_restart_mode(&self, mode: String) {
-        *self.restart_mode.lock().unwrap() = mode;
+        *self.restart_mode.lock() = mode;
     }
 
     fn set_restart_requested(&self, requested: bool) {
@@ -114,14 +114,13 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcSnapshotState for SupervisorShar
     }
 
     fn supervisor_state_label(&self) -> String {
-        let state = self.supervisor_state.lock().unwrap();
+        let state = self.supervisor_state.lock();
         state.as_str().to_string()
     }
 
     fn actor_state_label(&self) -> Option<String> {
         self.actor_state
             .lock()
-            .unwrap()
             .map(|state| state.as_str().to_string())
     }
 
@@ -282,9 +281,9 @@ mod tests {
     fn handle_ipc_inject_normalizes_submit_newline_before_writing() {
         let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         let written = Arc::new(Mutex::new(Vec::new()));
-        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-            Box::new(RecordingWriter(written.clone())),
-        ))));
+        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
+            RecordingWriter(written.clone()),
+        )))));
 
         let response = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
             IpcMethod::Inject {
@@ -295,7 +294,7 @@ mod tests {
 
         assert!(response.ok);
         assert_eq!(
-            written.lock().unwrap().as_slice(),
+            written.lock().as_slice(),
             b"agent-doc tasks/software/tsift.md\r"
         );
     }
@@ -322,9 +321,9 @@ mod tests {
             None,
         ));
         let written = Arc::new(Mutex::new(Vec::new()));
-        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-            Box::new(RecordingWriter(written.clone())),
-        ))));
+        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
+            RecordingWriter(written.clone()),
+        )))));
 
         let bytes = "agent-doc tasks/software/tsift.md\n";
         let first = agent_doc_supervisor_io::ipc::deliver_supervisor_inject(
@@ -348,11 +347,11 @@ mod tests {
         );
         assert!(shared.prompt_dispatch_grace_active(std::time::Duration::from_secs(15)));
         assert_eq!(
-            written.lock().unwrap().as_slice(),
+            written.lock().as_slice(),
             b"agent-doc tasks/software/tsift.md\r"
         );
 
-        *shared.prompt_dispatch_projection.lock().unwrap() = None;
+        *shared.prompt_dispatch_projection.lock() = None;
         let after_ready = agent_doc_supervisor_io::ipc::deliver_supervisor_inject(
             shared.as_ref(),
             bytes,
@@ -363,7 +362,7 @@ mod tests {
             agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryOutcome::Delivered
         );
         assert_eq!(
-            written.lock().unwrap().as_slice(),
+            written.lock().as_slice(),
             b"agent-doc tasks/software/tsift.md\ragent-doc tasks/software/tsift.md\r"
         );
     }
@@ -377,9 +376,9 @@ mod tests {
         let shared = Arc::new(SupervisorShared::new("test", "test-instance".to_string()));
         shared.set_capability_proof_gate(CapabilityProofGate::Pending, None);
         let written = Arc::new(Mutex::new(Vec::new()));
-        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-            Box::new(RecordingWriter(written.clone())),
-        ))));
+        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
+            RecordingWriter(written.clone()),
+        )))));
         let response = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
             IpcMethod::Inject {
                 bytes: "agent-doc tasks/software/tsift.md\n".to_string(),
@@ -389,7 +388,7 @@ mod tests {
 
         assert!(response.ok, "{response:?}");
         assert_eq!(
-            written.lock().unwrap().as_slice(),
+            written.lock().as_slice(),
             b"agent-doc tasks/software/tsift.md\r"
         );
     }
@@ -447,9 +446,9 @@ mod tests {
         );
 
         let written = Arc::new(Mutex::new(Vec::new()));
-        *shared.inject_writer.lock().unwrap() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(
-            Box::new(RecordingWriter(written.clone())),
-        ))));
+        *shared.inject_writer.lock() = Some(Arc::new(Mutex::new(SharedPtyWriter::new(Box::new(
+            RecordingWriter(written.clone()),
+        )))));
         let clear = agent_doc_supervisor_io::ipc::handle_supervisor_ipc(
             IpcMethod::Clear {
                 bytes: "/clear".to_string(),
@@ -459,7 +458,7 @@ mod tests {
         assert!(clear.ok, "clear must bypass the dispatch gate: {clear:?}");
         // Delivery matches the Inject path: trailing-newline normalization only,
         // no spurious CR added when the control text has none.
-        assert_eq!(written.lock().unwrap().as_slice(), b"/clear");
+        assert_eq!(written.lock().as_slice(), b"/clear");
     }
     #[test]
     fn handle_ipc_stop_bypasses_failed_capability_proof() {

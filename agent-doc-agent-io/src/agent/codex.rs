@@ -51,12 +51,13 @@
 //! - send_fork_args: verifies fork (resume --last) command
 
 use anyhow::Result;
+use parking_lot::Mutex;
 use std::collections::{HashSet, VecDeque};
 use std::io::BufRead;
 use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use super::{Agent, AgentResponse};
@@ -188,16 +189,11 @@ fn managed_network_child_proof_cache() -> &'static Mutex<HashSet<String>> {
 }
 
 fn managed_network_child_proof_is_cached(key: &str) -> bool {
-    managed_network_child_proof_cache()
-        .lock()
-        .map(|cache| cache.contains(key))
-        .unwrap_or(false)
+    managed_network_child_proof_cache().lock().contains(key)
 }
 
 fn remember_managed_network_child_proof(key: String) {
-    if let Ok(mut cache) = managed_network_child_proof_cache().lock() {
-        cache.insert(key);
-    }
+    managed_network_child_proof_cache().lock().insert(key);
 }
 
 fn env_map_as_overrides(
@@ -1146,9 +1142,7 @@ impl Codex {
                 let mut reader = std::io::BufReader::new(stderr);
                 let mut content = String::new();
                 let _ = reader.read_to_string(&mut content);
-                if let Ok(mut guard) = buf.lock() {
-                    *guard = content;
-                }
+                *buf.lock() = content;
             }))
         } else {
             None
@@ -1296,10 +1290,7 @@ impl CodexStreamIterator {
         if let Some(handle) = self.stderr_handle.take() {
             let _ = handle.join();
         }
-        self.stderr_buf
-            .lock()
-            .map(|g| g.clone())
-            .unwrap_or_default()
+        self.stderr_buf.lock().clone()
     }
 
     fn restart_fresh_after_resume_capability_drift(&mut self) -> Result<()> {

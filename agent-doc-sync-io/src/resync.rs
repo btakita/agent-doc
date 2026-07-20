@@ -1500,7 +1500,7 @@ fn apply_stash_ttl_prune(tmux: &Tmux) {
 mod th {
     use super::*;
     use tmux_router::{IsolatedTmux, RegistryEntry as SessionEntry};
-    pub(crate) static TMUX_START_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    pub(crate) static TMUX_START_MUTEX: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
     pub(crate) struct ScopedCurrentDir {
         prev_cwd: std::path::PathBuf,
         _env_guard: crate::test_support::ProcessGlobalLockGuard,
@@ -1524,10 +1524,8 @@ mod th {
             let _ = std::env::set_current_dir(&self.prev_cwd);
         }
     }
-    pub(crate) fn tmux_start_lock() -> std::sync::MutexGuard<'static, ()> {
-        TMUX_START_MUTEX
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    pub(crate) fn tmux_start_lock() -> parking_lot::MutexGuard<'static, ()> {
+        TMUX_START_MUTEX.lock()
     }
     pub(crate) fn test_cwd() -> std::path::PathBuf {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))

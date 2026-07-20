@@ -59,7 +59,7 @@ pub fn supervisor_auto_install_enabled(doc: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use parking_lot::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn supervisor_feature_knobs_resolve_from_frontmatter_over_project() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK.lock();
         let _recycle = EnvGuard::unset(SUPERVISOR_AUTO_RECYCLE_ENV);
         let _restart = EnvGuard::unset(AGENT_CHANGE_RESTART_ENV);
         let _install = EnvGuard::unset(SUPERVISOR_AUTO_INSTALL_ENV);
@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn supervisor_feature_knobs_resolve_env_over_frontmatter() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK.lock();
         let _recycle = EnvGuard::set(SUPERVISOR_AUTO_RECYCLE_ENV, "off");
         let _restart = EnvGuard::set(AGENT_CHANGE_RESTART_ENV, "off");
         let _install = EnvGuard::set(SUPERVISOR_AUTO_INSTALL_ENV, "off");

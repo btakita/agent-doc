@@ -119,9 +119,7 @@ fn encode_columnar_ops(ops: &[TextOp]) -> Result<Vec<u8>> {
                 columns.origin_present.push(1);
                 let origin_counter =
                     i64::try_from(origin.counter()).context("origin counter exceeds i64")?;
-                columns
-                    .origin_counter_delta
-                    .push(counter - origin_counter);
+                columns.origin_counter_delta.push(counter - origin_counter);
                 columns.origin_peer.push(origin.peer());
             }
             None => columns.origin_present.push(0),
@@ -148,8 +146,8 @@ fn decode_columnar_ops(compressed: &[u8]) -> Result<Vec<TextOp>> {
     let compressed = BASE64_STANDARD
         .decode(compressed)
         .context("decode columnar text-op base64")?;
-    let packed = zstd::stream::decode_all(compressed.as_slice())
-        .context("decompress columnar text ops")?;
+    let packed =
+        zstd::stream::decode_all(compressed.as_slice()).context("decompress columnar text ops")?;
     let columns: ColumnarOps =
         rmp_serde::from_slice(&packed).context("decode columnar text ops")?;
 
@@ -163,7 +161,12 @@ fn decode_columnar_ops(compressed: &[u8]) -> Result<Vec<TextOp>> {
     let id_pairs = absolute_counters
         .iter()
         .zip(columns.id_peer.iter())
-        .map(|(counter, peer)| Ok((u64::try_from(*counter).context("negative op counter")?, *peer)))
+        .map(|(counter, peer)| {
+            Ok((
+                u64::try_from(*counter).context("negative op counter")?,
+                *peer,
+            ))
+        })
         .collect::<Result<Vec<_>>>()?;
     let ids = opids_from_pairs(&id_pairs)?;
 
@@ -588,7 +591,10 @@ mod tests {
         let id = ops[0].id;
         let via_tuple: OpId =
             rmp_serde::from_slice(&rmp_serde::to_vec(&(id.counter(), id.peer())).unwrap()).unwrap();
-        assert_eq!(via_tuple, id, "OpId must serialize as a (counter, peer) pair");
+        assert_eq!(
+            via_tuple, id,
+            "OpId must serialize as a (counter, peer) pair"
+        );
     }
 
     #[test]

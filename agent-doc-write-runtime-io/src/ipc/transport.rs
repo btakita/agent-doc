@@ -1983,7 +1983,8 @@ mod late_fallback_patch_guard_tests {
 
     #[test]
     fn ipc_dedupe_full_content_redelivery_is_disabled() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
         use std::time::Duration;
 
         let tmp = TempDir::new().unwrap();
@@ -2005,7 +2006,7 @@ mod late_fallback_patch_guard_tests {
         let server = std::thread::spawn(move || {
             agent_doc_ipc_io::start_listener(&listener_root, move |msg| {
                 let payload: serde_json::Value = serde_json::from_str(msg).ok()?;
-                *listener_seen.lock().unwrap() = Some(payload.clone());
+                *listener_seen.lock() = Some(payload.clone());
                 if let Some(full_content) = payload.get("fullContent").and_then(|v| v.as_str()) {
                     fs::write(&listener_doc, full_content).ok()?;
                 }
@@ -2046,7 +2047,7 @@ mod late_fallback_patch_guard_tests {
             "disabled full-content redelivery must not mutate the editor-visible file"
         );
         assert!(
-            seen_payload.lock().unwrap().is_none(),
+            seen_payload.lock().is_none(),
             "listener should not receive a disabled full-content payload"
         );
         let ops_log = fs::read_to_string(agent_doc_dir.join("logs/ops.log")).unwrap();

@@ -435,14 +435,14 @@ mod tests {
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "---\nagent_doc_session: queue-session\n---\n").unwrap();
 
-        let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let captured = std::sync::Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
         let captured_for_ipc = captured.clone();
         let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             dir.path(),
             "queue-session",
             move |method| match method {
                 IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    captured_for_ipc.lock().unwrap().push(bytes);
+                    captured_for_ipc.lock().push(bytes);
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::State
@@ -459,7 +459,7 @@ mod tests {
         let result = dispatch_command(&item, &ctx).unwrap();
         assert!(matches!(result, DispatchResult::Ok));
         assert_eq!(
-            captured.lock().unwrap().as_slice(),
+            captured.lock().as_slice(),
             &[
                 agent_doc_tmux_commands::submitted_text_without_trailing_line_endings("/doctor")
                     .to_string()
@@ -495,14 +495,14 @@ mod tests {
         let doc = dir.path().join("doc.md");
         std::fs::write(&doc, "---\nagent_doc_session: queue-session\n---\n").unwrap();
 
-        let captured = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let captured = std::sync::Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
         let captured_for_ipc = captured.clone();
         let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             dir.path(),
             "queue-session",
             move |method| match method {
                 IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    captured_for_ipc.lock().unwrap().push(bytes);
+                    captured_for_ipc.lock().push(bytes);
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::State
@@ -520,7 +520,7 @@ mod tests {
 
         assert!(result.is_err());
         assert!(
-            captured.lock().unwrap().is_empty(),
+            captured.lock().is_empty(),
             "queued /clear must go through session clear guards, not raw supervisor/tmux injection"
         );
 

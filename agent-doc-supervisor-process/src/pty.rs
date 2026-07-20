@@ -779,14 +779,12 @@ mod tests {
     struct EnvGuard {
         key: &'static str,
         prior: Option<String>,
-        _lock: std::sync::MutexGuard<'static, ()>,
+        _lock: parking_lot::MutexGuard<'static, ()>,
     }
 
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
-            let lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let lock = agent_doc_harness::prompt_source::TEST_ENV_LOCK.lock();
             let prior = std::env::var(key).ok();
             unsafe {
                 std::env::set_var(key, value);

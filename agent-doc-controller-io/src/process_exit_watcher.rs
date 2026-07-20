@@ -25,9 +25,10 @@
 //! authority gate never blocks on it. Tests never install this watcher — they install a
 //! fake one and drive synthetic exit events (see `editor_attach`'s SimWorld tests).
 
+use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -59,17 +60,11 @@ impl OsProcessExitWatcher {
 
 impl ProcessExitWatcher for OsProcessExitWatcher {
     fn watch(&self, pid: u32) {
-        self.watched
-            .lock()
-            .expect("process-exit watcher lock")
-            .insert(pid);
+        self.watched.lock().insert(pid);
     }
 
     fn unwatch(&self, pid: u32) {
-        self.watched
-            .lock()
-            .expect("process-exit watcher lock")
-            .remove(&pid);
+        self.watched.lock().remove(&pid);
     }
 }
 
@@ -83,14 +78,7 @@ pub fn install_process_exit_watcher(project_root: PathBuf) {
 fn run_poll_loop(watched: Arc<Mutex<HashSet<u32>>>, project_root: PathBuf) {
     loop {
         thread::sleep(POLL_INTERVAL);
-        let snapshot: Vec<u32> = {
-            watched
-                .lock()
-                .expect("process-exit watcher lock")
-                .iter()
-                .copied()
-                .collect()
-        };
+        let snapshot: Vec<u32> = { watched.lock().iter().copied().collect() };
         for pid in snapshot {
             // Check liveness outside the lock (it may syscall).
             if !process_is_live(pid) {
@@ -104,10 +92,7 @@ fn run_poll_loop(watched: Arc<Mutex<HashSet<u32>>>, project_root: PathBuf) {
                     &project_root,
                     pid as u64,
                 );
-                watched
-                    .lock()
-                    .expect("process-exit watcher lock")
-                    .remove(&pid);
+                watched.lock().remove(&pid);
             }
         }
     }

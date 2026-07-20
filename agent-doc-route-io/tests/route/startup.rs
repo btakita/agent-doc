@@ -1038,7 +1038,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let supervisor_instance_id = "busy-reroute-supervisor".to_string();
         let supervisor_instance_id_for_ipc = supervisor_instance_id.clone();
         let ipc_tmux = iso.clone();
-        let injected_pane = Arc::new(std::sync::Mutex::new(None::<String>));
+        let injected_pane = Arc::new(parking_lot::Mutex::new(None::<String>));
         let injected_pane_for_ipc = injected_pane.clone();
         let mut ipc = agent_doc_supervisor_io::ipc::SupervisorIpc::start(
             dir.path(),
@@ -1060,7 +1060,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                 IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    if let Some(target) = injected_pane_for_ipc.lock().unwrap().clone() {
+                    if let Some(target) = injected_pane_for_ipc.lock().clone() {
                         let _ = ipc_tmux.send_keys(&target, &bytes);
                     }
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
@@ -1101,7 +1101,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 let captured = agent_doc_tmux_io::capture_pane(&iso_for_thread, &replacement_pane)
                     .unwrap_or_default();
                 if captured.contains("> ") {
-                    *injected_pane_for_thread.lock().unwrap() = Some(replacement_pane.clone());
+                    *injected_pane_for_thread.lock() = Some(replacement_pane.clone());
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(50));
@@ -1319,8 +1319,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_waits_for_busy_restart_handoff_before_retrying_route() {
+        use parking_lot::Mutex;
         use std::sync::{
-            Arc, Mutex,
+            Arc,
             atomic::{AtomicBool, Ordering},
         };
 
@@ -1391,7 +1392,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
                 IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                    injects_for_ipc.lock().unwrap().push(bytes.clone());
+                    injects_for_ipc.lock().push(bytes.clone());
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
@@ -1474,7 +1475,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert!(restart_called.load(Ordering::Relaxed));
         assert_eq!(routed, replacement_pane);
         assert!(
-            *injects.lock().unwrap()
+            *injects.lock()
                 == vec![
                     agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
                         &HarnessConfig::codex().trigger_command(&file_path)
@@ -1673,7 +1674,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_prefers_authoritative_actor_dispatch_target() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -1741,7 +1743,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "restart_count": 0
             })),
             IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
@@ -1789,7 +1791,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             &HarnessConfig::codex().trigger_command(&file_path),
         )
         .to_string();
-        assert_eq!(*injects.lock().unwrap(), vec![trigger]);
+        assert_eq!(*injects.lock(), vec![trigger]);
         assert_eq!(
             agent_doc_session_registry_io::lookup(session_id)
                 .unwrap()
@@ -1808,7 +1810,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_prefers_authoritative_actor_dispatch_target() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -1879,7 +1882,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "restart_count": 0
             })),
             IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
@@ -1903,7 +1906,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         assert_eq!(resolved, actor_pane);
 
         assert!(
-            injects.lock().unwrap().is_empty(),
+            injects.lock().is_empty(),
             "ready authoritative dispatch-only path should submit through tmux pane input instead of supervisor inject"
         );
         assert_eq!(
@@ -1935,8 +1938,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_does_not_restart_after_tracked_codex_clear() {
+        use parking_lot::Mutex;
         use std::sync::{
-            Arc, Mutex,
+            Arc,
             atomic::{AtomicBool, Ordering},
         };
 
@@ -2022,7 +2026,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "restart_count": 0
             })),
             IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::Restart { .. } => {
@@ -2053,7 +2057,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
 
         assert!(
-            injects.lock().unwrap().is_empty(),
+            injects.lock().is_empty(),
             "dispatch-only reroute after session clear should use pane submit instead of supervisor inject"
         );
 
@@ -2079,8 +2083,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatch_only_accepts_live_submit_without_codex_hook_proof() {
+        use parking_lot::Mutex;
         use std::sync::{
-            Arc, Mutex,
+            Arc,
             atomic::{AtomicBool, Ordering},
         };
 
@@ -2160,7 +2165,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "restart_count": 0
             })),
             IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::Restart { .. } => {
@@ -2188,7 +2193,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         );
         assert_eq!(pane, actor_pane);
         assert!(
-            injects.lock().unwrap().is_empty(),
+            injects.lock().is_empty(),
             "ready authoritative dispatch-only path should stay on direct pane submit"
         );
         assert!(
@@ -2201,7 +2206,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_fails_closed_for_blocked_or_closed_authoritative_actor() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
 
         for (actor_state, reason) in [
             ("blocked", "the authoritative actor is blocked"),
@@ -2270,7 +2276,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                         "restart_count": 0
                     })),
                     IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                        injects_for_ipc.lock().unwrap().push(bytes.clone());
+                        injects_for_ipc.lock().push(bytes.clone());
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
                     IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
@@ -2297,7 +2303,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "expected {actor_state} actor failure to mention `{reason}`, got: {message}"
             );
             assert!(
-                injects.lock().unwrap().is_empty(),
+                injects.lock().is_empty(),
                 "route must not inject a duplicate reopen while the authoritative actor is {actor_state}"
             );
             assert_eq!(
@@ -2328,7 +2334,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn resolve_or_create_pane_dispatches_busy_authoritative_actor_when_prompt_target_pending() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -2385,7 +2392,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "restart_count": 0
             })),
             IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
@@ -2433,7 +2440,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             &HarnessConfig::claude().trigger_command(&file_path),
         )
         .to_string();
-        assert_eq!(*injects.lock().unwrap(), vec![trigger]);
+        assert_eq!(*injects.lock(), vec![trigger]);
         assert_eq!(
             agent_doc_session_registry_io::lookup(session_id)
                 .unwrap()
@@ -2446,7 +2453,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn route_waits_for_starting_authoritative_actor_ready_before_dispatch() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -2532,7 +2540,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "restart_count": 0
             })),
             IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
@@ -2582,7 +2590,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             &HarnessConfig::codex().trigger_command(&file_path),
         )
         .to_string();
-        assert_eq!(*injects.lock().unwrap(), vec![trigger]);
+        assert_eq!(*injects.lock(), vec![trigger]);
         assert_eq!(
             agent_doc_session_registry_io::lookup(session_id)
                 .unwrap()
@@ -2595,7 +2603,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn route_refreshes_closed_starting_authoritative_actor_without_start_timeout() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -2669,7 +2678,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "restart_count": 0
             })),
             IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
@@ -2696,7 +2705,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "closed actor refresh should surface the terminal state instead of the stale starting gate: {message}"
         );
         assert!(
-            injects.lock().unwrap().is_empty(),
+            injects.lock().is_empty(),
             "route must not queue a reopen once the starting actor refreshes to closed"
         );
 
@@ -2705,7 +2714,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn route_dispatch_only_fails_closed_for_starting_authoritative_actor_without_ready_state() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -2780,7 +2790,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "restart_count": 0
             })),
             IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
@@ -2809,7 +2819,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "starting actor failure should explain the state gate: {message}"
         );
         assert!(
-            injects.lock().unwrap().is_empty(),
+            injects.lock().is_empty(),
             "dispatch-only authoritative reroute must not queue through supervisor IPC while the actor is starting"
         );
 
@@ -2824,7 +2834,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn route_dispatch_only_refuses_starting_authoritative_actor_after_tracked_clear_until_ready() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc/codex-hooks/sessions")).unwrap();
@@ -2913,7 +2924,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "restart_count": 0
             })),
             IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
@@ -2942,7 +2953,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             "starting actor after /clear should fail before input when no prompt is visible: {message}"
         );
         assert!(
-            injects.lock().unwrap().is_empty(),
+            injects.lock().is_empty(),
             "dispatch-only reroute after /clear should not queue through supervisor IPC"
         );
 
@@ -2962,7 +2973,8 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
     #[test]
     #[ignore = "live tmux integration test; run `make tmux-ci`"]
     fn alive_registered_pane_uses_supervisor_pid_fallback_when_argv_loses_file_path() {
-        use std::sync::{Arc, Mutex};
+        use parking_lot::Mutex;
+        use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
@@ -2998,7 +3010,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": mock_agent_pid })),
             IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
             IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
-                injects_for_ipc.lock().unwrap().push(bytes.clone());
+                injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
             IpcMethod::Restart { .. } | IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => {
@@ -3023,7 +3035,7 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         .expect("route should recover the live owner via supervisor pid");
         assert_eq!(resolved, pane);
         assert!(
-            *injects.lock().unwrap()
+            *injects.lock()
                 == vec![
                     agent_doc_tmux_commands::submitted_text_without_trailing_line_endings(
                         &HarnessConfig::codex().trigger_command(&file_path)

@@ -563,9 +563,10 @@ pub fn next_generation(file: &Path, session_id: &str) -> Result<OwnershipGenerat
 // `DocumentActor::submit`; phase 1 keeps the existing call sites unchanged so
 // the runtime can land independently shippable.
 
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use std::thread::{self, JoinHandle};
 
 use agent_doc_document_realtime::session_ops::SessionOpKind;
@@ -736,10 +737,7 @@ impl SessionActorRuntime {
     /// Get the actor for `doc_id`, spawning it (rooted at `base_dir`) on first
     /// use. Subsequent calls with the same id return the same mailbox.
     pub fn actor_for(&self, doc_id: &str, base_dir: &Path) -> Arc<DocumentActor> {
-        let mut actors = self
-            .actors
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut actors = self.actors.lock();
         actors
             .entry(doc_id.to_string())
             .or_insert_with(|| Arc::new(DocumentActor::spawn(doc_id, base_dir.to_path_buf())))
@@ -749,10 +747,7 @@ impl SessionActorRuntime {
     /// Drop the actor for `doc_id` if present, returning whether one existed.
     /// The owner thread is joined when the last `Arc` is dropped.
     pub fn shutdown(&self, doc_id: &str) -> bool {
-        let mut actors = self
-            .actors
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut actors = self.actors.lock();
         actors.remove(doc_id).is_some()
     }
 }
@@ -1045,8 +1040,7 @@ mod tests {
         let started = record_session_start(&file, "session-hsw", "%30", "@8", 1).unwrap();
         assert_eq!(started.harness, "codex");
 
-        let switched =
-            set_record_harness_direct(&file, "session-hsw", "%30", "claude").unwrap();
+        let switched = set_record_harness_direct(&file, "session-hsw", "%30", "claude").unwrap();
         // Stored normalized, so route's normalized `expected_harness` compares equal.
         assert_eq!(switched.harness, "claude-code");
         // An identity correction, never a rebind.
@@ -1283,7 +1277,7 @@ mod tests {
             let observed = observed.clone();
             let rx = actor
                 .enqueue(SessionOpKind::WriteSubmit, move |ctx| {
-                    observed.lock().unwrap().push(seq);
+                    observed.lock().push(seq);
                     ctx.processed()
                 })
                 .unwrap();
@@ -1305,7 +1299,7 @@ mod tests {
         }
 
         assert_eq!(
-            *observed.lock().unwrap(),
+            *observed.lock(),
             (0..N).collect::<Vec<_>>(),
             "single-producer ops must execute in FIFO order"
         );
@@ -1395,19 +1389,15 @@ mod tests {
         let order: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
         let o1 = order.clone();
         let r1 = a1
-            .enqueue(SessionOpKind::QueueHead, move |_| {
-                o1.lock().unwrap().push(1)
-            })
+            .enqueue(SessionOpKind::QueueHead, move |_| o1.lock().push(1))
             .unwrap();
         let o2 = order.clone();
         let r2 = a2
-            .enqueue(SessionOpKind::QueueHead, move |_| {
-                o2.lock().unwrap().push(2)
-            })
+            .enqueue(SessionOpKind::QueueHead, move |_| o2.lock().push(2))
             .unwrap();
         r1.recv().unwrap();
         r2.recv().unwrap();
-        assert_eq!(*order.lock().unwrap(), vec![1, 2]);
+        assert_eq!(*order.lock(), vec![1, 2]);
 
         assert!(rt.shutdown("doc-A"));
         assert!(rt.shutdown("doc-B"));

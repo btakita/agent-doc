@@ -752,7 +752,7 @@ pub fn run_with_reap_policy(
         let writer_arc = Arc::new(Mutex::new(SharedPtyWriter::new(pty_writer)));
 
         // Update shared state
-        *shared.inject_writer.lock().unwrap() = Some(writer_arc.clone());
+        *shared.inject_writer.lock() = Some(writer_arc.clone());
         shared
             .child_pid
             .store(session.process_id().unwrap_or(0), Ordering::Relaxed);
@@ -974,7 +974,7 @@ pub fn run_with_reap_policy(
         // Clean up shared state (must happen before dropping session so the
         // inject_writer Arc is released before the pty master closes).
         shared.running.store(false, Ordering::Relaxed);
-        *shared.inject_writer.lock().unwrap() = None;
+        *shared.inject_writer.lock() = None;
         shared.child_pid.store(0, Ordering::Relaxed);
 
         // Drop the session to close the pty master. The reader thread holds a
@@ -1057,7 +1057,7 @@ pub fn run_with_reap_policy(
                 }
             }
             PostChildExitAction::AutoRestart => {
-                let mode = shared.restart_mode.lock().unwrap().clone();
+                let mode = shared.restart_mode.lock().clone();
                 first_run = mode == "fresh";
                 auto_trigger_next_launch = true;
                 restart_count += 1;
@@ -1114,7 +1114,7 @@ pub fn run_with_reap_policy(
         // path and surface the same restart/quit prompt as Ctrl+D.
         let policy_exit_code = supervisor_policy_exit_code(code, ctrl_c_forwarded_interrupt);
         let action = policy.on_exit(policy_exit_code);
-        *shared.supervisor_state.lock().unwrap() = policy.state;
+        *shared.supervisor_state.lock() = policy.state;
         let action_name = match &action {
             RestartAction::PromptUser => "prompt_user",
             RestartAction::RestartAfter { .. } => "restart_after",

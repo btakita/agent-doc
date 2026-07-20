@@ -497,7 +497,21 @@ So `no_live_registration` in the ops log never meant what it says. A real regist
 `ReplicaSignalOutcome` now carries `found` alongside `notified`, and the diagnosis distinguishes `no_live_registration` (plane empty — stale attachment inside agent-doc) from `delivery_failed_to_all:N` (registration exists, IPC failed) and `requested:N/M` (partial). Regression pins all four shapes.
 
 Closing this item: the probe it asked for is done and its stated hypothesis is falsified. The next probe has a real target — with the fresh binary, re-run the wedge and read the new token. `delivery_failed_to_all` sends you to `send_message_to_pid` and the editor's socket; `no_live_registration` sends you to the attachment path. Previously both looked identical.
-<!-- agent:boundary:37836615 -->
+
+### Re: destructive cascade — queue activation erased by unpersisted state — opus-4-8
+
+> **Queue prompt:** do [#f4d5]
+
+Fixed in `9b3567f26`.
+
+The item said activation logic is safety-critical and the failing document's state was unavailable to verify against. It turns out the fix does not need that state, because `resolve_activation` already reports the dangerous shape exactly: an operator `queue: start` over a body with no remaining prompts yields `active: false` **with `consumed_start_fence: true`**. That fence is the evidence that the emptiness may be unpersisted rather than real — and `need_clear_active` was ignoring it.
+
+So the guard is one clause: do not revoke an activation whose start fence was consumed **this cycle**. Deactivating on known-stale data is the unsafe direction, and the moment right after consuming the operator's fence is precisely when the body is least trustworthy — a previous cycle's `queue_maintenance_not_persisted` leaves the old text in effect while the operator sees their `start` reverted to `stop`.
+
+Holding the activation costs one cycle and nothing else: a queue that genuinely is empty has no fresh fence on the next pass and clears normally. The failure it prevents — silently erasing an explicit operator action — is unbounded by comparison.
+
+Regression pins the shape at the `resolve_activation` level, so if that ever stops reporting `consumed_start_fence` for this case the guard's evidence disappears loudly rather than silently.
+<!-- agent:boundary:ad881be3 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -525,9 +539,9 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ do [#mtds]
 - ⏭️ do [#queuecontmirror]
 - ⏭️ do [#hvw0]
-- do [#bbpe]
+- ⏭️ do [#bbpe]
 - ~~do [#mrnh]~~
-- 🚧 do [#f4d5]
+- ~~do [#f4d5]~~
 - do [#5d9f]
 - do [#7n20]
 - do [#42xb]
@@ -620,7 +634,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
 - [ ] [#f6j3] [recommended] Stale branch fix/editor-authority-no-disk-repair (worktree src/agent-doc-editor-authority-fix) has 2 unmerged commits targeting the editor-authority blocker, but is 5 days / 50 commits behind main and still carries the OLD error wording ('bounded publish-live-buffer request', 'reload or save the editor buffer') where main now says 'bounded Lazily-current observation request ... operator_action=none'. Main has already reworked that area. Decide explicitly: rebase and salvage, or delete the branch+worktree. Do NOT merge as-is
 - [ ] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
-- [ ] 🚧 [#f4d5] Destructive cascade: a queue-maintenance persist failure erases the operator's queue activation. Reported live from a second session on brookebrodack-dev.md: operator flips frontmatter to `queue: start`, preflight reads the (unpersisted, therefore empty) queue body as drained and strips the activation back to `queue: stop`. Path: `agent-doc-preflight-io/src/lib.rs:3485` — `queue_has_prompts`/`drained_residue` feed `need_clear_active` and `need_clear_drained_body`, all computed from a queue body that a PREVIOUS cycle failed to persist. Deactivating on known-stale data is unsafe: when this cycle could not persist queue maintenance, preflight must preserve operator activation rather than infer 'drained'. Not fixed here — activation logic is safety-critical and I did not have the failing document's state to verify against.
 - [ ] [#5d9f] Second session observed that finalize's commit boundary persists queue maintenance through a path standalone `agent-doc queue sync` never reaches — the queue landed on the next write after three straight sync failures plus an `admin reload-lib`. Two persistence paths with different reachability is itself the bug surface. Determine why the commit path succeeds where queue sync fails, and route queue sync through whatever the commit boundary does. Result: queue text populates but stays UNARMED (`queue_drainable_head_count: 0`, `queue_continuation_required: false`), so the auto-loop still never gets the head.
 - [ ] [#7n20] Finish the ensure-window liveness fix across the CLI/controller process boundary. `bbc50c26e` extends the 400ms missing-replica ensure window when a `crdt_replica_register` proves the editor is alive, but the counter is process-global: on the split path the register lands controller-side while `ensure_document_model` runs CLI-side, so live telemetry still shows `window_extended=false` and the wedge persists. Two options: carry the liveness proof across IPC, or run the ensure controller-side where the registration already is. Do NOT route preflight's initial current-doc resolve through the ensure path — tried in this cycle and reverted; it violates `preflight_missing_editor_model_pauses_without_reading_disk_authority` and made preflight resolve to DISK content instead of waiting for the attached editor.
 - [ ] [#42xb] Bootstrap size is the wedge's real driver — investigate shrinking it. Live `crdt_replica_register` on agent-doc-bugs2.md carries 1,312,802 bytes for a 47KB document, i.e. ~28x the text in accumulated CRDT history, and the failures began when bootstrap crossed ~1.3MB (earlier registers at 358-437KB succeeded). Even a corrected ensure window only buys time; compaction/GC of replica history would remove the pressure. Check whether `agent-doc compact` reduces the register bootstrap, and whether superseded-generation pruning actually reclaims history.

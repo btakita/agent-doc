@@ -194,6 +194,48 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// `#ay80`: pin the ignore invariant WITHOUT depending on how far a
+    /// finalize pipeline gets.
+    ///
+    /// `finalize_skips_ignored_untracked_session_doc` asserts a specific stderr
+    /// line emitted late in that pipeline, so it passes locally (live
+    /// controller/editor) and fails in GitHub Actions (none of those), where
+    /// finalize can fail earlier for an unrelated reason and the expected line
+    /// never appears. The rule being protected — an untracked path matched by
+    /// `.gitignore` is never staged — is decidable from git alone, so test it
+    /// where the environment cannot change the answer.
+    #[test]
+    fn ignored_untracked_path_is_detected_independently_of_any_pipeline() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        Command::new("git")
+            .current_dir(root)
+            .args(["init"])
+            .output()
+            .unwrap();
+        fs::create_dir_all(root.join("scratch")).unwrap();
+        fs::write(root.join(".gitignore"), "scratch/\n.agent-doc/\n").unwrap();
+        fs::write(root.join("scratch/session.md"), "body\n").unwrap();
+        fs::write(root.join("tracked.md"), "body\n").unwrap();
+
+        let ignored = Path::new("scratch/session.md");
+        assert!(
+            is_repo_path_ignored(root, ignored).unwrap(),
+            "`scratch/` in .gitignore must match scratch/session.md"
+        );
+        assert!(
+            is_untracked_repo_path_ignored(root, ignored).unwrap(),
+            "an untracked ignored path must report ignored — this is what blocks staging"
+        );
+
+        // The negative case: an unignored untracked path must NOT be reported
+        // ignored, or the guard would refuse legitimate commits.
+        assert!(
+            !is_repo_path_ignored(root, Path::new("tracked.md")).unwrap(),
+            "an unignored path must not match"
+        );
+    }
+
     #[test]
     fn tracked_modified_paths_lists_tracked_dirty_files_only() {
         let dir = tempfile::TempDir::new().unwrap();

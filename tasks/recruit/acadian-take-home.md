@@ -356,17 +356,38 @@ Done, all of it. **https://github.com/btakita/mag7-viewer** is public and anonym
 Superproject commit `e30a275ba`. `make check` passes from the new path: 33 backend tests, mypy clean, 56 frontend tests, typecheck, production build.
 
 Two loose ends I have not touched: the frontmatter still reads `agent: c` (harness-mismatch warning every preflight), and your next queue item — the reset button being misaligned — arrived while this was running and is unstruck.
-<!-- agent:boundary:26f8ace9 -->
+
+### Re: reset button alignment — opus-4-8
+
+> **Queue prompt:** The reset button is misaligned.
+
+Fixed — and it was my regression from the labels change two cycles ago, not a pre-existing flaw.
+
+**Cause.** The button was anchored `bottom: 1px` against the chart container. When I moved the date labels below the brush, that container grew by a label row, and the bottom-anchored button came down with it — landing level with the labels instead of the slider it resets. Your screenshot shows exactly that: the icon sitting a row too low, beside the dates rather than beside the handles.
+
+**Fix.** It now aligns to the *measured* vertical centre of the brush band, computed in the same layout effect that already measures the handles for label placement. The distinction matters beyond this one bug: a bottom-anchored control drifts every time anything is added underneath it, whereas one anchored to the thing it belongs to does not. If a legend or another row goes below the chart later, this stays put.
+
+**Verified:**
+
+| check | result |
+|---|---|
+| button centre vs brush centre | delta **0.00px** |
+| button bottom vs label row top | 180.9 vs 182.0 — clears it |
+| still right of the brush | yes |
+| labels present after reload | all 7 cards |
+
+I should name the pattern, since this is the second time the labels change has bitten: adding that row changed the chart container's height, and I did not re-check what else was positioned relative to that container. The absent-labels flake last cycle and this misalignment are both downstream of the same edit. A layout change that alters a container's box needs a sweep of everything anchored to it, not just a check that the new thing looks right.
+
+`make check` is green: 33 backend tests, mypy clean, 56 frontend tests, typecheck, production build.
+
+Pushed as `ae73125` on **btakita/mag7-viewer**; superproject gitlink at `3f35abcce`.
+<!-- agent:boundary:b86abb88 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
-- ~~Move the date selection tooltip below the selector ![img_7.png](img_7.png). Make sure the tooltip is always legible and does not obscure other UI data. Also handle when the two sliders are close together. Make sure the date tooltips do not overlap.~~
-- ~~What is UX best practice to support resetting the zoom from the mouse? Don't implement anything, just discuss.~~
-- ~~Support double-click zoom reset.~~
-- ~~Rename gh repo to mag7-viewer. Make sure documentation + code reflects new name. Rename submodule to mag7-viewer. make repo public~~
-- The reset button is misaligned ![img_8.png](img_8.png).
+- ~~The reset button is misaligned ![img_8.png](img_8.png).~~
 <!-- /agent:queue -->
 
 ## Backlog

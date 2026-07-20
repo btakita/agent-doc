@@ -1933,11 +1933,6 @@ fn auto_install_stderr_log_file(crate_root: &Path) -> Option<std::fs::File> {
         .ok()
 }
 
-#[cfg(not(unix))]
-fn auto_install_stderr_log_file(_crate_root: &Path) -> Option<std::fs::File> {
-    None
-}
-
 /// Run the auto-install sequence ONCE through `make install`. The Makefile owns
 /// the local-dev profile, incremental target dir, linker selection, and cdylib
 /// install flags. The target is idempotent, so retrying it is safe.
@@ -1953,9 +1948,11 @@ fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
     // child's stdio independent of route ownership; fd2 remains the fallback so
     // a log that cannot be opened degrades to today's behavior rather than
     // discarding build output.
+    #[cfg(unix)]
     let stderr_log = auto_install_stderr_log_file(crate_root);
     for (program, args) in steps {
         // `#restartstderrbleed` — never inherit stdio: fd1 is the agent pane.
+        #[cfg(unix)]
         let plan = match stderr_log.as_ref() {
             Some(file) => {
                 use std::os::fd::AsRawFd;
@@ -1965,6 +1962,8 @@ fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
             }
             None => agent_doc_supervisor::auto_install_stdio::auto_install_child_stdio_plan(),
         };
+        #[cfg(not(unix))]
+        let plan = agent_doc_supervisor::auto_install_stdio::auto_install_child_stdio_plan();
         let (stdin, stdout, stderr) = auto_install_child_stdio_from_plan(plan);
         let status = std::process::Command::new(program)
             .args(args)

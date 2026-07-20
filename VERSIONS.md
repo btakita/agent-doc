@@ -6,6 +6,11 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.8
+
+- **Windows release builds no longer type-check Unix-only auto-install file-descriptor routing.** The explicit log-fd stdio plan is now compiled only on Unix; Windows keeps its existing null-stdout/inherited-stderr plan.
+- **Formal checks track the current official TLA+ 1.8.0 artifact and recover from stale cached jars.** The pinned checksum now matches the release asset published by the TLA+ project, and a mismatched local cache is refreshed before verification.
+
 ## 0.35.7
 
 _JetBrains plugin 0.2.283._

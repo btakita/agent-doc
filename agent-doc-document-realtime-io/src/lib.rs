@@ -1951,34 +1951,6 @@ pub fn apply_canonical_replace_if_attached(
                             if ack_recovery.wait(file, source, live_editors)?
                                 == AckRecoveryWait::ForegroundDeadline
                             {
-                                // `#deliveryackcut`: the force-refresh probe went
-                                // unanswered, so any live member still holding
-                                // fan-out is a zombie. Retire it (never the last
-                                // one — see `retire_non_acking_live_members`) so
-                                // it stops wedging convergence for every LATER
-                                // operation, not just this one.
-                                match agent_doc_crdt_relay_io::retire_non_acking_live_members(file)
-                                {
-                                    Ok(retired) if !retired.is_empty() => {
-                                        agent_doc_ops_log_io::log_op(
-                                            file,
-                                            &format!(
-                                                "{source}_crdt_zombie_replica_retired file={} retired={:?} timeout_ms={} recovery=disconnect_then_reconnect_catch_up",
-                                                file.display(),
-                                                retired,
-                                                CRDT_ACK_RECOVERY_TIMEOUT_MS,
-                                            ),
-                                        );
-                                    }
-                                    Ok(_) => {}
-                                    Err(err) => agent_doc_ops_log_io::log_op(
-                                        file,
-                                        &format!(
-                                            "{source}_crdt_zombie_replica_retire_failed file={} error={err}",
-                                            file.display(),
-                                        ),
-                                    ),
-                                }
                                 let relay_write = pending_write
                                     .take()
                                     .expect("pending CRDT target must retain its write receipt");
@@ -2008,6 +1980,40 @@ pub fn apply_canonical_replace_if_attached(
                                         return Ok(Some(relay_write));
                                     }
                                     write_policy::CrdtWriteCompletion::BlockMissingRetention => {
+                                        // `#deliveryackcut`: no retained-delivery
+                                        // proof, so nothing will complete this
+                                        // asynchronously — the force-refresh probe
+                                        // went unanswered and the member holding
+                                        // fan-out is a zombie. Retire it so it
+                                        // stops wedging convergence for every
+                                        // LATER operation too. Deliberately NOT
+                                        // done on the retained path above: that
+                                        // path has a working async completion and
+                                        // retiring the replica would destroy the
+                                        // thing meant to complete it.
+                                        match agent_doc_crdt_relay_io::retire_non_acking_live_members(
+                                            file,
+                                        ) {
+                                            Ok(retired) if !retired.is_empty() => {
+                                                agent_doc_ops_log_io::log_op(
+                                                    file,
+                                                    &format!(
+                                                        "{source}_crdt_zombie_replica_retired file={} retired={:?} timeout_ms={} recovery=rebuild_realtime_then_editor_then_disk",
+                                                        file.display(),
+                                                        retired,
+                                                        CRDT_ACK_RECOVERY_TIMEOUT_MS,
+                                                    ),
+                                                );
+                                            }
+                                            Ok(_) => {}
+                                            Err(err) => agent_doc_ops_log_io::log_op(
+                                                file,
+                                                &format!(
+                                                    "{source}_crdt_zombie_replica_retire_failed file={} error={err}",
+                                                    file.display(),
+                                                ),
+                                            ),
+                                        }
                                         anyhow::bail!(
                                             "{source}: editor delivery ACK recovery for {} did not settle within {}ms and the exact canonical target lacks active retained-delivery proof; refusing closeout",
                                             file.display(),

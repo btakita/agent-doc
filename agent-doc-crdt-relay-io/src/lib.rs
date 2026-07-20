@@ -807,6 +807,28 @@ fn current_text_for_file_with_authority_inner(
         return Ok(CurrentText::EditorSyncPending);
     }
 
+    // `#dropcountzero`: a hub with no live replica has nobody to speak for the
+    // editor's buffer. Serving `canonical_text()` here would promote whatever
+    // the relay last converged — possibly older than unsaved operator edits —
+    // as current, which is the same mistake as promoting a durable projection
+    // into a missing live hub. Report it as the missing-replica state instead so
+    // the bounded self-heal ladder runs: rebuild from the realtime model, then
+    // nudge the editor to re-register and rebuild from its buffer, and only
+    // reach disk after exhaustion. This is what makes retiring a sole zombie
+    // (`retire_non_acking_live_members`) safe: it enters recovery rather than
+    // bypassing it.
+    if hub.needs_replica_rebuild() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_current_text_unavailable file={} authority=multi_replica reason=missing_replica doc_hash={} live_editors=0 recovery=rebuild_realtime_then_editor_then_disk",
+                file.display(),
+                hash,
+            ),
+        );
+        return Ok(CurrentText::EditorAttachedMissingReplica);
+    }
+
     let text = hub.canonical_text();
     let live_editors = hub.live_count();
     agent_doc_ops_log_io::log_op(

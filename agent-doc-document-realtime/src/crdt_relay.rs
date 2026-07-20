@@ -244,6 +244,17 @@ pub struct RelayHub {
     /// `count(present_keys whose cell is true)` whenever the epoch or any observed
     /// liveness cell changes. [`Self::live_count`] is a reactive read of this slot.
     live_editor_count: SlotHandle<usize>,
+    /// `#dropcountzero`: set when [`Self::retire_non_acking_live_members`] drops a
+    /// replica that never ACKed, cleared as soon as any member registers or
+    /// reconnects.
+    ///
+    /// This distinguishes the two ways a hub can hold zero live members, which
+    /// need opposite handling. A hub that simply has no replica (an editor that
+    /// deregistered, a repaired compact target) still has an authoritative
+    /// canonical worth serving. A hub whose replica we *retired mid-delivery*
+    /// may be missing edits that replica never handed over, so its canonical is
+    /// not safe to serve as current — it has to rebuild.
+    retired_unacked_replica: bool,
 }
 
 impl RelayHub {
@@ -353,6 +364,7 @@ impl RelayHub {
             liveness,
             membership_epoch,
             live_editor_count,
+            retired_unacked_replica: false,
         }
     }
 
@@ -470,6 +482,7 @@ impl RelayHub {
         // membership epoch so the derived count observes the newly-present key.
         self.set_live(client_id, true);
         self.bump_membership_epoch();
+        self.retired_unacked_replica = false;
         Ok(())
     }
 
@@ -525,6 +538,9 @@ impl RelayHub {
         // Mark live only after a successful bidirectional catch-up (the `member`
         // borrow above must end before touching the reactive `ctx`).
         self.set_live(client_id, true);
+        // The catch-up just merged whatever this replica held, so a prior
+        // retirement is accounted for (`#dropcountzero`).
+        self.retired_unacked_replica = false;
         Ok(())
     }
 
@@ -994,13 +1010,18 @@ impl RelayHub {
     /// non-ACKing by construction. A slow-but-live editor that ACKs at any point
     /// before the deadline has drained its queue and is never considered here.
     ///
-    /// **Safety invariant: this never empties the live set.** Retiring the last
-    /// live member would drop `live_count` to zero, which flips the document to
-    /// detached/disk authority — and a disk write over an editor buffer holding
-    /// unsaved operator edits is exactly the clobber this whole path exists to
-    /// prevent. A sole zombie therefore stays live and keeps the existing
-    /// retained-delivery / `agent-doc admin reload-lib` recovery, which replaces
-    /// the replica without touching the document.
+    /// **The live set may drop to zero, deliberately** (`#dropcountzero`). An
+    /// earlier revision kept one member back on the theory that `live_count == 0`
+    /// flips the document to disk authority. It does not:
+    /// `crdt_authority_for_file` derives authority from the reliable-sync
+    /// liveness plane and route registration, never from this hub's count. Zero
+    /// live members means "the relay has no replica to talk to", which is the
+    /// `EditorAttachedMissingReplica` state — and that state already has a
+    /// bounded self-heal ladder that rebuilds from the realtime model, then asks
+    /// the editor to re-register and rebuilds from its buffer, and only reaches
+    /// disk after exhaustion. Retiring a sole zombie therefore *enters* recovery
+    /// instead of bypassing it, and automates the `agent-doc admin reload-lib`
+    /// nudge an operator otherwise has to run by hand.
     ///
     /// Retirement reuses [`Self::disconnect`], so it is not data loss: the
     /// member keeps its replica state and [`Self::reconnect`] performs the usual
@@ -1008,27 +1029,31 @@ impl RelayHub {
     ///
     /// Returns the retired client ids, ascending, for the caller to log.
     pub fn retire_non_acking_live_members(&mut self) -> Vec<u64> {
-        let mut candidates = self
+        let mut retired = self
             .members
             .iter()
             .filter(|(id, member)| self.is_live(**id) && !member.pending.is_empty())
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
-        candidates.sort_unstable();
-
-        let live_total = self
-            .members
-            .keys()
-            .filter(|id| self.is_live(**id))
-            .count();
-        // Keep at least one live member: never let retirement flip authority.
-        let retirable = live_total.saturating_sub(1).min(candidates.len());
-        candidates.truncate(retirable);
-
-        for client_id in &candidates {
+        retired.sort_unstable();
+        for client_id in &retired {
             self.disconnect(*client_id);
         }
-        candidates
+        if !retired.is_empty() {
+            self.retired_unacked_replica = true;
+        }
+        retired
+    }
+
+    /// Whether this hub's canonical replica must be rebuilt before it can be
+    /// served as current text (`#dropcountzero`).
+    ///
+    /// True only while a retired non-ACKing replica is unaccounted for and no
+    /// member has come back. A hub that merely has no replica is NOT in this
+    /// state: its canonical is still the authoritative converged text (compact's
+    /// repaired zero-editor target depends on that).
+    pub fn needs_replica_rebuild(&self) -> bool {
+        self.retired_unacked_replica && self.live_count() == 0
     }
 
     pub fn delivery_snapshot(&self) -> Vec<ReplicaDeliverySnapshot> {
@@ -2587,27 +2612,66 @@ mod tests {
         assert_eq!(hub.live_count(), 2);
     }
 
-    /// `#deliveryackcut` safety invariant — retirement must never empty the live
-    /// set. Dropping the last live editor flips the document to disk authority,
-    /// and a disk write over an editor buffer with unsaved operator edits is the
-    /// clobber this path exists to prevent.
+    /// `#dropcountzero` — a sole zombie IS retired, taking the live count to
+    /// zero on purpose. That is the missing-replica state, which has its own
+    /// bounded rebuild ladder (realtime model → editor buffer → disk), so
+    /// entering it automates the `admin reload-lib` nudge instead of wedging.
     #[test]
-    fn a_sole_zombie_is_never_retired() {
+    fn a_sole_zombie_is_retired_and_drops_the_live_count_to_zero() {
         let mut hub = RelayHub::new(1);
         hub.register(2).unwrap();
-        // A CP-authored write fans out to every live editor, including the sole one.
         hub.apply_canonical_replace("", "hello\n").unwrap();
         assert!(!hub.pending_updates(2).unwrap().is_empty());
 
         let retired = hub.retire_non_acking_live_members();
+        assert_eq!(retired, vec![2], "the sole non-ACKing member is retired");
+        assert_eq!(hub.live_count(), 0, "the live count drops to zero");
         assert!(
-            retired.is_empty(),
-            "the only live member must stay live even when it is not ACKing"
+            hub.delivery_converged(),
+            "an empty live cut converges instead of wedging every later write"
         );
-        assert_eq!(
-            hub.live_count(),
-            1,
-            "authority must not flip to detached/disk because of retirement"
+        // Still registered, so the editor can re-register and catch up rather
+        // than losing its replica state.
+        assert!(hub.is_registered(2));
+        hub.reconnect(2).unwrap();
+        assert_eq!(hub.live_count(), 1);
+    }
+
+    /// `#dropcountzero` — the two ways to reach zero live members need opposite
+    /// handling, so the hub must tell them apart.
+    ///
+    /// A hub that simply has no replica still holds an authoritative canonical
+    /// (compact's repaired zero-editor target depends on being served it). A hub
+    /// whose replica was retired mid-delivery may be missing edits that replica
+    /// never handed over, so it must rebuild before its canonical is served.
+    #[test]
+    fn only_a_retired_replica_marks_the_hub_as_needing_rebuild() {
+        // Deregistered, never retired: zero live, but canonical is still good.
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.deregister(2);
+        assert_eq!(hub.live_count(), 0);
+        assert!(
+            !hub.needs_replica_rebuild(),
+            "a hub with no replica still serves its canonical"
+        );
+
+        // Retired mid-delivery: zero live AND unaccounted-for edits.
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.apply_canonical_replace("", "hello\n").unwrap();
+        assert_eq!(hub.retire_non_acking_live_members(), vec![2]);
+        assert_eq!(hub.live_count(), 0);
+        assert!(
+            hub.needs_replica_rebuild(),
+            "a retired non-ACKing replica forces a rebuild before serving current text"
+        );
+
+        // Reconnecting merges what it held, which accounts for the retirement.
+        hub.reconnect(2).unwrap();
+        assert!(
+            !hub.needs_replica_rebuild(),
+            "catch-up clears the rebuild requirement"
         );
     }
 

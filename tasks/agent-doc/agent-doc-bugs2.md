@@ -39,13 +39,15 @@ done
 Compacted content:
 - Archived 8 response topic(s): cache conflict, resurrected deletions, document corruption; standardize the rebuild order; do [#lazilyscopeadopt]; 5 more
 - Prior summary/context: prior compacted content: Archived 58 response topic(s): JB Run Agent Doc stalls + duplicated queue line; do [#ctrlchk...
-<!-- agent:boundary:32505ea3 -->
+<!-- agent:boundary:16e099ce -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#restartselfdefer]
+- do [#restartbusyquit]
+- do [#restartselfpane]
 - do [#autoinstalldeferstale]
-- ~~do [#relaylockpoison]~~
 - ⏭️ do [#orphandrain]
 - do [#c8tb]
 - 🚧 do [#libgcpidrace]
@@ -106,6 +108,9 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#restartselfdefer] #agent-doc-bug DONE 2026-07-20. #restartselfpane over-corrected: it refused EVERY restart requested from the target document's own pane, which regressed the healthy path. With a live supervisor a restart is a blue/green drain-and-supersede (drains to the turn boundary, then execve in place, preserving child and pane, no dropped turn), so a self-request is safe there - the requesting turn finishing IS the deferral. The guard now fires only when no supervisor exists to carry it, which is the case that genuinely cannot work. Also answers 'interrupt, restart, resume the turn' in the negative: draining beats interrupting wherever available, and --resume restores the CONVERSATION not an in-flight turn, so re-dispatching would replay partial side effects against an open cycle preflight guards.
+- [ ] [#restartbusyquit] #agent-doc-bug DONE 2026-07-20. Controller quit keys could not free a mid-turn harness pane: C-d only quits an IDLE composer, so a running turn ignored it and the restart timed out after 10s with a generic live_harness_quit_timeout. Fixed: operator_quit_key_plan_for_state interrupts first when the pane is busy, busy is detected from the live capture (not assumed - interrupting an idle composer is not always harmless: Codex C-g opens the external editor), and the busy plan composes the shared operator_interrupt_key_plan rather than restating its keys so the Codex C-g rule cannot drift.
+- [ ] [#restartselfpane] #agent-doc-bug DONE 2026-07-20. An agent running `session restart-supervisor` for its OWN document is mid-turn by construction, so the controller was told to quit the session making the request - it could only ever time out, and the Escape it sent likely dismissed that command's own permission prompt. Fixed: refuse up front by comparing $TMUX_PANE against the document's owner pane, before any keys are sent, with a message naming the pane and pointing at another pane or the editor's Restart Agent action.
 - [ ] [#autoinstalldeferstale] #agent-doc-bug A committed crash fix in a sibling dependency can sit un-promoted indefinitely. Proven 2026-07-20: tmux-router c883a0a (skip unreadable registry rows instead of failing the whole load) plus its regression test were committed, but every live session kept crashing on the pre-fix code because supervisor auto-install logs `auto-install deferred: src/agent-doc has uncommitted changes; waiting for the source commit before promoting a binary` and defers on ANY uncommitted change in src/agent-doc — including work unrelated to the fix. The operator sees a generic `stale_install` preflight warning that says the install predates local source edits; it does NOT say a fix already landed is not the code running. Make the deferral legible: when auto-install defers, name the commits (agent-doc AND patched siblings) that the running binary is missing, and surface that in the preflight warning rather than only in supervisor-stderr.log.
 - [ ] [#operatorverifylive] [operator-verify] #relaylockpoison live proof: with the JB plugin loaded, force a replica panic (the crash-2026-07-09 shape: agent_doc_replica_apply_local) and confirm later replica calls still succeed instead of returning -1/null for the life of the IDE. This is the behavior the whole migration exists to guarantee and it cannot be proven without a host IDE.
 - [ ] 🚧 [#libgcpidrace] #agent-doc-bug lib_gc::tests::gc_removes_lib_with_dead_pid_lock (src/lib_gc.rs:302, 'assertion failed: !v1.exists()') fails intermittently under nextest parallelism and passes in isolation and on re-run. Observed 2026-07-19 during the #ay80ci cycle: one make check run failed it, the next full run was 7804/7804 green. Dead-pid lib GC is racing another concurrently-running test's pid/lib dir, so the 'is this pid dead' probe sees a pid that is alive/reused (or the lib dir is recreated between the probe and the assert). Will redden CI intermittently the same way #ay80ci did, so pin it deterministically rather than retrying: isolate the lib root per test (unique temp dir keyed by test name) and/or make the liveness probe take an explicit injected pid-alive predicate instead of consulting the real process table.

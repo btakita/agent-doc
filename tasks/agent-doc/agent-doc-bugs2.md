@@ -561,7 +561,7 @@ The diagnosis in the item was right: `normalize_queue_tag_token` turns `key=true
 One deliberate narrowing: repeated **`key=value`** attrs are left alone. Two different values may be a real conflict, and silently resolving to the first would hide it rather than surface it. Only bare flags dedup. There is a regression for each shape, including that a clean tag is unchanged.
 
 On the second half — "then find the appending writer" — I did not identify it, and I should flag the tradeoff: because the tag now self-heals on every rebuild, the duplicates stop being permanent, which also removes the evidence that would have led to the writer. If it matters, the way to catch it now is a debug assertion at the rebuild that reports when it *had* to dedup, rather than reading the accumulated state. The item's suspicion that it rides the failed queue-convergence path is still untested.
-<!-- agent:boundary:4525ee9e -->
+<!-- agent:boundary:9b9df7da -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -597,7 +597,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#42xb]~~
 - ⏭️ do [#zq8e]
 - ~~do [#a2zx]~~
-- do [#dbj7]
+- ⏭️ do [#dbj7]
 - 🚧 do [#ay80]
 - do [#syncfocuslag]
 - do [#jbrunsteering]

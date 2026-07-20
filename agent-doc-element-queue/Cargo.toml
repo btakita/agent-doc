@@ -12,5 +12,5 @@ name = "agent_doc_element_queue"
 
 [dependencies]
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.6" }
-lazily = { version = "0.41.0", features = ["thread-safe"] }
+lazily = { version = "0.45.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }

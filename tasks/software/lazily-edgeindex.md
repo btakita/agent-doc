@@ -14,9 +14,23 @@ and 2 below are **done**; step 3 is partly done; step 4 has not started.
 | Step | Status |
 |---|---|
 | 1. Port to remaining bindings | **DONE** — all 8 audited, thresholds 32/64/128/160, no family constant |
-| 2. Family disposal decision | **DONE** — `ctx.scope() -> TeardownScope`, `disarm()`; spec + Lean + 8 fixtures |
+| 2. Family disposal decision | **DESIGN done, BINDING API rs-ONLY** — see correction below |
 | 3. Flatten per-subscriber cost | substep 1 **DONE** (`3480cbb`); substep 2 blocked on a dedicated host; substep 3 gated behind 2 |
 | 4. Release | **not started, and needs an explicit go** |
+
+> **Correction to step 2, measured 2026-07-19.** This row previously read
+> "**DONE** — `ctx.scope() -> TeardownScope`, `disarm()`; spec + Lean + 8
+> fixtures". That is accurate about what shipped and misleading about what it
+> means: the spec text, the Lean proofs, and the 8 fixtures all landed, and the
+> **binding API landed in `lazily-rs` alone**. Grepping implementation sources
+> (excluding tests) for `TeardownScope|disarm` across all eight bindings returns
+> hits in rs only. "8 fixtures" was read downstream — including by me — as "8
+> bindings", and nothing contradicted it until seven conformance runners were
+> built and five independently skipped the same fixtures naming `begin_scope` /
+> `end_scope` / `disarm` / `dispose` as unsupported.
+>
+> The general lesson, which is the same one this session hit four times: a step
+> marked DONE for *design* work reads as done for *delivery*. Say which.
 
 **Three open threads, none of which can proceed without a decision or a
 different machine:**
@@ -56,6 +70,56 @@ to naive behind a flag, never by observing a flat column; assume any
 saturated-teardown arm is inert until an assertion proves otherwise (5 of 5
 agents built a broken one first); and never dispatch two agents into the same
 repo.
+
+## Thread 1 outcome (2026-07-19, later session)
+
+**Thread 1 did not end in a migration. It ended in a removal.** `Cell.subscribe`
+is gone from the family — `lazily-spec` now states a `MUST NOT` on observer APIs
+for *any* reactive (`Cell`, `Slot`, `Signal`), and a binding conforms by not
+having one. rs/cpp/js/kt never had one; py (three registries), dart, go, and zig
+removed theirs and re-expressed `on_transition` as an `Effect`.
+
+The reasoning, short version: six normative clauses accumulated around the
+mechanism and four bindings still disagreed, the sixth clause (per-write
+delivery, unsuppressed by `batch`) contradicted the batching model beside it, and
+the per-node memory cost was decisive — removing it moved zig's
+`@sizeOf(Cell(u64))` from **168 to 32 bytes**, paid by every cell in every
+program whether or not anything registered. Full argument in
+`lazily-spec/docs/reactive-graph.md` § "Reactives have no observers"; the
+`hybrid`/staleness theorems are in `lazily-formal`.
+
+### What this session also found, none of it planned
+
+- **An invalidation-cascade defect in two bindings** (`lazily-dart` `c91a32a`,
+  `lazily-go` `bdfdbce`): a chain `cell -> a -> b` served a stale `b` forever.
+  Neither binding's tests *could* have caught it — every async slot test in both
+  reads a cell directly, nothing composed a slot on a slot. Found by reading one
+  implementation beside another. Formalized as
+  `hybrid_serves_stale_value_at_depth_two`.
+- **A disposal defect in `lazily-rs` itself** (`5db90d2`) and the identical one in
+  `lazily-js` (`4d20670`): disposal detached edges without dirtying the surviving
+  cone, permanently freezing a live reader.
+- **A cycle-spin hang in `lazily-rs`** (`ec4b681`): the async frontier walk had no
+  visited set and cloned rather than drained, so a cyclic async graph spun forever
+  *holding the context lock*.
+- **Three silent-corruption paths in `lazily-zig`** from swallowed allocation
+  failures (`e1ba5d6`, `b8f09eb`), one of which detached a node from the graph
+  permanently.
+- **Conformance delivery was broken in every binding but rs** — three distinct
+  mechanisms (never cloned / local copy shadows the sibling / bundled copy), only
+  the first catchable by an absence guard. Repaired family-wide.
+
+### Where the corpus stands
+
+All eight bindings now replay `conformance/reactive-graph` against **every
+context they ship** — the requirement that matters, since the dart and go defects
+were correct synchronously and broken asynchronously. **1 of 9 fixtures replays
+family-wide**; the other 8 skip with their blocking op named, and unblocking them
+is exactly the step-2 binding API that was never ported.
+
+`scope_teardown_equals_fold_of_disposals.json` is blocked by **shape**, not ops —
+it is `scenarios`-shaped and asserts a relation between two op streams, so
+porting the API alone will never unblock it.
 
 ### Original state entry
 

@@ -267,10 +267,31 @@ declares:**
 the spec clause, overstated all three points below.** The spec is fixed; this is
 the synced version.
 
-| `⊕` | what the algebra gives you |
-|---|---|
-| semilattice join — idempotent, commutative, associative (CRDT policies) | **the ascent only.** `x_{n+1} ⊒ x_n` every step → non-decreasing chain. **Not termination.** |
-| non-idempotent — `+`, `append`, counters | no *guaranteed* fixed point. Terminates iff `f` yields the identity (`0`, empty append) |
+**Three classes, not two — and the default policy is in the third.** An earlier
+draft of this section and of the spec split on join-vs-non-idempotent, which left
+`KeepLatest` in neither: it is idempotent but **not commutative** (a right-zero
+band, per the spec's own policy table). Since `Cell ≡ MergeCell<KeepLatest>`, the
+most reachable feedback loop in the family had no analysis at all.
+
+| `⊕` | recurrence | termination |
+|---|---|---|
+| join **with ACC** | monotone ascent, bounded height | **always halts** |
+| join **without ACC** — G-Set, OR-Set, LWW | monotone accumulation | halts iff the set is finite; **semi-decidable** |
+| **`KeepLatest`** and other idempotent-but-not-commutative bands | `x ⊕ op = op` collapses it to `x_{n+1} = f(x_n)` | **undecidable — Turing complete** |
+| non-idempotent — `+`, `append`, counters | accumulates | no guarantee; halts at an absorbing/saturating value |
+
+Under a right-zero band the merge discards prior state, so there is no ascent,
+ACC is irrelevant, and the lattice framing does not apply. What remains is
+unrestricted iteration of an arbitrary function over unbounded state. **No
+analysis can decide whether it halts.** A caller there must supply a decreasing
+measure, an iteration bound, or a cancellation observed in the effect body.
+
+**The termination condition is `x ⊕ f(x) == x`** — exactly when the store-guard
+suppresses. An identity is *sufficient, never necessary, and need not exist*: any
+absorbing or saturating value is a fixed point, and a `MergePolicy` is only
+required to be an associative fold. `KeepLatest` has no unit at all. An earlier
+draft of this plan wrote "terminates **iff** `f` yields the identity", which is
+false in general and undefined for the default policy.
 
 **ACC — the ascending chain condition.** Every strictly increasing chain
 
@@ -317,10 +338,15 @@ solvers, pollers. It is permitted; the caller just owes a stated reason the loop
 ends. **Where that check can live is not obvious, and differs by context.**
 
 A scheduler-closed loop iterates *inside the flush*. In a synchronous context the
-flush does not return to the caller between iterations — `set_cell` → flush →
-effect → merge → invalidate → flush → … is one un-returned call. So the calling
-thread is not running and cannot observe an interrupt. It also starves whatever
-would deliver one. That is livelock, not iteration.
+outer `set_cell` never returns while the loop runs, so the calling thread is not
+running, cannot observe an interrupt, and starves whatever would deliver one.
+That is livelock, not iteration.
+
+**Mechanism, corrected:** this is *not* nested flush re-entry. `merge` inside an
+effect body calls `set_cell` → `flush_effects`, which hits the re-entrancy guard
+and **returns immediately**; the newly scheduled effect is appended to the
+worklist and picked up by the **outer** drain. So the loop is flat, at constant
+stack depth — it will not even self-terminate by stack overflow.
 
 **The yield point that does exist is the effect body**, which is caller code
 running once per iteration. Not writing is what ends the cascade:
@@ -334,17 +360,22 @@ effect(|ctx| {
 
 | mechanism | sync context | async context |
 |---|---|---|
-| flag / deadline / counter checked in the effect body | ✅ **the** yield point | ✅ |
-| external cancellation between iterations | ❌ no yield point; caller isn't running | ✅ awaits provide one |
-| binding-level flush-re-entry bound | ⚠️ backstop only — reports *exhaustion*, which is not convergence | ⚠️ same |
+| flag / deadline / counter checked in the effect body | ✅ **the** yield point (verified: the drain body does nothing but pop and run) | ✅ |
+| external cancellation between iterations | ❌ no yield point; caller isn't running | ⚠️ awaits should provide one — **unverified against any async drain** |
+| binding-level **drain-iteration** bound | ⚠️ backstop only — reports *exhaustion*, which is not convergence | ⚠️ same |
 
 Accordingly, per the corrected spec:
 
 - A caller **MUST** be able to state why the loop terminates — ACC on the value
   domain for a join policy, or an explicit condition otherwise. **The policy's
   declared algebra is not sufficient evidence.**
-- Bindings **SHOULD** bound effect-flush re-entry and report exhaustion.
-  **Unmeasured: no binding is known to do this, and nobody has checked.**
+- Bindings **SHOULD** bound the **effect-drain iteration count** and report
+  exhaustion. **Not re-entry depth** — every binding surveyed (`lazily-rs`
+  `Context` and `ThreadSafeContext`, `lazily-js`) guards re-entrant flushes and
+  returns immediately, so depth is pinned at 1 by construction and a depth bound
+  could never fire. The loop is a flat unbounded drain at constant stack depth.
+  **Measured: none of the three bounds anything; the only exit is an empty
+  worklist.**
 
 **Fixture debt:** none of §8 is fixtured, including the re-entry bound. Add to
 the §9.4 set — at minimum, a divergent loop must produce a reported exhaustion

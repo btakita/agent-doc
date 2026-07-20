@@ -1,7 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 90ef27b4-fc94-4065-af55-7804da6568b4
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -71,14 +70,26 @@ One existing test asserted the old behavior (`!result.contains(boundary_id)`). I
 **Remaining under `#boundaryaccum1`:** the two minting sites still use different id formats, and compact-io has its own `resolve_boundary_marker`. Folding all three onto one helper is the tidy-up; the divergence itself is fixed.
 
 Also reaped the done-markers from this session's work that were sitting as queue heads.
-<!-- agent:boundary:bd0c4445 -->
+
+### Re: `#boundarystableid` and `#writestdinhang` — gpt-5
+
+Both fixes are complete and deployed.
+
+`#boundarystableid` now preserves and moves the existing boundary ID on ordinary exchange appends instead of minting a new ID on every append. Regression coverage proves a single stable boundary survives repeated appends.
+
+`#writestdinhang` now bounds silent non-interactive stdin reads to 60 seconds by default and returns actionable guidance instead of hanging indefinitely. TTY input remains unbounded for legitimate interactive composition, and `AGENT_DOC_STDIN_TIMEOUT_SECS=0` explicitly restores an unlimited wait.
+
+Verification on commit `72dbdde5c`: `make tmux-ci` passed, the current full `make check` passed, and `make install` installed the release-local binary/cdylib plus JetBrains plugin 0.2.282, reloaded the live native library, and scheduled four route-owned supervisors for idle-boundary recycle. The agent-doc commit and superproject pointer commit `05d5faf85` were pushed to `main`.
+
+The latest hosted CI run was older than this fix: all 7,806 Rust tests passed, then the separate TLA target failed. Local tmux and full-suite verification are green on current HEAD.
+<!-- agent:boundary:8adcea2f -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 I changed the agent from claude to codex with a claude resume session id, attempted to start with `start --route-owned --route-owned-reap-policy keep-alive tasks/agent-doc/agent-doc-bugs2.md 2>> /home/brian/work/btakita/agent-loop/agent-doc/logs/supervisor-stderr.log`, but got an error. In addition, I was not able to exit the process. Ctrl+C hung.
-- do [#boundarystableid]
-- do [#writestdinhang]
+- ~~I changed the agent from claude to codex with a claude resume session id, attempted to start with `start --route-owned --route-owned-reap-policy keep-alive tasks/agent-doc/agent-doc-bugs2.md 2>> /home/brian/work/btakita/agent-loop/agent-doc/logs/supervisor-stderr.log`, but got an error. In addition, I was not able to exit the process. Ctrl+C hung.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~do [#boundarystableid]~~
+- ~~do [#writestdinhang]~~
 - do [#operatorverifylive]
 - do [#autoinstalldeferstale]
 - do [#orphandrain]
@@ -141,8 +152,6 @@ Also reaped the done-markers from this session's work that were sitting as queue
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#boundarystableid] #agent-doc-bug DONE 2026-07-20. ROOT CAUSE of the boundary drift under #boundaryaccum1, and a sharper finding than 'carry-forward never takes': element.rs append_with_boundary DELIBERATELY minted a fresh id on every append ('the boundary is consumed and re-inserted'), so 162 snapshots of one document held 162 distinct ids. Its comment claimed this matched apply_patches_with_overrides, but that path mints only when the boundary was LOST (its snowball guard) - the two were never actually matched, and they mint different FORMATS (element.rs 8-hex via new_boundary_id, template.rs a full Uuid::new_v4). Because live and committed minted independently, they differed by exactly the marker line and no later cycle could settle it. Fixed: append moves the existing id instead of re-minting. Remaining follow-up: unify the two id formats and fold compact-io's resolve_boundary_marker onto the same helper.
-- [ ] [#writestdinhang] #agent-doc-bug agent-doc write --commit blocks FOREVER on fd 0 when stdin is an open socket that never closes (e.g. a tool/automation harness that does not redirect stdin). Diagnosed 2026-07-20 by /proc/PID/task/*/wchan showing unix_stream_read_generic on fd 0 -> the caller's shell, after two ~15min hangs that I initially and wrongly attributed to CRDT convergence. Workaround is < /dev/null. Fix: bound the stdin read, or detect a non-EOF-capable stdin and fail fast with guidance, so an automation caller gets an error instead of an indefinite hang.
 - [ ] [#autoinstalldeferstale] #agent-doc-bug A committed crash fix in a sibling dependency can sit un-promoted indefinitely. Proven 2026-07-20: tmux-router c883a0a (skip unreadable registry rows instead of failing the whole load) plus its regression test were committed, but every live session kept crashing on the pre-fix code because supervisor auto-install logs `auto-install deferred: src/agent-doc has uncommitted changes; waiting for the source commit before promoting a binary` and defers on ANY uncommitted change in src/agent-doc — including work unrelated to the fix. The operator sees a generic `stale_install` preflight warning that says the install predates local source edits; it does NOT say a fix already landed is not the code running. Make the deferral legible: when auto-install defers, name the commits (agent-doc AND patched siblings) that the running binary is missing, and surface that in the preflight warning rather than only in supervisor-stderr.log.
 - [ ] [#operatorverifylive] [operator-verify] #relaylockpoison live proof: with the JB plugin loaded, force a replica panic (the crash-2026-07-09 shape: agent_doc_replica_apply_local) and confirm later replica calls still succeed instead of returning -1/null for the life of the IDE. This is the behavior the whole migration exists to guarantee and it cannot be proven without a host IDE.
 - [ ] [#libgcpidrace] #agent-doc-bug lib_gc::tests::gc_removes_lib_with_dead_pid_lock (src/lib_gc.rs:302, 'assertion failed: !v1.exists()') fails intermittently under nextest parallelism and passes in isolation and on re-run. Observed 2026-07-19 during the #ay80ci cycle: one make check run failed it, the next full run was 7804/7804 green. Dead-pid lib GC is racing another concurrently-running test's pid/lib dir, so the 'is this pid dead' probe sees a pid that is alive/reused (or the lib dir is recreated between the probe and the assert). Will redden CI intermittently the same way #ay80ci did, so pin it deterministically rather than retrying: isolate the lib root per test (unique temp dir keyed by test name) and/or make the liveness probe take an explicit injected pid-alive predicate instead of consulting the real process table.

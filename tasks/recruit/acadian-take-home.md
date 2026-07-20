@@ -1,5 +1,6 @@
 ---
 agent_doc_session: 7605b2c4-eaba-4a4c-9739-bb52a499521e
+resume: ad1125c2-24f9-4650-942c-4b774833fed2
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -116,17 +117,47 @@ One subtlety worth naming: the selection resolves through x-axis **labels**, not
 The screenshot also caught a flaw worth fixing: dragging was highlighting the axis labels as selected text. Added `user-select: none` on the chart container and confirmed the selection stays empty through a drag.
 
 `make check` is green: 29 backend tests, mypy clean, 22 frontend tests (13 new ones covering the range math — ordering, click rejection, unknown labels, and clamping stale indices), typecheck, production build.
-<!-- agent:boundary:088776c8 -->
+The Loading... should not displace the grid. Use a spinner instead that is discretely placed at the boundary of the view. Use UI best practice for a stock analytics dashboard.
+
+### Re: ambient loading spinner — opus-4-8
+
+Fixed. The `Loading returns…` paragraph was a block element sitting in the document flow directly above the grid, so every fetch pushed the charts down and then snapped them back. Two changes remove the displacement:
+
+**First load** now renders a `SkeletonGrid` — seven placeholder cards mirroring the real card box model (header row, 180px plot, three-up stats footer). The grid occupies its final geometry before data arrives, so cards swap in without a reflow.
+
+**Refetches** keep the existing grid mounted and visible (stale-while-revalidate). The `.results` wrapper gets `aria-busy` and dims to `opacity: 0.65`; the data you were reading stays exactly where it was. That is the pattern trading dashboards use — a range change should never yank the chart you are mid-read on.
+
+**The indicator itself** is a `position: fixed` pill at the bottom-right boundary of the viewport: a 14px spinner plus a label that reads `Loading returns…` on first paint and `Updating returns…` on a refresh. It is `pointer-events: none`, carries `role="status"` + `aria-live="polite"` so screen readers get the announcement the removed paragraph used to provide, and honours `prefers-reduced-motion` (skeleton pulse off, spinner slowed).
+
+The render decision lives in `lib/viewState.ts` as two pure functions — `viewState()` returns `skeleton | grid | empty | blank` and `isRefreshing()` distinguishes a first load from a refresh — so it is unit-testable without a DOM harness. Six new tests cover it.
+
+Verified live in Chromium against the running dev servers, measuring `.grid` top offset across all three states:
+
+| state | grid top | cards | spinner | opacity |
+|---|---|---|---|---|
+| first-load skeleton | 95.296875 | 7 | yes, `Loading returns…` | 1 |
+| mid-refresh | 95.296875 | 7 | yes, `Updating returns…` | 0.65 |
+| idle with data | 95.296875 | 7 | none | 1 |
+
+Identical to the fractional pixel — zero displacement. `aria-busy` flips `true`/`false` correctly, and the spinner computes to `position: fixed`.
+
+`make check` is green: 29 backend tests, mypy clean, 28 frontend tests (6 new), typecheck, production build.
+
+Pushed as `dcaa862` on `btakita/acadian-take-home`, superproject gitlink at `31e33b562`. Also untracked `frontend/tsconfig.tsbuildinfo` (`a431a7e`) — a build cache that was dirtying the tree on every typecheck.
+
+One unrelated observation worth naming: on the default trailing-6-month range the backend returned only six symbols — MSFT was absent — while a shorter range returned all seven. The API drops a requested ticker silently rather than reporting it as unavailable. That is a backend data-contract gap, not a UI one; I have left it alone and queued it as a backlog item.
+<!-- agent:boundary:d83407f8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] [#backendsilentlydrops] Backend silently drops a requested ticker when yfinance returns no data for it (MSFT absent on the trailing-6-month range, present on a shorter range). Report unavailable symbols in the response payload instead of omitting them.
 <!-- /agent:backlog -->
 
 ## Icebox

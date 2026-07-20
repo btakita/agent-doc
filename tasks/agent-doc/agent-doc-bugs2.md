@@ -116,21 +116,47 @@ I did **not** touch the liveness core's lifetimes. You flagged that as exactly w
 **On CI.** Red on main, pre-existing (`ec7a701fa`, before my commit), local `make check` green at 7803/7803. But I got the mechanism `#ay80` was missing: `finalize_skips_ignored_untracked_session_doc` *does* exit 1 as expected — stderr is `captured turn intent synthetic-<n> was not projected as active`, not the `skipped ignored untracked path` it asserts. Finalize is dying **earlier** than the skip it's testing. So it's not a flaky assertion or an environment quirk; on CI the captured-turn-intent projection doesn't go active for a gitignored untracked doc. Filed as `#ay80ci` with that lead, since it blocks every CI run.
 
 Queue note: your free-text `JB Sync Tmux Layout` failure line is the next head and I haven't touched it.
-<!-- agent:boundary:e6984883 -->
+
+### Re: do [#ay80ci] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#ay80ci]
+
+
+Fixed and pushed (`23a83cb6d`). CI's red was a real defect in the write path, not a bad assertion or an environment quirk.
+
+**Root cause.** `cycle_document_hash` (`agent-doc-cycle-state-io`) required an *already-existing* `.agent-doc` ancestor and returned `None` otherwise — and all fifteen callers read that `None` as "silently skip the write." Nothing else in the write path agrees with that rule:
+
+- `append_state_fact` resolves its destination with `project_root_or_file_parent`, which **falls back to the document's parent**, and `open_state_db` creates `.agent-doc` there.
+- The repair-side reader, `load_pending_response_state`, resolves the same way.
+
+So the guard never prevented the directory from being created. It only made key derivation stricter than both the writer's own destination resolution *and* the reader — and swallowed the write in between. `save_pending` captures a response, writes the fact, then reads it back to prove durability; with the write skipped, the read-back found nothing and finalize died before doing any work, which is exactly the `captured turn intent … was not projected as active` you see on CI.
+
+That also explains the CI-only shape I couldn't pin last cycle. Whether `.agent-doc` exists by capture time is environmental: locally a global config or a live controller materializes the root earlier in the run, so the guard happened to pass. A clean runner materializes nothing. Note the failing test is the one test in `finalize_integration.rs` that does *not* pre-create `.agent-doc/snapshots` in its tempdir — every sibling test does, which is why it was alone in failing.
+
+I proved the mechanism before touching anything: a throwaway probe called `append_response_captured_body` on a doc with no `.agent-doc` ancestor and it returned `wrote=false`. Then fixed, then re-asserted the same call returns `true` *and* that the state db exists at the root the reader resolves.
+
+**Fix.** Drop the guard so key derivation matches destination resolution on both sides. Pinned by `capture_write_lands_without_a_preexisting_agent_doc_ancestor`, which asserts both halves — the fact lands, and it lands where the reader looks. Verified failing before and passing after.
+
+This also brings the path in line with the repo's own no-swallowed-errors rule: `Ok(false)` on a durability write was a silent failure by construction.
+
+`make check` green at 7804/7804, `make install` done.
+
+**One thing I want to flag rather than bury:** on the first `make check` run after the fix, `lib_gc::tests::gc_removes_lib_with_dead_pid_lock` failed (`assertion failed: !v1.exists()`, `src/lib_gc.rs:302`), then passed in isolation and passed on the full re-run. That's a genuine nextest-parallelism flake — dead-pid lib GC racing another test's pid/lib dir — not caused by this change, but it will intermittently redden CI the same way this one did. Filed as `#libgcpidrace`.
+<!-- agent:boundary:cef97453 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#deliveryackcut]~~
-- ~~do [#orphandrain]~~
-- ~~do [#c8tb]~~
-- ~~⏭️ do [#lazilyscopeadopt]~~
-- ~~JB `Sync Tmux Layout` on brookebrodack-dev.md failed: `Sync failed through the project controller; see IDE log for details.`~~ — auto-struck: answered this cycle (#ftstrike)
+- do [#libgcpidrace]
+- ~~do [#ay80ci]~~
+- do [#hubregistryevict]
 - ⏭️ do [#missingreplicarebuild]
 - ⏭️ do [#jbrouteasyncchannel]
 - ⏭️ do [#authoritydescentstd]
 - ⏭️ do [#patchretryidem]
-- do [#hvw0]
+- ⏭️ do [#hvw0]
 - do [#bbpe]
 - do [#dbj7]
 - do [#crdtpushdrainverify]
@@ -182,8 +208,8 @@ Queue note: your free-text `JB Sync Tmux Layout` failure line is the next head a
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#libgcpidrace] #agent-doc-bug lib_gc::tests::gc_removes_lib_with_dead_pid_lock (src/lib_gc.rs:302, 'assertion failed: !v1.exists()') fails intermittently under nextest parallelism and passes in isolation and on re-run. Observed 2026-07-19 during the #ay80ci cycle: one make check run failed it, the next full run was 7804/7804 green. Dead-pid lib GC is racing another concurrently-running test's pid/lib dir, so the 'is this pid dead' probe sees a pid that is alive/reused (or the lib dir is recreated between the probe and the assert). Will redden CI intermittently the same way #ay80ci did, so pin it deterministically rather than retrying: isolate the lib root per test (unique temp dir keyed by test name) and/or make the liveness probe take an explicit injected pid-alive predicate instead of consulting the real process table.
 - [ ] [#hubregistryevict] [focused-cycle] #agent-doc-bug agent-doc-crdt-relay-io's hub_registry (static Mutex<HashMap<String, RelayHub>>) is never evicted in production code — only tests call .remove(). Every document the controller ever touches leaves one RelayHub (its own ThreadSafeContext, canonical replica, member mirrors, liveness cell family) alive for the process lifetime. Found while proving #lazilyscopeadopt: this is the ONLY real process-lifetime growth in the reactive layer, and it is a registry-eviction question, not a ctx.scope() one. Eviction is not free: with_hub recreates an EMPTY hub on next contact, so a wrong eviction is exactly the phantom missing_replica shape. Sequence AFTER #missingreplicarebuild since eviction increases traffic on that recovery path. A missing hub is already a first-class handled state (CurrentText::EditorAttachedMissingReplica + recover_missing_hub_from_durable_projection), so the safe shape is evict-only-when-no-members-and-committed, verified by a test that re-contact after eviction recovers the same canonical text.
-- [ ] [#ay80ci] [focused-cycle] #agent-doc-bug CI red on main is now MECHANISM-IDENTIFIED (supersedes review #ay80, which only recorded 'fails in CI, passes locally'). finalize_skips_ignored_untracked_session_doc (tests/finalize_integration.rs:248) does fail with exit 1 as expected, but stderr is 'Error: captured turn intent synthetic-<n> was not projected as active for /tmp/.tmpXXXX/scratch/session.md' instead of 'skipped ignored untracked path scratch/session.md' — finalize dies EARLIER than the ignored-untracked skip it asserts. Not a flaky assertion: on CI the captured-turn-intent projection does not go active for a gitignored untracked doc, so the ignored-path skip is never reached. Run 29711874618 (commit ec7a701fa). Reproduce by forcing the state.db projection path rather than rerunning CI. Blocks every CI run, so take it early.
 - [ ] [#authoritydescentstd] [focused-cycle] #agent-doc-bug Standardize the authority rebuild/descent order into ONE shared pure decision fn. IMPLEMENTED TWICE, independently, under the SAME tags (#px82/#bn41): (1) agent-doc-document-realtime-io reobserve_missing_editor_replica_with_reregistration + resolve_editor_unavailable_disk_read_fallback; (2) agent-doc-preflight-io current_text_via_preflight_authority_retrying + observe_current_text_with_bounded_retry. PROVEN DRIFT: separate budgets/env overrides (AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS vs AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS, both default 3 but independently tunable), and the liveness-witness memo from adefcda0a exists ONLY in the realtime-io copy (grep in preflight-io = 0) — a policy fix silently applied to half the paths. DESIGN DECIDED 2026-07-19: home is agent-doc-turn, NOT a new crate (every agent-doc crate is already publish=false, so a crate buys a boundary not privacy) and NOT agent-doc-document-realtime (preflight-io does not depend on it and would take a new edge onto write_policy.rs 161KB + crdt_relay.rs 107KB; both consumers ALREADY depend on agent-doc-turn, which already hosts closeout_recovery/cycle_policy/wait_machine/repair). SHAPE: follow the closeout_recovery.rs precedent — 'File/effect adapters classify concrete diffs into this smaller vocabulary before asking the turn policy to pick the recovery state.' Pure observation vocabulary (Current/Detached/MissingReplica/SyncPending/Error) + decision enum (Retry/RebuildFromPlugin/DescendToDisk/FailClosed); each -io site maps its own CurrentText in. The adapter is load-bearing, not ceremony: CurrentText lives in agent-doc-crdt-relay-io (effectful), so a direct dependency would invert the layering and make agent-doc-turn depend on an -io crate. CONSTRAINT: the two sites are similar, NOT identical — realtime-io gates rebuild eligibility on sync_pending vs missing_replica, preflight-io retries both. Preserve that as a parameter; flattening it reintroduces the ~28s-per-read-site double rebuild the exclusion was added to fix. Prerequisite for #missingreplicarebuild.
 - [ ] [#missingreplicarebuild] [focused-cycle] #agent-doc-bug Read authority descends to DISK while an editor is attached, on the missing_replica path. The operator's directive — realtime model, then rebuild from the plugin, then disk — is ALREADY the structure: resolve_editor_unavailable_disk_read_fallback has an explicit 'Tier 1 retry: rebuild the model from the live editor buffer' calling ensure_document_model_through_authority. But it is gated `rebuild_eligible = reason == "sync_pending" && observe_editor_open(file)`; missing_replica is EXCLUDED because reobserve_missing_editor_replica_with_reregistration self-heals it upstream (excluding it was a real fix: rebuilding twice measured ~28s per read site). The gap is what happens when that upstream self-heal EXHAUSTS — the descent then reaches disk with an editor still attached, which is the corruption vector (operator-observed: frontmatter closing fence gained a leading space, deleted queue heads resurrected). Fix direction: on missing_replica exhaustion, do NOT descend to disk while observe_editor_open(file) — request one plugin rebuild (the forceRefresh/re-register the runbook describes) and fail closed if it cannot answer, rather than adopting disk. Depends on #deliveryackcut: a live-but-non-ACKing replica is why the upstream heal exhausts in the first place.
 - [ ] [#deliveryackcut] [focused-cycle] delivery_converged() requires every LIVE member to have ACKed, so a zombie replica (registered + reported live, but no longer ACKing) wedges every write until timeout. Exclude a non-ACKing member from the convergence cut the way a disconnected one already is (crdt_relay.rs delivery_converged/is_live). Needs a staleness signal — is_live is a reactive cell with no ACK clock — and a threshold conservative enough that a slow-but-live editor is never dropped, since dropping one clobbers operator edits. Root-caused 2026-07-19; mitigation shipped in 651f63517.

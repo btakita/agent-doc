@@ -724,7 +724,23 @@ Sharpened rather than built, and the sharpening matters because my earlier frami
 So the fix is to reconcile the **enumerators**, not the entry model: either teach `item_nodes` the `---` block shape, or render multiline heads with a bullet plus indented continuation that both round-trips through `parse_spans` and yields a node. The second changes operator-visible bytes for every multiline entry; the first does not, which makes it the safer default.
 
 **Not landing it here.** One thing I cannot yet state as fact is which path actually mutated the document in the observed strikes — the entry re-render or the AST node op — and that determines which enumerator to change. That wants a single clean reproduction, not more code reading, and the damage is already prevented by the fail-closed guard so nothing is at risk while it waits.
-<!-- agent:boundary:0e97376f -->
+
+### Re: realtime agent:signals element — opus-4-8
+
+> **Queue prompt:** do [#agentsignals]
+
+Gated on its own stated precondition, which this session actively disproved.
+
+The item is tagged `[future/separate]` and says explicitly: add it "**after core realtime convergence is stable**". Today's evidence says it is not:
+
+- `delivery_pending` wedged preflight, `write --commit`, `session-check` and `compact` repeatedly, and needed `admin reload-lib` to clear — root-caused today as a live-but-non-ACKing replica (`#deliveryackcut`, still open);
+- the ensure path's `no_live_registration` signal turned out to be ambiguous between a missing registration and a failed delivery (`7ab6800f4`), meaning the convergence layer's own diagnostics were misreporting;
+- `state.db` corrupted **twice in an hour**, cause still unknown.
+
+`agent:signals` would add a new realtime element whose whole value is that its states are deterministic and trustworthy. Building deterministic signals on a plane that is currently misreporting its own liveness would produce signals that are confidently wrong — worse than no signals, because the item's own design says they must be "deterministic built-in signals for tests, queue, supervisor, and ipc" and explicitly "not load-bearing" on the experimental MLP half. Supervisor and IPC are exactly the two surfaces that proved unreliable today.
+
+So this stays gated, and the unblocking condition is concrete rather than vague: `#deliveryackcut` resolved, and the `state.db` corruption root-caused. Both are tracked. Nothing else about the design needs revisiting — the phasing was right, the precondition simply is not met.
+<!-- agent:boundary:0cdb1dd5 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -778,7 +794,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ do [#restartbleednonroute]
 - ⏭️ do [#r4gq]
 - ⏭️ do [#af88]
-- do [#claimnewpane]
+- ⏭️ do [#claimnewpane]
 - do [#boundaryaccum1]
 - do [#qactsync]
 - do [#ftimmediate]
@@ -794,7 +810,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - do [#crdtauth6]
 - do [#nsfz]
 - do [#suprestassoc-live]
-- 🚧 do [#agentsignals]
+- ~~do [#agentsignals]~~
 - Free text queue items that were already done should be struck or removed from the queue. The following queue item was complete but is still open.
 - do [#elementgraphprd]
 - 📌 do [#jbedtledgerverify]
@@ -894,13 +910,13 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#crdtauth6] [operator-verify] CRDT authority live proof: verify the existing JB DocumentListener -> CrdtReplicaForwarder.forwardLocalDelta path, Kotlin Unix-socket ReplicaTransport, VS Code koffi replica seam, and Rust fan-out stay connected in a live editor session. This is proof/parity work only; operator-visible text is already authoritative and must not wait on this item. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
-- [ ] 🚧 [#agentsignals] [future/separate] Add a realtime agent:signals element after core realtime convergence is stable. Start with deterministic built-in signals for tests, queue, supervisor, and ipc; design custom user-defined signals as plugin-backed tracked work with Rust as the first target and future multi-language support; use tasks/software/realtime-signals-patchboard.md as the GUI/semi-programmatic reference; keep MLP enhancement optional/experimental and not load-bearing for deterministic states.
 - [ ] [#elementgraphprd] [future/separate] Define the single-document element layout for both single-model sessions and multi-harness orchestration, including typed graph/workers/jobs/schedule elements plus an advisory perceptron graph that scores visible signals without directly mutating runnable work. PRD: tasks/agent-doc/prd-element-layout-perceptron-graph.md
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] 🚧 [#agentsignals] [future/separate] Add a realtime agent:signals element after core realtime convergence is stable. Start with deterministic built-in signals for tests, queue, supervisor, and ipc; design custom user-defined signals as plugin-backed tracked work with Rust as the first target and future multi-language support; use tasks/software/realtime-signals-patchboard.md as the GUI/semi-programmatic reference; keep MLP enhancement optional/experimental and not load-bearing for deterministic states.
 - [/] [#steeringobservableset] #agent-doc-bug Phase 6 durable graph adoption: back RealtimeSteeringSet with a lazily reactive OBSERVABLE SET (not a drain-one-head QueueCell) keyed on the body-aware identity (Phase 3.1), reconciled on the reliable-sync plane; session-check reads set-emptiness (all directives settled) instead of re-diffing HEAD↔buffer. Plan: src/agent-doc/tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md (Phase 6). [recommended]
 - [/] [#crde] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978030079-4 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]
   evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978020608-2 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof)

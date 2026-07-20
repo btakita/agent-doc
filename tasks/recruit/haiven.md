@@ -424,12 +424,34 @@ The exchange is large, but the active queue means compaction should wait for an 
 
 > **Queue prompt:**
 >
+> /goal Implement backlog item(s): #yyzn
+
+
+> **Queue prompt:**
+>
+> /goal Implement backlog item(s): #b10a
+
+
+> **Queue prompt:**
+>
 > 📌 **Throughput unaffected:** ~3.3–3.6 M/s framed vs ~3.6 M/s unbounded. (One 1.59 M/s outlier was noise; reruns gave 3.60/3.58.)
 
 Confirmed. This is an already-resolved measurement note, not a new implementation task: the friend-frame bounds subscription memory without a material throughput penalty, and the isolated 1.59 M/s result was correctly rejected after consistent reruns. No benchmark or documentation change is needed for this queue item.
 
 The exchange remains large; compaction still waits for explicit opt-in while the queue is active.
-<!-- agent:boundary:4740e2aa -->
+
+### Re: orphaned goal heads — gpt-5
+
+> **Queue prompts:**
+>
+> `/goal Implement backlog item(s): #b10a`
+>
+> `/goal Implement backlog item(s): #yyzn`
+
+Neither ID exists in this document’s backlog, icebox, or completed set, so neither command could dispatch real work. I removed both orphaned free-text heads through the guarded queue-consume path. The existing `#yyzn-clarify` backlog item remains open to capture the intended target if it is supplied later; no implementation item was silently invented.
+
+The exchange remains large; compaction still waits for explicit opt-in while the queue is active.
+<!-- agent:boundary:185c8a41 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -438,8 +460,8 @@ The exchange remains large; compaction still waits for explicit opt-in while the
 - ~~do [#activepri]~~
 - ~~do [#fanoutpri]~~
 - ~~📌 **Throughput unaffected:** ~3.3–3.6 M/s framed vs ~3.6 M/s unbounded. (One 1.59 M/s outlier was noise; reruns gave 3.60/3.58.)~~
-- /goal Implement backlog item(s): #b10a
-- /goal Implement backlog item(s): #yyzn
+- ~~⏭️ /goal Implement backlog item(s): #b10a~~
+- ~~/goal Implement backlog item(s): #yyzn~~
 - do [#friendsnapshot]
 - do [#yyzn-clarify]
 - do [#haivenwsopt]

@@ -12289,6 +12289,14 @@ fn reap_dead_supervisor_socket(file: &Path, socket: &Path) {
 #[cfg(not(any(test, feature = "test-support")))]
 fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result<String> {
     let tmux = tmux_router::Tmux::default_server();
+    // `#restartresume`: `restart-supervisor` defaults to continue-mode (`--fresh`
+    // is the opt-out), but a replacement that has to (re)launch the harness was
+    // dropping that mode and starting a brand-new conversation. That is the worst
+    // possible moment to discard context: the operator is recovering, not starting
+    // over. BOTH launch branches below must carry it — the preserve-existing-pane
+    // branch is the COMMON one (a pane whose agent already exited is a bare shell),
+    // so fixing only the cold-start branch leaves the usual path still lossy.
+    let resume = (work.mode != "fresh").then_some(agent_doc_harness::ResumeRequest::Latest);
     if !work.pane_id.trim().is_empty() {
         let pane_alive = tmux.pane_alive(&work.pane_id);
         let current_command = if pane_alive {
@@ -12317,10 +12325,30 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                         stderr_log_dir.display()
                     )
                 })?;
-                let start_cmd = agent_doc_supervisor_process::start_command::route_owned_start_command_with_stderr_log(
-                    &agent_doc_bin,
+                let start_cmd =
+                    agent_doc_supervisor_process::start_command::route_owned_start_command_with_options(
+                        &agent_doc_bin,
+                        &work.file,
+                        &agent_doc_supervisor_process::start_command::RouteOwnedStartOptions {
+                            reap_policy:
+                                agent_doc_supervisor::route_owned::RouteOwnedReapPolicy::Auto,
+                            stderr_log: Some(&stderr_log),
+                            resume: resume.clone(),
+                        },
+                    );
+                agent_doc_ops_log_io::log_op(
                     &work.file,
-                    &stderr_log,
+                    &format!(
+                        "controller_supervisor_replacement_preserve_pane mode={} resume={} session={} pane={}",
+                        work.mode,
+                        if resume.is_some() {
+                            "continue"
+                        } else {
+                            "fresh"
+                        },
+                        work.session_id,
+                        work.pane_id,
+                    ),
                 );
                 agent_doc_tmux_io::input_diag::log_text_submit(
                     agent_doc_tmux_io::input_diag::InputDiagSink::new(
@@ -12386,7 +12414,6 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
     // that promise to a brand-new conversation. That is the worst possible moment
     // to discard context: the supervisor is already dead, so the operator is
     // recovering, not starting over. Carry the mode into the cold start.
-    let resume = (work.mode != "fresh").then_some(agent_doc_harness::ResumeRequest::Latest);
     agent_doc_ops_log_io::log_op(
         &work.file,
         &format!(

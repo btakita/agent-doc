@@ -310,7 +310,8 @@ execution.
 | ~~**Merge coverage**: one execution model or three?~~ | **DECIDED — three, implemented not ledgered. See §9.1** |
 | Does `MapHandle` collapse entirely, or become a bound on `K`? | during the `lazily-rs` port (§5.2) |
 | Could the **wire** id be `CellId` — do effect ids ever cross the wire? | before renaming the wire type (§5.1) |
-| Async fold timing: what does "folds synchronously" mean when the upstream resolves asynchronously? | blocks `AsyncContext` merge (§9.1) |
+| ~~Async fold timing~~ | **RESOLVED — cells are the synchronous input layer, so merge is synchronous in `AsyncContext` too. Was overstated. See §9.1** |
+| Does the async scheduler coalesce N invalidations in a batch into one effect rerun? | **now tested by fixture 1** rather than assumed (§9.1) |
 | Wire vocabulary: does `SlotValue` become `CellValue`? | the wire names things, and `Cell` is a thing — so this is now coherent in a way `MemoValue` never was. Still a breaking wire change across 8 bindings **plus `agent-doc`'s IPC**; dual-accept applies |
 
 ---
@@ -336,21 +337,50 @@ where it is least likely to be violated. The thread-safe model is exactly where
 an implementer feels the pull toward a direct edge, because routing a feed
 through a scheduled effect *feels* racy even though it is not.
 
-Split, because the two models are not the same problem:
+**All four fixtures apply to all three runtimes.** No per-model applicability is
+needed, and none should be built.
 
 | model | action | why |
 |---|---|---|
-| `ThreadSafeContext` | **implement** | mutex-backed, same semantics; `apply_merge` reads untracked, folds, routes through `set_cell`, so it should be a straight port — **unmeasured, verify before calling it mechanical** |
-| `AsyncContext` | **answer a design question first** | §7 says merge "folds synchronously inside a batch; only propagation defers." What does *synchronously* mean when the upstream resolves asynchronously? That is a spec extension, not a port |
+| `ThreadSafeContext` | **implement** | mutex-backed, same semantics; `apply_merge` reads untracked, folds, routes through `set_cell` — should be a straight port, **unmeasured, verify before calling it mechanical** |
+| `AsyncContext` | **implement** | not a spec extension — see below |
 
-Sequence: `ThreadSafeContext` merge → settle async fold timing → land all four
-fixtures against all three models.
+**The async question was overstated in an earlier draft**, which asked what
+"folds synchronously" means when the upstream resolves asynchronously. That
+presumed merge is async in `AsyncContext`. It is not:
 
-**Do not pre-build per-model fixture applicability.** Fixtures currently pin
-`"model": "Context"` and are replayed against all three implementations, with no
-way to say "this one applies to two of three." That machinery is only worth
-building if the async question turns out genuinely hard — not in anticipation of
-it.
+> *"Cells are the synchronous input layer: `cell`, `get_cell`, and `set_cell`
+> are synchronous. Only computed slots, memos, and effects are async."*
+> — `lazily-spec/docs/async.md:60-62`
+
+`apply_merge` is **entirely** cell operations — read untracked, fold, route
+through `set_cell`. So §7's "merge folds synchronously inside a batch" holds
+verbatim in `AsyncContext`, not by analogy. `batch` is likewise *"a
+**synchronous** boundary"* there. Fixture 2 therefore passes for exactly the same
+reason it passes in `Context`.
+
+The only difference is **when the feeding effect runs**: *"async reruns execute
+after the batch returns, on the runtime executor"* (`async.md:210-214`). That is
+timing, not semantics, and `GraphModel::settle()` already exists for it — it
+*"changes when the corpus's assertions are evaluated, never what they assert."*
+
+**What this makes fixture 1 into: a discriminating test for the async scheduler.**
+It asserts one merge per settled cone, which in `Context` holds because effects
+are scheduled rather than inline, so N invalidations coalesce into one run. The
+async docs claim the same coalescing — *"schedules **an** async rerun after the
+current invalidation pass"*, and *"one in-flight computation per revision"* — but
+**claimed is not fixtured**, which is the exact state signal eagerness sat in
+while a binding shipped a per-invalidation puller under a green checkmark. So the
+fixture now tests that claim rather than assuming it.
+
+**Known coverage gap, additive not blocking.** The four fixtures have the feed
+read a plain *cell*, and cells are synchronous — so as written they never
+exercise the async-specific path. A fifth fixture whose feed reads an **async
+formula**, where the effect cannot run until that formula resolves, is what
+actually stresses it. Add it separately rather than complicating the four.
+
+Sequence: implement merge on `ThreadSafeContext` and `AsyncContext` → land all
+four fixtures against all three models → add the async-formula feed fixture.
 
 ---
 

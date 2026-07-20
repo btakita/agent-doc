@@ -174,16 +174,83 @@ pub fn stale_install_warning(doc_git_root: &Path) -> Option<PreflightWarning> {
         return None;
     }
 
+    // `#autoinstalldeferstale`: distinguish "predates your uncommitted edits"
+    // (housekeeping) from "predates COMMITTED work" (a landed fix is not the code
+    // running). Both previously read identically, and the second one is why a
+    // session crashed on an already-fixed bug.
+    let oldest_installed = artifacts.iter().filter_map(|(_, mtime)| *mtime).min();
+    let missing = oldest_installed
+        .map(|since| commits_since(&repo, since))
+        .unwrap_or_default();
+
     Some(PreflightWarning {
         code: "stale_install".to_string(),
         message: format!(
-            "stale agent-doc install: {} predate the latest local source edit - live sessions (tmux / JetBrains) may run pre-edit code at an unchanged version. Run `make install` in {} to rebuild the binary + cdylib.",
+            "stale agent-doc install: {} predate the latest local source edit - live sessions (tmux / JetBrains) may run pre-edit code at an unchanged version.{} Run `make install` in {} to rebuild the binary + cdylib.",
             stale.join(", "),
+            missing_commits_note(&missing)
+                .map(|note| format!(" {note}"))
+                .unwrap_or_default(),
             repo.display()
         ),
         document_agent: None,
         active_harness: None,
     })
+}
+
+/// Name what the running binary is actually missing.
+///
+/// `#autoinstalldeferstale`: "the install predates local source edits" reads as
+/// housekeeping, so an operator reasonably ignores it. But when the source repo
+/// has COMMITTED work the binary predates, the same warning means something much
+/// sharper — a fix that is already landed is not the code running. Observed
+/// 2026-07-20: a supervisor crashed repeatedly on a registry bug whose fix and
+/// regression test were already committed in a patched sibling, because
+/// auto-install had deferred on an unrelated dirty worktree and only said so in
+/// `supervisor-stderr.log`.
+///
+/// Pure so the wording is testable without a repo.
+pub fn missing_commits_note(commits: &[String]) -> Option<String> {
+    if commits.is_empty() {
+        return None;
+    }
+    let head = commits.first().map(String::as_str).unwrap_or_default();
+    let extra = commits.len().saturating_sub(1);
+    let tail = if extra > 0 {
+        format!(" (+{extra} more)")
+    } else {
+        String::new()
+    };
+    Some(format!(
+        "The running binary is MISSING {} committed change(s), newest `{head}`{tail} - a fix you already landed is NOT the code running.",
+        commits.len()
+    ))
+}
+
+/// Commit subjects in `repo` newer than `since` (unix seconds), newest first.
+///
+/// Best-effort: any git failure yields an empty list, because a missing note is
+/// strictly better than blocking or mis-reporting the staleness warning.
+fn commits_since(repo: &Path, since: u64) -> Vec<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .arg("log")
+        .arg(format!("--since=@{since}"))
+        .arg("--format=%h %s")
+        .arg("--max-count=20")
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
 }
 
 /// `#stale-plugin-detect`: the expected editor-plugin version this binary ships
@@ -387,6 +454,45 @@ pub fn stale_plugin_warnings_from_registrations(
 
 #[cfg(test)]
 mod tests {
+    /// `#autoinstalldeferstale`: a stale install that merely predates uncommitted
+    /// edits is housekeeping; one that predates COMMITTED work means a landed fix
+    /// is not running. Those read identically before this note, which is how a
+    /// supervisor crashed repeatedly on an already-fixed bug.
+    #[test]
+    fn missing_commits_note_names_what_the_binary_is_missing() {
+        assert_eq!(
+            super::missing_commits_note(&[]),
+            None,
+            "no committed work past the install is ordinary staleness, not an alarm"
+        );
+
+        let one = super::missing_commits_note(&["abc1234 fix the thing".to_string()])
+            .expect("committed work must produce a note");
+        assert!(one.contains("MISSING 1 committed change"), "{one}");
+        assert!(one.contains("abc1234 fix the thing"), "{one}");
+        assert!(
+            one.contains("NOT the code running"),
+            "the note must say why it matters: {one}"
+        );
+        assert!(
+            !one.contains("more"),
+            "a single commit needs no overflow: {one}"
+        );
+
+        let many = super::missing_commits_note(&[
+            "aaa1111 newest".to_string(),
+            "bbb2222 older".to_string(),
+            "ccc3333 oldest".to_string(),
+        ])
+        .expect("committed work must produce a note");
+        assert!(many.contains("MISSING 3 committed change"), "{many}");
+        assert!(
+            many.contains("aaa1111 newest"),
+            "the NEWEST commit is the most useful identifier: {many}"
+        );
+        assert!(many.contains("(+2 more)"), "{many}");
+    }
+
     use super::*;
     use tempfile::TempDir;
 

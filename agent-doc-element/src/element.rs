@@ -334,11 +334,22 @@ impl Component {
             };
             let line_end = line_end.min(self.close_start);
 
-            // Replace the boundary marker with response content + new boundary.
-            // The boundary is consumed and re-inserted, matching the binary's
-            // post-patch behavior in apply_patches_with_overrides().
-            let new_id = crate::id::new_boundary_id();
-            let new_marker = crate::id::format_boundary_marker(&new_id);
+            // Replace the boundary marker with response content + the SAME
+            // boundary, moved to the new end of the component.
+            //
+            // `#boundarystableid`: this used to mint a fresh id on every append,
+            // which is why 162 snapshots of one document held 162 distinct
+            // boundary ids. The marker is a position, not an event: re-minting
+            // gives the live projection and the committed blob different ids for
+            // the same boundary, so they differ by exactly that line and no later
+            // cycle can settle it — each side keeps re-minting its own. Moving the
+            // existing id keeps the two convergent.
+            //
+            // The old comment claimed this matched `apply_patches_with_overrides`,
+            // but that path mints only when the boundary was LOST (its snowball
+            // guard), never on an ordinary append. The two were never actually
+            // matched.
+            let new_marker = crate::id::format_boundary_marker(boundary_id);
             let mut result = String::with_capacity(doc.len() + content.len() + new_marker.len());
             let prior = &doc[self.open_end..line_start];
             result.push_str(&doc[..line_start]);
@@ -1095,7 +1106,10 @@ pub fn repair_malformed_boundary_comment(doc: &str) -> Option<String> {
         // "preserving" it would inject a stray `--` line into the document. Only
         // a `-`-leading remainder is debris — a `>`-leading one is a blockquote
         // from the welded line and is real content.
-        let remainder = match remainder.strip_prefix("--").or(remainder.strip_prefix("->")) {
+        let remainder = match remainder
+            .strip_prefix("--")
+            .or(remainder.strip_prefix("->"))
+        {
             Some(rest) => rest.strip_prefix('>').unwrap_or(rest),
             None => remainder.strip_prefix('-').unwrap_or(remainder),
         };
@@ -2065,9 +2079,72 @@ actual content
 
         assert!(result.contains("### Re: Answer"));
         assert!(result.contains("user prompt"));
-        // Original marker should be consumed, but a NEW boundary re-inserted
-        assert!(!result.contains(&format!("agent:boundary:{boundary_id}")));
-        assert!(result.contains("agent:boundary:"));
+
+        // `#boundarystableid`: the marker MOVES to the new end of the component,
+        // it is not re-minted. The id is a stable position marker, not a
+        // per-response event — re-minting made the live projection and the
+        // committed blob disagree by exactly this line, permanently.
+        assert_eq!(
+            result.matches("<!-- agent:boundary:").count(),
+            1,
+            "exactly one boundary must survive an append:\n{result}"
+        );
+        assert!(
+            result.contains(&format!("<!-- agent:boundary:{boundary_id} -->")),
+            "the boundary id must be carried forward, not re-minted:\n{result}"
+        );
+
+        // ...and it must be carried forward to the END, after the appended
+        // response — not left at its original position above it.
+        let boundary_at = result
+            .find(&format!("<!-- agent:boundary:{boundary_id} -->"))
+            .expect("boundary present");
+        let response_at = result.find("### Re: Answer").expect("response present");
+        assert!(
+            response_at < boundary_at,
+            "the boundary must move to the end of the component:\n{result}"
+        );
+    }
+
+    /// `#boundarystableid`: repeated appends must keep ONE stable id. The
+    /// re-minting this replaced is what produced 162 distinct boundary ids across
+    /// one document's snapshots, guaranteeing live/committed divergence.
+    #[test]
+    fn repeated_appends_keep_one_stable_boundary_id() {
+        let boundary_id = "stable01";
+        let mut doc = format!(
+            "<!-- agent:exchange patch=append -->\n\
+             user prompt\n\
+             <!-- agent:boundary:{boundary_id} -->\n\
+             <!-- /agent:exchange -->\n"
+        );
+        for turn in 0..3 {
+            let components = parse(&doc).unwrap();
+            let comp = components
+                .iter()
+                .find(|c| c.name == "exchange")
+                .expect("exchange component");
+            doc = comp.append_with_boundary(
+                &doc,
+                &format!("### Re: Turn {turn}\n\nBody {turn}."),
+                boundary_id,
+            );
+        }
+        assert_eq!(
+            doc.matches("<!-- agent:boundary:").count(),
+            1,
+            "boundaries must never accumulate across turns:\n{doc}"
+        );
+        assert!(
+            doc.contains(&format!("<!-- agent:boundary:{boundary_id} -->")),
+            "the id must be identical after three appends:\n{doc}"
+        );
+        for turn in 0..3 {
+            assert!(
+                doc.contains(&format!("### Re: Turn {turn}")),
+                "turn {turn} must survive:\n{doc}"
+            );
+        }
     }
 
     #[test]

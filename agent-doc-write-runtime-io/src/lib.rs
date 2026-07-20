@@ -466,16 +466,85 @@ pub fn run_command_with_empty_response_recovery(
     run_command_inner(options, commit_mode, Some(empty_response_recovery))
 }
 
+/// How long a NON-INTERACTIVE stdin may stay silent before it is treated as hung.
+///
+/// `0` disables the bound entirely. Override with `AGENT_DOC_STDIN_TIMEOUT_SECS`.
+const STDIN_SILENT_TIMEOUT_SECS: u64 = 60;
+
+/// How long to wait for stdin to reach EOF, or `None` to wait forever.
+///
+/// `#writestdinhang`: `read_to_string(stdin)` blocks until EOF, and an automation
+/// caller that never closes fd 0 never delivers one. Observed 2026-07-20 — two
+/// ~15-minute hangs where fd 0 was a still-open socket belonging to the calling
+/// harness; `/proc/<pid>/task/*/wchan` showed `unix_stream_read_generic`. The
+/// process cannot distinguish that from "the producer is about to write", so it
+/// waits indefinitely and the operator sees a mystery hang.
+///
+/// A TTY is exempt and waits forever: a human composing a response at a terminal
+/// is legitimately silent for minutes, and a deadline there would truncate real
+/// input. Only a non-interactive stdin — pipe, socket, file — is bounded, because
+/// a producer that has piped nothing after a full minute is not coming.
+pub fn stdin_read_deadline(is_terminal: bool, timeout_secs: u64) -> Option<std::time::Duration> {
+    if is_terminal || timeout_secs == 0 {
+        return None;
+    }
+    Some(std::time::Duration::from_secs(timeout_secs))
+}
+
+fn configured_stdin_timeout_secs() -> u64 {
+    std::env::var("AGENT_DOC_STDIN_TIMEOUT_SECS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(STDIN_SILENT_TIMEOUT_SECS)
+}
+
 fn read_response_input() -> Result<String> {
     if let Some(response) = RESPONSE_STDIN_OVERRIDE.with(|slot| slot.borrow_mut().take()) {
         return Ok(response);
     }
 
-    let mut response = String::new();
-    std::io::stdin()
-        .read_to_string(&mut response)
-        .context("failed to read response from stdin")?;
-    Ok(response)
+    let deadline = stdin_read_deadline(
+        std::io::IsTerminal::is_terminal(&std::io::stdin()),
+        configured_stdin_timeout_secs(),
+    );
+    let Some(deadline) = deadline else {
+        let mut response = String::new();
+        std::io::stdin()
+            .read_to_string(&mut response)
+            .context("failed to read response from stdin")?;
+        return Ok(response);
+    };
+
+    // The blocked read cannot be cancelled, so it runs on a detached thread and
+    // dies with the process. Bounding the WAIT (not the read) is what turns an
+    // indefinite hang into an actionable error.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut response = String::new();
+        let result = std::io::stdin()
+            .read_to_string(&mut response)
+            .map(|_| response);
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(deadline) {
+        Ok(result) => result.context("failed to read response from stdin"),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => anyhow::bail!(
+            "no response arrived on stdin after {}s and it never closed, so this would have waited forever.\n\
+             `agent-doc write` reads the response body from stdin. Either pipe one in:\n\
+             \n\
+             \x20   cat <<'RESPONSE' | agent-doc write --commit <FILE>\n\
+             \x20   <!-- patch:exchange --> ... <!-- /patch:exchange -->\n\
+             \x20   RESPONSE\n\
+             \n\
+             or, for a flags-only invocation (for example `--backlog-add`), close stdin with `< /dev/null`.\n\
+             Set AGENT_DOC_STDIN_TIMEOUT_SECS=0 to wait indefinitely instead.",
+            deadline.as_secs()
+        ),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            anyhow::bail!("stdin reader thread died before delivering a response")
+        }
+    }
 }
 
 fn log_resolved_backlog_prompt_cleanup(file: &Path, removed_total: usize) {
@@ -2342,6 +2411,34 @@ mod tests {
     use std::fs::OpenOptions;
     use std::time::Duration;
     use tempfile::TempDir;
+
+    /// `#writestdinhang`: a non-interactive stdin that never closes must be
+    /// bounded, or `read_to_string` waits forever. Two ~15-minute hangs were
+    /// observed where fd 0 was a still-open socket owned by the calling harness.
+    ///
+    /// A TTY is exempt on purpose: a human composing a response is legitimately
+    /// silent for minutes, and bounding that would truncate real input.
+    #[test]
+    fn stdin_read_deadline_bounds_only_non_interactive_input() {
+        assert_eq!(
+            stdin_read_deadline(true, 60),
+            None,
+            "a human typing at a terminal must never be cut off"
+        );
+        assert_eq!(
+            stdin_read_deadline(false, 60),
+            Some(Duration::from_secs(60)),
+            "a pipe/socket that has sent nothing is hung, not slow"
+        );
+    }
+
+    /// The bound must stay escapable: an operator who genuinely wants to wait
+    /// forever on a pipe can opt out, and that opt-out must also apply to a TTY.
+    #[test]
+    fn stdin_read_deadline_zero_disables_the_bound() {
+        assert_eq!(stdin_read_deadline(false, 0), None);
+        assert_eq!(stdin_read_deadline(true, 0), None);
+    }
 
     #[test]
     fn retained_response_outcome_keeps_same_closeout_mutation_envelope() {

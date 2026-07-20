@@ -1995,10 +1995,16 @@ pub fn apply_canonical_replace_if_attached(
                                 let relay_write = pending_write
                                     .take()
                                     .expect("pending CRDT target must retain its write receipt");
-                                let exact_target_retained = relay_write.applied
-                                    && relay_text == *applied_target
-                                    && relay_write.content_hash
-                                        == agent_doc_hash::content_hash(applied_target);
+                                // Socket delivery can win the race before the
+                                // controller-side CAS acquires the relay. The
+                                // resulting no-op receipt is still durably retained
+                                // because the intent was journaled before apply.
+                                let exact_target_retained = exact_target_has_active_retention(
+                                    file,
+                                    &relay_write,
+                                    applied_target,
+                                    &relay_text,
+                                );
                                 let completion = write_policy::decide_crdt_write_completion(
                                     write_policy::CrdtWriteCompletionEvidence {
                                         exact_target_retained,
@@ -2450,6 +2456,18 @@ fn acknowledged_noop_relay_write(
         live_editors,
         delivery_converged: true,
     }
+}
+
+fn exact_target_has_active_retention(
+    file: &Path,
+    relay_write: &agent_doc_crdt_relay_io::CpRelayWrite,
+    applied_target: &str,
+    relay_text: &str,
+) -> bool {
+    relay_text == applied_target
+        && relay_write.content_hash == agent_doc_hash::content_hash(applied_target)
+        && (relay_write.applied
+            || pending_document_write_for_target(file, &relay_write.content_hash).is_some())
 }
 
 fn reconcile_deferred_write_to_acknowledged_cut_if_needed(
@@ -6787,6 +6805,31 @@ mod tests {
         assert_eq!(receipt.targets, 0);
         assert!(receipt.delivery_converged);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+    }
+
+    #[test]
+    fn no_op_race_receipt_uses_the_preapply_durable_intent_as_retention_proof() {
+        let baseline = "# Session\n\nBefore.\n";
+        let target = "# Session\n\nBefore.\n\nAfter.\n";
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        ensure_deferred_document_write_intent(
+            &file,
+            baseline,
+            target,
+            "no_op_race_retention_test",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        let mut receipt = acknowledged_noop_relay_write(target, 1);
+        receipt.delivery_converged = false;
+
+        assert!(!receipt.applied);
+        assert!(exact_target_has_active_retention(
+            &file, &receipt, target, target
+        ));
+        assert!(!exact_target_has_active_retention(
+            &file, &receipt, target, baseline
+        ));
     }
 
     #[test]

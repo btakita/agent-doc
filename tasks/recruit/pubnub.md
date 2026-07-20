@@ -9,7 +9,7 @@ claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 pending_done_guard: warn
 agent_doc_lint_dialect: off
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -59,14 +59,20 @@ A real-time terminal chat on the PubNub Rust SDK. Two terminals, one channel, li
 That gap is worth carrying into the recruiter conversation: it is a concrete, specific observation about their product surface, made from having actually built on it.
 
 I did not touch the PubNub Functions package you linked (`admin.pubnub.com/.../functions/packages`) — that needs your account session. Say the word if you want a Function added to this repo.
-<!-- agent:boundary:d935c6f9 -->
+
+### Re: unresolved queue head #bt09 — opus-4-8
+
+> **Queue prompt:** /goal Implement backlog item(s): #bt09
+
+Not actionable in this document. `#bt09` does not exist in this session's `agent:backlog` — the only item here is `#pubnubpoc`. It is a stale head from another document's backlog, so I am recording it as resolved-unactionable rather than guessing at what it meant.
+
+If `#bt09` belongs to another session doc, re-queue it there and it will carry its own definition.
+<!-- agent:boundary:5c5c28f5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
-- ~~📌 Help me to create a simple pubnub app. Create a gh repo for it...btakita/pubnub-example?~~ — auto-struck: answered this cycle (#ftstrike)
-- /goal Implement backlog item(s): #bt09
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

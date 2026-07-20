@@ -190,6 +190,6 @@
 [submodule "src/freehold"]
 	path = src/freehold
 	url = git@github.com:freehold-hub/freehold.git
-[submodule "src/acadian-take-home"]
-	path = src/acadian-take-home
-	url = https://github.com/btakita/acadian-take-home.git
+[submodule "src/mag7-viewer"]
+	path = src/mag7-viewer
+	url = https://github.com/btakita/mag7-viewer.git

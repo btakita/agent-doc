@@ -419,7 +419,17 @@ The fixed idle footprint is unchanged: the old list pointer became one lazy band
 Verification: `go test ./hub`, `go test -race ./hub`, and the full `make check` gate (vet, race-detecting all-package tests, and builds) are green. This repository has no GitHub Actions workflow named `CI`, so there was no latest CI run to inspect. Commits: submodule `3367515`, parent gitlink `08f03e487`. The tsift-generated `.gitignore` and untracked `AGENTS.md` changes in the submodule were deliberately excluded.
 
 The exchange is large, but the active queue means compaction should wait for an explicit opt-in.
-<!-- agent:boundary:cfb53106 -->
+
+### Re: framed fan-out throughput note — gpt-5
+
+> **Queue prompt:**
+>
+> 📌 **Throughput unaffected:** ~3.3–3.6 M/s framed vs ~3.6 M/s unbounded. (One 1.59 M/s outlier was noise; reruns gave 3.60/3.58.)
+
+Confirmed. This is an already-resolved measurement note, not a new implementation task: the friend-frame bounds subscription memory without a material throughput penalty, and the isolated 1.59 M/s result was correctly rejected after consistent reruns. No benchmark or documentation change is needed for this queue item.
+
+The exchange remains large; compaction still waits for explicit opt-in while the queue is active.
+<!-- agent:boundary:4740e2aa -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -427,7 +437,7 @@ The exchange is large, but the active queue means compaction should wait for an 
 <!-- agent:queue go -->
 - ~~do [#activepri]~~
 - ~~do [#fanoutpri]~~
-- 📌 **Throughput unaffected:** ~3.3–3.6 M/s framed vs ~3.6 M/s unbounded. (One 1.59 M/s outlier was noise; reruns gave 3.60/3.58.)
+- ~~📌 **Throughput unaffected:** ~3.3–3.6 M/s framed vs ~3.6 M/s unbounded. (One 1.59 M/s outlier was noise; reruns gave 3.60/3.58.)~~
 - /goal Implement backlog item(s): #b10a
 - /goal Implement backlog item(s): #yyzn
 - do [#friendsnapshot]

@@ -271,6 +271,20 @@ impl RelayHub {
     /// Build the thread-safe reactive liveness core shared by every constructor:
     /// a `ThreadSafeContext`, an on-demand `client_id -> live` cell family, a membership
     /// epoch cell, and the derived live-member count slot.
+    ///
+    /// **Lifetime (`#lazilyscopeadopt`).** This core deliberately does *not* use
+    /// lazily's `ctx.scope() -> TeardownScope`. The context is private to one
+    /// `RelayHub` and is dropped with it, so hub disposal already tears the whole
+    /// graph down; a scope would only re-express that ownership. And within one
+    /// hub the graph is bounded: `mint_client_id` derives a client id
+    /// deterministically from a **stable** editor identity, so connection churn
+    /// re-materializes the same cells rather than minting new ones. Both bounds
+    /// are asserted against lazily's edge introspection in
+    /// `reconnect_churn_on_stable_identity_does_not_grow_the_liveness_edge_set`
+    /// and `liveness_edge_set_is_bounded_by_distinct_identities_not_churn`. The
+    /// remaining process-lifetime growth is one hub per document in
+    /// `agent-doc-crdt-relay-io`'s `hub_registry`, which is a registry-eviction
+    /// question, not a reactive-scope one.
     fn build_liveness_core() -> (
         ThreadSafeContext,
         ThreadSafeCellMap<u64, bool>,
@@ -2489,6 +2503,73 @@ mod tests {
             hub.live_count(),
             2,
             "reconnect recomputes the derived count"
+        );
+    }
+
+    /// `#lazilyscopeadopt` — the edge-set-vs-observer-registry test applied to the
+    /// liveness core: *anything surviving an invalidation is not a graph edge*.
+    ///
+    /// `live_editor_count` observes every present liveness key, so its dependency
+    /// set is the thing that could grow without bound in a long-lived controller.
+    /// Reconnect churn on a **stable** client identity (what `mint_client_id`
+    /// produces — a deterministic id from a stable string identity) must not add
+    /// an edge per cycle: the same key re-materializes the same cell.
+    #[test]
+    fn reconnect_churn_on_stable_identity_does_not_grow_the_liveness_edge_set() {
+        use lazily::reactive_graph::ReactiveGraph;
+
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        // Force the derived count to compute so its dependency edges exist.
+        assert_eq!(hub.live_count(), 1);
+        let baseline = hub.ctx.dependency_count(&hub.live_editor_count);
+
+        for _ in 0..64 {
+            hub.deregister(2);
+            assert_eq!(hub.live_count(), 0);
+            hub.register(2).unwrap();
+            assert_eq!(hub.live_count(), 1);
+        }
+
+        assert_eq!(
+            hub.ctx.dependency_count(&hub.live_editor_count),
+            baseline,
+            "register/deregister churn on one stable identity must not accumulate \
+             dependency edges on the derived live-editor count",
+        );
+    }
+
+    /// `#lazilyscopeadopt` — the liveness edge set is bounded by the number of
+    /// **distinct** editor identities for the document, not by connection churn.
+    /// That bound is why the hub's reactive state needs no `ctx.scope()`: the hub
+    /// owns a private `ThreadSafeContext` that is dropped with the hub, and within
+    /// one hub the graph stops growing once every identity has been seen.
+    #[test]
+    fn liveness_edge_set_is_bounded_by_distinct_identities_not_churn() {
+        use lazily::reactive_graph::ReactiveGraph;
+
+        let mut hub = RelayHub::new(1);
+        for id in 2..=9u64 {
+            hub.register(id).unwrap();
+        }
+        assert_eq!(hub.live_count(), 8);
+        let saturated = hub.ctx.dependency_count(&hub.live_editor_count);
+
+        // Every identity has now been seen; a second full churn pass adds nothing.
+        for id in 2..=9u64 {
+            hub.deregister(id);
+        }
+        assert_eq!(hub.live_count(), 0);
+        for id in 2..=9u64 {
+            hub.register(id).unwrap();
+        }
+        assert_eq!(hub.live_count(), 8);
+
+        assert_eq!(
+            hub.ctx.dependency_count(&hub.live_editor_count),
+            saturated,
+            "the derived count's edge set must saturate at the distinct-identity \
+             count instead of growing with each connection cycle",
         );
     }
 }

@@ -829,7 +829,21 @@ The item's framing is that the retry "RE-APPLIES the response tail instead of re
 So patch application is **not** the splice source, and neither is the merge retry. The corruption must originate where the retry **constructs** the content it applies — the `content_ours` / response-tail assembly above the apply layer. That is consistent with the debris shape: a bare ` -->` whose opening marker was consumed is what you get when a tail is concatenated onto an image that already contains it, not what you get from re-running a well-formed patch.
 
 Recorded the elimination plus the next probe on the item: capture `content_ours` on the second attempt of a raced finalize and diff it against the first. The regression stays as a guard so this layer cannot silently become the cause later.
-<!-- agent:boundary:025980c9 -->
+
+### Re: selection-scoped Run Agent Doc — opus-4-8
+
+> **Queue prompt:** do [#promptselect]
+
+Gated, with the dependency made concrete rather than left as "design pass needed".
+
+Part **(d)** — "responses attached UNDER their originating prompt, a threaded prompt→response layer in the Document Tree rather than a flat exchange tail" — is not an independent design question. It *is* **Phase 2 of `plan-exchange-tree-seqcrdt-and-ipc-unify.md`** ("Exchange document-tree model"), which I confirmed while triaging `#steeringobservableset`: only Phase 1 carries `✅ DONE`; Phases 2, 3, 3.1, 4 and 5 do not. There is no document-tree threading layer to attach responses to yet, so (d) cannot be built without either doing Phase 2 or inventing a parallel threading model that Phase 2 would then have to reconcile — the second-document-model hazard.
+
+The item's own closing constraint points the same way: it "must compose with realtime steering, since a selection sent mid-turn IS steering" — and steering's durable graph adoption (`#steeringobservableset`) is likewise sequenced behind Phase 3/3.1.
+
+**What is independently doable** is (a): the `agent-doc prompt "<text>"` CLI verb accepting multi-line via stdin. That is self-contained, testable, and useful on its own — a way to send a scoped prompt without the whole-document trigger — and it unblocks (b), the JB/VSCode hook. Only (c) and (d) genuinely need the tree.
+
+So the honest split is: (a)+(b) are a normal implementation cycle available now; (c)+(d) are gated behind Phase 2. Recorded that on the item so the next pass does not re-derive the dependency, and gated rather than left drainable since starting at (d) is the natural but wrong entry point.
+<!-- agent:boundary:30ad7776 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -893,7 +907,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ do [#60ev]
 - ⏭️ do [#2y8j]
 - ⏭️ do [#cdtcutover]
-- do [#coredecomp]
+- ⏭️ do [#coredecomp]
 - do [#orchdecomp]
 - do [#skillharnessplugin]
 - do [#crdtauth6]
@@ -908,7 +922,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 do [#30p6]
 - ~~📌 do [#n39j]~~
 - ~~📌 do [#f6j3]~~
-- 🚧 📌 do [#promptselect]
+- ~~📌 do [#promptselect]~~
 - 📌 do [#realtimesalient]
 - 📌 do [#syncobscache2]
 - 📌 do [#capturebacklogatomic]
@@ -952,7 +966,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#7n20] Finish the ensure-window liveness fix across the CLI/controller process boundary. `bbc50c26e` extends the 400ms missing-replica ensure window when a `crdt_replica_register` proves the editor is alive, but the counter is process-global: on the split path the register lands controller-side while `ensure_document_model` runs CLI-side, so live telemetry still shows `window_extended=false` and the wedge persists. Two options: carry the liveness proof across IPC, or run the ensure controller-side where the registration already is. Do NOT route preflight's initial current-doc resolve through the ensure path — tried in this cycle and reverted; it violates `preflight_missing_editor_model_pauses_without_reading_disk_authority` and made preflight resolve to DISK content instead of waiting for the attached editor.
 - [ ] [#zq8e] Editor-authority wedge blocks ALL queue maintenance (root of the #goal drain stall). Evidence in ops.log for this doc: at 19:32:45 `controller_crdt_current_text source=preflight_queue_maintenance` returns `status=current live_editors=1 delivery_converged=true`; 2s later the SAME queue_maintenance path logs `document_model_ensure_start initial_state=editor_attached_model_missing`, a `crdt_replica_register` succeeds (`data_kind=ok generation_fenced=true bootstrap_bytes=1312802`), then `document_model_ensure_republish_observer_not_ready` -> `document_model_ensure_failed` after 5s. EVERY `document_model_ensure_start` this session reports missing-replica across unrelated sources (queue_maintenance, pending_add_sync, controller_recycle_request) while the controller consistently reports current. Two observers of one document disagree; the ensure-path observer does not see a replica the controller demonstrably has. NOTE: likely already owned by the `src/agent-doc-editor-authority-fix` worktree (commits `preserve attached editor authority during retry`, `bound idle authority replay`) — coordinate before landing a rival fix in src/agent-doc.
 - [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).
-- [ ] 🚧 [#promptselect] #agent-doc-feature Selection-scoped `Run Agent Doc`: send ONLY the editor text selection as the prompt. Needs (a) a dedicated CLI verb — `agent-doc prompt "<text>"` (or `steer`; `run` is taken) accepting multi-line via stdin/cat, (b) JB+VSCode `Run Agent Doc` hooked to it so a non-empty selection routes through `prompt` instead of the whole-document trigger, (c) acknowledgement: agent-doc echoes the prompt into the document with the prompt prefix plus salient response, (d) responses attached UNDER their originating prompt — a threaded prompt->response layer in the Document Tree rather than a flat exchange tail. Must compose with realtime steering (#realtime-steering-verbatim) since a selection sent mid-turn IS steering. Design pass needed before implementation.
 - [ ] [#realtimesalient] #agent-doc-feature Write salient responses into the document in REAL TIME rather than buffering until finalize. Today only complete `### Re:` sections cross response-checkpoint and partial output is console-only (SKILL.md: "stream incomplete progress only to the console"). Requires deciding what counts as salient mid-turn, and preserving the invariant that incomplete token prefixes never become authoritative document text — so likely a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it. Pairs with #promptselect threading.
 - [ ] [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.
 - [ ] [#syncobscache2] #syncobscache follow-up (the rest of the focus-sync win): extend the command-scoped observation cache into ../tmux-router. After the agent-doc-side cache: 109 -> 80 subprocess spawns, 2225 -> 2031ms (~9% only). list-panes barely moved (35 -> 34) because tmux-router spawns from 47 sites directly via its own Command builder, bypassing TmuxCommandRunner. Dominant remainder: `list-panes -a -F #{pane_id} #{pane_dead}` run 18x identically — pane_dead_flag lists ALL panes and scans for one, once per pane. Fix: move the scope into tmux-router and/or batch pane_dead_flag into one map fetch. Re-measure with the PATH-shim spawn counter.
@@ -1001,6 +1014,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ## Review
  
 <!-- agent:review -->
+- [/] 🚧 [#promptselect] #agent-doc-feature Selection-scoped `Run Agent Doc`: send ONLY the editor text selection as the prompt. Needs (a) a dedicated CLI verb — `agent-doc prompt "<text>"` (or `steer`; `run` is taken) accepting multi-line via stdin/cat, (b) JB+VSCode `Run Agent Doc` hooked to it so a non-empty selection routes through `prompt` instead of the whole-document trigger, (c) acknowledgement: agent-doc echoes the prompt into the document with the prompt prefix plus salient response, (d) responses attached UNDER their originating prompt — a threaded prompt->response layer in the Document Tree rather than a flat exchange tail. Must compose with realtime steering (#realtime-steering-verbatim) since a selection sent mid-turn IS steering. Design pass needed before implementation.
 - [/] [#agentsignals] [future/separate] Add a realtime agent:signals element after core realtime convergence is stable. Start with deterministic built-in signals for tests, queue, supervisor, and ipc; design custom user-defined signals as plugin-backed tracked work with Rust as the first target and future multi-language support; use tasks/software/realtime-signals-patchboard.md as the GUI/semi-programmatic reference; keep MLP enhancement optional/experimental and not load-bearing for deterministic states.
 - [/] [#steeringobservableset] #agent-doc-bug Phase 6 durable graph adoption: back RealtimeSteeringSet with a lazily reactive OBSERVABLE SET (not a drain-one-head QueueCell) keyed on the body-aware identity (Phase 3.1), reconciled on the reliable-sync plane; session-check reads set-emptiness (all directives settled) instead of re-diffing HEAD↔buffer. Plan: src/agent-doc/tasks/agent-doc/plan-exchange-tree-seqcrdt-and-ipc-unify.md (Phase 6). [recommended]
 - [/] [#crde] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/professional/equityfundingsource.md stage=dispatch_only_dispatch_start_proof pane=%83 actor_generation=1214 editor_attempt_id=1783978030079-4 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad component=route/dispatch_only_dispatch_start_proof content_hash=sha256:3251e072b5c1857ba06e9ba613e1004b5eefef103db7003d7dcf7efe0d698ea8]

@@ -623,7 +623,21 @@ That last point is the actual proof. The defect was that the auto-strike of reso
 This is live operator-visible evidence rather than a unit test, which is what the item asked for. Marking done.
 
 Worth noting for the neighbouring items: this also means the queue-maintenance persist path is healthy on the current binary, so `queue_maintenance_not_persisted` is not currently reproducing — relevant to `#5d9f`, whose remaining half is the *arming* defect rather than persistence.
-<!-- agent:boundary:3eadad49 -->
+
+### Re: fenced Compact Exchange CRDT epoch — re-scoped, not implemented — opus-4-8
+
+> **Queue prompt:** do [#compacttombgc]
+
+Re-scoped rather than built, because the measurement that closed `#42xb` also changes what this item should be.
+
+`#bootstrapsize` in `crdt_sync.rs` records a real 57KB session document whose bootstrap was 815,754 bytes across 88,630 ops with **ZERO tombstones** and one peer. So `TextCrdt` tombstone GC — the item's headline step — would have reclaimed **nothing** on the observed shape. The payload is not accumulated deletions; it is one op per inserted codepoint of pre-compaction history.
+
+**The epoch itself is still the right idea, for a different reason.** Compacting exchange text does not retire the CRDT ops that produced it, so a compacted document keeps paying for history the operator can no longer see. Rebootstrapping attached replicas from the compacted snapshot and rejecting/component-rebasing older-epoch deltas is precisely what discards that insert history — it is the only mechanism here that makes compaction actually shrink the register bootstrap. That is worth doing on its own merits.
+
+So I inverted the item: epoch fence + rebootstrap is the headline, tombstone GC becomes a trailing step that matters for delete-heavy documents rather than the goal. The stated prerequisite is unchanged and still binding — the all-replica stability frontier has to exist before any epoch fence is safe, or a replica that has not caught up loses ops it never received.
+
+Left actionable rather than gated: nothing blocks it except sequencing behind the frontier, and it is now aimed at the thing that actually accounts for the bytes.
+<!-- agent:boundary:84863248 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -667,8 +681,8 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#supboundarylivelock]~~
 - ⏭️ do [#statedbvacuum]
 - ~~do [#qdonestrikeverify]~~
-- 🚧 do [#crashresiliencelograce]
-- do [#compacttombgc]
+- ⏭️ do [#crashresiliencelograce]
+- 🚧 do [#compacttombgc]
 - do [#compactindcellsverify]
 - do [#zqv8]
 - do [#crde]
@@ -755,8 +769,8 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#syncobscache2] #syncobscache follow-up (the rest of the focus-sync win): extend the command-scoped observation cache into ../tmux-router. After the agent-doc-side cache: 109 -> 80 subprocess spawns, 2225 -> 2031ms (~9% only). list-panes barely moved (35 -> 34) because tmux-router spawns from 47 sites directly via its own Command builder, bypassing TmuxCommandRunner. Dominant remainder: `list-panes -a -F #{pane_id} #{pane_dead}` run 18x identically — pane_dead_flag lists ALL panes and scans for one, once per pane. Fix: move the scope into tmux-router and/or batch pane_dead_flag into one map fetch. Re-measure with the PATH-shim spawn counter.
 - [ ] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
 - [ ] [#statedbvacuum] [recommended] #agent-doc-feature One-time reclaim + ongoing compaction for .agent-doc/state.db. #authorityfactretention (566a72f6d) bounds future growth (170,215 -> 5,000 document_authority_observed rows on the live db), but SQLite reuses freed pages rather than shrinking: agent-loop state.db is still 477MB on disk with ~47,000 free pages and state_events holding 288MB across 73,822 pages for only 11,056 rows. Reclaiming needs a VACUUM, which takes an exclusive lock and must not run under a live controller. Add a bounded maintenance path (an `agent-doc admin vacuum` gated on no live controller/supervisor, or PRAGMA incremental_vacuum wired into an idle boundary) instead of leaving operators to run sqlite3 by hand.
-- [ ] 🚧 [#crashresiliencelograce] test-hygiene: crash_resilience::tests::log_panic_to_file_appends_without_panicking fails under a parallel workspace run (cargo test --workspace) at src/crash_resilience.rs:173 but passes in isolation and under make check. The panic-log append test shares a fixed path across concurrently-running crate test binaries. Give it a per-test temp path so the suite is order-independent.
-- [ ] [#compacttombgc] [recommended] Add a fenced Compact Exchange CRDT epoch: rebootstrap attached replicas from the compacted snapshot, reject or component-rebase older-epoch deltas, expose the all-replica stability frontier, then run TextCrdt tombstone GC.
+- [ ] [#crashresiliencelograce] test-hygiene: crash_resilience::tests::log_panic_to_file_appends_without_panicking fails under a parallel workspace run (cargo test --workspace) at src/crash_resilience.rs:173 but passes in isolation and under make check. The panic-log append test shares a fixed path across concurrently-running crate test binaries. Give it a per-test temp path so the suite is order-independent.
+- [ ] 🚧 [#compacttombgc] [recommended] Fenced Compact Exchange CRDT epoch — RE-SCOPED 2026-07-19 away from tombstone GC. The #bootstrapsize measurement (crdt_sync.rs) on a real 57KB document found 88,630 ops and ZERO tombstones, so TextCrdt tombstone GC would reclaim nothing on the observed shape; the payload is pre-compaction INSERT history. The valuable half is the epoch itself: rebootstrap attached replicas from the compacted snapshot and reject/component-rebase older-epoch deltas, which discards that insert history — the only mechanism that makes compaction actually shrink the register bootstrap. Keep tombstone GC as a trailing step for delete-heavy documents, not the headline. Still needs the all-replica stability frontier before any epoch fence is safe.
 - [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
 - [ ] [#5qjj] steeringmirrorverify|[operator-verify] Restart IntelliJ IDEA 2026.1 to activate plugin 0.2.258 (if stale bytecode appears, uninstall, restart, reinstall the signed local zip, and restart); during an active turn, make multiple exchange edits and verify the JetBrains banner and VS Code status item report the aggregate count/full hover, then run agent-doc once after editing and confirm the handoff queues without submitting a partial edit.
 - [ ] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.

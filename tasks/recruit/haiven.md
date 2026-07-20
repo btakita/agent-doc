@@ -507,6 +507,21 @@ Resolved as queue bookkeeping. The earlier `/goal Implement backlog item(s): #yy
 On the priority question: keep inbound service dispatch FIFO. Giving an incoming high-fan-out message priority can amplify overload by expanding the most expensive work first. Keep the narrow two-lane policy only at each client’s bounded outbound queue: live chat and acknowledgements ahead of bootstrap history/presence frames, with a frame’s age starting when its first item is queued and never resetting as later items merge. Fan-out admission/concurrency should be bounded separately.
 
 The exchange remains large; the active queue continues without pausing for compaction.
+
+### Re: inbound priority and high fan-out — gpt-5
+
+Keep it simple.
+
+Do not prioritize inbound messages. A high-fan-out inbound message is the most expensive work item because it expands into many deliveries; promoting it can amplify overload and delay cheaper work. Keep per-service ingress FIFO and control fan-out with bounded admission/concurrency.
+
+The useful priority boundary is each client’s bounded outbound queue:
+
+- live chat and acknowledgements are interactive;
+- initial chat-history frames and presence snapshots are bulk;
+- a pending frame’s scheduling age starts when its first item is added, not from the messages’ historical timestamps;
+- appending or merging later items never resets that age, so steady live traffic cannot starve the frame.
+
+That narrow two-lane policy with aging is worth keeping. A separate ingress or global fan-out priority scheduler is not worth the complexity without measured evidence that it is needed.
 <!-- agent:boundary:c77a9068 -->
 <!-- /agent:exchange -->
 
@@ -520,14 +535,14 @@ The exchange remains large; the active queue continues without pausing for compa
 - ~~/goal Implement backlog item(s): #yyzn~~
 - ~~do [#friendsnapshot]~~
 - ~~do [#yyzn-clarify]~~
-- do [#haivenwsopt]
+- 🚧 do [#haivenwsopt]
 - do [#tnpa]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
+- [ ] 🚧 [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 <!-- /agent:backlog -->
 

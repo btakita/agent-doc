@@ -985,11 +985,28 @@ So the fix is to stop touching the cwd, not to change the path. I split the ambi
 Worth noting the **sibling** test `resolve_logs_dir_finds_nearest_dot_agent_doc` had the same `set_current_dir` pattern and was equally capable of poisoning others; the item named only one. Both are converted, and there are now no `set_current_dir` calls left in the module — only comments explaining why.
 
 Verified under `cargo test --workspace`, the exact mode it failed in, plus `make check` at 7799 green.
-<!-- agent:boundary:4d53d754 -->
+
+### Re: auto-install stdio bleed + lazily 0.45 upgrade — opus-4-8
+
+> **Queue prompt:** do [#restartbleednonroute]
+
+Fixed in `c89cbc398`. `auto_install_child_stdio_plan()` dups **fd2**, which is off-pane only while `SupervisorStderrRedirect` is active — on a non-route-owned TUI, or a route-owned supervisor whose redirect fell back to inactive on error, fd2 *is* the agent pane and `make install` output bleeds into the live session. The child now writes to the project's `.agent-doc/logs/supervisor-stderr.log`, opened once and held for the sequence, so its stdio is independent of route ownership. fd2 stays the fallback: a log that cannot be opened degrades to today's behavior rather than silently discarding build output.
+
+Regressions cover both directions — a real fd `> 2` that **appends** across reopens (a recycle must not truncate prior output), and `None` outside a project so the fallback path stays reachable. The architecture test also caught me routing through `agent_doc_fs::find_project_root` directly; corrected to `agent_doc_project_root_io::project_root_containing`, which is the layering rule that test exists to hold.
+
+**lazily 0.41.0 → 0.45.0** (`66f71cb40`), for `ctx.scope` with automatic disposal. Two things worth recording:
+
+The bump had to be **uniform**. Bumping only the root manifest left 22 member crates on 0.41, and two lazily versions in one graph do not unify — `Outbox<SqliteStore>` from 0.41 failed the `DurableOutbox` bound that 0.45 satisfies, which presents as a missing trait impl rather than a duplicate-crate mismatch. All 23 manifests are on 0.45 now; 7801 tests pass with no source changes.
+
+And the upgrade makes disposal **possible**, not applied. Since nothing before 0.45 disposed reactives, every cell/computed agent-doc creates has been living for the process lifetime — which matters most in the per-document relay/liveness cores inside a long-lived controller. Filed as `#lazilyscopeadopt` with those sites named.
+
+I left `src/lazily-rs`, `src/lazily-kt`, and `src/lazily-js` completely untouched — another session is publishing them, and their working-tree changes are that session's, not mine.
+<!-- agent:boundary:188f7942 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#lazilyscopeadopt]
 ~~~done
 We should immediately self-heal. Make all self-healing real-time, not turn-based...if possible.
 > Heads now render as list items. `parse_spans` still accepts the legacy bare form, so existing documents round-trip and self-heal on the next render rather than needing migration. There's a regression asserting every rendered head is a list item, and that healing is idempotent.
@@ -1012,7 +1029,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#jbroutasync]~~
 - ~~do [#mtds]~~
 - ~~do [#queuecontmirror]~~
-- do [#hvw0]
+- ⏭️ do [#hvw0]
 - do [#bbpe]
 - ~~do [#mrnh]~~
 - ~~do [#f4d5]~~
@@ -1036,7 +1053,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#crde]~~
 - ~~do [#steeringobservableset]~~
 - do [#vscsaveproj]
-- do [#restartbleednonroute]
+- ~~do [#restartbleednonroute]~~
 - do [#r4gq]
 - do [#af88]
 - do [#claimnewpane]
@@ -1091,6 +1108,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#lazilyscopeadopt] Adopt lazily 0.45's ctx.scope() -> TeardownScope at the sites that build long-lived reactives, now that the dependency is upgraded (66f71cb40). Before 0.45 nothing disposed reactives, so every cell/computed agent-doc created lived for the process lifetime; the upgrade makes disposal POSSIBLE but does not apply it. Start with the relay/liveness cores that build per-document reactive state (crdt_relay.rs build_liveness_core, editor_attach, editor_open_docs) since those are per-document and therefore unbounded in a long-lived controller. Verify with the edge-set-vs-observer-registry test: anything surviving an invalidation is not a graph edge.
 - [ ] [#deliveryackcut] [focused-cycle] delivery_converged() requires every LIVE member to have ACKed, so a zombie replica (registered + reported live, but no longer ACKing) wedges every write until timeout. Exclude a non-ACKing member from the convergence cut the way a disconnected one already is (crdt_relay.rs delivery_converged/is_live). Needs a staleness signal — is_live is a reactive cell with no ACK clock — and a threshold conservative enough that a slow-but-live editor is never dropped, since dropping one clobbers operator edits. Root-caused 2026-07-19; mitigation shipped in 651f63517.
 - [ ] [#orphandrain] [recommended] Controller-side drain for documents with NO supervisor. Shipped then REVERTED same session (revert of 'feat(controller): drain go-mode queues that have no supervisor') after it caused a dispatch storm: 15 dispatches for one doc in ~60s despite a 90s backoff, ~31 contending controller processes. Two faults, both in the effects half: (1) run_editor_route called from INSIDE the controller re-enters the controller ('timed out after 5.0s waiting for project controller response') — Run Agent Doc calls it from OUTSIDE; (2) the backoff lived in an in-memory HashMap in the controller, so every failed dispatch caused a restart that wiped it, permitting immediate re-dispatch. Redesign: dispatch from OUTSIDE the controller event loop (detached child, not a self-call) and persist per-document backoff in state.db next to the drain lease. The pure policy module (agent-doc-controller/src/orphan_drain.rs, 9 tests, gates correct) was sound — recover it from git history rather than rewriting. Underlying gap remains OPEN: a doc whose owner pane is a live agent TUI can never get a supervisor (preserve_pane_blocked), so it has no idle-queue watch and its go-mode queue only advances when a human triggers Run Agent Doc.
 - [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.
@@ -1122,7 +1140,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
 - [ ] [#ipcpostcommitinv] [focused-cycle] #agent-doc-bug IPC root-cause C: structural invariants enforced on wrong write path. #boundaryaccum root fix landed (git.rs unconditional snapshot collapse) but needs a POST-COMMIT verification gate that fails loudly/self-heals if HEAD carries more than one boundary or a duplicated scaffold. Reuse ipc_corruption.rs detect_duplicated_scaffold. Touches git.rs, ipc_corruption.rs, flow/closeout.rs. Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md.
 - [ ] [#vscsaveproj] [focused-cycle] #agent-doc-bug VS Code save_document observability parity — ROUTE CORRECTED 2026-07-19. processSaveDocumentSignal (editors/vscode/src/extension.ts) only writes to outputChannel; JB records missing_file/missing_document/saved/failed. BUT there is NO shared FFI export for surface ops: JB's recordEditorSurfaceOps (PatchWatcher.kt:1031) builds the line in Kotlin via buildEditorSurfaceOpsLogLine + appendOpsLog. Duplicating that builder in TypeScript would violate the FFI-first rule and guarantee drift between two editors emitting the same event. Correct route: add a surface-op export to ffi.rs (the shared C ABI both editors already use — VS Code has the READ side via stateSubscribe/GraphView but no write side), call it from processSaveDocumentSignal, then migrate JB off its Kotlin-local builder so one implementation serves both. Then the behavioral test (open doc -> signal -> save -> ack-content). Scope is Rust FFI + TS + JB migration, not a TS-only patch.
-- [ ] [#restartbleednonroute] #agent-doc-bug Harden auto-install child stdio against fd2==pane: run_auto_install_steps_once (project_controller/rpc.rs) blindly dups fd2 via auto_install_child_stdio_plan(); when SupervisorStderrRedirect is inactive (non-route-owned TUI, or route-owned but maybe_start fell back to inactive on error) fd2 is the agent pane and make-install output still bleeds. Open the session project_root .agent-doc/logs/supervisor-stderr.log and pass its fd to auto_install_child_stdio_plan_to_fd(log_fd) so build output is off-pane regardless of route ownership; add a redirect-inactive regression.
 - [ ] [#r4gq] [operator-verify] Live JB Run Agent Doc dispatch-hang proof (#kjw0 fix, shipped 0.34.66 build): after the recycled build is running, trigger Run Agent Doc into a BUSY codex pane (mid-turn, 'esc to interrupt' visible) and confirm it returns FAST with a queued-behind-active-turn outcome (pane shows queued status) instead of hanging ~21s then a dispatch-start-unproven notification. Grep ops.log for route_dispatch_start_queued_behind_active_turn (present on success) and confirm accepted_without_dispatch_start_proof is ABSENT for the busy case. Root cause: route injected the trigger into a mid-turn pane; codex queued it behind the active turn so the UserPromptSubmit hook could not advance within the 10s proof budget, and the direct-pane path paid TWO 10s waits (initial + late-resubmit) then filed a false bug. Fix: short_circuit_dispatch_start_when_pane_busy in route/dispatch.rs detects busy_proof_line and returns RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn (accepted, not fail-closed).
 - [ ] [#af88] [focused-cycle] #agent-doc-bug IPC wedge hardening follow-ups from the 2026-07-01 audit (wedges C + A FIXED this cycle: supervisor IPC listener now spawns per-connection threads so a half-open client cannot freeze all supervisor dispatch; editor IPC send now has set_send_timeout). Remaining: (E) pty.rs stdin.lock() held across the blocking read — evaluate a raw-fd read that preserves the restart/quit-prompt stdin coexistence in start.rs; (B/D) editor IPC listener per-connection read_line has no timeout (thread/fd leak under a persistent half-open client) — add a bounded backstop; (F) connect_sync has no connect timeout (mitigated today by the 3s wait_for_controller deadline loop). Also decide the AGENTS.md 'No async' convention nuance for the server-scale roadmap.
 - [ ] [#claimnewpane] [focused-cycle] #agent-doc-feature Claim for Tmux Pane should open a new document in a fresh pane in the SAME tmux session (never replace the current pane or move the window to another session). Plan: tasks/agent-doc/plan-claim-new-pane-same-session.md

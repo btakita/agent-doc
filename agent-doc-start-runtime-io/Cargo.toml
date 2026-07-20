@@ -12,6 +12,7 @@ name = "agent_doc_start_runtime_io"
 doctest = false
 
 [dependencies]
+uuid = { version = "1", features = ["v4"] }
 # `#relaylockpoison`: locks here are parking_lot, not `std::sync` — the workspace
 # keeps `panic=unwind` so the cdylib's `catch_unwind` guards survive a panic in a
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex

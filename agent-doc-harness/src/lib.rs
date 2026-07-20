@@ -83,6 +83,8 @@ pub struct HarnessConfig {
     pub restart_behavior: RestartBehavior,
     /// How `--resume <ID>` names a specific conversation on this harness.
     pub resume_behavior: ResumeBehavior,
+    /// How this harness accepts a caller-chosen conversation id at launch.
+    pub session_id_assignment: SessionIdAssignment,
     pub clean_exit_behavior: CleanExitBehavior,
     pub prompt_patterns: Vec<String>,
     /// Template for the trigger command sent via tmux send-keys.
@@ -250,6 +252,64 @@ pub fn resolve_resume_claim(
     }
 }
 
+/// How a harness lets the CALLER choose the conversation id up front.
+///
+/// `#resumecapture`: a harness launched in a tmux pane never reports its
+/// conversation id back the way the `run`/`stream` backends do — it just talks
+/// to a terminal. The first design here discovered the id afterwards by scanning
+/// the harness's transcript directory, but that is a race: two sessions started
+/// close together in one project produce two fresh transcripts, and "newest
+/// wins" can adopt the wrong one. Since a mis-attributed id resumes someone
+/// else's conversation, that is precisely the failure this work exists to
+/// prevent.
+///
+/// Assigning the id removes the guess entirely: agent-doc mints the id, tells
+/// the harness to use it, and records it — all deterministic, all at launch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionIdAssignment {
+    /// `<binary> … <flag> <uuid>` (Claude: `--session-id <uuid>`).
+    Flag(String),
+    /// Not verified against a released CLI. Never guessed: a flag the harness
+    /// rejects fails the launch, and one it ignores silently records an id that
+    /// points at nothing.
+    Unsupported,
+}
+
+/// Add the assigned conversation id to a harness's launch args.
+///
+/// Returns the id actually assigned, or `None` when this harness cannot take one
+/// (or the operator already supplied the flag, in which case theirs wins).
+///
+/// Never combined with a resume: `--session-id` names a NEW conversation and
+/// `--resume` continues an existing one, so passing both is contradictory.
+pub fn apply_session_id_assignment(
+    harness: &HarnessConfig,
+    base_args: &mut Vec<String>,
+    new_id: &str,
+) -> Option<String> {
+    let SessionIdAssignment::Flag(flag) = &harness.session_id_assignment else {
+        return None;
+    };
+    if base_args.iter().any(|arg| arg == flag) {
+        return None;
+    }
+    // A harness resuming an existing conversation must not also be told to start
+    // a new one under a fresh id.
+    if let ResumeBehavior::AppendFlag(resume_flag) = &harness.resume_behavior
+        && base_args.iter().any(|arg| arg == resume_flag)
+    {
+        return None;
+    }
+    if let ResumeBehavior::PrependSubcommand(resume_sub) = &harness.resume_behavior
+        && base_args.first().is_some_and(|arg| arg == resume_sub)
+    {
+        return None;
+    }
+    base_args.push(flag.clone());
+    base_args.push(new_id.to_string());
+    Some(new_id.to_string())
+}
+
 /// Keys that make a live harness pane exit cleanly back to its shell.
 ///
 /// `#restartlivepane`: distinct from the operator INTERRUPT plan, which cancels
@@ -289,6 +349,7 @@ impl HarnessConfig {
             binary: "claude".into(),
             restart_behavior: RestartBehavior::Append(vec!["--continue".into()]),
             resume_behavior: ResumeBehavior::AppendFlag("--resume".into()),
+            session_id_assignment: SessionIdAssignment::Flag("--session-id".into()),
             clean_exit_behavior: CleanExitBehavior::PromptUser,
             prompt_patterns: vec!["❯".into(), "⏵".into()],
             trigger_command_template: "/agent-doc {file}".into(),
@@ -305,6 +366,8 @@ impl HarnessConfig {
             binary: "codex".into(),
             restart_behavior: RestartBehavior::Prepend(vec!["resume".into(), "--last".into()]),
             resume_behavior: ResumeBehavior::PrependSubcommand("resume".into()),
+            // Codex's id-assignment flag is not verified against a released CLI.
+            session_id_assignment: SessionIdAssignment::Unsupported,
             clean_exit_behavior: CleanExitBehavior::RestartContinue,
             prompt_patterns: vec!["❯".into(), ">".into(), "›".into()],
             trigger_command_template: "agent-doc {file}".into(),
@@ -324,6 +387,7 @@ impl HarnessConfig {
             // released CLI, so `--resume <ID>` degrades to `--continue` rather
             // than guessing a flag that may not exist.
             resume_behavior: ResumeBehavior::Unsupported,
+            session_id_assignment: SessionIdAssignment::Unsupported,
             clean_exit_behavior: CleanExitBehavior::RestartContinue,
             prompt_patterns: vec![">".into(), "›".into()],
             trigger_command_template: "/agent-doc {file}".into(),
@@ -3775,7 +3839,64 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
         }
     }
 
-    /// `#restartlivepane`: `C-d` only quits from an EMPTY composer — with draft
+    /// `#resumecapture`: agent-doc mints the conversation id and tells the
+    /// harness to use it, so the document knows its own id deterministically at
+    /// launch. The discarded alternative — discovering the id afterwards from the
+    /// harness's transcript directory — races whenever two sessions start close
+    /// together in one project, and adopting the wrong transcript resumes someone
+    /// else's conversation.
+    #[test]
+    fn session_id_is_assigned_at_launch_for_harnesses_that_accept_one() {
+        let mut args = vec!["--model".to_string(), "opus".to_string()];
+        assert_eq!(
+            apply_session_id_assignment(&HarnessConfig::claude(), &mut args, "new-uuid"),
+            Some("new-uuid".to_string())
+        );
+        assert_eq!(args, ["--model", "opus", "--session-id", "new-uuid"]);
+    }
+
+    /// An unverified harness must not be handed a guessed flag: one it rejects
+    /// fails the launch, one it ignores records an id pointing at nothing.
+    #[test]
+    fn session_id_assignment_is_skipped_for_unverified_harnesses() {
+        for harness in [HarnessConfig::codex(), HarnessConfig::opencode()] {
+            let mut args: Vec<String> = Vec::new();
+            assert_eq!(
+                apply_session_id_assignment(&harness, &mut args, "new-uuid"),
+                None,
+                "{} must not receive a guessed id flag",
+                harness.binary
+            );
+            assert!(args.is_empty(), "{} args must be untouched", harness.binary);
+        }
+    }
+
+    /// `--session-id` starts a NEW conversation and `--resume` continues an
+    /// existing one. Passing both is contradictory, and would either fail the
+    /// launch or silently abandon the conversation being resumed.
+    #[test]
+    fn session_id_is_not_assigned_when_resuming() {
+        let mut args = vec!["--resume".to_string(), "existing-conv".to_string()];
+        assert_eq!(
+            apply_session_id_assignment(&HarnessConfig::claude(), &mut args, "new-uuid"),
+            None
+        );
+        assert_eq!(args, ["--resume", "existing-conv"]);
+        assert!(!args.iter().any(|a| a == "--session-id"));
+    }
+
+    /// An operator-supplied `--session-id` wins, like every other launch arg.
+    #[test]
+    fn session_id_assignment_defers_to_operator_supplied_flag() {
+        let mut args = vec!["--session-id".to_string(), "operator-uuid".to_string()];
+        assert_eq!(
+            apply_session_id_assignment(&HarnessConfig::claude(), &mut args, "new-uuid"),
+            None
+        );
+        assert_eq!(args, ["--session-id", "operator-uuid"]);
+    }
+
+    /// `#restartlivepane`: `C-d` only quits from an EMPTY composer    /// `#restartlivepane`: `C-d` only quits from an EMPTY composer — with draft
     /// text it deletes forward and the pane never exits, stranding a restart
     /// half-done. Every plan must clear the composer first.
     #[test]

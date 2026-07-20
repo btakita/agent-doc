@@ -84,6 +84,66 @@ fn resume_id_owner(canonical: &Path, request: &agent_doc_harness::ResumeRequest)
     None
 }
 
+/// Mint the conversation id for this launch, put it on the harness command line,
+/// and record it on the document.
+///
+/// `#resumecapture`: a pane-launched harness never reports its id back the way
+/// the `run`/`stream` backends do. Assigning it is deterministic — the earlier
+/// design discovered it afterwards by scanning the harness transcript directory,
+/// which races when two sessions start close together in one project, and
+/// adopting the wrong transcript resumes someone else's conversation.
+///
+/// Returns the assigned id, if this harness accepts one.
+fn assign_and_record_session_id(
+    file: &Path,
+    harness: &agent_doc_harness::HarnessConfig,
+    base_args: &mut Vec<String>,
+) -> Option<String> {
+    let new_id = uuid::Uuid::new_v4().to_string();
+    let assigned = agent_doc_harness::apply_session_id_assignment(harness, base_args, &new_id)?;
+    // Record it up front: the document must know its own conversation id even if
+    // this process dies before the session produces anything.
+    match record_document_resume_id(file, &assigned) {
+        Ok(_) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "start_session_id_assigned id={assigned} harness={}",
+                harness.binary
+            ),
+        ),
+        Err(err) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!("start_session_id_record_failed id={assigned} error={err:#}"),
+        ),
+    }
+    Some(assigned)
+}
+
+/// Write `resume: <id>` onto the document THROUGH the realtime authority.
+///
+/// Not a raw disk write: the document may be open in an editor, and the realtime
+/// model is the authority for its current text. Returns whether anything changed.
+fn record_document_resume_id(file: &Path, id: &str) -> Result<bool> {
+    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "start_resume_id_capture",
+    )?;
+    if frontmatter::parse(&current)
+        .map(|(fm, _)| fm.resume.as_deref() == Some(id))
+        .unwrap_or(false)
+    {
+        return Ok(false);
+    }
+    let updated = frontmatter::set_resume_id(&current, id)?;
+    agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+        file,
+        &updated,
+        &current,
+        "start_resume_id_capture",
+    )?;
+    Ok(true)
+}
+
 struct StartRunLaunchLog<'a> {
     session_log: &'a mut Option<std::fs::File>,
     route_owned: bool,
@@ -301,6 +361,11 @@ pub fn run_with_reap_policy_and_resume(
     let mut base_args = initial_launch_spec.base_args.clone();
     let mut resolved_env = initial_launch_spec.resolved_env.clone();
     let mut capability_proof_frontmatter = fm.clone();
+
+    // `#resumecapture`: mint this launch's conversation id, hand it to the
+    // harness, and record it on the document — so the NEXT restart can resume
+    // precisely instead of starting fresh. No-op when already resuming.
+    assign_and_record_session_id(&canonical, &harness, &mut base_args);
 
     // Query initial terminal size
     let initial_size = {

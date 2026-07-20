@@ -193,3 +193,6 @@
 [submodule "src/mag7-viewer"]
 	path = src/mag7-viewer
 	url = https://github.com/btakita/mag7-viewer.git
+[submodule "src/pubnub-example"]
+	path = src/pubnub-example
+	url = git@github.com:btakita/pubnub-example.git

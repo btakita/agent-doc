@@ -971,7 +971,21 @@ Closing this one on measurement, because today's incident settled both halves.
 **The ongoing-compaction half is implemented.** `reclaim_state_db_free_space` exists with the `#statedbvacuum` tag on it, gated at a 25% free-fraction threshold, and is wired into `agent-doc-gc-io` (`lib.rs:492`) behind `!dry_run`. It carries exactly the constraint the item names — the comment states the full-file rewrite belongs in `gc`, "never `open_state_db`, which routine RPCs call", because `VACUUM` takes an exclusive lock. So the bounded, controller-safe reclaim step the item asks for is the one that shipped.
 
 Marking done. What is *not* resolved is why the database corrupted at all — that is unknown and recorded at `open_and_init_state_db`, and it matters more than the disk-space question this item was tracking.
-<!-- agent:boundary:62c66b9a -->
+
+### Re: crash_resilience panic-log test race — opus-4-8
+
+> **Queue prompt:** do [#crashresiliencelograce]
+
+Fixed in `da90b044f` — but the diagnosis in the item was wrong, and the proposed fix would not have worked.
+
+The item says the test "shares a fixed path across concurrently-running crate test binaries" and prescribes "give it a per-test temp path". It **already had** a per-test temp path — `tempfile::tempdir()`. The race was `std::env::set_current_dir`, which mutates **process-global** state: a sibling test running concurrently in the same binary sees this test's temp directory as its cwd, and then sees it deleted when the tempdir drops. That is precisely the class `#wsflake2` already fixed once in `agent-doc-git-io` (`ScopedCurrentDir` mutating the global cwd while a sibling test read it), which is why it reproduced under `cargo test --workspace` and never in isolation.
+
+So the fix is to stop touching the cwd, not to change the path. I split the ambient resolution from the pure walk-up (`resolve_logs_dir_from`) and the append from the resolution (`log_panic_to_dir`), so both tests in the module take an explicit root. Production behavior is unchanged — `resolve_logs_dir()` still starts from `current_dir()`.
+
+Worth noting the **sibling** test `resolve_logs_dir_finds_nearest_dot_agent_doc` had the same `set_current_dir` pattern and was equally capable of poisoning others; the item named only one. Both are converted, and there are now no `set_current_dir` calls left in the module — only comments explaining why.
+
+Verified under `cargo test --workspace`, the exact mode it failed in, plus `make check` at 7799 green.
+<!-- agent:boundary:4d53d754 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -994,7 +1008,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#c8tb]~~
 - ⏭️ do [#jbrouteasyncchannel]
 - ~~do [#wsflake2]~~
-- do [#patchretryidem]
+- ⏭️ do [#patchretryidem]
 - ~~do [#jbroutasync]~~
 - ~~do [#mtds]~~
 - ~~do [#queuecontmirror]~~
@@ -1015,7 +1029,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#supboundarylivelock]~~
 - ~~do [#statedbvacuum]~~
 - ~~do [#qdonestrikeverify]~~
-- do [#crashresiliencelograce]
+- ~~do [#crashresiliencelograce]~~
 - do [#compacttombgc]
 - do [#compactindcellsverify]
 - do [#zqv8]
@@ -1091,7 +1105,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).
 - [ ] 🚧 [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.
 - [ ] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
-- [ ] [#crashresiliencelograce] test-hygiene: crash_resilience::tests::log_panic_to_file_appends_without_panicking fails under a parallel workspace run (cargo test --workspace) at src/crash_resilience.rs:173 but passes in isolation and under make check. The panic-log append test shares a fixed path across concurrently-running crate test binaries. Give it a per-test temp path so the suite is order-independent.
 - [ ] [#compacttombgc] [recommended] Fenced Compact Exchange CRDT epoch — RE-SCOPED 2026-07-19 away from tombstone GC. The #bootstrapsize measurement (crdt_sync.rs) on a real 57KB document found 88,630 ops and ZERO tombstones, so TextCrdt tombstone GC would reclaim nothing on the observed shape; the payload is pre-compaction INSERT history. The valuable half is the epoch itself: rebootstrap attached replicas from the compacted snapshot and reject/component-rebase older-epoch deltas, which discards that insert history — the only mechanism that makes compaction actually shrink the register bootstrap. Keep tombstone GC as a trailing step for delete-heavy documents, not the headline. Still needs the all-replica stability frontier before any epoch fence is safe.
 - [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
 - [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.

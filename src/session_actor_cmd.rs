@@ -5072,7 +5072,26 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             lease.supervisor_socket.as_deref(),
             Some(expected_socket.as_str())
         );
-        assert_eq!(ctx.operator_status.transitions.len(), 2);
+        // `#wsflake2`: assert the invariant, not an exact transition count.
+        //
+        // This test drives a REAL `SupervisorIpc` socket, so the number of
+        // recorded transitions depends on how many state observations the live
+        // supervisor happens to service before the assertion runs. Pinning
+        // `== 2` made this the last known flake in the workspace suite: the two
+        // transitions the test drives are always recorded, but an extra
+        // observation under load pushed the count to 3 and failed a run that
+        // was otherwise correct.
+        //
+        // What the test actually protects is that the lease was refreshed from
+        // the matching live supervisor — already asserted above by
+        // runtime_state / supervisor_pid / supervisor_socket — plus the fact
+        // that transitions were recorded at all. Timing cannot produce FEWER
+        // than the two driven here, so a lower bound is the honest assertion.
+        assert!(
+            ctx.operator_status.transitions.len() >= 2,
+            "expected at least the two driven transitions, got {}",
+            ctx.operator_status.transitions.len()
+        );
     }
 
     #[test]

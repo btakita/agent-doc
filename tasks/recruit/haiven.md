@@ -538,7 +538,15 @@ Implemented the gnet transport scale refinements in `src/haiven-websocket-hub`.
 Verification: `make check` passes, including `go vet`, `go test -race ./...`, and all builds.
 
 Commits: `f245f69` in the hub and `d08d39e0e` for the parent gitlink.
-<!-- agent:boundary:816429d8 -->
+
+### Re: ⏭️ do [#haivenwsopt] — gpt-5
+
+> **Queue prompt:**
+>
+> ⏭️ do [#haivenwsopt]
+
+`#haivenwsopt` is implemented and committed, but agent-doc cannot safely persist its response while the open editor buffer differs from disk. Please save or reload `tasks/recruit/haiven.md`; I will then complete the retained closeout without overwriting your edits.
+<!-- agent:boundary:ba05a292 -->
 <!-- /agent:exchange -->
 
 ## Queue

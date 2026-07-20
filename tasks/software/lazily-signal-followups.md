@@ -173,16 +173,32 @@ to be simultaneously callable and method-carrying, which is nightly-only in Rust
 five bindings and unavailable in three is the wrong family default — the same
 principle that resolved the disposal contract.
 
-Candidate spellings, all acceptable, chosen per binding:
+**DECIDED: `ctx.computed(f)` + `ctx.eager_computed(f)`** — two flat constructors,
+cased per language (`eagerComputed` in JS/Kotlin/Dart/Zig, `EagerComputed[T](ctx,
+f)` as a free function in Go, which is what Go already does for every generic
+constructor).
+
+The decisive argument is scope discipline, not elegance. Today's API is
+`ctx.memo(f)` + `ctx.signal(f)` — two flat constructors. This keeps that shape
+and changes only the words, so the rename stays a rename. Every alternative below
+converts a naming pass into an API redesign on top of a change already touching
+8 bindings, the wire protocol, 114 fixtures, the Lean model, and two published
+posts. That is how a rename becomes a spiral.
+
+It also preserves unmarked/marked, needs no new machinery (no namespace object,
+no ZST wrapper, no callable struct, no caller-managed disposable), and works in
+all eight with only the casing/free-function transformation already in use.
+
+Alternatives considered and deferred — evaluate separately, never bundled:
 
 - `ctx.eager.computed(f)` / `ctx.eager().computed(f)` — modifier-then-noun;
   works wherever methods can carry type parameters.
 - `ctx.pull(computed)` returning a disposable — the most thesis-consistent: no
-  eager type at all, eagerness is something you *do*, and it finally gives an
-  honest name to the operation currently misnamed `dispose_signal`. Works in all
-  eight including Go.
-- `ctx.eagerComputed(f)` / `EagerComputed[T](ctx, f)` — the boring one that
-  definitely works everywhere.
+  eager type at all, eagerness is something you *do*, and it would fix the
+  `dispose_signal` misnomer as a side effect. Works in all eight including Go.
+  **Worth revisiting on its own once the rename has landed** — it is an API
+  design question, not a naming one, and it deserves to be judged without a
+  migration riding on it.
 
 Precedent for specifying the concept and leaving the spelling: reactive-graph.md
 already does this for `batch`, noting that closure-based bindings take the writes

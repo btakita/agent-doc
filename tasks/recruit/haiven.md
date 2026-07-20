@@ -1,6 +1,7 @@
 ---
 agent_doc_session: 7a3dfe1a-875b-4b93-9e8e-12d156448f63
-agent: claude
+resume: 9ebbc95c-25e9-4c7c-abe9-fd96040c3461
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -339,6 +340,11 @@ The one place I'd genuinely spend complexity is activity-tiered *policy downgrad
 
 ### Re: #activepri — activity-banded fan-out, implemented — opus-4-8
 
+> **Queue prompt:**
+>
+> do [#activepri]
+
+
 Done, `205f7a0`. 212 tests pass, vet clean, race-clean.
 
 **The trap I warned about last cycle was real in this codebase**, and it would have made the whole feature a silent no-op:
@@ -374,13 +380,19 @@ DESIGN.md §4.4 documents it, including the +24 B and the pongs trap.
 `#fanoutpri` (the two-band send queue) is still open and still the weaker of the two ideas — it resequences work where this removes it. Worth doing if you want the pair, but it earns less.
 
 **And the caveat from last cycle stands:** the brief says limit AI use and judges your reasoning. This is a working implementation you can point at, but the design-decision log entry — *pongs make liveness the wrong signal for engagement* — is the part that's worth anything in the write-up, and that's yours to write.
-<!-- agent:boundary:cf7e139e -->
+I'm writing a follow up email. I want the priority queue to also increase priority of old messages:
+```
+Thank you Craig. I want to make a quick addendum.
+
+We should consider prioritizing messages. For example, a chat message should be quickly received. The fan-out from the chat message is expensive and maybe deprioritized. This also provides the option to coalesce chat messages into a single frame if there is backpressure. Older deprioritized messages could also have escalating prioritization as they age. 
+```
+<!-- agent:boundary:be2d03bc -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
-- do [#activepri]
+<!-- agent:queue -->
+- ~~do [#activepri]~~
 - do [#fanoutpri]
 - 📌 **Throughput unaffected:** ~3.3–3.6 M/s framed vs ~3.6 M/s unbounded. (One 1.59 M/s outlier was noise; reruns gave 3.60/3.58.)
 - ⏭️ /goal Implement backlog item(s): #b10a
@@ -395,7 +407,6 @@ DESIGN.md §4.4 documents it, including the +24 B and the pongs trap.
 
 <!-- agent:backlog queue -->
 - [ ] [#fanoutpri] haiven-websocket-hub: two-band send queue (interactive vs bulk) in hub/sendqueue.go — two lazily-allocated list.Lists drained high-then-low, each FIFO internally, O(1), no heap, so per-conn idle footprint (740 B) is unchanged. Interactive = acks, directed chat, moderation; bulk = presence/typing/passive topic traffic. HARD CONSTRAINT: a service may never span bands, or per-service monotonic seq (DESIGN §6.2) stops meaning 'loss' and client dedup/reorder breaks. Explicitly NO aging/escalation — bulk band stays DropOldest/ConflateByEntity, which bounds staleness by construction instead of by a timer.
-- [ ] [#activepri] haiven-websocket-hub: activity-tiered fan-out in SendToTopic (hub/hub.go:200) — (a) partition the members snapshot so active recipients enqueue first, (b) more importantly downgrade per-recipient class policy for inactive conns (presence/typing -> conflate-hard/drop, chat still spills) since that removes work rather than resequencing it. Define active from one lock-free atomic lastClientFrameAt on the conn, NOT a client-reported focus signal. Needs hysteresis (promote 30s / demote 120s) or conns thrash between bands. BLOCKED ON #friendsnapshot: demoting inactive presence to drop means a user who becomes active holds no correct state and gets no replay (at-most-once) — snapshot-on-resume must land first.
 - [ ] [#friendsnapshot] haiven-websocket-hub: a friend-frame needs a presence snapshot on frame change — presence is at-most-once + conflated, so a newly-framed friend produces no replay and renders 'offline' until their next tick. Add a 'give me current state for these K' query (design §6.1 already specifies snapshot-on-resume for at-most-once classes) + model frame paging (re-subscribe churn on scroll) in the realistic loadtest. This is the real work item behind -friends-frame, not the subscription cap.
 - [ ] 🚧 [#yyzn-clarify] Queue head '/goal Implement backlog item(s): #yyzn' references a backlog ID that does not exist in this document (backlog/icebox/done all lack it); the binary marks it skipped_queue_head_ids. Confirm the intended item or remove the head.
 - [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
@@ -414,4 +425,5 @@ DESIGN.md §4.4 documents it, including the +24 B and the pongs trap.
 - 2026-07-15 [#haivenws] Implement the gobwas/ws WebSocket transport migration for haiven-websocket-hub (scale + low latency; chosen over nbio for ecosystem breadth + no single-maintainer risk): event loop via panjf2000/gnet (or cloudwego/netpoll), protocol via gobwas/ws/wsutil ControlHandler, handler pool via panjf2000/ants, deadline/ping timing-wheel via antlabs/timer, keep net/http for /healthz+/metrics; rewrite conn.go pumps into gnet callbacks + a gobwas frame adapter, re-map sendQueue onto AsyncWrite, keep Accept/registry/router/outbox/breaker semantics, update e2e test + DESIGN.md §3-§4, add ADR recording gobwas vs nbio vs gorilla+gin. [recommended]
 - 2026-07-16 [#typeconflate] haiven-websocket-hub: typing overflow is DropNewest (hub/backpressure.go:81) — on a full queue sendqueue.go:93 silently discards the ARRIVING frame, including the terminal 'stopped', leaving a stuck 'is typing…' indicator (no TTL exists anywhere in the repo). Switch typing to ConflateByEntity (as presence uses, backpressure.go:80) so the newest always wins and is bounded per entity; ALSO add a receiver-side typing TTL (~5-10s) for the never-sent-stop case (typist crash/disconnect), which no queue policy can fix. Note: conflation will change the realistic loadtest typing delivery counts in docs/LOADTEST.md.
 - 2026-07-16 [#friendfanout] haiven-websocket-hub: implement -friends-fanout=subscribe|resolve in the realistic loadtest — resolve mode drops friend-topic subscriptions and has the presence service resolve i's online friends (reverse adjacency, built once in the harness = the service's store) issuing SendToClient per friend. Then re-run the friends-median sweep to confirm hub per-conn heap stays flat at the friends-off row (~2.31 KiB) at any median, and measure the CPU/throughput cost of the trade (1 SendToTopic -> F SendToClient per presence update). This is the fix for the unbounded friend-presence memory documented in docs/LOADTEST.md.
+- 2026-07-19 [#activepri] haiven-websocket-hub: activity-tiered fan-out in SendToTopic (hub/hub.go:200) — (a) partition the members snapshot so active recipients enqueue first, (b) more importantly downgrade per-recipient class policy for inactive conns (presence/typing -> conflate-hard/drop, chat still spills) since that removes work rather than resequencing it. Define active from one lock-free atomic lastClientFrameAt on the conn, NOT a client-reported focus signal. Needs hysteresis (promote 30s / demote 120s) or conns thrash between bands. BLOCKED ON #friendsnapshot: demoting inactive presence to drop means a user who becomes active holds no correct state and gets no replay (at-most-once) — snapshot-on-resume must land first.
 <!-- /agent:done -->

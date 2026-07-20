@@ -957,7 +957,7 @@ Taking these together, because they are one root cause seen from two ends, and t
 **What shipped today (`7ab6800f4`) matters for both.** The ensure path reported `no_live_registration` whenever its signal returned 0, asserting "the liveness plane holds no registration to send to". That is true only when zero registrations were *found*; with registrations present and every IPC delivery failing, the count is also 0. So the very telemetry these items reason from was conflating "no registration" with "delivery failed" — which is why `#zq8e`'s evidence looks contradictory (`live_editors=1` alongside a missing model). `ReplicaSignalOutcome` now separates them.
 
 That changes what the next measurement should be, so I gated rather than guessed: **re-read the ensure-failure telemetry on the current binary before choosing between the two remedies.** If it now reports `delivery_failed_to_all:N`, the fix is in delivery and the process-boundary counter is a red herring; if it reports `no_live_registration`, `#7n20`'s boundary analysis holds and the choice is IPC-proof versus controller-side ensure. Both are multi-crate changes at the write path's foundation, and picking on stale telemetry is how this area got two competing explanations already.
-<!-- agent:boundary:5075047c -->
+<!-- agent:boundary:00da275f -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -973,7 +973,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ```
 ~~~
 - ~~do [#deliveryackcut]~~
-- ⏭️ do [#multilineheadbullet]
+- ~~do [#multilineheadbullet]~~
 - ~~do [#qconsumenostrike]~~
 - ~~do [#lazilynottl]~~
 - ~~do [#orphandrain]~~
@@ -1044,7 +1044,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ 📌 do [#jbtsiftnosub2verify]
 - ⏭️ 📌 do [#sidecarstate]
 - ~~📌 do [#64we]~~
-- 📌 do [#adstatechart2]
+- ⏭️ 📌 do [#adstatechart2]
 - 📌 do [#adstatechart3]
 - 📌 do [#adstatechartkt]
 - 📌 do [#adstatechartjs]

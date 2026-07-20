@@ -10,6 +10,22 @@ import org.junit.Test
 
 class CrdtReplicaAckFrontierTest {
     @Test
+    fun `remote editor projection keeps its replica until the visible ack runs`() {
+        val sourcePath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CrdtReplicaManager.kt"),
+        ).first { Files.exists(it) }
+        val listener = Files.readString(sourcePath)
+            .substringAfter("override fun documentChanged(event: DocumentEvent)")
+            .substringBefore("private fun seedAndAttachFromDocument(")
+        val remoteApplyGuard = "if (CrdtReplicaManager.isApplyingRemote(filePath)) return"
+        val forcedRefresh = "ensureOpenDocumentReplica(filePath, event.document, forceRefresh = true)"
+
+        assertTrue(listener.contains(remoteApplyGuard))
+        assertTrue(listener.indexOf(remoteApplyGuard) < listener.indexOf(forcedRefresh))
+    }
+
+    @Test
     fun `one oldest ack carries proof for the newest matching visible frontier`() {
         val updates = listOf(
             update(generation = 3, expectedHash = "first"),

@@ -299,6 +299,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             loggedFilePath = filePath
             if (managerForFilePath(filePath) !== this) return
             if (!CrdtReplicaManager.isOperatorDocumentEvent(filePath, event)) {
+                // A remote CRDT apply mutates the IntelliJ Document before its
+                // visible-content ACK is queued back onto this worker. Replacing
+                // the replica from this listener would run ahead of that ACK,
+                // retire its retained frontier, and make the controller deliver
+                // the same canonical edit again. The remote apply path updates
+                // the shadow and requests its own post-ACK drain.
+                if (CrdtReplicaManager.isApplyingRemote(filePath)) return
                 // A clean File Cache Conflict reload may be the operator
                 // accepting a Lazily-retained external disk candidate. Resolve
                 // on the worker; exact CAS/rebootstrap rules keep ordinary

@@ -241,7 +241,33 @@ Then one of my earlier brush drags turned out to have actually landed, leaving A
 Pushed as `3be8199` on `btakita/acadian-take-home`; superproject gitlink at `c90969813`.
 
 One unrelated note: the frontmatter reads `agent: c`, which preflight flags as a harness mismatch on every cycle (it falls back to the active harness, so nothing breaks). Likely a truncated `claude` — worth fixing to silence the warning.
-<!-- agent:boundary:3d5fb335 -->
+
+### Re: reset button unclickable, crosshair cursor — opus-4-8
+
+You were right, and my verification had a hole that let it through.
+
+**Cause.** Recharts' own wrapper is `position: relative` and comes *after* the button in the DOM, so it painted over the absolutely-positioned button. The chart surface took the hit instead — which both swallowed the click and showed its `crosshair` cursor. Fixed with a stacking order (`z-index: 3`) and an explicit `cursor: pointer`.
+
+**Why my check missed it.** I verified the button with `btn.click()`, which dispatches directly on the element and bypasses hit-testing entirely. It passes just as happily on an element buried under an overlay. The click I "confirmed" last cycle never went through the pointer path a real user takes, so the result was meaningless for this failure mode.
+
+**Re-verified properly**, using the pointer path rather than the element:
+
+| check | before | after |
+|---|---|---|
+| topmost element at button centre | chart surface | the button's own `<svg>` |
+| computed cursor at that point | `crosshair` | `pointer` |
+| event dispatched at the centre coordinate | ignored | resets the zoom |
+
+The last row is the real test: I resolved the element via `document.elementFromPoint` at the button's centre and dispatched there, and AAPL went from its zoomed window `2026-02-02 … 2026-06-11` back to the full `2026-02-03 … 2026-07-20`, with the button disappearing.
+
+The general lesson I am taking from this: `element.click()` proves a handler is wired, never that a control is reachable. For anything positioned or overlaid, the check has to go through `elementFromPoint`.
+
+`make check` is green: 33 backend tests, mypy clean, 42 frontend tests, typecheck, production build.
+
+Pushed as `9eb3d0a` on `btakita/acadian-take-home`; superproject gitlink at `c794c0205`.
+
+Your next queue item — moving the date tooltips below the selector and keeping them legible and non-overlapping when the handles are close — is still queued and unstruck; I will take it on the next invocation.
+<!-- agent:boundary:658a81ae -->
 <!-- /agent:exchange -->
 
 ## Queue

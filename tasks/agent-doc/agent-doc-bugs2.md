@@ -957,7 +957,21 @@ Taking these together, because they are one root cause seen from two ends, and t
 **What shipped today (`7ab6800f4`) matters for both.** The ensure path reported `no_live_registration` whenever its signal returned 0, asserting "the liveness plane holds no registration to send to". That is true only when zero registrations were *found*; with registrations present and every IPC delivery failing, the count is also 0. So the very telemetry these items reason from was conflating "no registration" with "delivery failed" — which is why `#zq8e`'s evidence looks contradictory (`live_editors=1` alongside a missing model). `ReplicaSignalOutcome` now separates them.
 
 That changes what the next measurement should be, so I gated rather than guessed: **re-read the ensure-failure telemetry on the current binary before choosing between the two remedies.** If it now reports `delivery_failed_to_all:N`, the fix is in delivery and the process-boundary counter is a red herring; if it reports `no_live_registration`, `#7n20`'s boundary analysis holds and the choice is IPC-proof versus controller-side ensure. Both are multi-crate changes at the write path's foundation, and picking on stale telemetry is how this area got two competing explanations already.
-<!-- agent:boundary:00da275f -->
+
+### Re: JB File Cache Conflict + state.db reclaim — opus-4-8
+
+**File Cache Conflict — resolved.** Followed `runbooks/jb-cache-conflict.md` rather than improvising: `agent-doc admin reload-lib` delivered the typed reload to **1/1 editor endpoints**, which triggers the plugin's `forceRefresh` re-registration for every open Markdown document. Per the runbook, tab reopen and IDE restart are *not* recovery steps once the updated plugin is active, and the only follow-up is to retry `session-check` — never recapture the response, re-run finalize, or select `--force-disk`. `session-check` is now **ok**, working tree clean. The one remaining interruption was my own empty `preflight_started` cycle, cancelled separately; it was not part of the conflict.
+
+> **Queue prompt:** do [#statedbvacuum]
+
+Closing this one on measurement, because today's incident settled both halves.
+
+**The one-time reclaim already happened — involuntarily.** The item cites `state.db` at **477MB with ~47,000 free pages**, `state_events` holding 288MB across 73,822 pages for 11,056 rows. The database corrupted twice today and was rebuilt from a clean schema, so it now stands at **14.8MB / 3,608 pages / 280 free**, with `state_events` at 4,126 rows. There is nothing left to reclaim. (Not a route I would recommend — but the outcome the item wanted is the outcome we have.)
+
+**The ongoing-compaction half is implemented.** `reclaim_state_db_free_space` exists with the `#statedbvacuum` tag on it, gated at a 25% free-fraction threshold, and is wired into `agent-doc-gc-io` (`lib.rs:492`) behind `!dry_run`. It carries exactly the constraint the item names — the comment states the full-file rewrite belongs in `gc`, "never `open_state_db`, which routine RPCs call", because `VACUUM` takes an exclusive lock. So the bounded, controller-safe reclaim step the item asks for is the one that shipped.
+
+Marking done. What is *not* resolved is why the database corrupted at all — that is unknown and recorded at `open_and_init_state_db`, and it matters more than the disk-space question this item was tracking.
+<!-- agent:boundary:947b6a8f -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -978,14 +992,14 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#lazilynottl]~~
 - ~~do [#orphandrain]~~
 - ~~do [#c8tb]~~
-- ⏭️ do [#jbrouteasyncchannel]
+- do [#jbrouteasyncchannel]
 - ~~do [#wsflake2]~~
-- ⏭️ do [#patchretryidem]
+- do [#patchretryidem]
 - ~~do [#jbroutasync]~~
 - ~~do [#mtds]~~
 - ~~do [#queuecontmirror]~~
-- ⏭️ do [#hvw0]
-- ⏭️ do [#bbpe]
+- do [#hvw0]
+- do [#bbpe]
 - ~~do [#mrnh]~~
 - ~~do [#f4d5]~~
 - ~~do [#5d9f]~~
@@ -993,58 +1007,58 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#42xb]~~
 - ~~do [#zq8e]~~
 - ~~do [#a2zx]~~
-- ⏭️ do [#dbj7]
+- do [#dbj7]
 - ~~do [#ay80]~~
-- ⏭️ do [#syncfocuslag]
+- 🚧 do [#syncfocuslag]
 - ~~do [#jbrunsteering]~~
-- ⏭️ do [#crdtpushdrainverify]
+- do [#crdtpushdrainverify]
 - ~~do [#supboundarylivelock]~~
-- ⏭️ do [#statedbvacuum]
+- ~~do [#statedbvacuum]~~
 - ~~do [#qdonestrikeverify]~~
-- ⏭️ do [#crashresiliencelograce]
-- ⏭️ do [#compacttombgc]
-- ⏭️ do [#compactindcellsverify]
-- ⏭️ do [#zqv8]
+- do [#crashresiliencelograce]
+- do [#compacttombgc]
+- do [#compactindcellsverify]
+- do [#zqv8]
 - ~~do [#crde]~~
 - ~~do [#steeringobservableset]~~
-- ⏭️ do [#vscsaveproj]
-- ⏭️ do [#restartbleednonroute]
-- ⏭️ do [#r4gq]
-- ⏭️ do [#af88]
-- ⏭️ do [#claimnewpane]
-- ⏭️ do [#boundaryaccum1]
-- ⏭️ do [#qactsync]
-- ⏭️ do [#ftimmediate]
-- ⏭️ do [#qeditrace]
-- ⏭️ do [#jbcompactcommit]
-- ⏭️ do [#tmuxsynccrashlog]
-- ⏭️ do [#60ev]
-- ⏭️ do [#2y8j]
-- ⏭️ do [#cdtcutover]
-- ⏭️ do [#coredecomp]
-- ⏭️ do [#orchdecomp]
-- ⏭️ do [#skillharnessplugin]
-- ⏭️ do [#crdtauth6]
-- ⏭️ do [#nsfz]
-- ⏭️ do [#suprestassoc-live]
+- do [#vscsaveproj]
+- do [#restartbleednonroute]
+- do [#r4gq]
+- do [#af88]
+- do [#claimnewpane]
+- do [#boundaryaccum1]
+- do [#qactsync]
+- do [#ftimmediate]
+- do [#qeditrace]
+- do [#jbcompactcommit]
+- do [#tmuxsynccrashlog]
+- do [#60ev]
+- do [#2y8j]
+- do [#cdtcutover]
+- do [#coredecomp]
+- do [#orchdecomp]
+- do [#skillharnessplugin]
+- do [#crdtauth6]
+- do [#nsfz]
+- do [#suprestassoc-live]
 - ~~do [#agentsignals]~~
 - ~~Free text queue items that were already done should be struck or removed from the queue. The following queue item was complete but is still open.~~
 - ~~do [#elementgraphprd]~~
-- ⏭️ 📌 do [#jbedtledgerverify]
-- ⏭️ 📌 do [#fmgc]
-- ⏭️ 📌 do [#0dsr]
-- ⏭️ 📌 do [#30p6]
+- 📌 do [#jbedtledgerverify]
+- 📌 do [#fmgc]
+- 📌 do [#0dsr]
+- 📌 do [#30p6]
 - ~~📌 do [#n39j]~~
 - ~~📌 do [#f6j3]~~
 - ~~📌 do [#promptselect]~~
 - ~~📌 do [#realtimesalient]~~
 - ~~📌 do [#syncobscache2]~~
-- ⏭️ 📌 do [#capturebacklogatomic]
-- ⏭️ 📌 do [#opcapturelazily]
-- ⏭️ 📌 do [#jbtsiftnosub2verify]
-- ⏭️ 📌 do [#sidecarstate]
+- 📌 do [#capturebacklogatomic]
+- 📌 do [#opcapturelazily]
+- 📌 do [#jbtsiftnosub2verify]
+- 📌 do [#sidecarstate]
 - ~~📌 do [#64we]~~
-- ⏭️ 📌 do [#adstatechart2]
+- 📌 do [#adstatechart2]
 - 📌 do [#adstatechart3]
 - 📌 do [#adstatechartkt]
 - 📌 do [#adstatechartjs]
@@ -1075,9 +1089,8 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
 - [ ] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
 - [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).
-- [ ] [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.
+- [ ] 🚧 [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.
 - [ ] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
-- [ ] [#statedbvacuum] [recommended] #agent-doc-feature One-time reclaim + ongoing compaction for .agent-doc/state.db. #authorityfactretention (566a72f6d) bounds future growth (170,215 -> 5,000 document_authority_observed rows on the live db), but SQLite reuses freed pages rather than shrinking: agent-loop state.db is still 477MB on disk with ~47,000 free pages and state_events holding 288MB across 73,822 pages for only 11,056 rows. Reclaiming needs a VACUUM, which takes an exclusive lock and must not run under a live controller. Add a bounded maintenance path (an `agent-doc admin vacuum` gated on no live controller/supervisor, or PRAGMA incremental_vacuum wired into an idle boundary) instead of leaving operators to run sqlite3 by hand.
 - [ ] [#crashresiliencelograce] test-hygiene: crash_resilience::tests::log_panic_to_file_appends_without_panicking fails under a parallel workspace run (cargo test --workspace) at src/crash_resilience.rs:173 but passes in isolation and under make check. The panic-log append test shares a fixed path across concurrently-running crate test binaries. Give it a per-test temp path so the suite is order-independent.
 - [ ] [#compacttombgc] [recommended] Fenced Compact Exchange CRDT epoch — RE-SCOPED 2026-07-19 away from tombstone GC. The #bootstrapsize measurement (crdt_sync.rs) on a real 57KB document found 88,630 ops and ZERO tombstones, so TextCrdt tombstone GC would reclaim nothing on the observed shape; the payload is pre-compaction INSERT history. The valuable half is the epoch itself: rebootstrap attached replicas from the compacted snapshot and reject/component-rebase older-epoch deltas, which discards that insert history — the only mechanism that makes compaction actually shrink the register bootstrap. Keep tombstone GC as a trailing step for delete-heavy documents, not the headline. Still needs the all-replica stability frontier before any epoch fence is safe.
 - [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.

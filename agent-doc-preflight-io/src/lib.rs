@@ -3722,7 +3722,23 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     let drained_residue = queue_entries_are_drained_residue(&activation.entries_after);
     let need_sync_newly_activated_queue_snapshot = activation.active && !snapshot_was_active;
     let need_set_active = activation.active && !persisted_active;
-    let need_clear_active = !activation.active && persisted_active && !activation.deferred;
+    // `#f4d5`: never revoke an activation the operator set THIS cycle.
+    //
+    // Reported live from a second session on `brookebrodack-dev.md`: the
+    // operator flips frontmatter to `queue: start`, preflight consumes that
+    // start fence, then reads a queue body a PREVIOUS cycle failed to persist
+    // (`queue_maintenance_not_persisted`), infers "drained" from that stale
+    // emptiness, and strips the activation straight back to `queue: stop`. The
+    // operator's explicit request is erased by state they never saw.
+    //
+    // Deactivating on known-stale data is the unsafe direction, and an
+    // activation consumed this cycle is exactly when the body is least
+    // trustworthy. Holding it costs one cycle: if the queue really is empty,
+    // the next pass has no fresh fence and clears it normally.
+    let need_clear_active = !activation.active
+        && persisted_active
+        && !activation.deferred
+        && !activation.consumed_start_fence;
     let need_strip_auto = has_auto && !queue_has_prompts;
     let need_clear_non_auto_residue =
         !has_auto && !activation.active && !activation.deferred && drained_residue;

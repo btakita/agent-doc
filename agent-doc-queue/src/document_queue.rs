@@ -4687,6 +4687,27 @@ mod tests {
         assert!(!detect_head_prompt_modified(&snapshot, &file));
     }
 
+    /// `#f4d5`: the destructive-cascade shape. An operator `queue: start`
+    /// against a body whose prompts a previous cycle failed to persist yields
+    /// `active: false` WITH `consumed_start_fence: true`. Preflight must read
+    /// that fence and hold the activation instead of inferring "drained" from
+    /// stale emptiness and reverting the operator to `queue: stop`.
+    #[test]
+    fn start_fence_over_unpersisted_body_still_reports_the_consumed_fence() {
+        let entries = vec![QueueEntry::StartFence(None)];
+        let act = resolve_activation(&entries, false, false, true);
+        assert!(
+            !act.active,
+            "no remaining prompts, so activation resolves inactive"
+        );
+        assert!(
+            act.consumed_start_fence,
+            "the operator's start fence was consumed and MUST stay observable — \
+             it is the only evidence that this emptiness may be unpersisted state \
+             rather than a real drain"
+        );
+    }
+
     #[test]
     fn activation_auto_with_prompts() {
         let entries = vec![make_prompt("do #fix1"), make_prompt("do #fix2")];

@@ -98,7 +98,19 @@ fn log_panic_to_file(line: &str) {
     let Some(dir) = resolve_logs_dir() else {
         return;
     };
-    let _ = std::fs::create_dir_all(&dir);
+    log_panic_to_dir(&dir, line);
+}
+
+/// Append one panic line to an explicit logs directory.
+///
+/// `#crashresiliencelograce`: split out so the behavior can be tested without
+/// `set_current_dir`. That call mutates PROCESS-global state, so a sibling test
+/// running concurrently in the same binary observed this test's temp directory
+/// (and then its deletion) — the same class of failure as the git-io
+/// `ScopedCurrentDir` flake. A per-test temp path does not fix it; not touching
+/// the process cwd does.
+fn log_panic_to_dir(dir: &std::path::Path, line: &str) {
+    let _ = std::fs::create_dir_all(dir);
     let path = dir.join("panic.log");
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
@@ -113,7 +125,13 @@ fn log_panic_to_file(line: &str) {
 /// Walk up from the current directory to the nearest `.agent-doc/` and return its
 /// `logs` subdirectory. Best-effort: returns `None` outside a project.
 fn resolve_logs_dir() -> Option<PathBuf> {
-    let mut dir = std::env::current_dir().ok()?;
+    resolve_logs_dir_from(std::env::current_dir().ok()?)
+}
+
+/// Walk up from `start` to the nearest `.agent-doc/`. Pure apart from the
+/// `is_dir` probes, so it needs no ambient cwd.
+fn resolve_logs_dir_from(start: PathBuf) -> Option<PathBuf> {
+    let mut dir = start;
     loop {
         if dir.join(".agent-doc").is_dir() {
             return Some(dir.join(".agent-doc").join("logs"));
@@ -141,10 +159,9 @@ mod tests {
         let nested = tmp.path().join("a").join("b");
         std::fs::create_dir_all(&nested).unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&nested).unwrap();
-        let got = resolve_logs_dir();
-        std::env::set_current_dir(prev).unwrap();
+        // `#crashresiliencelograce`: resolve from an explicit start instead of
+        // mutating the process cwd, which raced sibling tests in this binary.
+        let got = resolve_logs_dir_from(nested.clone());
         assert_eq!(
             got,
             Some(
@@ -159,17 +176,20 @@ mod tests {
 
     #[test]
     fn log_panic_to_file_appends_without_panicking() {
+        // `#crashresiliencelograce`: no `set_current_dir` — that mutated
+        // process-global state and raced sibling tests under a parallel
+        // workspace run. Resolve the directory from an explicit root instead.
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
-        log_panic_to_file("[agent-doc][panic] thread 'main' panicked at x.rs:1:1: boom");
-        log_panic_to_file("[agent-doc][panic] second line");
-        let contents =
-            std::fs::read_to_string(tmp.path().join(".agent-doc").join("logs").join("panic.log"))
-                .unwrap();
-        std::env::set_current_dir(prev).unwrap();
+        let dir = resolve_logs_dir_from(tmp.path().to_path_buf())
+            .expect("a .agent-doc ancestor resolves to its logs dir");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        log_panic_to_dir(&dir, "[agent-doc][panic] thread 'main' panicked at x.rs:1:1: boom");
+        log_panic_to_dir(&dir, "[agent-doc][panic] second line");
+
+        let contents = std::fs::read_to_string(dir.join("panic.log")).unwrap();
         assert!(contents.contains("boom"));
-        assert_eq!(contents.lines().count(), 2);
+        assert_eq!(contents.lines().count(), 2, "appends, never truncates");
     }
 }

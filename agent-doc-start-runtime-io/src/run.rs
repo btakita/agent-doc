@@ -24,31 +24,90 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     run_with_reap_policy(file, force, route_owned, RouteOwnedReapPolicy::Auto)
 }
 
-/// Resolve a `--resume` request against the ids sibling documents already claim.
+/// Resolve an ALREADY-RESOLVED `--resume` request against the ids sibling
+/// documents already claim.
+///
+/// Must run on the frontmatter-resolved value, never on a bare `Latest`:
+/// `resume_id_owner` only matches `ResumeRequest::Id`, so calling this before
+/// frontmatter resolution silently protects nothing for the common default-resume
+/// case.
 ///
 /// `#resumeclaim`: on conflict the OWNER keeps the conversation and this document
 /// starts fresh, loudly. Deliberately fail-open on lookup errors — a missing or
 /// unreadable `state.db` must not block a start; the worst case is the pre-claim
 /// behaviour, not a wedged supervisor.
 fn resolve_resume_claim_for_start(
-    file: &Path,
+    canonical: &Path,
     resume: Option<agent_doc_harness::ResumeRequest>,
 ) -> Option<agent_doc_harness::ResumeRequest> {
-    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let document = canonical.to_string_lossy().to_string();
     let owner = resume
         .as_ref()
-        .and_then(|request| resume_id_owner(&canonical, request));
+        .and_then(|request| resume_id_owner(canonical, request));
     let claim =
         agent_doc_harness::resolve_resume_claim(&document, resume.as_ref(), owner.as_deref());
     if let Some(warning) = claim.warning() {
         eprintln!("[start] warning: {warning}");
         agent_doc_ops_log_io::log_op(
-            &canonical,
+            canonical,
             &format!("start_resume_claim_conflict document={document}"),
         );
     }
     claim.effective_request(resume)
+}
+
+/// Degrade a resolved `--resume <id>` to fresh when its transcript is verifiably
+/// gone, instead of launching a harness that will hard-exit.
+///
+/// `#resumestale`: verified against the real CLI — `claude --resume <bad-id>`
+/// exits 1 with "No conversation found", it does not fall back to fresh on its
+/// own. An unverified transcript layout (`resume_id_transcript_exists` returning
+/// `None`) is not evidence of absence, so it passes the id through unchanged
+/// rather than guessing.
+fn degrade_resume_if_transcript_missing(
+    canonical: &Path,
+    project_root: &Path,
+    harness: &agent_doc_harness::HarnessConfig,
+    resume: Option<agent_doc_harness::ResumeRequest>,
+    session_log: &mut Option<std::fs::File>,
+    route_owned: bool,
+) -> Option<agent_doc_harness::ResumeRequest> {
+    let Some(agent_doc_harness::ResumeRequest::Id(id)) = &resume else {
+        return resume;
+    };
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return resume;
+    };
+    let cwd = project_root.to_string_lossy().to_string();
+    let dir =
+        agent_doc_harness::session_transcript_dir(&harness.session_transcript_layout, &home, &cwd);
+    match agent_doc_harness::resume_id_transcript_exists(dir.as_deref(), id) {
+        Some(false) => {
+            start_console_status(
+                session_log,
+                route_owned,
+                format!(
+                    "[start] warning: no transcript found for conversation id {id}; starting a fresh {} conversation instead of a resume that would fail",
+                    harness.binary
+                ),
+            );
+            log_event(
+                session_log,
+                &format!(
+                    "start_resume_transcript_missing id={id} harness={}",
+                    harness.binary
+                ),
+            );
+            agent_doc_ops_log_io::log_op(
+                canonical,
+                &format!("start_resume_transcript_missing id={id}"),
+            );
+            None
+        }
+        // `Some(true)`: confirmed present, proceed. `None`: unverified layout —
+        // not evidence of absence, proceed rather than guess.
+        Some(true) | None => resume,
+    }
 }
 
 /// The other document that already records this conversation id, if any.
@@ -255,10 +314,6 @@ pub fn run_with_reap_policy_and_resume(
     route_owned_reap_policy: RouteOwnedReapPolicy,
     resume: Option<agent_doc_harness::ResumeRequest>,
 ) -> Result<()> {
-    // `#resumeclaim`: a harness conversation belongs to ONE document. Resolve the
-    // claim before launch so a stale or copy-pasted `resume:` cannot interleave
-    // this document's turns into another document's conversation.
-    let resume = resolve_resume_claim_for_start(file, resume);
     let agent_doc_start_io::StartRuntime {
         session_id,
         fm,
@@ -267,13 +322,38 @@ pub fn run_with_reap_policy_and_resume(
         project_root,
         mut session_log,
         stderr_redirect,
-        harness: _harness,
+        harness,
         pane_id,
         supervisor_instance_id,
         actor_record,
         post_start_document_model_ensure,
     } = prepare_start_runtime(file, force, route_owned)?;
     let _stderr_redirect = stderr_redirect;
+
+    // `#resumeclaim` / `#resumestale`: resolve what this launch will actually
+    // resume BEFORE building the launch spec, in three steps that must run in
+    // THIS order:
+    //   1. Frontmatter lookup — bare `--resume`/the default only ever means
+    //      "look up this document's own recorded id"; it must never fall back to
+    //      the harness's continue-latest mode (`#resumenocontinue`).
+    //   2. Claim check — on a document whose own id, this DOES nothing to
+    //      explicit `--resume <id>` (checking before resolution left the common
+    //      default-resume case unprotected: `Latest` never matches the `Id`
+    //      pattern the claim check keys on, so it silently did nothing for it).
+    //   3. Transcript existence — `claude --resume <id>` hard-exits 1 when the
+    //      transcript is gone (pruned, cleared `~/.claude`, moved machine),
+    //      verified against the real CLI. Checking first degrades to fresh
+    //      silently instead of the start command failing outright.
+    let resume = agent_doc_harness::resolve_resume_request(resume.as_ref(), fm.resume.as_deref());
+    let resume = resolve_resume_claim_for_start(&canonical, resume);
+    let resume = degrade_resume_if_transcript_missing(
+        &canonical,
+        &project_root,
+        &harness,
+        resume,
+        &mut session_log,
+        route_owned,
+    );
 
     // --- Snapshot integrity validation ---
     // If file was moved (JB plugin respawn after rename), the old path hash
@@ -1598,6 +1678,104 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
+
+    /// `#resumestale`: a resume request for an id with a verified-missing
+    /// transcript must degrade to fresh — verified live against the real CLI,
+    /// `claude --resume <bad-id>` hard-exits 1 rather than falling back on its
+    /// own, so agent-doc must catch this before ever launching the child.
+    #[test]
+    fn degrade_resume_if_transcript_missing_falls_back_to_fresh() {
+        let dir = TempDir::new().unwrap();
+        let project_root = dir.path().join("proj");
+        std::fs::create_dir_all(&project_root).unwrap();
+        let doc = project_root.join("plan.md");
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(home.join(".claude").join("projects").join(
+            agent_doc_harness::claude_project_dir_name(&project_root.to_string_lossy()),
+        ))
+        .unwrap();
+        // SAFETY: single-threaded test-local env mutation.
+        unsafe { std::env::set_var("HOME", &home) };
+
+        let mut log: Option<std::fs::File> = None;
+        let missing = degrade_resume_if_transcript_missing(
+            &doc,
+            &project_root,
+            &agent_doc_harness::HarnessConfig::claude(),
+            Some(agent_doc_harness::ResumeRequest::Id("no-such-id".into())),
+            &mut log,
+            false,
+        );
+        assert_eq!(
+            missing, None,
+            "a verified-missing transcript must degrade to fresh"
+        );
+
+        // Now create the transcript and confirm the SAME id passes through.
+        let transcripts =
+            home.join(".claude")
+                .join("projects")
+                .join(agent_doc_harness::claude_project_dir_name(
+                    &project_root.to_string_lossy(),
+                ));
+        std::fs::write(transcripts.join("real-id.jsonl"), b"{}").unwrap();
+        let present = degrade_resume_if_transcript_missing(
+            &doc,
+            &project_root,
+            &agent_doc_harness::HarnessConfig::claude(),
+            Some(agent_doc_harness::ResumeRequest::Id("real-id".into())),
+            &mut log,
+            false,
+        );
+        assert_eq!(
+            present,
+            Some(agent_doc_harness::ResumeRequest::Id("real-id".into())),
+            "a confirmed-present transcript must pass through unchanged"
+        );
+
+        // An unverified harness (codex) must never assert MISSING — proceed.
+        let unverified = degrade_resume_if_transcript_missing(
+            &doc,
+            &project_root,
+            &agent_doc_harness::HarnessConfig::codex(),
+            Some(agent_doc_harness::ResumeRequest::Id("some-id".into())),
+            &mut log,
+            false,
+        );
+        assert_eq!(
+            unverified,
+            Some(agent_doc_harness::ResumeRequest::Id("some-id".into())),
+            "an unverified layout is not evidence of absence"
+        );
+        unsafe { std::env::remove_var("HOME") };
+    }
+
+    /// `#resumeclaim`: the ordering fix. The claim check must run on the
+    /// FRONTMATTER-resolved id, not the raw pre-resolution value — checking
+    /// before resolution left the common bare-`--resume` case unprotected,
+    /// since `resolve_resume_claim_for_start`'s `resume_id_owner` only matches
+    /// `ResumeRequest::Id`, never `Latest`.
+    #[test]
+    fn resolve_resume_claim_for_start_operates_on_resolved_ids_only() {
+        // A `Latest` request reaching this function (i.e. NOT pre-resolved) is
+        // never protected — this pins the precondition the caller must uphold:
+        // resolve frontmatter FIRST, claim-check SECOND.
+        let unresolved = resolve_resume_claim_for_start(
+            Path::new("/tmp/does-not-matter.md"),
+            Some(agent_doc_harness::ResumeRequest::Latest),
+        );
+        assert_eq!(
+            unresolved,
+            Some(agent_doc_harness::ResumeRequest::Latest),
+            "Latest passes through untouched — it is not this function's job to resolve it"
+        );
+
+        // None passes through unchanged (nothing to claim-check).
+        assert_eq!(
+            resolve_resume_claim_for_start(Path::new("/tmp/x.md"), None),
+            None
+        );
+    }
 
     #[test]
     fn route_owned_start_status_logs_without_printing_by_default() {

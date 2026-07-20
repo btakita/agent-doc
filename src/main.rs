@@ -1903,11 +1903,18 @@ enum Commands {
         #[arg(long)]
         force: bool,
         /// Resume the harness conversation instead of starting a fresh one.
-        /// Bare `--resume` resumes the id recorded in the document's `resume:`
-        /// frontmatter, falling back to the harness's continue-latest mode.
-        /// `--resume <ID>` resumes that conversation explicitly.
+        /// This is the DEFAULT: with no `--resume`/`--fresh` flag at all, a start
+        /// still resumes the id recorded in the document's `resume:` frontmatter
+        /// when one is on record (never the harness's continue-latest mode —
+        /// only ever this document's own id). Pass `--resume <ID>` to resume a
+        /// specific conversation explicitly, or bare `--resume` to make the
+        /// default lookup explicit.
         #[arg(long, value_name = "ID", num_args = 0..=1, default_missing_value = "")]
         resume: Option<String>,
+        /// Start a brand-new conversation even if this document has a recorded
+        /// `resume:` id. Overrides the default resume-if-recorded behavior.
+        #[arg(long, conflicts_with = "resume")]
+        fresh: bool,
         /// Internal route-owned pane mode: exit and reap after the first
         /// binary-owned document cycle commits when the document has no
         /// continued-interaction signals.
@@ -3868,17 +3875,28 @@ fn try_main() -> anyhow::Result<()> {
             file,
             force,
             resume,
+            fresh,
             route_owned,
             route_owned_reap_policy,
         } => {
-            let resume = resume.map(|id| {
-                let id = id.trim();
-                if id.is_empty() {
-                    agent_doc_harness::ResumeRequest::Latest
-                } else {
-                    agent_doc_harness::ResumeRequest::Id(id.to_string())
-                }
-            });
+            // Default is resume-if-recorded, matching `restart-supervisor`'s
+            // continue-mode default: with no flags at all, still attempt the
+            // document's own recorded id (`Latest` looks it up; see
+            // `resolve_resume_request`). `--fresh` opts out explicitly.
+            let resume = if fresh {
+                None
+            } else {
+                Some(
+                    resume.map_or(agent_doc_harness::ResumeRequest::Latest, |id| {
+                        let id = id.trim();
+                        if id.is_empty() {
+                            agent_doc_harness::ResumeRequest::Latest
+                        } else {
+                            agent_doc_harness::ResumeRequest::Id(id.to_string())
+                        }
+                    }),
+                )
+            };
             agent_doc_start_runtime_io::run_with_reap_policy_and_resume(
                 &file,
                 force,

@@ -85,6 +85,9 @@ pub struct HarnessConfig {
     pub resume_behavior: ResumeBehavior,
     /// How this harness accepts a caller-chosen conversation id at launch.
     pub session_id_assignment: SessionIdAssignment,
+    /// Where this harness records conversation transcripts, so a resume attempt
+    /// can be checked before launch instead of discovered as a hard failure.
+    pub session_transcript_layout: SessionTranscriptLayout,
     pub clean_exit_behavior: CleanExitBehavior,
     pub prompt_patterns: Vec<String>,
     /// Template for the trigger command sent via tmux send-keys.
@@ -310,6 +313,66 @@ pub fn apply_session_id_assignment(
     Some(new_id.to_string())
 }
 
+/// Where a harness records the transcript of a conversation it can resume.
+///
+/// `#resumestale`: distinct from the discovery mechanism this replaced
+/// (`#resumecapture`'s first draft, deleted for its race). This is not used to
+/// GUESS an id — the id already comes from `resume:` frontmatter or an explicit
+/// CLI argument. It is used only to check, for an id already in hand, whether a
+/// resume attempt has any chance of succeeding: `claude --resume <id>` hard-exits
+/// 1 ("No conversation found") when the transcript is gone — pruned, a cleared
+/// `~/.claude`, or a document moved to a new machine — verified against the real
+/// CLI. Defaulting `agent-doc start` to always attempt resume would turn that
+/// into a start command that fails outright; checking first lets it degrade to
+/// fresh instead, silently, before ever launching a doomed child.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionTranscriptLayout {
+    /// `<home>/.claude/projects/<encoded-cwd>/<conversation-id>.jsonl`.
+    ClaudeProjects,
+    /// Layout not verified against a released CLI. An unverified layout must
+    /// never assert a transcript is MISSING — that would degrade a possibly-good
+    /// resume to fresh on a guess, the same class of mistake as guessing it
+    /// exists.
+    Unsupported,
+}
+
+/// Claude Code's per-project transcript directory name.
+///
+/// Both `/` and `.` become `-`, so `/home/u/.config/x` is `-home-u--config-x`
+/// (the doubled dash is a literal `/.`, not a separator).
+pub fn claude_project_dir_name(cwd: &str) -> String {
+    cwd.chars()
+        .map(|ch| if ch == '/' || ch == '.' { '-' } else { ch })
+        .collect()
+}
+
+/// The directory holding this harness's conversation transcripts for `cwd`.
+pub fn session_transcript_dir(
+    layout: &SessionTranscriptLayout,
+    home: &std::path::Path,
+    cwd: &str,
+) -> Option<std::path::PathBuf> {
+    match layout {
+        SessionTranscriptLayout::ClaudeProjects => Some(
+            home.join(".claude")
+                .join("projects")
+                .join(claude_project_dir_name(cwd)),
+        ),
+        SessionTranscriptLayout::Unsupported => None,
+    }
+}
+
+/// Whether `id`'s transcript exists at `dir/<id>.jsonl`.
+///
+/// `None` means "cannot determine" (an unverified layout, or the directory could
+/// not be read) — callers must treat that as "proceed", not as "missing". Only a
+/// verified layout that positively confirms the file is absent may downgrade a
+/// resume to fresh.
+pub fn resume_id_transcript_exists(dir: Option<&std::path::Path>, id: &str) -> Option<bool> {
+    let dir = dir?;
+    Some(dir.join(format!("{id}.jsonl")).is_file())
+}
+
 /// Keys that make a live harness pane exit cleanly back to its shell.
 ///
 /// `#restartlivepane`: distinct from the operator INTERRUPT plan, which cancels
@@ -371,6 +434,7 @@ impl HarnessConfig {
             restart_behavior: RestartBehavior::Append(vec!["--continue".into()]),
             resume_behavior: ResumeBehavior::AppendFlag("--resume".into()),
             session_id_assignment: SessionIdAssignment::Flag("--session-id".into()),
+            session_transcript_layout: SessionTranscriptLayout::ClaudeProjects,
             clean_exit_behavior: CleanExitBehavior::PromptUser,
             prompt_patterns: vec!["❯".into(), "⏵".into()],
             trigger_command_template: "/agent-doc {file}".into(),
@@ -389,6 +453,8 @@ impl HarnessConfig {
             resume_behavior: ResumeBehavior::PrependSubcommand("resume".into()),
             // Codex's id-assignment flag is not verified against a released CLI.
             session_id_assignment: SessionIdAssignment::Unsupported,
+            // `~/.codex/sessions` nests by date; naming is not verified here.
+            session_transcript_layout: SessionTranscriptLayout::Unsupported,
             clean_exit_behavior: CleanExitBehavior::RestartContinue,
             prompt_patterns: vec!["❯".into(), ">".into(), "›".into()],
             trigger_command_template: "agent-doc {file}".into(),
@@ -409,6 +475,8 @@ impl HarnessConfig {
             // than guessing a flag that may not exist.
             resume_behavior: ResumeBehavior::Unsupported,
             session_id_assignment: SessionIdAssignment::Unsupported,
+            // OpenCode's transcript layout is not verified here either.
+            session_transcript_layout: SessionTranscriptLayout::Unsupported,
             clean_exit_behavior: CleanExitBehavior::RestartContinue,
             prompt_patterns: vec![">".into(), "›".into()],
             trigger_command_template: "/agent-doc {file}".into(),
@@ -3858,6 +3926,58 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
                 Some(requested.clone())
             );
         }
+    }
+
+    /// The encoding is literal character substitution: BOTH `/` and `.` become
+    /// `-`, so a dotfile directory yields a doubled dash that is a real `/.`, not
+    /// a separator. Getting this wrong points the existence check at a directory
+    /// that does not exist, and every resume silently degrades to fresh.
+    #[test]
+    fn claude_project_dir_name_replaces_slashes_and_dots() {
+        assert_eq!(
+            claude_project_dir_name("/home/brian/work/btakita/agent-loop"),
+            "-home-brian-work-btakita-agent-loop"
+        );
+        assert_eq!(
+            claude_project_dir_name("/home/brian/.claude-mem/observer-sessions"),
+            "-home-brian--claude-mem-observer-sessions"
+        );
+    }
+
+    #[test]
+    fn session_transcript_dir_resolves_only_for_verified_layouts() {
+        let home = std::path::Path::new("/home/u");
+        assert_eq!(
+            session_transcript_dir(&SessionTranscriptLayout::ClaudeProjects, home, "/w/proj"),
+            Some(std::path::PathBuf::from("/home/u/.claude/projects/-w-proj"))
+        );
+        assert_eq!(
+            session_transcript_dir(&SessionTranscriptLayout::Unsupported, home, "/w/proj"),
+            None,
+            "an unverified layout must never produce a guessed path"
+        );
+    }
+
+    /// `#resumestale`: an unverified layout must never assert MISSING — that is
+    /// still a guess, just phrased as a negative instead of a positive one, and
+    /// would degrade a possibly-good resume to fresh on no evidence at all.
+    #[test]
+    fn transcript_existence_is_unknown_for_unverified_layouts() {
+        assert_eq!(resume_id_transcript_exists(None, "any-id"), None);
+    }
+
+    #[test]
+    fn transcript_existence_checks_the_real_filesystem() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("present.jsonl"), b"{}").unwrap();
+        assert_eq!(
+            resume_id_transcript_exists(Some(dir.path()), "present"),
+            Some(true)
+        );
+        assert_eq!(
+            resume_id_transcript_exists(Some(dir.path()), "absent"),
+            Some(false)
+        );
     }
 
     /// `#resumecapture`: agent-doc mints the conversation id and tells the

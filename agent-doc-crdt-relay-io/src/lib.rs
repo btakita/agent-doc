@@ -807,28 +807,6 @@ fn current_text_for_file_with_authority_inner(
         return Ok(CurrentText::EditorSyncPending);
     }
 
-    // `#dropcountzero`: a hub with no live replica has nobody to speak for the
-    // editor's buffer. Serving `canonical_text()` here would promote whatever
-    // the relay last converged — possibly older than unsaved operator edits —
-    // as current, which is the same mistake as promoting a durable projection
-    // into a missing live hub. Report it as the missing-replica state instead so
-    // the bounded self-heal ladder runs: rebuild from the realtime model, then
-    // nudge the editor to re-register and rebuild from its buffer, and only
-    // reach disk after exhaustion. This is what makes retiring a sole zombie
-    // (`retire_non_acking_live_members`) safe: it enters recovery rather than
-    // bypassing it.
-    if hub.needs_replica_rebuild() {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "crdt_current_text_unavailable file={} authority=multi_replica reason=missing_replica doc_hash={} live_editors=0 recovery=rebuild_realtime_then_editor_then_disk",
-                file.display(),
-                hash,
-            ),
-        );
-        return Ok(CurrentText::EditorAttachedMissingReplica);
-    }
-
     let text = hub.canonical_text();
     let live_editors = hub.live_count();
     agent_doc_ops_log_io::log_op(
@@ -2974,16 +2952,77 @@ pub fn apply_disk_change_for_file(file: &Path, on_disk: &str) -> Result<Option<D
 /// This notification is advisory: the durable Lazily outbox remains authoritative
 /// and a later observation/reconnect drains it. No filesystem wake sidecar is
 /// created, and one unavailable replica cannot fail the canonical transition.
-/// Retire live editor replicas that never ACKed their fan-out (`#deliveryackcut`).
+/// What reconciling the hub's replica cache against process liveness found
+/// (`#deliveryackcut`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReplicaReconcile {
+    /// Members whose editor process is gone. Fully deregistered — the cache
+    /// entry was wrong, so it is removed, not tombstoned.
+    pub removed_dead: Vec<u64>,
+    /// Members that are not ACKing but whose editor process IS alive. These are
+    /// not stale cache entries; the process exists and owes us a replica, so the
+    /// correct action is to make it re-register (refill), never to drop it.
+    pub live_unacked: Vec<u64>,
+}
+
+/// Reconcile the per-document replica cache against ground truth
+/// (`#deliveryackcut`).
 ///
-/// Drive this only at the end of the ACK recovery ladder, once the force-refresh
-/// liveness probe has gone unanswered — see
-/// [`RelayHub::retire_non_acking_live_members`] for the staleness argument and
-/// for the invariant that the live set is never emptied.
+/// The hub's member set is a **cache** of which editor replicas exist and are
+/// live. When delivery stalls, that cache is what is wrong — so invalidate it
+/// against the authority (the editor pid recorded in the replica identity) and
+/// refill, rather than parking a zombie entry in it.
 ///
-/// Returns the retired client ids (empty when there is no hub for `file`).
-pub fn retire_non_acking_live_members(file: &Path) -> Result<Vec<u64>> {
-    Ok(with_existing_hub(file, |hub| hub.retire_non_acking_live_members())?.unwrap_or_default())
+/// This is the same reconciliation `register_replica_for_file_with_liveness`
+/// already performs via [`dead_editor_replica_ids`]; it simply had no trigger
+/// except an editor announcing itself, so a stall could never repair it.
+///
+/// The two outcomes are deliberately different, because the failures are:
+/// a dead pid means the entry is garbage and is removed outright, while a live
+/// pid with no ACK means a real process with a stale replica, which the caller
+/// refills through the existing re-registration nudge.
+pub fn reconcile_replicas_against_process_liveness(file: &Path) -> Result<ReplicaReconcile> {
+    reconcile_replicas_against_liveness_with(
+        file,
+        agent_doc_reliable_sync_io::process_pid_is_live,
+    )
+}
+
+fn reconcile_replicas_against_liveness_with(
+    file: &Path,
+    is_pid_live: impl Fn(u32) -> bool,
+) -> Result<ReplicaReconcile> {
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let dead = dead_editor_replica_ids(&document_hash, is_pid_live)?;
+    let outcome = with_existing_hub(file, |hub| {
+        let mut removed_dead = Vec::new();
+        for client_id in &dead {
+            if hub.deregister(*client_id) {
+                removed_dead.push(*client_id);
+            }
+        }
+        let live_unacked = hub
+            .delivery_snapshot()
+            .into_iter()
+            .filter(|entry| entry.live && entry.pending_updates > 0)
+            .map(|entry| entry.client_id)
+            .collect::<Vec<_>>();
+        ReplicaReconcile {
+            removed_dead,
+            live_unacked,
+        }
+    })?
+    .unwrap_or_default();
+    for client_id in &outcome.removed_dead {
+        forget_replica_identity(&document_hash, *client_id)?;
+    }
+    Ok(outcome)
+}
+
+/// Whether every live replica for `file` has drained its fan-out
+/// (`#deliveryackcut`). `Ok(true)` when no hub exists — nothing to block on.
+pub fn delivery_converged_for_file(file: &Path) -> Result<bool> {
+    Ok(with_existing_hub(file, |hub| hub.delivery_converged())?.unwrap_or(true))
 }
 
 pub fn signal_crdt_replica_event(
@@ -3750,6 +3789,44 @@ mod tests {
             assert_eq!(pending[0].origin, CANONICAL_CLIENT_ID);
         })
         .unwrap();
+    }
+
+    /// `#deliveryackcut`: a dead editor process is a WRONG cache entry, so it is
+    /// removed outright — no zombie member, no tombstone. The member set is a
+    /// cache of which replicas exist; reconciling it against pid liveness is
+    /// invalidation, and re-registration is the refill.
+    #[test]
+    fn reconcile_removes_replicas_whose_editor_process_is_gone() {
+        let (_dir, file) = temp_doc("reconcile-dead-pid.md");
+        std::fs::write(&file, "# Session\n\nseed\n").unwrap();
+        let file_str = file.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        // A jetbrains identity carries the editor pid, which is what
+        // `dead_editor_replica_ids` reconciles against.
+        let identity = format!("jetbrains-424242-abcd:{file_str}");
+        let (client_id, _bootstrap) = register_replica_for_file(&file, &identity)
+            .unwrap()
+            .expect("replica should attach");
+        assert!(with_hub(&file, |hub| hub.is_registered(client_id)).unwrap());
+
+        // The editor process is gone: every pid reports dead.
+        let outcome = reconcile_replicas_against_liveness_with(&file, |_pid| false).unwrap();
+        assert_eq!(
+            outcome.removed_dead,
+            vec![client_id],
+            "a replica whose process is gone must be removed from the cache"
+        );
+        assert!(
+            outcome.live_unacked.is_empty(),
+            "a removed replica is not awaiting refill"
+        );
+        assert!(
+            !with_hub(&file, |hub| hub.is_registered(client_id)).unwrap(),
+            "the stale entry must be gone, not parked as a zombie"
+        );
+        hub_registry().lock().unwrap().remove(
+            &agent_doc_fs::document_state_hash(&file).unwrap(),
+        );
     }
 
     #[test]

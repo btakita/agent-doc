@@ -404,6 +404,42 @@ impl std::fmt::Display for CrdtConvergenceState {
     }
 }
 
+/// Reconcile the replica cache against process liveness when delivery stalls
+/// (`#deliveryackcut`).
+///
+/// A stalled ACK means the hub's member set is caching a replica that is not
+/// really there. Invalidate it against the editor pid and refill: a member whose
+/// process is GONE is deregistered outright (no zombie, no tombstone), while a
+/// member whose process is ALIVE is left alone and nudged to re-register by the
+/// surrounding ACK recovery ladder — a live process owes us a replica, so the
+/// repair is to rebuild it, not to drop it.
+///
+/// Best-effort: a failure here is logged and never fails the caller's write.
+fn reconcile_stalled_replicas(file: &Path, source: &str) {
+    match agent_doc_crdt_relay_io::reconcile_replicas_against_process_liveness(file) {
+        Ok(outcome) if !outcome.removed_dead.is_empty() || !outcome.live_unacked.is_empty() => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_crdt_replica_cache_reconciled file={} removed_dead={:?} live_unacked={:?} timeout_ms={} recovery=refill_via_reregistration",
+                    file.display(),
+                    outcome.removed_dead,
+                    outcome.live_unacked,
+                    CRDT_ACK_RECOVERY_TIMEOUT_MS,
+                ),
+            );
+        }
+        Ok(_) => {}
+        Err(err) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "{source}_crdt_replica_cache_reconcile_failed file={} error={err}",
+                file.display(),
+            ),
+        ),
+    }
+}
+
 #[derive(Default)]
 struct AckRecoveryState {
     started: Option<std::time::Instant>,
@@ -1968,6 +2004,22 @@ pub fn apply_canonical_replace_if_attached(
                                 );
                                 match completion {
                                     write_policy::CrdtWriteCompletion::RetainedForAsyncDelivery => {
+                                        // `#deliveryackcut`: this is the path a
+                                        // real zombie actually reaches --
+                                        // `async_delivery_recovery_active` flips
+                                        // true on the FIRST AckReplay send, so a
+                                        // registered-but-dead replica lands here,
+                                        // not on BlockMissingRetention. Retiring
+                                        // only there left the wedge in place for
+                                        // every later operation.
+                                        //
+                                        // The canonical stays `Trusted`: the write
+                                        // applied and its exact target is retained,
+                                        // so the canonical IS that target and must
+                                        // remain serveable as current text.
+                                        // Retirement here only stops the zombie
+                                        // from blocking convergence.
+                                        reconcile_stalled_replicas(file, source);
                                         agent_doc_ops_log_io::log_op(
                                             file,
                                             &format!(
@@ -1981,39 +2033,12 @@ pub fn apply_canonical_replace_if_attached(
                                     }
                                     write_policy::CrdtWriteCompletion::BlockMissingRetention => {
                                         // `#deliveryackcut`: no retained-delivery
-                                        // proof, so nothing will complete this
-                                        // asynchronously — the force-refresh probe
-                                        // went unanswered and the member holding
-                                        // fan-out is a zombie. Retire it so it
-                                        // stops wedging convergence for every
-                                        // LATER operation too. Deliberately NOT
-                                        // done on the retained path above: that
-                                        // path has a working async completion and
-                                        // retiring the replica would destroy the
-                                        // thing meant to complete it.
-                                        match agent_doc_crdt_relay_io::retire_non_acking_live_members(
-                                            file,
-                                        ) {
-                                            Ok(retired) if !retired.is_empty() => {
-                                                agent_doc_ops_log_io::log_op(
-                                                    file,
-                                                    &format!(
-                                                        "{source}_crdt_zombie_replica_retired file={} retired={:?} timeout_ms={} recovery=rebuild_realtime_then_editor_then_disk",
-                                                        file.display(),
-                                                        retired,
-                                                        CRDT_ACK_RECOVERY_TIMEOUT_MS,
-                                                    ),
-                                                );
-                                            }
-                                            Ok(_) => {}
-                                            Err(err) => agent_doc_ops_log_io::log_op(
-                                                file,
-                                                &format!(
-                                                    "{source}_crdt_zombie_replica_retire_failed file={} error={err}",
-                                                    file.display(),
-                                                ),
-                                            ),
-                                        }
+                                        // proof, so nothing establishes that the
+                                        // canonical reflects what the retired
+                                        // replica held -- it must rebuild through
+                                        // the missing-replica ladder before it is
+                                        // served as current text.
+                                        reconcile_stalled_replicas(file, source);
                                         anyhow::bail!(
                                             "{source}: editor delivery ACK recovery for {} did not settle within {}ms and the exact canonical target lacks active retained-delivery proof; refusing closeout",
                                             file.display(),
@@ -6010,6 +6035,62 @@ mod tests {
         );
         assert!(!log.contains("did not settle within"), "{log}");
     }
+
+    #[test]
+    /// `#deliveryackcut`: a stalled ACK reconciles the replica cache against
+    /// process liveness on the path a real zombie actually reaches.
+    ///
+    /// `async_delivery_recovery_active` flips true on the FIRST AckReplay send,
+    /// so a registered-but-not-ACKing replica ends at
+    /// `RetainedForAsyncDelivery`, not `BlockMissingRetention`. Reconciling only
+    /// on the blocked path would never run for the common case.
+    ///
+    /// The fixture's editor process is alive, so the correct outcome is
+    /// `live_unacked` — the process owes us a replica and gets nudged to
+    /// re-register. It must NOT be dropped, and the canonical must stay
+    /// serveable, because the retained target IS the canonical.
+    #[test]
+    fn a_stalled_ack_reconciles_the_replica_cache_against_process_liveness() {
+        let baseline = "# Session\n\nseed\n";
+        let compacted = "# Session\n\nseed\n\n## Exchange\n\n*Compacted.*\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-stalled-ack-reconcile";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        let write = apply_canonical_replace_if_attached(&file, baseline, compacted, "compact")
+            .expect("a retained canonical target is not a failure")
+            .expect("should use the attached CRDT relay");
+        assert!(!write.delivery_converged, "the fixture never ACKs");
+
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            log.contains("crdt_replica_cache_reconciled"),
+            "a stalled ACK must reconcile the replica cache:\n{log}"
+        );
+        assert!(
+            log.contains("removed_dead=[]"),
+            "a live editor process must NOT be dropped from the cache:\n{log}"
+        );
+        assert!(
+            !log.contains("live_unacked=[]"),
+            "the non-ACKing live replica must be reported for refill:\n{log}"
+        );
+
+        // The canonical stays serveable: the retained target IS the canonical.
+        let current = agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap();
+        assert!(
+            matches!(
+                current,
+                agent_doc_crdt_relay_io::CurrentText::Current { ref text, .. }
+                    if text == compacted
+            ),
+            "retained canonical must remain current text, got {current:?}"
+        );
+    }
+
 
     #[test]
     fn canonical_replace_crdt_rebases_over_settled_operator_text_once() {

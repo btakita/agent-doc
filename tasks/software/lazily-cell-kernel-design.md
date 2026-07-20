@@ -43,7 +43,7 @@ the sink position is a capability, not a current degree.
 | `Reactive<T>` (trait) | `Cell<T, K>` |
 | `Source<T>` (trait) | inherent impl on `Cell<T, Source<M>>` |
 | `MergeCell` | `SourceCell<T, M>` with `M ≠ KeepLatest` |
-| `Slot` | `FormulaCell<T>` |
+| `Slot` *(as a reactive value)* | `FormulaCell<T>` |
 | `Signal` | `FormulaCell<T>` + puller `Effect` |
 | `SlotHandle<T>` | `Cell<T, Formula>` |
 | `SignalHandle<T>` | `Cell<T, Formula>` + effect |
@@ -51,6 +51,12 @@ the sink position is a capability, not a current degree.
 | `CellHandle<T>` | `Cell<T, Source<KeepLatest>>` |
 
 Added: `FormulaCell`, `Formula`, `Cell<T, K>`. **Nine names out, three in.**
+
+**`Slot` is not deleted — it is repurposed** (§5.0). It stops naming a reactive
+value and starts naming the *storage position that holds a node*, which is what
+the arena already is. So `SlotId`, `SlotValue`, and the slab vocabulary all stay
+and become accurate rather than legacy. Only the *reactive-value* sense of `Slot`
+goes, and it goes to `FormulaCell`.
 
 `Cell ≡ MergeCell<KeepLatest>` stops being a spec assertion and becomes a type
 alias with a default parameter.
@@ -154,7 +160,51 @@ sequence this after that resolves rather than stacking two migrations.
 Findings from executing the superseded plan. Each one compiles, or would have,
 which is why none of them would surface on their own.
 
-### 5.1 The id names two stability tiers, not two concepts
+### 5.0 `Slot` is repurposed as the storage concept — `SlotId` stays
+
+**DECIDED 2026-07-20.** `Slot` no longer names a derived reactive value; it names
+**the position that holds a node**. `SlotId` therefore stays, and is now accurate
+rather than legacy.
+
+The code is already a slot map:
+
+```rust
+nodes: Vec<Option<Node>>,     // each index is a slot; Option = occupied | vacant
+free_ids: Vec<u64>,           // LIFO recycling
+```
+
+`src/context.rs:120` already frames it this way — *"`SlotId`s are recycled
+(`free_ids` is LIFO)"*. And the slab sense is **unoccupied**: zero hits for
+`free_slot`, `slot_index`, `slots[`. The superseded plan checked for exactly this
+and read the result as "the rename is clean"; it is better read as *the storage
+meaning is free to take*.
+
+**The ecosystem collisions that killed `Slot` dissolve under the new meaning:**
+
+| ecosystem | means | under "storage slot" |
+|---|---|---|
+| Python `__slots__` | fixed attribute storage | **aligned** — the same idea |
+| Vue / Svelte `<slot>` | a position content is inserted into | **aligned** — a position holding something |
+| Qt signals & slots | a callback | evaporates — the joint reading requires `Signal`, which is deleted |
+
+`Slot` was wrong for *"a derived reactive value."* It is right for *"a position
+that holds a node."*
+
+**It also beats every alternative considered**, because a slot holds *any* node
+kind — `SourceCell`, `FormulaCell`, or `Effect`. The container's name does not
+depend on its occupant, which is exactly what defeated `CellId` (§5.1) and
+`NodeId` (§5.1).
+
+**Consequence: `SlotValue` on the wire is correct, not a seam.** It is the value
+in a slot. The superseded plan's §13 dilemma — leave a permanent seam, or take a
+breaking wire change across eight bindings **plus `agent-doc`'s IPC** — simply
+does not arise. No rename, no dual-accept.
+
+Layering: a `Cell<T, K>` handle carries a `SlotId`; the slot holds a node. The
+`recycled_id_inherits_nothing` fixture becomes vividly named — the slot persists,
+the occupant changes.
+
+### 5.1 Superseded by §5.0 — retained for the reasoning
 
 `lazily-memo-rename-plan.md` §10 step 6 carves out `SlotId`, correctly: it is the
 id of **every** node kind, not of derivations, so a word-boundary pass yields
@@ -309,7 +359,9 @@ execution.
 | ~~**Go**: interface or runtime rejection?~~ | **DECIDED — interface, see §4** |
 | ~~**Merge coverage**: one execution model or three?~~ | **DECIDED — three, implemented not ledgered. See §9.1** |
 | Does `MapHandle` collapse entirely, or become a bound on `K`? | during the `lazily-rs` port (§5.2) |
-| Could the **wire** id be `CellId` — do effect ids ever cross the wire? | before renaming the wire type (§5.1) |
+| ~~Could the **wire** id be `CellId`?~~ | **MOOT — `SlotId`/`SlotValue` stay (§5.0). A slot holds any node kind, so the occupant question never arises** |
+| **Re-count the reactive-value sense of `slot` per repo** | before scheduling; the old ~12,000 is now an upper bound (§11) |
+| A `feed_async(cell, producer)` convenience constructor? | **trigger: two real call sites** (§9.2) |
 | ~~Async fold timing~~ | **RESOLVED — cells are the synchronous input layer, so merge is synchronous in `AsyncContext` too. Was overstated. See §9.1** |
 | Does the async scheduler coalesce N invalidations in a batch into one effect rerun? | **now tested by fixture 1** rather than assumed (§9.1) |
 | Wire vocabulary: does `SlotValue` become `CellValue`? | the wire names things, and `Cell` is a thing — so this is now coherent in a way `MemoValue` never was. Still a breaking wire change across 8 bindings **plus `agent-doc`'s IPC**; dual-accept applies |
@@ -384,6 +436,81 @@ four fixtures against all three models → add the async-formula feed fixture.
 
 ---
 
+## 9.2 Async and threaded execution — where the async is allowed to live
+
+**Question:** a `MergeCell` may be computationally expensive or involve a network
+call. Can cells support async or threaded execution?
+
+**Yes — but the async lives in the producer, never in the fold.**
+
+```rust
+pub trait MergePolicy<T> {
+    fn merge(old: &T, op: T) -> T;   // MUST be associative
+    const COMMUTATIVE: bool;
+    const IDEMPOTENT: bool;
+    const CONFLATES: bool;
+}
+```
+
+The algebra **is** the convergence guarantee, so the fold stays synchronous. An
+async fold breaks four specific things, not merely "reasoning" in the abstract:
+
+1. **Lost updates.** `apply_merge` reads old, folds, routes through `set_cell`. An
+   await in that window lets another write land. The fix is CAS-and-retry, or
+   holding a lock across an await — a deadlock hazard in `ThreadSafeContext`.
+2. **Associativity stops being checkable.** The law assumes each `⊕` is atomic.
+   With suspendable folds two can be in flight against one cell, so "the current
+   value" is ambiguous and `merge_laws.rs` would be property-testing a law that
+   no longer describes the runtime.
+3. **`CONFLATES` / relay coalescing.** Conflating N pending ops means folding
+   them; async folds make coalescing an async batch with its own ordering
+   questions — inside the backpressure path.
+4. **Batch semantics.** §7's "N calls → N folds, one invalidation" cannot be
+   guaranteed at batch exit with folds still pending.
+
+Plus lazily-formal's convergence proofs assume a synchronous fold.
+
+**The supported shape** — §7's construction, with the awaiting done by the
+effect:
+
+```rust
+effect_async(|ctx| async {
+    let v = fetch_remote().await;   // expensive / network — async, outside the algebra
+    acc.merge(ctx, v);              // fold — synchronous, cheap, associative
+})
+```
+
+So: *the algebra is cheap and pure; the work that produces ops is arbitrary and
+may be async.* A `MergeCell` fed from a network call is already expressible.
+
+**Encapsulation, and the trade.** Putting the I/O inside the policy would
+encapsulate the logic — one call site instead of an effect plus a fetch plus a
+merge. That benefit is real, and it is the honest argument for async folds. But
+it is available without them: encapsulate the **feeding construction** rather
+than the fold.
+
+```rust
+ctx.feed_async(acc, || async { fetch_remote().await });
+```
+
+Same encapsulation, none of the four costs. **Do not build it yet** — same
+grounds §10b of the superseded plan declined `feedback(upstream, target, f,
+done)`: designing ergonomics before anyone has written the pattern is guessing.
+**Trigger: two real call sites.**
+
+### 9.2.1 Constraint to add — merge policies must be cheap
+
+Nothing in `MergePolicy`'s docs says the fold must be cheap or non-blocking, and
+in `ThreadSafeContext` **the fold runs under the mutex**. An expensive `merge`
+therefore holds the lock for its duration, and nothing warns the author.
+
+Add a normative constraint: `MergePolicy::merge` **MUST NOT** block and **SHOULD**
+be O(1)-ish in the size of `old`. Unenforceable by the corpus — it constrains
+implementations, not observable behaviour — so it is review-enforced, the same
+construction §7 uses for its documentation obligation.
+
+---
+
 ## 10. Non-goals
 
 - **`Cell` → anything.** It survives the spreadsheet-genus objection and is now
@@ -404,10 +531,21 @@ four fixtures against all three models → add the async-formula feed fixture.
 
 ## 11. Risk
 
-**The volume is unchanged and large.** ~12,000 word-boundary `slot` sites across
-nine repos, `lazily-rs` alone at 8,408 with density in `context.rs` (174),
-`thread_safe.rs` (168), `spec_compliance.rs` (161), `async_context.rs` (143),
-plus `benches/` — and `#lzbenchver` gates on benchmark drift.
+**The volume is large but materially smaller than the superseded plan's ~12,000.**
+That figure counted *every* word-boundary `slot` site across nine repos. Under
+§5.0 the storage sense **stays**, so every `SlotId`, `SlotIdSet`, `SlotIdMap`,
+`SlotIdHashBuilder`, `SlotValue`, and slab-vocabulary occurrence is untouched —
+including the 87 `SlotId` uses in `context.rs` alone, and the whole wire surface.
+
+**Re-count before scheduling.** The remaining churn is the *reactive-value* sense
+only, and nobody has measured that separately from the storage sense. The old
+per-repo table (`lazily-rs` 8,408; `lazily-py` 1,116; `lazily-zig` 851;
+`lazily-dart` 530; `lazily-go` 378; `lazily-kt` 370; `lazily-js` 276;
+`lazily-cpp` 275) is now an **upper bound, not an estimate**.
+
+Density in `lazily-rs` was `context.rs` (174), `thread_safe.rs` (168),
+`spec_compliance.rs` (161), `async_context.rs` (143), plus `benches/` — and
+`#lzbenchver` gates on benchmark drift, so benches are in scope.
 
 **But the churn now buys a concept removed rather than a word swapped.** That is
 the difference from the superseded plan, and the only honest justification for

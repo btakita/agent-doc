@@ -585,6 +585,7 @@ pub fn resolve_or_create_pane_dispatch_only(
         None,
         Some(created_panes),
         true,
+        None,
         startup_effects,
     )
 }
@@ -804,6 +805,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                 Some(registered_pane.as_str()),
                 Some(created_panes),
                 false,
+                None,
                 effects.route_startup_effects,
             );
         }
@@ -1303,6 +1305,7 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
         None,
         Some(created_panes),
         false,
+        None,
         effects.route_startup_effects,
     )
 }

@@ -210,6 +210,7 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         session_id: &str,
         file_arg: &str,
         window: Option<&str>,
+        resume: Option<agent_doc_harness::ResumeRequest>,
     ) -> Result<String>;
 
     fn run_editor_route(
@@ -311,6 +312,7 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         _session_id: &str,
         _file_arg: &str,
         _window: Option<&str>,
+        _resume: Option<agent_doc_harness::ResumeRequest>,
     ) -> Result<String> {
         anyhow::bail!("project controller test runtime does not route auto-start")
     }

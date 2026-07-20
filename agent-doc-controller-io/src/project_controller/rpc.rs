@@ -12380,8 +12380,29 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
         }
     }
     let file_str = work.file.to_string_lossy().to_string();
+    // `#restartresume`: `restart-supervisor` defaults to continue-mode (`--fresh`
+    // is the opt-out), but when there is no live supervisor to restart we escalate
+    // to a COLD START — and a cold start with no resume intent silently downgrades
+    // that promise to a brand-new conversation. That is the worst possible moment
+    // to discard context: the supervisor is already dead, so the operator is
+    // recovering, not starting over. Carry the mode into the cold start.
+    let resume = (work.mode != "fresh").then_some(agent_doc_harness::ResumeRequest::Latest);
+    agent_doc_ops_log_io::log_op(
+        &work.file,
+        &format!(
+            "controller_supervisor_replacement_cold_start mode={} resume={} session={} pane={}",
+            work.mode,
+            if resume.is_some() {
+                "continue"
+            } else {
+                "fresh"
+            },
+            work.session_id,
+            work.pane_id,
+        ),
+    );
     runtime_effects()?
-        .route_auto_start(&tmux, &work.file, &work.session_id, &file_str, None)
+        .route_auto_start(&tmux, &work.file, &work.session_id, &file_str, None, resume)
         .with_context(|| {
             format!(
                 "failed to cold-start replacement supervisor for {}",

@@ -19935,20 +19935,27 @@ fn test_agent_doc_supervisor_process_owns_resize_effects() {
             "agent-doc-supervisor-process should own route-owned supervisor start command rendering: {required}"
         );
     }
-    for (relative, required) in [
-        (
-            "agent-doc-route-io/src/startup.rs",
-            "route_owned_start_command_with_reap_policy_and_stderr_log",
-        ),
-        (
-            "agent-doc-controller-io/src/project_controller/rpc.rs",
-            "route_owned_start_command_with_stderr_log",
-        ),
+    // `#restartstderrbleed`: every route-owned boot must name a stderr log at the
+    // shell boundary, so fd2 is redirected before the binary runs its first
+    // instruction. Assert on `stderr_log`, not on one renderer's function name —
+    // the previous name-only guard broke when `#restartresume` moved these call
+    // sites onto `RouteOwnedStartOptions` even though the invariant still held,
+    // which teaches the next reader to silence the guard instead of honouring it.
+    for relative in [
+        "agent-doc-route-io/src/startup.rs",
+        "agent-doc-controller-io/src/project_controller/rpc.rs",
     ] {
         let source = fs::read_to_string(manifest_dir.join(relative)).unwrap();
+        let names_a_renderer = source.contains("route_owned_start_command_with_options")
+            || source.contains("route_owned_start_command_with_reap_policy_and_stderr_log")
+            || source.contains("route_owned_start_command_with_stderr_log");
         assert!(
-            source.contains(required),
-            "{relative} must redirect fd2 at the shell boundary before a route-owned supervisor boots: {required}"
+            names_a_renderer,
+            "{relative} must render its route-owned start command through agent-doc-supervisor-process"
+        );
+        assert!(
+            source.contains("stderr_log"),
+            "{relative} must redirect fd2 at the shell boundary before a route-owned supervisor boots (pass a stderr_log)"
         );
     }
     let supervisor_detached_child =

@@ -182,13 +182,15 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         session_id: &str,
         file_arg: &str,
         window: Option<&str>,
+        resume: Option<agent_doc_harness::ResumeRequest>,
     ) -> anyhow::Result<String> {
-        agent_doc_route_io::startup::auto_start(
+        agent_doc_route_io::startup::auto_start_resuming(
             tmux,
             file,
             session_id,
             file_arg,
             window,
+            resume,
             agent_doc_route_io::runtime_effects::route_startup_effects(),
         )
     }

@@ -27,7 +27,7 @@ use agent_doc_controller::dispatch::{
     DispatchOnlyReopenDelivery, DuplicatePanePolicyErrorFacts, FreshStartAckOutcome,
     RoutedDispatchStartProof, duplicate_pane_policy_error_message, fresh_route_start_ack_timeout,
 };
-use agent_doc_harness::HarnessConfig;
+use agent_doc_harness::{HarnessConfig, ResumeRequest};
 use agent_doc_supervisor::route_owned::RouteOwnedReapPolicy;
 use agent_doc_tmux::is_first_column;
 use tmux_router::Tmux;
@@ -228,6 +228,36 @@ pub fn auto_start(
     context_session: Option<&str>,
     effects: RouteStartupEffects,
 ) -> Result<String> {
+    auto_start_resuming(
+        tmux,
+        file,
+        session_id,
+        file_path,
+        context_session,
+        None,
+        effects,
+    )
+}
+
+/// [`auto_start`] that carries a `--resume` intent into the cold-started pane.
+///
+/// `#restartresume`: a supervisor restart with no live supervisor escalates to a
+/// cold start, and `restart-supervisor` defaults to continue-mode. Without this
+/// the escalation silently downgrades that promise to a FRESH conversation —
+/// exactly when the operator most needs it preserved.
+///
+/// Typed as `Option<ResumeRequest>` rather than a bool on purpose: the chain
+/// below already carries several positional bools, and a resume flag that is
+/// silently wrong starts a new conversation instead of erroring.
+pub fn auto_start_resuming(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    context_session: Option<&str>,
+    resume: Option<ResumeRequest>,
+    effects: RouteStartupEffects,
+) -> Result<String> {
     auto_start_ext(
         tmux,
         file,
@@ -236,6 +266,7 @@ pub fn auto_start(
         context_session,
         false,
         false,
+        resume,
         effects,
     )
 }
@@ -263,6 +294,7 @@ pub fn provision_pane(
         context_session,
         true,
         split_before,
+        None,
         effects,
     )
 }
@@ -288,6 +320,7 @@ pub fn try_provision_pane(
         true,
         split_before,
         StartupLockMode::Try,
+        None,
         effects,
     )
 }
@@ -301,6 +334,7 @@ pub fn auto_start_ext(
     context_session: Option<&str>,
     skip_wait: bool,
     split_before: bool,
+    resume: Option<ResumeRequest>,
     effects: RouteStartupEffects,
 ) -> Result<String> {
     match auto_start_ext_with_lock_mode(
@@ -312,6 +346,7 @@ pub fn auto_start_ext(
         skip_wait,
         split_before,
         StartupLockMode::Blocking,
+        resume,
         effects,
     )? {
         Some(pane) => Ok(pane),
@@ -329,6 +364,7 @@ pub fn auto_start_ext_with_lock_mode(
     skip_wait: bool,
     split_before: bool,
     startup_lock_mode: StartupLockMode,
+    resume: Option<ResumeRequest>,
     effects: RouteStartupEffects,
 ) -> Result<Option<String>> {
     let harness = resolve_harness_for_file(file);
@@ -347,6 +383,7 @@ pub fn auto_start_ext_with_lock_mode(
         None,
         false,
         startup_lock_mode,
+        resume,
         effects,
     )
 }
@@ -374,6 +411,7 @@ pub fn auto_start_in_session(
     startup_miss_handoff_blocked_pane: Option<&str>,
     created_panes: Option<&mut Vec<String>>,
     dispatch_only: bool,
+    resume: Option<ResumeRequest>,
     effects: RouteStartupEffects,
 ) -> Result<String> {
     match auto_start_in_session_with_lock_mode(
@@ -389,6 +427,7 @@ pub fn auto_start_in_session(
         created_panes,
         dispatch_only,
         StartupLockMode::Blocking,
+        resume,
         effects,
     )? {
         Some(pane) => Ok(pane),
@@ -410,6 +449,7 @@ pub fn auto_start_in_session_with_lock_mode(
     mut created_panes: Option<&mut Vec<String>>,
     dispatch_only: bool,
     startup_lock_mode: StartupLockMode,
+    resume: Option<ResumeRequest>,
     effects: RouteStartupEffects,
 ) -> Result<Option<String>> {
     // Serialize auto-starts for both the document and the target tmux session.
@@ -639,12 +679,16 @@ pub fn auto_start_in_session_with_lock_mode(
         skip_wait,
         agent_doc_controller_io::route_snapshot::editor_route_attempt_id().as_deref(),
     );
-    let start_cmd = agent_doc_supervisor_process::start_command::route_owned_start_command_with_reap_policy_and_stderr_log(
-        &agent_doc_bin,
-        Path::new(&start_path),
-        reap_policy,
-        &stderr_log,
-    );
+    let start_cmd =
+        agent_doc_supervisor_process::start_command::route_owned_start_command_with_options(
+            &agent_doc_bin,
+            Path::new(&start_path),
+            &agent_doc_supervisor_process::start_command::RouteOwnedStartOptions {
+                reap_policy,
+                stderr_log: Some(&stderr_log),
+                resume: resume.clone(),
+            },
+        );
     agent_doc_ops_log_io::log_op(
         file,
         &format!(

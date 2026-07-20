@@ -334,7 +334,29 @@ One process note: the shared browser was being actively driven by another sessio
 `make check` is green: 33 backend tests, mypy clean, 56 frontend tests (5 new), typecheck, production build.
 
 Pushed as `94c2bc9` on `btakita/acadian-take-home`; superproject gitlink at `6fc7b3362`.
-<!-- agent:boundary:55086ce2 -->
+
+### Re: renamed to mag7-viewer, repo public — opus-4-8
+
+> **Queue prompt:** Rename gh repo to mag7-viewer. Make sure documentation + code reflects new name. Rename submodule to mag7-viewer. make repo public
+
+Done, all of it. **https://github.com/btakita/mag7-viewer** is public and anonymously cloneable.
+
+- **Repo renamed** `acadian-take-home` → `mag7-viewer`. GitHub keeps the old URL redirecting, so nothing that referenced it breaks.
+- **Submodule moved** to `src/mag7-viewer`, with the `.gitmodules` section name and URL both updated to match — `git mv` only moves the path and leaves the section name and URL stale, so those needed doing by hand.
+- **Local plumbing repaired.** `git submodule status` was reporting the submodule as uninitialised (`-` prefix) because `.git/config` still keyed it under the old name and the gitdir pointer still aimed at `.git/modules/src/acadian-take-home`. Renamed the module directory, rewrote the `.git` pointer and `core.worktree`, and renamed the config section. Status is clean now.
+- **Description updated** and the "take-home assessment" wording dropped, since the repo is public under a neutral name.
+- **Visibility flipped to public**, verified anonymously rather than by trusting the API response: `curl` returns 200 unauthenticated, and a credential-less `git clone` of the public URL lands at `94c2bc9`, matching HEAD.
+
+**No documentation or code inside the submodule changed** — worth stating explicitly rather than reporting a rename I did not need to do. The app's own identifiers were already `mag7-*` (`mag7-backend`, `mag7-frontend`, `<title>MAG7 Return Viewer</title>`, README titled "MAG7 Interactive Return Viewer"). The only place the old name lived was the repo URL and submodule path. I checked for clone URLs in the README and there are none.
+
+**Before flipping visibility** I scanned the tracked file list and grepped for keys, tokens, private keys, and AWS ids. The only hit was the npm package `js-tokens` in `package-lock.json`. No credentials, no `.env`, no lockfile secrets.
+
+**One mistake I made and corrected.** My first commit accidentally swept in three Vite dep-cache stubs (`frontend/.vite/deps*/package.json`) — a dev server was still running against the old path and recreated the directory underneath the rename, and my `git add src/acadian-take-home` picked it up. I stopped the three stale Vite processes, removed the files from the index, moved the leftover directory out of the tree, and amended. The commit is now exactly two entries: `.gitmodules` and the path rename.
+
+Superproject commit `e30a275ba`. `make check` passes from the new path: 33 backend tests, mypy clean, 56 frontend tests, typecheck, production build.
+
+Two loose ends I have not touched: the frontmatter still reads `agent: c` (harness-mismatch warning every preflight), and your next queue item — the reset button being misaligned — arrived while this was running and is unstruck.
+<!-- agent:boundary:26f8ace9 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -343,7 +365,8 @@ Pushed as `94c2bc9` on `btakita/acadian-take-home`; superproject gitlink at `6fc
 - ~~Move the date selection tooltip below the selector ![img_7.png](img_7.png). Make sure the tooltip is always legible and does not obscure other UI data. Also handle when the two sliders are close together. Make sure the date tooltips do not overlap.~~
 - ~~What is UX best practice to support resetting the zoom from the mouse? Don't implement anything, just discuss.~~
 - ~~Support double-click zoom reset.~~
-- Rename gh repo to mag7-viewer. Make sure documentation + code reflects new name. make repo public
+- ~~Rename gh repo to mag7-viewer. Make sure documentation + code reflects new name. Rename submodule to mag7-viewer. make repo public~~
+- The reset button is misaligned ![img_8.png](img_8.png).
 <!-- /agent:queue -->
 
 ## Backlog

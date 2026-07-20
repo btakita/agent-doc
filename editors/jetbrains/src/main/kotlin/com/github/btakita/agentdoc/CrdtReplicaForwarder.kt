@@ -13,6 +13,8 @@ import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.TimeUnit
 
+private const val CRDT_IDLE_PULL_WARN_MS = 1_000L
+
 /**
  * Thin editor-as-replica forwarding seam (`#crdtauth5`, plan phase 3/5).
  *
@@ -203,7 +205,12 @@ class CrdtReplicaForwarder(
             is ReplicaPullDelivery.Replace -> "replace_chars=${delivery.text.length}"
             is ReplicaPullDelivery.Unavailable -> "unavailable=${delivery.reason}"
         }
-        logSlow("transport.pullDelivery", started, details = detail)
+        val warnMs = if (delivery is ReplicaPullDelivery.Deltas && delivery.updates.isEmpty()) {
+            CRDT_IDLE_PULL_WARN_MS
+        } else {
+            50L
+        }
+        logSlow("transport.pullDelivery", started, warnMs = warnMs, details = detail)
         return delivery
     }
 

@@ -98,6 +98,10 @@ class CrdtReplicaAckFrontierTest {
             deliveryBranch.contains("shouldUrgentDrainForRemoteEventUtil(reasonToken)") &&
                 deliveryBranch.contains("CrdtReplicaManager.requestUrgentRemoteDrain("),
         )
+        assertFalse(
+            "one controller push must not enqueue a second drain through generic activity recording",
+            deliveryBranch.contains("recordDocumentActivity(file, \"socket-crdt-remote\")"),
+        )
         // #ensurereregister: a force-refresh on this path is allowed ONLY behind the
         // no-replica guard. With a replica present it would re-establish (replace)
         // live editor authority mid-flight, which is what this test has always

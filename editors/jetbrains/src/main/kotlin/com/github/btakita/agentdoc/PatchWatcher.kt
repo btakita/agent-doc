@@ -485,7 +485,10 @@ class PatchWatcher(private val project: Project) : Disposable {
                 } else {
                     CrdtReplicaManager.requestRemoteDrain(project, file, "crdt-remote")
                 }
-                recordDocumentActivity(file, "socket-crdt-remote")
+                // The urgent/normal branch above already requests the only CRDT drain this
+                // controller event needs. Refreshing through recordDocumentActivity here
+                // queued a second pull for every delivery signal.
+                TurnStateBannerRefresher.getInstance(project).requestRefresh(file, "socket-crdt-remote")
                 APPLY_APPLIED
             }
             EditorIntent.RefreshVcs.token -> {

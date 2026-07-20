@@ -424,6 +424,24 @@ class TypingTrackerEdtBudgetTest {
             source.contains("remoteDrainBackoffScheduled.compareAndSet(false, true)") &&
                 source.contains("executor.schedule("),
         )
+        val backoffBody = source.substringAfter("private fun scheduleRemoteDrainAfterBackoff(")
+            .substringBefore("private fun drainRemoteUpdates(")
+        assertTrue(
+            "a backoff resume must drain retained flags without manufacturing a workspace-wide request",
+            backoffBody.contains("queueRemoteDrain(CRDT_DRAIN_BACKOFF_REASON)") &&
+                !backoffBody.contains("requestRemoteDrain("),
+        )
+        assertTrue(
+            "drain-all must consume already-covered per-file requests instead of rearming forever",
+            source.substringAfter("val paths = if (drainAll)")
+                .substringBefore("if (paths.isEmpty())")
+                .contains("drainRequestedPaths.clear()"),
+        )
+        assertTrue(
+            "backoff diagnostics must use a bounded reason token",
+            source.contains("CRDT_DRAIN_BACKOFF_REASON = \"backoff-resume\"") &&
+                !backoffBody.contains("reason-backoff"),
+        )
         assertTrue(
             "CRDT timing logs should identify slow native/socket/EDT operations",
             source.contains("[crdt-perf]") &&

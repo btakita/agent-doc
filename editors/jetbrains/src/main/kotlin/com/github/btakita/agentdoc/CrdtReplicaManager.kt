@@ -33,14 +33,13 @@ private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
 private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
-// `#crdt-drain-idle-quiet`: the no-op drain-all loop must keep polling so purely-remote
-// CRDT updates (a peer edits with no local event here) still get pulled — but an idle
-// replica set does not need a 5s cadence. Cap the idle reschedule at 30s so a workspace
-// full of parked session-doc replicas stops waking every 5s (observed steady-state
-// churn across ~9 attached replicas). Active editing / authority-publish / open-document
-// events still trigger an immediate drain, so only passive remote-only observation on an
-// otherwise-idle doc sees up to 30s of extra latency.
+// `#crdt-drain-idle-quiet`: back off work that arrived while a no-op drain was
+// already running. The resume callback must consume that retained work without
+// manufacturing another drain-all request; doing so turns one overlap into a
+// permanent workspace-wide socket polling loop.
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_MAX_BACKOFF_MS = 30_000L
+private const val CRDT_IDLE_WORKER_WARN_MS = 1_000L
+private const val CRDT_DRAIN_BACKOFF_REASON = "backoff-resume"
 // Delivery routability is a component-level fact, not merely an IDE-process
 // fact. Refresh from the same serialized executor that pulls/applies/ACKs CRDT
 // deliveries: if that worker stalls, this heartbeat stalls too and Rust stops
@@ -528,6 +527,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         } else {
             drainRequestedPaths.add(filePath)
         }
+        queueRemoteDrain(reason)
+    }
+
+    /** Queue retained drain flags without creating new work. */
+    private fun queueRemoteDrain(reason: String) {
         if (!shouldStartRemoteDrainUtil(remoteDrainBackoffScheduled.get())) return
         if (!drainQueued.compareAndSet(false, true)) return
         if (!shouldStartRemoteDrainUtil(remoteDrainBackoffScheduled.get())) {
@@ -552,15 +556,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     log.debug("[crdt-replica] no-op drain cycle; backing off reschedule by ${delayMs}ms (consecutive=${consecutiveNoOpReschedules.get()})")
                     // Publish the backoff gate before releasing drainQueued so an
                     // external CRDT event cannot win the gap and start immediately.
-                    scheduleRemoteDrainAfterBackoff(delayMs, reason)
+                    scheduleRemoteDrainAfterBackoff(delayMs)
                     drainQueued.set(false)
                 } else if (moreWorkRequested) {
                     consecutiveNoOpReschedules.set(0)
                     drainQueued.set(false)
-                    requestRemoteDrain(reason = "rescheduled")
+                    queueRemoteDrain("rescheduled")
                 } else {
                     consecutiveNoOpReschedules.set(0)
                     drainQueued.set(false)
+                    // Close the request-vs-release race: a request can arrive after the
+                    // moreWorkRequested snapshot but before drainQueued is released.
+                    if (drainAllRequested.get() || drainRequestedPaths.isNotEmpty()) {
+                        queueRemoteDrain("handoff")
+                    }
                 }
             }
         }
@@ -644,12 +653,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         )
     }
 
-    private fun scheduleRemoteDrainAfterBackoff(delayMs: Long, reason: String) {
+    private fun scheduleRemoteDrainAfterBackoff(delayMs: Long, retryFilePath: String? = null) {
+        if (retryFilePath != null) drainRequestedPaths.add(retryFilePath)
         if (!remoteDrainBackoffScheduled.compareAndSet(false, true)) return
         executor.schedule(
             {
                 remoteDrainBackoffScheduled.set(false)
-                if (!disposed.get()) requestRemoteDrain(reason = "$reason-backoff")
+                if (!disposed.get()) queueRemoteDrain(CRDT_DRAIN_BACKOFF_REASON)
             },
             delayMs,
             TimeUnit.MILLISECONDS,
@@ -660,6 +670,9 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         val started = System.nanoTime()
         val drainAll = drainAllRequested.getAndSet(false)
         val paths = if (drainAll) {
+            // Every currently requested path is already covered by this all-replica
+            // snapshot. Leaving those flags behind rearms the no-op backoff forever.
+            drainRequestedPaths.clear()
             forwarders.keys().toList()
         } else {
             drainRequestedPaths.toList().also { drained ->
@@ -673,7 +686,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             val forwarder = forwarders[filePath] ?: continue
             appliedTotal += drainRemoteUpdatesFor(filePath, forwarder)
         }
-        logSlow("remote-drain", paths.firstOrNull() ?: "(none)", started, details = "paths=${paths.size} reason=$reason drain_all=$drainAll applied_total=$appliedTotal")
+        logSlow(
+            "remote-drain",
+            paths.firstOrNull() ?: "(none)",
+            started,
+            warnMs = if (appliedTotal == 0) CRDT_IDLE_WORKER_WARN_MS else CRDT_WORKER_WARN_MS,
+            details = "paths=${paths.size} reason=$reason drain_all=$drainAll applied_total=$appliedTotal",
+        )
         return appliedTotal
     }
 
@@ -762,6 +781,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 "remote-drain-file",
                 filePath,
                 started,
+                warnMs = if (usefulWork == 0) CRDT_IDLE_WORKER_WARN_MS else CRDT_WORKER_WARN_MS,
                 details = "delivery=$deliveryKind updates=$updateCount peer=$peerUpdateCount self=$selfEchoCount acked=$ackCount queued=$queuedForEditor",
             )
         }
@@ -1352,7 +1372,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             "[crdt-replica] remote editor projection not yet visible for ${File(pending.filePath).name}; " +
                                 "backing off retry by ${delayMs}ms",
                         )
-                        scheduleRemoteDrainAfterBackoff(delayMs, "remote-editor-apply-raced")
+                        scheduleRemoteDrainAfterBackoff(delayMs, pending.filePath)
                     }
                 }
             }

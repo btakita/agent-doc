@@ -79,18 +79,19 @@ Both do the same thing in prose: bounded retry on the transient editor statuses,
 That is the strongest argument for your point: this duplication is not just untidy, it silently splits fixes.
 
 Filed as `#authoritydescentstd` — extract the order (realtime model → rebuild from plugin → disk, carrying the `missing_replica`/`sync_pending` distinction and the exhaustion rule from `#missingreplicarebuild`) into one pure decision function in `agent-doc-turn` or `agent-doc-flow`, with both sites consuming it. That matches the repo's own shared-pure-decision-fn idiom, and it is the prerequisite for `#missingreplicarebuild` — otherwise that fix lands in one copy too.
-<!-- agent:boundary:896aa2f2 -->
+<!-- agent:boundary:c91724f9 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#authoritydescentstd]
-- ⏭️ do [#missingreplicarebuild]
 - ~~do [#deliveryackcut]~~
 - ~~do [#orphandrain]~~
 - ~~do [#c8tb]~~
 - ⏭️ do [#lazilyscopeadopt]
+- 🚧 JB `Sync Tmux Layout` on brookebrodack-dev.md failed: `Sync failed through the project controller; see IDE log for details.`
+- ⏭️ do [#missingreplicarebuild]
 - ⏭️ do [#jbrouteasyncchannel]
+- ⏭️ do [#authoritydescentstd]
 - do [#patchretryidem]
 - do [#hvw0]
 - do [#bbpe]

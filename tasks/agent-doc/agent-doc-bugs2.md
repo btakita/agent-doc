@@ -39,7 +39,27 @@ done
 Compacted content:
 - Archived 58 response topic(s): JB Run Agent Doc stalls + duplicated queue line; do [#ctrlchkptiso]; do [#f1s3]; 55 more
 - Prior summary/context: prior compacted content: Archived 36 response topic(s): do [#donestrikeextra]; do [#ctrliotestflake]; do [#ensurerepl...
-<!-- agent:boundary:96bfd82d -->
+
+### Re: cache conflict, resurrected deletions, document corruption — opus-4-8
+
+Three reports, and they share one root. Immediate repairs first:
+
+**Document corruption — repaired.** The frontmatter closing fence at line 23 was ` ---` with a leading space, which breaks frontmatter termination. It was **working-tree only** — HEAD had the correct `---` — so this was uncommitted realtime-write drift, not a committed corruption. Fixed and verified: preflight parses again and reports `queue_active: true`.
+
+**Resurrected deletions — your deletions are now durable.** The working tree held your 48 queue heads while HEAD still had 82, so the 34 deletions were live but uncommitted and at risk of exactly the resurrection you saw. Committed: HEAD and working tree now both read 48, `session-check` ok. I checked that my own preflight did not re-add any before committing.
+
+**Your fallback directive is already the architecture — and that is the useful finding.** `resolve_editor_unavailable_disk_read_fallback` carries an explicit *"Tier 1 retry: rebuild the model from the live editor buffer"* calling `ensure_document_model_through_authority`, exactly the realtime-model → plugin-rebuild → disk order you describe. But it is gated:
+
+```rust
+let rebuild_eligible = reason == "sync_pending" && observe_editor_open(file);
+```
+
+`missing_replica` is deliberately excluded, because `reobserve_missing_editor_replica_with_reregistration` self-heals it upstream — and that exclusion was itself a real fix (rebuilding twice measured ~28s per read site).
+
+So the hole is not the missing tier; it is **what happens when that upstream self-heal exhausts**. The descent then reaches disk *with an editor still attached* — which is precisely how a stale/garbled disk image becomes authority, and it fits both symptoms: a fence gaining a leading space, and deleted heads coming back from an older image.
+
+Filed as `#missingreplicarebuild`, and it depends on `#deliveryackcut` — a live-but-non-ACKing replica is *why* the upstream heal exhausts. Fixing the zombie-replica case removes the exhaustion; hardening the descent removes the corruption when it still happens. I did not change read authority here: it is the most delicate path in the system, and I am deep enough in this session that I would rather hand you a precise diagnosis than a rushed edit to it.
+<!-- agent:boundary:142a5b7c -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -47,7 +67,7 @@ Compacted content:
 - ~~do [#deliveryackcut]~~
 - ~~do [#orphandrain]~~
 - ~~do [#c8tb]~~
-- do [#lazilyscopeadopt]
+- ⏭️ do [#lazilyscopeadopt]
 - do [#jbrouteasyncchannel]
 - do [#patchretryidem]
 - do [#hvw0]
@@ -102,6 +122,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#missingreplicarebuild] [focused-cycle] #agent-doc-bug Read authority descends to DISK while an editor is attached, on the missing_replica path. The operator's directive — realtime model, then rebuild from the plugin, then disk — is ALREADY the structure: resolve_editor_unavailable_disk_read_fallback has an explicit 'Tier 1 retry: rebuild the model from the live editor buffer' calling ensure_document_model_through_authority. But it is gated `rebuild_eligible = reason == "sync_pending" && observe_editor_open(file)`; missing_replica is EXCLUDED because reobserve_missing_editor_replica_with_reregistration self-heals it upstream (excluding it was a real fix: rebuilding twice measured ~28s per read site). The gap is what happens when that upstream self-heal EXHAUSTS — the descent then reaches disk with an editor still attached, which is the corruption vector (operator-observed: frontmatter closing fence gained a leading space, deleted queue heads resurrected). Fix direction: on missing_replica exhaustion, do NOT descend to disk while observe_editor_open(file) — request one plugin rebuild (the forceRefresh/re-register the runbook describes) and fail closed if it cannot answer, rather than adopting disk. Depends on #deliveryackcut: a live-but-non-ACKing replica is why the upstream heal exhausts in the first place.
 - [ ] [#lazilyscopeadopt] [focused-cycle] Adopt lazily 0.45's ctx.scope() -> TeardownScope at the sites that build long-lived reactives, now that the dependency is upgraded (66f71cb40). Before 0.45 nothing disposed reactives, so every cell/computed agent-doc created lived for the process lifetime; the upgrade makes disposal POSSIBLE but does not apply it. Start with the relay/liveness cores that build per-document reactive state (crdt_relay.rs build_liveness_core, editor_attach, editor_open_docs) since those are per-document and therefore unbounded in a long-lived controller. Verify with the edge-set-vs-observer-registry test: anything surviving an invalidation is not a graph edge. Needs its own cycle — changing reactive lifetimes in the liveness core is exactly where a wrong disposal shows up as a phantom live_editors=0.
 - [ ] [#deliveryackcut] [focused-cycle] delivery_converged() requires every LIVE member to have ACKed, so a zombie replica (registered + reported live, but no longer ACKing) wedges every write until timeout. Exclude a non-ACKing member from the convergence cut the way a disconnected one already is (crdt_relay.rs delivery_converged/is_live). Needs a staleness signal — is_live is a reactive cell with no ACK clock — and a threshold conservative enough that a slow-but-live editor is never dropped, since dropping one clobbers operator edits. Root-caused 2026-07-19; mitigation shipped in 651f63517.
 - [ ] [#orphandrain] [recommended] Controller-side drain for documents with NO supervisor. Shipped then REVERTED same session (revert of 'feat(controller): drain go-mode queues that have no supervisor') after it caused a dispatch storm: 15 dispatches for one doc in ~60s despite a 90s backoff, ~31 contending controller processes. Two faults, both in the effects half: (1) run_editor_route called from INSIDE the controller re-enters the controller ('timed out after 5.0s waiting for project controller response') — Run Agent Doc calls it from OUTSIDE; (2) the backoff lived in an in-memory HashMap in the controller, so every failed dispatch caused a restart that wiped it, permitting immediate re-dispatch. Redesign: dispatch from OUTSIDE the controller event loop (detached child, not a self-call) and persist per-document backoff in state.db next to the drain lease. The pure policy module (agent-doc-controller/src/orphan_drain.rs, 9 tests, gates correct) was sound — recover it from git history rather than rewriting. Underlying gap remains OPEN: a doc whose owner pane is a live agent TUI can never get a supervisor (preserve_pane_blocked), so it has no idle-queue watch and its go-mode queue only advances when a human triggers Run Agent Doc.

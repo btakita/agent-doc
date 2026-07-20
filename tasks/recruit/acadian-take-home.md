@@ -518,7 +518,7 @@ Date maths is UTC day offsets throughout — local-time `Date` arithmetic shifts
 Pushed `46c010c`; gitlink `c51cd05e0`.
 
 One note on process: `agent-doc preflight` failed closed twice this cycle trying to re-apply a stale 2,314-byte orphaned response that is already committed, so I worked from the committed document and closed out through `respond`, which reopens a cycle on its own. I did not touch `.agent-doc/` state to clear the orphan — that is another repo's tooling and not mine to hand-edit.
-<!-- agent:boundary:b8d122eb -->
+<!-- agent:boundary:264bb8b6 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -530,7 +530,6 @@ One note on process: `agent-doc preflight` failed closed twice this cycle trying
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] 🚧 [#proposeablequickly] Propose a UX to be able to quickly select a diffrent date range via mouse while over the chart or range slider. Perhaps a slider?
 <!-- /agent:backlog -->
 
 ## Icebox

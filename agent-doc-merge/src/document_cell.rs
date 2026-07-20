@@ -189,6 +189,11 @@ pub fn node_key_identity(key: &str) -> &str {
     }
 }
 
+fn duplicate_primary_identity(key: &str) -> Option<&str> {
+    let (primary, ordinal) = key.rsplit_once(":duplicate:")?;
+    (!ordinal.is_empty() && ordinal.bytes().all(|byte| byte.is_ascii_digit())).then_some(primary)
+}
+
 /// One component occurrence projected into an ordered keyed item sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComponentOccurrence {
@@ -694,19 +699,27 @@ fn split_keyed_children(name: &str, body: &str) -> Option<Vec<(String, String)>>
     } else {
         None
     }?;
-    // Sanity: unique keys, else keyed reconciliation is unsound (two identical
-    // free-text items). Disambiguate the PREAMBLE child, which is always first.
-    let mut seen = std::collections::HashSet::new();
+    // Duplicate prompt text — including duplicate durable `[#id]` prompts — can
+    // be intentional operator input. Preserve every occurrence losslessly and
+    // give later occurrences a stable ordinal identity. This lets the
+    // ownership-aware compose preserve THEIRS' exact multiplicity while
+    // distinguishing replayed copies that exist only on OURS. Disambiguate the
+    // PREAMBLE child, which is always first.
+    let mut occurrences = std::collections::HashMap::<String, usize>::new();
     let mut pairs = Vec::with_capacity(children.len());
     for child in &children {
-        let key = if child.key == PREAMBLE_KEY {
+        let base_key = if child.key == PREAMBLE_KEY {
             "preamble".to_string()
         } else {
             child.key.clone()
         };
-        if !seen.insert(key.clone()) {
-            return None;
-        }
+        let ordinal = occurrences.entry(base_key.clone()).or_default();
+        let key = if *ordinal == 0 {
+            base_key
+        } else {
+            format!("{base_key}:duplicate:{ordinal}")
+        };
+        *ordinal += 1;
         pairs.push((key, child.text.clone()));
     }
     Some(pairs)
@@ -909,6 +922,17 @@ enum DocNode {
 struct ComponentFraming {
     open: String,
     close: String,
+}
+
+fn render_occurrence(framing: &ComponentFraming, occurrence: &ComponentOccurrence) -> String {
+    let body_len: usize = occurrence.items.iter().map(|(_, value)| value.len()).sum();
+    let mut rendered = String::with_capacity(framing.open.len() + body_len + framing.close.len());
+    rendered.push_str(&framing.open);
+    for (_, value) in &occurrence.items {
+        rendered.push_str(value);
+    }
+    rendered.push_str(&framing.close);
+    rendered
 }
 
 /// Parse a document into ordered top-level [`DocNode`]s: interstitials around
@@ -1128,7 +1152,13 @@ fn compose_occurrence(
             (Some(o), None) => {
                 let authoritative_theirs_delete =
                     policy == ConflictPolicy::TheirsWins || !ours_updated.contains(id);
-                if theirs_removed.contains(id) && authoritative_theirs_delete && !is_exchange {
+                let replayed_duplicate_omitted_by_operator = policy == ConflictPolicy::TheirsWins
+                    && !in_b
+                    && duplicate_primary_identity(id)
+                        .is_some_and(|primary| theirs_map.contains_key(primary));
+                if (theirs_removed.contains(id) && authoritative_theirs_delete && !is_exchange)
+                    || replayed_duplicate_omitted_by_operator
+                {
                     None
                 } else {
                     Some(o.clone())
@@ -1500,23 +1530,21 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                     occurrence: t_occ,
                 },
             ) => {
-                // Splittability parity with the legacy `reconcile_component_body`
-                // (`#qcellmerge1` finalize-path parity): keyed reconciliation is
-                // only sound when ours AND theirs both project to real keyed
-                // children. When one side splits into keyed children (e.g. an
-                // `exchange` carrying a `### Re:` response on the agent/ours side)
-                // but the other projects to the reserved single whole-body item
-                // (no `### Re:` yet on the live/disk side), pairing a `body` item
-                // against `preamble`/`### Re:` items is unsound: the body item is
-                // present-only-on-one-side, so the weave keeps it verbatim ALONGSIDE
-                // the keyed side's items — duplicating the prompt and retaining the
-                // stale `<!-- agent:boundary:… -->` marker that ours replaced. A
-                // whitespace-only body item contributes nothing and is harmless
-                // (the keyed side wins cleanly — e.g. a fresh `### Re:` against an
-                // empty exchange), so only a body item carrying real content forces
-                // the fallback. The legacy `split(ours)? / split(theirs)?` guard
-                // leaf-merges the whole component here; mirror that by falling back
-                // so the caller runs the legacy whole-doc / per-node merge unchanged.
+                let base_occ = base_by_key
+                    .get(&(o_occ.component.clone(), o_occ.occurrence))
+                    .copied();
+                let base_framing = base_framing_by_key
+                    .get(&(o_occ.component.clone(), o_occ.occurrence))
+                    .copied();
+                // Keyed reconciliation is only sound when ours AND theirs agree on
+                // component splittability. A response append commonly makes OURS'
+                // exchange keyed while the live editor cut still has one body-only
+                // prompt. Isolate that mismatch to this component and invoke the
+                // proven legacy leaf merge for it. Falling the whole document back
+                // here lets an already-merged queue body re-enter the flat CRDT with
+                // the original base on every retained-write retry, multiplying queue
+                // items. Other components must remain on their ownership-aware keyed
+                // merge path.
                 if is_body_only(o_occ) != is_body_only(t_occ) {
                     let body_only_side = if is_body_only(o_occ) { o_occ } else { t_occ };
                     let body_only_has_content = body_only_side
@@ -1524,12 +1552,25 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                         .iter()
                         .any(|(_, value)| !value.trim().is_empty());
                     if body_only_has_content {
-                        return CellMergeOutcome::fallback();
+                        let ours_component = render_occurrence(o_framing, o_occ);
+                        let theirs_component = render_occurrence(t_framing, t_occ);
+                        let base_component = base_occ
+                            .zip(base_framing)
+                            .map(|(occ, framing)| render_occurrence(framing, occ));
+                        match crate::crdt::merge_one_component(
+                            &o_occ.component,
+                            base_component.as_deref(),
+                            &ours_component,
+                            &theirs_component,
+                        ) {
+                            Ok(merged_component) => {
+                                out.push_str(&merged_component);
+                                continue;
+                            }
+                            Err(_) => return CellMergeOutcome::fallback(),
+                        }
                     }
                 }
-                let base_occ = base_by_key
-                    .get(&(o_occ.component.clone(), o_occ.occurrence))
-                    .copied();
                 let base_holder;
                 let base_ref = match base_occ {
                     Some(b) => b,
@@ -1571,9 +1612,6 @@ pub fn merge_3way(base_doc: &str, ours_doc: &str, theirs_doc: &str) -> CellMerge
                 // an operator change (theirs ≠ base) wins; an agent change wins only
                 // when the operator left the marker at base.
                 let body: String = merged_items.iter().map(|(_, v)| v.as_str()).collect();
-                let base_framing = base_framing_by_key
-                    .get(&(o_occ.component.clone(), o_occ.occurrence))
-                    .copied();
                 let open = reconcile_marker_operator_authoritative(
                     base_framing.map(|f| f.open.as_str()),
                     &o_framing.open,
@@ -2692,16 +2730,16 @@ agent_doc_format: template
         assert!(legacy.contains("first task X"));
     }
 
-    /// `#qcellmerge1` finalize-path parity: when ours projects the `exchange`
+    /// `#qcellmerge1` finalize-path isolation: when ours projects the `exchange`
     /// into keyed `### Re:` children (the agent placed a response) but theirs is
     /// still a single whole-body item carrying a live prompt + the stale boundary
     /// (no `### Re:` yet), the keyed compose would weave theirs' body in verbatim
     /// alongside ours' items — duplicating the prompt and keeping the stale
     /// `<!-- agent:boundary:base1234 -->` marker that ours replaced. The
-    /// splittability-mismatch guard must fall back so the caller runs the legacy
-    /// whole-component leaf merge (which drops the stale boundary).
+    /// splittability-mismatch guard must run the legacy whole-component leaf merge
+    /// locally, without falling unrelated operator-owned cells back to a flat CRDT.
     #[test]
-    fn keyed_exchange_vs_body_only_with_content_falls_back() {
+    fn keyed_exchange_vs_body_only_with_content_uses_isolated_leaf_merge() {
         let base = "<!-- agent:exchange -->\n\
 ❯ Please reply\n\
 <!-- agent:boundary:base1234 -->\n\
@@ -2723,10 +2761,93 @@ while I was typing the next queue item\n\
 
         let out = merge_3way(base, ours, theirs);
         assert!(
-            out.fell_back,
-            "keyed-vs-body-only-with-content exchange must fall back to the legacy leaf merge"
+            !out.fell_back,
+            "keyed-vs-body-only exchange must stay isolated to its legacy leaf merge"
         );
-        assert!(out.merged_text.is_empty());
+        assert!(out.merged_text.contains("### Re: answer"));
+        assert!(
+            out.merged_text
+                .contains("while I was typing the next queue item")
+        );
+        assert_eq!(out.merged_text.matches("agent:boundary:").count(), 1);
+        assert!(out.merged_text.contains("agent:boundary:fresh5678"));
+    }
+
+    #[test]
+    fn retained_retry_reconciles_duplicate_tagged_queue_item_to_operator_count() {
+        let base = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ Please reply\n",
+            "<!-- agent:boundary:base1234 -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#autoinstalldeferstale] once\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let ours = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ Please reply\n",
+            "### Re: answer\n\nDone.\n\n",
+            "<!-- agent:boundary:fresh5678 -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#autoinstalldeferstale] once\n",
+            "- do [#autoinstalldeferstale] once\n",
+            "- do [#autoinstalldeferstale] once\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let theirs = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ Please reply\n",
+            "while I was typing the next queue item\n",
+            "<!-- agent:boundary:base1234 -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n",
+            "- do [#autoinstalldeferstale] once\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let first = merge_3way(base, ours, theirs);
+        assert!(!first.fell_back, "retry merge must remain component-local");
+        assert_eq!(
+            first
+                .merged_text
+                .matches("- do [#autoinstalldeferstale] once")
+                .count(),
+            1,
+            "operator-cleaned durable queue item must appear exactly once"
+        );
+
+        let retry = merge_3way(base, &first.merged_text, theirs);
+        assert!(
+            !retry.fell_back,
+            "repeated retry must remain component-local"
+        );
+        assert_eq!(
+            retry
+                .merged_text
+                .matches("- do [#autoinstalldeferstale] once")
+                .count(),
+            1,
+            "replaying the retained merge must not multiply the queue item"
+        );
+        assert_eq!(retry.merged_text.matches("agent:boundary:").count(), 1);
+    }
+
+    #[test]
+    fn operator_intentional_duplicate_tagged_queue_items_are_preserved() {
+        let base = "<!-- agent:queue -->\n- do [#same] twice\n<!-- /agent:queue -->\n";
+        let ours = base;
+        let theirs = concat!(
+            "<!-- agent:queue -->\n",
+            "- do [#same] twice\n",
+            "- do [#same] twice\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let out = merge_3way(base, ours, theirs);
+        assert!(!out.fell_back);
+        assert_eq!(out.merged_text.matches("- do [#same] twice").count(), 2);
     }
 
     /// Counterpart: a keyed-vs-body-only mismatch where the body-only side is

@@ -727,11 +727,17 @@ Additional convergence invariants:
   not install or ACK it; it re-adopts the exact coherent editor baseline,
   atomically re-registers the replica, and retries the retained intent.
 - A retained captured response whose editor authority has advanced is replayed
-  over that authority whether the operator cut is still unsaved or has already
-  reached disk. The binary then requests native editor save itself. Operator
-  Ctrl+S, preflight repair, recapture, and force-disk are not recovery steps.
+over that authority whether the operator cut is still unsaved or has already
+reached disk. The binary then requests native editor save itself. Operator
+Ctrl+S, preflight repair, recapture, and force-disk are not recovery steps.
+- Repeating that retained replay with the original content-bearing merge base is
+  idempotent per component. An unsplittable exchange race is isolated to the
+  exchange leaf; it cannot re-merge an already-composed queue as flat text.
+  Operator-owned list multiplicity remains exact: intentional duplicate prompts
+  are preserved when present in the operator cut, while retained-target-only
+  replay copies are removed on the next merge over a cleaned operator cut.
 - IDE document selection is operator-owned. Replica refresh, reconnect,
-  controller activity, tmux focus changes, and background queue work must not
+controller activity, tmux focus changes, and background queue work must not
   open, select, or focus a different JetBrains document.
 
 ## Realtime Parse State

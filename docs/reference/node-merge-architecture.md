@@ -65,12 +65,17 @@ route through it.
    `name → content` map (`base_by_name`) plus a positional list of interstitial base slots.
    Each node resolves its own base: components by name (so the `exchange` committed-response
    guard sees its *real* base), interstitials by position.
-7. **Per-node merge** — walk the `ours`/`theirs` node pairs in document order. If a pair is
-   identical, keep it verbatim; otherwise run the three-way leaf `merge` against *that node's*
-   base only.
-8. **Recombine** in document order.
+7. **Per-cell merge** — first project aligned components into keyed children and compose each
+child against its own base with component ownership. Duplicate prompt keys receive stable
+occurrence ordinals: the operator-owned side's exact multiplicity wins, so intentional
+duplicates survive while retained-agent-only replay copies do not multiply.
+8. **Component-local leaf fallback** — if one aligned component changes splittability (most
+commonly a keyed response append racing a body-only live exchange), run the legacy leaf merge
+for that component only. The mismatch must not demote unrelated queue/backlog components to a
+flat CRDT merge with the original base.
+9. **Recombine** in document order.
 
-The leaf merge is still the whole-doc `merge`, now applied to one node's text at a time.
+The leaf merge is still the whole-doc `merge`, applied to one component's text at a time.
 
 ## The leaf merge — `merge`
 

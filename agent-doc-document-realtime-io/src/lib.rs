@@ -6981,6 +6981,85 @@ mod tests {
     }
 
     #[test]
+    fn retained_target_retries_do_not_multiply_operator_cleaned_queue_item() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Apply the change.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#autoinstalldeferstale] once\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let response_target = base
+            .replace(
+                "<!-- agent:boundary:base -->",
+                "### Re: retained — gpt-5\n\nRetained response.\n<!-- agent:boundary:response -->",
+            )
+            .replace(
+                "- do [#autoinstalldeferstale] once\n",
+                concat!(
+                    "- do [#autoinstalldeferstale] once\n",
+                    "- do [#autoinstalldeferstale] once\n",
+                    "- do [#autoinstalldeferstale] once\n",
+                ),
+            );
+        let live_editor = base.replace(
+            "<!-- agent:boundary:base -->",
+            "while I was typing the next queue item\n<!-- agent:boundary:base -->",
+        );
+        let (_dir, file, _canonical) = temp_doc(base);
+
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &response_target,
+            "retained_queue_replay_first",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &live_editor,
+            "retained_queue_replay_merge",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+
+        let first = pending_document_write(&file).expect("composed target retained");
+        assert_eq!(
+            first
+                .target_content
+                .matches("- do [#autoinstalldeferstale] once")
+                .count(),
+            1,
+            "the live operator cut governs duplicate durable queue ids"
+        );
+
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &live_editor,
+            "retained_queue_replay_retry",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        let retry = pending_document_write(&file).expect("retry target retained");
+        assert_eq!(
+            retry
+                .target_content
+                .matches("- do [#autoinstalldeferstale] once")
+                .count(),
+            1,
+            "reusing the original merge base must not multiply the queue item"
+        );
+        assert_eq!(retry.target_content.matches("agent:boundary:").count(), 1);
+        assert!(retry.target_content.contains("Retained response."));
+    }
+
+    #[test]
     fn reconnect_replays_each_deferred_backlog_change_in_order() {
         let base = concat!(
             "---\nagent_doc_format: template\n---\n\n",

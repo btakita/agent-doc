@@ -149,6 +149,154 @@ mod orphan_drain_model {
     }
 }
 
+/// Retained-response retry model: the original editor cut remains the merge
+/// base while response delivery, editor prompt edits, replica acceptance, and
+/// controller restart can interleave. A durable queue id is a singleton across
+/// every retry after the operator has cleaned its replayed copies.
+mod retained_queue_retry_model {
+    use agent_doc_merge::crdt::{CrdtDoc, merge_by_component};
+
+    const ITEM: &str = "- do [#autoinstalldeferstale] once";
+
+    #[derive(Clone, Copy, Debug)]
+    enum Action {
+        Retry,
+        EditorAddsPrompt,
+        EditorCleansQueue,
+        ReplicaAcceptsTarget,
+        ControllerRestarts,
+    }
+
+    const ACTIONS: [Action; 5] = [
+        Action::Retry,
+        Action::EditorAddsPrompt,
+        Action::EditorCleansQueue,
+        Action::ReplicaAcceptsTarget,
+        Action::ControllerRestarts,
+    ];
+
+    #[derive(Clone, Debug)]
+    struct World {
+        base_state: Vec<u8>,
+        retained_target: String,
+        editor_cut: String,
+        retries: usize,
+    }
+
+    impl World {
+        fn new() -> Self {
+            let base = concat!(
+                "<!-- agent:exchange -->\n",
+                "❯ Apply the change.\n",
+                "<!-- agent:boundary:base -->\n",
+                "<!-- /agent:exchange -->\n",
+                "<!-- agent:queue -->\n",
+                "- do [#autoinstalldeferstale] once\n",
+                "<!-- /agent:queue -->\n",
+            );
+            let retained_target = base
+                .replace(
+                    "<!-- agent:boundary:base -->",
+                    "### Re: retained — gpt-5\n\nRetained response.\n<!-- agent:boundary:response -->",
+                )
+                .replace(
+                    "- do [#autoinstalldeferstale] once\n",
+                    concat!(
+                        "- do [#autoinstalldeferstale] once\n",
+                        "- do [#autoinstalldeferstale] once\n",
+                        "- do [#autoinstalldeferstale] once\n",
+                    ),
+                );
+            Self {
+                base_state: CrdtDoc::from_text(base).encode_state(),
+                retained_target,
+                editor_cut: base.to_string(),
+                retries: 0,
+            }
+        }
+
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::Retry => {
+                    let operator_item_count = self.editor_cut.matches(ITEM).count();
+                    self.retained_target = merge_by_component(
+                        Some(&self.base_state),
+                        &self.retained_target,
+                        &self.editor_cut,
+                    )
+                    .expect("retained retry merge");
+                    self.retries += 1;
+                    if operator_item_count <= 1 {
+                        assert_eq!(
+                            self.retained_target.matches(ITEM).count(),
+                            operator_item_count,
+                            "retained retry overrode the operator-cleaned queue multiplicity"
+                        );
+                    }
+                    assert_eq!(
+                        self.retained_target.matches("agent:boundary:").count(),
+                        1,
+                        "retained retry duplicated the response boundary"
+                    );
+                }
+                Action::EditorAddsPrompt => {
+                    if !self.editor_cut.contains("❯ Prompt during delivery.") {
+                        self.editor_cut = self.editor_cut.replace(
+                            "❯ Apply the change.\n",
+                            "❯ Apply the change.\n❯ Prompt during delivery.\n",
+                        );
+                    }
+                }
+                Action::EditorCleansQueue => {
+                    let mut seen = false;
+                    self.editor_cut = self
+                        .editor_cut
+                        .split_inclusive('\n')
+                        .filter(|line| {
+                            if line.trim_end() != ITEM {
+                                return true;
+                            }
+                            let keep = !seen;
+                            seen = true;
+                            keep
+                        })
+                        .collect();
+                }
+                Action::ReplicaAcceptsTarget => {
+                    self.editor_cut = self.retained_target.clone();
+                }
+                Action::ControllerRestarts => {
+                    // The retained target and original content-bearing base are
+                    // durable. Restart changes no merge inputs.
+                }
+            }
+        }
+    }
+
+    fn explore(world: World, depth: usize) {
+        if depth == 0 {
+            return;
+        }
+        for action in ACTIONS {
+            let mut next = world.clone();
+            next.step(action);
+            explore(next, depth - 1);
+        }
+    }
+
+    #[test]
+    fn bounded_retry_interleavings_keep_tagged_queue_item_singleton() {
+        let mut direct = World::new();
+        direct.step(Action::Retry);
+        direct.step(Action::ControllerRestarts);
+        direct.step(Action::EditorAddsPrompt);
+        direct.step(Action::Retry);
+        assert_eq!(direct.retries, 2);
+
+        explore(World::new(), 5);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CyclePhase {
     Idle,

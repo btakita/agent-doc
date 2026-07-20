@@ -265,9 +265,16 @@ fn merge_inner(
             crate::document_cell::merge_3way_with_ops(&base_text, ours_text, theirs_text, ops);
         if !outcome.fell_back {
             if !outcome.conflicts.is_empty() {
+                let chose_ours = outcome
+                    .conflicts
+                    .iter()
+                    .filter(|conflict| conflict.chosen == conflict.ours)
+                    .count();
                 eprintln!(
-                    "[crdt] cell_merge(op-routed): {} conflict(s) surfaced (policy=ours-wins)",
-                    outcome.conflicts.len()
+                    "[crdt] cell_merge(op-routed): {} conflict(s) resolved by component authorship (ours={} theirs={})",
+                    outcome.conflicts.len(),
+                    chose_ours,
+                    outcome.conflicts.len() - chose_ours,
                 );
             }
             eprintln!(
@@ -539,9 +546,16 @@ fn try_cell_merge_text(
         return None;
     }
     if !outcome.conflicts.is_empty() {
+        let chose_ours = outcome
+            .conflicts
+            .iter()
+            .filter(|conflict| conflict.chosen == conflict.ours)
+            .count();
         eprintln!(
-            "[crdt] cell_merge: {} conflict(s) surfaced (policy=ours-wins)",
-            outcome.conflicts.len()
+            "[crdt] cell_merge: {} conflict(s) resolved by component authorship (ours={} theirs={})",
+            outcome.conflicts.len(),
+            chose_ours,
+            outcome.conflicts.len() - chose_ours,
         );
     }
     Some(outcome.merged_text)
@@ -1248,7 +1262,7 @@ fn reconcile_component(
 /// with operator-authoritative markers so the component framing is valid by
 /// construction (never a duplicated/dropped `<!-- /agent:NAME -->`); flat
 /// whole-slice merge only when the framing does not parse.
-fn merge_one_component(
+pub(crate) fn merge_one_component(
     name: &str,
     base_text: Option<&str>,
     ours_text: &str,

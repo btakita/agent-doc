@@ -5353,44 +5353,9 @@ fn handle_editor_command_submit_rpc(
     request: ControllerRequest,
 ) -> Result<serde_json::Value> {
     let (submit, payload_json) = parse_editor_command_submit_request(&request)?;
-
-    let command_id = submit.command_id.clone();
-    let generation = submit.authority_generation;
-
-    // Fold the submit + progress events into a projection mirroring what the
-    // plugin will observe. Progress is never terminal.
-    let progress = command_submit_progress_events(&command_id, generation, true);
-    let mut projection = command_submit_projection(&submit, &progress);
-
     let command_result =
         dispatch_command_submit_payload(bootstrap, &request, &submit, payload_json);
-
-    // Terminal authority folds through the causal receipt.
-    let receipt_id = format!("{command_id}-receipt");
-    let receipt = if command_result.terminal_applied {
-        lazily::applied_receipt(&receipt_id, &command_id, "project-controller", generation)
-    } else {
-        lazily::rejected_receipt(
-            &receipt_id,
-            &command_id,
-            "project-controller",
-            generation,
-            command_result.terminal_reason.clone().unwrap_or_else(|| {
-                format!("{} exit_code={}", submit.name, command_result.exit_code)
-            }),
-        )
-    };
-    projection.observe_receipt(&receipt);
-
-    Ok(serde_json::json!({
-        "command_id": command_id,
-        "exit_code": command_result.exit_code,
-        "output": command_result.output,
-        "payload": command_result.payload,
-        "projection": serde_json::to_value(projection.to_image())?,
-        "events": serde_json::to_value(progress)?,
-        "receipt": serde_json::to_value(receipt)?,
-    }))
+    terminal_command_submit_response(&submit, command_result)
 }
 
 fn parse_editor_command_submit_request(
@@ -5474,6 +5439,112 @@ fn command_submit_projection(
     projection
 }
 
+fn terminal_command_submit_response(
+    submit: &lazily::CommandSubmit,
+    command_result: CommandSubmitDispatchResult,
+) -> Result<serde_json::Value> {
+    let command_id = submit.command_id.clone();
+    let generation = submit.authority_generation;
+    let progress = command_submit_progress_events(&command_id, generation, true);
+    let mut projection = command_submit_projection(submit, &progress);
+    let receipt_id = format!("{command_id}-receipt");
+    let receipt = if command_result.terminal_applied {
+        lazily::applied_receipt(&receipt_id, &command_id, "project-controller", generation)
+    } else {
+        lazily::rejected_receipt(
+            &receipt_id,
+            &command_id,
+            "project-controller",
+            generation,
+            command_result.terminal_reason.clone().unwrap_or_else(|| {
+                format!("{} exit_code={}", submit.name, command_result.exit_code)
+            }),
+        )
+    };
+    projection.observe_receipt(&receipt);
+
+    Ok(serde_json::json!({
+        "command_id": command_id,
+        "exit_code": command_result.exit_code,
+        "output": command_result.output,
+        "payload": command_result.payload,
+        "projection": serde_json::to_value(projection.to_image())?,
+        "events": serde_json::to_value(progress)?,
+        "receipt": serde_json::to_value(receipt)?,
+    }))
+}
+
+const ASYNC_EDITOR_COMMAND_RESULT_TTL: Duration = Duration::from_secs(5 * 60);
+const ASYNC_EDITOR_COMMAND_RESULT_CAPACITY: usize = 256;
+
+#[derive(Clone)]
+struct AsyncEditorCommandResult {
+    response: serde_json::Value,
+    updated_at: std::time::Instant,
+}
+
+fn async_editor_command_results()
+-> &'static parking_lot::Mutex<std::collections::HashMap<String, AsyncEditorCommandResult>> {
+    static RESULTS: std::sync::LazyLock<
+        parking_lot::Mutex<std::collections::HashMap<String, AsyncEditorCommandResult>>,
+    > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
+    &RESULTS
+}
+
+fn retain_async_editor_command_result(command_id: &str, response: serde_json::Value) {
+    let now = std::time::Instant::now();
+    let mut results = async_editor_command_results().lock();
+    results.retain(|_, result| {
+        now.duration_since(result.updated_at) <= ASYNC_EDITOR_COMMAND_RESULT_TTL
+    });
+    if results.len() >= ASYNC_EDITOR_COMMAND_RESULT_CAPACITY
+        && !results.contains_key(command_id)
+        && let Some(oldest) = results
+            .iter()
+            .min_by_key(|(_, result)| result.updated_at)
+            .map(|(id, _)| id.clone())
+    {
+        results.remove(&oldest);
+    }
+    results.insert(
+        command_id.to_string(),
+        AsyncEditorCommandResult {
+            response,
+            updated_at: now,
+        },
+    );
+}
+
+fn async_editor_command_result(command_id: &str) -> Option<serde_json::Value> {
+    let now = std::time::Instant::now();
+    let mut results = async_editor_command_results().lock();
+    results.retain(|_, result| {
+        now.duration_since(result.updated_at) <= ASYNC_EDITOR_COMMAND_RESULT_TTL
+    });
+    results
+        .get(command_id)
+        .map(|result| result.response.clone())
+}
+
+#[derive(Deserialize)]
+struct EditorCommandStatusPayload {
+    command_id: String,
+}
+
+fn handle_editor_command_status_rpc(request: ControllerRequest) -> Result<serde_json::Value> {
+    let payload: EditorCommandStatusPayload = serde_json::from_str(&request_string(
+        &request.diagnostic_payload,
+        "diagnostic_payload",
+    )?)
+    .context("parse editor_command_status payload")?;
+    async_editor_command_result(&payload.command_id).with_context(|| {
+        format!(
+            "unknown or expired async editor command: {}",
+            payload.command_id
+        )
+    })
+}
+
 /// Submit an editor command and return after CP admission.
 ///
 /// This is the message-passing fast path for editor gestures such as
@@ -5491,6 +5562,20 @@ fn handle_editor_command_submit_async_rpc(
     let generation = submit.authority_generation;
     let progress = command_submit_progress_events(&command_id, generation, false);
     let projection = command_submit_projection(&submit, &progress);
+    let accepted_response = serde_json::json!({
+        "command_id": command_id,
+        "exit_code": 0,
+        "output": format!("{} accepted", submit.name),
+        "payload": {
+            "accepted": true,
+            "command": submit.name,
+            "command_id": command_id,
+        },
+        "projection": serde_json::to_value(projection.to_image())?,
+        "events": serde_json::to_value(progress)?,
+        "receipt": serde_json::Value::Null,
+    });
+    retain_async_editor_command_result(&command_id, accepted_response.clone());
 
     let worker_bootstrap = bootstrap.clone();
     let worker_request = request.clone();
@@ -5498,7 +5583,7 @@ fn handle_editor_command_submit_async_rpc(
     let worker_project_root = bootstrap.project_root.clone();
     let worker_command_id = command_id.clone();
     let worker_name = submit.name.clone();
-    spawn_editor_command_async_worker(move || {
+    if let Err(err) = spawn_editor_command_async_worker(move || {
         let result = dispatch_command_submit_payload(
             &worker_bootstrap,
             &worker_request,
@@ -5518,21 +5603,21 @@ fn handle_editor_command_submit_async_rpc(
                 compact_command_output(&result.output),
             ),
         );
-    })?;
+        let terminal_response = terminal_command_submit_response(&worker_submit, result)
+            .unwrap_or_else(|response_err| {
+                serde_json::json!({
+                    "command_id": worker_command_id,
+                    "exit_code": 1,
+                    "output": format!("failed to encode async command completion: {response_err:#}"),
+                })
+            });
+        retain_async_editor_command_result(&worker_command_id, terminal_response);
+    }) {
+        async_editor_command_results().lock().remove(&command_id);
+        return Err(err);
+    }
 
-    Ok(serde_json::json!({
-        "command_id": command_id,
-        "exit_code": 0,
-        "output": format!("{} accepted", submit.name),
-        "payload": {
-            "accepted": true,
-            "command": submit.name,
-            "command_id": command_id,
-        },
-        "projection": serde_json::to_value(projection.to_image())?,
-        "events": serde_json::to_value(progress)?,
-        "receipt": serde_json::Value::Null,
-    }))
+    Ok(accepted_response)
 }
 
 fn validate_async_editor_command_payload(
@@ -5547,6 +5632,10 @@ fn validate_async_editor_command_payload(
         "focus_document_pane" => {
             let _: FocusDocumentPaneCommandPayload =
                 serde_json::from_str(payload_json).context("parse focus_document_pane payload")?;
+        }
+        "editor_route" => {
+            let _: ControllerEditorRoutePayload =
+                serde_json::from_str(payload_json).context("parse editor_route payload")?;
         }
         other => anyhow::bail!("unsupported async editor command: {other}"),
     }
@@ -8213,6 +8302,7 @@ pub(crate) fn handle_request_locked(
         "editor_command_submit_async" => controller_envelope(
             handle_editor_command_submit_async_rpc(&bootstrap_snapshot, request),
         ),
+        "editor_command_status" => controller_envelope(handle_editor_command_status_rpc(request)),
         "crdt_current_text" => {
             controller_envelope(handle_crdt_current_text_rpc(&bootstrap_snapshot, request))
         }
@@ -13271,6 +13361,31 @@ mod tests {
         assert_eq!(response["projection"]["commands"][0]["status"], "accepted");
         assert_eq!(response["projection"]["commands"][0]["terminal"], false);
         assert!(response["receipt"].is_null());
+
+        // The test-support worker runs inline, so the completion channel is
+        // already terminal by the time admission returns.
+        let status = handle_editor_command_status_rpc(ControllerRequest {
+            command: "editor_command_status".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::json!({ "command_id": "cmd-sync-async" }).to_string(),
+            ),
+        })
+        .unwrap();
+        assert_eq!(status["exit_code"], 0);
+        assert_eq!(status["projection"]["commands"][0]["status"], "applied");
+        assert_eq!(status["projection"]["commands"][0]["terminal"], true);
+        assert!(!status["receipt"].is_null());
     }
 
     #[test]
@@ -13280,20 +13395,58 @@ mod tests {
         let bootstrap = test_bootstrap(&dir);
         let request = command_submit_request_for_test(
             None,
+            "unknown_command",
+            "agent-doc.unknown_command.v1",
+            serde_json::json!({}),
+            "cmd-unknown-async",
+        );
+
+        let err = handle_editor_command_submit_async_rpc(&bootstrap, request).unwrap_err();
+        assert!(format!("{err:#}").contains("unsupported async editor command"));
+    }
+
+    #[test]
+    fn async_command_submit_accepts_well_formed_editor_route_payload() {
+        let request = command_submit_request_for_test(
+            Some(PathBuf::from("plan.md")),
             "editor_route",
             "agent-doc.editor_route.v1",
             serde_json::json!({
                 "relative_path": "plan.md",
                 "dispatch_only": true,
                 "plain_trigger": true,
-                "wait_for_ready_secs": 0,
-                "layout_args": []
+                "wait_for_ready_secs": 15,
+                "layout_args": [],
+                "attempt_id": "attempt-1",
+                "route_key": "route-1"
             }),
             "cmd-route-async",
         );
+        let (submit, payload_json) = parse_editor_command_submit_request(&request).unwrap();
+        validate_async_editor_command_payload(&submit, &payload_json).unwrap();
+    }
 
-        let err = handle_editor_command_submit_async_rpc(&bootstrap, request).unwrap_err();
-        assert!(format!("{err:#}").contains("unsupported async editor command"));
+    #[test]
+    fn editor_command_status_rejects_unknown_completion_id() {
+        let request = ControllerRequest {
+            command: "editor_command_status".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::json!({ "command_id": "cmd-does-not-exist" }).to_string(),
+            ),
+        };
+        let err = handle_editor_command_status_rpc(request).unwrap_err();
+        assert!(format!("{err:#}").contains("unknown or expired async editor command"));
     }
 
     #[test]

@@ -37,7 +37,7 @@ target path is the lazily command envelope.
 
 | Command | `name` | `payload_type` | Interim path |
 |---|---|---|---|
-| Run Agent Doc | `editor_route` | `agent-doc.editor_route.v1` | JB `CpRouteClient`; VS Code raw `controller.sock` `editor_route` |
+| Run Agent Doc | `editor_route` | `agent-doc.editor_route.v1` | JB `CpRouteClient` submits `editor_command_submit_async` and polls `editor_command_status`; VS Code raw `controller.sock` `editor_route` |
 | Sync Tmux Layout / Load Window | `sync_tmux_layout` | `agent-doc.sync_tmux_layout.v1` | JB `CpRouteClient` submits `editor_command_submit_async`; legacy native endpoint remains available for older plugins |
 | Focus handoff | `focus_document_pane` | `agent-doc.focus_document_pane.v1` | JB `CpRouteClient` submits `editor_command_submit_async`; legacy native endpoint remains available for older plugins |
 | Save document | `save_document` | `agent-doc.save_document.v1` | file signal / socket IPC |
@@ -71,6 +71,13 @@ Maps to the controller's existing `ControllerEditorRoutePayload`; the command
 envelope's `command_id` becomes the route's causation id, and the controller
 emits `observed` → `accepted` → `started` events plus a terminal `applied` /
 `rejected` receipt.
+
+JetBrains uses the async admission endpoint so the controller socket is released
+before route completion. It then queries `editor_command_status` with
+`{"command_id":"<id>"}` until the matching projection is terminal. An
+`accepted` or `running` projection is progress only; the plugin preserves the
+terminal output and receipt semantics used for busy, queued, retry, and failure
+notifications.
 
 ### `agent-doc.sync_tmux_layout.v1`
 

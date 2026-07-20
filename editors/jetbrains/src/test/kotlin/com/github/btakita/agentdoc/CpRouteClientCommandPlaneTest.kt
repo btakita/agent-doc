@@ -51,6 +51,34 @@ class CpRouteClientCommandPlaneTest {
     }
 
     @Test
+    fun `editorCommandSubmitRequest can target async submit endpoint`() {
+        val request = CpRouteClient.editorCommandSubmitRequest(
+            filePath = "/proj/plan.md",
+            relativePath = "plan.md",
+            layoutArgs = emptyList(),
+            waitForReadySeconds = 30,
+            attemptId = "attempt-async",
+            routeKey = "root:plan.md:run",
+            commandId = "cmd-editor-async",
+            controllerCommand = "editor_command_submit_async",
+        )
+
+        assertEquals("editor_command_submit_async", request.get("command").asString)
+        val message = JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+        assertEquals("editor_route", message.getAsJsonObject("CommandSubmit").get("name").asString)
+    }
+
+    @Test
+    fun `editorCommandStatusRequest identifies the admitted command`() {
+        val request = CpRouteClient.editorCommandStatusRequest("/proj/plan.md", "cmd-editor-async")
+
+        assertEquals("editor_command_status", request.get("command").asString)
+        assertEquals("/proj/plan.md", request.get("file").asString)
+        val payload = JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+        assertEquals("cmd-editor-async", payload.get("command_id").asString)
+    }
+
+    @Test
     fun `syncTmuxLayoutCommandSubmitRequest builds sync_tmux_layout CommandSubmit`() {
         val request = CpRouteClient.syncTmuxLayoutCommandSubmitRequest(
             projectRoot = "/proj",
@@ -222,6 +250,27 @@ class CpRouteClientCommandPlaneTest {
         )
         assertEquals(1, result.exitCode)
         assertTrue(result.output.contains("boom"))
+    }
+
+    @Test
+    fun `resolveCommandSubmitTerminalData waits for a non terminal projection`() {
+        val result = CpRouteClient.resolveCommandSubmitTerminalData(
+            projectionData("running", false, "editor_route running"),
+            "cmd-1",
+        )
+
+        assertEquals(null, result)
+    }
+
+    @Test
+    fun `resolveCommandSubmitTerminalData returns an applied terminal`() {
+        val result = CpRouteClient.resolveCommandSubmitTerminalData(
+            projectionData("applied", true, "routed ok"),
+            "cmd-1",
+        )
+
+        assertEquals(0, result?.exitCode)
+        assertEquals("routed ok", result?.output)
     }
 
     @Test

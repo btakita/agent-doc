@@ -49,14 +49,25 @@ internal object CpRouteClient {
                 relativePath = relativePath,
                 layoutArgs = layoutArgs,
                 waitForReadySeconds = waitForReadySeconds,
-                attemptId = attemptId,
-                routeKey = routeKey,
-                commandId = commandId,
-            )
-            return try {
-                sendCommandSubmitToSocket(socket, request, commandId)
-            } catch (e: Exception) {
-                log.warn("[route] command-plane editor_route request failed via ${socket.path}: ${e.message}")
+            attemptId = attemptId,
+            routeKey = routeKey,
+            commandId = commandId,
+            controllerCommand = "editor_command_submit_async",
+        )
+        return try {
+            val accepted = sendAcceptedCommandSubmitToSocket(socket, request, commandId, "editor_route")
+            if (accepted.exitCode != 0) {
+                accepted
+            } else {
+                awaitCommandSubmitTerminal(
+                    socket = socket,
+                    filePath = filePath,
+                    commandId = commandId,
+                    timeoutMs = waitForReadySeconds * 1000 + COMMAND_COMPLETION_GRACE_MS,
+                )
+            }
+        } catch (e: Exception) {
+            log.warn("[route] command-plane editor_route request failed via ${socket.path}: ${e.message}")
                 CpEditorRouteResult(
                     exitCode = 1,
                     output = "command-plane editor_route request failed via ${socket.path}: ${e.message}",
@@ -266,9 +277,10 @@ internal object CpRouteClient {
         layoutArgs: List<String>,
         waitForReadySeconds: Long,
         attemptId: String?,
-        routeKey: String?,
-        commandId: String,
-    ): JsonObject {
+    routeKey: String?,
+    commandId: String,
+    controllerCommand: String = "editor_command_submit",
+): JsonObject {
         val payload = editorRoutePayload(relativePath, layoutArgs, waitForReadySeconds, attemptId, routeKey)
         return commandSubmitRequest(
             filePath = filePath,
@@ -280,10 +292,22 @@ internal object CpRouteClient {
             // while the prior document turn is in flight.
             idempotencyKey = attemptId ?: routeKey ?: relativePath,
             commandId = commandId,
-            deadlineMs = waitForReadySeconds * 1000,
-            supersede = false,
-        )
-    }
+        deadlineMs = waitForReadySeconds * 1000,
+        supersede = false,
+        controllerCommand = controllerCommand,
+    )
+}
+
+internal fun editorCommandStatusRequest(filePath: String, commandId: String): JsonObject {
+    val request = JsonObject()
+    request.addProperty("command", "editor_command_status")
+    request.addProperty("file", filePath)
+    request.addProperty(
+        "diagnostic_payload",
+        JsonObject().also { it.addProperty("command_id", commandId) }.toString(),
+    )
+    return request
+}
 
     internal fun syncTmuxLayoutCommandSubmitRequest(
         projectRoot: String,
@@ -396,15 +420,26 @@ internal object CpRouteClient {
     // Resolve a unary `call` from the controller's returned command projection.
     // Terminal-only: an `applied` terminal yields the output; anything else (a
     // non-terminal projection, or a rejected terminal) is a failure result.
-    internal fun resolveCommandSubmitData(data: JsonObject, commandId: String): CpEditorRouteResult {
-        val output = data.get("output")?.asString ?: ""
-        val commands = data.getAsJsonObject("projection")?.getAsJsonArray("commands")
-        val entry = commands?.firstOrNull {
-            it.isJsonObject && it.asJsonObject.get("command_id")?.asString == commandId
-        }?.asJsonObject
-        if (entry == null || entry.get("terminal")?.asBoolean != true) {
-            return CpEditorRouteResult(1, output.ifEmpty { "command plane returned a non-terminal projection" })
-        }
+internal fun resolveCommandSubmitData(data: JsonObject, commandId: String): CpEditorRouteResult {
+    return resolveCommandSubmitTerminalData(data, commandId)
+        ?: CpEditorRouteResult(
+            1,
+            data.get("output")?.asString?.ifEmpty { "command plane returned a non-terminal projection" }
+                ?: "command plane returned a non-terminal projection",
+        )
+}
+
+/** Return a terminal command result, or null while the command is still in flight. */
+internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: String): CpEditorRouteResult? {
+    val output = data.get("output")?.asString ?: ""
+    val commands = data.getAsJsonObject("projection")?.getAsJsonArray("commands")
+    val entry = commands?.firstOrNull {
+        it.isJsonObject && it.asJsonObject.get("command_id")?.asString == commandId
+    }?.asJsonObject
+        ?: return CpEditorRouteResult(1, output.ifEmpty { "command plane returned no projection entry" })
+    if (entry.get("terminal")?.asBoolean != true) {
+        return null
+    }
         val status = entry.get("status")?.asString
         if (status != "applied") {
             val reason = entry.get("reason")?.takeIf { !it.isJsonNull }?.asString
@@ -451,7 +486,9 @@ internal object CpRouteClient {
     /// which is `routed_cycle_ack_timeout` at 30s with a live child. Setting it
     /// near the client's 15s deadline hint would abort routes that are still
     /// running correctly — the exact failure recorded in #jbroutasync.
-    private const val SOCKET_REQUEST_TIMEOUT_MS = 60_000L
+private const val SOCKET_REQUEST_TIMEOUT_MS = 60_000L
+private const val COMMAND_COMPLETION_GRACE_MS = 5_000L
+private const val COMMAND_COMPLETION_POLL_MS = 100L
 
     private val socketWatchdog = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-cp-socket-watchdog").apply { isDaemon = true }
@@ -510,22 +547,43 @@ internal object CpRouteClient {
         )
     }
 
-    private fun sendCommandSubmitToSocket(
-        socket: File,
-        request: JsonObject,
-        commandId: String,
-    ): CpEditorRouteResult {
-        val data = sendRequestDataToSocket(socket, request)
-        return resolveCommandSubmitData(data, commandId)
-    }
-
-    private fun sendAcceptedCommandSubmitToSocket(
+private fun sendAcceptedCommandSubmitToSocket(
         socket: File,
         request: JsonObject,
         commandId: String,
         commandName: String,
     ): CpEditorRouteResult {
-        val data = sendRequestDataToSocket(socket, request)
-        return resolveCommandSubmitAcceptedData(data, commandId, commandName)
+    val data = sendRequestDataToSocket(socket, request)
+    return resolveCommandSubmitAcceptedData(data, commandId, commandName)
+}
+
+private fun awaitCommandSubmitTerminal(
+    socket: File,
+    filePath: String,
+    commandId: String,
+    timeoutMs: Long,
+): CpEditorRouteResult {
+    val deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceAtLeast(1))
+    while (true) {
+        val data = sendRequestDataToSocket(socket, editorCommandStatusRequest(filePath, commandId))
+        resolveCommandSubmitTerminalData(data, commandId)?.let { return it }
+        val remainingNanos = deadlineNanos - System.nanoTime()
+        if (remainingNanos <= 0) {
+            return CpEditorRouteResult(
+                1,
+                "editor_route did not publish a terminal result within ${timeoutMs}ms",
+            )
+        }
+        val sleepMs = minOf(
+            COMMAND_COMPLETION_POLL_MS,
+            TimeUnit.NANOSECONDS.toMillis(remainingNanos).coerceAtLeast(1),
+        )
+        try {
+            Thread.sleep(sleepMs)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return CpEditorRouteResult(1, "editor_route completion wait interrupted")
+        }
     }
+}
 }

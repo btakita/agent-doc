@@ -43,10 +43,10 @@ deprecation cycle, not a substitution.
 |---|---|---|
 | `lazily-js` | **public** `slot()`, `disposeSlot()`, `SlotHandle` in `.d.ts` | deprecate, don't delete |
 | `lazily-react` | **public** `useSlot` hook; imports `SlotHandle` across the package boundary | **must follow `lazily-js`** |
-| other six bindings | internal type names | independent |
+| other **seven** bindings (rs, py, zig, dart, go, kt, cpp) | internal type names | independent |
 | `lazily-html` | 49 hits are the **HTML `<slot>` element** | **out of scope — do not touch** |
 
-So it is **nine repos, not eight**, with one hard ordering edge. Deprecation
+So it is **nine repos** but **eight corpus runners** — `lazily-react` wraps `lazily-js` and runs no corpus, `lazily-html` is out of scope. Where this plan says *runner* it means the eight bindings; where it says *repo* it includes react. One hard ordering edge. Deprecation
 policy for the two public ones must be decided before step 1: keep `slot()` as a
 deprecated alias for one release, or take the major-version break.
 
@@ -243,6 +243,14 @@ split already recorded in `relaycell-backpressure-analysis.md`.
 **`merge` folds synchronously inside a `batch`; only propagation defers.** N
 calls → N folds, one invalidation. Pinned explicitly because "does batching lose
 my merges?" is the accumulator case's first question. It does not.
+
+**Deliverable the spec attaches and this plan must schedule:** the spec says
+*"merge granularity is flush granularity, and this **MUST** be stated wherever
+the construction is offered."* That is a **documentation obligation on every
+binding that exposes the construction**, not a fixture. Add it to each binding's
+step. Note it is unenforceable by the corpus — it constrains prose — so it is
+review-enforced, the same construction the spec uses (self-awarely) for the
+`SHOULD NOT` on signal-as-node-kind.
 
 ---
 
@@ -492,16 +500,30 @@ sequenced fixtures first, which is the lockstep flag day §9.3 says to avoid.
 3. **Formal.** **19 files**, not 2. `AsyncSlotState.lean` (74 hits) is a **file
    rename**. `Signaling.lean` and `SignalingRoster.lean` are **WebRTC signaling —
    semantically unrelated, do not touch.** `lake build` clean, no `sorry`.
-4. **All nine runners dual-accept** `signal` **and** `eager_memo`. ~3 lines each.
+4. **All eight runners dual-accept** `signal` **and** `eager_memo`. ~3 lines each.
    Corpus stays green throughout; no fixture has changed yet.
 5. **Flip the fixtures** to `eager_memo` / `dispose_eager_memo`, plus the 47
    prose occurrences across 13 files. Corpus green everywhere on the first run,
    because step 4 already landed.
 6. **Reference binding** `lazily-rs` — type, handles, `SlotMap`, `eager_memo`,
-   and the `Dependent` trait as an internal seam. ~8,400 sites: use a mechanical
-   substitution, having first confirmed no slab/arena sense of "slot" exists
-   (verified zero hits today). Include `benches/` — they feed `BENCHMARKS.md`
-   and `#lzbenchver` gates on drift.
+   and the `Dependent` trait as an internal seam. ~8,400 sites. Include
+   `benches/` — they feed `BENCHMARKS.md` and `#lzbenchver` gates on drift.
+
+   **CARVE-OUT, do not skip: `SlotId` must become `NodeId`, not `MemoId`.**
+   `SlotId` (`src/context.rs:24`) is the id of **every** node kind, not of
+   derivations — confirmed on effects and cells: `pending_effects:
+   VecDeque<SlotId>`, `all_effect_ids: Vec<SlotId>`, `fn run_effect(&self, id:
+   SlotId)`, `fn clear_cell_dependents(&self, id: SlotId)`, `TRACKING_STACK:
+   RefCell<Vec<SlotId>>`, plus `SlotIdSet`/`SlotIdMap`/`SlotIdHashBuilder` in
+   `thread_safe.rs:92-93`. 87 occurrences in `context.rs` alone. A word-boundary
+   `Slot`→`Memo` pass yields `MemoId` naming effect and cell ids — strictly worse
+   than today, **and it compiles**, so nothing catches it. The wire already calls
+   this `node`/`NodeId` (§13), so `NodeId` is the right target.
+
+   **Grep every binding for the same pattern before step 9 fans out.** Any
+   `Slot`-prefixed identifier that spans node kinds is a carve-out, not a rename.
+   Confirmed absent in `lazily-rs`: slab/arena senses (`free_slot`, `slot_index`,
+   `slots[`, `slab`) — zero hits. Re-verify per binding.
 7. **`lazily-js`**, honouring the deprecation decision from step 1.
 8. **`lazily-react`** — depends on step 7 for `MemoHandle` types.
 9. **Remaining six in parallel** — separate repos, **one agent per repo, never
@@ -515,7 +537,7 @@ Independent of the rename; do not bundle. Needs new runner surface.
 
 1. Add the `merge` op and a cell policy parameter to `_REACTIVE_GRAPH_OPS` —
    **`merge` is not currently in the allowlist.**
-2. Implement the op in all nine runners.
+2. Implement the op in all **eight** runners.
 3. Land the four §9.4 fixtures, mutation-verified.
 4. Add a re-entry-bound fixture per §8.1: a divergent loop must report exhaustion
    rather than hang, testable with a bounded iteration count. **Currently
@@ -530,6 +552,81 @@ Independent of the rename; do not bundle. Needs new runner surface.
   capture `$?` directly rather than through a pipe.
 - **Nothing is weakened to make a binding pass.** A reported divergence is a
   successful outcome.
+
+---
+
+## 10b. Feedback: what is settled, what is open, and what to build
+
+**Track C — independent of the rename.** The spec section is deliberately
+part-settled and part-open. This records the line so a binding author knows
+exactly what they owe today, and so the open parts do not rot into unfixtured
+prose the way this area already did once.
+
+### Settled — normative, build against it
+
+| clause | status |
+|---|---|
+| A `Source` never acquires a dependency edge; feedback is `Effect` + `merge` | normative |
+| Delivery per settled cone; merge granularity is flush granularity | normative |
+| `merge` folds synchronously in a `batch`; only propagation defers | normative |
+| Three termination classes; `KeepLatest` is undecidable (Turing complete) | mathematics, not policy |
+| **Drain-iteration bound `MUST`, exhaustion observable** | normative — **build this first** |
+| Exhaustion `SHOULD` report what was cycling | normative |
+| Termination state `SHOULD` be a `Memo`, not a closure branch | normative |
+| Accumulator rules; `Memo` closing over a counter is a `MUST NOT` | normative |
+
+**Build the drain bound before anything else in this track.** It is the
+*enabling condition* for fixturing the whole area: a conformance runner cannot
+replay a divergent loop against a binding whose only exit is convergence, because
+the fixture hangs the runner. Nothing else here is testable until it lands.
+
+### To implement, specified but not yet written
+
+Both are binding-internal accounting over structures that already exist. Neither
+is public API and neither adds arena surface.
+
+1. **Write-into-own-cone detection.** When effect `E` writes node `N`, check
+   whether `N ∈ deps(E)`. Both sides are already tracked. This identifies a
+   scheduler-closed loop **the first time it closes**, rather than after the
+   drain budget expires — and it is what makes the exhaustion `SHOULD`
+   implementable in a useful form: name the effect and the node, not "the drain
+   hit a counter."
+2. **Per-effect drain attribution.** Attribute drain iterations to the effect
+   that keeps rescheduling itself. Without it, a long-but-terminating cascade and
+   a divergent loop hit the same counter, and the budget cannot tell them apart —
+   which is how bounds end up set to a million to stop false positives.
+
+Fold these into the `feedback_drain_bound_reports_exhaustion` fixture: assert the
+report **identifies the loop**, not merely that exhaustion occurred.
+
+### Open — phrased as questions, with triggers
+
+Deliberately not normative. **No binding can claim conformance to these**, and
+they must not be written in requirement language until resolved.
+
+| question | trigger to revisit |
+|---|---|
+| Should the drain budget be per-loop rather than per-context? | when a binding reports a **false positive** on a long legitimate cascade |
+| Should there be a `feedback(upstream, target, f, done)` convenience constructor? | when the memo-termination pattern has **two real call sites**. It would be justified on the same grounds as `eager_memo` — it encodes an invariant callers get wrong (the stop condition belongs in a memo, not the closure) — but designing its ergonomics before anyone has written it is guessing |
+| Does any binding's async drain observe cancellation between iterations? | **unmeasured** — measure it; do not assume. The sync answer (the effect body is the only yield point) was verified; the async row was not |
+
+**Why triggers rather than dates.** This section sat as unfixtured normative
+prose precisely because nobody had a reason to return to it. A trigger names the
+observation that should bring someone back.
+
+### What was declined, so it is not re-proposed
+
+A `fixpoint` construct, in two tiers. Recorded in the spec under *There is no
+`fixpoint` construct, and this records why*. One-line summary: the
+`BOUNDED_HEIGHT` flag it needed would be **unverifiable** (ACC is not even
+refutable by sampling) or **vacuous** (`Max` over `i64` has height `2^64`); it
+could not cover `KeepLatest`, which is the reachable case; and a measure
+parameter adds no capability over a stop predicate in the effect body, while
+being a composition promoted to a primitive.
+
+Likewise declined as a **node kind**: `FeedbackEffect`. It sits at the sink
+position like any effect, so it is not a fourth DAG position — the useful content
+of the idea is the detection and attribution above, which need no declaration.
 
 ---
 

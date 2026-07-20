@@ -2988,12 +2988,31 @@ pub fn reconcile_replicas_against_process_liveness(file: &Path) -> Result<Replic
     )
 }
 
+/// Errors here are never retried, and that is deliberate. Every fallible step
+/// below fails for exactly one of two reasons, and neither is transient:
+///
+/// - a poisoned registry mutex ([`dead_editor_replica_ids`],
+///   [`forget_replica_identity`], [`with_existing_hub`]) — another thread
+///   panicked holding that lock, and a `std::sync::Mutex` stays poisoned for the
+///   life of the process, so a retry is guaranteed to fail identically;
+/// - [`agent_doc_fs::document_state_hash`] failing to canonicalize, which means
+///   the document was deleted or renamed mid-write. Retrying cannot conjure it
+///   back, and the enclosing write already fails closed on a vanished document.
+///
+/// Retry that *is* useful happens one level up: this runs at the ACK deadline of
+/// a single write attempt, and the CRDT write convergence loop retries the whole
+/// attempt under its own backoff, which re-runs this reconciliation. A retry
+/// loop here would be redundant for that case and would spin on a poisoned lock
+/// in the other.
 fn reconcile_replicas_against_liveness_with(
     file: &Path,
     is_pid_live: impl Fn(u32) -> bool,
 ) -> Result<ReplicaReconcile> {
     let document_hash = agent_doc_fs::document_state_hash(file)?;
     let dead = dead_editor_replica_ids(&document_hash, is_pid_live)?;
+    // Lock order matches `register_replica_for_file_with_liveness`: take the
+    // metadata lock, release it, then take the hub lock. Never both at once, so
+    // registration and reconciliation cannot deadlock each other.
     let outcome = with_existing_hub(file, |hub| {
         let mut removed_dead = Vec::new();
         for client_id in &dead {
@@ -3013,7 +3032,12 @@ fn reconcile_replicas_against_liveness_with(
         }
     })?
     .unwrap_or_default();
-    for client_id in &outcome.removed_dead {
+    // Forget every DEAD identity, not just the ones the hub still held. Gating
+    // this on `removed_dead` stranded an identity whose hub member was already
+    // gone: the next pass re-detects it as dead, `deregister` returns false, so
+    // `removed_dead` is empty and the forget never runs again. Draining `dead`
+    // is idempotent and self-healing instead.
+    for client_id in &dead {
         forget_replica_identity(&document_hash, *client_id)?;
     }
     Ok(outcome)

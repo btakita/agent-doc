@@ -414,8 +414,19 @@ impl std::fmt::Display for CrdtConvergenceState {
 /// surrounding ACK recovery ladder — a live process owes us a replica, so the
 /// repair is to rebuild it, not to drop it.
 ///
-/// Best-effort: a failure here is logged and never fails the caller's write.
-fn reconcile_stalled_replicas(file: &Path, source: &str) {
+/// **Failure here is not swallowed, because it voids the caller's promise.**
+/// The only way this fails is a poisoned registry mutex or a vanished document
+/// (see `reconcile_replicas_against_process_liveness`), and neither is
+/// transient, so there is nothing to retry. A poisoned registry is specifically
+/// reachable: the workspace deliberately keeps `panic = "unwind"` so the cdylib's
+/// `catch_unwind` guards can survive a replica panic inside the host IDE, which
+/// means a caught panic that happened under one of these locks leaves it
+/// poisoned for the life of that process. In that state nothing will ever
+/// complete an "async delivery", so a caller that reports retained success with
+/// `operator_action=none` is making a promise the relay cannot keep. The
+/// retained path therefore fails closed on `Err` and names the operator
+/// recovery instead.
+fn reconcile_stalled_replicas(file: &Path, source: &str) -> Result<()> {
     match agent_doc_crdt_relay_io::reconcile_replicas_against_process_liveness(file) {
         Ok(outcome) if !outcome.removed_dead.is_empty() || !outcome.live_unacked.is_empty() => {
             agent_doc_ops_log_io::log_op(
@@ -428,15 +439,24 @@ fn reconcile_stalled_replicas(file: &Path, source: &str) {
                     CRDT_ACK_RECOVERY_TIMEOUT_MS,
                 ),
             );
+            Ok(())
         }
-        Ok(_) => {}
-        Err(err) => agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "{source}_crdt_replica_cache_reconcile_failed file={} error={err}",
+        Ok(_) => Ok(()),
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_crdt_replica_cache_reconcile_failed file={} error={err} recovery=reload_lib",
+                    file.display(),
+                ),
+            );
+            Err(err.context(format!(
+                "the replica cache for {} could not be reconciled, so retained delivery cannot be \
+                 completed by the relay; run `agent-doc admin reload-lib` to replace the editor \
+                 replica",
                 file.display(),
-            ),
-        ),
+            )))
+        }
     }
 }
 
@@ -2012,7 +2032,7 @@ pub fn apply_canonical_replace_if_attached(
                                         // here, not on BlockMissingRetention.
                                         // Reconciling only there left the wedge in
                                         // place for every later operation.
-                                        reconcile_stalled_replicas(file, source);
+                                        reconcile_stalled_replicas(file, source)?;
                                         agent_doc_ops_log_io::log_op(
                                             file,
                                             &format!(
@@ -2030,7 +2050,14 @@ pub fn apply_canonical_replace_if_attached(
                                         // this is the path where the cache being
                                         // wrong is most likely to be why nothing
                                         // completed.
-                                        reconcile_stalled_replicas(file, source);
+                                        // Already failing closed; a reconcile
+                                        // error only adds detail, so log it and
+                                        // keep the caller's original reason.
+                                        if let Err(err) = reconcile_stalled_replicas(file, source) {
+                                            eprintln!(
+                                                "[{source}] warning: replica cache reconcile failed while blocking closeout: {err:#}"
+                                            );
+                                        }
                                         anyhow::bail!(
                                             "{source}: editor delivery ACK recovery for {} did not settle within {}ms and the exact canonical target lacks active retained-delivery proof; refusing closeout",
                                             file.display(),

@@ -8,6 +8,13 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 queue: stop
+prompt_presets:
+  '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
+  '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
+  '#commit-push': commit all uncommitted files
+  '#commit-push-deploy': commit all uncommitted files + deploy
+  '#mermaid': Include explanatory mermaid diagram(s).
+  '#spec-test-commit-push': update spec + tests. commit + push
 ---
 
 ## Status
@@ -346,6 +353,8 @@ Done, all of it. **https://github.com/btakita/mag7-viewer** is public and anonym
 - **Local plumbing repaired.** `git submodule status` was reporting the submodule as uninitialised (`-` prefix) because `.git/config` still keyed it under the old name and the gitdir pointer still aimed at `.git/modules/src/acadian-take-home`. Renamed the module directory, rewrote the `.git` pointer and `core.worktree`, and renamed the config section. Status is clean now.
 - **Description updated** and the "take-home assessment" wording dropped, since the repo is public under a neutral name.
 - **Visibility flipped to public**, verified anonymously rather than by trusting the API response: `curl` returns 200 unauthenticated, and a credential-less `git clone` of the public URL lands at `94c2bc9`, matching HEAD.
+- The module table omitted `models.py` even though the prose right below it tells you to edit `MAG7` in that file.
+- The Tests section claimed **29 backend and 9 frontend** tests. Actual is **33 and 66** — the frontend count was stale by a factor of seven, since every interaction module I added this session came with tests the README never learned about. Now corrected and verified against a live `make check` rather than assumed.
 
 **No documentation or code inside the submodule changed** — worth stating explicitly rather than reporting a rename I did not need to do. The app's own identifiers were already `mag7-*` (`mag7-backend`, `mag7-frontend`, `<title>MAG7 Return Viewer</title>`, README titled "MAG7 Interactive Return Viewer"). The only place the old name lived was the repo URL and submodule path. I checked for clone URLs in the README and there are none.
 
@@ -410,14 +419,44 @@ Bound with native listeners on the track and slide rects rather than an overlay,
 `make check` is green: 33 backend tests, mypy clean, 66 frontend tests (10 new), typecheck, production build.
 
 Pushed as `b1debeb` on **btakita/mag7-viewer**; superproject gitlink at `e0a02efa8`.
-<!-- agent:boundary:77d3d7ea -->
+
+### Re: ? shortcuts overlay — opus-4-8
+
+Added. `?` opens a **Keyboard & mouse** overlay, `Esc` closes it, and a dotted-underline hint in the subtitle announces the key — an overlay nothing points at is a shortcut nobody finds.
+
+**One correction first.** I wrote "keyboard navigation" in the README feature list last cycle. Checking before building this, the app had **zero** custom key handling — what I meant was standard Tab/Enter focus behaviour, which is true but thinner than that bullet implied. So the keyboard section lists only what genuinely exists rather than inventing entries to fill the panel, and I have reworded the README bullet.
+
+The section that earns the overlay is **Mouse**. The gestures are conventional but invisible — drag to zoom, double-click to reset, drag the slider to select, drag the window to pan, drag a handle to resize — and until now they were documented only in the README. The left column names the target (Chart / Slider / Handle) rather than repeating "Drag" five times.
+
+`shouldOpenHelp()` is a pure function because the interesting case is negative: `?` is a printable character, so a global listener must not steal it from the date inputs. Modified chords are left to the browser.
+
+**Verified live:**
+
+| check | result |
+|---|---|
+| `?` opens | yes, focus moves into the dialog |
+| `Esc` closes | yes |
+| `?` typed in a date field | does not open, focus stays in the field |
+| focus on close | returns to the opener |
+| backdrop click / panel click | closes / does not close |
+| semantics | `role="dialog"`, `aria-modal="true"`, labelled |
+
+`make check` green: 33 backend, mypy clean, 73 frontend (7 new), typecheck, build. SPEC.md and README updated.
+
+Pushed `6f1083d`; gitlink `187b08baa`.
+<!-- agent:boundary:8066ae7f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue preset="#spec-test-commit-push" go -->
 - ~~The reset button is misaligned ![img_8.png](img_8.png).~~
 - ~~Please support mouse drag UX in the selector area.~~
+- ~~Please have a clear list of features in the README. Do not be verbose.~~
+- Add spec file + AGENTS.md where CLAUDE.md imports the AGENTS.md using `@AGENTS.md`
+- You mentioned keyboard navigation. Add `?` key showing the keyboard shortcuts.
+- Propose a UX to be able to quickly select a diffrent date range via mouse while over the chart or range slider. Perhaps a slider?
+- Please draft an email.
 <!-- /agent:queue -->
 
 ## Backlog

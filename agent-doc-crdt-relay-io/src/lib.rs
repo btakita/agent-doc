@@ -986,17 +986,23 @@ fn ensure_document_model_with_current_text_observer_inner(
     if matches!(first, CurrentText::EditorAttachedMissingReplica)
         && replica_reregister_cooldown_elapsed(file)
     {
-        let reregister = match signal_crdt_replica_event_counting(
+        let reregister = match signal_crdt_replica_event_with_counts(
             file,
             CrdtReplicaEventReason::AckRecoveryForceRefresh,
             0,
         ) {
-            // `notified=0` is the load-bearing case: Lazily reports the editor
-            // attached, yet the liveness plane holds no registration to send to.
-            // That is a stale-attachment wedge inside agent-doc, NOT an editor
-            // that ignored us, and the two demand opposite responses.
-            Ok(0) => "no_live_registration".to_string(),
-            Ok(notified) => format!("requested:{notified}"),
+            // `#mrnh`: report FOUND registrations alongside notified ones.
+            // `notified == 0` used to be logged unconditionally as
+            // `no_live_registration` — "Lazily reports the editor attached, yet
+            // the liveness plane holds no registration to send to" — but that
+            // is only true when `found == 0`. With `found > 0` and every IPC
+            // send failing, `notified` is also 0, and the plane DOES hold the
+            // registration the controller reports as `live_editors=1`. Those
+            // are opposite faults (a stale attachment inside agent-doc versus a
+            // delivery failure to a real editor) and conflating them is what
+            // pointed this investigation at bootstrap payload size and
+            // generation fencing instead of at delivery.
+            Ok(outcome) => outcome.diagnosis(),
             Err(err) => format!("failed:{}", format!("{err:#}").replace('\n', "\\n")),
         };
         agent_doc_ops_log_io::log_op(
@@ -2964,11 +2970,61 @@ pub fn signal_crdt_replica_event(
 /// diagnostic is actively misleading during a missing-replica wedge, because it
 /// reads as "the binary nudged the editor and the editor ignored it" and points
 /// diagnosis at the editor plugin when in fact no message was ever sent.
+/// How a replica-event signal resolved (`#mrnh`).
+///
+/// `notified` alone cannot distinguish "the liveness plane holds no
+/// registration" from "registrations exist but every delivery failed" — both
+/// are `0`. Those demand opposite responses, and conflating them sent this
+/// investigation after payload size and generation fencing when the plane
+/// already reported `live_editors=1`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplicaSignalOutcome {
+    /// Live registrations the reliable-sync plane holds for the document.
+    pub found: usize,
+    /// Registrations an IPC message was successfully delivered to.
+    pub notified: usize,
+}
+
+impl ReplicaSignalOutcome {
+    /// The diagnosis token for ops logs. `found == 0` is a stale-attachment
+    /// wedge inside agent-doc; `found > 0` with `notified == 0` is a delivery
+    /// failure to a registration that *does* exist.
+    pub fn diagnosis(&self) -> String {
+        match (self.found, self.notified) {
+            (0, _) => "no_live_registration".to_string(),
+            (found, 0) => format!("delivery_failed_to_all:{found}"),
+            (found, notified) if notified < found => {
+                format!("requested:{notified}/{found}")
+            }
+            (_, notified) => format!("requested:{notified}"),
+        }
+    }
+}
+
+/// Signal a replica event, reporting both how many registrations were found and
+/// how many were reached. See [`ReplicaSignalOutcome`].
+pub fn signal_crdt_replica_event_with_counts(
+    file: &Path,
+    reason: CrdtReplicaEventReason,
+    targets: usize,
+) -> Result<ReplicaSignalOutcome> {
+    signal_crdt_replica_event_counting_inner(file, reason, targets)
+}
+
 pub fn signal_crdt_replica_event_counting(
     file: &Path,
     reason: CrdtReplicaEventReason,
     targets: usize,
 ) -> Result<usize> {
+    signal_crdt_replica_event_counting_inner(file, reason, targets)
+        .map(|outcome| outcome.notified)
+}
+
+fn signal_crdt_replica_event_counting_inner(
+    file: &Path,
+    reason: CrdtReplicaEventReason,
+    targets: usize,
+) -> Result<ReplicaSignalOutcome> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let _ = reliable_sync_editor_live_for_file(&canonical);
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
@@ -2978,6 +3034,7 @@ pub fn signal_crdt_replica_event_counting(
         .projection()
         .live_registrations(&document_hash);
 
+    let found = registrations.len();
     let mut notified = 0usize;
     for registration in registrations {
         let payload = serde_json::json!({
@@ -3005,7 +3062,7 @@ pub fn signal_crdt_replica_event_counting(
             notified += 1;
         }
     }
-    Ok(notified)
+    Ok(ReplicaSignalOutcome { found, notified })
 }
 
 /// Controller-owned disk-change transition. The watcher already routes through
@@ -3035,6 +3092,51 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
+
+    /// `#mrnh`: "no registration exists" and "registrations exist but nothing
+    /// could be delivered" are opposite faults that both produced
+    /// `notified == 0`. The diagnosis must tell them apart, or the ops log
+    /// blames a stale attachment for what is really a delivery failure —
+    /// which is what sent this investigation after payload size and
+    /// generation fencing while the plane reported `live_editors=1`.
+    #[test]
+    fn replica_signal_diagnosis_separates_missing_registration_from_failed_delivery() {
+        assert_eq!(
+            ReplicaSignalOutcome {
+                found: 0,
+                notified: 0
+            }
+            .diagnosis(),
+            "no_live_registration",
+            "no registration is a stale-attachment wedge inside agent-doc"
+        );
+        assert_eq!(
+            ReplicaSignalOutcome {
+                found: 1,
+                notified: 0
+            }
+            .diagnosis(),
+            "delivery_failed_to_all:1",
+            "a registration that exists but cannot be reached is a DELIVERY fault"
+        );
+        assert_eq!(
+            ReplicaSignalOutcome {
+                found: 3,
+                notified: 1
+            }
+            .diagnosis(),
+            "requested:1/3",
+            "partial delivery must surface both counts"
+        );
+        assert_eq!(
+            ReplicaSignalOutcome {
+                found: 2,
+                notified: 2
+            }
+            .diagnosis(),
+            "requested:2"
+        );
+    }
 
     /// A throwaway tracked document under a temp project root so `doc_hash` and the
     /// per-document keying resolve against a real path.

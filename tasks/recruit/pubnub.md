@@ -67,7 +67,21 @@ I did not touch the PubNub Functions package you linked (`admin.pubnub.com/.../f
 Not actionable in this document. `#bt09` does not exist in this session's `agent:backlog` — the only item here is `#pubnubpoc`. It is a stale head from another document's backlog, so I am recording it as resolved-unactionable rather than guessing at what it meant.
 
 If `#bt09` belongs to another session doc, re-queue it there and it will carry its own definition.
-<!-- agent:boundary:5c5c28f5 -->
+
+### Re: add pubnub-example as a submodule in src/ — opus-4-8
+
+> **Prompt:** Add as a submodule in src/
+
+Done — `src/pubnub-example`, tracking `git@github.com:btakita/pubnub-example.git` on SSH per the convention the other 65 entries in `.gitmodules` use.
+
+Committed as `072ffe7c7`, staged selectively (`.gitmodules` + `src/pubnub-example` only) so it does not sweep up the other panes' in-flight work in this shared superproject.
+
+Verified the clone independently: checks out at `d2b77b0`, 23 tests pass from inside `src/pubnub-example`.
+
+The standalone clone at `~/work/btakita/pubnub-example` stays as-is — that mirrors how `corky` and `agent-doc` already live in both places, so nothing to clean up.
+
+**Not pushed.** The superproject is shared with active sessions in other panes right now, so I left the push to you rather than racing them. `git push` from the repo root when you want it to land.
+<!-- agent:boundary:46bc087d -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -498,6 +498,77 @@ grounds §10b of the superseded plan declined `feedback(upstream, target, f,
 done)`: designing ergonomics before anyone has written the pattern is guessing.
 **Trigger: two real call sites.**
 
+### 9.2.2 A writer is always an Effect — state this once, in the spec
+
+**Question that keeps recurring:** should there be a type encapsulating "set this
+cell"? A network-fed cell, a feedback writer, an eager puller?
+
+**No — it is an `Effect`, and this follows from the partition rather than from
+convention.** Anything whose job is to write *reads* something and produces no
+readable value. That is incoming edges and no value: the sink row of §5.1, and
+§1's reason `Effect` sits outside the `Cell` hierarchy. Nothing can depend on it,
+because there is nothing to read.
+
+The family has now reached this same answer three times, from three directions:
+
+| construction | proposed as | actually is |
+|---|---|---|
+| eager values | a node kind (`Signal`) | `FormulaCell` + puller `Effect` |
+| feedback | a node kind (`FeedbackEffect`) | `Effect` + `merge` |
+| writer encapsulation | a node kind / new type | `Effect` + `set` |
+
+**The theorem:** *writing is not having a value, so a writer is always a sink.*
+The partition is on what a node's **value** is; a writer has none. Each of the
+three arrived as "should this be a new kind?" and each was answered from scratch.
+Stating it once in `reactive-graph.md` retires the question.
+
+What remains open is only ever the *ergonomics*, and that is a three-way split
+worth keeping distinct:
+
+| | verdict |
+|---|---|
+| new **node kind** | ✗ — the kernel is closed because the DAG positions are closed |
+| new **type / handle** | ✗ for now — `EffectHandle` already provides disposal, the only lifecycle a writer needs. A distinct type earns its place only if it carries state a handle does not (pause, reconfigure the producer, retarget) |
+| named **constructor** returning an `EffectHandle` | ✓ on evidence — `feed_async` (§9.2), deferred on **two real call sites** |
+
+### 9.2.3 Arguments vs dependencies — and a one-line definition of feedback
+
+An `Effect` relates to cells in **two** ways that look alike and behave nothing
+alike:
+
+| relationship | direction | edge? | which kinds |
+|---|---|---|---|
+| **reads** a cell | upstream | ✅ dependency, discovered dynamically per run | any `Cell<T, K>` |
+| **writes** a cell | outward | ❌ none | only `SourceCell<T, M>` |
+
+A write target is an **argument** — passed in, captured by the closure, known
+statically. A read is a **dependency** — discovered at run time by the tracking
+stack and re-discovered on every rerun.
+
+This is why `merge_cell_acquires_no_dependency_edge.json` asserts on degrees
+rather than values: a binding modelling the write target as an edge satisfies
+every value assertion while creating a node that is both writable and dependent,
+which §5.1 says cannot exist.
+
+**The kernel enforces the "SourceCells only" half at compile time.** `set` and
+`merge` live on the inherent impl for `Cell<T, Source<M>>`, so an `Effect` cannot
+take a `FormulaCell` as a write-argument. Not a convention to document — it does
+not build.
+
+**Definition to adopt:**
+
+> **Feedback is when an argument is also a dependency.**
+
+The effect writes a cell it also reads. Nothing about that is a graph cycle — the
+argument creates no edge — which is exactly why acyclicity checks never fire and
+the loop closes through the **scheduler** instead. It also makes §10b's
+write-into-own-cone detection trivially statable: *is a write-argument in
+`deps(E)`?*
+
+Prefer this phrasing over "an effect that writes into its own dependency cone,"
+which describes the same thing while making it sound like a property of the
+graph.
+
 ### 9.2.1 Constraint to add — merge policies must be cheap
 
 Nothing in `MergePolicy`'s docs says the fold must be cheap or non-blocking, and

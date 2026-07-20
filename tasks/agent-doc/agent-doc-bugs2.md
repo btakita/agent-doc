@@ -1,5 +1,6 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
+resume: 90ef27b4-fc94-4065-af55-7804da6568b4
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -39,11 +40,33 @@ done
 Compacted content:
 - Archived 8 response topic(s): cache conflict, resurrected deletions, document corruption; standardize the rebuild order; do [#lazilyscopeadopt]; 5 more
 - Prior summary/context: prior compacted content: Archived 58 response topic(s): JB Run Agent Doc stalls + duplicated queue line; do [#ctrlchk...
-<!-- agent:boundary:bb444958 -->
+
+### Re: I tried agent-doc start, but it started a new claude session — opus-4-8
+
+You were right, and the cause was mundane: `--resume` was opt-in on `start`. With no flag, `Option::map` on `None` produced `None`, and that flowed all the way through — no frontmatter lookup, no claim check, nothing. `restart-supervisor` defaults to continue-mode; plain `start` never did. So the id-assignment work landed through the CP restart path and the JetBrains action, but never through the command you actually ran.
+
+Fixed in `a1de7ffce`: `start` now defaults to resume-if-recorded, with `--fresh` to opt out.
+
+The reason this wasn't a one-line flag flip is what I found when I tested the failure mode before flipping it. `claude --resume <bad-id>` **hard-exits 1** with "No conversation found" — it does not fall back to fresh. So defaulting to resume would convert a pruned transcript, a cleared `~/.claude`, or a document moved between machines into a start command that fails outright. That trades an annoyance for a regression. `start` now checks the transcript before launching and degrades a verified-missing id to fresh, saying so out loud. An unverified harness layout (codex, opencode) reports "unknown", which is deliberately **not** treated as evidence of absence — asserting MISSING on a guess degrades a good resume exactly as wrongly as asserting PRESENT.
+
+Wiring that up surfaced a real bug in the claim check from the previous cycle: it ran **before** frontmatter resolution, and `resume_id_owner` only matches `ResumeRequest::Id`. So for the common bare/default case (`Latest`) it silently did nothing — only an explicit `--resume <id>` typed on the CLI was ever protected. Order is now frontmatter → claim → transcript existence, with the precondition documented at both call sites so it cannot silently regress again.
+
+`make check`: 7835 passed, 240 skipped.
+
+**Two corrections to things I said earlier in this session.**
+
+I claimed the repeated `write --commit` hangs were CRDT relay convergence. They were not. `/proc/<pid>/task/*/wchan` showed `unix_stream_read_generic` on **fd 0** — `agent-doc write` was blocked reading stdin, connected to my own shell's socket, which never closes. Two ~15-minute hangs, both my own invocation error, both misdiagnosed as a document-authority problem. `< /dev/null` fixes it. Filed as `#writestdinhang`, because an automation caller deserves a fast error rather than an indefinite hang.
+
+I also killed a hung invocation and told you the restart "did not happen" earlier when the log showed it had — `nohup … &` had detached it, so the interrupt hit my wrapper, not the work. I should have read the log before asserting.
+
+**Still open:** the boundary re-mint (162 distinct ids across snapshots; carry-forward effectively never takes) and `#autoinstalldeferstale`, which is what let the original crash run already-fixed code.
+<!-- agent:boundary:62d8299d -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#resumenocontinue]
+- do [#writestdinhang]
 - do [#resumestale]
 - do [#operatorverifylive]
 - 🚧 do [#restartselfdefer]
@@ -110,6 +133,8 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#resumenocontinue] #agent-doc-bug DONE 2026-07-19. agent-doc must never emit a harness continue-latest flag (claude --continue): it resolves to whatever ran most recently in the directory, which need not be this document's conversation - operator-observed attaching to an unrelated session. Resume resolves ONLY this document's own recorded id; an unknown id starts fresh and reports why (ResumeDegrade::NoRecordedId / HarnessUnsupported). Referenced by code comments in agent-doc-harness and start-runtime-io.
+- [ ] [#writestdinhang] #agent-doc-bug agent-doc write --commit blocks FOREVER on fd 0 when stdin is an open socket that never closes (e.g. a tool/automation harness that does not redirect stdin). Diagnosed 2026-07-20 by /proc/PID/task/*/wchan showing unix_stream_read_generic on fd 0 -> the caller's shell, after two ~15min hangs that I initially and wrongly attributed to CRDT convergence. Workaround is < /dev/null. Fix: bound the stdin read, or detect a non-EOF-capable stdin and fail fast with guidance, so an automation caller gets an error instead of an indefinite hang.
 - [ ] [#resumestale] #agent-doc-bug DONE 2026-07-20. agent-doc start only passed --resume when typed, so #resumecapture only paid off via restart-supervisor / JetBrains, not plain start (reported live). Fixed to default resume-if-recorded with --fresh to opt out; verified live that claude --resume <bad-id> hard-exits 1 rather than falling back, so added a pre-launch transcript-existence check that degrades a verified-missing id to fresh before ever launching the doomed child (unverified harness layouts never treated as evidence of absence). Also fixed #resumeclaim ordering: the claim check ran before frontmatter resolution and silently protected only explicit --resume <id>, never the common default case; now resolves frontmatter first, then claim-checks.
 - [ ] 🚧 [#restartselfdefer] #agent-doc-bug DONE 2026-07-20. #restartselfpane over-corrected: it refused EVERY restart requested from the target document's own pane, which regressed the healthy path. With a live supervisor a restart is a blue/green drain-and-supersede (drains to the turn boundary, then execve in place, preserving child and pane, no dropped turn), so a self-request is safe there - the requesting turn finishing IS the deferral. The guard now fires only when no supervisor exists to carry it, which is the case that genuinely cannot work. Also answers 'interrupt, restart, resume the turn' in the negative: draining beats interrupting wherever available, and --resume restores the CONVERSATION not an in-flight turn, so re-dispatching would replay partial side effects against an open cycle preflight guards.
 - [ ] [#restartbusyquit] #agent-doc-bug DONE 2026-07-20. Controller quit keys could not free a mid-turn harness pane: C-d only quits an IDLE composer, so a running turn ignored it and the restart timed out after 10s with a generic live_harness_quit_timeout. Fixed: operator_quit_key_plan_for_state interrupts first when the pane is busy, busy is detected from the live capture (not assumed - interrupting an idle composer is not always harmless: Codex C-g opens the external editor), and the busy plan composes the shared operator_interrupt_key_plan rather than restating its keys so the Codex C-g rule cannot drift.

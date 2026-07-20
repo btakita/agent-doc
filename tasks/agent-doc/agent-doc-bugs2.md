@@ -929,7 +929,21 @@ Stale incident — and unusually, its captured diagnostic is the most useful art
 **And it argues against my `#30p6` suspect.** Earlier today I recorded `route_trigger_visible_in_current_draft`'s trailing `!later_has_prompt` as the prime suspect: any `is_prompt_line` after the trigger reads as "already submitted". This capture is a real stranded draft, and **no** line after the trigger is a prompt line — codex's patterns are `❯ > ›`, and the footer starts `gpt-5.5 xhigh · …`. That condition would have returned `true`, recognition would have succeeded, and the resubmit would have fired. So the suspect does not explain the observed stall.
 
 I have updated `#30p6` to record the weakened suspect rather than leave a confident-but-contradicted note sitting there — with the surviving candidates (`payload_already_pending == None` from an uncapturable pane, or recognition failing earlier) and the sharper confirmation step: capture the pane **and** the computed `payload_already_pending` together, since this pass proved the pane capture alone is not sufficient to decide it.
-<!-- agent:boundary:4c6b15fe -->
+
+### Re: steering mirror live verification — opus-4-8
+
+> **Queue prompt:** do [#5qjj]
+
+Genuinely operator-gated (an IDE restart plus human observation of two editor surfaces), so I refreshed it rather than attempting it — the instructions as written would have sent you after the wrong build.
+
+**The version pin is 24 releases stale.** The item says "restart IntelliJ IDEA 2026.1 to activate plugin **0.2.258**". `gradle.properties` now reads `pluginVersion = 0.2.282`, and a live registration during this session confirmed 0.2.282 is what actually loads. So the activation step is obsolete; what remains is the behavioral check, against the current plugin.
+
+I also sharpened what to watch for, because the interesting half is easy to miss. The property is not "a banner appears" — it is that multiple mid-turn edits report as an **aggregate**. Steering is a concurrent set, not a FIFO drained one head at a time (`#realtime-steering-aggregate`), and delivering only the first edit is the specific regression this verification exists to catch. So: multiple exchange edits during an active turn → banner and VS Code status item show the **aggregate count with the full hover**, not the first edit alone.
+
+The second check is unchanged and still worth doing: running `agent-doc` once after editing must queue the handoff **without submitting a partial edit**.
+
+Worth noting the code half already landed on 2026-07-12 — `all_unstarted_prompt_bearing_changes_from_diff` plus `RealtimeSteeringSet::verbatim_aggregate()`. So this is specifically the editor-surface proof that the aggregate reaches the operator's screen, not a check on whether aggregation works at all.
+<!-- agent:boundary:1cbd8077 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -1004,7 +1018,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#elementgraphprd]~~
 - ⏭️ 📌 do [#jbedtledgerverify]
 - ⏭️ 📌 do [#fmgc]
-- 📌 do [#0dsr]
+- ⏭️ 📌 do [#0dsr]
 - 📌 do [#30p6]
 - ~~📌 do [#n39j]~~
 - ~~📌 do [#f6j3]~~
@@ -1024,7 +1038,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 do [#ipcliveness]
 - 📌 do [#ipcverhandshake]
 - 📌 do [#ipcpostcommitinv]
-- 📌 do [#5qjj]
+- 🚧 📌 do [#5qjj]
 <!-- /agent:queue -->
 
 ## Notes
@@ -1056,7 +1070,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#crashresiliencelograce] test-hygiene: crash_resilience::tests::log_panic_to_file_appends_without_panicking fails under a parallel workspace run (cargo test --workspace) at src/crash_resilience.rs:173 but passes in isolation and under make check. The panic-log append test shares a fixed path across concurrently-running crate test binaries. Give it a per-test temp path so the suite is order-independent.
 - [ ] [#compacttombgc] [recommended] Fenced Compact Exchange CRDT epoch — RE-SCOPED 2026-07-19 away from tombstone GC. The #bootstrapsize measurement (crdt_sync.rs) on a real 57KB document found 88,630 ops and ZERO tombstones, so TextCrdt tombstone GC would reclaim nothing on the observed shape; the payload is pre-compaction INSERT history. The valuable half is the epoch itself: rebootstrap attached replicas from the compacted snapshot and reject/component-rebase older-epoch deltas, which discards that insert history — the only mechanism that makes compaction actually shrink the register bootstrap. Keep tombstone GC as a trailing step for delete-heavy documents, not the headline. Still needs the all-replica stability frontier before any epoch fence is safe.
 - [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
-- [ ] [#5qjj] steeringmirrorverify|[operator-verify] Restart IntelliJ IDEA 2026.1 to activate plugin 0.2.258 (if stale bytecode appears, uninstall, restart, reinstall the signed local zip, and restart); during an active turn, make multiple exchange edits and verify the JetBrains banner and VS Code status item report the aggregate count/full hover, then run agent-doc once after editing and confirm the handoff queues without submitting a partial edit.
+- [ ] 🚧 [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.
 - [ ] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.
 - [ ] [#capturebacklogatomic] [focused-cycle] #agent-doc-bug A finalize that captures the response but fails before recording backlog mutations strands in response_captured with requires_backlog_capture=true + pending_added_this_cycle=false; preflight then refuses closeout and errors "still response_captured after recovery", forcing a manual mv-aside because replaying the capture re-trips the backlog gate. Fix: capture the whole cycle intent (response + backlog mutations) atomically, and let preflight supersede an uncommittable capture instead of looping. Exposed by this turn. Plan: tasks/agent-doc/plan-capture-includes-backlog-mutations.md
 - [ ] [#opcapturelazily] [focused-cycle] #sidecarstate op-capture (.agent-doc/op-capture/<doc-hash>.json, agent-doc-op-capture-io #qnodemerge4) is a bespoke JSON sidecar source of truth: durable ordered EditorOps + base_hash that preflight repair / CRDT merge REPLAY as authority then consume+clear (base-hash-guarded so safe). Because it is a separate replay source, clearing captures/ + state/cycles/ aside did not stop the churn this turn. Migrate onto the lazily state backbone (co-located with cycle-phase state) so captured-op authority is one coherent atomically-clearable model. 96-ref cross-crate surface; folds into #sidecarstate. Plan: tasks/agent-doc/plan-op-capture-lazily-state-migration.md

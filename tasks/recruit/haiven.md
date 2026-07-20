@@ -451,7 +451,22 @@ The exchange remains large; compaction still waits for explicit opt-in while the
 Neither ID exists in this document’s backlog, icebox, or completed set, so neither command could dispatch real work. I removed both orphaned free-text heads through the guarded queue-consume path. The existing `#yyzn-clarify` backlog item remains open to capture the intended target if it is supplied later; no implementation item was silently invented.
 
 The exchange remains large; compaction still waits for explicit opt-in while the queue is active.
-<!-- agent:boundary:185c8a41 -->
+
+### Re: do [#friendsnapshot] — gpt-5
+
+Updated email draft:
+
+Thanks, Craig. One more thought I wanted to add.
+
+I’d use a priority-aware outbound queue. Direct chat messages and acknowledgements should drain ahead of bulk fan-out, with aging so bulk traffic still makes progress. Direct and fan-out chat should stay in the same priority band if they share an ordered stream.
+
+The hub can batch multiple chat messages into one WebSocket write, but each message still keeps its own ID, sequence, retry, and deduplication state.
+
+I’d also keep a bounded chat frame on the client at all times. Initial load fetches the latest K messages and a cursor for older history. New live messages fold into that frame by ID or sequence. Duplicate echoes collapse into the existing entry, new messages append in order, and old entries roll out of the visible frame but remain available through history paging.
+
+Friend presence follows the same bounded-frame idea, but the load path is different. When the friend frame changes, the client subscribes to the new page and requests current presence for those K friends. Presence is current state, while chat is durable ordered history.
+Understood. I’m holding document finalization while you edit. The implementation is committed and `make check` passes; the draft remains uncommitted until you’re finished.
+<!-- agent:boundary:65bdcda4 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -460,9 +475,9 @@ The exchange remains large; compaction still waits for explicit opt-in while the
 - ~~do [#activepri]~~
 - ~~do [#fanoutpri]~~
 - ~~📌 **Throughput unaffected:** ~3.3–3.6 M/s framed vs ~3.6 M/s unbounded. (One 1.59 M/s outlier was noise; reruns gave 3.60/3.58.)~~
-- ~~⏭️ /goal Implement backlog item(s): #b10a~~
+- ~~/goal Implement backlog item(s): #b10a~~
 - ~~/goal Implement backlog item(s): #yyzn~~
-- do [#friendsnapshot]
+- 🚧 do [#friendsnapshot]
 - do [#yyzn-clarify]
 - do [#haivenwsopt]
 - do [#tnpa]
@@ -471,7 +486,7 @@ The exchange remains large; compaction still waits for explicit opt-in while the
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#friendsnapshot] haiven-websocket-hub: a friend-frame needs a presence snapshot on frame change — presence is at-most-once + conflated, so a newly-framed friend produces no replay and renders 'offline' until their next tick. Add a 'give me current state for these K' query (design §6.1 already specifies snapshot-on-resume for at-most-once classes) + model frame paging (re-subscribe churn on scroll) in the realistic loadtest. This is the real work item behind -friends-frame, not the subscription cap.
+- [ ] 🚧 [#friendsnapshot] haiven-websocket-hub: a friend-frame needs a presence snapshot on frame change — presence is at-most-once + conflated, so a newly-framed friend produces no replay and renders 'offline' until their next tick. Add a 'give me current state for these K' query (design §6.1 already specifies snapshot-on-resume for at-most-once classes) + model frame paging (re-subscribe churn on scroll) in the realistic loadtest. This is the real work item behind -friends-frame, not the subscription cap.
 - [ ] [#yyzn-clarify] Queue head '/goal Implement backlog item(s): #yyzn' references a backlog ID that does not exist in this document (backlog/icebox/done all lack it); the binary marks it skipped_queue_head_ids. Confirm the intended item or remove the head.
 - [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).

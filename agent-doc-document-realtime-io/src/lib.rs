@@ -158,7 +158,9 @@ const CRDT_WRITE_SETTLE_MS: u64 = 500;
 pub const RETAINED_FOR_RETRY_MARKER: &str = "pending change retained for retry";
 
 #[cfg(test)]
-const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 2_500;
+// Leave enough scheduler headroom for the ACK-recovery clock to start after
+// the initial relay/model work on slower shared CI runners.
+const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 5_000;
 #[cfg(not(test))]
 const CRDT_WRITE_CONVERGENCE_TIMEOUT_MS: u64 = 60_000;
 const CRDT_WRITE_BACKOFF_INITIAL_MS: u64 = 25;

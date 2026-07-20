@@ -454,17 +454,27 @@ pub fn attach(file: &Path, pane: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Would this restart have to quit the pane the CALLER is running in?
+/// Is the caller running in the pane this restart targets?
 ///
 /// `#restartselfpane`: an agent that runs `session restart-supervisor` for its
 /// own document is, by construction, mid-turn at that moment — it is executing
-/// the very command that asks. The controller then sends quit keys into a busy
-/// harness, which ignores them, and the restart can only ever time out. Observed
+/// the very command that asks.
+///
+/// This alone is NOT a reason to refuse. `#restartselfdefer`: with a LIVE
+/// supervisor the restart is a blue/green drain-and-supersede — it waits for the
+/// turn boundary and then `execve`s in place, preserving the child and the pane
+/// (`restart_supervisor_drains_then_reexecs_in_place_no_dropped_turn`). A
+/// self-request is perfectly safe there: the requesting turn simply finishes
+/// first, which is the deferral. Refusing it would break the healthy path.
+///
+/// It is only fatal when there is NO supervisor to carry the deferral, because
+/// the request then escalates to a cold start that must QUIT this pane — and a
+/// mid-turn harness ignores the quit keys, so it can only time out. Observed
 /// 2026-07-20: a 10s `live_harness_quit_timeout` whose real cause was that the
 /// requester WAS the target.
 ///
 /// `$TMUX_PANE` is the caller's own pane, so this is exact rather than heuristic.
-fn restart_would_quit_the_calling_pane(owner_pane: Option<&str>) -> bool {
+fn restart_targets_the_calling_pane(owner_pane: Option<&str>) -> bool {
     let Some(owner_pane) = owner_pane.map(str::trim).filter(|pane| !pane.is_empty()) else {
         return false;
     };
@@ -482,12 +492,23 @@ pub fn restart(file: &Path, mode: RestartMode, force: bool) -> Result<()> {
         .actor_record
         .as_ref()
         .map(|record| record.pane_id.clone());
-    if restart_would_quit_the_calling_pane(owner_pane.as_deref()) {
-        anyhow::bail!(
-            "refusing to restart {}: this command is running IN that document's own pane ({}), so the restart would have to quit the session that is asking for it — and a mid-turn harness ignores the quit keys, so it can only time out. Run it from another pane, or use the editor's Restart Agent action.",
-            ctx.canonical_file.display(),
-            owner_pane.as_deref().unwrap_or("?"),
-        );
+    if restart_targets_the_calling_pane(owner_pane.as_deref()) {
+        // `#restartselfdefer`: a live supervisor drains to the turn boundary and
+        // supersedes itself in place, so this turn finishing IS the deferral —
+        // let it through. Only a dead supervisor forces the cold-start path that
+        // has to quit this very pane, which a mid-turn harness cannot honour.
+        if ctx.supervisor_runtime.health == SupervisorHealth::Healthy {
+            println!(
+                "[session] restart requested from this document's own pane ({}); the live supervisor will drain the current turn and supersede itself at the turn boundary — this turn is not interrupted.",
+                owner_pane.as_deref().unwrap_or("?"),
+            );
+        } else {
+            anyhow::bail!(
+                "refusing to restart {}: this command is running IN that document's own pane ({}) and there is no live supervisor to defer to, so the restart would escalate to a cold start that must quit the session asking for it — and a mid-turn harness ignores the quit keys, so it can only time out. Run it from another pane, or use the editor's Restart Agent action.",
+                ctx.canonical_file.display(),
+                owner_pane.as_deref().unwrap_or("?"),
+            );
+        }
     }
     if !force {
         guard_starting_actor_operator_command(&ctx, &tmux, OperatorAction::Restart)?;
@@ -3812,34 +3833,36 @@ fn timestamp_secs() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    /// `#restartselfpane`: an agent that runs `restart-supervisor` for its own
-    /// document is mid-turn by construction, so the controller's quit keys hit a
-    /// busy harness that ignores them and the restart can only time out. Refuse
-    /// up front with that reason instead of burning 10s on a mystery timeout.
+    /// `#restartselfpane` / `#restartselfdefer`: detecting that the caller IS the
+    /// target is only half the decision. With a live supervisor the restart
+    /// drains to the turn boundary and supersedes in place, so a self-request is
+    /// safe — the requesting turn finishing IS the deferral. Refusing it there
+    /// would break the healthy path. It is fatal only with no supervisor to defer
+    /// to, when the request escalates to a cold start that must quit this pane.
     #[test]
-    fn restart_refuses_when_the_caller_is_the_target_pane() {
+    fn restart_detects_when_the_caller_is_the_target_pane() {
         // SAFETY: single-threaded test-local env mutation.
         unsafe { std::env::set_var("TMUX_PANE", "%53") };
         assert!(
-            super::restart_would_quit_the_calling_pane(Some("%53")),
-            "restarting from inside the owner pane must be refused"
+            super::restart_targets_the_calling_pane(Some("%53")),
+            "a restart aimed at the caller's own pane must be recognised"
         );
         assert!(
-            !super::restart_would_quit_the_calling_pane(Some("%54")),
-            "a different pane is the supported way to restart"
+            !super::restart_targets_the_calling_pane(Some("%54")),
+            "a different pane is an ordinary restart"
         );
         assert!(
-            !super::restart_would_quit_the_calling_pane(None),
-            "an unknown owner pane must not block a restart"
+            !super::restart_targets_the_calling_pane(None),
+            "an unknown owner pane proves nothing"
         );
         assert!(
-            !super::restart_would_quit_the_calling_pane(Some("  ")),
+            !super::restart_targets_the_calling_pane(Some("  ")),
             "a blank owner pane proves nothing"
         );
         unsafe { std::env::remove_var("TMUX_PANE") };
         assert!(
-            !super::restart_would_quit_the_calling_pane(Some("%53")),
-            "outside tmux there is no calling pane to protect"
+            !super::restart_targets_the_calling_pane(Some("%53")),
+            "outside tmux there is no calling pane to detect"
         );
     }
 

@@ -93,7 +93,6 @@ The latest hosted CI run was older than this fix: all 7,806 Rust tests passed, t
 The shipped guard and automated regression coverage are complete, but this item is specifically a live host-IDE proof and cannot be honestly marked done from the CLI. The loaded JetBrains plugin reports the expected 0.2.282 generation, but there is no safe production test hook that forces `agent_doc_replica_apply_local` to panic inside the running IDE and then probes later calls.
 
 I moved the item to review with its existing exact unblocker: in the live IDE, force the historical replica panic shape and verify subsequent replica calls still succeed rather than returning `-1`/null for the rest of the IDE process. No additional backlog follow-up is needed because the remaining work is review-only operator verification, not implementation.
-
 ### Re: #orphandrain — gpt-5
 
 > **Queue prompt:**
@@ -111,15 +110,27 @@ Completed and shipped the controller-side drain for `queue: go` documents that h
 Verification passed: focused regressions; `make check` with 7,853/7,853 tests plus all local model checks; `make tmux-ci`; and `make install`. The install replaced the release-local binary/library, delivered `reload_library` to the live editor endpoint, installed the matching JetBrains plugin into four IDEs, and marked four supervisors for idle recycle. The newest hosted CI result is still the older failed run from the preceding commit; local tmux and SimWorld coverage for this change are green.
 
 Implementation commit `9cd5515f5` is pushed on the `agent-doc` submodule. Superproject pointer commit `849cde3c9` is prepared. The newly added JetBrains latency/flakiness and CRDT/file-cache-conflict prompts remain queued for the next cycle; this closeout does not consume them.
-<!-- agent:boundary:61809aee -->
+
+### Re: #fixcrdtmerge — gpt-5
+
+> **Queue prompt:**
+>
+> do [#fixcrdtmerge]
+
+
+Implemented and pushed agent-doc submodule commit `6e6830a8d` (`fix(merge): make retained retries component-idempotent`). A keyed/body-only structural mismatch now falls back only for that component, so unrelated queue and backlog cells retain ownership-aware merging. Duplicate prompt identities carry stable occurrence ordinals: intentional operator duplicates remain intact, while extra stale agent-side replay occurrences reconcile back to the operator-visible multiplicity. Conflict summaries now report the component authorship decision instead of hardcoding the misleading `policy=ours-wins` label.
+
+Regression coverage includes retained retries over an operator-cleaned queue, intentional duplicate preservation, body-only exchange races, realtime journal replay, and bounded SimWorld interleavings. `make check`, `make tmux-ci`, focused crate/integration tests, and `git diff --check` pass. The patched binary/library and JetBrains package are installed; the submodule commit is pushed and root pointer commit `30ea4a364` is prepared.
+
+The acadian trace also exposed two concurrent eight-second `session-check` polling loops for the same Claude companion session, alongside the normal supervisor. Those duplicate pollers amplified replay, closeout, and git-lock pressure; I left the foreign processes untouched. On this document, the retained capture committed on the first patched `session-check` and the operator-cleaned queue stayed single-copy.
+<!-- agent:boundary:388f7893 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#orphandrain]~~
+- ~~do [#fixcrdtmerge]~~
 - JB `Run Agent Doc` is slow & flaky. Please optimize all contributing bottlenecks.
-- Fix CRDT merge conflict that occurred after I updated the queue during a turn. A File Cache Conflict also occurred where a queue item I wrote was deleted by agent-doc. `  - The session doc hit a CRDT merge conflict resolved ours-wins on the previous response section. I checked: all 12 response sections are present and no operator text was lost. Disk and editor authority are currently diverged; per the tool that's status-only and self-healing, so I have a poll running rather than forcing anything. The code is committed and pushed independently of that.`
-- do [#c8tb]
+- ⏭️ do [#c8tb]
 - do [#libgcpidrace]
 - do [#hubregistryevict]
 - do [#missingreplicarebuild]
@@ -178,6 +189,7 @@ Implementation commit `9cd5515f5` is pushed on the `agent-doc` submodule. Superp
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] 🚧 [#fixcrdtmerge] Fix CRDT merge conflict that occurred after I updated the document `  - The session doc hit a CRDT merge conflict resolved ours-wins on the previous response section. I checked: all 12 response sections are present and no operator text was lost. Disk and editor authority are currently diverged; per the tool that's status-only and self-healing, so I have a poll running rather than forcing anything. The code is committed and pushed independently of that.`
 - [ ] [#libgcpidrace] #agent-doc-bug lib_gc::tests::gc_removes_lib_with_dead_pid_lock (src/lib_gc.rs:302, 'assertion failed: !v1.exists()') fails intermittently under nextest parallelism and passes in isolation and on re-run. Observed 2026-07-19 during the #ay80ci cycle: one make check run failed it, the next full run was 7804/7804 green. Dead-pid lib GC is racing another concurrently-running test's pid/lib dir, so the 'is this pid dead' probe sees a pid that is alive/reused (or the lib dir is recreated between the probe and the assert). Will redden CI intermittently the same way #ay80ci did, so pin it deterministically rather than retrying: isolate the lib root per test (unique temp dir keyed by test name) and/or make the liveness probe take an explicit injected pid-alive predicate instead of consulting the real process table.
 - [ ] [#hubregistryevict] [focused-cycle] #agent-doc-bug agent-doc-crdt-relay-io's hub_registry (static Mutex<HashMap<String, RelayHub>>) is never evicted in production code — only tests call .remove(). Every document the controller ever touches leaves one RelayHub (its own ThreadSafeContext, canonical replica, member mirrors, liveness cell family) alive for the process lifetime. Found while proving #lazilyscopeadopt: this is the ONLY real process-lifetime growth in the reactive layer, and it is a registry-eviction question, not a ctx.scope() one. Eviction is not free: with_hub recreates an EMPTY hub on next contact, so a wrong eviction is exactly the phantom missing_replica shape. Sequence AFTER #missingreplicarebuild since eviction increases traffic on that recovery path. A missing hub is already a first-class handled state (CurrentText::EditorAttachedMissingReplica + recover_missing_hub_from_durable_projection), so the safe shape is evict-only-when-no-members-and-committed, verified by a test that re-contact after eviction recovers the same canonical text.
 - [ ] [#authoritydescentstd] [focused-cycle] #agent-doc-bug Standardize the authority rebuild/descent order into ONE shared pure decision fn. IMPLEMENTED TWICE, independently, under the SAME tags (#px82/#bn41): (1) agent-doc-document-realtime-io reobserve_missing_editor_replica_with_reregistration + resolve_editor_unavailable_disk_read_fallback; (2) agent-doc-preflight-io current_text_via_preflight_authority_retrying + observe_current_text_with_bounded_retry. PROVEN DRIFT: separate budgets/env overrides (AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS vs AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS, both default 3 but independently tunable), and the liveness-witness memo from adefcda0a exists ONLY in the realtime-io copy (grep in preflight-io = 0) — a policy fix silently applied to half the paths. DESIGN DECIDED 2026-07-19: home is agent-doc-turn, NOT a new crate (every agent-doc crate is already publish=false, so a crate buys a boundary not privacy) and NOT agent-doc-document-realtime (preflight-io does not depend on it and would take a new edge onto write_policy.rs 161KB + crdt_relay.rs 107KB; both consumers ALREADY depend on agent-doc-turn, which already hosts closeout_recovery/cycle_policy/wait_machine/repair). SHAPE: follow the closeout_recovery.rs precedent — 'File/effect adapters classify concrete diffs into this smaller vocabulary before asking the turn policy to pick the recovery state.' Pure observation vocabulary (Current/Detached/MissingReplica/SyncPending/Error) + decision enum (Retry/RebuildFromPlugin/DescendToDisk/FailClosed); each -io site maps its own CurrentText in. The adapter is load-bearing, not ceremony: CurrentText lives in agent-doc-crdt-relay-io (effectful), so a direct dependency would invert the layering and make agent-doc-turn depend on an -io crate. CONSTRAINT: the two sites are similar, NOT identical — realtime-io gates rebuild eligibility on sync_pending vs missing_replica, preflight-io retries both. Preserve that as a parameter; flattening it reintroduces the ~28s-per-read-site double rebuild the exclusion was added to fix. Prerequisite for #missingreplicarebuild.

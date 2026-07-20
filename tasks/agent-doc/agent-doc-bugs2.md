@@ -901,7 +901,7 @@ Tracing it confirms the measurement: `drainable_head_count` consults `deferred_b
 I also saw the behavior directly this session rather than only in the numbers: `#multilineheadbullet` sits **first** in `queue_prompts` after I tagged it `[focused-cycle]`, yet head selection passed over it every cycle and chose a genuinely drainable item instead. Listed ≠ selected, and only selection follows the drainable filter.
 
 Marking done. If the loop is ever told to keep draining an entirely operator-gated queue again, that is a new instance with a different cause — this one is closed by measurement, not by assumption.
-<!-- agent:boundary:a56575b7 -->
+<!-- agent:boundary:62300113 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -970,7 +970,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ do [#skillharnessplugin]
 - ⏭️ do [#crdtauth6]
 - ⏭️ do [#nsfz]
-- do [#suprestassoc-live]
+- ⏭️ do [#suprestassoc-live]
 - ~~do [#agentsignals]~~
 - ~~Free text queue items that were already done should be struck or removed from the queue. The following queue item was complete but is still open.~~
 - ~~do [#elementgraphprd]~~

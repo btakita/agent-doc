@@ -89,7 +89,7 @@ they are the same argument applied twice.
 | | |
 |---|---|
 | genus | **`Reactive<T>`** — already the spec's umbrella (reactive-graph.md:47), with `Source<T>: Reactive<T>` for the writable ones. Preferred over `Signal`. |
-| source | **`Cell`** — keep. Spreadsheet lineage is the right ancestor; `State` would collide with this family's own statechart module. |
+| source | **`Cell`** — keep. Borrows *containment at a position*, which holds exactly (arena id holding a value), and is the unmarked member of an unmarked/marked pair. `State` would collide with this family's own statechart module. |
 | derivation | **`Slot` → `Computed`** |
 | sink | **`Effect`** — keep. |
 | eager form | **`Signal` → `Computed.eager`** — retire the word. |
@@ -124,6 +124,22 @@ storage), Vue/Svelte/Web Components/Compose `<slot>` (template insertion point),
 Qt (the callback a signal invokes — the thing the family banned). Joint reading
 of `Slot` + `Signal` is Qt's Signals & Slots, a callback system. Joint reading of
 `Cell` + `Computed` is a spreadsheet, which is what a lazy reactive graph is.
+
+**On the `Cell` objection, since it will be raised again.** In a spreadsheet
+"cell" is the genus — A1 is a cell whether it holds `42` or `=B1+C1` — so
+narrowing it to the entered case looks like the same category error that retires
+`Signal`. It is not, for two reasons. The name borrows *containment at a
+position*, which holds exactly for both (an arena id holding a value), rather
+than borrowing entered-ness. And `Cell`/`Computed` is an **unmarked/marked
+pair**: the bare container noun for the source, the participle marking provenance
+for the derivation. That construction is standard in the immediate neighbourhood
+— SQL `column` / `computed column`, Swift property / `computed property`,
+spreadsheet "cell" / "formula cell" — and in all three the unmarked form means
+stored. Supporting precedent: outside spreadsheets, `Cell` in programming means a
+*mutable container* specifically (Rust `Cell`/`RefCell`, Lisp cons cells, OCaml
+ref cells), which is narrow in the right direction. And the interface layer
+states the real relationship anyway: `Reactive<T>` is the genus, `Source<T>` the
+writable branch, `Cell ≡ MergeCell<KeepLatest>` one concrete instance.
 
 `Slot` collides in three ecosystems lazily ships bindings into, with three
 different meanings: Python `__slots__` (attribute storage), Vue/Svelte/Web

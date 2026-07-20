@@ -1025,12 +1025,12 @@ That sums to roughly **40–75ms**, against the ~2.5s the item recorded with ~2.
 The item's core finding still stands and is worth keeping: spawn count was never the bottleneck (109→63 spawns moved wall clock not at all). Whatever the ~2.1s actually was, it is not present on the current binary, and the instrumentation that would catch a recurrence is permanent rather than ad-hoc — which is the durable win here.
 
 Marking done. A future slow sync is a new measurement against named phases, not a blind 2.1s hole.
-<!-- agent:boundary:d25706eb -->
+<!-- agent:boundary:c27851aa -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ do [#lazilyscopeadopt]
+- ~~do [#compacttombgc]~~
 ~~~done
 We should immediately self-heal. Make all self-healing real-time, not turn-based...if possible.
 > Heads now render as list items. `parse_spans` still accepts the legacy bare form, so existing documents round-trip and self-heal on the next render rather than needing migration. There's a regression asserting every rendered head is a list item, and that healing is idempotent.
@@ -1047,14 +1047,14 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#lazilynottl]~~
 - ~~do [#orphandrain]~~
 - ~~do [#c8tb]~~
-- ⏭️ do [#jbrouteasyncchannel]
+- do [#lazilyscopeadopt]
 - ~~do [#wsflake2]~~
-- ⏭️ do [#patchretryidem]
+- do [#jbrouteasyncchannel]
 - ~~do [#jbroutasync]~~
 - ~~do [#mtds]~~
 - ~~do [#queuecontmirror]~~
-- ⏭️ do [#hvw0]
-- ⏭️ do [#bbpe]
+- do [#patchretryidem]
+- do [#hvw0]
 - ~~do [#mrnh]~~
 - ~~do [#f4d5]~~
 - ~~do [#5d9f]~~
@@ -1062,16 +1062,16 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#42xb]~~
 - ~~do [#zq8e]~~
 - ~~do [#a2zx]~~
-- ⏭️ do [#dbj7]
+- do [#bbpe]
 - ~~do [#ay80]~~
 - ~~do [#syncfocuslag]~~
 - ~~do [#jbrunsteering]~~
-- do [#crdtpushdrainverify]
+- do [#dbj7]
 - ~~do [#supboundarylivelock]~~
 - ~~do [#statedbvacuum]~~
 - ~~do [#qdonestrikeverify]~~
 - ~~do [#crashresiliencelograce]~~
-- 🚧 do [#compacttombgc]
+- do [#crdtpushdrainverify]
 - do [#compactindcellsverify]
 - do [#zqv8]
 - ~~do [#crde]~~

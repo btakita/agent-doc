@@ -79,7 +79,44 @@ Both do the same thing in prose: bounded retry on the transient editor statuses,
 That is the strongest argument for your point: this duplication is not just untidy, it silently splits fixes.
 
 Filed as `#authoritydescentstd` — extract the order (realtime model → rebuild from plugin → disk, carrying the `missing_replica`/`sync_pending` distinction and the exhaustion rule from `#missingreplicarebuild`) into one pure decision function in `agent-doc-turn` or `agent-doc-flow`, with both sites consuming it. That matches the repo's own shared-pure-decision-fn idiom, and it is the prerequisite for `#missingreplicarebuild` — otherwise that fix lands in one copy too.
-<!-- agent:boundary:c91724f9 -->
+
+### Re: do [#lazilyscopeadopt] — opus-4-8
+
+> **Queue prompt:**
+>
+> do [#lazilyscopeadopt]
+
+
+Done, but not the way the item framed it — the premise turned out to be false, so I proved that instead of writing a no-op wrapper. Committed `6be9eeabd`, pushed.
+
+**The item's premise.** "Before 0.45 nothing disposed reactives, so every cell/computed agent-doc created lived for the process lifetime." That isn't what the code does. Every reactive context in agent-doc is private to an owning struct and dropped with it:
+
+| Owner | Context |
+|---|---|
+| `RelayHub` | `build_liveness_core()` → own `ThreadSafeContext` |
+| `EditorAttach` / `EditorOpenDocs` | own `ThreadSafeContext` (process-global singletons by design) |
+| `DynamicContextProjection` | own `Context` |
+| `ControllerSupervisorRecycleGraph` | own `ThreadSafeContext` |
+
+I checked every `.cell(` / `.computed(` / `.memo(` / `.effect(` / `.signal(` call site in the workspace: 9 files, and every non-test creation sits in a constructor. Nothing builds reactives repeatedly on a shared long-lived context — which is the only shape `ctx.scope()` actually fixes. Wrapping these in a scope would re-express ownership that the `Arc` drop already gives us.
+
+**What I landed instead.** The item asked to verify with the edge-set-vs-observer-registry test — *anything surviving an invalidation is not a graph edge* — so I applied that test to the one thing that genuinely could grow: `live_editor_count` is a `computed` that observes **every present** liveness key, and the family is deferral-not-deallocation, so its dependency set is the candidate leak. Two tests in `crdt_relay.rs` pin it with lazily's `dependency_count`:
+
+- `reconnect_churn_on_stable_identity_does_not_grow_the_liveness_edge_set` — 64 register/deregister cycles on one id add zero edges. `mint_client_id` derives ids deterministically from a *stable* identity, so churn re-materializes the same cell rather than minting a new one. That's the actual bound, and it wasn't written down anywhere.
+- `liveness_edge_set_is_bounded_by_distinct_identities_not_churn` — the edge set saturates at the distinct-identity count; a second full churn pass adds nothing.
+
+I probed both for vacuity before trusting them: baseline is 2 (epoch cell + one liveness cell), saturated is 9 (epoch + 8 identities). They measure something real.
+
+I did **not** touch the liveness core's lifetimes. You flagged that as exactly where a wrong disposal shows up as a phantom `live_editors=0`, and since the premise didn't hold there was no defect to justify the risk.
+
+**What I found on the way — filed at the top of backlog:**
+
+`#hubregistryevict` is the real process-lifetime growth: `hub_registry` is a `static Mutex<HashMap<String, RelayHub>>` and production code never removes from it (only tests do). One RelayHub per document ever touched, alive forever. That's genuinely per-document unbounded in a long-lived controller — the thing the item was reaching for — but it's registry eviction, not reactive scoping. I deliberately didn't do it this cycle: `with_hub` recreates an **empty** hub on next contact, so a wrong eviction produces precisely the `missing_replica` shape that `#missingreplicarebuild` (next in the queue) is still open on. Eviction should land after that fix, not before it.
+
+**On CI.** Red on main, pre-existing (`ec7a701fa`, before my commit), local `make check` green at 7803/7803. But I got the mechanism `#ay80` was missing: `finalize_skips_ignored_untracked_session_doc` *does* exit 1 as expected — stderr is `captured turn intent synthetic-<n> was not projected as active`, not the `skipped ignored untracked path` it asserts. Finalize is dying **earlier** than the skip it's testing. So it's not a flaky assertion or an environment quirk; on CI the captured-turn-intent projection doesn't go active for a gitignored untracked doc. Filed as `#ay80ci` with that lead, since it blocks every CI run.
+
+Queue note: your free-text `JB Sync Tmux Layout` failure line is the next head and I haven't touched it.
+<!-- agent:boundary:e6984883 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -87,12 +124,12 @@ Filed as `#authoritydescentstd` — extract the order (realtime model → rebuil
 - ~~do [#deliveryackcut]~~
 - ~~do [#orphandrain]~~
 - ~~do [#c8tb]~~
-- ⏭️ do [#lazilyscopeadopt]
-- 🚧 JB `Sync Tmux Layout` on brookebrodack-dev.md failed: `Sync failed through the project controller; see IDE log for details.`
+- ~~⏭️ do [#lazilyscopeadopt]~~
+- ~~JB `Sync Tmux Layout` on brookebrodack-dev.md failed: `Sync failed through the project controller; see IDE log for details.`~~ — auto-struck: answered this cycle (#ftstrike)
 - ⏭️ do [#missingreplicarebuild]
 - ⏭️ do [#jbrouteasyncchannel]
 - ⏭️ do [#authoritydescentstd]
-- do [#patchretryidem]
+- ⏭️ do [#patchretryidem]
 - do [#hvw0]
 - do [#bbpe]
 - do [#dbj7]
@@ -145,9 +182,10 @@ Filed as `#authoritydescentstd` — extract the order (realtime model → rebuil
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#hubregistryevict] [focused-cycle] #agent-doc-bug agent-doc-crdt-relay-io's hub_registry (static Mutex<HashMap<String, RelayHub>>) is never evicted in production code — only tests call .remove(). Every document the controller ever touches leaves one RelayHub (its own ThreadSafeContext, canonical replica, member mirrors, liveness cell family) alive for the process lifetime. Found while proving #lazilyscopeadopt: this is the ONLY real process-lifetime growth in the reactive layer, and it is a registry-eviction question, not a ctx.scope() one. Eviction is not free: with_hub recreates an EMPTY hub on next contact, so a wrong eviction is exactly the phantom missing_replica shape. Sequence AFTER #missingreplicarebuild since eviction increases traffic on that recovery path. A missing hub is already a first-class handled state (CurrentText::EditorAttachedMissingReplica + recover_missing_hub_from_durable_projection), so the safe shape is evict-only-when-no-members-and-committed, verified by a test that re-contact after eviction recovers the same canonical text.
+- [ ] [#ay80ci] [focused-cycle] #agent-doc-bug CI red on main is now MECHANISM-IDENTIFIED (supersedes review #ay80, which only recorded 'fails in CI, passes locally'). finalize_skips_ignored_untracked_session_doc (tests/finalize_integration.rs:248) does fail with exit 1 as expected, but stderr is 'Error: captured turn intent synthetic-<n> was not projected as active for /tmp/.tmpXXXX/scratch/session.md' instead of 'skipped ignored untracked path scratch/session.md' — finalize dies EARLIER than the ignored-untracked skip it asserts. Not a flaky assertion: on CI the captured-turn-intent projection does not go active for a gitignored untracked doc, so the ignored-path skip is never reached. Run 29711874618 (commit ec7a701fa). Reproduce by forcing the state.db projection path rather than rerunning CI. Blocks every CI run, so take it early.
 - [ ] [#authoritydescentstd] [focused-cycle] #agent-doc-bug Standardize the authority rebuild/descent order into ONE shared pure decision fn. IMPLEMENTED TWICE, independently, under the SAME tags (#px82/#bn41): (1) agent-doc-document-realtime-io reobserve_missing_editor_replica_with_reregistration + resolve_editor_unavailable_disk_read_fallback; (2) agent-doc-preflight-io current_text_via_preflight_authority_retrying + observe_current_text_with_bounded_retry. PROVEN DRIFT: separate budgets/env overrides (AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS vs AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS, both default 3 but independently tunable), and the liveness-witness memo from adefcda0a exists ONLY in the realtime-io copy (grep in preflight-io = 0) — a policy fix silently applied to half the paths. DESIGN DECIDED 2026-07-19: home is agent-doc-turn, NOT a new crate (every agent-doc crate is already publish=false, so a crate buys a boundary not privacy) and NOT agent-doc-document-realtime (preflight-io does not depend on it and would take a new edge onto write_policy.rs 161KB + crdt_relay.rs 107KB; both consumers ALREADY depend on agent-doc-turn, which already hosts closeout_recovery/cycle_policy/wait_machine/repair). SHAPE: follow the closeout_recovery.rs precedent — 'File/effect adapters classify concrete diffs into this smaller vocabulary before asking the turn policy to pick the recovery state.' Pure observation vocabulary (Current/Detached/MissingReplica/SyncPending/Error) + decision enum (Retry/RebuildFromPlugin/DescendToDisk/FailClosed); each -io site maps its own CurrentText in. The adapter is load-bearing, not ceremony: CurrentText lives in agent-doc-crdt-relay-io (effectful), so a direct dependency would invert the layering and make agent-doc-turn depend on an -io crate. CONSTRAINT: the two sites are similar, NOT identical — realtime-io gates rebuild eligibility on sync_pending vs missing_replica, preflight-io retries both. Preserve that as a parameter; flattening it reintroduces the ~28s-per-read-site double rebuild the exclusion was added to fix. Prerequisite for #missingreplicarebuild.
 - [ ] [#missingreplicarebuild] [focused-cycle] #agent-doc-bug Read authority descends to DISK while an editor is attached, on the missing_replica path. The operator's directive — realtime model, then rebuild from the plugin, then disk — is ALREADY the structure: resolve_editor_unavailable_disk_read_fallback has an explicit 'Tier 1 retry: rebuild the model from the live editor buffer' calling ensure_document_model_through_authority. But it is gated `rebuild_eligible = reason == "sync_pending" && observe_editor_open(file)`; missing_replica is EXCLUDED because reobserve_missing_editor_replica_with_reregistration self-heals it upstream (excluding it was a real fix: rebuilding twice measured ~28s per read site). The gap is what happens when that upstream self-heal EXHAUSTS — the descent then reaches disk with an editor still attached, which is the corruption vector (operator-observed: frontmatter closing fence gained a leading space, deleted queue heads resurrected). Fix direction: on missing_replica exhaustion, do NOT descend to disk while observe_editor_open(file) — request one plugin rebuild (the forceRefresh/re-register the runbook describes) and fail closed if it cannot answer, rather than adopting disk. Depends on #deliveryackcut: a live-but-non-ACKing replica is why the upstream heal exhausts in the first place.
-- [ ] [#lazilyscopeadopt] [focused-cycle] Adopt lazily 0.45's ctx.scope() -> TeardownScope at the sites that build long-lived reactives, now that the dependency is upgraded (66f71cb40). Before 0.45 nothing disposed reactives, so every cell/computed agent-doc created lived for the process lifetime; the upgrade makes disposal POSSIBLE but does not apply it. Start with the relay/liveness cores that build per-document reactive state (crdt_relay.rs build_liveness_core, editor_attach, editor_open_docs) since those are per-document and therefore unbounded in a long-lived controller. Verify with the edge-set-vs-observer-registry test: anything surviving an invalidation is not a graph edge. Needs its own cycle — changing reactive lifetimes in the liveness core is exactly where a wrong disposal shows up as a phantom live_editors=0.
 - [ ] [#deliveryackcut] [focused-cycle] delivery_converged() requires every LIVE member to have ACKed, so a zombie replica (registered + reported live, but no longer ACKing) wedges every write until timeout. Exclude a non-ACKing member from the convergence cut the way a disconnected one already is (crdt_relay.rs delivery_converged/is_live). Needs a staleness signal — is_live is a reactive cell with no ACK clock — and a threshold conservative enough that a slow-but-live editor is never dropped, since dropping one clobbers operator edits. Root-caused 2026-07-19; mitigation shipped in 651f63517.
 - [ ] [#orphandrain] [recommended] Controller-side drain for documents with NO supervisor. Shipped then REVERTED same session (revert of 'feat(controller): drain go-mode queues that have no supervisor') after it caused a dispatch storm: 15 dispatches for one doc in ~60s despite a 90s backoff, ~31 contending controller processes. Two faults, both in the effects half: (1) run_editor_route called from INSIDE the controller re-enters the controller ('timed out after 5.0s waiting for project controller response') — Run Agent Doc calls it from OUTSIDE; (2) the backoff lived in an in-memory HashMap in the controller, so every failed dispatch caused a restart that wiped it, permitting immediate re-dispatch. Redesign: dispatch from OUTSIDE the controller event loop (detached child, not a self-call) and persist per-document backoff in state.db next to the drain lease. The pure policy module (agent-doc-controller/src/orphan_drain.rs, 9 tests, gates correct) was sound — recover it from git history rather than rewriting. Underlying gap remains OPEN: a doc whose owner pane is a live agent TUI can never get a supervisor (preserve_pane_blocked), so it has no idle-queue watch and its go-mode queue only advances when a human triggers Run Agent Doc.
 - [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.

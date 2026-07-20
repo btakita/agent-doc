@@ -494,7 +494,20 @@ Implemented `#friendsnapshot` in `haiven-websocket-hub`:
 Verification passed: targeted tests, race tests, a realistic paging run, and full `make check`.
 
 Submodule commits: `25b85f0` and `3e43140`. Parent gitlink is advanced on the current branch.
-<!-- agent:boundary:5e81a9f0 -->
+
+### Re: do [#yyzn-clarify] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#yyzn-clarify]
+
+
+Resolved as queue bookkeeping. The earlier `/goal Implement backlog item(s): #yyzn` referenced no backlog, icebox, or completed item, so there was no concrete implementation target to infer. Its orphaned queue head was already consumed; `#yyzn-clarify` is now closed with no code changes.
+
+On the priority question: keep inbound service dispatch FIFO. Giving an incoming high-fan-out message priority can amplify overload by expanding the most expensive work first. Keep the narrow two-lane policy only at each client’s bounded outbound queue: live chat and acknowledgements ahead of bootstrap history/presence frames, with a frame’s age starting when its first item is queued and never resetting as later items merge. Fan-out admission/concurrency should be bounded separately.
+
+The exchange remains large; the active queue continues without pausing for compaction.
+<!-- agent:boundary:c77a9068 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -505,8 +518,8 @@ Submodule commits: `25b85f0` and `3e43140`. Parent gitlink is advanced on the cu
 - ~~📌 **Throughput unaffected:** ~3.3–3.6 M/s framed vs ~3.6 M/s unbounded. (One 1.59 M/s outlier was noise; reruns gave 3.60/3.58.)~~
 - ~~/goal Implement backlog item(s): #b10a~~
 - ~~/goal Implement backlog item(s): #yyzn~~
-- 🚧 do [#friendsnapshot]
-- do [#yyzn-clarify]
+- ~~do [#friendsnapshot]~~
+- ~~do [#yyzn-clarify]~~
 - do [#haivenwsopt]
 - do [#tnpa]
 <!-- /agent:queue -->
@@ -514,7 +527,6 @@ Submodule commits: `25b85f0` and `3e43140`. Parent gitlink is advanced on the cu
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#yyzn-clarify] Queue head '/goal Implement backlog item(s): #yyzn' references a backlog ID that does not exist in this document (backlog/icebox/done all lack it); the binary marks it skipped_queue_head_ids. Confirm the intended item or remove the head.
 - [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
 - [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 <!-- /agent:backlog -->
@@ -534,4 +546,5 @@ Submodule commits: `25b85f0` and `3e43140`. Parent gitlink is advanced on the cu
 - 2026-07-19 [#activepri] haiven-websocket-hub: activity-tiered fan-out in SendToTopic (hub/hub.go:200) — (a) partition the members snapshot so active recipients enqueue first, (b) more importantly downgrade per-recipient class policy for inactive conns (presence/typing -> conflate-hard/drop, chat still spills) since that removes work rather than resequencing it. Define active from one lock-free atomic lastClientFrameAt on the conn, NOT a client-reported focus signal. Needs hysteresis (promote 30s / demote 120s) or conns thrash between bands. BLOCKED ON #friendsnapshot: demoting inactive presence to drop means a user who becomes active holds no correct state and gets no replay (at-most-once) — snapshot-on-resume must land first.
 - 2026-07-20 [#fanoutpri] haiven-websocket-hub: two-band send queue (interactive vs bulk) in hub/sendqueue.go — two lazily-allocated list.Lists drained high-then-low, each FIFO internally, O(1), no heap, so per-conn idle footprint (740 B) is unchanged. Interactive = acks, directed chat, moderation; bulk = presence/typing/passive topic traffic. HARD CONSTRAINT: a service may never span bands, or per-service monotonic seq (DESIGN §6.2) stops meaning 'loss' and client dedup/reorder breaks. Explicitly NO aging/escalation — bulk band stays DropOldest/ConflateByEntity, which bounds staleness by construction instead of by a timer.
 - 2026-07-20 [#friendsnapshot] haiven-websocket-hub: a friend-frame needs a presence snapshot on frame change — presence is at-most-once + conflated, so a newly-framed friend produces no replay and renders 'offline' until their next tick. Add a 'give me current state for these K' query (design §6.1 already specifies snapshot-on-resume for at-most-once classes) + model frame paging (re-subscribe churn on scroll) in the realistic loadtest. This is the real work item behind -friends-frame, not the subscription cap.
+- 2026-07-20 [#yyzn-clarify] Queue head '/goal Implement backlog item(s): #yyzn' references a backlog ID that does not exist in this document (backlog/icebox/done all lack it); the binary marks it skipped_queue_head_ids. Confirm the intended item or remove the head.
 <!-- /agent:done -->

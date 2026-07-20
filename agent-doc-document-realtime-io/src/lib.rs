@@ -1951,6 +1951,34 @@ pub fn apply_canonical_replace_if_attached(
                             if ack_recovery.wait(file, source, live_editors)?
                                 == AckRecoveryWait::ForegroundDeadline
                             {
+                                // `#deliveryackcut`: the force-refresh probe went
+                                // unanswered, so any live member still holding
+                                // fan-out is a zombie. Retire it (never the last
+                                // one — see `retire_non_acking_live_members`) so
+                                // it stops wedging convergence for every LATER
+                                // operation, not just this one.
+                                match agent_doc_crdt_relay_io::retire_non_acking_live_members(file)
+                                {
+                                    Ok(retired) if !retired.is_empty() => {
+                                        agent_doc_ops_log_io::log_op(
+                                            file,
+                                            &format!(
+                                                "{source}_crdt_zombie_replica_retired file={} retired={:?} timeout_ms={} recovery=disconnect_then_reconnect_catch_up",
+                                                file.display(),
+                                                retired,
+                                                CRDT_ACK_RECOVERY_TIMEOUT_MS,
+                                            ),
+                                        );
+                                    }
+                                    Ok(_) => {}
+                                    Err(err) => agent_doc_ops_log_io::log_op(
+                                        file,
+                                        &format!(
+                                            "{source}_crdt_zombie_replica_retire_failed file={} error={err}",
+                                            file.display(),
+                                        ),
+                                    ),
+                                }
                                 let relay_write = pending_write
                                     .take()
                                     .expect("pending CRDT target must retain its write receipt");

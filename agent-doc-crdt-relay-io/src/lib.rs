@@ -2952,6 +2952,18 @@ pub fn apply_disk_change_for_file(file: &Path, on_disk: &str) -> Result<Option<D
 /// This notification is advisory: the durable Lazily outbox remains authoritative
 /// and a later observation/reconnect drains it. No filesystem wake sidecar is
 /// created, and one unavailable replica cannot fail the canonical transition.
+/// Retire live editor replicas that never ACKed their fan-out (`#deliveryackcut`).
+///
+/// Drive this only at the end of the ACK recovery ladder, once the force-refresh
+/// liveness probe has gone unanswered — see
+/// [`RelayHub::retire_non_acking_live_members`] for the staleness argument and
+/// for the invariant that the live set is never emptied.
+///
+/// Returns the retired client ids (empty when there is no hub for `file`).
+pub fn retire_non_acking_live_members(file: &Path) -> Result<Vec<u64>> {
+    Ok(with_existing_hub(file, |hub| hub.retire_non_acking_live_members())?.unwrap_or_default())
+}
+
 pub fn signal_crdt_replica_event(
     file: &Path,
     reason: CrdtReplicaEventReason,

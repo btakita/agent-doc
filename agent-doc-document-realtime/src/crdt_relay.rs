@@ -979,6 +979,58 @@ impl RelayHub {
             .all(|(_, member)| member.pending.is_empty())
     }
 
+    /// Retire live members that never ACKed, so one zombie replica cannot wedge
+    /// every later write (`#deliveryackcut`).
+    ///
+    /// [`Self::delivery_converged`] requires every LIVE member to have drained
+    /// its fan-out queue. A zombie — registered and reported live, but no longer
+    /// ACKing, typically a stale editor plugin — never drains, so convergence
+    /// stays false forever and each subsequent operation burns its full timeout.
+    ///
+    /// The caller drives this at the end of the ACK recovery ladder, after the
+    /// force-refresh probe has gone unanswered. That is the staleness signal:
+    /// `is_live` is a reactive cell with no ACK clock, but a member still holding
+    /// pending updates *after the system's own liveness probe expired* is
+    /// non-ACKing by construction. A slow-but-live editor that ACKs at any point
+    /// before the deadline has drained its queue and is never considered here.
+    ///
+    /// **Safety invariant: this never empties the live set.** Retiring the last
+    /// live member would drop `live_count` to zero, which flips the document to
+    /// detached/disk authority — and a disk write over an editor buffer holding
+    /// unsaved operator edits is exactly the clobber this whole path exists to
+    /// prevent. A sole zombie therefore stays live and keeps the existing
+    /// retained-delivery / `agent-doc admin reload-lib` recovery, which replaces
+    /// the replica without touching the document.
+    ///
+    /// Retirement reuses [`Self::disconnect`], so it is not data loss: the
+    /// member keeps its replica state and [`Self::reconnect`] performs the usual
+    /// bidirectional catch-up.
+    ///
+    /// Returns the retired client ids, ascending, for the caller to log.
+    pub fn retire_non_acking_live_members(&mut self) -> Vec<u64> {
+        let mut candidates = self
+            .members
+            .iter()
+            .filter(|(id, member)| self.is_live(**id) && !member.pending.is_empty())
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
+
+        let live_total = self
+            .members
+            .keys()
+            .filter(|id| self.is_live(**id))
+            .count();
+        // Keep at least one live member: never let retirement flip authority.
+        let retirable = live_total.saturating_sub(1).min(candidates.len());
+        candidates.truncate(retirable);
+
+        for client_id in &candidates {
+            self.disconnect(*client_id);
+        }
+        candidates
+    }
+
     pub fn delivery_snapshot(&self) -> Vec<ReplicaDeliverySnapshot> {
         let mut snapshot = self
             .members
@@ -2504,6 +2556,82 @@ mod tests {
             2,
             "reconnect recomputes the derived count"
         );
+    }
+
+    /// `#deliveryackcut` — a zombie replica must not wedge convergence for the
+    /// other live editors.
+    #[test]
+    fn retiring_a_zombie_unwedges_delivery_convergence_for_the_rest() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        hub.apply_local(2, 0, 0, "hello\n").unwrap();
+
+        // 3 is the zombie: it holds fan-out it never ACKs.
+        assert!(!hub.pending_updates(3).unwrap().is_empty());
+        assert!(
+            !hub.delivery_converged(),
+            "an unACKed live member blocks convergence"
+        );
+
+        let retired = hub.retire_non_acking_live_members();
+        assert_eq!(retired, vec![3], "the non-ACKing member is retired");
+        assert!(
+            hub.delivery_converged(),
+            "convergence resumes once the zombie leaves the live cut"
+        );
+        // Retirement is a disconnect, not a deregister: the replica is still
+        // registered and can reconnect with a full bidirectional catch-up.
+        assert!(hub.is_registered(3));
+        hub.reconnect(3).unwrap();
+        assert_eq!(hub.live_count(), 2);
+    }
+
+    /// `#deliveryackcut` safety invariant — retirement must never empty the live
+    /// set. Dropping the last live editor flips the document to disk authority,
+    /// and a disk write over an editor buffer with unsaved operator edits is the
+    /// clobber this path exists to prevent.
+    #[test]
+    fn a_sole_zombie_is_never_retired() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        // A CP-authored write fans out to every live editor, including the sole one.
+        hub.apply_canonical_replace("", "hello\n").unwrap();
+        assert!(!hub.pending_updates(2).unwrap().is_empty());
+
+        let retired = hub.retire_non_acking_live_members();
+        assert!(
+            retired.is_empty(),
+            "the only live member must stay live even when it is not ACKing"
+        );
+        assert_eq!(
+            hub.live_count(),
+            1,
+            "authority must not flip to detached/disk because of retirement"
+        );
+    }
+
+    /// `#deliveryackcut` — a member that ACKed has an empty queue and is never a
+    /// retirement candidate, however slow it was.
+    #[test]
+    fn a_slow_but_acking_member_is_never_retired() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+        hub.apply_local(2, 0, 0, "hello\n").unwrap();
+
+        for update in hub.pending_updates(3).unwrap() {
+            hub.ack_delivery(3, &update.patch_id, update.generation)
+                .unwrap();
+        }
+        assert!(hub.delivery_converged());
+
+        let retired = hub.retire_non_acking_live_members();
+        assert!(
+            retired.is_empty(),
+            "an ACKed member has drained its queue and is not a zombie"
+        );
+        assert_eq!(hub.live_count(), 2);
     }
 
     /// `#lazilyscopeadopt` — the edge-set-vs-observer-registry test applied to the

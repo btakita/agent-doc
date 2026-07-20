@@ -971,7 +971,7 @@ Closing this one on measurement, because today's incident settled both halves.
 **The ongoing-compaction half is implemented.** `reclaim_state_db_free_space` exists with the `#statedbvacuum` tag on it, gated at a 25% free-fraction threshold, and is wired into `agent-doc-gc-io` (`lib.rs:492`) behind `!dry_run`. It carries exactly the constraint the item names — the comment states the full-file rewrite belongs in `gc`, "never `open_state_db`, which routine RPCs call", because `VACUUM` takes an exclusive lock. So the bounded, controller-safe reclaim step the item asks for is the one that shipped.
 
 Marking done. What is *not* resolved is why the database corrupted at all — that is unknown and recorded at `open_and_init_state_db`, and it matters more than the disk-space question this item was tracking.
-<!-- agent:boundary:947b6a8f -->
+<!-- agent:boundary:62c66b9a -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -992,7 +992,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#lazilynottl]~~
 - ~~do [#orphandrain]~~
 - ~~do [#c8tb]~~
-- do [#jbrouteasyncchannel]
+- ⏭️ do [#jbrouteasyncchannel]
 - ~~do [#wsflake2]~~
 - do [#patchretryidem]
 - ~~do [#jbroutasync]~~

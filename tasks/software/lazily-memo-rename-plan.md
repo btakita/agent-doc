@@ -46,6 +46,26 @@ deprecation cycle, not a substitution.
 | other **seven** bindings (rs, py, zig, dart, go, kt, cpp) | internal type names | independent |
 | `lazily-html` | 49 hits are the **HTML `<slot>` element** | **out of scope — do not touch** |
 
+**DECIDED: dual with deprecation.** Keep `slot()` / `disposeSlot()` / `useSlot`
+as deprecated aliases beside the new names for one release, then remove. No major
+version break. Same policy as §9.3 option (2) for the fixture ops, so the whole
+migration is transitional rather than a flag day.
+
+- Mark with `@deprecated` in `reactive.d.ts` TSDoc so editors surface it. A
+  runtime warning is a binding's choice — if used, warn **once per process**, not
+  per call, or a feedback loop will flood the console.
+- Removal is a **separate release**, listed as Track A step 10. Do not bundle it.
+- The `Context` doc comment at `reactive.d.ts:61` reads "the graph owning all
+  Cell/Slot/Signal/Effect nodes" — published TSDoc prose, not just signatures.
+
+**BLOCKED, needs a decision before `lazily-react`'s step: `useSlot` cannot become
+`useMemo`.** React owns that name, and shadowing it in a React integration
+package is not viable. The package already exports `useReactiveMemo` (with an
+equality guard) alongside `useSlot` (without one), so the pair needs a naming
+scheme, not a substitution. **Read what both hooks actually do before choosing** —
+the guard difference is the real distinction and the names should reflect it.
+Do not let a mechanical pass pick this.
+
 So it is **nine repos** but **eight corpus runners** — `lazily-react` wraps `lazily-js` and runs no corpus, `lazily-html` is out of scope. Where this plan says *runner* it means the eight bindings; where it says *repo* it includes react. One hard ordering edge. Deprecation
 policy for the two public ones must be decided before step 1: keep `slot()` as a
 deprecated alias for one release, or take the major-version break.

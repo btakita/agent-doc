@@ -1915,16 +1915,58 @@ fn auto_install_stream_dup_fd(target_fd: std::os::fd::RawFd) -> std::process::St
     }
 }
 
+/// Open the supervisor stderr log for auto-install child output
+/// (`#restartbleednonroute`). `None` when no project root resolves or the file
+/// cannot be opened, in which case the caller keeps the fd2 plan.
+#[cfg(unix)]
+fn auto_install_stderr_log_file(crate_root: &Path) -> Option<std::fs::File> {
+    let project_root = agent_doc_project_root_io::project_root_containing(crate_root)?;
+    let path = agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(
+        &project_root,
+    );
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok()?;
+    }
+    std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok()
+}
+
+#[cfg(not(unix))]
+fn auto_install_stderr_log_file(_crate_root: &Path) -> Option<std::fs::File> {
+    None
+}
+
 /// Run the auto-install sequence ONCE through `make install`. The Makefile owns
 /// the local-dev profile, incremental target dir, linker selection, and cdylib
 /// install flags. The target is idempotent, so retrying it is safe.
 fn run_auto_install_steps_once(crate_root: &Path) -> Result<()> {
     let steps: [(&str, &[&str]); 1] = [("make", &["install"])];
+    // `#restartbleednonroute`: prefer an explicit LOG fd over fd2.
+    //
+    // The default plan dups fd2, which is off-pane only while
+    // `SupervisorStderrRedirect` is active. On a non-route-owned TUI — or a
+    // route-owned supervisor whose redirect fell back to inactive on error —
+    // fd2 IS the agent pane, so `make install` output bleeds straight into the
+    // live session. Holding the log file open for the whole sequence makes the
+    // child's stdio independent of route ownership; fd2 remains the fallback so
+    // a log that cannot be opened degrades to today's behavior rather than
+    // discarding build output.
+    let stderr_log = auto_install_stderr_log_file(crate_root);
     for (program, args) in steps {
         // `#restartstderrbleed` — never inherit stdio: fd1 is the agent pane.
-        let (stdin, stdout, stderr) = auto_install_child_stdio_from_plan(
-            agent_doc_supervisor::auto_install_stdio::auto_install_child_stdio_plan(),
-        );
+        let plan = match stderr_log.as_ref() {
+            Some(file) => {
+                use std::os::fd::AsRawFd;
+                agent_doc_supervisor::auto_install_stdio::auto_install_child_stdio_plan_to_fd(
+                    file.as_raw_fd(),
+                )
+            }
+            None => agent_doc_supervisor::auto_install_stdio::auto_install_child_stdio_plan(),
+        };
+        let (stdin, stdout, stderr) = auto_install_child_stdio_from_plan(plan);
         let status = std::process::Command::new(program)
             .args(args)
             .current_dir(crate_root)
@@ -13639,6 +13681,53 @@ mod tests {
     /// `#restartstderrbleed` — the auto-install child must NOT inherit the
     /// supervisor's fd1 (the agent pane). Prove that `make install`-style output
     /// on BOTH stdout and stderr is redirected to the supervisor-log target fd,
+    /// `#restartbleednonroute`: the auto-install child must land on a real LOG
+    /// file, not fd2. fd2 is off-pane only while `SupervisorStderrRedirect` is
+    /// active; on a non-route-owned TUI (or a route-owned supervisor whose
+    /// redirect fell back to inactive) fd2 IS the agent pane, and `make
+    /// install` output bleeds into the live session.
+    #[cfg(unix)]
+    #[test]
+    fn auto_install_stderr_log_is_opened_off_fd2_when_a_project_root_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+
+        let file = auto_install_stderr_log_file(dir.path())
+            .expect("a project root must yield an appendable stderr log");
+
+        use std::os::fd::AsRawFd;
+        assert!(
+            file.as_raw_fd() > 2,
+            "the child must dup a real log fd, never the inherited fd2/pane"
+        );
+
+        let path = agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(
+            dir.path(),
+        );
+        assert!(path.exists(), "opening must create the log: {}", path.display());
+
+        // Appending, not truncating — a recycle must not discard prior output.
+        use std::io::Write;
+        let mut file = file;
+        file.write_all(b"first\n").unwrap();
+        drop(file);
+        let again = auto_install_stderr_log_file(dir.path()).unwrap();
+        drop(again);
+        assert!(
+            std::fs::read_to_string(&path).unwrap().contains("first"),
+            "reopening must append, not truncate"
+        );
+    }
+
+    /// Outside a project there is no log to open, so the caller keeps the fd2
+    /// plan rather than discarding build output entirely.
+    #[cfg(unix)]
+    #[test]
+    fn auto_install_stderr_log_is_none_without_a_project_root() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(auto_install_stderr_log_file(dir.path()).is_none());
+    }
+
     /// never left on the parent's stdout where it would corrupt the agent TUI.
     #[cfg(unix)]
     #[test]

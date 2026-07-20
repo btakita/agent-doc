@@ -6,7 +6,7 @@ claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
 codex_args: -s danger-full-access
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -564,6 +564,11 @@ The exchange is at the session-accretion warning threshold; the active queue rem
 
 ### Re: Track C resilience load gate — gpt-5
 
+> **Queue prompt:**
+>
+> do [#tnpa]
+
+
 Implemented `-suite=trackc` for the websocket hub. It now exercises concurrent hard drops and duplicate-connection reconnects, delayed readers, paced sustained fan-out, concurrent burst fan-out, and a killed/recovered chat downstream through the real circuit breaker.
 
 The command is an assertion gate, not just a report. It exits non-zero unless client-wire p99 stays within `-trackc-latency-slo`, reconnect churn stays within the heap ceiling at the same live population, all delayed readers are shed, every healthy peer remains connected, every healthy message reaches a fast client, and the downstream breaker opens and recovers. `make loadtest-trackc` runs the 10k-client default.
@@ -571,27 +576,17 @@ The command is an assertion gate, not just a report. It exits non-zero unless cl
 The production-sized run passed: 1,000 sustained + 1,000 burst messages, 1,000 reconnects, 200 delayed readers shed, 9,800 healthy peers still live, heap 18.69 MiB before / 18.70 MiB after churn, and client-wire p99 6.91 ms against a 250 ms SLO. `make check` passed, including the race suite and both builds. This repository has no GitHub Actions workflow named `CI`, as confirmed during the preceding queue cycle.
 
 Commits: `a21dda3` in `haiven-websocket-hub`; parent gitlink `41c13912a`.
-<!-- agent:boundary:efcede79 -->
+<!-- agent:boundary:b0e2aef5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- ~~do [#activepri]~~
-- ~~do [#fanoutpri]~~
-- ~~📌 **Throughput unaffected:** ~3.3–3.6 M/s framed vs ~3.6 M/s unbounded. (One 1.59 M/s outlier was noise; reruns gave 3.60/3.58.)~~
-- ~~/goal Implement backlog item(s): #b10a~~
-- ~~/goal Implement backlog item(s): #yyzn~~
-- ~~do [#friendsnapshot]~~
-- ~~do [#yyzn-clarify]~~
-- ~~do [#haivenwsopt]~~
-- ⏭️ do [#tnpa]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -611,4 +606,5 @@ Commits: `a21dda3` in `haiven-websocket-hub`; parent gitlink `41c13912a`.
 - 2026-07-20 [#friendsnapshot] haiven-websocket-hub: a friend-frame needs a presence snapshot on frame change — presence is at-most-once + conflated, so a newly-framed friend produces no replay and renders 'offline' until their next tick. Add a 'give me current state for these K' query (design §6.1 already specifies snapshot-on-resume for at-most-once classes) + model frame paging (re-subscribe churn on scroll) in the realistic loadtest. This is the real work item behind -friends-frame, not the subscription cap.
 - 2026-07-20 [#yyzn-clarify] Queue head '/goal Implement backlog item(s): #yyzn' references a backlog ID that does not exist in this document (backlog/icebox/done all lack it); the binary marks it skipped_queue_head_ids. Confirm the intended item or remove the head.
 - 2026-07-20 [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
+- 2026-07-20 [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 <!-- /agent:done -->

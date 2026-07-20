@@ -3091,6 +3091,27 @@ fn test_agent_doc_model_tier_owns_context_usage_policy() {
             "preflight/run.rs must not re-own model-tier attribution or harness policy: {forbidden_snippet}"
         );
     }
+    // `#n39j` / `#queuepersiststall`: when queue maintenance fails to PERSIST,
+    // preflight must report the queue's REAL drainability by probing it
+    // read-only, never a zeroed `QueueState::default()`. Those two are
+    // indistinguishable to the loop gate, so a persistence failure silently
+    // presenting as "queue empty" stalls a drain that still has work — observed
+    // live (0 -> 14 drainable on brookebrodack-dev.md).
+    //
+    // Reproducing the real failure needs a simulated editor-authority outage,
+    // so this pins the CONTRACT at the branch instead: the probe is called, and
+    // the zeroed default survives only as the probe's own last resort.
+    assert!(
+        preflight_run_source.contains("inspect_queue_state(file, diff_result.as_deref())"),
+        "the queue-maintenance persist-failure branch must probe real drainability (#queuepersiststall)"
+    );
+    assert!(
+        preflight_run_source
+            .contains("inspect_queue_state(file, diff_result.as_deref()).unwrap_or_else("),
+        "the zeroed QueueState::default() must remain the PROBE's fallback (`unwrap_or_else`), never the \
+         primary persist-failure answer (#queuepersiststall)"
+    );
+
     assert!(
         preflight_warnings_source.contains("agent_doc_model_tier::harness_mismatch_warning(")
             && preflight_warnings_source

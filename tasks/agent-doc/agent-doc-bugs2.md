@@ -143,17 +143,29 @@ Verification passed: focused controller tests, focused JetBrains tests, `cargo f
 Completed. The async admission plus terminal-status channel is implemented, tested, installed, committed, and pushed as `6376196be`. The JetBrains client still returns the real terminal result, so existing busy, queued, retry, and failure classifications are preserved.
 
 No new actionable follow-up work was created by this response.
-<!-- agent:boundary:3bafb85d -->
+
+### Re: #c8tb operator verification and agent-doc churn — gpt-5
+
+> **Queue prompt:** do [#c8tb]
+
+`#c8tb` remains an operator-verification item: its required proof needs a live JetBrains click while the supervisor socket is deliberately unavailable and the pane is mid-turn. I moved it to the gated state instead of claiming that external proof.
+
+The agent-doc churn exposed while closing the preceding JB route item is fixed. Retained retries now wait on an already-outstanding delivery instead of emitting another identical Yrs transaction, accept a delivery-converged editor cut when semantic rebasing proves the response is already present, and carry that accepted live cut into deferred native-save recovery so the stale whole-document target cannot be resurrected.
+
+Regression coverage proves both the pending-delivery and acknowledged-editor-cut paths return zero-update receipts while preserving operator prompts and queue deletions. The full realtime-IO crate suite, `make check`, `make tmux-ci`, and `make install` passed. The source fix is committed and pushed as `42b9ee253`; the root gitlink checkpoint is `e85302cf0`.
+
+No new actionable follow-up work was created by this response.
+<!-- agent:boundary:d7b7363c -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#fixcrdtmerge]~~
-- 🚧 JB `Run Agent Doc` is slow & flaky. Please optimize all contributing bottlenecks.
+- ~~JB `Run Agent Doc` is slow & flaky. Please optimize all contributing bottlenecks.~~
 - ⏭️ do [#c8tb]
 - ⏭️ do [#libgcpidrace]
 - ⏭️ do [#hubregistryevict]
-- do [#missingreplicarebuild]
+- ⏭️ do [#missingreplicarebuild]
 - ~~do [#jbrouteasyncchannel]~~
 - do [#authoritydescentstd]
 - do [#patchretryidem]

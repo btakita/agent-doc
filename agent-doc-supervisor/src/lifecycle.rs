@@ -122,7 +122,26 @@ pub fn supervisor_recycle_action(
     }
 
     if !turn_boundary {
-        return SupervisorRecycleAction::None;
+        // `#supboundarylivelock`: an EXPLICIT operator recycle must not be
+        // silently dropped here.
+        //
+        // `turn_boundary` is `prompt_visible && !turn_active`, which never
+        // holds for a continuously-active pane, so `admin recycle` on a busy
+        // non-stale supervisor returned `None` on every tick and the request
+        // simply expired at `DEFAULT_RECYCLE_REQUEST_TTL_SECS` (900s) with its
+        // ledger phase still `Requested` — a stale binary stayed mapped for a
+        // whole session with no signal that the operator's request had died.
+        //
+        // Deferring keeps the request alive and visible for the next boundary
+        // instead of discarding it. Deliberately NOT `RecycleImmediate`: away
+        // from a turn boundary a recycle would kill a live turn, which is the
+        // very thing the gate exists to prevent. This fixes the silent loss,
+        // not the mid-turn escalation question.
+        return if explicit_admin {
+            SupervisorRecycleAction::DeferCycleOpen
+        } else {
+            SupervisorRecycleAction::None
+        };
     }
 
     if cycle_open {
@@ -202,6 +221,40 @@ pub fn supervisor_restart_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#supboundarylivelock`: an explicit `admin recycle` against a busy,
+    /// non-stale supervisor used to return `None` on every tick, so the request
+    /// expired after 900s with its ledger phase still `Requested` and a stale
+    /// binary stayed mapped for the whole session. It must defer (stay alive
+    /// for the next boundary), never vanish — and must still not recycle
+    /// mid-turn, which would kill the live turn the gate protects.
+    #[test]
+    fn explicit_admin_recycle_defers_away_from_a_turn_boundary_instead_of_vanishing() {
+        use SupervisorRecycleAction::*;
+        // stale=false, auto=false, turn_boundary=FALSE, head_pending=false,
+        // explicit_admin=TRUE, no wedge, no reexec failure, cycle_open=false.
+        assert_eq!(
+            supervisor_recycle_action(false, false, false, false, true, false, false, false, false),
+            DeferCycleOpen,
+            "an explicit operator recycle must survive to the next boundary"
+        );
+
+        // Without an explicit request there is nothing to preserve.
+        assert_eq!(
+            supervisor_recycle_action(
+                false, false, false, false, false, false, false, false, false
+            ),
+            None,
+            "a non-explicit tick away from a boundary stays a no-op"
+        );
+
+        // At a real boundary the explicit request is consumed as before.
+        assert_eq!(
+            supervisor_recycle_action(false, false, true, false, true, false, false, false, false),
+            RecycleImmediate,
+            "reaching a boundary must still honor the explicit request immediately"
+        );
+    }
 
     #[test]
     fn recycle_action_policy() {
@@ -296,10 +349,15 @@ mod tests {
             supervisor_recycle_action(false, false, false, false, false, true, false, true, true),
             EscalateKillRelaunch
         );
-        // No wedge, mid-turn: unchanged — nothing recycles off a boundary.
+        // No wedge, mid-turn: still nothing RECYCLES off a boundary. This case
+        // carries `explicit_admin = true`, so since `#supboundarylivelock` it
+        // defers instead of returning `None` — the operator's request stays
+        // alive for the next boundary rather than silently expiring after 900s.
+        // The invariant this line guards (no mid-turn recycle) is unchanged:
+        // `DeferCycleOpen` does not recycle.
         assert_eq!(
             supervisor_recycle_action(true, true, false, true, true, false, false, false, false),
-            None
+            DeferCycleOpen
         );
     }
 

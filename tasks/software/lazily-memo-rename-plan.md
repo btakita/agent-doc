@@ -3,9 +3,14 @@
 **Status:** designed 2026-07-20, not started. Supersedes §2 of
 [`lazily-signal-followups.md`](lazily-signal-followups.md).
 
-Two renames and one new internal trait. The renames are pure substitution — no
-wire change, no API shape change, no semantic change. The trait is a seam the
-bindings have already grown independently.
+Two renames and one new internal trait. **No semantic change** — but not a pure
+substitution: two repos ship `slot` as public API (§1), one wire variant is still
+named `SlotValue` (§13), and the affected surface is ~12,000 sites across nine
+repos. The trait is a seam the bindings have already grown independently.
+
+**Revised 2026-07-20 after review.** An earlier draft claimed "no wire change, no
+API shape change" and rated the risk low. All three were wrong; §1, §10 and §13
+carry the corrections.
 
 ---
 
@@ -25,7 +30,25 @@ bindings have already grown independently.
 
 **The constructor does not move.** Today `ctx.memo(f)` returns a `Slot` — the
 type/constructor mismatch that started this. The type moves to meet the
-constructor, not the reverse. That is the minimum edit that resolves it.
+constructor, not the reverse.
+
+**But this is NOT a pure internal rename, and an earlier draft of this plan said
+it was.** `lazily-js` ships three constructor aliases publicly
+(`src/reactive.d.ts:71-73`): `computed()`, `slot()`, and `memo()`, all returning
+`SlotHandle` — plus `disposeSlot()` (`:91`). So `ctx.slot()` and `disposeSlot()`
+are **published npm API**, and removing them is a breaking change requiring a
+deprecation cycle, not a substitution.
+
+| repo | exposure | ordering |
+|---|---|---|
+| `lazily-js` | **public** `slot()`, `disposeSlot()`, `SlotHandle` in `.d.ts` | deprecate, don't delete |
+| `lazily-react` | **public** `useSlot` hook; imports `SlotHandle` across the package boundary | **must follow `lazily-js`** |
+| other six bindings | internal type names | independent |
+| `lazily-html` | 49 hits are the **HTML `<slot>` element** | **out of scope — do not touch** |
+
+So it is **nine repos, not eight**, with one hard ordering edge. Deprecation
+policy for the two public ones must be decided before step 1: keep `slot()` as a
+deprecated alias for one release, or take the major-version break.
 
 ---
 
@@ -249,12 +272,35 @@ the synced version.
 | semilattice join — idempotent, commutative, associative (CRDT policies) | **the ascent only.** `x_{n+1} ⊒ x_n` every step → non-decreasing chain. **Not termination.** |
 | non-idempotent — `+`, `append`, counters | no *guaranteed* fixed point. Terminates iff `f` yields the identity (`0`, empty append) |
 
+**ACC — the ascending chain condition.** Every strictly increasing chain
+
+```
+x₀ ⊏ x₁ ⊏ x₂ ⊏ …
+```
+
+is **finite**. Equivalently: there is no way to keep strictly growing forever.
+A lattice of finite height satisfies it automatically. In plain terms for a merge
+policy: *is there a bound on how many times the accumulated value can strictly
+increase before it must repeat?*
+
+| value domain | ACC | why |
+|---|---|---|
+| boolean flag `false ⊑ true` | ✅ | height 1 |
+| max over a fixed finite range | ✅ | bounded above |
+| set over a **finite** universe | ✅ | bounded by universe size |
+| G-Set / OR-Set over strings, UUIDs | ❌ | always room for a fresh element |
+| LWW with unbounded timestamps | ❌ | always a later timestamp |
+| append-only log | ❌ | always longer |
+
 **The join does not supply ACC.** Idempotence, commutativity and associativity
-imply nothing about chain height. A G-Set or OR-Set over an unbounded domain is a
-good join semilattice whose chain climbs forever if `f` keeps producing fresh
-elements; LWW over unbounded timestamps is the same. **Most CRDT policies are not
-finite-height.** So a policy declaration is not evidence that a loop over it
-terminates — ACC is a separate property of the value domain.
+constrain *how* values combine; they say nothing about how tall the lattice is. A
+G-Set over an unbounded domain is a perfectly good join semilattice whose chain
+climbs forever if `f` keeps producing fresh elements. **Most CRDT policies are
+not finite-height** — which is by design, since a CRDT that could only grow
+finitely would be a poor replicated set.
+
+So a policy declaration is not evidence that a loop over it terminates. ACC is a
+separate property of the **value domain**, and it is the caller's to establish.
 
 **Not the classical dataflow result.** Kleene/MFP requires a monotone transfer
 function and delivers the *least* fixed point. This reaches *a* fixed point, with
@@ -313,10 +359,11 @@ does not rename like source does. Measured 2026-07-20.
 
 ### 9.1 What is already neutral
 
-**The derivation op is already `computed`, not `slot`.** The op vocabulary is
-`cell`, `computed`, `effect`, `read`, `set_cell`, `dispose`, `batch`,
-`begin_scope`, `end_scope`, `disarm`, `churn`, `fanout`, `dispose_fanout`,
-`dispose_stale_handle`, `signal`, `dispose_signal`.
+**The derivation op is already `computed`, not `slot`.** The 18 ops in
+`_REACTIVE_GRAPH_OPS` are `cell`, `computed`, `effect`, `read`, `set_cell`,
+`dispose`, `batch`, `begin_scope`, `end_scope`, `disarm`, `churn`, `fanout`,
+`dispose_fanout`, `dispose_stale_handle`, `subscribe`, `unsubscribe` (retired
+observer ops), `signal`, `dispose_signal`.
 
 So the corpus never adopted `slot` as an op name, and the rename touches **no op
 that describes the derivation**. That is a large piece of luck.
@@ -327,8 +374,8 @@ that describes the derivation**. That is a large piece of luck.
 |---|---|---|
 | `signal` op → `eager_memo` | 1 op, 3 fixtures, **8 runners** | flag day, see 9.3 |
 | `dispose_signal` op → `dispose_eager_memo` | 1 op, 1 fixture, **8 runners** | flag day |
-| literal "slot" in fixture prose / node ids | **47 occurrences**, ~10 fixtures | spans `reactive-graph`, `delta`, `reliable-sync`, `materialization`, `collections` — descriptive text and some node ids, no semantics |
-| `_REACTIVE_GRAPH_OPS` allowlist | 1 file | `tests/test_schema_conformance.py` |
+| literal "slot" in fixture prose / node ids | **47 occurrences, 13 files** | 8 in `reactive-graph/`, 2 in `materialization/`, 1 each in `collections/` and `reliable-sync/`, plus top-level `delta_*` — descriptive text and some node ids, no semantics |
+| `_REACTIVE_GRAPH_OPS` allowlist | 1 file | `tests/test_schema_conformance.py` — needs the eager rename **and** a new `merge` op, which is not currently in the allowlist |
 | new `MergeCell`-fed-from-a-reactive fixtures | **4 new** | §7 properties, currently unfixtured |
 
 ### 9.3 Op renames are a flag day — plan for it
@@ -393,33 +440,65 @@ op. The counting machinery already exists in all eight runners from
 
 ## 10. Execution
 
-**Order matters** — spec first so the bindings have a target, fixtures before
-bindings so red-first works.
+**Two independent tracks.** An earlier draft bundled them and produced an
+unachievable gate — step 1 required `make check` green on fixtures using a
+`merge` op no runner implements. They are now separate and can proceed in
+parallel.
 
-1. **Spec + fixtures.** Rename in `reactive-graph.md`, `cell-model.md`,
-   `protocol.md`, `coverage.json`, and the 114 fixtures. Add the four
-   `MergeCell`-fed-from-a-reactive fixtures (§9.4) while the prose is
-   fresh. `make check` green.
-2. **Formal.** `LazilyFormal/Signal.lean` → the eager-memo naming;
-   `Reactive.lean` prose. `lake build` clean, no `sorry`.
-3. **Reference binding.** `lazily-rs` — type, handles, `SlotMap`, `eager_memo`,
-   plus the `Dependent` trait as an internal seam. Full corpus green on all three
-   contexts.
-4. **Remaining seven, in parallel** — separate repos, so agents do not collide.
-   **One agent per repo, never two.** Each replays the full corpus and reports
-   counts as proof it ran.
-5. **Blog.** Both posts. See §11.
-6. **Superproject pointers, then deploy.**
+### Track A — the rename
 
-**Gates at every step:**
+Ordering is driven by §9.3's **dual-accept** recommendation, which requires
+runners to accept the new op *before* any fixture emits it. An earlier draft
+sequenced fixtures first, which is the lockstep flag day §9.3 says to avoid.
 
-- The corpus must print its fixture counts. A green suite in an unfamiliar
+1. **Decide the two open policy questions** (§1, §13): deprecation for
+   `lazily-js`'s public `slot()` / `disposeSlot()`, and `SlotValue` — leave the
+   seam or break the wire.
+2. **Spec prose only** — no fixture op changes yet. `docs/reactive-graph.md`,
+   root `cell-model.md` and `protocol.md` (**mind the `docs/` symlinks — do not
+   double-edit**), `README.md`, `coverage.json`, `book/`, `examples/`. `make
+   check` green.
+3. **Formal.** **19 files**, not 2. `AsyncSlotState.lean` (74 hits) is a **file
+   rename**. `Signaling.lean` and `SignalingRoster.lean` are **WebRTC signaling —
+   semantically unrelated, do not touch.** `lake build` clean, no `sorry`.
+4. **All nine runners dual-accept** `signal` **and** `eager_memo`. ~3 lines each.
+   Corpus stays green throughout; no fixture has changed yet.
+5. **Flip the fixtures** to `eager_memo` / `dispose_eager_memo`, plus the 47
+   prose occurrences across 13 files. Corpus green everywhere on the first run,
+   because step 4 already landed.
+6. **Reference binding** `lazily-rs` — type, handles, `SlotMap`, `eager_memo`,
+   and the `Dependent` trait as an internal seam. ~8,400 sites: use a mechanical
+   substitution, having first confirmed no slab/arena sense of "slot" exists
+   (verified zero hits today). Include `benches/` — they feed `BENCHMARKS.md`
+   and `#lzbenchver` gates on drift.
+7. **`lazily-js`**, honouring the deprecation decision from step 1.
+8. **`lazily-react`** — depends on step 7 for `MemoHandle` types.
+9. **Remaining six in parallel** — separate repos, **one agent per repo, never
+   two**. Each replays the full corpus and prints counts as proof it ran.
+10. **Drop the deprecated op alias** a release later.
+11. **Blog** (§11), then superproject pointers, then deploy.
+
+### Track B — the MergeCell fixtures
+
+Independent of the rename; do not bundle. Needs new runner surface.
+
+1. Add the `merge` op and a cell policy parameter to `_REACTIVE_GRAPH_OPS` —
+   **`merge` is not currently in the allowlist.**
+2. Implement the op in all nine runners.
+3. Land the four §9.4 fixtures, mutation-verified.
+4. Add a re-entry-bound fixture per §8.1: a divergent loop must report exhaustion
+   rather than hang, testable with a bounded iteration count. **Currently
+   unmeasured in every binding.**
+
+### Gates, both tracks
+
+- **The corpus must print its fixture counts.** A green suite in an unfamiliar
   environment is an empty suite until it says how much it ran — an isolated
   worktree silently skipped the entire corpus at exit 0 on 2026-07-20.
-- RTK filters `go test` output; use `rtk proxy go test -v` to see counts, and
+- **RTK filters `go test` output.** Use `rtk proxy go test -v` for counts, and
   capture `$?` directly rather than through a pipe.
-- No fixture, spec clause, or assertion is weakened to make a binding pass. A
-  reported divergence is a successful outcome.
+- **Nothing is weakened to make a binding pass.** A reported divergence is a
+  successful outcome.
 
 ---
 
@@ -466,10 +545,54 @@ bundling is how a rename becomes a spiral.
 
 ## 13. Risk
 
-**Low, and lower than it looked.** No wire change (`slot_id` was already retired
-in favor of a kind-agnostic `node`/`NodeId`, and is actively rejected by the
-schema). No constructor change. No semantic change. No public API shape change
-beyond type names.
+**Not low. An earlier draft said "low, and lower than it looked" — that was
+wrong on three counts**, all found in review.
 
-The real risk is **scope creep** — every alternative in §11 is more interesting
-than the rename, and none of them belongs in it.
+**Volume.** Word-boundary `slot` occurrences per repo:
+
+| repo | sites | | repo | sites |
+|---|---|---|---|---|
+| `lazily-rs` | **8408** | | `lazily-kt` | 370 |
+| `lazily-py` | 1116 | | `lazily-js` | 276 |
+| `lazily-zig` | 851 | | `lazily-cpp` | 275 |
+| `lazily-dart` | 530 | | `lazily-react` | 39 |
+| `lazily-go` | 378 | | | |
+
+~12,000 sites. In `lazily-rs` the density is `src/context.rs` (174),
+`src/thread_safe.rs` (168), `tests/spec_compliance.rs` (161),
+`src/async_context.rs` (143), plus `benches/context.rs` (30) and
+`benches/async_context.rs` (24) — **benchmarks feed `BENCHMARKS.md`, and
+`#lzbenchver` already gates on version drift.** A mechanical strategy is
+required, not a per-file pass.
+
+Mitigating: a search for slab/arena-index senses of "slot" in `lazily-rs`
+(`free_slot`, `slot_index`, `slots[`, `slab`) found **zero hits**, so the
+substitution is cleaner than the count suggests. Verify the same per binding
+before starting.
+
+**Public API.** Two repos ship `slot` publicly (§1). This is a breaking npm
+change, not a rename.
+
+**Wire vocabulary.** `slot_id` is genuinely retired and actively rejected — that
+claim held. But the delta format still carries a live variant named `SlotValue`
+(`schemas/delta.json:34,109`; 10 references in `protocol.md`), and
+`protocol.md:206` already mixes vocabulary: "**Memo** equality suppression: a
+dirty `memo()` … emits no `SlotValue`". **Decide explicitly:**
+
+- (a) leave `SlotValue` — permanent wire-level seam, contradicts §11.3's "the
+  family stopped shipping the name"; or
+- (b) rename it — a breaking wire change across all bindings **plus `agent-doc`'s
+  IPC**, which consumes this format.
+
+Not deciding is not an option; the earlier "no wire change" headline hid it.
+
+**Docs.** `lazily-spec` alone: `README.md` (18.6K), `coverage.json`, `book/`,
+`examples/`, and 30+ files under `docs/` including `reactive-graph.md` (68K) and
+`relaycell-backpressure-analysis.md` (36K). Note `cell-model.md` and
+`protocol.md` live at repo root with symlinks in `docs/` — **an agent doing
+path-based edits must not double-edit through both paths.**
+
+**The real risk remains scope creep.** Every alternative in §12 is more
+interesting than the rename, and none belongs in it. §10 previously violated this
+itself by scheduling the new `MergeCell` fixtures inside the rename step; that is
+now split into an independent track.

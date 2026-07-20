@@ -785,7 +785,7 @@ Fixed in `56f5a2390`. The item had already narrowed this to exactly one test and
 The invariant the test exists to protect is that the lease was refreshed **from the matching live supervisor**, and that is already asserted by `runtime_state`, `supervisor_pid`, and `supervisor_socket` immediately above. The count assertion adds nothing on top of those except timing sensitivity. Timing can produce *more* transitions than the two the test drives but never fewer, so the lower bound is the honest assertion, with the reasoning recorded inline so nobody tightens it back to `==` later.
 
 Marking done: this was the last known flake, the three earlier fixes (git-io `ScopedCurrentDir` lock, the `PROCESS_SERVES_RELAY_HUB` global, the crate-wide liveness-plane assertion) are already landed, and `make check` is green at 7798 tests. If a different flake surfaces later it is a new instance, not this one — the shared-global class this item was really about is closed.
-<!-- agent:boundary:2c67e205 -->
+<!-- agent:boundary:e43c0f52 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -844,7 +844,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ do [#qactsync]
 - ⏭️ do [#ftimmediate]
 - ⏭️ do [#qeditrace]
-- do [#jbcompactcommit]
+- ⏭️ do [#jbcompactcommit]
 - do [#tmuxsynccrashlog]
 - do [#60ev]
 - do [#2y8j]

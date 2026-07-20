@@ -136,18 +136,14 @@ Also added payload validation for async `editor_route`, status/error coverage in
 
 Verification passed: focused controller tests, focused JetBrains tests, `cargo fmt --all -- --check`, full `make check`, `make tmux-ci`, and `make install`. The local build and JetBrains plugin 0.2.282 were installed successfully. Code commit: `6376196be`; root pointer commit: `10f6155d7`.
 
-### Re: JB Run Agent Doc latency and reliability — gpt-5
+### Re: queue completion for JB Run Agent Doc — gpt-5
 
-Implemented and installed the JetBrains Run Agent Doc latency/flakiness fix.
+> **Queue prompt:** JB `Run Agent Doc` is slow & flaky. Please optimize all contributing bottlenecks.
 
-The bottleneck was the long-lived unary `editor_command_submit` request: `editor_route` kept one controller socket handler occupied until routing reached a terminal receipt. JetBrains now submits `editor_route` through `editor_command_submit_async`, receives admission immediately, and polls a new `editor_command_status` completion endpoint from its existing background route task.
+Completed. The async admission plus terminal-status channel is implemented, tested, installed, committed, and pushed as `6376196be`. The JetBrains client still returns the real terminal result, so existing busy, queued, retry, and failure classifications are preserved.
 
-The completion channel is bounded to 256 entries with a five-minute TTL. It stores the accepted projection before worker launch and atomically replaces it with the real terminal projection and causal receipt. The plugin never treats `accepted` or `running` as success; it waits for `applied` or `rejected`, preserving the existing busy, queued, retry, and failure notification behavior.
-
-Also added payload validation for async `editor_route`, status/error coverage in Rust, JetBrains request and terminal-resolution tests, and protocol documentation. The existing client-deadline cap and socket hang guard remain in place.
-
-Verification passed: focused controller tests, focused JetBrains tests, `cargo fmt --all -- --check`, full `make check`, `make tmux-ci`, and `make install`. The local build and JetBrains plugin 0.2.282 were installed successfully. Code commit: `6376196be`; root pointer commit: `10f6155d7`.
-<!-- agent:boundary:4ddafb01 -->
+No new actionable follow-up work was created by this response.
+<!-- agent:boundary:3bafb85d -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -155,8 +151,8 @@ Verification passed: focused controller tests, focused JetBrains tests, `cargo f
 - ~~do [#fixcrdtmerge]~~
 - 🚧 JB `Run Agent Doc` is slow & flaky. Please optimize all contributing bottlenecks.
 - ⏭️ do [#c8tb]
-- do [#libgcpidrace]
-- do [#hubregistryevict]
+- ⏭️ do [#libgcpidrace]
+- ⏭️ do [#hubregistryevict]
 - do [#missingreplicarebuild]
 - ~~do [#jbrouteasyncchannel]~~
 - do [#authoritydescentstd]

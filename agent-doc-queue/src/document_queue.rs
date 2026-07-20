@@ -1663,11 +1663,31 @@ fn rewrite_queue_tag_attrs(tag: &str, keep: impl Fn(&str) -> bool) -> String {
     let Some((tokens, tail)) = queue_tag_tokens(tag) else {
         return tag.to_string();
     };
+    // `#a2zx`: dedup repeated BOOLEAN flags while rebuilding.
+    //
+    // Normalization turns `key=true` into a bare `key`, but nothing collapsed a
+    // flag that was already present, so any writer appending an existing flag
+    // accumulated it permanently — the live document grew
+    // `<!-- agent:queue priority preset="..." priority go -->` and
+    // `<!-- agent:backlog priority priority queue -->`. A boolean flag is
+    // idempotent by definition: a repeat carries no information, so keep the
+    // first occurrence and drop later ones.
+    //
+    // Only bare flags are deduped. A repeated `key=value` may be a real
+    // conflict (two different values), so those are left alone rather than
+    // silently resolved to the first.
+    let mut seen_flags = std::collections::HashSet::new();
     let tokens = tokens
         .into_iter()
         .filter_map(|token| {
             let normalized = normalize_queue_tag_token(&token);
-            keep(queue_tag_token_key(&normalized)).then_some(normalized)
+            if !keep(queue_tag_token_key(&normalized)) {
+                return None;
+            }
+            if !normalized.contains('=') && !seen_flags.insert(normalized.clone()) {
+                return None;
+            }
+            Some(normalized)
         })
         .collect::<Vec<_>>();
     format!("<!-- {} -->{}", tokens.join(" "), tail)
@@ -4887,6 +4907,43 @@ mod tests {
         let act = resolve_activation(&entries, false, false, false);
         assert!(!act.active);
         assert!(act.trigger.is_none());
+    }
+
+    #[test]
+    /// `#a2zx`: repeated boolean flags accumulate permanently because nothing
+    /// collapsed a flag that was already present. These are the exact malformed
+    /// tags the live `agent-doc-bugs2.md` grew.
+    #[test]
+    fn normalize_queue_tag_attrs_dedups_repeated_boolean_flags() {
+        assert_eq!(
+            normalize_queue_tag_attrs(
+                "<!-- agent:queue priority preset=\"#spec-test\" priority go -->"
+            ),
+            "<!-- agent:queue priority preset=\"#spec-test\" go -->",
+            "a repeated flag must collapse, preserving first-occurrence order"
+        );
+        assert_eq!(
+            normalize_queue_tag_attrs("<!-- agent:backlog priority priority queue -->"),
+            "<!-- agent:backlog priority queue -->"
+        );
+        // `key=true` normalizes to a bare flag, so it must dedup against one.
+        assert_eq!(
+            normalize_queue_tag_attrs("<!-- agent:queue priority priority=true go -->"),
+            "<!-- agent:queue priority go -->"
+        );
+        // Idempotent: a clean tag is unchanged.
+        assert_eq!(
+            normalize_queue_tag_attrs("<!-- agent:queue priority go -->"),
+            "<!-- agent:queue priority go -->"
+        );
+    }
+
+    /// A repeated `key=value` may be a genuine conflict between two different
+    /// values, so it must NOT be silently resolved to the first.
+    #[test]
+    fn normalize_queue_tag_attrs_leaves_repeated_valued_attrs_alone() {
+        let tag = "<!-- agent:queue preset=\"#a\" preset=\"#b\" -->";
+        assert_eq!(normalize_queue_tag_attrs(tag), tag);
     }
 
     #[test]

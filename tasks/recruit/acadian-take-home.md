@@ -444,7 +444,33 @@ The section that earns the overlay is **Mouse**. The gestures are conventional b
 `make check` green: 33 backend, mypy clean, 73 frontend (7 new), typecheck, build. SPEC.md and README updated.
 
 Pushed `6f1083d`; gitlink `187b08baa`.
-<!-- agent:boundary:8066ae7f -->
+
+### Re: email draft (restored) — opus-4-8
+
+Re-adding this because the earlier copy was lost. It was written into the working tree but never reached a commit, and the `ours-wins` CRDT merge dropped it when the wedged cycle finally landed. Confirmed against git history: no commit of this document has ever contained it. The `Re: README feature list` response was lost the same way — that work itself is committed as `300b273`, only the write-up is gone.
+
+**To:** Philip Prabhu <philipu@boston-technology.com>
+**Subject:** MAG7 Return Viewer — take-home submission
+
+Hi Philip,
+
+My take-home for the Acadian Full Stack Engineer role is ready:
+
+https://github.com/btakita/mag7-viewer
+
+It is a FastAPI + pandas backend serving daily percentage returns for the MAG7 names, and a React 18 + TypeScript frontend with one interactive chart per ticker, a date-range picker, per-ticker statistics, and a sortable cross-ticker summary table.
+
+The README covers setup, how to run both halves, and the assumptions I made. `make check` runs the full suite: backend tests and mypy, frontend tests, typecheck, and a production build.
+
+Happy to walk through any of it.
+
+Best,
+Brian
+
+---
+
+Not saved to Drafts and not sent. The newest message in the Philip thread locally is 26 May and there is no take-home assignment email in the mail corpus, so I could not confirm the recipient or whether this should thread onto something newer.
+<!-- agent:boundary:adc6b253 -->
 <!-- /agent:exchange -->
 
 ## Queue

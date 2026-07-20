@@ -495,7 +495,30 @@ Proposal only — nothing implemented. (My earlier answer to this was in one of 
 So: **master slider + preset chips**, with the tier distinction treated as a requirement rather than polish.
 
 Say the word and I will implement it — spec, tests, commit, push.
-<!-- agent:boundary:16717700 -->
+
+### Re: master range slider — opus-4-8
+
+> **Queue prompt:** do [#proposeablequickly]
+
+Built the proposal: a master range slider plus preset chips (`1M · 3M · 6M · YTD · 1Y · 5Y · Max`). The fetched range now has a mouse path — until now the chart drag and card sliders only zoomed within data already loaded.
+
+The tier distinction I flagged as the main design risk is treated as a requirement: the master slider is labelled, taller, has year ticks, and shows its dates. Card sliders have none of that. Built from two native range inputs, so arrows and Home/End work without reimplementing them.
+
+Date maths is UTC day offsets throughout — local-time `Date` arithmetic shifts by a day either side of a DST boundary, which would read as a range that drifts when you drag it. There is a regression test pinned on the 2026-03-08 boundary.
+
+**Two bugs I found by driving it, not by reading it:**
+
+- **`Max` resolved to the same range as `5Y`**, so clicking Max highlighted 5Y. Fixed by making the span nine years — not ten, because the API rejects ranges over `365 * 10` days and ten calendar years is 3652. A test now asserts no preset can ask for a range the backend would reject, which pins the frontend to the backend's cap.
+- **The minimum window was two days**, which lands on a weekend often enough to have no complete trading day — so the slider could drag itself into a 502. Now seven days, so every reachable slider position is a request that succeeds. Verified: collapsing the handles yields `2026-07-13 … 2026-07-20` with no error, where before it produced `2026-07-18 … 2026-07-20` and an error banner.
+
+**Verified live:** every preset drives a real refetch (`1M`, `YTD`, `1Y`, `Max` all return seven cards with correct dates and no error), dragging a handle sets an arbitrary range and clears the active chip, and `Max` now spans 2017-07-20 → 2026-07-20 and is accepted by the backend.
+
+`make check` green: 33 backend, mypy clean, 93 frontend (27 new), typecheck, build. SPEC.md and README updated.
+
+Pushed `46c010c`; gitlink `c51cd05e0`.
+
+One note on process: `agent-doc preflight` failed closed twice this cycle trying to re-apply a stale 2,314-byte orphaned response that is already committed, so I worked from the committed document and closed out through `respond`, which reopens a cycle on its own. I did not touch `.agent-doc/` state to clear the orphan — that is another repo's tooling and not mine to hand-edit.
+<!-- agent:boundary:b8d122eb -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -520,9 +520,25 @@ The useful priority boundary is each client’s bounded outbound queue:
 - initial chat-history frames and presence snapshots are bulk;
 - a pending frame’s scheduling age starts when its first item is added, not from the messages’ historical timestamps;
 - appending or merging later items never resets that age, so steady live traffic cannot starve the frame.
+- Added split-handshake, liveness-node, pool ordering, pool saturation, and deferred fragmented-message coverage; updated the transport documentation.
+- Buffered HTTP upgrade headers across TCP segments, capped at 16 KiB, and preserved same-segment WebSocket bytes for `Conn.Feed`.
+- Moved complete application-message decode and routing off the poller through a shared, nonblocking `ants` pool. Each connection has a bounded serial drain, so messages stay ordered; saturation sheds that connection instead of blocking the poller.
+- Replaced the `OnTick` live-connection scan with one `antlabs/timer` timing-wheel node per upgraded connection. `OnTick` is now O(1) and only signals readiness.
 
 That narrow two-lane policy with aging is worth keeping. A separate ingress or global fan-out priority scheduler is not worth the complexity without measured evidence that it is needed.
-<!-- agent:boundary:c77a9068 -->
+### Re: haiven-websocket-hub gnet transport O(1)-scale refinements
+
+Implemented the gnet transport scale refinements in `src/haiven-websocket-hub`.
+
+- Replaced the `OnTick` live-connection scan with one `antlabs/timer` timing-wheel node per upgraded connection. `OnTick` is now O(1) and only signals readiness.
+- Moved complete application-message decode and routing off the poller through a shared, nonblocking `ants` pool. Each connection has a bounded serial drain, so messages stay ordered; saturation sheds that connection instead of blocking the poller.
+- Buffered HTTP upgrade headers across TCP segments, capped at 16 KiB, and preserved same-segment WebSocket bytes for `Conn.Feed`.
+- Added split-handshake, liveness-node, pool ordering, pool saturation, and deferred fragmented-message coverage; updated the transport documentation.
+
+Verification: `make check` passes, including `go vet`, `go test -race ./...`, and all builds.
+
+Commits: `f245f69` in the hub and `d08d39e0e` for the parent gitlink.
+<!-- agent:boundary:816429d8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -535,15 +551,15 @@ That narrow two-lane policy with aging is worth keeping. A separate ingress or g
 - ~~/goal Implement backlog item(s): #yyzn~~
 - ~~do [#friendsnapshot]~~
 - ~~do [#yyzn-clarify]~~
-- 🚧 do [#haivenwsopt]
-- do [#tnpa]
+- ⏭️ do [#haivenwsopt]
+- 🚧 do [#tnpa]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] 🚧 [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
-- [ ] [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
+- [ ] [#haivenwsopt] haiven-websocket-hub gnet transport O(1)-scale refinements: swap the OnTick liveness sweep for an antlabs/timer per-conn timing wheel; run message dispatch through a panjf2000/ants pool as a poller-goroutine guard; harden the WS handshake for fragmented-across-TCP-segments upgrades (currently single-segment). [recommended]
+- [ ] 🚧 [#tnpa] [recommended] Build the Track C load-test harness for haiven-websocket-hub: simulate unreliable-network clients (drops, slow consumers, reconnect storms), sustained + burst fan-out, kill one downstream mid-test; assert latency SLO holds, memory tracks connection count, and slow consumers get shed without collateral damage (design §9).
 <!-- /agent:backlog -->
 
 ## Icebox

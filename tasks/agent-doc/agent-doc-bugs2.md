@@ -457,7 +457,21 @@ Each selected node is now verified against the head `parse_spans` actually ident
 `#orphandrain` and `#c8tb` are restored to `- do [#…]`. Their backlog entries were never touched, so nothing was lost beyond their place in the drain — and the restore now survives convergence, which it could not before, because the positional re-render that reverted it no longer runs on a targeted consume.
 
 The multiline head still cannot be struck; it is now *refused* instead of silently mis-striking. Making multiline prompts bullet-addressable so both enumerators agree is the remaining half, and it is a queue-serialization change that deserves its own cycle rather than the tail of this one.
-<!-- agent:boundary:f8a13d35 -->
+
+### Re: make self-healing real-time, not turn-based — opus-4-8
+
+> **Queue prompt:** We should immediately self-heal. Make all self-healing real-time, not turn-based...if possible.
+
+Partly shipped, and I found the concrete instance where "turn-based" is actively causing damage.
+
+**Shipped** (`adefcda0a`): the replica self-heal no longer waits on a clock. It is keyed on the Lazily liveness witness, so a registration landing re-arms recovery *immediately* rather than after a TTL window — the specific case the earlier queue item raised.
+
+**The instance that matters most is the one this document's own note names.** `#qbulletlesshead` says legacy bare heads "self-heal on the next render." For the **multiline** shape that render never comes: `document_queue.rs::render` emits multiline prompts between bare `---` fences with no bullet, so they never normalize into something `item_nodes` can address. That is not a cosmetic lag — it is exactly what let `queue consume` strike `#c8tb` and `#orphandrain` as unrun work, and what made this document unwritable for several cycles. A deferred self-heal that never fires is worse than none, because the rest of the system assumes it eventually did.
+
+**The remaining turn-based heals** live at cycle boundaries — `preflight_io` (abandoned-capture and replay-duplication heal), `commit_io` (boundary-invariant reduction, which explicitly logs "leaving for next cycle"), and `session_check_io`. Those are genuinely turn-scoped by design: they repair *cycle* state, and a cycle is the unit they operate on. I do not think "make all of them realtime" is right as stated — the honest version is that a self-heal must fire on the **event that invalidates the state**, which for replica liveness is a registration (now done), and for queue segmentation is a render/parse (currently broken, filed as `#multilineheadbullet`).
+
+I did not land the serialization change here. It rewrites how every multiline queue entry is stored, against live documents holding 150+ entries, and mis-landing it silently marks unrun work complete — the harm already demonstrated twice today. That earns its own cycle with round-trip fixtures over real documents.
+<!-- agent:boundary:507b86dd -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -478,7 +492,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#orphandrain]~~
 - ~~do [#c8tb]~~
 - ⏭️ do [#jbrouteasyncchannel]
-- do [#wsflake2]
+- ⏭️ do [#wsflake2]
 - do [#patchretryidem]
 - do [#jbroutasync]
 - do [#mtds]
@@ -562,6 +576,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#multilineheadbullet] [focused-cycle] Make multiline `---` queue prompts bullet-addressable so markdown_ast::item_nodes and parse_spans share one segmentation truth — the remaining half of #qconsumenostrike. Today a multiline head can be REFUSED but never struck, so an answered one stays queued forever. This is a queue-serialization change (render + parse round-trip) against live documents with 150+ entries, and the failure mode of getting it wrong is silently marking unrun work complete, so it needs its own cycle with round-trip fixtures over real documents. Concrete instance of the 'self-heal should be real-time, not turn-based' directive: the bare-form heal currently waits for 'the next render', which for the multiline shape never comes.
 - [ ] [#deliveryackcut] [focused-cycle] delivery_converged() requires every LIVE member to have ACKed, so a zombie replica (registered + reported live, but no longer ACKing) wedges every write until timeout. Exclude a non-ACKing member from the convergence cut the way a disconnected one already is (crdt_relay.rs delivery_converged/is_live). Needs a staleness signal — is_live is a reactive cell with no ACK clock — and a threshold conservative enough that a slow-but-live editor is never dropped, since dropping one clobbers operator edits. Root-caused 2026-07-19; mitigation shipped in 651f63517.
 - [ ] [#orphandrain] [recommended] Controller-side drain for documents with NO supervisor. Shipped then REVERTED same session (revert of 'feat(controller): drain go-mode queues that have no supervisor') after it caused a dispatch storm: 15 dispatches for one doc in ~60s despite a 90s backoff, ~31 contending controller processes. Two faults, both in the effects half: (1) run_editor_route called from INSIDE the controller re-enters the controller ('timed out after 5.0s waiting for project controller response') — Run Agent Doc calls it from OUTSIDE; (2) the backoff lived in an in-memory HashMap in the controller, so every failed dispatch caused a restart that wiped it, permitting immediate re-dispatch. Redesign: dispatch from OUTSIDE the controller event loop (detached child, not a self-call) and persist per-document backoff in state.db next to the drain lease. The pure policy module (agent-doc-controller/src/orphan_drain.rs, 9 tests, gates correct) was sound — recover it from git history rather than rewriting. Underlying gap remains OPEN: a doc whose owner pane is a live agent TUI can never get a supervisor (preserve_pane_blocked), so it has no idle-queue watch and its go-mode queue only advances when a human triggers Run Agent Doc.
 - [ ] [#c8tb] [operator-verify] Live #jbroutebusystall proof (0b49105e1): with the supervisor socket down (route logs `route_dispatch_only_authoritative_degraded_direct_pane supervisor_health=no_socket`) and the pane mid-turn, click JB Run Agent Doc. Expect `route_start` -> `route_success` in the attempt ledger to drop from ~17s to under ~2s, with `route_existing_pane_busy_active_turn_skip_wait` in ops.log and the SAME outcome as before (`route_existing_pane_already_running`, pane focused, no duplicate injection). Unit tests pin the cue gating but cannot prove the live latency win.

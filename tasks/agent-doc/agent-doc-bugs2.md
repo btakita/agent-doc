@@ -591,7 +591,7 @@ That is the whole mechanism: nothing is interrupting the turn on agent-doc's sid
 **Gated rather than fixed, because the fix collides with a known guard.** The obvious change — for a busy Claude pane, send text without `Enter` so it queues as steering — lands the trigger as an unsubmitted draft, which is precisely the shape `#jbtsiftnosub2` teaches route to treat as *stranded* and resubmit once with a bare `Enter`. That resubmit would re-interrupt the turn, so the two behaviors have to be reconciled deliberately: route needs to distinguish "deliberately queued steering for a busy pane" from "a fresh pane that failed to submit". Both currently look identical.
 
 The item is no longer NOT STARTED and no longer unverified; it needs a design decision on that interaction, with the busy/fresh distinction as the crux.
-<!-- agent:boundary:59f46e99 -->
+<!-- agent:boundary:779aabe0 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -631,7 +631,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#ay80]~~
 - ⏭️ do [#syncfocuslag]
 - ~~do [#jbrunsteering]~~
-- do [#crdtpushdrainverify]
+- ⏭️ do [#crdtpushdrainverify]
 - 🚧 do [#supboundarylivelock]
 - do [#statedbvacuum]
 - do [#qdonestrikeverify]

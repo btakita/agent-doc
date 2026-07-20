@@ -212,15 +212,12 @@ Three early samples in an initial sweep looked anomalous; they were at x = 10/20
 `make check` is green: 33 backend tests (4 new), mypy clean, 42 frontend tests (10 new), typecheck, production build. README updated for the new payload shape.
 
 Pushed as `f7f4fa3` + `2a26971` on `btakita/acadian-take-home`; superproject gitlink at `662c1fec1`.
-<!-- agent:boundary:1d6f93fb -->
+<!-- agent:boundary:16225d5d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
-- ~~do [#backendsilentlydrops]~~
-- The tooltips are "dancing" around when I move the mouse over the line graph. Please keep the tooltips anchored to the mouse and with a fixed reference point (no dancing). Only change the position in relation to the mouse when the viewport would otherwise cut it off.
-- The selection slidebar background is not pleasing ![img_5.png](img_5.png). Please use ui best practices to ensure the color fits well with the background.
 <!-- /agent:queue -->
 
 ## Backlog

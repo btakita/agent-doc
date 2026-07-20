@@ -209,9 +209,22 @@ as the closure body while begin/end bindings call them around it.
 - Constructor: `ctx.computed()`, with `ctx.memo()` kept as a deprecated alias for
   one release? (The type/constructor asymmetry is the reason to change it at all
   — `ctx.cell()` → `Cell` and `ctx.effect()` → `Effect` already match.)
-- Wire protocol `slot_id` — rename the serialized field, or keep it as a legacy
-  identifier with a note? **This is the expensive part** and the only piece that
-  is not a pure source change.
+- ~~Wire protocol `slot_id`~~ — **RESOLVED, no work needed.** Checked
+  2026-07-20: the wire protocol already addresses nodes with a kind-agnostic
+  `node` field typed as `NodeId` (`schemas/delta.json`), which covers Cell, Slot
+  and Effect alike. `slot_id` is not merely deprecated there but a **stale form
+  the schema actively rejects**, guarded by
+  `test_stale_snapshot_form_with_slot_id_is_rejected`. Someone already made this
+  generalization and went past `reactive_id` to plain `node`.
+
+  **So the rename has no wire component at all** — no serialized field change, no
+  compatibility break, no legacy-identifier decision. It is a pure source, docs,
+  fixtures, and prose change, which materially shrinks the risk.
+
+  The only surviving `slot_id` is in `schemas/agent-doc-state.json`, describing
+  an application-level hash in the agent-doc state projection
+  (`slot_id = fnv1a(document_hash, type_tag, entity_key)`). That is agent-doc's
+  vocabulary, not lazily's node addressing, and is a separate decision.
 
 **Scope:** 8 bindings, spec prose, 114 fixtures, the Lean model, both blog posts,
 the wire protocol.

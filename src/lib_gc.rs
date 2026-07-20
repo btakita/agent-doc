@@ -107,6 +107,10 @@ pub fn resolve_lib_dir() -> Result<PathBuf> {
 }
 
 pub fn gc_libs(lib_dir: &Path) -> Result<GcResult> {
+    gc_libs_with_pid_alive(lib_dir, is_pid_alive)
+}
+
+fn gc_libs_with_pid_alive(lib_dir: &Path, pid_alive: impl Fn(u32) -> bool) -> Result<GcResult> {
     let symlink_path = lib_dir.join(platform_lib_name());
     let current_target = if symlink_path.is_symlink() {
         std::fs::read_link(&symlink_path).ok()
@@ -144,7 +148,7 @@ pub fn gc_libs(lib_dir: &Path) -> Result<GcResult> {
             let lock_name = lock_entry.file_name();
             let lock_str = lock_name.to_string_lossy();
             if let Some(pid) = is_pid_lock(&lock_str, &name_str) {
-                if is_pid_alive(pid) {
+                if pid_alive(pid) {
                     live_pids.push(pid);
                 } else {
                     dead_locks.push(lock_entry.path());
@@ -273,11 +277,10 @@ mod tests {
         let v2_name = crate::lib_install::versioned_lib_name("2.0.0");
         create_symlink(tmp.path(), &v2_name);
 
-        // Lock with current process PID (always alive)
         let my_pid = std::process::id();
         write_pid_lock(&v1, my_pid);
 
-        let result = gc_libs(tmp.path()).unwrap();
+        let result = gc_libs_with_pid_alive(tmp.path(), |pid| pid == my_pid).unwrap();
 
         assert!(v1.exists());
         assert!(result.libs_removed.is_empty());
@@ -293,11 +296,12 @@ mod tests {
         let v2_name = crate::lib_install::versioned_lib_name("2.0.0");
         create_symlink(tmp.path(), &v2_name);
 
-        // Lock with a PID that's almost certainly dead
-        let dead_pid = 99999u32;
+        // Deliberately use the live test process PID: the injected probe, not
+        // ambient process-table timing or PID reuse, defines this fixture.
+        let dead_pid = std::process::id();
         let lock = write_pid_lock(&v1, dead_pid);
 
-        let result = gc_libs(tmp.path()).unwrap();
+        let result = gc_libs_with_pid_alive(tmp.path(), |_| false).unwrap();
 
         assert!(!v1.exists());
         assert!(!lock.exists());

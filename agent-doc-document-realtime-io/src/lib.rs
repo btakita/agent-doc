@@ -792,7 +792,7 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
                         let intent_id = ensure_deferred_document_write_intent(
                             path,
                             &projection_base,
-                            content,
+                            &text,
                             "serialized_atomic_write_editor_save_pending",
                             DocumentWriteDeferredReason::CrdtDeliveryAckPending,
                         )?;
@@ -2056,10 +2056,66 @@ pub fn apply_canonical_replace_if_attached(
                                     }
                                 }
                             }
-                        } else {
-                            // Operator text arrived after our write. Recompute from
-                            // the original base/agent candidate against the newest
-                            // converged operator cut, then issue one new CRDT delta.
+                        } else if delivery_converged {
+                            // The editor may publish queue consumption, a new prompt,
+                            // or other operator-owned bytes while ACKing our retained
+                            // response. If semantic rebasing says that converged cut
+                            // already contains the response, accept it byte-for-byte.
+                            // Re-applying the stale whole-document target here creates
+                            // a fresh CRDT transition on every closeout retry.
+                            let editor_cut = editor_operator_cut_for_agent_rebase(
+                                file,
+                                expected_current,
+                                &relay_text,
+                                source,
+                            );
+                            let settled_target = rebase_agent_candidate_over_editor_cut(
+                                expected_current,
+                                content,
+                                &editor_cut,
+                            )
+                            .with_context(|| {
+                                format!(
+                                    "{source}: failed to verify the acknowledged editor cut for {}",
+                                    file.display()
+                                )
+                            })?;
+                            let settled_target = canonicalize_and_validate_agent_rebase(
+                                &settled_target,
+                                content,
+                                file,
+                                source,
+                            )?;
+                            if settled_target == relay_text
+                                && delivery_convergence_is_editor_visible(
+                                    live_editors,
+                                    durable_visible_write_content_proves_target(file, &relay_text),
+                                )
+                            {
+                                reconcile_deferred_write_to_acknowledged_cut_if_needed(
+                                    file,
+                                    &relay_text,
+                                    source,
+                                )?;
+                                let relay_write =
+                                    acknowledged_noop_relay_write(&relay_text, live_editors);
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_crdt_relay_semantic_noop file={} prior_target_hash={} acknowledged_hash={} live_editors={} delivery_converged=true action=accept_editor_cut_no_reapply wait_ms={}",
+                                        file.display(),
+                                        agent_doc_hash::content_hash(applied_target),
+                                        relay_write.content_hash,
+                                        live_editors,
+                                        started.elapsed().as_millis(),
+                                    ),
+                                );
+                                return Ok(Some(relay_write));
+                            }
+
+                            // Genuine operator text still leaves part of the target
+                            // unapplied. Recompute from the original base/candidate
+                            // against that cut, then issue one new CRDT delta.
                             pending_target = None;
                             pending_write = None;
                             ack_recovery.reset();
@@ -2166,6 +2222,80 @@ pub fn apply_canonical_replace_if_attached(
                                     file.display(),
                                 )));
                             }
+                        }
+
+                        if effective_target == relay_text && !delivery_converged {
+                            // The canonical already contains this exact target. A
+                            // prior delivery is still outstanding, so replay its
+                            // wakeup/ACK path without manufacturing another Yrs
+                            // transaction for identical bytes.
+                            reconcile_deferred_write_to_acknowledged_cut_if_needed(
+                                file,
+                                &effective_target,
+                                source,
+                            )?;
+                            wait_state = CrdtConvergenceState::DeliveryAckPending;
+                            if ack_recovery.wait(file, source, live_editors)?
+                                == AckRecoveryWait::ForegroundDeadline
+                            {
+                                reconcile_stalled_replicas(file, source)?;
+                                let mut relay_write =
+                                    acknowledged_noop_relay_write(&effective_target, live_editors);
+                                relay_write.delivery_converged = false;
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_crdt_relay_noop_delivery_deferred file={} content_hash={} live_editors={} delivery_converged=false action=await_existing_delivery_no_reapply timeout_ms={}",
+                                        file.display(),
+                                        relay_write.content_hash,
+                                        live_editors,
+                                        CRDT_ACK_RECOVERY_TIMEOUT_MS,
+                                    ),
+                                );
+                                return Ok(Some(relay_write));
+                            }
+                            let elapsed_ms =
+                                started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+                            let remaining_ms =
+                                CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(elapsed_ms);
+                            let sleep_for =
+                                std::time::Duration::from_millis(backoff_ms.min(remaining_ms));
+                            if !sleep_for.is_zero() {
+                                std::thread::sleep(sleep_for);
+                            }
+                            backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, false);
+                            continue;
+                        }
+
+                        if delivery_converged
+                            && effective_target == relay_text
+                            && canonical_disk_projection_is_exact(file, &effective_target)
+                            && delivery_convergence_is_editor_visible(
+                                live_editors,
+                                durable_visible_write_content_proves_target(
+                                    file,
+                                    &effective_target,
+                                ),
+                            )
+                        {
+                            reconcile_deferred_write_to_acknowledged_cut_if_needed(
+                                file,
+                                &effective_target,
+                                source,
+                            )?;
+                            let relay_write =
+                                acknowledged_noop_relay_write(&effective_target, live_editors);
+                            agent_doc_ops_log_io::log_op(
+                                file,
+                                &format!(
+                                    "{source}_crdt_relay_exact_noop file={} content_hash={} live_editors={} delivery_converged=true action=skip_compare_and_swap wait_ms={}",
+                                    file.display(),
+                                    relay_write.content_hash,
+                                    live_editors,
+                                    started.elapsed().as_millis(),
+                                ),
+                            );
+                            return Ok(Some(relay_write));
                         }
 
                         // Retain every accepted candidate before it crosses the
@@ -2305,6 +2435,41 @@ pub fn apply_canonical_replace_if_attached(
         }
         backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, false);
     }
+}
+
+fn acknowledged_noop_relay_write(
+    content: &str,
+    live_editors: usize,
+) -> agent_doc_crdt_relay_io::CpRelayWrite {
+    agent_doc_crdt_relay_io::CpRelayWrite {
+        applied: false,
+        content_len: content.len(),
+        content_hash: agent_doc_hash::content_hash(content),
+        update_bytes: 0,
+        targets: 0,
+        live_editors,
+        delivery_converged: true,
+    }
+}
+
+fn reconcile_deferred_write_to_acknowledged_cut_if_needed(
+    file: &Path,
+    acknowledged: &str,
+    source: &str,
+) -> Result<()> {
+    let acknowledged_hash = agent_doc_hash::content_hash(acknowledged);
+    if pending_document_write(file)
+        .is_some_and(|pending| !pending.target_hash.eq_ignore_ascii_case(&acknowledged_hash))
+    {
+        ensure_deferred_document_write_intent(
+            file,
+            acknowledged,
+            acknowledged,
+            source,
+            DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget,
+        )?;
+    }
+    Ok(())
 }
 
 fn agent_projection_integrity_valid(content: &str) -> bool {
@@ -6521,6 +6686,107 @@ mod tests {
         let rebased = rebase_agent_candidate_over_editor_cut(baseline, &target, &live).unwrap();
 
         assert_eq!(rebased, live);
+    }
+
+    #[test]
+    fn acknowledged_operator_cut_short_circuits_retained_response_reapply() {
+        let baseline = concat!(
+            "<!-- agent:exchange -->\n❯ Question.\n<!-- /agent:exchange -->\n",
+            "<!-- agent:queue go -->\n- do [#deleted]\n<!-- /agent:queue -->\n",
+        );
+        let target = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: Question. — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->",
+        );
+        let operator_cut = target
+            .replace("❯ Question.\n", "❯ Question.\n❯ New prompt.\n")
+            .replace("- do [#deleted]\n", "");
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-acknowledged-operator-cut-no-reapply";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            hub.apply_local(client_id, 0, baseline.chars().count() as u32, &operator_cut)
+                .unwrap();
+        })
+        .unwrap();
+        ensure_deferred_document_write_intent(
+            &file,
+            baseline,
+            &target,
+            "acknowledged_operator_cut_seed",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        std::fs::write(&file, &operator_cut)
+            .expect("simulate the acknowledged editor cut's native save");
+
+        let receipt = apply_canonical_replace_if_attached(
+            &file,
+            baseline,
+            &target,
+            "acknowledged_operator_cut_test",
+        )
+        .unwrap()
+        .expect("live editor authority should return an acknowledged receipt");
+
+        assert!(!receipt.applied, "the accepted editor cut must be a no-op");
+        assert_eq!(receipt.update_bytes, 0);
+        assert_eq!(receipt.targets, 0);
+        assert!(receipt.delivery_converged);
+        assert_eq!(
+            receipt.content_hash,
+            agent_doc_hash::content_hash(&operator_cut)
+        );
+        let pending = pending_document_write(&file)
+            .expect("native-save recovery must retain the accepted editor cut");
+        assert_eq!(pending.target_content, operator_cut);
+    }
+
+    #[test]
+    fn identical_target_waits_for_existing_delivery_without_reapply() {
+        let baseline =
+            "# Session\n\n<!-- agent:exchange -->\n❯ Question.\n<!-- /agent:exchange -->\n";
+        let target = baseline.replace(
+            "<!-- /agent:exchange -->",
+            "### Re: Question. — gpt-5\n\nAnswered.\n<!-- /agent:exchange -->",
+        );
+        let (_dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-identical-target-existing-delivery";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let initial = agent_doc_crdt_relay_io::apply_cp_write_for_file(
+            &file,
+            baseline,
+            &target,
+            "identical_target_initial_write",
+        )
+        .unwrap()
+        .expect("initial write should use the relay");
+        assert!(initial.applied);
+        assert!(!initial.delivery_converged);
+        let ack = ack_crdt_deliveries(
+            file.clone(),
+            identity,
+            1,
+            std::time::Duration::from_millis(100),
+        );
+
+        let receipt =
+            apply_canonical_replace_if_attached(&file, baseline, &target, "identical_target_retry")
+                .unwrap()
+                .expect("existing delivery should converge");
+        ack.join().unwrap();
+
+        assert!(!receipt.applied);
+        assert_eq!(receipt.update_bytes, 0);
+        assert_eq!(receipt.targets, 0);
+        assert!(receipt.delivery_converged);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
     }
 
     #[test]

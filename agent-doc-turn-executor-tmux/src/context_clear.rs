@@ -746,6 +746,7 @@ mod tests {
     }
 
     #[test]
+    #[test]
     fn operator_interrupt_key_plan_omits_ctrl_g_for_codex_composer() {
         // #codex-interrupt-clear-ctrl-g-opens-editor: C-g opens the external
         // editor (nvim) in the Codex composer, so the normal interrupt path must

@@ -525,7 +525,11 @@ fn report_supervisor_replacement_outcome(file: &Path, background_started: bool) 
         "[session] warning: without a supervisor there is NO idle-queue watch, so an active `queue: go` document will not self-drain and needs a human to advance it."
     );
     eprintln!(
-        "[session] hint: check `controller_supervisor_replacement_background_failed` in .agent-doc/logs/ops.log for the reason; if it is `preserve_pane_blocked`, run `agent-doc session restart-supervisor {}` from a different pane.",
+        // `#restartlivepane`: "run it from a different pane" was wrong advice —
+        // the refusal is about the TARGET pane, not the calling one, so retrying
+        // elsewhere reproduces it exactly. A pane running the document's own
+        // harness now auto-restarts; anything else needs the pane freed.
+        "[session] hint: check `controller_supervisor_replacement_background_failed` in .agent-doc/logs/ops.log for the reason; if it is `preserve_pane_blocked`, the owner pane is running a program that is not this document's harness — quit it, or point the document at another pane with `agent-doc claim {}`.",
         file.display()
     );
 }

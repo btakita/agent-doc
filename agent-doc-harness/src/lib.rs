@@ -205,6 +205,24 @@ fn apply_restart_launch_args(harness: &HarnessConfig, base_args: &mut Vec<String
     }
 }
 
+/// Keys that make a live harness pane exit cleanly back to its shell.
+///
+/// `#restartlivepane`: distinct from the operator INTERRUPT plan, which cancels
+/// the current turn and leaves the harness running. This ends the PROCESS so a
+/// supervisor can relaunch it under its own ownership.
+///
+/// `Escape` first, always: `C-d` only quits from an EMPTY composer. With draft
+/// text present the harness treats it as delete-forward and the pane never
+/// exits, which would strand a restart half-done.
+pub fn operator_quit_key_plan(harness: &str) -> Vec<&'static str> {
+    match harness {
+        // OpenCode needs the doubled Escape its interrupt plan uses before the
+        // composer is genuinely empty.
+        "opencode" => vec!["Escape", "Escape", "C-d"],
+        _ => vec!["Escape", "C-d"],
+    }
+}
+
 pub fn normalize_harness_name(raw: &str) -> String {
     match raw.trim() {
         "" => "default".to_string(),
@@ -3644,6 +3662,30 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
             Some(ResumeRequest::Id("cli-id".into()))
         );
         assert_eq!(resolve_resume_request(None, Some("fm-id")), None);
+    }
+
+    /// `#restartlivepane`: `C-d` only quits from an EMPTY composer — with draft
+    /// text it deletes forward and the pane never exits, stranding a restart
+    /// half-done. Every plan must clear the composer first.
+    #[test]
+    fn operator_quit_key_plan_always_clears_the_composer_before_ctrl_d() {
+        for harness in ["claude", "codex", "opencode", "unknown"] {
+            let plan = operator_quit_key_plan(harness);
+            assert_eq!(
+                plan.last(),
+                Some(&"C-d"),
+                "{harness} quit plan must end by quitting"
+            );
+            assert_eq!(
+                plan.first(),
+                Some(&"Escape"),
+                "{harness} quit plan must clear the composer before C-d"
+            );
+        }
+        assert_eq!(
+            operator_quit_key_plan("opencode"),
+            vec!["Escape", "Escape", "C-d"]
+        );
     }
 
     #[test]

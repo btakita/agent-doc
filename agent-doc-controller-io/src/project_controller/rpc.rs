@@ -11908,13 +11908,34 @@ enum SupervisorReplacementIpcStatus {
 enum SupervisorReplacementPaneStartDecision {
     PreserveExisting,
     AutoStartNew,
+    /// The pane runs THIS document's own harness. Quit it, then start under a
+    /// supervisor — that is literally what "Restart Agent" means.
+    RestartLiveHarness,
+    /// The pane runs something else. Never touch it.
     BlockLiveNonShell,
 }
 
+/// `#restartlivepane`: refusing every live non-shell pane made "Restart Agent"
+/// impossible on the one pane it is always aimed at — the document's own agent.
+/// The operator explicitly asked to restart THIS document's harness, and
+/// `--resume` (`#restartresume`) means relaunching costs the process, not the
+/// conversation. So a pane running the document's own harness is restartable.
+///
+/// The guard that matters is kept, and narrowed rather than widened: a live pane
+/// running anything ELSE is still untouchable. That covers a build, an editor, an
+/// ssh session, or a harness bound to a different document — killing any of those
+/// destroys unrelated work the operator never offered up.
+///
+/// Matching is deliberately EXACT against the resolved harness binary, not
+/// `HarnessConfig::process_names` (which includes `node` and `agent-doc`): a
+/// substring match there would make any Node process look like a restartable
+/// agent. Related: `#bare-foreign-session-guard` — proving ownership, never
+/// assuming it.
 #[cfg(any(test, not(feature = "test-support")))]
 fn supervisor_replacement_pane_start_decision(
     pane_alive: bool,
     current_command: Option<&str>,
+    document_harness_binary: Option<&str>,
 ) -> SupervisorReplacementPaneStartDecision {
     if !pane_alive {
         return SupervisorReplacementPaneStartDecision::AutoStartNew;
@@ -11923,7 +11944,17 @@ fn supervisor_replacement_pane_start_decision(
         .map(str::trim)
         .filter(|command| !command.is_empty());
     if current_command.is_some_and(agent_doc_tmux::pane_current_command_is_bare_shell) {
-        SupervisorReplacementPaneStartDecision::PreserveExisting
+        return SupervisorReplacementPaneStartDecision::PreserveExisting;
+    }
+    let runs_own_harness = match (current_command, document_harness_binary) {
+        (Some(command), Some(harness)) => {
+            let harness = harness.trim();
+            !harness.is_empty() && command.eq_ignore_ascii_case(harness)
+        }
+        _ => false,
+    };
+    if runs_own_harness {
+        SupervisorReplacementPaneStartDecision::RestartLiveHarness
     } else {
         SupervisorReplacementPaneStartDecision::BlockLiveNonShell
     }
@@ -12286,6 +12317,44 @@ fn reap_dead_supervisor_socket(file: &Path, socket: &Path) {
     }
 }
 
+/// Quit a live harness pane back to its shell so a supervisor can relaunch it.
+///
+/// Returns `false` if the pane never becomes a bare shell, so the caller can fail
+/// closed instead of typing a shell command into a live agent.
+#[cfg(not(any(test, feature = "test-support")))]
+fn quit_live_harness_pane_to_shell(
+    tmux: &tmux_router::Tmux,
+    pane_id: &str,
+    harness_binary: &str,
+) -> bool {
+    let plan = agent_doc_harness::operator_quit_key_plan(harness_binary);
+    for (index, key) in plan.iter().enumerate() {
+        if index > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+        if tmux.send_keys_raw(pane_id, key).is_err() {
+            return false;
+        }
+    }
+    // Harness shutdown is not instant (flushing state, writing the session log),
+    // so poll rather than sleeping one guessed interval.
+    for _ in 0..40 {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        if !tmux.pane_alive(pane_id) {
+            // The pane closed outright; the caller's cold-start path handles this.
+            return false;
+        }
+        if agent_doc_tmux_io::target_current_command(tmux, pane_id)
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(agent_doc_tmux::pane_current_command_is_bare_shell)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(not(any(test, feature = "test-support")))]
 fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result<String> {
     let tmux = tmux_router::Tmux::default_server();
@@ -12304,7 +12373,59 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
         } else {
             None
         };
-        match supervisor_replacement_pane_start_decision(pane_alive, current_command.as_deref()) {
+        let document_harness = std::fs::read_to_string(&work.file)
+            .ok()
+            .and_then(|content| agent_doc_harness::document_harness_from_content(&content))
+            .map(|name| agent_doc_harness::HarnessConfig::from_agent_name(&name).binary)
+            .unwrap_or_else(|| agent_doc_harness::HarnessConfig::claude().binary);
+        match supervisor_replacement_pane_start_decision(
+            pane_alive,
+            current_command.as_deref(),
+            Some(document_harness.as_str()),
+        ) {
+            SupervisorReplacementPaneStartDecision::RestartLiveHarness => {
+                // Quit the document's own harness so the pane falls back to its
+                // shell, then take the normal preserve-existing start path below.
+                // Bounded and fail-closed: if the pane does not become a shell we
+                // refuse exactly as before rather than typing into a live agent.
+                agent_doc_ops_log_io::log_op(
+                    &work.file,
+                    &format!(
+                        "controller_supervisor_replacement_quitting_live_harness harness={} session={} pane={} generation={} receipt_id={}",
+                        document_harness,
+                        work.session_id,
+                        work.pane_id,
+                        work.generation,
+                        work.operator_receipt_id,
+                    ),
+                );
+                if !quit_live_harness_pane_to_shell(&tmux, &work.pane_id, &document_harness) {
+                    agent_doc_ops_log_io::log_op(
+                        &work.file,
+                        &format!(
+                            "controller_supervisor_replacement_preserve_pane_blocked mode={} session={} pane={} generation={} receipt_id={} reason=live_harness_quit_timeout harness={}",
+                            work.mode,
+                            work.session_id,
+                            work.pane_id,
+                            work.generation,
+                            work.operator_receipt_id,
+                            document_harness,
+                        ),
+                    );
+                    anyhow::bail!(
+                        "the {document_harness} session in pane {} did not exit to a shell, so the replacement supervisor was not started; quit it manually and retry",
+                        work.pane_id
+                    );
+                }
+            }
+            _ => {}
+        }
+        match supervisor_replacement_pane_start_decision(
+            pane_alive,
+            // Re-read: the quit above may have turned this into a bare shell.
+            agent_doc_tmux_io::target_current_command(&tmux, &work.pane_id).as_deref(),
+            Some(document_harness.as_str()),
+        ) {
             SupervisorReplacementPaneStartDecision::PreserveExisting => {
                 let agent_doc_bin = agent_doc_supervisor_process::agent_doc_start_bin();
                 let project_root = agent_doc_project_root_io::project_root_containing(&work.file)
@@ -12398,10 +12519,27 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
                         current_command
                     ),
                 );
+                // Do NOT advertise `--force` here: this decision takes no force
+                // flag (`--force` only affects the earlier IPC-escalation choice),
+                // so suggesting it sends the operator in a circle. `#restartlivepane`
+                // already auto-restarts a pane running the document's OWN harness;
+                // reaching this arm means the pane is running something else, and
+                // the honest advice is to free it or point the document elsewhere.
                 anyhow::bail!(
-                    "refusing to cold-start replacement supervisor by typing into live non-shell pane {} (current_command={current_command}); run `agent-doc session restart-supervisor {}` from a different pane, or use --force if the owner pane is genuinely wedged",
+                    "refusing to start a replacement supervisor in pane {}: it is running `{current_command}`, which is not {}'s harness. Quit that program (or claim the document to another pane with `agent-doc claim {}`) and retry.",
                     work.pane_id,
+                    work.file.display(),
                     work.file.display()
+                );
+            }
+            SupervisorReplacementPaneStartDecision::RestartLiveHarness => {
+                // The quit above reported the pane back at a shell, so re-reading
+                // it must not still show the harness. If it does, something else
+                // reclaimed the pane between the two reads — fail closed rather
+                // than quitting twice or typing into whatever is now running.
+                anyhow::bail!(
+                    "pane {} is still running {document_harness} after it reported exiting; refusing to start a replacement supervisor into it",
+                    work.pane_id
                 );
             }
             SupervisorReplacementPaneStartDecision::AutoStartNew => {}
@@ -14497,27 +14635,77 @@ mod tests {
     #[test]
     fn supervisor_replacement_preserves_only_bare_shell_panes() {
         assert_eq!(
-            supervisor_replacement_pane_start_decision(false, None),
+            supervisor_replacement_pane_start_decision(false, None, Some("claude")),
             SupervisorReplacementPaneStartDecision::AutoStartNew
         );
         for shell in ["sh", "bash", "zsh", "-zsh", "fish"] {
             assert_eq!(
-                supervisor_replacement_pane_start_decision(true, Some(shell)),
+                supervisor_replacement_pane_start_decision(true, Some(shell), Some("claude")),
                 SupervisorReplacementPaneStartDecision::PreserveExisting,
                 "{shell} should be safe for shell-command cold start"
             );
         }
-        for live_harness in ["node", "codex", "claude", "agent-doc", "vim", ""] {
-            assert_eq!(
-                supervisor_replacement_pane_start_decision(true, Some(live_harness)),
-                SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
-                "{live_harness:?} must not receive route-owned start text"
-            );
-        }
         assert_eq!(
-            supervisor_replacement_pane_start_decision(true, None),
+            supervisor_replacement_pane_start_decision(true, None, Some("claude")),
             SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
             "unknown command on a live pane is not safe for prompt injection"
+        );
+    }
+
+    /// `#restartlivepane`: a pane running THIS document's own harness is what
+    /// "Restart Agent" is always aimed at. Refusing it made the command
+    /// impossible to use on its own target.
+    #[test]
+    fn supervisor_replacement_restarts_a_pane_running_its_own_harness() {
+        for harness in ["claude", "codex", "opencode"] {
+            assert_eq!(
+                supervisor_replacement_pane_start_decision(true, Some(harness), Some(harness)),
+                SupervisorReplacementPaneStartDecision::RestartLiveHarness,
+                "{harness} pane bound to a {harness} document must be restartable"
+            );
+        }
+    }
+
+    /// The guard that matters is NARROWED, not removed. A live pane running
+    /// anything other than this document's own harness stays untouchable —
+    /// killing a build, an editor, an ssh session, or a harness bound to a
+    /// DIFFERENT document destroys work the operator never offered up.
+    #[test]
+    fn supervisor_replacement_still_refuses_panes_that_are_not_our_harness() {
+        for foreign in [
+            "vim",
+            "nvim",
+            "ssh",
+            "cargo",
+            "make",
+            "node",
+            "agent-doc",
+            "",
+        ] {
+            assert_eq!(
+                supervisor_replacement_pane_start_decision(true, Some(foreign), Some("claude")),
+                SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
+                "{foreign:?} must not be quit or receive route-owned start text"
+            );
+        }
+        // A codex pane must not be quit just because a claude document asked.
+        assert_eq!(
+            supervisor_replacement_pane_start_decision(true, Some("codex"), Some("claude")),
+            SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
+            "a pane running a DIFFERENT harness is someone else's session"
+        );
+        // `node` is in claude's `process_names`; matching on that list instead of
+        // the exact binary would make any Node process look restartable.
+        assert_eq!(
+            supervisor_replacement_pane_start_decision(true, Some("node"), Some("claude")),
+            SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
+            "process_names substring matching must not be used here"
+        );
+        // Unknown document harness proves nothing, so it cannot authorise a quit.
+        assert_eq!(
+            supervisor_replacement_pane_start_decision(true, Some("claude"), None),
+            SupervisorReplacementPaneStartDecision::BlockLiveNonShell,
+            "an unresolved document harness must not authorise quitting a live pane"
         );
     }
 

@@ -1025,7 +1025,7 @@ That sums to roughly **40–75ms**, against the ~2.5s the item recorded with ~2.
 The item's core finding still stands and is worth keeping: spawn count was never the bottleneck (109→63 spawns moved wall clock not at all). Whatever the ~2.1s actually was, it is not present on the current binary, and the instrumentation that would catch a recurrence is permanent rather than ad-hoc — which is the durable win here.
 
 Marking done. A future slow sync is a new measurement against named phases, not a blind 2.1s hole.
-<!-- agent:boundary:cb8cae29 -->
+<!-- agent:boundary:bb94e2b6 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -1062,7 +1062,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~do [#42xb]~~
 - ~~do [#zq8e]~~
 - ~~do [#a2zx]~~
-- do [#dbj7]
+- ⏭️ do [#dbj7]
 - ~~do [#ay80]~~
 - ~~do [#syncfocuslag]~~
 - ~~do [#jbrunsteering]~~

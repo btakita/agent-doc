@@ -1921,9 +1921,8 @@ fn auto_install_stream_dup_fd(target_fd: std::os::fd::RawFd) -> std::process::St
 #[cfg(unix)]
 fn auto_install_stderr_log_file(crate_root: &Path) -> Option<std::fs::File> {
     let project_root = agent_doc_project_root_io::project_root_containing(crate_root)?;
-    let path = agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(
-        &project_root,
-    );
+    let path =
+        agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(&project_root);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok()?;
     }
@@ -8248,7 +8247,7 @@ impl agent_doc_reliable_sync_io::push::LivenessPushTransport for RpcDocumentPush
 /// controller feeds is the one [`crdt_authority_for_file`] reads — the plane is the
 /// sole live-editor metadata authority.
 fn controller_liveness_plane()
--> &'static std::sync::Mutex<agent_doc_reliable_sync_io::plane::ControllerLivenessPlane> {
+-> &'static parking_lot::Mutex<agent_doc_reliable_sync_io::plane::ControllerLivenessPlane> {
     agent_doc_reliable_sync_io::global_liveness_plane()
 }
 
@@ -8292,9 +8291,7 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
         })
         .collect::<Result<Vec<_>>>()?;
     let dead_open_pids = {
-        let mut plane = controller_liveness_plane()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
+        let mut plane = controller_liveness_plane().lock();
         for batch in &batches {
             plane.restore_liveness(batch);
         }
@@ -8376,9 +8373,7 @@ pub struct ControllerReliableSyncStatusResponse {
 fn handle_reliable_sync_status(
     _bootstrap: &ControllerBootstrap,
 ) -> Result<ControllerReliableSyncStatusResponse> {
-    let plane = controller_liveness_plane()
-        .lock()
-        .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
+    let plane = controller_liveness_plane().lock();
     let projection = plane.projection();
     let plane_open = projection.open_docs();
     let plane_live = projection.live_docs();
@@ -8469,7 +8464,6 @@ pub fn live_editor_registrations_for_file(
     let mut registrations = if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
         controller_liveness_plane()
             .lock()
-            .map_err(|_| anyhow::anyhow!("embedded relay liveness plane mutex poisoned"))?
             .projection()
             .live_registrations(&document_hash)
     } else {
@@ -8536,12 +8530,7 @@ pub fn record_reliable_sync_editor_exit(project_root: &Path, pid: u64) {
         );
         return;
     }
-    match controller_liveness_plane().lock() {
-        Ok(mut plane) => plane.apply_local(&op),
-        Err(_) => eprintln!(
-            "[reliable-sync] record_reliable_sync_editor_exit: liveness plane mutex poisoned"
-        ),
-    }
+    controller_liveness_plane().lock().apply_local(&op);
 }
 
 /// `plugin → controller` reliable-sync liveness push (`#lzsync`, Phase 3C).
@@ -8647,9 +8636,7 @@ fn handle_reliable_sync(
         liveness_ops_json.as_deref(),
     )?;
     {
-        let mut plane = controller_liveness_plane()
-            .lock()
-            .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
+        let mut plane = controller_liveness_plane().lock();
         if let Some(ops) = &liveness_ops {
             plane.restore_liveness(ops);
         }
@@ -13492,14 +13479,13 @@ mod tests {
         std::fs::write(&doc, "Body\n").unwrap();
         let canonical = doc.canonicalize().unwrap();
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-        controller_liveness_plane()
-            .lock()
-            .unwrap()
-            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+        controller_liveness_plane().lock().restore_liveness(&[
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
                 document_hash,
                 pid: std::process::id().into(),
                 tag: "test-editor-current-text".into(),
-            }]);
+            },
+        ]);
         let bootstrap = test_bootstrap(&dir);
         let mut should_stop = false;
 
@@ -13550,14 +13536,13 @@ mod tests {
         std::fs::write(&doc, "Body\n").unwrap();
         let canonical = doc.canonicalize().unwrap();
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
-        controller_liveness_plane()
-            .lock()
-            .unwrap()
-            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+        controller_liveness_plane().lock().restore_liveness(&[
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
                 document_hash,
                 pid: std::process::id().into(),
                 tag: "test-editor-current-text-recover".into(),
-            }]);
+            },
+        ]);
         let mut prior = agent_doc_document_realtime::crdt_relay::RelayHub::new(1);
         let editor =
             agent_doc_document_realtime::crdt_relay::mint_client_id("intellij:controller-recover");
@@ -13701,10 +13686,13 @@ mod tests {
             "the child must dup a real log fd, never the inherited fd2/pane"
         );
 
-        let path = agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(
-            dir.path(),
+        let path =
+            agent_doc_supervisor_process::start_command::route_owned_stderr_log_path(dir.path());
+        assert!(
+            path.exists(),
+            "opening must create the log: {}",
+            path.display()
         );
-        assert!(path.exists(), "opening must create the log: {}", path.display());
 
         // Appending, not truncating — a recycle must not discard prior output.
         use std::io::Write;
@@ -16727,7 +16715,7 @@ mod tests {
         }])
         .expect("encode liveness frame");
         {
-            let mut plane = controller_liveness_plane().lock().unwrap();
+            let mut plane = controller_liveness_plane().lock();
             plane.ingest(&live_hash, 1, &frame).expect("ingest");
         }
         // The reliable-sync plane is authoritative: the open doc is MultiReplica...
@@ -16782,7 +16770,6 @@ mod tests {
         .unwrap();
         controller_liveness_plane()
             .lock()
-            .unwrap()
             .ingest(&document_hash, 1, &frame)
             .unwrap();
 
@@ -16882,8 +16869,10 @@ mod tests {
             !status
                 .registrations
                 .iter()
-                .any(|registration| registration.document_hash == "docwire-status"
-                    || registration.path.contains("docwire-status")),
+                .any(
+                    |registration| registration.document_hash == "docwire-status"
+                        || registration.path.contains("docwire-status")
+                ),
             "this document must project without a registration oracle; got {:?}",
             status.registrations
         );

@@ -415,13 +415,9 @@ impl std::fmt::Display for CrdtConvergenceState {
 /// repair is to rebuild it, not to drop it.
 ///
 /// **Failure here is not swallowed, because it voids the caller's promise.**
-/// The only way this fails is a poisoned registry mutex or a vanished document
-/// (see `reconcile_replicas_against_process_liveness`), and neither is
-/// transient, so there is nothing to retry. A poisoned registry is specifically
-/// reachable: the workspace deliberately keeps `panic = "unwind"` so the cdylib's
-/// `catch_unwind` guards can survive a replica panic inside the host IDE, which
-/// means a caught panic that happened under one of these locks leaves it
-/// poisoned for the life of that process. In that state nothing will ever
+/// The only remaining failure is a vanished document (see
+/// `reconcile_replicas_against_process_liveness`), which is not transient, so
+/// there is nothing to retry. When the cache cannot be reconciled, nothing will
 /// complete an "async delivery", so a caller that reports retained success with
 /// `operator_action=none` is making a promise the relay cannot keep. The
 /// retained path therefore fails closed on `Err` and names the operator
@@ -2260,10 +2256,11 @@ pub fn apply_canonical_replace_if_attached(
                                 // floor on every apply kept a contended write pinned at
                                 // 25ms for the whole 60s budget (~2400 merge+CAS
                                 // attempts, each worsening the contention it retried).
-                                let advanced =
-                                    last_applied_hash.as_deref() != Some(relay_write.content_hash.as_str());
+                                let advanced = last_applied_hash.as_deref()
+                                    != Some(relay_write.content_hash.as_str());
                                 last_applied_hash = Some(relay_write.content_hash.clone());
-                                backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, advanced);
+                                backoff_ms =
+                                    CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, advanced);
                                 pending_write = Some(relay_write);
                                 ack_recovery.reset();
                             }
@@ -4730,8 +4727,7 @@ fn try_resolve_current_doc_with_disk_after_model_ensure(
 /// `AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS`.
 const DEFAULT_EDITOR_REPLICA_REOBSERVE_ATTEMPTS: u32 = 3;
 const EDITOR_REPLICA_REOBSERVE_ATTEMPTS_ENV: &str = "AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS";
-const EDITOR_REPLICA_REOBSERVE_BACKOFF: std::time::Duration =
-    std::time::Duration::from_millis(250);
+const EDITOR_REPLICA_REOBSERVE_BACKOFF: std::time::Duration = std::time::Duration::from_millis(250);
 
 fn editor_replica_reobserve_attempts() -> u32 {
     std::env::var(EDITOR_REPLICA_REOBSERVE_ATTEMPTS_ENV)
@@ -4871,10 +4867,7 @@ fn reobserve_missing_editor_replica_with_reregistration(
         clear_editor_replica_self_heal_exhausted(file);
         return observed;
     }
-    if should_pause_editor_replica_self_heal(
-        file,
-        &editor_replica_liveness_witness(file),
-    ) {
+    if should_pause_editor_replica_self_heal(file, &editor_replica_liveness_witness(file)) {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -5798,7 +5791,6 @@ mod tests {
     ) {
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
-            .unwrap()
             .restore_liveness(ops);
     }
 
@@ -6109,7 +6101,6 @@ mod tests {
             "retained canonical must remain current text, got {current:?}"
         );
     }
-
 
     #[test]
     fn canonical_replace_crdt_rebases_over_settled_operator_text_once() {

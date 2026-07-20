@@ -207,7 +207,6 @@ mod tests {
         let pid = std::process::id();
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
-            .unwrap()
             .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
                 document_hash,
                 pid: pid.into(),

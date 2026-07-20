@@ -4366,7 +4366,6 @@ mod tests {
             ];
             agent_doc_reliable_sync_io::global_liveness_plane()
                 .lock()
-                .map_err(|_| anyhow::anyhow!("compact test liveness plane mutex poisoned"))?
                 .restore_liveness(&liveness_ops);
             let project_root = agent_doc_fs::find_project_root(&canonical)
                 .context("compact test could not resolve project root")?;

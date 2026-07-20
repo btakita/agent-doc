@@ -595,7 +595,6 @@ pub fn seed_reliable_sync_editor_registration(file: &Path, tag: &str, capabiliti
     ];
     agent_doc_reliable_sync_io::global_liveness_plane()
         .lock()
-        .unwrap()
         .restore_liveness(&ops);
 
     let project_root = canonical

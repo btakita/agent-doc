@@ -2852,7 +2852,6 @@ mod tests {
         let first_tag = format!("{owner}:open-1");
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
-            .unwrap()
             .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
                 document_hash: document_hash.clone(),
                 pid,
@@ -2874,7 +2873,6 @@ mod tests {
 
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
-            .unwrap()
             .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Close {
                 document_hash: document_hash.clone(),
                 pid,
@@ -2887,7 +2885,6 @@ mod tests {
 
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
-            .unwrap()
             .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
                 document_hash,
                 pid,

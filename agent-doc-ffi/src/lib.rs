@@ -15,11 +15,12 @@
 //! plus the shared `FfiPatchResult` C-ABI type and its constructor helpers,
 //! which the boundary/apply-patch surfaces (`#vb8h` / `#e130`) also depend on.
 
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use agent_doc_element::element;
 
@@ -512,12 +513,12 @@ pub unsafe extern "C" fn agent_doc_replica_open(
                 Err(_) => return -2,
             }
         };
-        match replica_registry().lock() {
-            Ok(mut reg) => {
+        {
+            let mut reg = replica_registry().lock();
+            {
                 reg.insert(replica_id, replica);
                 0
             }
-            Err(_) => -1,
         }
     })
 }
@@ -544,15 +545,15 @@ pub unsafe extern "C" fn agent_doc_replica_apply_local(
                 Err(_) => return -2,
             }
         };
-        match replica_registry().lock() {
-            Ok(reg) => match reg.get(&replica_id) {
+        {
+            let reg = replica_registry().lock();
+            match reg.get(&replica_id) {
                 Some(replica) => {
                     replica.apply_local_edit(offset, delete_len, insert_str);
                     0
                 }
                 None => -3,
-            },
-            Err(_) => -1,
+            }
         }
     })
 }
@@ -566,12 +567,12 @@ pub unsafe extern "C" fn agent_doc_replica_apply_local(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn agent_doc_replica_text(replica_id: u64) -> *mut c_char {
     ffi_guard!(ptr::null_mut(), {
-        match replica_registry().lock() {
-            Ok(reg) => match reg.get(&replica_id) {
+        {
+            let reg = replica_registry().lock();
+            match reg.get(&replica_id) {
                 Some(replica) => CString::new(replica.text()).unwrap_or_default().into_raw(),
                 None => ptr::null_mut(),
-            },
-            Err(_) => ptr::null_mut(),
+            }
         }
     })
 }
@@ -588,12 +589,12 @@ pub unsafe extern "C" fn agent_doc_replica_state_vector(
     out_len: *mut usize,
 ) -> *mut u8 {
     ffi_guard!(null_state(out_len), {
-        match replica_registry().lock() {
-            Ok(reg) => match reg.get(&replica_id) {
+        {
+            let reg = replica_registry().lock();
+            match reg.get(&replica_id) {
                 Some(replica) => leak_state(replica.state_vector(), out_len),
                 None => null_state(out_len),
-            },
-            Err(_) => null_state(out_len),
+            }
         }
     })
 }
@@ -617,15 +618,15 @@ pub unsafe extern "C" fn agent_doc_replica_diff(
             return null_state(out_len);
         }
         let sv = unsafe { std::slice::from_raw_parts(their_sv, their_sv_len) };
-        match replica_registry().lock() {
-            Ok(reg) => match reg.get(&replica_id) {
+        {
+            let reg = replica_registry().lock();
+            match reg.get(&replica_id) {
                 Some(replica) => match replica.diff(sv) {
                     Ok(update) => leak_state(update, out_len),
                     Err(_) => null_state(out_len),
                 },
                 None => null_state(out_len),
-            },
-            Err(_) => null_state(out_len),
+            }
         }
     })
 }
@@ -647,15 +648,15 @@ pub unsafe extern "C" fn agent_doc_replica_apply_update(
             return -2;
         }
         let bytes = unsafe { std::slice::from_raw_parts(update, update_len) };
-        match replica_registry().lock() {
-            Ok(reg) => match reg.get(&replica_id) {
+        {
+            let reg = replica_registry().lock();
+            match reg.get(&replica_id) {
                 Some(replica) => match replica.apply_update(bytes) {
                     Ok(()) => 0,
                     Err(_) => -2,
                 },
                 None => -3,
-            },
-            Err(_) => -1,
+            }
         }
     })
 }
@@ -672,12 +673,12 @@ pub unsafe extern "C" fn agent_doc_replica_encode_state(
     out_len: *mut usize,
 ) -> *mut u8 {
     ffi_guard!(null_state(out_len), {
-        match replica_registry().lock() {
-            Ok(reg) => match reg.get(&replica_id) {
+        {
+            let reg = replica_registry().lock();
+            match reg.get(&replica_id) {
                 Some(replica) => leak_state(replica.encode_state(), out_len),
                 None => null_state(out_len),
-            },
-            Err(_) => null_state(out_len),
+            }
         }
     })
 }
@@ -690,15 +691,15 @@ pub unsafe extern "C" fn agent_doc_replica_encode_state(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn agent_doc_replica_close(replica_id: u64) -> i32 {
     ffi_guard!(ERR_FFI_PANIC, {
-        match replica_registry().lock() {
-            Ok(mut reg) => {
+        {
+            let mut reg = replica_registry().lock();
+            {
                 if reg.remove(&replica_id).is_some() {
                     0
                 } else {
                     -3
                 }
             }
-            Err(_) => -1,
         }
     })
 }
@@ -727,12 +728,12 @@ pub unsafe extern "C" fn agent_doc_replica_persist(replica_id: u64, path: *const
             Ok(s) => s,
             Err(_) => return -2,
         };
-        let state = match replica_registry().lock() {
-            Ok(reg) => match reg.get(&replica_id) {
+        let state = {
+            let reg = replica_registry().lock();
+            match reg.get(&replica_id) {
                 Some(replica) => replica.encode_state(),
                 None => return -3,
-            },
-            Err(_) => return -1,
+            }
         };
         match atomic_write_bytes(std::path::Path::new(path_str), &state) {
             Ok(()) => 0,
@@ -769,12 +770,12 @@ pub unsafe extern "C" fn agent_doc_replica_recover(replica_id: u64, path: *const
             Ok(r) => r,
             Err(_) => return -2,
         };
-        match replica_registry().lock() {
-            Ok(mut reg) => {
+        {
+            let mut reg = replica_registry().lock();
+            {
                 reg.insert(replica_id, replica);
                 0
             }
-            Err(_) => -1,
         }
     })
 }

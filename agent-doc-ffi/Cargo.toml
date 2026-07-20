@@ -11,6 +11,14 @@ publish = false
 name = "agent_doc_ffi"
 
 [dependencies]
+# `#relaylockpoison`: the replica registry uses parking_lot, not std::sync::Mutex.
+# This cdylib is loaded into the host IDE and every export is wrapped in
+# `ffi_guard`/`catch_unwind` so a replica panic degrades to ERR_FFI_PANIC instead
+# of aborting the editor. But the guard unwinds THROUGH this registry's lock, so
+# with a poisoning mutex that survivable panic left every later replica call
+# returning -1/null for the life of the IDE -- exactly the outage catch_unwind
+# exists to prevent.
+parking_lot = "0.12"
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.6" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.6" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.6" }

@@ -636,7 +636,6 @@ mod tests {
         let document_hash = agent_doc_hash::document_id_for_path(file);
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
-            .unwrap()
             .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
                 document_hash,
                 pid: std::process::id().into(),

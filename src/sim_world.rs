@@ -9100,7 +9100,6 @@ impl SimEditor {
         let liveness_tag = format!("sim-editor:{editor_id}:{key}");
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
-            .map_err(|_| anyhow!("SimEditor liveness plane mutex poisoned"))?
             .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
                 document_hash,
                 pid: std::process::id().into(),
@@ -9167,7 +9166,6 @@ impl SimEditor {
         let document_hash = agent_doc_hash::document_id_for_path(&self.path);
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
-            .map_err(|_| anyhow!("SimEditor liveness plane mutex poisoned"))?
             .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Close {
                 document_hash,
                 pid: std::process::id().into(),

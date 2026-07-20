@@ -52,14 +52,10 @@ fn ipc_listener_active(file: &Path) -> bool {
     let document_hash = agent_doc_hash::document_id_for_path(file);
     let registration = agent_doc_reliable_sync_io::global_liveness_plane()
         .lock()
-        .ok()
-        .and_then(|plane| {
-            plane
-                .projection()
-                .live_registrations(&document_hash)
-                .into_iter()
-                .max_by_key(|registration| registration.timestamp_ms)
-        });
+        .projection()
+        .live_registrations(&document_hash)
+        .into_iter()
+        .max_by_key(|registration| registration.timestamp_ms);
     let Some(registration) = registration else {
         return false;
     };

@@ -53,22 +53,24 @@ pub const RELIABLE_SYNC_MESSAGE_TYPE: &str = "reliable_sync";
 /// reliable-sync RPC) and hydrated by controller-io from durable reliable-sync state
 /// in a short-lived CLI. It lives here so every controller/realtime consumer reads
 /// the same process projection.
-pub fn global_liveness_plane() -> &'static std::sync::Mutex<plane::ControllerLivenessPlane> {
-    static PLANE: std::sync::LazyLock<std::sync::Mutex<plane::ControllerLivenessPlane>> =
-        std::sync::LazyLock::new(|| std::sync::Mutex::new(plane::ControllerLivenessPlane::new()));
+pub fn global_liveness_plane() -> &'static parking_lot::Mutex<plane::ControllerLivenessPlane> {
+    static PLANE: std::sync::LazyLock<parking_lot::Mutex<plane::ControllerLivenessPlane>> =
+        std::sync::LazyLock::new(|| parking_lot::Mutex::new(plane::ControllerLivenessPlane::new()));
     &PLANE
 }
 
 /// Plane-primary "is a live editor attached to `file`?" — the shared hot-path authority
 /// read for the step-3 flip. Returns `Some(true/false)` when the plane has ever
 /// received an open/close fact for this document (including a durably known closed
-/// document); returns `None` only on a true cold miss (a poisoned lock or a
-/// never-hydrated document). Both
+/// document); returns `None` only on a true cold miss (a never-hydrated
+/// document). The lock cannot poison (`#relaylockpoison`), so `None` can no
+/// longer mean "a panic happened somewhere else and we are now silently
+/// reporting no editor". Both
 /// `controller-io::crdt_authority_for_file` and the
 /// `document-realtime-io` `#6b5h` disk-write guard route through this so every hot-path
 /// reader agrees. Controller-io owns durable hydration when this returns `None`.
 pub fn plane_editor_live_for_path(file: &str) -> Option<bool> {
-    let plane = global_liveness_plane().lock().ok()?;
+    let plane = global_liveness_plane().lock();
     let projection = plane.projection();
     let document_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(file));
     if !projection.tracks_document(&document_hash) {
@@ -80,7 +82,7 @@ pub fn plane_editor_live_for_path(file: &str) -> Option<bool> {
 /// Plane-primary sync-in-flight read for one document. This compares Lazily
 /// editor edit/sync epochs without filesystem state.
 pub fn plane_document_in_flight_for_path(file: &str) -> Option<bool> {
-    let plane = global_liveness_plane().lock().ok()?;
+    let plane = global_liveness_plane().lock();
     let projection = plane.projection();
     let document_hash = agent_doc_hash::document_id_for_path(std::path::Path::new(file));
     if !projection.tracks_document(&document_hash) {

@@ -11,6 +11,13 @@ publish = false
 name = "agent_doc_reliable_sync_io"
 
 [dependencies]
+# `#relaylockpoison`: the liveness plane uses parking_lot, not std::sync::Mutex.
+# It is the authority for "is an editor attached", and `panic = "unwind"` is kept
+# deliberately so the cdylib's catch_unwind guards survive a replica panic in the
+# host IDE. With a poisoning mutex, a caught panic taken under this lock made
+# every later read fall back to "no editor" -- silently flipping every document
+# in that process to disk authority.
+parking_lot = "0.12"
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.6" }
 agent-doc-ipc-io = { path = "../agent-doc-ipc-io", version = "0.35.6" }
 agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.6" }

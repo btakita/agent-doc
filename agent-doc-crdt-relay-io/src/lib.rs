@@ -48,11 +48,12 @@
 //!   and ACKs the delivery. The commit barrier refuses a MultiReplica closeout
 //!   while any live target has unacknowledged delivery.
 
+use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -140,9 +141,7 @@ fn restore_durable_liveness(file: &Path, document_hash: &str) -> Result<()> {
             }
         }
     }
-    let mut plane = agent_doc_reliable_sync_io::global_liveness_plane()
-        .lock()
-        .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?;
+    let mut plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
     for batch in &batches {
         plane.restore_liveness(batch);
     }
@@ -183,8 +182,8 @@ pub fn reliable_sync_editor_registrations_for_file(
     let _ = reliable_sync_editor_live_for_file(file);
     agent_doc_reliable_sync_io::global_liveness_plane()
         .lock()
-        .map(|plane| plane.projection().live_registrations(&document_hash))
-        .unwrap_or_default()
+        .projection()
+        .live_registrations(&document_hash)
 }
 
 /// Resolve CRDT authority from the shared durable reliable-sync liveness plane.
@@ -246,9 +245,7 @@ fn replica_reregister_cooldown_elapsed(file: &Path) -> bool {
     let Ok(key) = agent_doc_fs::document_state_hash(file) else {
         return true;
     };
-    let Ok(mut gate) = replica_reregister_cooldown_gate().lock() else {
-        return true;
-    };
+    let mut gate = replica_reregister_cooldown_gate().lock();
     let now = std::time::Instant::now();
     match gate.get(&key) {
         Some(last) if now.duration_since(*last) < REPLICA_REREGISTER_COOLDOWN => false,
@@ -334,9 +331,7 @@ fn note_replica_registration(file: &Path) {
     let Ok(key) = agent_doc_fs::document_state_hash(file) else {
         return;
     };
-    if let Ok(mut counts) = replica_registration_counts().lock() {
-        *counts.entry(key).or_insert(0) += 1;
-    }
+    *replica_registration_counts().lock().entry(key).or_insert(0) += 1;
 }
 
 fn replica_registration_count(file: &Path) -> u64 {
@@ -345,8 +340,8 @@ fn replica_registration_count(file: &Path) -> u64 {
     };
     replica_registration_counts()
         .lock()
-        .ok()
-        .and_then(|counts| counts.get(&key).copied())
+        .get(&key)
+        .copied()
         .unwrap_or(0)
 }
 
@@ -386,10 +381,7 @@ fn replica_identity_registry() -> &'static Mutex<HashMap<String, HashMap<u64, St
 /// and install themselves as independent successors.
 fn replica_registration_lock(document_hash: &str) -> Result<Arc<Mutex<()>>> {
     static LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
-    let mut locks = LOCKS
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .map_err(|e| anyhow::anyhow!("replica registration lock registry poisoned: {e}"))?;
+    let mut locks = LOCKS.get_or_init(|| Mutex::new(HashMap::new())).lock();
     Ok(locks
         .entry(document_hash.to_string())
         .or_insert_with(|| Arc::new(Mutex::new(())))
@@ -431,9 +423,7 @@ fn superseded_logical_replica_ids(
     identity: &str,
     client_id: u64,
 ) -> Result<Vec<u64>> {
-    let registry = replica_identity_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("replica identity registry poisoned: {e}"))?;
+    let registry = replica_identity_registry().lock();
     let logical = logical_replica_identity(identity);
     Ok(registry
         .get(document_hash)
@@ -455,9 +445,7 @@ fn logical_replica_generation_is_current(
     identity: &str,
     client_id: u64,
 ) -> Result<bool> {
-    let registry = replica_identity_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("replica identity registry poisoned: {e}"))?;
+    let registry = replica_identity_registry().lock();
     let Some(members) = registry.get(document_hash) else {
         return Ok(true);
     };
@@ -477,9 +465,7 @@ fn dead_editor_replica_ids(
     document_hash: &str,
     is_pid_live: impl Fn(u32) -> bool,
 ) -> Result<Vec<u64>> {
-    let registry = replica_identity_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("replica identity registry poisoned: {e}"))?;
+    let registry = replica_identity_registry().lock();
     Ok(registry
         .get(document_hash)
         .into_iter()
@@ -498,9 +484,7 @@ fn record_replica_identity(
     identity: &str,
     retired: &[u64],
 ) -> Result<()> {
-    let mut registry = replica_identity_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("replica identity registry poisoned: {e}"))?;
+    let mut registry = replica_identity_registry().lock();
     let members = registry.entry(document_hash.to_string()).or_default();
     for retired_id in retired {
         members.remove(retired_id);
@@ -510,9 +494,7 @@ fn record_replica_identity(
 }
 
 fn forget_replica_identity(document_hash: &str, client_id: u64) -> Result<()> {
-    let mut registry = replica_identity_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("replica identity registry poisoned: {e}"))?;
+    let mut registry = replica_identity_registry().lock();
     if let Some(members) = registry.get_mut(document_hash) {
         members.remove(&client_id);
         if members.is_empty() {
@@ -532,9 +514,7 @@ fn forget_replica_identity(document_hash: &str, client_id: u64) -> Result<()> {
 /// finalize/disk entry points below do).
 pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T> {
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let mut registry = hub_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    let mut registry = hub_registry().lock();
     let hub = registry
         .entry(hash)
         .or_insert_with(|| RelayHub::new(CANONICAL_CLIENT_ID));
@@ -547,9 +527,7 @@ pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T>
 /// not available.
 fn with_existing_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<Option<T>> {
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let mut registry = hub_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    let mut registry = hub_registry().lock();
     Ok(registry.get_mut(&hash).map(f))
 }
 
@@ -562,15 +540,8 @@ pub fn embedded_relay_is_available_for_file(file: &Path) -> bool {
     let Ok(hash) = agent_doc_fs::document_state_hash(file) else {
         return false;
     };
-    let allocated = hub_registry()
-        .lock()
-        .map(|registry| registry.contains_key(&hash))
-        .unwrap_or(false);
-    allocated
-        || embedded_relay_route_registry()
-            .lock()
-            .map(|registry| registry.contains(&hash))
-            .unwrap_or(false)
+    hub_registry().lock().contains_key(&hash)
+        || embedded_relay_route_registry().lock().contains(&hash)
 }
 
 /// Whether `file` is explicitly routed to the relay in this process.
@@ -578,20 +549,14 @@ pub fn embedded_relay_route_is_registered_for_file(file: &Path) -> bool {
     let Ok(hash) = agent_doc_fs::document_state_hash(file) else {
         return false;
     };
-    embedded_relay_route_registry()
-        .lock()
-        .map(|registry| registry.contains(&hash))
-        .unwrap_or(false)
+    embedded_relay_route_registry().lock().contains(&hash)
 }
 
 /// Route controller/model reads for `file` through this process without
 /// manufacturing a relay hub. Used by deterministic missing-replica tests.
 pub fn register_embedded_relay_route_for_file(file: &Path) -> Result<()> {
     let hash = agent_doc_fs::document_state_hash(file)?;
-    embedded_relay_route_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("embedded relay route registry poisoned: {e}"))?
-        .insert(hash);
+    embedded_relay_route_registry().lock().insert(hash);
     Ok(())
 }
 
@@ -601,9 +566,7 @@ pub fn register_embedded_relay_route_for_file(file: &Path) -> Result<()> {
 fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T> {
     let hash = agent_doc_fs::document_state_hash(file)?;
     {
-        let mut registry = hub_registry()
-            .lock()
-            .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+        let mut registry = hub_registry().lock();
         if let Some(hub) = registry.get_mut(&hash) {
             return Ok(f(hub));
         }
@@ -611,9 +574,7 @@ fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T)
     let seed_text = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("failed to seed relay hub from {}: {e}", file.display()))?;
     let seeded_hub = RelayHub::from_text(CANONICAL_CLIENT_ID, &seed_text);
-    let mut registry = hub_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    let mut registry = hub_registry().lock();
     let hub = registry.entry(hash).or_insert(seeded_hub);
     Ok(f(hub))
 }
@@ -631,10 +592,7 @@ pub fn seed_embedded_relay_for_file(file: &Path) -> Result<()> {
 /// Whether a relay hub has been allocated for `doc_hash` (test-only assertion
 /// helper, e.g. proving the Detached path allocates no hub).
 pub fn hub_is_allocated_for_test(doc_hash: &str) -> bool {
-    hub_registry()
-        .lock()
-        .map(|registry| registry.contains_key(doc_hash))
-        .unwrap_or(false)
+    hub_registry().lock().contains_key(doc_hash)
 }
 
 /// Live document text resolved from the CRDT relay authority.
@@ -687,9 +645,7 @@ pub fn current_revision_for_file_with_authority(
     }
 
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let registry = hub_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    let registry = hub_registry().lock();
     let Some(hub) = registry.get(&hash) else {
         return Ok(CurrentRevision::EditorAttachedMissingReplica);
     };
@@ -765,15 +721,11 @@ fn current_text_for_file_with_authority_inner(
     }
 
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let mut registry = hub_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    let mut registry = hub_registry().lock();
     if !registry.contains_key(&hash) && recover_missing_from_projection {
         drop(registry);
         recover_missing_hub_from_durable_projection(file, &hash)?;
-        registry = hub_registry()
-            .lock()
-            .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+        registry = hub_registry().lock();
     }
     let Some(hub) = registry.get_mut(&hash) else {
         agent_doc_ops_log_io::log_op(
@@ -1040,8 +992,8 @@ fn ensure_document_model_with_current_text_observer_inner(
             && replica_registration_count(file) > registrations_at_start
         {
             extended_for_registration = true;
-            deadline = started_at
-                + std::time::Duration::from_millis(DOCUMENT_MODEL_ENSURE_TIMEOUT_MS);
+            deadline =
+                started_at + std::time::Duration::from_millis(DOCUMENT_MODEL_ENSURE_TIMEOUT_MS);
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -1203,14 +1155,10 @@ pub fn request_lazily_current_observation_with_timeout(
     let _ = reliable_sync_editor_live_for_file(&canonical);
     let registration = agent_doc_reliable_sync_io::global_liveness_plane()
         .lock()
-        .ok()
-        .and_then(|plane| {
-            plane
-                .projection()
-                .live_registrations(&agent_doc_hash::document_id_for_path(&canonical))
-                .into_iter()
-                .max_by_key(|registration| registration.timestamp_ms)
-        });
+        .projection()
+        .live_registrations(&agent_doc_hash::document_id_for_path(&canonical))
+        .into_iter()
+        .max_by_key(|registration| registration.timestamp_ms);
     let listener_active = registration.as_ref().is_some_and(|registration| {
         agent_doc_ipc_io::is_listener_active_for_pid(&project_root, registration.pid)
     });
@@ -1363,19 +1311,16 @@ fn mark_editor_attach_open(file: &Path) {
     let doc = file.display().to_string();
     let _ = reliable_sync_editor_live_for_file(file);
     let document_hash = agent_doc_hash::document_id_for_path(file);
-    let pids = agent_doc_reliable_sync_io::global_liveness_plane()
-        .lock()
-        .ok()
-        .map(|plane| {
-            plane
-                .projection()
-                .open_pids(&document_hash)
-                .into_iter()
-                .filter(|pid| plane.projection().pid_alive(*pid))
-                .filter_map(|pid| u32::try_from(pid).ok())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    let pids = {
+        let plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
+        let projection = plane.projection();
+        projection
+            .open_pids(&document_hash)
+            .into_iter()
+            .filter(|pid| projection.pid_alive(*pid))
+            .filter_map(|pid| u32::try_from(pid).ok())
+            .collect::<Vec<_>>()
+    };
     for pid in pids {
         agent_doc_document_realtime::editor_attach::editor_attach().attach(&doc, pid);
     }
@@ -1413,9 +1358,7 @@ fn register_replica_for_file_with_liveness(
     }
     let document_hash = agent_doc_fs::document_state_hash(file)?;
     let registration_lock = replica_registration_lock(&document_hash)?;
-    let _registration_guard = registration_lock
-        .lock()
-        .map_err(|e| anyhow::anyhow!("replica registration lock poisoned: {e}"))?;
+    let _registration_guard = registration_lock.lock();
     let client_id = mint_client_id(identity);
     // Gather under the metadata lock, then release it before taking the hub
     // lock. This lock order is deliberate: registration and deregistration can
@@ -2094,9 +2037,7 @@ pub fn recover_hub_from_projection(
 ) -> Result<()> {
     let hash = agent_doc_fs::document_state_hash(file)?;
     {
-        let registry = hub_registry()
-            .lock()
-            .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+        let registry = hub_registry().lock();
         if let Some(existing) = registry.get(&hash) {
             // A live hub already holds the authority — disk is recovery-only, so
             // reconcile the projection into it (in-memory wins) instead of clobbering.
@@ -2106,9 +2047,7 @@ pub fn recover_hub_from_projection(
     }
     let hub =
         RelayHub::recover_from_projection_with_lineage(CANONICAL_CLIENT_ID, projection, lineage)?;
-    let mut registry = hub_registry()
-        .lock()
-        .map_err(|e| anyhow::anyhow!("relay hub registry poisoned: {e}"))?;
+    let mut registry = hub_registry().lock();
     registry.entry(hash).or_insert(hub);
     Ok(())
 }
@@ -2681,20 +2620,8 @@ pub fn record_committed_baseline_for_file(file: &Path) {
             return;
         }
     };
-    match hub_registry().lock() {
-        Ok(mut registry) => {
-            if let Some(hub) = registry.get_mut(&hash) {
-                hub.record_committed_baseline(&on_disk);
-            }
-        }
-        Err(e) => agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "crdt_record_committed_baseline_registry_error file={} error={}",
-                file.display(),
-                e
-            ),
-        ),
+    if let Some(hub) = hub_registry().lock().get_mut(&hash) {
+        hub.record_committed_baseline(&on_disk);
     }
 }
 
@@ -2982,28 +2909,19 @@ pub struct ReplicaReconcile {
 /// pid with no ACK means a real process with a stale replica, which the caller
 /// refills through the existing re-registration nudge.
 pub fn reconcile_replicas_against_process_liveness(file: &Path) -> Result<ReplicaReconcile> {
-    reconcile_replicas_against_liveness_with(
-        file,
-        agent_doc_reliable_sync_io::process_pid_is_live,
-    )
+    reconcile_replicas_against_liveness_with(file, agent_doc_reliable_sync_io::process_pid_is_live)
 }
 
-/// Errors here are never retried, and that is deliberate. Every fallible step
-/// below fails for exactly one of two reasons, and neither is transient:
-///
-/// - a poisoned registry mutex ([`dead_editor_replica_ids`],
-///   [`forget_replica_identity`], [`with_existing_hub`]) — another thread
-///   panicked holding that lock, and a `std::sync::Mutex` stays poisoned for the
-///   life of the process, so a retry is guaranteed to fail identically;
-/// - [`agent_doc_fs::document_state_hash`] failing to canonicalize, which means
-///   the document was deleted or renamed mid-write. Retrying cannot conjure it
-///   back, and the enclosing write already fails closed on a vanished document.
+/// Errors here are never retried, and that is deliberate. Since
+/// `#relaylockpoison` the registries use `parking_lot`, which does not poison,
+/// so the only remaining failure is
+/// [`agent_doc_fs::document_state_hash`] failing to canonicalize — the document
+/// was deleted or renamed mid-write. Retrying cannot conjure it back, and the
+/// enclosing write already fails closed on a vanished document.
 ///
 /// Retry that *is* useful happens one level up: this runs at the ACK deadline of
 /// a single write attempt, and the CRDT write convergence loop retries the whole
-/// attempt under its own backoff, which re-runs this reconciliation. A retry
-/// loop here would be redundant for that case and would spin on a poisoned lock
-/// in the other.
+/// attempt under its own backoff, which re-runs this reconciliation.
 fn reconcile_replicas_against_liveness_with(
     file: &Path,
     is_pid_live: impl Fn(u32) -> bool,
@@ -3113,8 +3031,7 @@ pub fn signal_crdt_replica_event_counting(
     reason: CrdtReplicaEventReason,
     targets: usize,
 ) -> Result<usize> {
-    signal_crdt_replica_event_counting_inner(file, reason, targets)
-        .map(|outcome| outcome.notified)
+    signal_crdt_replica_event_counting_inner(file, reason, targets).map(|outcome| outcome.notified)
 }
 
 fn signal_crdt_replica_event_counting_inner(
@@ -3127,7 +3044,6 @@ fn signal_crdt_replica_event_counting_inner(
     let document_hash = agent_doc_hash::document_id_for_path(&canonical);
     let registrations = agent_doc_reliable_sync_io::global_liveness_plane()
         .lock()
-        .map_err(|_| anyhow::anyhow!("reliable-sync liveness plane mutex poisoned"))?
         .projection()
         .live_registrations(&document_hash);
 
@@ -3284,7 +3200,6 @@ mod tests {
         let document_hash = agent_doc_hash::document_id_for_path(Path::new(file));
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
-            .unwrap()
             .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
                 document_hash,
                 pid: pid.into(),
@@ -3643,7 +3558,7 @@ mod tests {
 
         let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         let current_id = {
-            let registry = replica_identity_registry().lock().unwrap();
+            let registry = replica_identity_registry().lock();
             let members = registry.get(&document_hash).expect("identity metadata");
             let logical_members = members
                 .iter()
@@ -3848,9 +3763,9 @@ mod tests {
             !with_hub(&file, |hub| hub.is_registered(client_id)).unwrap(),
             "the stale entry must be gone, not parked as a zombie"
         );
-        hub_registry().lock().unwrap().remove(
-            &agent_doc_fs::document_state_hash(&file).unwrap(),
-        );
+        hub_registry()
+            .lock()
+            .remove(&agent_doc_fs::document_state_hash(&file).unwrap());
     }
 
     #[test]
@@ -3876,7 +3791,7 @@ mod tests {
         checkpoint_durable_projection_for_file(&doc, "test_missing_replica").unwrap();
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         assert!(
-            hub_registry().lock().unwrap().remove(&hash).is_some(),
+            hub_registry().lock().remove(&hash).is_some(),
             "test setup should evict the live hub"
         );
         assert!(
@@ -3929,7 +3844,7 @@ mod tests {
         checkpoint_durable_projection_for_file(&doc, "test_reattach").unwrap();
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         assert!(
-            hub_registry().lock().unwrap().remove(&hash).is_some(),
+            hub_registry().lock().remove(&hash).is_some(),
             "test setup should evict the live hub"
         );
 
@@ -3961,7 +3876,7 @@ mod tests {
         seed_live_reliable_sync_open(&file_str);
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
         assert!(
-            !hub_registry().lock().unwrap().contains_key(&hash),
+            !hub_registry().lock().contains_key(&hash),
             "no hub should be allocated yet"
         );
         assert!(
@@ -3971,9 +3886,8 @@ mod tests {
             "no durable projection should exist"
         );
 
-        let err =
-            apply_cp_write_for_file(&doc, "baseline\n", "baseline\nmore\n", "test_cp_relay")
-                .unwrap_err();
+        let err = apply_cp_write_for_file(&doc, "baseline\n", "baseline\nmore\n", "test_cp_relay")
+            .unwrap_err();
         assert!(
             format!("{err:#}").contains("no registered replica yet"),
             "must fail closed without a projection to recover from: {err:#}"
@@ -3990,7 +3904,7 @@ mod tests {
             &doc,
             CrdtAuthority::GitAuthoritative
         ));
-        let registry = hub_registry().lock().unwrap();
+        let registry = hub_registry().lock();
         assert!(
             !registry.contains_key(&hash),
             "the Detached path must not allocate a relay hub"
@@ -4006,7 +3920,7 @@ mod tests {
 
         assert_eq!(outcome, DurableProjectionCheckpoint::Detached);
         assert!(
-            !hub_registry().lock().unwrap().contains_key(&hash),
+            !hub_registry().lock().contains_key(&hash),
             "detached checkpoint must not create a relay hub"
         );
         assert!(
@@ -4079,7 +3993,7 @@ mod tests {
             "test:projection-recovery",
         )
         .unwrap();
-        hub_registry().lock().unwrap().remove(&hash);
+        hub_registry().lock().remove(&hash);
 
         let strict = current_text_for_file_with_authority(&doc, CrdtAuthority::MultiReplica)
             .expect("strict read should not fail");
@@ -4149,7 +4063,7 @@ mod tests {
             "test:ensure-projection-recovery",
         )
         .unwrap();
-        hub_registry().lock().unwrap().remove(&hash);
+        hub_registry().lock().remove(&hash);
 
         let poll_count = Arc::new(Mutex::new(0usize));
         let poll_count_for_observer = Arc::clone(&poll_count);
@@ -4242,7 +4156,7 @@ mod tests {
             "test:missing-replica-recycle",
         )
         .unwrap();
-        hub_registry().lock().unwrap().remove(&hash);
+        hub_registry().lock().remove(&hash);
 
         let poll_count = Arc::new(Mutex::new(0usize));
         let poll_count_for_observer = Arc::clone(&poll_count);
@@ -4291,7 +4205,7 @@ mod tests {
     fn ensure_document_model_requests_replica_reregistration_for_missing_replica() {
         let (_dir, doc) = temp_doc("ensure-model-reregister-missing-replica.md");
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        hub_registry().lock().unwrap().remove(&hash);
+        hub_registry().lock().remove(&hash);
 
         let err = ensure_document_model_with_current_text_observer(
             &doc,
@@ -4319,7 +4233,7 @@ mod tests {
     fn ensure_document_model_spaces_repeated_replica_reregistration_requests() {
         let (_dir, doc) = temp_doc("ensure-model-reregister-cooldown.md");
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        hub_registry().lock().unwrap().remove(&hash);
+        hub_registry().lock().remove(&hash);
 
         for _ in 0..3 {
             let _ = ensure_document_model_with_current_text_observer(
@@ -4348,7 +4262,7 @@ mod tests {
     fn ensure_document_model_does_not_request_reregistration_while_sync_pending() {
         let (_dir, doc) = temp_doc("ensure-model-reregister-sync-pending.md");
         let hash = agent_doc_fs::document_state_hash(&doc).unwrap();
-        hub_registry().lock().unwrap().remove(&hash);
+        hub_registry().lock().remove(&hash);
 
         let _ = ensure_document_model_with_current_text_observer(
             &doc,
@@ -4399,7 +4313,7 @@ mod tests {
             "test:compact-exchange-recovery",
         )
         .unwrap();
-        hub_registry().lock().unwrap().remove(&hash);
+        hub_registry().lock().remove(&hash);
 
         let err = ensure_document_model_with_current_text_recovery_observer(
             &doc,
@@ -4445,7 +4359,7 @@ mod tests {
             "test:publish-transport-failure",
         )
         .unwrap();
-        hub_registry().lock().unwrap().remove(&hash);
+        hub_registry().lock().remove(&hash);
 
         std::fs::write(dir.path().join(".agent-doc").join("patches"), "not a dir").unwrap();
 
@@ -4891,7 +4805,7 @@ mod tests {
         .unwrap();
         assert_eq!(result, None, "the headless path performs no live reconcile");
         assert!(
-            !hub_registry().lock().unwrap().contains_key(&hash),
+            !hub_registry().lock().contains_key(&hash),
             "the headless path must not allocate a relay hub"
         );
     }

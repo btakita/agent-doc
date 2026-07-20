@@ -190,7 +190,9 @@ fn observe_current_text_with_bounded_retry(
         // error the operator has to clear with two manual admin commands.
         if matches!(
             observed,
-            Ok(Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica))
+            Ok(Some(
+                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            ))
         ) {
             let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
                 file,
@@ -3200,8 +3202,7 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
     // item — operators author `do [#id]` heads directly. A head with no
     // recorded provenance is UNKNOWN, treated as operator-authored, and never
     // struck (`#qauthorder`).
-    let mut drift_struck_ids: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut drift_struck_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mirror_created_identities = agent_doc_project_root_io::project_root_containing(file)
         .and_then(|root| agent_doc_sqlite::state_store::open_state_db(&root).ok())
         .and_then(|conn| {
@@ -3213,7 +3214,8 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
         })
         .unwrap_or_default();
     if !mirror_created_identities.is_empty() {
-        let active_tracked = agent_doc_queue::queue_continuation::active_tracked_ids(&current_content);
+        let active_tracked =
+            agent_doc_queue::queue_continuation::active_tracked_ids(&current_content);
         for id in entries_for_strike
             .iter()
             .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
@@ -4679,7 +4681,11 @@ pub(crate) fn persist_queue_maintenance_doc(
                     &format!(
                         "queue_maintenance_model_ensure source={source} before={} outcome=failed error={}",
                         queue_maintenance_head_label(&observed),
-                        format!("{err:#}").replace('\n', " | ").chars().take(240).collect::<String>(),
+                        format!("{err:#}")
+                            .replace('\n', " | ")
+                            .chars()
+                            .take(240)
+                            .collect::<String>(),
                     ),
                 ),
             }
@@ -5192,7 +5198,9 @@ mod tests {
         assert_eq!(calls, 2, "expected exactly the configured attempt budget");
         assert!(matches!(
             observed,
-            Ok(Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica))
+            Ok(Some(
+                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            ))
         ));
     }
 
@@ -6123,7 +6131,6 @@ mod tests {
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
         agent_doc_reliable_sync_io::global_liveness_plane()
             .lock()
-            .unwrap()
             .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
                 document_hash,
                 pid: std::process::id().into(),

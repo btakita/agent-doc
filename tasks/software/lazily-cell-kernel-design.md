@@ -125,12 +125,27 @@ inheritance one** — five of eight bindings have no inheritance at all.
 | **go** | ❌ | **generics cannot restrict methods by type parameter, and methods cannot introduce their own** |
 | py / dart / js | n/a | no compile-time enforcement either way |
 
-**The Go carve-out is the one real casualty.** Go needs either separate types
-plus an interface — reintroducing `Reactive<T>` in exactly one binding — or
-runtime rejection of writes to formula cells. Decide deliberately; do not let it
-be discovered during the port. Note `lazily-go` is already flagged as blocked on
-a consuming cascade (`#lzsignaleager`), so it is the binding least able to absorb
-an unplanned divergence.
+**DECIDED 2026-07-20 — Go uses an interface, to keep the compile error.**
+Runtime rejection was rejected: the whole point of putting the kind in the type
+is that `formula.set()` fails to build, and a binding that downgrades that to a
+panic gives up the guarantee while paying all the migration cost.
+
+The interface *is* the genus, so nothing new is invented:
+
+```go
+type Cell[T any] interface { Get(ctx *Context) T }
+
+type SourceCell[T any, M MergePolicy[T]] struct{ … }  // has Set/Merge
+type FormulaCell[T any]                   struct{ … }  // has neither
+```
+
+`formulaCell.Set(…)` is undefined at compile time. Go reintroduces the read
+abstraction the other bindings delete, but under the name `Cell[T]` — the same
+word the genus carries everywhere else, so this is a mechanism difference, not a
+vocabulary fork.
+
+Note `lazily-go` is already blocked on a consuming cascade (`#lzsignaleager`), so
+sequence this after that resolves rather than stacking two migrations.
 
 ---
 
@@ -139,20 +154,47 @@ an unplanned divergence.
 Findings from executing the superseded plan. Each one compiles, or would have,
 which is why none of them would surface on their own.
 
-### 5.1 `NodeId` is already taken — the rename plan's own fix collides
+### 5.1 The id names two stability tiers, not two concepts
 
 `lazily-memo-rename-plan.md` §10 step 6 carves out `SlotId`, correctly: it is the
 id of **every** node kind, not of derivations, so a word-boundary pass yields
-`MemoId` naming effect and cell ids. Its prescribed fix is `SlotId` → `NodeId`.
+`MemoId` naming effect and cell ids — *"strictly worse than today, **and it
+compiles**, so nothing catches it."* Its prescribed fix is `SlotId` → `NodeId`.
 
-**`NodeId` already exists in `lazily-rs`** — `distributed::NodeId(pub u64)`
-(`src/distributed.rs:38`), a distributed-systems **peer** identifier, publicly
-re-exported at crate root beside `PeerId` (`src/lib.rs:178`). It means *cluster
-node*, not *graph node*.
+`NodeId` already exists (`src/distributed.rs:38`, re-exported at
+`src/lib.rs:178`). **It is not a peer id** — an earlier draft of this section
+said so and was wrong. It is documented as the *"stable, transport-facing
+identifier for a reactive node (cell or slot)… deliberately decoupled from the
+crate-internal `SlotId` so the on-the-wire identity stays stable independent of
+internal allocation details."*
 
-So the carve-out's fix would collide with live public API. Use **`GraphNodeId`**,
-or keep both module-scoped and never flat-export both. Re-verify per binding —
-any binding with a distributed plane likely has the same clash.
+So the two are the **same concept at two stability tiers**, not a collision
+between unrelated things:
+
+| | scope | stability |
+|---|---|---|
+| `SlotId` | crate-internal | allocation-dependent, recycled |
+| `distributed::NodeId` | wire-facing | stable by design |
+
+**Name the tier, not the graph.** `SlotId` → `NodeId` (internal);
+`distributed::NodeId` → `WireNodeId`, or keep it module-scoped and stop
+flat-exporting it. This beats `GraphNodeId`, which disambiguates a collision that
+is not really one while leaving the actual distinction unnamed.
+
+**`CellId` is wrong for the internal id.** It covers effects
+(`pending_effects: VecDeque<SlotId>`, `all_effect_ids: Vec<SlotId>`,
+`run_effect(id: SlotId)`), and an `Effect` is not a `Cell` — that is the §1
+boundary. `CellId` would name effect ids as cell ids: the carve-out's own error
+with a different word.
+
+**Open — could the *wire* id be `CellId`?** Its doc says "cell or slot" and omits
+effects, which would make `CellId` accurate there. But `EdgeBody` carries
+`dependent`/`dependency` as `NodeId`s and an effect *is* a dependent, so mirrored
+effect edges would put effect ids on the wire. `NodeState`'s `Opaque` variant
+("visible but non-serializable") may be how an effect appears — or may be a cell
+holding a non-serializable value. **Verify before renaming the wire type.**
+
+Re-verify per binding; any binding with a distributed plane has both tiers.
 
 ### 5.2 `MapHandle` probably collapses
 
@@ -264,11 +306,51 @@ execution.
 
 | question | trigger / owner |
 |---|---|
-| **Go**: interface, or runtime write rejection? | blocks the `lazily-go` port; decide before it starts (§4) |
-| **Merge coverage: one execution model or three?** | blocks Track B. Ledgering means §7 is pinned only on the single-threaded model — and the thread-safe model is where a feed-as-an-edge implementation is most tempting (§5.4) |
+| ~~**Go**: interface or runtime rejection?~~ | **DECIDED — interface, see §4** |
+| ~~**Merge coverage**: one execution model or three?~~ | **DECIDED — three, implemented not ledgered. See §9.1** |
 | Does `MapHandle` collapse entirely, or become a bound on `K`? | during the `lazily-rs` port (§5.2) |
-| `GraphNodeId`, or module-scoped `NodeId`? | before the id carve-out (§5.1) |
+| Could the **wire** id be `CellId` — do effect ids ever cross the wire? | before renaming the wire type (§5.1) |
+| Async fold timing: what does "folds synchronously" mean when the upstream resolves asynchronously? | blocks `AsyncContext` merge (§9.1) |
 | Wire vocabulary: does `SlotValue` become `CellValue`? | the wire names things, and `Cell` is a thing — so this is now coherent in a way `MemoValue` never was. Still a breaking wire change across 8 bindings **plus `agent-doc`'s IPC**; dual-accept applies |
+
+---
+
+### 9.1 Merge coverage — DECIDED: implement on all three, do not ledger
+
+The fixtures did not create this work; they **found a gap**. `merge` is the
+algebra under RelayCell, whose transports are explicitly `InProc`,
+**`CrossThread`**, `Ipc`, `Ws` (`src/relay_transport.rs:6`). Cross-thread is a
+first-class use case for the merge plane, and yet `ThreadSafeContext` has no
+merge API at all. That reads as an omission nobody noticed rather than a scope
+decision.
+
+**Ledgering is the wrong instrument.** The ledger's own contract is that entries
+are *findings against the implementation* — "a new divergence fails the build and
+a fixed one fails it until the entry is removed." That is built for defects,
+which are meant to get fixed. A permanent capability gap parked there would
+corrode it, and a ledger with permanent entries stops being read.
+
+It would also leave §7's *"a `Source` never acquires a dependency edge"* — a
+structural invariant of the design, not a per-model behaviour — verified only
+where it is least likely to be violated. The thread-safe model is exactly where
+an implementer feels the pull toward a direct edge, because routing a feed
+through a scheduled effect *feels* racy even though it is not.
+
+Split, because the two models are not the same problem:
+
+| model | action | why |
+|---|---|---|
+| `ThreadSafeContext` | **implement** | mutex-backed, same semantics; `apply_merge` reads untracked, folds, routes through `set_cell`, so it should be a straight port — **unmeasured, verify before calling it mechanical** |
+| `AsyncContext` | **answer a design question first** | §7 says merge "folds synchronously inside a batch; only propagation defers." What does *synchronously* mean when the upstream resolves asynchronously? That is a spec extension, not a port |
+
+Sequence: `ThreadSafeContext` merge → settle async fold timing → land all four
+fixtures against all three models.
+
+**Do not pre-build per-model fixture applicability.** Fixtures currently pin
+`"model": "Context"` and are replayed against all three implementations, with no
+way to say "this one applies to two of three." That machinery is only worth
+building if the async question turns out genuinely hard — not in anticipation of
+it.
 
 ---
 

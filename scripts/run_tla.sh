@@ -3,9 +3,14 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tools_version="1.8.0"
-tools_sha256="58d44845a37a8d776deaf8cf3a623213b59d311bc0ec287bcdfbe148dd11bb3d"
+tools_sha256="cc4803dce2a8ffaf0f5920a9dc39df4b5ee34ab4cb53fb58ac557277a7e516b3"
 tools_url="https://github.com/tlaplus/tlaplus/releases/download/v${tools_version}/tla2tools.jar"
 tools_jar="${TLA_TOOLS_JAR:-${repo_root}/target/tla/tla2tools-${tools_version}.jar}"
+
+if [[ -f "${tools_jar}" ]] && ! printf '%s  %s\n' "${tools_sha256}" "${tools_jar}" | sha256sum --check --status; then
+  echo "[tla] cached tools checksum changed; refreshing ${tools_jar}" >&2
+  rm -f "${tools_jar}"
+fi
 
 if [[ ! -f "${tools_jar}" ]]; then
     command -v curl >/dev/null 2>&1 || {

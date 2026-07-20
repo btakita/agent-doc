@@ -752,7 +752,28 @@ You were right that `#elementgraphprd` was complete — but the cause is not the
 So this instance was an **unrecorded completion**, not a failed strike. Worth separating because the strike path itself is currently healthy: I verified today (`#qdonestrikeverify`) that five items resolved across this session are all struck in the queue *and* archived to `agent-doc-bugs2.done.md`, and the strikes persisted across a dozen subsequent preflights — which is exactly what used to be recomputed and thrown away.
 
 Where the general form of your point **does** still bite is free-text heads specifically. An id-backed head strikes reliably now; a free-text one has no id to resolve through, and this session found two live consequences — `#qconsumenostrike` (an unaddressable head could not be struck and, worse, struck a neighbour instead, which I fixed to fail closed) and `#ftimmediate` (a free-text head cannot carry an execution context). All three bottom out on free-text heads lacking a stable identity, which is now recorded as the shared root across those items.
-<!-- agent:boundary:aff82d3a -->
+
+### Re: go-mode dispatch leaves the trigger as an unsubmitted draft — opus-4-8
+
+> **Queue prompt:** do [#30p6]
+
+Narrowed to one predicate. Not asserting root cause — the item says "do not guess" and this needs a live pane capture — but the search space is now a single condition rather than a subsystem.
+
+Following the item's own starting evidence: `pending_draft_enter_resubmit()` returns `true` unconditionally, so it is confirmed **not** the filter. The real gate is the next clause — `drain_dispatch_dedup_skip(payload_already_pending)`, which is `matches!(x, Some(true))`. So the resubmit fires **only when the payload is positively recognized sitting in the composer**. `supervisor_pane_payload_already_pending` yields `None` if the pane cannot be captured and `Some(false)` if recognition fails; both suppress the resubmit and strand the draft. That is the upstream filter the item predicted.
+
+**Prime suspect — `route_trigger_visible_in_current_draft` (`dispatch.rs:412`).** Having located the trigger, it returns:
+
+```rust
+let later_has_prompt = lines.iter().skip(start + 1).any(|line| is_prompt_line(line));
+return !later_has_prompt;
+```
+
+Any line matching `is_prompt_line` *after* the trigger is read as "already submitted, this is scrollback". A TUI composer that renders prompt-like decoration below the typed text therefore classifies a live draft as submitted — exactly the reported shape: text in the composer, nothing submitted, resubmit never fires.
+
+**Ruled out along the way:** wrapping and path spelling are already handled (`wrapped_trigger_starts_at_line`, `line_contains_equivalent_agent_doc_path_trigger`), so a wrapped or differently-spelled path is not the miss.
+
+Confirmation is cheap and specific: capture the live pane at the stall and evaluate `is_prompt_line` against each line after the trigger. Recorded on the item so that is the first thing the next pass does.
+<!-- agent:boundary:be9355ba -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -808,7 +829,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ do [#af88]
 - ⏭️ do [#claimnewpane]
 - ⏭️ do [#boundaryaccum1]
-- do [#qactsync]
+- ⏭️ do [#qactsync]
 - do [#ftimmediate]
 - do [#qeditrace]
 - do [#jbcompactcommit]
@@ -823,12 +844,12 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - do [#nsfz]
 - do [#suprestassoc-live]
 - ~~do [#agentsignals]~~
-- ~~Free text queue items that were already done should be struck or removed from the queue. The following queue item was complete but is still open.~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~Free text queue items that were already done should be struck or removed from the queue. The following queue item was complete but is still open.~~
 - ~~do [#elementgraphprd]~~
 - 📌 do [#jbedtledgerverify]
 - 📌 do [#fmgc]
 - 📌 do [#0dsr]
-- 📌 do [#30p6]
+- 🚧 📌 do [#30p6]
 - 📌 do [#n39j]
 - 📌 do [#f6j3]
 - 📌 do [#promptselect]
@@ -870,7 +891,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#queuecontmirror] #agent-doc-bug queue_continuation_required stays true on a queue that is entirely bulk-mirrored [operator-verify] / [focused-cycle] / [future-separate] backlog heads (observed: 43 drainable heads on agent-doc-bugs2.md, none in-session drainable). SKILL.md defines the signal as false when every remaining head is operator-gated or inert, and #mirrorall explicitly mirrors operator-verify heads 'deferred from auto-drain' — but the drainability filter counts them anyway, so the in-session loop is told to keep draining work it must not drain. This is what kept re-selecting the same stale mirror set every cycle and what fed the #planmassdone footgun its 26 ids. Fix: apply the same deferral predicate #mirrorall uses when mirroring to the drainable-head count, so mirrored operator-gated heads raise queue_active without raising queue_continuation_required.
 - [ ] [#fmgc] [focused-cycle] Per-peer ack watermark for replay-state retention (#retentionwatermark). Tagged [focused-cycle] 2026-07-19: this is a schema migration plus retention-correctness change, and retention bugs are silent and asymmetric (evict early = replay state lost; evict late = unbounded growth), so it needs a clean context rather than a mid-drain slot. Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: reliable_sync_outbox_cursor/reliable_sync_inbox_cursor are PRIMARY KEY (document_hash) holding ONE scalar acked_through — there is no per-peer ack vector to take a MIN over, and reliable_sync_liveness_journal.source_key is a document hash, not a peer id. Needs: (a) a (document_hash, peer_key) ack table keyed by the PID-scoped editor registration; (b) retention keyed off MIN(acked_version) across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps STAY as a backstop rather than being replaced. PushChannel::flush (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via outbox.ack_through(ack); generalize that, do not rebuild it. SUGGESTED FIRST INCREMENT for whoever takes it: land (a) additively — table plus ack recording, retention still on count caps — so the per-peer data exists to design (b)/(c) against, rather than changing retention behaviour and schema in one step.
 - [ ] [#0dsr] [focused-cycle] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Tagged [focused-cycle] 2026-07-19 — this is WRITE-PATH work whose failure modes are destructive (replaying a stale intent clobbers operator text; broken idempotency double-archives a compact), so it needs fresh context, not a mid-drain slot. MAP (the expensive part, traced 2026-07-19): (1) durable journal = pending_write_journal, agent-doc-state-backbone/src/lib.rs:1433 — deduped by intent_id, entries cleared on DocumentWriteConverged; (2) accessor = pending_document_write_journal, agent-doc-document-realtime-io/src/lib.rs:2824; (3) EXISTING replay = deferred_document_write_reconnect_content, same file :3115 — but triggered only by editor RECONNECT (:1214) and closing cut (:3571), which is the actual gap: a retained intent waits for a reconnect that may never come; (4) settle entry points already exposed to preflight via its effects = settle_retained_committed_projection / settle_retained_captured_projection, agent-doc-closeout-runtime-io/src/lib.rs:170/226/289; (5) the repair step to hook = agent-doc-preflight-command-io/src/run.rs:296, which runs on every Run Agent Doc. IDEMPOTENCY NOTE: intent_id dedup gives you 'do not replay the SAME intent twice' for free, but it does NOT prove replaying a STALE intent over newer content is safe — that guard still has to be designed and is the real risk. Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms' and left work retained with no operator surface to resume it.
-- [ ] [#30p6] Go-mode idle-queue dispatch adds the agent-doc run to the agent composer but never submits it (#agent-doc-bug), so the queue stalls with the trigger sitting as an unsubmitted draft. Operator-reported 2026-07-18. NOT yet root-caused — do not guess. Starting evidence: a resubmit path already exists (idle_queue_resubmit_pending_payload / idle_queue_pending_payload_needs_enter_resubmit in agent-doc-start-runtime-io/src/idle_watch.rs) gated on tmux_submit_profile_for_harness(..).pending_draft_enter_resubmit(), which currently returns true unconditionally — so that gate is NOT the filter and the miss is upstream: check drain_dispatch_dedup_skip(payload_already_pending) and already_resubmitted (a stale latch would suppress the Enter), and whether shared.inject_pane resolves for a go-mode drain. Distinct from #jbtsiftnosub2, which covers the JB fresh-pane case only. Reproduce with a go-mode queue and watch the composer after injection
+- [ ] 🚧 [#30p6] [focused-cycle] Go-mode idle-queue dispatch adds the run to the composer but never submits it — NARROWED 2026-07-19 (still not proven; needs one pane capture). The resubmit gate chain is: idle_queue_pending_payload_needs_enter_resubmit = pending_draft_enter_resubmit() (true unconditionally, confirmed NOT the filter) && drain_dispatch_dedup_skip(payload_already_pending) && !already_resubmitted. drain_dispatch_dedup_skip is matches!(x, Some(true)), so the resubmit fires ONLY when the payload is positively recognized in the composer. supervisor_pane_payload_already_pending returns None when the pane cannot be captured, and Some(false) when recognition fails — both suppress the resubmit and leave the draft stranded. PRIME SUSPECT is the final condition of route_trigger_visible_in_current_draft (agent-doc-controller/src/dispatch.rs:412): after locating the trigger it returns !later_has_prompt, i.e. any line matching is_prompt_line AFTER the trigger means 'already submitted, this is scrollback'. A TUI composer box that renders prompt-like decoration below the typed text therefore reads as submitted while the draft is still sitting there. Wrapping and path-equivalence are already handled (wrapped_trigger_starts_at_line, line_contains_equivalent_agent_doc_path_trigger), so they are ruled out. CONFIRM BY: capturing the live pane at the stall and evaluating is_prompt_line against each line after the trigger.
 - [ ] [#n39j] SimWorld coverage for #queuepersiststall: preflight must report PROBED drainability when queue maintenance fails to persist, never QueueState::default(). Fixed + verified live (0 -> 14 drainable on brookebrodack-dev.md) but has no deterministic test — reproducing it needs a simulated editor-authority failure (editor_attached_model_missing), which is a SimWorld job rather than a mock. Add a SimWorld case that forces the persist failure and asserts preflight still reports the real drainable head count, so the loop-gate contract cannot silently regress to zeros
 - [ ] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
 - [ ] [#f6j3] [recommended] Stale branch fix/editor-authority-no-disk-repair (worktree src/agent-doc-editor-authority-fix) has 2 unmerged commits targeting the editor-authority blocker, but is 5 days / 50 commits behind main and still carries the OLD error wording ('bounded publish-live-buffer request', 'reload or save the editor buffer') where main now says 'bounded Lazily-current observation request ... operator_action=none'. Main has already reworked that area. Decide explicitly: rebase and salvage, or delete the branch+worktree. Do NOT merge as-is

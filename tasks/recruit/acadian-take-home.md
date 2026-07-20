@@ -381,13 +381,43 @@ I should name the pattern, since this is the second time the labels change has b
 `make check` is green: 33 backend tests, mypy clean, 56 frontend tests, typecheck, production build.
 
 Pushed as `ae73125` on **btakita/mag7-viewer**; superproject gitlink at `3f35abcce`.
-<!-- agent:boundary:b86abb88 -->
+
+### Re: mouse drag in the selector area — opus-4-8
+
+> **Queue prompt:** Please support mouse drag UX in the selector area.
+
+Done. Dragging anywhere in the selector now defines a range, with a live preview band while the drag is open.
+
+**What was actually missing.** Recharts already handles its travellers (`col-resize`) and the window slide (`move`) — those cursors were correct. The gap was the empty track: it showed a `crosshair`, promising a drag gesture, and pressing there did nothing. So the selector was advertising a capability it did not have.
+
+**The part I nearly got wrong.** My first implementation bound only to the track rect, which passed its own test and would have been near-useless in practice. Measuring the geometry showed why: at full range the window covers 242.6px of a 258.6px track, leaving **16px** exposed — split under the two handles. A track-only gesture is unreachable in exactly the state every user starts in.
+
+So the rule is now: **drag the window to select while unzoomed, to pan once zoomed.** That reads as a special case but is not one — with everything already shown there is nothing to pan, and once you have zoomed in, panning is what the window is good for. Both gestures are available whenever they are meaningful.
+
+Bound with native listeners on the track and slide rects rather than an overlay, since an overlay would have swallowed Recharts' own handle dragging. `selectionFromDrag()` holds the pointer→index mapping as a pure function and rejects gestures too narrow to be deliberate, so a stray click leaves the range alone instead of collapsing it to a point.
+
+**Verified live** — this path is native DOM, so unlike the Recharts brush it is fully drivable:
+
+| gesture | result |
+|---|---|
+| drag across track (zoomed) | range set to the dragged window |
+| drag across window (full range) | range set — the case a track-only binding would have missed |
+| drag window while zoomed | our handler stays out; Recharts pans |
+| plain click, no travel | range unchanged |
+| preview band during drag | left 91.0 vs expected 91.7, width 91.0 vs 90.5, centred on the brush (delta 0.00) |
+| slide/traveller hit-testing | still topmost; cursors `move` / `col-resize` intact |
+
+`make check` is green: 33 backend tests, mypy clean, 66 frontend tests (10 new), typecheck, production build.
+
+Pushed as `b1debeb` on **btakita/mag7-viewer**; superproject gitlink at `e0a02efa8`.
+<!-- agent:boundary:77d3d7ea -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue -->
 - ~~The reset button is misaligned ![img_8.png](img_8.png).~~
+- ~~Please support mouse drag UX in the selector area.~~
 <!-- /agent:queue -->
 
 ## Backlog

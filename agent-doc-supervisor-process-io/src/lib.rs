@@ -213,26 +213,36 @@ pub fn build_harness_launch_spec_with_resume(
     // Resume args go on before workspace-access/`--no-mcp` args so a
     // subcommand-shaped resume (Codex: `resume <id>`) stays in argv position 0,
     // where the CLI expects its subcommand.
+    // `#resumenocontinue` / `#resumeclaim`: only ever resume this document's own,
+    // unclaimed conversation id. Anything else starts fresh and says why —
+    // continue-latest and a stolen id both land in someone else's conversation.
+    // `#resumenocontinue`: only ever resume this document's own recorded id.
+    // Claim conflicts are resolved by the caller (which can see sibling
+    // documents); anything unresolved starts fresh and says why — continue-latest
+    // would land in whatever conversation ran last in this directory.
     let resolved_resume = agent_doc_harness::resolve_resume_request(resume, fm.resume.as_deref());
-    if agent_doc_harness::apply_resume_launch_args(
+    let effective_resume = resolved_resume;
+    match agent_doc_harness::apply_resume_launch_args(
         &harness,
         &mut base_args,
-        resolved_resume.as_ref(),
+        effective_resume.as_ref(),
     ) {
-        log.start_console_status(&format!(
-            "[start] {} has no id-addressed resume; --resume degraded to continue-latest",
-            harness.binary
-        ));
-    }
-    if let Some(resolved) = resolved_resume.as_ref() {
-        log.log_event(&format!(
-            "{}_start_resume request={}",
-            harness.binary,
-            match resolved {
-                agent_doc_harness::ResumeRequest::Latest => "latest".to_string(),
-                agent_doc_harness::ResumeRequest::Id(id) => format!("id:{id}"),
+        Some(degrade) => {
+            log.start_console_status(&format!(
+                "[start] --resume requested but starting a FRESH {} conversation: {}",
+                harness.binary,
+                degrade.reason()
+            ));
+            log.log_event(&format!(
+                "{}_start_resume_fresh reason={:?}",
+                harness.binary, degrade
+            ));
+        }
+        None => {
+            if let Some(agent_doc_harness::ResumeRequest::Id(id)) = effective_resume.as_ref() {
+                log.log_event(&format!("{}_start_resume id={id}", harness.binary));
             }
-        ));
+        }
     }
     agent_doc_git_io::dirs::append_workspace_access_args(
         &harness.binary,

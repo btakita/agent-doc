@@ -24,6 +24,66 @@ pub fn run(file: &Path, force: bool, route_owned: bool) -> Result<()> {
     run_with_reap_policy(file, force, route_owned, RouteOwnedReapPolicy::Auto)
 }
 
+/// Resolve a `--resume` request against the ids sibling documents already claim.
+///
+/// `#resumeclaim`: on conflict the OWNER keeps the conversation and this document
+/// starts fresh, loudly. Deliberately fail-open on lookup errors — a missing or
+/// unreadable `state.db` must not block a start; the worst case is the pre-claim
+/// behaviour, not a wedged supervisor.
+fn resolve_resume_claim_for_start(
+    file: &Path,
+    resume: Option<agent_doc_harness::ResumeRequest>,
+) -> Option<agent_doc_harness::ResumeRequest> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document = canonical.to_string_lossy().to_string();
+    let owner = resume
+        .as_ref()
+        .and_then(|request| resume_id_owner(&canonical, request));
+    let claim =
+        agent_doc_harness::resolve_resume_claim(&document, resume.as_ref(), owner.as_deref());
+    if let Some(warning) = claim.warning() {
+        eprintln!("[start] warning: {warning}");
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!("start_resume_claim_conflict document={document}"),
+        );
+    }
+    claim.effective_request(resume)
+}
+
+/// The other document that already records this conversation id, if any.
+fn resume_id_owner(canonical: &Path, request: &agent_doc_harness::ResumeRequest) -> Option<String> {
+    let agent_doc_harness::ResumeRequest::Id(id) = request else {
+        return None;
+    };
+    let project_root = agent_doc_project_root_io::project_root_containing(canonical)?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root).ok()?;
+    let mut stmt = conn
+        .prepare("SELECT canonical_path FROM documents WHERE canonical_path IS NOT NULL")
+        .ok()?;
+    let me = canonical.to_string_lossy().to_string();
+    let paths: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .ok()?
+        .filter_map(Result::ok)
+        .collect();
+    for other in paths {
+        if other == me {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&other) else {
+            continue;
+        };
+        let Ok((other_fm, _)) = frontmatter::parse(&content) else {
+            continue;
+        };
+        if other_fm.resume.as_deref().map(str::trim) == Some(id.as_str()) {
+            return Some(other);
+        }
+    }
+    None
+}
+
 struct StartRunLaunchLog<'a> {
     session_log: &'a mut Option<std::fs::File>,
     route_owned: bool,
@@ -135,6 +195,10 @@ pub fn run_with_reap_policy_and_resume(
     route_owned_reap_policy: RouteOwnedReapPolicy,
     resume: Option<agent_doc_harness::ResumeRequest>,
 ) -> Result<()> {
+    // `#resumeclaim`: a harness conversation belongs to ONE document. Resolve the
+    // claim before launch so a stale or copy-pasted `resume:` cannot interleave
+    // this document's turns into another document's conversation.
+    let resume = resolve_resume_claim_for_start(file, resume);
     let agent_doc_start_io::StartRuntime {
         session_id,
         fm,

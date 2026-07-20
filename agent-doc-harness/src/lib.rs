@@ -103,27 +103,48 @@ pub struct HarnessConfig {
 
 /// Resolve what a bare `--resume` should actually resume.
 ///
-/// A session document already records its conversation id in frontmatter
-/// (`resume:`), and that is strictly better than "whatever the harness thinks is
-/// most recent" — the operator may have run the harness elsewhere since. So bare
-/// `--resume` prefers the document's own id and only falls back to
-/// continue-latest when the document has never recorded one.
+/// A session document records its harness conversation id in frontmatter
+/// (`resume:`). That id is the ONLY thing agent-doc will ever resume.
 ///
-/// An explicit `--resume <ID>` always wins over frontmatter.
+/// `#resumenocontinue`: this deliberately does NOT fall back to the harness's
+/// "continue the most recent conversation" mode. `claude --continue` resolves to
+/// whatever ran most recently in that directory, which need not be this
+/// document's conversation — operator-observed attaching to an unrelated
+/// session. A fresh conversation is recoverable; hijacking someone else's is
+/// not. So an unknown id starts fresh and says so, and `ResumeRequest::Latest`
+/// survives only as "look it up", never as "continue whatever".
 pub fn resolve_resume_request(
     requested: Option<&ResumeRequest>,
     frontmatter_resume: Option<&str>,
 ) -> Option<ResumeRequest> {
     match requested? {
         ResumeRequest::Id(id) => Some(ResumeRequest::Id(id.clone())),
-        ResumeRequest::Latest => Some(
-            frontmatter_resume
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .map_or(ResumeRequest::Latest, |id| {
-                    ResumeRequest::Id(id.to_string())
-                }),
-        ),
+        ResumeRequest::Latest => frontmatter_resume
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(|id| ResumeRequest::Id(id.to_string())),
+    }
+}
+
+/// Why a requested resume produced no resume args.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumeDegrade {
+    /// `--resume` was asked for but the document records no conversation id.
+    NoRecordedId,
+    /// The harness has no id-addressed resume agent-doc can rely on.
+    HarnessUnsupported,
+}
+
+impl ResumeDegrade {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::NoRecordedId => {
+                "no conversation id is recorded for this document (frontmatter `resume:`)"
+            }
+            Self::HarnessUnsupported => {
+                "this harness has no id-addressed resume agent-doc can rely on"
+            }
+        }
     }
 }
 
@@ -131,77 +152,101 @@ pub fn resolve_resume_request(
 ///
 /// Pure so the arg shape is testable without a tmux pane or a live harness.
 ///
-/// Rules:
-/// - `None` leaves `base_args` untouched — no `--resume` was requested.
-/// - [`ResumeRequest::Latest`] (bare `--resume`) applies [`RestartBehavior`],
-///   which is exactly "continue the most recent conversation".
-/// - [`ResumeRequest::Id`] applies [`ResumeBehavior`]. On
-///   [`ResumeBehavior::Unsupported`] it degrades to continue-latest rather than
-///   inventing a flag, and reports the degrade so the caller can say so out loud.
-/// - Operator-supplied args win: if `base_args` already carries the resume flag
-///   or subcommand (via `claude_args` / `agent_args`), nothing is added. This
-///   mirrors the existing `--model` guard.
+/// Returns `Some(ResumeDegrade)` when a resume was requested but could not be
+/// expressed as an id. `#resumenocontinue`: the caller must then START FRESH and
+/// warn. It must never substitute the harness's continue-latest mode.
 ///
-/// Returns `true` when an id-addressed resume degraded to continue-latest.
+/// Operator-supplied args win: if `base_args` already carries the resume flag or
+/// subcommand (via `claude_args` / `agent_args`), nothing is added. This mirrors
+/// the existing `--model` guard.
 pub fn apply_resume_launch_args(
     harness: &HarnessConfig,
     base_args: &mut Vec<String>,
     resume: Option<&ResumeRequest>,
-) -> bool {
-    let Some(resume) = resume else {
-        return false;
-    };
+) -> Option<ResumeDegrade> {
+    let resume = resume?;
     let id = match resume {
-        ResumeRequest::Latest => None,
-        ResumeRequest::Id(id) => Some(id.as_str()),
+        // `Latest` reaching here means `resolve_resume_request` found no recorded
+        // id, so there is nothing safe to resume.
+        ResumeRequest::Latest => return Some(ResumeDegrade::NoRecordedId),
+        ResumeRequest::Id(id) => id.as_str(),
     };
-    match (id, &harness.resume_behavior) {
-        (Some(id), ResumeBehavior::AppendFlag(flag)) => {
+    match &harness.resume_behavior {
+        ResumeBehavior::AppendFlag(flag) => {
             if !base_args.iter().any(|arg| arg == flag) {
                 base_args.push(flag.clone());
                 base_args.push(id.to_string());
             }
-            false
+            None
         }
-        (Some(id), ResumeBehavior::PrependSubcommand(subcommand)) => {
+        ResumeBehavior::PrependSubcommand(subcommand) => {
             if !base_args.iter().any(|arg| arg == subcommand) {
                 base_args.insert(0, subcommand.clone());
                 base_args.insert(1, id.to_string());
             }
-            false
+            None
         }
-        (Some(_), ResumeBehavior::Unsupported) => {
-            apply_restart_launch_args(harness, base_args);
-            true
+        ResumeBehavior::Unsupported => Some(ResumeDegrade::HarnessUnsupported),
+    }
+}
+
+/// What to do about a `resume:` id that another document already claims.
+///
+/// `#resumeclaim`: a harness conversation belongs to exactly one document. Two
+/// documents resuming the same id interleave their turns into one conversation
+/// — the hijack, just arrived at from the other direction (a copy-pasted or
+/// stale `resume:` instead of continue-latest). The claim is therefore checked
+/// before launch, and a conflict is resolved in favour of the OWNER: the
+/// intruding document loses the id and starts fresh, loudly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResumeClaimOutcome {
+    /// Nothing to check, or this document already owns the id.
+    Owned,
+    /// Another document owns it. Start fresh instead, and warn.
+    ConflictOverridden { id: String, owner: String },
+}
+
+impl ResumeClaimOutcome {
+    /// The resume request to actually launch with.
+    pub fn effective_request(&self, requested: Option<ResumeRequest>) -> Option<ResumeRequest> {
+        match self {
+            Self::Owned => requested,
+            // Deliberately NOT `Latest`: falling back to continue-latest here
+            // would re-introduce exactly the hijack this check exists to stop.
+            Self::ConflictOverridden { .. } => None,
         }
-        (None, _) => {
-            apply_restart_launch_args(harness, base_args);
-            false
+    }
+
+    pub fn warning(&self) -> Option<String> {
+        match self {
+            Self::Owned => None,
+            Self::ConflictOverridden { id, owner } => Some(format!(
+                "conversation id {id} is already claimed by {owner}; starting a fresh conversation \
+                 instead of joining it. Remove `resume:` from this document, or resume it from {owner}."
+            )),
         }
     }
 }
 
-/// Apply a harness's continue-the-latest-conversation args, idempotently.
-fn apply_restart_launch_args(harness: &HarnessConfig, base_args: &mut Vec<String>) {
-    match &harness.restart_behavior {
-        RestartBehavior::Append(args) => {
-            if let Some(head) = args.first()
-                && base_args.iter().any(|arg| arg == head)
-            {
-                return;
-            }
-            base_args.extend(args.iter().cloned());
-        }
-        RestartBehavior::Prepend(args) => {
-            if let Some(head) = args.first()
-                && base_args.iter().any(|arg| arg == head)
-            {
-                return;
-            }
-            for (offset, arg) in args.iter().enumerate() {
-                base_args.insert(offset, arg.clone());
-            }
-        }
+/// Decide whether `document` may resume `id`, given the id's current owner.
+///
+/// `current_owner` is the document that already records this id, if any.
+/// Comparison is on the caller-normalised document identity, so a document
+/// always owns its own id.
+pub fn resolve_resume_claim(
+    document: &str,
+    requested: Option<&ResumeRequest>,
+    current_owner: Option<&str>,
+) -> ResumeClaimOutcome {
+    let Some(ResumeRequest::Id(id)) = requested else {
+        return ResumeClaimOutcome::Owned;
+    };
+    match current_owner {
+        Some(owner) if owner != document => ResumeClaimOutcome::ConflictOverridden {
+            id: id.clone(),
+            owner: owner.to_string(),
+        },
+        _ => ResumeClaimOutcome::Owned,
     }
 }
 
@@ -3540,66 +3585,92 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
     #[test]
     fn resume_id_uses_each_harness_own_arg_shape() {
         let mut claude_args = vec!["--model".to_string(), "opus".to_string()];
-        let degraded = apply_resume_launch_args(
-            &HarnessConfig::claude(),
-            &mut claude_args,
-            Some(&ResumeRequest::Id("conv-42".into())),
+        assert_eq!(
+            apply_resume_launch_args(
+                &HarnessConfig::claude(),
+                &mut claude_args,
+                Some(&ResumeRequest::Id("conv-42".into())),
+            ),
+            None
         );
-        assert!(!degraded);
         assert_eq!(claude_args, ["--model", "opus", "--resume", "conv-42"]);
 
         let mut codex_args = vec!["--model".to_string(), "gpt-5".to_string()];
-        let degraded = apply_resume_launch_args(
-            &HarnessConfig::codex(),
-            &mut codex_args,
-            Some(&ResumeRequest::Id("conv-42".into())),
+        assert_eq!(
+            apply_resume_launch_args(
+                &HarnessConfig::codex(),
+                &mut codex_args,
+                Some(&ResumeRequest::Id("conv-42".into())),
+            ),
+            None
         );
-        assert!(!degraded);
         assert_eq!(codex_args, ["resume", "conv-42", "--model", "gpt-5"]);
     }
 
-    /// Bare `--resume` means "continue the most recent conversation", which is
-    /// exactly `RestartBehavior` — so it must reuse it rather than duplicate it.
+    /// `#resumenocontinue`: agent-doc must NEVER emit a continue-latest flag.
+    /// `claude --continue` resolves to whatever ran most recently in the
+    /// directory, which need not be this document's conversation — that is how a
+    /// resume hijacks an unrelated session. An unknown id starts FRESH and
+    /// reports why.
     #[test]
-    fn bare_resume_continues_latest_via_restart_behavior() {
-        let mut claude_args: Vec<String> = Vec::new();
-        apply_resume_launch_args(
-            &HarnessConfig::claude(),
-            &mut claude_args,
-            Some(&ResumeRequest::Latest),
-        );
-        assert_eq!(claude_args, ["--continue"]);
-
-        let mut codex_args = vec!["--model".to_string(), "gpt-5".to_string()];
-        apply_resume_launch_args(
-            &HarnessConfig::codex(),
-            &mut codex_args,
-            Some(&ResumeRequest::Latest),
-        );
-        assert_eq!(codex_args, ["resume", "--last", "--model", "gpt-5"]);
+    fn unknown_resume_id_starts_fresh_and_never_continues_latest() {
+        for harness in [
+            HarnessConfig::claude(),
+            HarnessConfig::codex(),
+            HarnessConfig::opencode(),
+        ] {
+            let mut args = vec!["--model".to_string(), "opus".to_string()];
+            let degrade =
+                apply_resume_launch_args(&harness, &mut args, Some(&ResumeRequest::Latest));
+            assert_eq!(
+                degrade,
+                Some(ResumeDegrade::NoRecordedId),
+                "{} must report why it could not resume",
+                harness.binary
+            );
+            assert_eq!(
+                args,
+                ["--model", "opus"],
+                "{} must add NO resume args when the id is unknown",
+                harness.binary
+            );
+            for banned in ["--continue", "-c", "--last", "resume"] {
+                assert!(
+                    !args.iter().any(|arg| arg == banned),
+                    "{} must never fall back to continue-latest ({banned})",
+                    harness.binary
+                );
+            }
+        }
     }
 
-    /// A harness with no verified id-addressed resume must degrade to
-    /// continue-latest and SAY so, not silently invent a flag the CLI may
-    /// reject (which would fail the launch) or ignore (silent context loss).
+    /// A harness with no verified id-addressed resume must start fresh and say
+    /// so — not guess a flag, and not silently continue-latest.
     #[test]
-    fn unsupported_resume_id_degrades_to_continue_and_reports() {
+    fn unsupported_resume_harness_starts_fresh_and_reports() {
         let mut args: Vec<String> = Vec::new();
-        let degraded = apply_resume_launch_args(
-            &HarnessConfig::opencode(),
-            &mut args,
-            Some(&ResumeRequest::Id("conv-42".into())),
+        assert_eq!(
+            apply_resume_launch_args(
+                &HarnessConfig::opencode(),
+                &mut args,
+                Some(&ResumeRequest::Id("conv-42".into())),
+            ),
+            Some(ResumeDegrade::HarnessUnsupported)
         );
-        assert!(degraded, "degrade must be reported to the caller");
-        assert_eq!(args, ["--continue"]);
+        assert!(
+            args.is_empty(),
+            "an unsupported resume must add no args at all: {args:?}"
+        );
     }
 
     /// No `--resume` at all must not touch the launch args.
     #[test]
     fn absent_resume_leaves_args_untouched() {
         let mut args = vec!["--model".to_string(), "opus".to_string()];
-        let degraded = apply_resume_launch_args(&HarnessConfig::claude(), &mut args, None);
-        assert!(!degraded);
+        assert_eq!(
+            apply_resume_launch_args(&HarnessConfig::claude(), &mut args, None),
+            None
+        );
         assert_eq!(args, ["--model", "opus"]);
     }
 
@@ -3623,34 +3694,25 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
             Some(&ResumeRequest::Id("conv-42".into())),
         );
         assert_eq!(codex_args, ["resume", "operator-id"]);
-
-        // Same guard for the continue-latest path.
-        let mut continued = vec!["--continue".to_string()];
-        apply_resume_launch_args(
-            &HarnessConfig::claude(),
-            &mut continued,
-            Some(&ResumeRequest::Latest),
-        );
-        assert_eq!(continued, ["--continue"]);
     }
 
-    /// Bare `--resume` prefers the document's own recorded conversation id over
-    /// the harness's "most recent" guess — the operator may have run the harness
-    /// on something else since, and continue-latest would resume the wrong one.
+    /// Bare `--resume` is a LOOKUP of the document's own recorded id, never
+    /// "continue whatever ran last". With no recorded id it resolves to nothing.
     #[test]
-    fn bare_resume_prefers_frontmatter_id_over_continue_latest() {
+    fn bare_resume_resolves_only_to_the_documents_own_recorded_id() {
         assert_eq!(
             resolve_resume_request(Some(&ResumeRequest::Latest), Some("doc-conv-7")),
             Some(ResumeRequest::Id("doc-conv-7".into()))
         );
         assert_eq!(
             resolve_resume_request(Some(&ResumeRequest::Latest), None),
-            Some(ResumeRequest::Latest)
+            None,
+            "no recorded id must resolve to no resume, not to continue-latest"
         );
-        // Blank/whitespace frontmatter is not an id.
         assert_eq!(
             resolve_resume_request(Some(&ResumeRequest::Latest), Some("   ")),
-            Some(ResumeRequest::Latest)
+            None,
+            "blank frontmatter is not an id"
         );
     }
 
@@ -3662,6 +3724,55 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop · Context 0% used
             Some(ResumeRequest::Id("cli-id".into()))
         );
         assert_eq!(resolve_resume_request(None, Some("fm-id")), None);
+    }
+
+    /// `#resumeclaim`: a conversation belongs to ONE document. A stale or
+    /// copy-pasted `resume:` pointing at another document's conversation must
+    /// lose — two documents resuming one id interleave their turns into it.
+    #[test]
+    fn resume_id_claimed_by_another_document_is_overridden_with_a_warning() {
+        let outcome = resolve_resume_claim(
+            "tasks/mine.md",
+            Some(&ResumeRequest::Id("conv-42".into())),
+            Some("tasks/theirs.md"),
+        );
+        assert_eq!(
+            outcome,
+            ResumeClaimOutcome::ConflictOverridden {
+                id: "conv-42".into(),
+                owner: "tasks/theirs.md".into(),
+            }
+        );
+        let warning = outcome.warning().expect("a conflict must warn");
+        assert!(
+            warning.contains("conv-42"),
+            "warning must name the id: {warning}"
+        );
+        assert!(
+            warning.contains("tasks/theirs.md"),
+            "warning must name the owner so the operator can act: {warning}"
+        );
+        // The override must start FRESH, never continue-latest — that would be
+        // the same hijack arrived at from the other direction.
+        assert_eq!(
+            outcome.effective_request(Some(ResumeRequest::Id("conv-42".into()))),
+            None
+        );
+    }
+
+    /// A document always owns its own id, and an unclaimed id is free.
+    #[test]
+    fn resume_claim_allows_the_owning_document_and_unclaimed_ids() {
+        let requested = ResumeRequest::Id("conv-42".into());
+        for owner in [Some("tasks/mine.md"), None] {
+            let outcome = resolve_resume_claim("tasks/mine.md", Some(&requested), owner);
+            assert_eq!(outcome, ResumeClaimOutcome::Owned, "owner={owner:?}");
+            assert!(outcome.warning().is_none());
+            assert_eq!(
+                outcome.effective_request(Some(requested.clone())),
+                Some(requested.clone())
+            );
+        }
     }
 
     /// `#restartlivepane`: `C-d` only quits from an EMPTY composer — with draft

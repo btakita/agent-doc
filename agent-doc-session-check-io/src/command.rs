@@ -1033,6 +1033,14 @@ fn self_heal_response_replay_duplication(
     else {
         return Ok(false);
     };
+    // Supersede the stale replay intent before publishing its normalized cut.
+    // Otherwise a failed/late delivery can restore the duplicate immediately
+    // after this repair and make every session-check repeat the same CRDT write.
+    agent_doc_document_realtime_io::reconcile_deferred_write_to_canonical_cut_if_needed(
+        file,
+        &normalized,
+        "session_check_response_replay_dedup",
+    )?;
     effects.atomic_write(file, &normalized)?;
     let settled = crate::resolve_current_document_content(
         file,

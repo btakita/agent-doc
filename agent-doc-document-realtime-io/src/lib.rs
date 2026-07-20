@@ -2101,7 +2101,7 @@ pub fn apply_canonical_replace_if_attached(
                                     durable_visible_write_content_proves_target(file, &relay_text),
                                 )
                             {
-                                reconcile_deferred_write_to_acknowledged_cut_if_needed(
+                                reconcile_deferred_write_to_canonical_cut_if_needed(
                                     file,
                                     &relay_text,
                                     source,
@@ -2238,7 +2238,7 @@ pub fn apply_canonical_replace_if_attached(
                             // prior delivery is still outstanding, so replay its
                             // wakeup/ACK path without manufacturing another Yrs
                             // transaction for identical bytes.
-                            reconcile_deferred_write_to_acknowledged_cut_if_needed(
+                            reconcile_deferred_write_to_canonical_cut_if_needed(
                                 file,
                                 &effective_target,
                                 source,
@@ -2287,7 +2287,7 @@ pub fn apply_canonical_replace_if_attached(
                                 ),
                             )
                         {
-                            reconcile_deferred_write_to_acknowledged_cut_if_needed(
+                            reconcile_deferred_write_to_canonical_cut_if_needed(
                                 file,
                                 &effective_target,
                                 source,
@@ -2473,7 +2473,7 @@ fn exact_target_has_active_retention(
             || pending_document_write_for_target(file, &relay_write.content_hash).is_some())
 }
 
-fn reconcile_deferred_write_to_acknowledged_cut_if_needed(
+pub fn reconcile_deferred_write_to_canonical_cut_if_needed(
     file: &Path,
     acknowledged: &str,
     source: &str,

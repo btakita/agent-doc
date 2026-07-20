@@ -12,6 +12,27 @@ repos. The trait is a seam the bindings have already grown independently.
 API shape change" and rated the risk low. All three were wrong; §1, §10 and §13
 carry the corrections.
 
+**Track A step 1 CLOSED 2026-07-20.** All three open policy questions decided:
+
+| question | decision | section |
+|---|---|---|
+| `lazily-js` public `slot()` / `disposeSlot()` | dual with deprecation, one release | §1 |
+| wire variant `SlotValue` | **dual-accept, rename later** — decode both, emit `SlotValue` one release, then flip and drop | §13 |
+| `lazily-react` `useSlot` | **deprecate and delete** — not renamed | §1 |
+
+`useSlot` is deleted rather than renamed because it has **zero call sites** in the
+family (only its own definition, `.d.ts`, barrel export, and a self-test), and one
+of its two documented justifications is a category error: "when every invalidation
+must propagate" asks a value node to behave like an event stream, which is the
+event-versus-state split §7 already draws. The surviving justification — equality
+check costlier than the render — is real but narrow, and can bring the hook back
+later with a use case behind it and a name chosen for that case. Same reasoning
+the plan applies to `Signal`: a construction got a public name because a
+lower-level thing had that name, not because the taxonomy asked for it.
+
+**Follow-up surfaced, not blocking:** `lazily-react` also ships `useSignal`
+(`test/bridge.test.js:3`), which §4 retires. Handle in Track A step 8.
+
 ---
 
 ## 1. What changes
@@ -58,13 +79,16 @@ migration is transitional rather than a flag day.
 - The `Context` doc comment at `reactive.d.ts:61` reads "the graph owning all
   Cell/Slot/Signal/Effect nodes" — published TSDoc prose, not just signatures.
 
-**BLOCKED, needs a decision before `lazily-react`'s step: `useSlot` cannot become
-`useMemo`.** React owns that name, and shadowing it in a React integration
-package is not viable. The package already exports `useReactiveMemo` (with an
-equality guard) alongside `useSlot` (without one), so the pair needs a naming
-scheme, not a substitution. **Read what both hooks actually do before choosing** —
-the guard difference is the real distinction and the names should reflect it.
-Do not let a mechanical pass pick this.
+**RESOLVED 2026-07-20 — `useSlot` is deleted, not renamed.** It could not become
+`useMemo` (React owns that name), and the pair `useReactiveMemo` (equality guard)
+/ `useSlot` (no guard) looked like it needed a naming scheme. Measurement changed
+the question: `useSlot` has **zero call sites** — only `src/hooks.js:217`,
+`src/hooks.d.ts:33`, `src/index.{js,d.ts}`, and `test/hooks.test.js:116` testing
+itself. Deprecate for one release beside the other aliases, then remove. See the
+step-1 table at the top for the full reasoning.
+
+`useReactiveMemo` **keeps its name** — it is the documented default and needs no
+churn.
 
 So it is **nine repos** but **eight corpus runners** — `lazily-react` wraps `lazily-js` and runs no corpus, `lazily-html` is out of scope. Where this plan says *runner* it means the eight bindings; where it says *repo* it includes react. One hard ordering edge. Deprecation
 policy for the two public ones must be decided before step 1: keep `slot()` as a
@@ -484,6 +508,31 @@ Runner surface needed is small: a `merge` op plus a policy parameter on the cell
 op. The counting machinery already exists in all eight runners from
 `computes_of`.
 
+**CORRECTION 2026-07-20, measured — "small" is wrong for any binding with more
+than one execution model.** In `lazily-rs`, `merge_cell` and `apply_merge` exist
+**only on `Context`** (`src/context.rs:1192,1205`). `ThreadSafeContext` and
+`AsyncContext` have **zero** merge API — grep for `merge` in `src/thread_safe.rs`
+and `src/async_context.rs` returns nothing.
+
+That matters because `tests/reactive_graph_conformance.rs` replays this corpus
+against **all three models**. So Track B step 2 in the reference binding is not
+"add two ops to a runner"; it is a choice:
+
+| option | cost | what it buys |
+|---|---|---|
+| (a) add `merge_cell`/`apply_merge` to `ThreadSafeContext` + `AsyncContext` | real library work on two models, not runner work | §7 verified on all three execution models |
+| (b) ledger both as `KNOWN_DIVERGENCES` | ~2 entries | §7 verified on **one of three** models |
+
+(b) is sanctioned — §9.5 says a reported divergence is a successful outcome, and
+the runner already carries a per-model ledger asserted in both directions. But be
+honest about what it means: the `Source`-never-acquires-an-edge partition would
+be pinned only for the single-threaded model, and the thread-safe model is
+exactly where a feed-as-an-edge implementation is most tempting.
+
+**Re-measure per binding before sizing step 2.** Any binding with sync/async/
+thread-safe splits likely has the same gap; the estimate above assumed one
+execution model per binding, which is false for at least `lazily-rs`.
+
 ### 9.5 Verification discipline, carried over
 
 - **Mutation-verify each new fixture.** Break the implementation deliberately and
@@ -725,20 +774,41 @@ change, not a rename.
 claim held. But the delta format still carries a live variant named `SlotValue`
 (`schemas/delta.json:34,109`; 10 references in `protocol.md`), and
 `protocol.md:206` already mixes vocabulary: "**Memo** equality suppression: a
-dirty `memo()` … emits no `SlotValue`". **Decide explicitly:**
+dirty `memo()` … emits no `SlotValue`".
 
-- (a) leave `SlotValue` — permanent wire-level seam, contradicts §11.3's "the
-  family stopped shipping the name"; or
-- (b) rename it — a breaking wire change across all bindings **plus `agent-doc`'s
-  IPC**, which consumes this format.
+**DECIDED 2026-07-20: dual-accept, rename later** — the same transitional policy
+as §9.3's fixture ops, applied to the wire.
 
-Not deciding is not an option; the earlier "no wire change" headline hid it.
+1. All bindings **decode** both `SlotValue` and `MemoValue`; keep **emitting**
+   `SlotValue`. Backward compatible in both directions, no flag day.
+2. One release later, flip emitters to `MemoValue`.
+3. A release after that, drop the `SlotValue` decode arm.
+
+Confirmed scope — `SlotValue` is live wire code in **all eight bindings plus
+`src/agent-doc/agent-doc-state-wire/src/lib.rs`**, so a lockstep rename would
+break `agent-doc`'s IPC simultaneously. That is why (b) was rejected. Leaving the
+seam permanently (a) was rejected because it contradicts §11.3's "the family
+stopped shipping the name."
+
+**The emitter flip and the decode-arm drop are separate releases. Do not bundle
+either into Track A.**
 
 **Docs.** `lazily-spec` alone: `README.md` (18.6K), `coverage.json`, `book/`,
 `examples/`, and 30+ files under `docs/` including `reactive-graph.md` (68K) and
-`relaycell-backpressure-analysis.md` (36K). Note `cell-model.md` and
-`protocol.md` live at repo root with symlinks in `docs/` — **an agent doing
-path-based edits must not double-edit through both paths.**
+`relaycell-backpressure-analysis.md` (36K).
+
+**Correction 2026-07-20 — the symlink hazard does not exist.** An earlier draft
+said `cell-model.md` and `protocol.md` live at repo root "with symlinks in
+`docs/`" and warned against double-editing. Measured: there are **no symlinks in
+the repo** outside `.venv`. `docs/cell-model.md` (30 B) and `docs/protocol.md`
+(28 B) are mdBook stubs containing exactly one line:
+
+```
+{{#include ../cell-model.md}}
+```
+
+So the prose lives only at the root path, the `docs/` paths hold no prose to
+double-edit, and a path-based pass is safe. Edit the root files.
 
 **The real risk remains scope creep.** Every alternative in §12 is more
 interesting than the rename, and none belongs in it. §10 previously violated this

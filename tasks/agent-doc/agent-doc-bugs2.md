@@ -881,7 +881,7 @@ The item's own design constraint is the blocker: preserving "incomplete token pr
 Each was filed independently and each bottoms out in "the exchange has no node model". That makes Phase 2 considerably more valuable than its own line item suggests — it is not one refactor competing with three features, it is the thing that unblocks all three. Worth weighing against the `state.db` corruption and `#deliveryackcut`, which are the other two open threads with outsized blast radius.
 
 I did not start it here: replacing the exchange's storage model is the highest-risk change in the system (a wrong merge silently drops operator text), and it deserves a cycle that begins with the plan rather than ends with it.
-<!-- agent:boundary:b5f0c146 -->
+<!-- agent:boundary:0af060f6 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -948,7 +948,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ do [#coredecomp]
 - ⏭️ do [#orchdecomp]
 - ⏭️ do [#skillharnessplugin]
-- do [#crdtauth6]
+- ⏭️ do [#crdtauth6]
 - do [#nsfz]
 - do [#suprestassoc-live]
 - ~~do [#agentsignals]~~
@@ -962,7 +962,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ~~📌 do [#f6j3]~~
 - ~~📌 do [#promptselect]~~
 - ~~📌 do [#realtimesalient]~~
-- 📌 do [#syncobscache2]
+- 🚧 📌 do [#syncobscache2]
 - 📌 do [#capturebacklogatomic]
 - 📌 do [#opcapturelazily]
 - 📌 do [#jbtsiftnosub2verify]
@@ -1004,7 +1004,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#zq8e] Editor-authority wedge blocks ALL queue maintenance (root of the #goal drain stall). Evidence in ops.log for this doc: at 19:32:45 `controller_crdt_current_text source=preflight_queue_maintenance` returns `status=current live_editors=1 delivery_converged=true`; 2s later the SAME queue_maintenance path logs `document_model_ensure_start initial_state=editor_attached_model_missing`, a `crdt_replica_register` succeeds (`data_kind=ok generation_fenced=true bootstrap_bytes=1312802`), then `document_model_ensure_republish_observer_not_ready` -> `document_model_ensure_failed` after 5s. EVERY `document_model_ensure_start` this session reports missing-replica across unrelated sources (queue_maintenance, pending_add_sync, controller_recycle_request) while the controller consistently reports current. Two observers of one document disagree; the ensure-path observer does not see a replica the controller demonstrably has. NOTE: likely already owned by the `src/agent-doc-editor-authority-fix` worktree (commits `preserve attached editor authority during retry`, `bound idle authority replay`) — coordinate before landing a rival fix in src/agent-doc.
 - [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).
 - [ ] [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.
-- [ ] [#syncobscache2] #syncobscache follow-up (the rest of the focus-sync win): extend the command-scoped observation cache into ../tmux-router. After the agent-doc-side cache: 109 -> 80 subprocess spawns, 2225 -> 2031ms (~9% only). list-panes barely moved (35 -> 34) because tmux-router spawns from 47 sites directly via its own Command builder, bypassing TmuxCommandRunner. Dominant remainder: `list-panes -a -F #{pane_id} #{pane_dead}` run 18x identically — pane_dead_flag lists ALL panes and scans for one, once per pane. Fix: move the scope into tmux-router and/or batch pane_dead_flag into one map fetch. Re-measure with the PATH-shim spawn counter.
+- [ ] 🚧 [#syncobscache2] #syncobscache follow-up (the rest of the focus-sync win): extend the command-scoped observation cache into ../tmux-router. After the agent-doc-side cache: 109 -> 80 subprocess spawns, 2225 -> 2031ms (~9% only). list-panes barely moved (35 -> 34) because tmux-router spawns from 47 sites directly via its own Command builder, bypassing TmuxCommandRunner. Dominant remainder: `list-panes -a -F #{pane_id} #{pane_dead}` run 18x identically — pane_dead_flag lists ALL panes and scans for one, once per pane. Fix: move the scope into tmux-router and/or batch pane_dead_flag into one map fetch. Re-measure with the PATH-shim spawn counter.
 - [ ] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
 - [ ] [#statedbvacuum] [recommended] #agent-doc-feature One-time reclaim + ongoing compaction for .agent-doc/state.db. #authorityfactretention (566a72f6d) bounds future growth (170,215 -> 5,000 document_authority_observed rows on the live db), but SQLite reuses freed pages rather than shrinking: agent-loop state.db is still 477MB on disk with ~47,000 free pages and state_events holding 288MB across 73,822 pages for only 11,056 rows. Reclaiming needs a VACUUM, which takes an exclusive lock and must not run under a live controller. Add a bounded maintenance path (an `agent-doc admin vacuum` gated on no live controller/supervisor, or PRAGMA incremental_vacuum wired into an idle boundary) instead of leaving operators to run sqlite3 by hand.
 - [ ] [#crashresiliencelograce] test-hygiene: crash_resilience::tests::log_panic_to_file_appends_without_panicking fails under a parallel workspace run (cargo test --workspace) at src/crash_resilience.rs:173 but passes in isolation and under make check. The panic-log append test shares a fixed path across concurrently-running crate test binaries. Give it a per-test temp path so the suite is order-independent.

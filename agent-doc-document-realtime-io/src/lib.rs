@@ -2005,20 +2005,13 @@ pub fn apply_canonical_replace_if_attached(
                                 match completion {
                                     write_policy::CrdtWriteCompletion::RetainedForAsyncDelivery => {
                                         // `#deliveryackcut`: this is the path a
-                                        // real zombie actually reaches --
+                                        // stalled replica actually reaches --
                                         // `async_delivery_recovery_active` flips
                                         // true on the FIRST AckReplay send, so a
-                                        // registered-but-dead replica lands here,
-                                        // not on BlockMissingRetention. Retiring
-                                        // only there left the wedge in place for
-                                        // every later operation.
-                                        //
-                                        // The canonical stays `Trusted`: the write
-                                        // applied and its exact target is retained,
-                                        // so the canonical IS that target and must
-                                        // remain serveable as current text.
-                                        // Retirement here only stops the zombie
-                                        // from blocking convergence.
+                                        // registered-but-silent replica lands
+                                        // here, not on BlockMissingRetention.
+                                        // Reconciling only there left the wedge in
+                                        // place for every later operation.
                                         reconcile_stalled_replicas(file, source);
                                         agent_doc_ops_log_io::log_op(
                                             file,
@@ -2033,11 +2026,10 @@ pub fn apply_canonical_replace_if_attached(
                                     }
                                     write_policy::CrdtWriteCompletion::BlockMissingRetention => {
                                         // `#deliveryackcut`: no retained-delivery
-                                        // proof, so nothing establishes that the
-                                        // canonical reflects what the retired
-                                        // replica held -- it must rebuild through
-                                        // the missing-replica ladder before it is
-                                        // served as current text.
+                                        // proof either, so reconcile here too --
+                                        // this is the path where the cache being
+                                        // wrong is most likely to be why nothing
+                                        // completed.
                                         reconcile_stalled_replicas(file, source);
                                         anyhow::bail!(
                                             "{source}: editor delivery ACK recovery for {} did not settle within {}ms and the exact canonical target lacks active retained-delivery proof; refusing closeout",

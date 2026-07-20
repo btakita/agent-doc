@@ -799,7 +799,25 @@ The actual gap is the **branch selection** — that the persist-failure path *us
 So I pinned the contract where it lives, in the source-assertion style this repo already uses: the branch must call `inspect_queue_state(...)` and the zeroed default must remain the **probe's own** `unwrap_or_else` fallback. Both persist-failure sites in `run.rs` satisfy it.
 
 One thing I got wrong first and fixed: I initially asserted an occurrence *count* of `QueueState::default()`, which failed because the phrase also appears in a nearby comment. A count over source text is fooled by prose; the structural form is not. Worth remembering for the other source assertions in that file.
-<!-- agent:boundary:3658837a -->
+
+### Re: stale fix/editor-authority-no-disk-repair branch — opus-4-8
+
+> **Queue prompt:** do [#f6j3]
+
+The decision this item asks for has **already been made and safely executed** — I verified rather than re-deciding, and deliberately did not delete anything.
+
+Current state:
+
+- the local branch `fix/editor-authority-no-disk-repair` **no longer exists** (only `refs/remotes/origin/...` remains);
+- the worktree `src/agent-doc-editor-authority-fix` **no longer exists**;
+- and the work is preserved under the tag **`archive/editor-authority-no-disk-repair`**.
+
+So someone took the "do not merge as-is" instruction and chose the third, better option: archive rather than either rebase-and-merge or destroy. The two commits the item names are intact and reachable — `8a3f33c42 fix: preserve attached editor authority during retry` and `8104031d4 fix: repair empty duplicate document scaffold` — neither of which is an ancestor of `main`, confirming they were genuinely not merged and the tag is the only thing holding them.
+
+That is the right outcome for this item's actual risk: the danger was silently merging stale code carrying superseded error wording, or losing the two commits outright. Neither happened.
+
+I left the remote branch alone. Deleting it is the one remaining cleanup, it is outward-facing, and the tag already makes it redundant rather than load-bearing — so that is your call, not something to do unasked. Marking done: the explicit decision the item demanded exists, and the salvage path stays open through the tag if the editor-authority work is ever revisited.
+<!-- agent:boundary:4eec3d37 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -860,7 +878,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ do [#qeditrace]
 - ⏭️ do [#jbcompactcommit]
 - ⏭️ do [#tmuxsynccrashlog]
-- do [#60ev]
+- ⏭️ do [#60ev]
 - do [#2y8j]
 - do [#cdtcutover]
 - do [#coredecomp]
@@ -877,7 +895,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - 📌 do [#0dsr]
 - 📌 do [#30p6]
 - ~~📌 do [#n39j]~~
-- 📌 do [#f6j3]
+- ~~📌 do [#f6j3]~~
 - 📌 do [#promptselect]
 - 📌 do [#realtimesalient]
 - 📌 do [#syncobscache2]
@@ -918,7 +936,6 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#0dsr] [focused-cycle] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Tagged [focused-cycle] 2026-07-19 — this is WRITE-PATH work whose failure modes are destructive (replaying a stale intent clobbers operator text; broken idempotency double-archives a compact), so it needs fresh context, not a mid-drain slot. MAP (the expensive part, traced 2026-07-19): (1) durable journal = pending_write_journal, agent-doc-state-backbone/src/lib.rs:1433 — deduped by intent_id, entries cleared on DocumentWriteConverged; (2) accessor = pending_document_write_journal, agent-doc-document-realtime-io/src/lib.rs:2824; (3) EXISTING replay = deferred_document_write_reconnect_content, same file :3115 — but triggered only by editor RECONNECT (:1214) and closing cut (:3571), which is the actual gap: a retained intent waits for a reconnect that may never come; (4) settle entry points already exposed to preflight via its effects = settle_retained_committed_projection / settle_retained_captured_projection, agent-doc-closeout-runtime-io/src/lib.rs:170/226/289; (5) the repair step to hook = agent-doc-preflight-command-io/src/run.rs:296, which runs on every Run Agent Doc. IDEMPOTENCY NOTE: intent_id dedup gives you 'do not replay the SAME intent twice' for free, but it does NOT prove replaying a STALE intent over newer content is safe — that guard still has to be designed and is the real risk. Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms' and left work retained with no operator surface to resume it.
 - [ ] [#30p6] [focused-cycle] Go-mode idle-queue dispatch adds the run to the composer but never submits it — NARROWED 2026-07-19 (still not proven; needs one pane capture). The resubmit gate chain is: idle_queue_pending_payload_needs_enter_resubmit = pending_draft_enter_resubmit() (true unconditionally, confirmed NOT the filter) && drain_dispatch_dedup_skip(payload_already_pending) && !already_resubmitted. drain_dispatch_dedup_skip is matches!(x, Some(true)), so the resubmit fires ONLY when the payload is positively recognized in the composer. supervisor_pane_payload_already_pending returns None when the pane cannot be captured, and Some(false) when recognition fails — both suppress the resubmit and leave the draft stranded. PRIME SUSPECT is the final condition of route_trigger_visible_in_current_draft (agent-doc-controller/src/dispatch.rs:412): after locating the trigger it returns !later_has_prompt, i.e. any line matching is_prompt_line AFTER the trigger means 'already submitted, this is scrollback'. A TUI composer box that renders prompt-like decoration below the typed text therefore reads as submitted while the draft is still sitting there. Wrapping and path-equivalence are already handled (wrapped_trigger_starts_at_line, line_contains_equivalent_agent_doc_path_trigger), so they are ruled out. CONFIRM BY: capturing the live pane at the stall and evaluating is_prompt_line against each line after the trigger.
 - [ ] [#hvw0] [operator-verify] Rotate the CARGO_REGISTRY_TOKEN secret on github.com/btakita/skill-harness — the current one returns 403 authentication failed, so CI cannot publish to crates.io (v0.1.3 was published manually from the passage token btak/CARGO_REGISTRY_TOKEN). Needs a repo-secret write, which is operator-gated. Until it is rotated, every tagged release will now FAIL loudly at the publish step (that is the intended new behavior after 32836ad; it previously reported success)
-- [ ] [#f6j3] [recommended] Stale branch fix/editor-authority-no-disk-repair (worktree src/agent-doc-editor-authority-fix) has 2 unmerged commits targeting the editor-authority blocker, but is 5 days / 50 commits behind main and still carries the OLD error wording ('bounded publish-live-buffer request', 'reload or save the editor buffer') where main now says 'bounded Lazily-current observation request ... operator_action=none'. Main has already reworked that area. Decide explicitly: rebase and salvage, or delete the branch+worktree. Do NOT merge as-is
 - [ ] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
 - [ ] [#7n20] Finish the ensure-window liveness fix across the CLI/controller process boundary. `bbc50c26e` extends the 400ms missing-replica ensure window when a `crdt_replica_register` proves the editor is alive, but the counter is process-global: on the split path the register lands controller-side while `ensure_document_model` runs CLI-side, so live telemetry still shows `window_extended=false` and the wedge persists. Two options: carry the liveness proof across IPC, or run the ensure controller-side where the registration already is. Do NOT route preflight's initial current-doc resolve through the ensure path — tried in this cycle and reverted; it violates `preflight_missing_editor_model_pauses_without_reading_disk_authority` and made preflight resolve to DISK content instead of waiting for the attached editor.
 - [ ] [#zq8e] Editor-authority wedge blocks ALL queue maintenance (root of the #goal drain stall). Evidence in ops.log for this doc: at 19:32:45 `controller_crdt_current_text source=preflight_queue_maintenance` returns `status=current live_editors=1 delivery_converged=true`; 2s later the SAME queue_maintenance path logs `document_model_ensure_start initial_state=editor_attached_model_missing`, a `crdt_replica_register` succeeds (`data_kind=ok generation_fenced=true bootstrap_bytes=1312802`), then `document_model_ensure_republish_observer_not_ready` -> `document_model_ensure_failed` after 5s. EVERY `document_model_ensure_start` this session reports missing-replica across unrelated sources (queue_maintenance, pending_add_sync, controller_recycle_request) while the controller consistently reports current. Two observers of one document disagree; the ensure-path observer does not see a replica the controller demonstrably has. NOTE: likely already owned by the `src/agent-doc-editor-authority-fix` worktree (commits `preserve attached editor authority during retry`, `bound idle authority replay`) — coordinate before landing a rival fix in src/agent-doc.

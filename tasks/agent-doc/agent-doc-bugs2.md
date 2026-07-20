@@ -71,29 +71,25 @@ One existing test asserted the old behavior (`!result.contains(boundary_id)`). I
 **Remaining under `#boundaryaccum1`:** the two minting sites still use different id formats, and compact-io has its own `resolve_boundary_marker`. Folding all three onto one helper is the tidy-up; the divergence itself is fixed.
 
 Also reaped the done-markers from this session's work that were sitting as queue heads.
-<!-- agent:boundary:eb0b0d7f -->
+<!-- agent:boundary:bd0c4445 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- 🚧 I changed the agent from claude to codex with a claude resume session id, attempted to start with `start --route-owned --route-owned-reap-policy keep-alive tasks/agent-doc/agent-doc-bugs2.md 2>> /home/brian/work/btakita/agent-loop/agent-doc/logs/supervisor-stderr.log`, but got an error. In addition, I was not able to exit the process. Ctrl+C hung.
 - do [#boundarystableid]
-- ~~do [#resumenocontinue]~~
 - do [#writestdinhang]
-- ~~⏭️ do [#resumestale]~~
 - do [#operatorverifylive]
-- ~~do [#restartselfdefer]~~
-- ~~do [#restartbusyquit]~~
-- ~~do [#restartselfpane]~~
-- ⏭️ do [#autoinstalldeferstale]
-- ⏭️ do [#orphandrain]
+- do [#autoinstalldeferstale]
+- do [#orphandrain]
 - do [#c8tb]
 - do [#libgcpidrace]
 - do [#hubregistryevict]
-- ⏭️ do [#missingreplicarebuild]
-- ⏭️ do [#jbrouteasyncchannel]
-- ⏭️ do [#authoritydescentstd]
-- ⏭️ do [#patchretryidem]
-- ⏭️ do [#hvw0]
+- do [#missingreplicarebuild]
+- do [#jbrouteasyncchannel]
+- do [#authoritydescentstd]
+- do [#patchretryidem]
+- do [#hvw0]
 - do [#bbpe]
 - do [#dbj7]
 - do [#crdtpushdrainverify]

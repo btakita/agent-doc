@@ -2439,6 +2439,16 @@ enum Commands {
         #[arg(long, value_enum)]
         agent_doc_write: Option<frontmatter::AgentDocWrite>,
     },
+    /// Record the harness conversation id this document resumes.
+    ///
+    /// Normally set automatically at launch (`#resumecapture`). Use this to
+    /// adopt a conversation agent-doc did not start, or to repair a lost id.
+    ResumeId {
+        /// Path to the session document
+        file: PathBuf,
+        /// Harness conversation id (e.g. a Claude Code session UUID)
+        id: String,
+    },
     /// Get or set the document mode (format + write strategy)
     Mode {
         /// Path to the session document
@@ -4552,6 +4562,21 @@ fn try_main() -> anyhow::Result<()> {
             agent_doc_format,
             agent_doc_write,
         } => convert::run(&file, mode.as_ref(), agent_doc_format, agent_doc_write),
+        Commands::ResumeId { file, id } => {
+            let id = id.trim();
+            if id.is_empty() {
+                anyhow::bail!("conversation id must not be empty");
+            }
+            // Goes through the realtime authority, not a raw disk write: the
+            // document may be open in an editor that owns its current text.
+            let changed = agent_doc_start_runtime_io::record_document_resume_id(&file, id)?;
+            if changed {
+                println!("recorded resume id {id} for {}", file.display());
+            } else {
+                println!("{} already resumes {id}", file.display());
+            }
+            Ok(())
+        }
         Commands::Mode { file, set } => mode::run(&file, set.as_deref()),
         Commands::Annotate {
             file,

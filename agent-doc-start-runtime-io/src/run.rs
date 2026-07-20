@@ -123,7 +123,7 @@ fn assign_and_record_session_id(
 ///
 /// Not a raw disk write: the document may be open in an editor, and the realtime
 /// model is the authority for its current text. Returns whether anything changed.
-fn record_document_resume_id(file: &Path, id: &str) -> Result<bool> {
+pub fn record_document_resume_id(file: &Path, id: &str) -> Result<bool> {
     let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "start_resume_id_capture",

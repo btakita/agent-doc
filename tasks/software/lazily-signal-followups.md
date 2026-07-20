@@ -151,6 +151,43 @@ what TC39, Vue, Angular, Preact, and MobX already mean by it.
 is a taxonomy of roles; `Cell`/`Memo`/`Effect` mixes a role, a strategy, and a
 role.
 
+**The eager form: a concept decision, spelled per binding.**
+
+Settled: **eagerness is a marked modifier on a computed, not a kind.** Lazy stays
+unmarked. `ctx.computed.lazy(f)` was considered and rejected — putting lazy and
+eager side by side as peer options asserts a symmetry the *Signal Is Not a
+Reactive Primitive* argument explicitly denies (`eager = lazy + puller`,
+`lazy ≠ eager - anything`). Unmarked-lazy encodes the asymmetry for free and
+matches the `Cell`/`Computed` unmarked/marked pattern.
+
+NOT settled, and deliberately left per-binding: the spelling. A hard constraint
+drives this — **Go methods cannot have type parameters**, so every dotted form
+(`ctx.computed.eager[T](f)`, `ctx.eager.computed[T](f)`) is impossible there for
+generic constructors. That is why lazily-go already uses free functions
+(`NewMemo[T](ctx, compute)`) rather than context methods, and has always
+diverged from the `ctx.method()` convention out of necessity.
+
+Also rejected: `ctx.computed.eager(f)` as a family syntax. It needs `ctx.computed`
+to be simultaneously callable and method-carrying, which is nightly-only in Rust
+(`fn_traits`), impossible in Go for generics, and unavailable in Zig. Safe in
+five bindings and unavailable in three is the wrong family default — the same
+principle that resolved the disposal contract.
+
+Candidate spellings, all acceptable, chosen per binding:
+
+- `ctx.eager.computed(f)` / `ctx.eager().computed(f)` — modifier-then-noun;
+  works wherever methods can carry type parameters.
+- `ctx.pull(computed)` returning a disposable — the most thesis-consistent: no
+  eager type at all, eagerness is something you *do*, and it finally gives an
+  honest name to the operation currently misnamed `dispose_signal`. Works in all
+  eight including Go.
+- `ctx.eagerComputed(f)` / `EagerComputed[T](ctx, f)` — the boring one that
+  definitely works everywhere.
+
+Precedent for specifying the concept and leaving the spelling: reactive-graph.md
+already does this for `batch`, noting that closure-based bindings take the writes
+as the closure body while begin/end bindings call them around it.
+
 **Still to settle before the first edit:**
 
 - Constructor: `ctx.computed()`, with `ctx.memo()` kept as a deprecated alias for

@@ -212,12 +212,43 @@ Three early samples in an initial sweep looked anomalous; they were at x = 10/20
 `make check` is green: 33 backend tests (4 new), mypy clean, 42 frontend tests (10 new), typecheck, production build. README updated for the new payload shape.
 
 Pushed as `f7f4fa3` + `2a26971` on `btakita/acadian-take-home`; superproject gitlink at `662c1fec1`.
-<!-- agent:boundary:16225d5d -->
+
+### Re: reset zoom as an icon beside the slider — opus-4-8
+
+> **Queue prompt:** Change the "Reset Zoom" button text into a reset icon. Move the Reset Zoom button to the right of the slider. commit + push
+
+Done. The control is now a 20px icon button (circular-arrow glyph) sitting in the gutter immediately right of the brush, and the card header is back to just the symbol and the cumulative return.
+
+Two details worth naming:
+
+**The gutter is reserved unconditionally.** `RESET_GUTTER` is applied to the chart's right margin whether or not the button is showing, and the button itself is absolutely positioned. If the space were only reserved while zoomed, the plot and brush would resize the moment you zoomed — the same class of displacement you flagged with the loading indicator.
+
+**The label survives as an accessible name.** Icon-only buttons routinely lose theirs. `Reset zoom` is still there via an `.sr-only` span (verified computed at 1×1px, clipped) plus a `title` attribute for hover.
+
+**Verification.** Synthetic mouse events do not drive Recharts' drag, so I could not zoom the chart programmatically. I force-rendered the control to measure its geometry, then reverted that and confirmed the gate was back — worth stating plainly, since a measurement taken under a temporary edit is only as good as the revert:
+
+| check | result |
+|---|---|
+| in chart, not header | `inChart: true`, `inHeader: false` |
+| right of the brush | button spans 313.5–333.5; brush ends at 307.5 |
+| vertical alignment | centers within 1.9px of the brush band |
+| icon, not text | `<svg>` present, label visually hidden at 1×1px |
+
+Then one of my earlier brush drags turned out to have actually landed, leaving AAPL genuinely zoomed — so the real end-to-end test was available after all. The button appeared on that card only, and clicking it restored the axis from `2026-03-17 … 2026-05-29` back to the full `2026-02-03 … 2026-07-20` range, with the button disappearing on reset.
+
+`make check` is green: 33 backend tests, mypy clean, 42 frontend tests, typecheck, production build.
+
+Pushed as `3be8199` on `btakita/acadian-take-home`; superproject gitlink at `c90969813`.
+
+One unrelated note: the frontmatter reads `agent: c`, which preflight flags as a harness mismatch on every cycle (it falls back to the active harness, so nothing breaks). Likely a truncated `claude` — worth fixing to silence the warning.
+<!-- agent:boundary:3d5fb335 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue go -->
+- ~~Change the "Reset Zoom" button text into a reset icon. Move the Reset Zoom button to the right of the slider ![img_6.png](img_6.png). commit + push~~
+- Move the date selection tooltip below the selector ![img_7.png](img_7.png). Make sure the tooltip is always legible and does not obscure other UI data. Also handle when the two sliders are close together. Make sure the date tooltips do not overlap.
 <!-- /agent:queue -->
 
 ## Backlog

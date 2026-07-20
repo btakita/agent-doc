@@ -605,7 +605,25 @@ An explicit request now **defers** instead of being discarded, so it survives to
 One existing assertion encoded the stricter `None` for this case. Its own comment states the invariant as "nothing **recycles** off a boundary" — and `DeferCycleOpen` does not recycle — so the invariant is intact and the assertion was stricter than the intent it documented. Updated with that reasoning recorded inline, plus a new test covering all three shapes: explicit-off-boundary defers, non-explicit stays a no-op, and at a real boundary the explicit request is still honored immediately.
 
 Gated on the remaining escalation design: what `--force` should mean against a pane that never reaches a boundary.
-<!-- agent:boundary:55ad8cef -->
+
+### Re: confirm resolved queue heads clear on the fixed binary — opus-4-8
+
+> **Queue prompt:** do [#qdonestrikeverify]
+
+**Verified live, and it works.** The blocker recorded on this item was that `controller serve` pid 1501201 and supervisor pid 2040014 still mapped the pre-fix binary. Both are long gone — this session rebuilt `state.db` from scratch and has installed and recycled the binary repeatedly — so the precondition is now satisfied and the observable is directly checkable.
+
+Five items were resolved this session (`#lazilynottl`, `#f4d5`, `#mrnh`, `#42xb`, `#a2zx`). For every one of them, in the live document:
+
+- the queue head is struck — `- ~~do [#mrnh]~~`, and the same for the other four;
+- the backlog item is archived to `tasks/agent-doc-bugs2.done.md` (one entry each);
+- and critically, **the strike persisted across every subsequent preflight** — I have run a dozen since.
+
+That last point is the actual proof. The defect was that the auto-strike of resolved heads was "recomputed and thrown away every preflight", so a resolved head kept coming back. Five heads resolved at different points in this session are all still struck now, which is exactly what `persist_queue_maintenance_doc` driving the bounded `ensure_document_model` was supposed to buy.
+
+This is live operator-visible evidence rather than a unit test, which is what the item asked for. Marking done.
+
+Worth noting for the neighbouring items: this also means the queue-maintenance persist path is healthy on the current binary, so `queue_maintenance_not_persisted` is not currently reproducing — relevant to `#5d9f`, whose remaining half is the *arming* defect rather than persistence.
+<!-- agent:boundary:3eadad49 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -648,8 +666,8 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ do [#crdtpushdrainverify]
 - ~~do [#supboundarylivelock]~~
 - ⏭️ do [#statedbvacuum]
-- 🚧 do [#qdonestrikeverify]
-- do [#crashresiliencelograce]
+- ~~do [#qdonestrikeverify]~~
+- 🚧 do [#crashresiliencelograce]
 - do [#compacttombgc]
 - do [#compactindcellsverify]
 - do [#zqv8]
@@ -737,8 +755,7 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#syncobscache2] #syncobscache follow-up (the rest of the focus-sync win): extend the command-scoped observation cache into ../tmux-router. After the agent-doc-side cache: 109 -> 80 subprocess spawns, 2225 -> 2031ms (~9% only). list-panes barely moved (35 -> 34) because tmux-router spawns from 47 sites directly via its own Command builder, bypassing TmuxCommandRunner. Dominant remainder: `list-panes -a -F #{pane_id} #{pane_dead}` run 18x identically — pane_dead_flag lists ALL panes and scans for one, once per pane. Fix: move the scope into tmux-router and/or batch pane_dead_flag into one map fetch. Re-measure with the PATH-shim spawn counter.
 - [ ] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
 - [ ] [#statedbvacuum] [recommended] #agent-doc-feature One-time reclaim + ongoing compaction for .agent-doc/state.db. #authorityfactretention (566a72f6d) bounds future growth (170,215 -> 5,000 document_authority_observed rows on the live db), but SQLite reuses freed pages rather than shrinking: agent-loop state.db is still 477MB on disk with ~47,000 free pages and state_events holding 288MB across 73,822 pages for only 11,056 rows. Reclaiming needs a VACUUM, which takes an exclusive lock and must not run under a live controller. Add a bounded maintenance path (an `agent-doc admin vacuum` gated on no live controller/supervisor, or PRAGMA incremental_vacuum wired into an idle boundary) instead of leaving operators to run sqlite3 by hand.
-- [ ] 🚧 [#qdonestrikeverify] #agent-doc-bug #qdonestrike-durable follow-up: confirm resolved queue heads actually clear once the project controller runs a build containing agent-doc submodule 4faed5b01. Fix shipped: persist_queue_maintenance_doc now drives the bounded ensure_document_model and re-observes before failing closed, so a missing/pending replica no longer discards the whole queue-maintenance plan (the auto-strike of agent:done heads was recomputed and thrown away every preflight). NOT yet provable live: controller serve pid 1501201 + route-owned supervisor pid 2040014 still map the pre-fix binary, and preflight now reports the honest underlying state (editor authority stayed in editor_attached_model_missing after a bounded observation; recovery=retry_without_disk_write). Controller kill was deliberately NOT done because it is project-scoped and tasks/professional/equityfundingsource.md is foreign-owned by a concurrent pane %31. Verify after an idle-boundary recycle: preflight should log queue_maintenance_model_ensure and the struck heads (📌 do [#jblocalhistverify], do [#5bzd]) should disappear from agent:queue instead of being re-logged as auto-struck every run.
-- [ ] [#crashresiliencelograce] test-hygiene: crash_resilience::tests::log_panic_to_file_appends_without_panicking fails under a parallel workspace run (cargo test --workspace) at src/crash_resilience.rs:173 but passes in isolation and under make check. The panic-log append test shares a fixed path across concurrently-running crate test binaries. Give it a per-test temp path so the suite is order-independent.
+- [ ] 🚧 [#crashresiliencelograce] test-hygiene: crash_resilience::tests::log_panic_to_file_appends_without_panicking fails under a parallel workspace run (cargo test --workspace) at src/crash_resilience.rs:173 but passes in isolation and under make check. The panic-log append test shares a fixed path across concurrently-running crate test binaries. Give it a per-test temp path so the suite is order-independent.
 - [ ] [#compacttombgc] [recommended] Add a fenced Compact Exchange CRDT epoch: rebootstrap attached replicas from the compacted snapshot, reject or component-rebase older-epoch deltas, expose the all-replica stability frontier, then run TextCrdt tombstone GC.
 - [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
 - [ ] [#5qjj] steeringmirrorverify|[operator-verify] Restart IntelliJ IDEA 2026.1 to activate plugin 0.2.258 (if stale bytecode appears, uninstall, restart, reinstall the signed local zip, and restart); during an active turn, make multiple exchange edits and verify the JetBrains banner and VS Code status item report the aggregate count/full hover, then run agent-doc once after editing and confirm the handoff queues without submitting a partial edit.

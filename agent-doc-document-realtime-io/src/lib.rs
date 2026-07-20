@@ -1420,15 +1420,18 @@ pub fn settle_retained_non_capture_projection_through_authority(
             | DocumentWriteDeferredReason::EditorDeliveryWorkerStale
             | DocumentWriteDeferredReason::CrdtDeliveryAckPending
     );
-    let semantic_response_base = matches!(
-        pending.reason,
-        DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget
-    )
-    .then_some(pending.expected_content.as_deref())
-    .flatten()
-    .filter(|expected| {
-        !write_policy::buffer_presents_reference_response(&pending.target_content, expected)
-    });
+    // Delivery-stage reasons describe where projection paused, not whether a
+    // response target must be replayed byte-for-byte. Socket delivery may land
+    // the response before the controller records ACK convergence, leaving an
+    // exact-stage intent behind a newer canonical response. Preserve the
+    // content-bearing base for every response-introducing intent so settlement
+    // can accept that newer operator cut instead of restoring the stale target.
+    let semantic_response_base = (canonical != pending.target_content)
+        .then_some(pending.expected_content.as_deref())
+        .flatten()
+        .filter(|expected| {
+            !write_policy::buffer_presents_reference_response(&pending.target_content, expected)
+        });
     if !exact_projection_reason && semantic_response_base.is_none() {
         agent_doc_ops_log_io::log_op(
             path,
@@ -8156,6 +8159,71 @@ mod tests {
         assert!(!settled.contains("#deleted"));
         assert_eq!(settled.matches("### Re: Original prompt.").count(), 1);
         assert_eq!(settled.matches("agent:boundary:").count(), 1);
+        assert!(pending_document_write(&file).is_none());
+    }
+
+    #[test]
+    fn ack_pending_response_projection_settles_over_newer_canonical_cut() {
+        let editor_base = concat!(
+            "<!-- agent:exchange -->\n",
+            "❯ Original prompt.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- do [#deleted]\n<!-- /agent:queue -->\n",
+        );
+        let response_target = editor_base.replace(
+            "<!-- agent:boundary:base -->",
+            "### Re: Original prompt. — gpt-5\n\nAnswered.\n<!-- agent:boundary:base -->",
+        );
+        let newer_canonical = response_target
+            .replace(
+                "❯ Original prompt.\n",
+                "❯ Original prompt.\n❯ Prompt typed after socket delivery.\n",
+            )
+            .replace("- do [#deleted]\n", "");
+        let (_dir, file, _canonical) = temp_doc(editor_base);
+        let identity = "test-ack-pending-semantic-response-settlement";
+        seed_reliable_sync_open(&file, identity);
+        let (client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        ensure_deferred_document_write_intent(
+            &file,
+            editor_base,
+            &response_target,
+            "ack_pending_semantic_response_test",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            hub.apply_local(
+                client_id,
+                0,
+                editor_base.chars().count() as u32,
+                &newer_canonical,
+            )
+            .unwrap();
+        })
+        .unwrap();
+        std::fs::write(&file, &newer_canonical)
+            .expect("simulate the newer canonical cut's native save");
+
+        assert!(
+            settle_retained_non_capture_projection_through_authority(
+                &file,
+                "ack_pending_semantic_response_settlement_test",
+            )
+            .unwrap(),
+            "an ACK-pending response intent must settle semantically over a newer canonical cut",
+        );
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "ack_pending_semantic_response_settled_current",
+            )
+            .unwrap(),
+            newer_canonical,
+        );
         assert!(pending_document_write(&file).is_none());
     }
 

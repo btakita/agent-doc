@@ -94,7 +94,7 @@ cd backend && uv run dev
 `make dev-backend` now delegates to `uv run dev` instead of spelling out the uvicorn invocation, and the README documents the task and its flags.
 
 Two things worth flagging. `uv run` generated `backend/uv.lock` (1306 lines) and I committed it — for an application that's the right call, since it pins the resolved dependency set for whoever clones the repo, but say the word if you'd rather it stay untracked. And `make check` is green after the change: 29 backend tests, mypy clean across 9 source files now, 9 frontend tests, typecheck, production build.
-❯ 🚧 Please allow me to drag a range on the graph itself. Ensure the sliders are synced. commit + push
+❯ Please allow me to drag a range on the graph itself. Ensure the sliders are synced. commit + push
 
 ### Re: drag-to-zoom on the chart, synced sliders — fable-5
 
@@ -146,7 +146,7 @@ Identical to the fractional pixel — zero displacement. `aria-busy` flips `true
 Pushed as `dcaa862` on `btakita/acadian-take-home`, superproject gitlink at `31e33b562`. Also untracked `frontend/tsconfig.tsbuildinfo` (`a431a7e`) — a build cache that was dirtying the tree on every typecheck.
 
 One unrelated observation worth naming: on the default trailing-6-month range the backend returned only six symbols — MSFT was absent — while a shorter range returned all seven. The API drops a requested ticker silently rather than reporting it as unavailable. That is a backend data-contract gap, not a UI one; I have left it alone and queued it as a backlog item.
-❯ 🚧 When I change the sorting in the Summary table, the columns resize. Please ensure consistent column widths.
+❯ When I change the sorting in the Summary table, the columns resize. Please ensure consistent column widths.
 ### Re: stable summary table column widths — opus-4-8
 
 Fixed, and the root cause turned out to be narrower than I first assumed.
@@ -174,12 +174,51 @@ Widths held at `[190.117, 135.797, 190.117, 190.117, 190.117, 190.117, 271.617]`
 `make check` is green: 29 backend tests, mypy clean, 32 frontend tests (4 new pinning the column-width contract), typecheck, production build.
 
 Pushed as `50ded3a` on `btakita/acadian-take-home`; superproject gitlink at `45ee7d6da`.
-<!-- agent:boundary:4512cfd0 -->
+
+### Re: unavailable symbols, anchored tooltip, themed brush — opus-4-8
+
+> **Queue prompt:** do [#backendsilentlydrops]
+> **Queue prompt:** The tooltips are "dancing" around when I move the mouse over the line graph. Please keep the tooltips anchored to the mouse and with a fixed reference point (no dancing). Only change the position in relation to the mouse when the viewport would otherwise cut it off.
+> **Queue prompt:** The selection slidebar background is not pleasing. Please use ui best practices to ensure the color fits well with the background.
+
+All three done. Note the queue was not in `go` mode — I read three concrete work items plus an explicit invocation as the instruction and drained them; say so if you would rather I wait for `go` next time.
+
+**1. Unavailable symbols are now reported, not omitted.** The cause was `dropna(axis=1, how="all")` in `_extract_close` combined with a `present` filter: a ticker with no usable prices simply vanished from the response. `GET /returns` now answers `{data, unavailable}`, where every requested symbol appears in exactly one of the two and each unavailable entry carries a reason. The two causes are distinguished — no prices at all, versus prices with no complete trading day to difference. The frontend names them in a notice above the grid, grouped by reason (`groupByReason`), because a response can carry mixed causes and rendering one symbol's reason for the whole list would misreport the others.
+
+**2. The tooltip is anchored.** Three separate things were moving it, and the first two only showed up under measurement:
+
+- Recharts derives placement from the *active data point*, not the cursor.
+- The wrapper carries `transition: all`, so the panel glides after the pointer. `isAnimationActive={false}` does **not** remove this — it needed a CSS override.
+- The panel sizes to its own content, so the cursor-to-panel gap changed with the value being displayed.
+
+It now sits a constant 14px from the cursor at a fixed `y`, at a fixed width, flipping sides only when the right edge would clip it. `anchorX()` holds that as a pure function with 6 unit tests.
+
+I also had a wrong constant: I estimated the panel at 148px when it renders at 118px, which made it flip ~47px early and left a visible floating gap. Measurement caught it; the width is now pinned in CSS and the constant documents that the two must stay in sync.
+
+**3. The brush is themed.** Recharts hardcodes white/grey presentation attributes, which glared against the dark card. CSS overrides them (CSS beats presentation attributes). My first attempt had a selector bug — `rect:first-of-type` also matched the slide, so track and selected window resolved to the *same* color and the selection became invisible. Caught it by reading computed fills rather than eyeballing the screenshot. The track is now `--grid`, the selected window `--axis` at 0.35, handles `--muted` with a surface-colored stroke.
+
+**Live verification**, continuous 2px pointer sweep across the plot area:
+
+| | result |
+|---|---|
+| tooltip `y` | constant (6) across all samples |
+| tooltip width | constant (118) across all samples |
+| cursor-to-panel gap | constant 14px |
+| edge flips | exactly 1 |
+| wrapper transition | `none` |
+
+Three early samples in an initial sweep looked anomalous; they were at x = 10/20/30, and the plot area starts at x = 40 — outside it there is no data point and no tooltip to track. Every in-plot sample was constant. I also confirmed the notice with a synthetic mixed-cause payload: `MSFT, TSLA` grouped under one reason, `META` under another, four cards remaining.
+
+`make check` is green: 33 backend tests (4 new), mypy clean, 42 frontend tests (10 new), typecheck, production build. README updated for the new payload shape.
+
+Pushed as `f7f4fa3` + `2a26971` on `btakita/acadian-take-home`; superproject gitlink at `662c1fec1`.
+<!-- agent:boundary:1d6f93fb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
+<!-- agent:queue -->
+- ~~do [#backendsilentlydrops]~~
 - The tooltips are "dancing" around when I move the mouse over the line graph. Please keep the tooltips anchored to the mouse and with a fixed reference point (no dancing). Only change the position in relation to the mouse when the viewport would otherwise cut it off.
 - The selection slidebar background is not pleasing ![img_5.png](img_5.png). Please use ui best practices to ensure the color fits well with the background.
 <!-- /agent:queue -->
@@ -187,7 +226,6 @@ Pushed as `50ded3a` on `btakita/acadian-take-home`; superproject gitlink at `45e
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#backendsilentlydrops] Backend silently drops a requested ticker when yfinance returns no data for it (MSFT absent on the trailing-6-month range, present on a shorter range). Report unavailable symbols in the response payload instead of omitting them.
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -203,4 +241,5 @@ Pushed as `50ded3a` on `btakita/acadian-take-home`; superproject gitlink at `45e
 - 2026-07-18 [#acad3] Frontend: useReturns hook, DateRangePicker, TickerCard grid (Recharts line + tooltip + Brush zoom + min/max/mean), loading + ErrorBanner (plan: tasks/recruit/acadian/plan.md)
 - 2026-07-18 [#acad4] Bonus polish: cross-ticker SummaryTable, responsive pass, empty-range/API-down UX, stats unit tests (plan: tasks/recruit/acadian/plan.md)
 - 2026-07-18 [#acad5] Submission: README (setup/run/assumptions), final make check, create + push public GitHub repo, clean-clone sanity test (plan: tasks/recruit/acadian/plan.md)
+- 2026-07-20 [#backendsilentlydrops] Backend silently drops a requested ticker when yfinance returns no data for it (MSFT absent on the trailing-6-month range, present on a shorter range). Report unavailable symbols in the response payload instead of omitting them.
 <!-- /agent:done -->

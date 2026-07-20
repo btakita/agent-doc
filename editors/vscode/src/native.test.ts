@@ -15,16 +15,18 @@ import {
   writePidLock,
   removePidLock,
   utf16RangeToUtf8Bytes,
-} from './native';
+} from './native.js';
+import { fileURLToPath } from 'node:url';
+
+// ESM has no `__dirname`; derive it from the module URL.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function importLazilyStateProjection(): Promise<any> {
-  const moduleUrl = pathToFileURL(
-    path.resolve(__dirname, '../../../../lazily-js/src/state-projection.js'),
-  ).href;
-  const dynamicImport = new Function('specifier', 'return import(specifier)') as (
-    specifier: string,
-  ) => Promise<any>;
-  return dynamicImport(moduleUrl);
+  // This module is ESM now, so a plain dynamic import resolves the package
+  // export directly. The old `new Function('return import(...)')` indirection
+  // existed only to reach ESM from CommonJS, and it resolved bare specifiers
+  // against `out/` instead of the package.
+  return import('@lazily-hub/lazily-js/state-projection');
 }
 
 describe('utf16RangeToUtf8Bytes (#qnodemerge4wire non-ASCII offset semantics)', () => {

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { parseCrossSessionReject } from './crossSession';
+import { parseCrossSessionReject } from './crossSession.js';
 
 describe('parseCrossSessionReject', () => {
     it('parses the marker from merged claim output', () => {

@@ -21,12 +21,12 @@
 
 // esbuild inlines these at build time; tsc emits `require()`s resolved by Node's
 // require(ESM). The 4-up path reaches `src/lazily-js` in the monorepo.
-import { GraphView } from '../../../../lazily-js/src/graph-view.js';
-import { IpcMessage } from '../../../../lazily-js/src/index.js';
+import { GraphView } from '@lazily-hub/lazily-js/graph-view';
+import { IpcMessage } from '@lazily-hub/lazily-js';
 
-export { GraphView } from '../../../../lazily-js/src/graph-view.js';
-export { agentDocProjectionFromView } from './agentDocProjection';
-export type { AgentDocProjection } from './agentDocProjection';
+export { GraphView } from '@lazily-hub/lazily-js/graph-view';
+export { agentDocProjectionFromView } from './agentDocProjection.js';
+export type { AgentDocProjection } from './agentDocProjection.js';
 
 /** The agent-doc state node `type_tag`s (cross-language vocabulary). */
 export const AgentDocNodeType = {
@@ -150,7 +150,7 @@ export function agentDocTurnProjectionFromView(view: InstanceType<typeof GraphVi
 }
 
 /** Render the compact editor-visible status string (matches the kt `.compact()`). */
-export function compactAgentDocProjection(projection: import('./agentDocProjection').AgentDocProjection): string {
+export function compactAgentDocProjection(projection: import('./agentDocProjection.js').AgentDocProjection): string {
     return `route=${projection.routeReadiness ?? 'unknown'} pane=${projection.routePaneId ?? '-'} `
         + `transport=${projection.latestTransportPhase ?? '-'} `
         + `proof_markers=${projection.proofMarkers}`;

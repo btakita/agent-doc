@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { buildOverflowPopupMenuItems, buildPrimaryPopupMenuItems } from './popupMenu';
+import { buildOverflowPopupMenuItems, buildPrimaryPopupMenuItems } from './popupMenu.js';
 
 describe('popupMenu', () => {
     it('keeps editor parity actions in the primary numbered menu', () => {

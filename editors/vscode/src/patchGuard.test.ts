@@ -2,13 +2,17 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import * as fs from 'fs';
 import * as path from 'path';
-import { EditorIntent } from './editorIntent';
+import { EditorIntent } from './editorIntent.js';
 import {
     contentSha256Hex,
     createEditorApplyProof,
     isEditorApplyProofCurrent,
     isFullContentExpectedBufferCurrent,
-} from './patchGuard';
+} from './patchGuard.js';
+import { fileURLToPath } from 'node:url';
+
+// ESM has no `__dirname`; derive it from the module URL.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe('patchGuard', () => {
     it('rejects a stale editor generation', () => {

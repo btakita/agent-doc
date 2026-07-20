@@ -14,7 +14,7 @@ import {
     type ReplicaRemoteUpdate,
     type ReplicaTransport,
     utf16RangeToCodePoints,
-} from './crdtReplica';
+} from './crdtReplica.js';
 
 class FakeNode implements ReplicaNode {
     opened: number | null = null;

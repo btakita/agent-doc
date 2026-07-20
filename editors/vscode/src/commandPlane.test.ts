@@ -5,7 +5,7 @@ import {
     buildEditorRoutePayload,
     buildEditorRouteCommandMessage,
     resolveEditorRouteTerminal,
-} from './commandPlane';
+} from './commandPlane.js';
 
 test('buildEditorRouteCommandMessage produces an agent-doc.editor_route.v1 CommandSubmit', () => {
     const { commandId, message } = buildEditorRouteCommandMessage('plan.md', 'root:plan.md:run', [], 120, 'cmd-fixed');

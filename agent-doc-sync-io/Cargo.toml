@@ -42,7 +42,7 @@ agent-doc-tmux-io = { path = "../agent-doc-tmux-io", version = "0.35.6" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.6" }
 agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.6" }
 anyhow = "1"
-lazily = "0.45.0"
+lazily = "0.46.0"
 fs2 = "0.4"
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }

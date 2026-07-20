@@ -16,7 +16,7 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 // esbuild inlines this at build time; the 4-up path reaches `src/lazily-js` in
 // the monorepo (same resolution the state-graph-mirror import uses).
-import { OrSet } from '../../../../lazily-js/src/index.js';
+import { OrSet } from '@lazily-hub/lazily-js';
 import {
 documentIdForPath,
 EDITOR_CAPABILITY_LIST,
@@ -25,7 +25,7 @@ EDITOR_PLUGIN_VERSION,
 isSessionDocument,
     reliableSyncLivenessEnqueue,
     reliableSyncLivenessFlush,
-} from './native';
+} from './native.js';
 
 /** This editor's open-set as lazily-js `OrSet`s, one per `document_hash`. */
 class LivenessGraph {

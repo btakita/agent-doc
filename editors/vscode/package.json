@@ -11,7 +11,7 @@
     "url": "https://github.com/btakita/agent-loop"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.94.0"
   },
   "categories": [
     "Other"
@@ -234,6 +234,7 @@
     "publish": "vsce publish"
   },
   "dependencies": {
+    "@lazily-hub/lazily-js": "^0.25.0",
     "koffi": "^2.9.0"
   },
   "devDependencies": {
@@ -242,5 +243,6 @@
     "esbuild": "^0.24.0",
     "typescript": "^5.3.0",
     "@vscode/vsce": "^3.0.0"
-  }
+  },
+  "type": "module"
 }

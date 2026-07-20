@@ -6,7 +6,7 @@ import {
     reliableSyncDocumentOpFlush,
     reliableSyncDocumentOpPush,
     reliableSyncTextAdoptPush,
-} from './native';
+} from './native.js';
 
 export interface ReplicaRegisterAck {
     clientId: number;

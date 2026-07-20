@@ -2,7 +2,11 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
-import { EditorIntent } from './editorIntent';
+import { EditorIntent } from './editorIntent.js';
+import { fileURLToPath } from 'node:url';
+
+// ESM has no `__dirname`; derive it from the module URL.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe('typed reload_library intent', () => {
     const srcDir = path.join(__dirname, '..', 'src');

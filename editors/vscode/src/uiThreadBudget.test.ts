@@ -2,6 +2,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// ESM has no `__dirname`; derive it from the module URL.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe('editor UI thread budget', () => {
     it('VS Code text-change listener defers full-buffer and native-heavy work', () => {
@@ -27,7 +31,7 @@ describe('editor UI thread budget', () => {
 
     it('VS Code coalesces full-buffer reporting through lazily KeepLatest debounce', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
-        assert.ok(source.includes("import { DebounceCore } from '../../../../lazily-js/src/rateshape.js';"));
+        assert.ok(source.includes("import { DebounceCore } from '@lazily-hub/lazily-js/rateshape';"));
         assert.ok(source.includes('new DebounceCore<string>(LAZILY_CURRENT_OBSERVATION_DELAY_MS)'));
         assert.ok(source.includes('state.debounce.input(monotonicMillis(), fsPath)'));
         assert.ok(source.includes('state.debounce.tick(monotonicMillis())'));

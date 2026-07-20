@@ -5,14 +5,14 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import * as net from 'net';
 import { execFile } from 'child_process';
-import * as native from './native';
-import * as stateMirror from './stateMirror';
-import { createEditorApplyProof, isEditorApplyProofCurrent } from './patchGuard';
-import { EditorIntent } from './editorIntent';
-import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement } from './patchPlan';
-import { parseCrossSessionReject, CrossSessionReject } from './crossSession';
-import { buildEditorRoutePayload, buildEditorRouteCommandMessage, resolveEditorRouteTerminal } from './commandPlane';
-import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition';
+import * as native from './native.js';
+import * as stateMirror from './stateMirror.js';
+import { createEditorApplyProof, isEditorApplyProofCurrent } from './patchGuard.js';
+import { EditorIntent } from './editorIntent.js';
+import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement } from './patchPlan.js';
+import { parseCrossSessionReject, CrossSessionReject } from './crossSession.js';
+import { buildEditorRoutePayload, buildEditorRouteCommandMessage, resolveEditorRouteTerminal } from './commandPlane.js';
+import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition.js';
 import {
     buildBusySessionRestartBlockedMessage,
     buildBusySessionClearBlockedMessage,
@@ -28,11 +28,11 @@ import {
     parseStartingSessionRestartRefusal,
     sessionStatusShowsIdleDirectPane,
     type SessionCommandName,
-} from './sessionUi';
+} from './sessionUi.js';
 import {
     buildOverflowPopupMenuItems,
     buildPrimaryPopupMenuItems,
-} from './popupMenu';
+} from './popupMenu.js';
 import {
     analyzeTabSyncCommandResult,
     buildSyncCommandArgs,
@@ -45,20 +45,20 @@ import {
     shouldScheduleDeferredTabSyncRetry,
     tabSyncTimeoutBackoffDelayMs,
     type TabSyncState,
-} from './tabSync';
+} from './tabSync.js';
 import {
     EditorCommandCompletion,
     EditorCommandDecision,
     EditorCommandKind,
     EditorCommandRegistry,
-} from './editorCommandState';
+} from './editorCommandState.js';
 import {
     CrdtReplicaManager,
     type ReplicaLocalChangeAdmission,
     type ReplicaTextChange,
-} from './crdtReplica';
-import { registerReliableSyncLiveness } from './reliableSyncLiveness';
-import { DebounceCore } from '../../../../lazily-js/src/rateshape.js';
+} from './crdtReplica.js';
+import { registerReliableSyncLiveness } from './reliableSyncLiveness.js';
+import { DebounceCore } from '@lazily-hub/lazily-js/rateshape';
 
 // ---------------------------------------------------------------------------
 // CLI Resolution (Feature 9)
@@ -443,7 +443,7 @@ function refreshTurnStatus(reason = 'event', force = false): void {
 async function turnProjectionFromProjectController(
     projectRoot: string,
     filePath: string,
-): Promise<import('./sessionUi').TurnProjection> {
+): Promise<import('./sessionUi.js').TurnProjection> {
     const docHash = native.documentHash(filePath);
     let mirror = turnStatusMirrors.get(docHash);
     if (!mirror) {
@@ -498,7 +498,7 @@ async function refreshTurnStatusNow(reason: string): Promise<void> {
         turnStatusBarItem.show();
         return;
     }
-    let projection: import('./sessionUi').TurnProjection | null = null;
+    let projection: import('./sessionUi.js').TurnProjection | null = null;
     let disconnected: string | null = null;
     try {
         projection = await turnProjectionFromProjectController(projectRoot, editor.document.fileName);

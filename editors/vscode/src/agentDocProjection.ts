@@ -9,7 +9,7 @@
 //
 // esbuild inlines the lazily-js import at build time (same 4-up path the state-graph-mirror
 // and reliable-sync-liveness imports use).
-import { GraphView } from "../../../../lazily-js/src/graph-view.js";
+import { GraphView } from "@lazily-hub/lazily-js/graph-view";
 
 export interface AgentDocProjection {
     routeReadiness: string | null;

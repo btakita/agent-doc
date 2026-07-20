@@ -15,7 +15,7 @@ import {
     parseBusySessionClearRefusal,
     parseStartingSessionRestartRefusal,
     sessionStatusShowsIdleDirectPane,
-} from './sessionUi';
+} from './sessionUi.js';
 
 describe('sessionUi', () => {
     it('builds session command args for clear context routing', () => {

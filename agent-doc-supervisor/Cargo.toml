@@ -21,6 +21,6 @@ agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.6" }
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.6" }
 agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.6" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.6" }
-lazily = { version = "0.45.0", features = ["thread-safe"] }
+lazily = { version = "0.46.0", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

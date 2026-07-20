@@ -14,6 +14,6 @@ name = "agent_doc_state_wire"
 agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.6" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.6" }
 base64 = "0.22"
-lazily = { version = "0.45.0", features = ["ipc"] }
+lazily = { version = "0.46.0", features = ["ipc"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

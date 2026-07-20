@@ -7,7 +7,7 @@ import {
     createIdleEditorCommandState,
     onEditorCommandComplete,
     onEditorCommandRequest,
-} from './editorCommandState';
+} from './editorCommandState.js';
 
 describe('editorCommandState', () => {
     it('starts requested command for an idle document', () => {

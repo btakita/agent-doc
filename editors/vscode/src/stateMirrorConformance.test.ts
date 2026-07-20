@@ -7,7 +7,11 @@ import {
     GraphView,
     agentDocProjectionFromView,
     applyIpcMessageToView,
-} from './stateMirror';
+} from './stateMirror.js';
+import { fileURLToPath } from 'node:url';
+
+// ESM has no `__dirname`; derive it from the module URL.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * `#lzsync` 3B — cross-editor convergence parity (JS half), native wire.

@@ -11,7 +11,11 @@ import {
     shouldScheduleDeferredTabSyncRetry,
     tabSyncTimeoutBackoffDelayMs,
     visibleSignatureFromColumns,
-} from './tabSync';
+} from './tabSync.js';
+import { fileURLToPath } from 'node:url';
+
+// ESM has no `__dirname`; derive it from the module URL.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe('VS Code immediate focus handoff wiring', () => {
     it('attempts Project Controller focus before tab-sync planner dedup can skip a rapid split switch', () => {

@@ -146,7 +146,7 @@ dependencies = [
  "filetime",
  "indexmap",
  "instruction-files",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "libc",
  "module-harness",
  "notify",
@@ -446,7 +446,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-write-converge-io",
  "anyhow",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde_json",
  "tempfile",
  "uuid",
@@ -527,7 +527,7 @@ dependencies = [
  "base64 0.22.1",
  "fs2",
  "interprocess",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "libc",
  "rusqlite",
  "serde",
@@ -555,7 +555,7 @@ dependencies = [
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "anyhow",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -655,7 +655,7 @@ dependencies = [
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde",
  "sha2 0.11.0",
  "similar 3.1.1",
@@ -696,7 +696,7 @@ dependencies = [
  "agent-doc-turn",
  "agent-doc-write-converge-io",
  "anyhow",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde_json",
  "tempfile",
  "uuid",
@@ -806,7 +806,7 @@ name = "agent-doc-element-queue"
 version = "0.35.6"
 dependencies = [
  "agent-doc-element",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde",
 ]
 
@@ -1143,7 +1143,7 @@ dependencies = [
  "agent-doc-element",
  "agent-doc-hash",
  "agent-doc-markdown-ast",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde",
  "serde_json",
 ]
@@ -1188,7 +1188,7 @@ dependencies = [
  "agent-doc-markdown-lossless",
  "anyhow",
  "base64 0.22.1",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "rmp-serde",
  "serde",
  "serde_json",
@@ -1248,7 +1248,7 @@ dependencies = [
  "agent-doc-project-root-io",
  "agent-doc-turn",
  "anyhow",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde",
  "serde_json",
  "tempfile",
@@ -1474,7 +1474,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-hash",
  "agent-doc-session-accretion",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde",
  "serde_json",
 ]
@@ -1592,7 +1592,7 @@ dependencies = [
  "agent-doc-merge",
  "anyhow",
  "base64 0.22.1",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "libc",
  "serde",
  "serde_json",
@@ -1804,7 +1804,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "anyhow",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "tempfile",
  "tmux-router",
 ]
@@ -2161,7 +2161,7 @@ name = "agent-doc-state-backbone"
 version = "0.35.6"
 dependencies = [
  "agent-doc-turn",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde",
  "serde_json",
 ]
@@ -2191,7 +2191,7 @@ dependencies = [
  "agent-doc-state-backbone",
  "agent-doc-turn",
  "base64 0.22.1",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde",
  "serde_json",
 ]
@@ -2259,7 +2259,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-tmux-commands",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde",
  "serde_json",
 ]
@@ -2286,7 +2286,7 @@ dependencies = [
  "anyhow",
  "indexmap",
  "interprocess",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "libc",
  "portable-pty",
  "serde_json",
@@ -2380,7 +2380,7 @@ dependencies = [
  "agent-doc-workflow-io",
  "anyhow",
  "fs2",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "libc",
  "serde",
  "serde_json",
@@ -2462,7 +2462,7 @@ dependencies = [
 name = "agent-doc-tmux"
 version = "0.35.6"
 dependencies = [
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde",
  "tempfile",
 ]
@@ -2484,7 +2484,7 @@ dependencies = [
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "anyhow",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "tmux-router",
 ]
 
@@ -2506,7 +2506,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-template",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "proptest",
  "regex",
  "serde",
@@ -2685,7 +2685,7 @@ dependencies = [
  "agent-doc-workflow",
  "anyhow",
  "fs2",
- "lazily 0.45.0",
+ "lazily 0.46.0",
  "serde_json",
  "tempfile",
  "uuid",
@@ -4031,9 +4031,9 @@ dependencies = [
 
 [[package]]
 name = "lazily"
-version = "0.45.0"
+version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa86c49bea2a6ed5e0636ff2f15dccff7ba8498ce0c002d5895cdfa4a1f1d02d"
+checksum = "9904588ac0f11c268f2398b0e4f55da30f825f62af2329f260c9a8766f4efaa0"
 dependencies = [
  "arc-swap",
  "lazily-macros",

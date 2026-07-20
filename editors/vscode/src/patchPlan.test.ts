@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement, isPureRepositionSignal } from './patchPlan';
+import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement, isPureRepositionSignal } from './patchPlan.js';
 
 describe('isPureRepositionSignal', () => {
     it('treats a bare reposition payload as pure reposition', () => {

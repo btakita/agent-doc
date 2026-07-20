@@ -20,7 +20,7 @@ import {
     agentDocProjectionFromView,
     applyIpcMessageToView,
     type AgentDocProjection,
-} from './stateMirror';
+} from './stateMirror.js';
 
 // Result struct returned by FFI functions that produce text
 interface FfiPatchResult {

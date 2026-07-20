@@ -10,7 +10,7 @@ import {
     agentDocTurnProjectionFromView,
     applyIpcMessageToView,
     compactAgentDocProjection,
-} from './stateMirror';
+} from './stateMirror.js';
 import {
     documentHash,
     mirrorEpochForFile,
@@ -18,7 +18,7 @@ import {
     evictStateMirrorForFile,
     debugStateMirrorCount,
     seedStateMirrorMessageForTest,
-} from './native';
+} from './native.js';
 
 // --- native wire builders (externally-tagged IpcMessage JSON) -----------------
 

@@ -7,7 +7,6 @@ agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
-queue: stop
 prompt_presets:
   '#advance-review': Go through the review items. Add actionable backlog items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md. DO NOT IMPLEMENT THE FIX.
@@ -15,6 +14,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
+queue: start
 ---
 
 ## Status
@@ -470,24 +470,44 @@ Brian
 ---
 
 Not saved to Drafts and not sent. The newest message in the Philip thread locally is 26 May and there is no take-home assignment email in the mail corpus, so I could not confirm the recipient or whether this should thread onto something newer.
-<!-- agent:boundary:adc6b253 -->
+Propose a UX to be able to quickly select a diffrent date range via mouse while over the chart or range slider. Perhaps a slider?
+
+### Re: quick date-range selection by mouse — opus-4-8
+
+> **Queue prompt:** Propose a UX to be able to quickly select a different date range via mouse while over the chart or range slider. Perhaps a slider?
+
+Proposal only — nothing implemented. (My earlier answer to this was in one of the responses the CRDT merge dropped, hence the repeat.)
+
+**The real gap.** The chart drag and the card slider both zoom *within data already fetched*. Changing what gets fetched still means the two date inputs. So there is no mouse path to the query at all — that is the thing to fix, not the absence of a gesture.
+
+**Yes to the slider — as a master timeline.** One full-width slider under the header whose selected window *is* the fetched range. Drag it, it refetches (debounced, same as the date inputs). Year/month ticks and the two dates shown at its ends. This is the overview-timeline pattern from TradingView and Google Finance, and it answers "quickly, by mouse" directly.
+
+**The hazard, and it is the whole design problem.** A global slider and the seven card sliders would look identical and do different things — one loads data, the others zoom within it. Same control, two meanings, is how you get users dragging the wrong one. Three things fix it:
+
+- Put it directly under the header, full width, visually lighter and taller than a card slider — clearly a different tier.
+- Label it (`Range`) and show its dates; card sliders stay unlabelled.
+- Have it show tick marks at year/quarter boundaries, which card sliders do not.
+
+**Add preset chips beside it** — `1M · 3M · 6M · YTD · 1Y · 5Y · Max`. One click for the common jumps, keyboard-reachable, and they teach the slider by moving it when clicked.
+
+**What I would skip.** Shift+wheel over a chart to widen the window: undiscoverable, and wheel-hijacking is hostile on a page of seven stacked cards. Right-click menus: web users do not look there. And once the master slider exists, "promote this card's zoom to the fetched range" becomes redundant — the slider already expresses it.
+
+So: **master slider + preset chips**, with the tier distinction treated as a requirement rather than polish.
+
+Say the word and I will implement it — spec, tests, commit, push.
+<!-- agent:boundary:16717700 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push" go -->
-- ~~The reset button is misaligned ![img_8.png](img_8.png).~~
-- ~~Please support mouse drag UX in the selector area.~~
-- ~~Please have a clear list of features in the README. Do not be verbose.~~
-- Add spec file + AGENTS.md where CLAUDE.md imports the AGENTS.md using `@AGENTS.md`
-- You mentioned keyboard navigation. Add `?` key showing the keyboard shortcuts.
-- Propose a UX to be able to quickly select a diffrent date range via mouse while over the chart or range slider. Perhaps a slider?
-- Please draft an email.
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
+- 🚧 do [#proposeablequickly]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#proposeablequickly] Propose a UX to be able to quickly select a diffrent date range via mouse while over the chart or range slider. Perhaps a slider?
 <!-- /agent:backlog -->
 
 ## Icebox

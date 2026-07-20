@@ -79,9 +79,51 @@ context, 30 `dependents_of` assertions re-derived.
 
 ---
 
-## 2. `Slot` → `Computed` rename
+## 2. `Slot` → `Computed`, and retire `Signal`
 
-**Status:** decided in principle, not started. Its own pass.
+**Status:** converged 2026-07-20, not started. One pass, both renames together —
+they are the same argument applied twice.
+
+**Decided:**
+
+| | |
+|---|---|
+| genus | **`Reactive<T>`** — already the spec's umbrella (reactive-graph.md:47), with `Source<T>: Reactive<T>` for the writable ones. Preferred over `Signal`. |
+| source | **`Cell`** — keep. Spreadsheet lineage is the right ancestor; `State` would collide with this family's own statechart module. |
+| derivation | **`Slot` → `Computed`** |
+| sink | **`Effect`** — keep. |
+| eager form | **`Signal` → `Computed.eager`** — retire the word. |
+
+**Why `Signal` goes.** It has no slot in the family's own taxonomy: not the genus
+(`Reactive<T>` is), not a kind (it is a composition the arena has never heard
+of). In TC39 `Signal` is the *category* — `Signal.State` reads "reactive state",
+`Signal.Computed` reads "reactive computed" — so the family is using the word one
+taxonomic level below the standard it cites as corroboration, naming a species
+with the genus's word. The `Signal.` qualifier exists there only because TC39
+ships into a global namespace; a library namespace supplies it for free, which is
+why Vue and Angular say `computed` with nothing in front.
+
+Retiring it also closes the last of the three meanings catalogued in the
+*Signal Is Not a Reactive Primitive* post — the family stops participating in the
+ambiguity rather than documenting it from inside.
+
+**Why `Computed`, despite the length.** It names the role; `memo` names a
+technique whose classical meaning (Michie 1968) *never invalidates*, which is the
+central feature of this node. Precedent is exact at the interface level: Swift
+stored-vs-computed properties, SQL computed columns (virtual by default,
+`PERSISTED` on request — lazy vs eager, in a standards-track feature). Rejected:
+`Derived` (collides with the spec's own "derived construct" prose), `Formula`
+(names the expression, not the memoized value), `Memo`, and abbreviations.
+
+The length is a real cost, paid once per derivation at the call site and
+recovered on every read.
+
+**Why `Slot` goes.** Three collisions, three different meanings, in three
+ecosystems this family ships bindings into: Python `__slots__` (attribute
+storage), Vue/Svelte/Web Components/Compose `<slot>` (template insertion point),
+Qt (the callback a signal invokes — the thing the family banned). Joint reading
+of `Slot` + `Signal` is Qt's Signals & Slots, a callback system. Joint reading of
+`Cell` + `Computed` is a spreadsheet, which is what a lazy reactive graph is.
 
 `Slot` collides in three ecosystems lazily ships bindings into, with three
 different meanings: Python `__slots__` (attribute storage), Vue/Svelte/Web
@@ -93,14 +135,14 @@ what TC39, Vue, Angular, Preact, and MobX already mean by it.
 is a taxonomy of roles; `Cell`/`Memo`/`Effect` mixes a role, a strategy, and a
 role.
 
-**Settle before the first edit:**
+**Still to settle before the first edit:**
 
 - Constructor: `ctx.computed()`, with `ctx.memo()` kept as a deprecated alias for
-  one release?
+  one release? (The type/constructor asymmetry is the reason to change it at all
+  — `ctx.cell()` → `Cell` and `ctx.effect()` → `Effect` already match.)
 - Wire protocol `slot_id` — rename the serialized field, or keep it as a legacy
-  identifier with a note? This is the expensive part.
-- Does `Signal` survive as a name at all, or become `Computed.eager`? Separate,
-  bigger decision — the word carries three meanings across ecosystems.
+  identifier with a note? **This is the expensive part** and the only piece that
+  is not a pure source change.
 
 **Scope:** 8 bindings, spec prose, 114 fixtures, the Lean model, both blog posts,
 the wire protocol.

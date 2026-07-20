@@ -1952,6 +1952,53 @@ mod tests {
     use super::*;
     use std::path::Path;
     use tempfile::TempDir;
+    /// `#patchretryidem`: a post-CAS-race finalize RETRY re-runs patch
+    /// application against a document that may already carry the response.
+    /// Applying the same exchange patch twice must not splice the document —
+    /// live evidence showed the `> **Queue prompt:**` blockquote appearing
+    /// twice plus a bare ` -->` partial-terminator left behind
+    /// (`#boundarysplice`). This pins the append-mode invariant so the
+    /// idempotency question is answered where it is decidable.
+    #[test]
+    fn reapplying_the_same_exchange_patch_does_not_splice_the_document() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Please investigate.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let body = "### Re: investigation — opus\n\n> **Queue prompt:** do [#alpha]\n\nDone.\n";
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: body.to_string(),
+            attrs: std::collections::HashMap::new(),
+        }];
+        let configs = std::collections::HashMap::new();
+        let max_lines = std::collections::HashMap::new();
+
+        let once =
+            apply_patches_pure(doc, &patches, "", None, &configs, &max_lines).unwrap();
+        let twice =
+            apply_patches_pure(&once, &patches, "", None, &configs, &max_lines).unwrap();
+
+        // Whatever the append semantics are, a retry must never leave marker
+        // debris — that is the corruption signature, not a duplicated body.
+        assert!(
+            !twice.contains("\n -->"),
+            "partial terminator debris after re-apply (#boundarysplice):\n{twice}"
+        );
+        assert_eq!(
+            twice.matches("<!-- /agent:exchange -->").count(),
+            1,
+            "component terminator must stay singular after re-apply:\n{twice}"
+        );
+        assert_eq!(
+            twice.matches("Please investigate.").count(),
+            1,
+            "the operator prompt must never be duplicated by a retry:\n{twice}"
+        );
+    }
+
     #[test]
     fn parse_single_patch() {
         let response = "<!-- patch:status -->\nBuild passing.\n<!-- /patch:status -->\n";

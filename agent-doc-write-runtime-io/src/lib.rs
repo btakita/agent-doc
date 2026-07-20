@@ -789,8 +789,29 @@ fn consume_queue_prompts_for_done_ids_closeout(
                 file.display()
             )))
         }
+        // `#qconsumenostrike`: refusing to strike an unaddressable head is a
+        // SAFETY outcome, not a closeout failure. The head stays queued (the
+        // conservative direction — unrun work is never marked complete), and
+        // the response still commits. Making it fatal would leave every
+        // document whose answered head is a multiline `---` prompt permanently
+        // unable to close out, which is how this guard first presented.
+        Err(err) if error_refused_unaddressable_queue_head(&err) => {
+            eprintln!(
+                "[queue] warning: leaving the answered head queued for {} — it is not addressable \
+                 as a markdown node, so striking it could mark unrelated work complete \
+                 (#qconsumenostrike). Closeout continues.",
+                file.display()
+            );
+            Ok(None)
+        }
         other => other,
     }
+}
+
+/// True when a queue consume refused because the target head could not be
+/// proven to be the node it would strike (`#qconsumenostrike`).
+fn error_refused_unaddressable_queue_head(error: &anyhow::Error) -> bool {
+    format!("{error:#}").contains("#qconsumenostrike")
 }
 
 fn set_status_with_options(file: &Path, text: &str, force_disk: bool) -> Result<()> {

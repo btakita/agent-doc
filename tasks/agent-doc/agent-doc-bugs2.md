@@ -539,11 +539,33 @@ Closing this without running the investigation, because both halves are already 
 **What actually moved the number was encoding, and it is already shipped.** Array-of-structs interleaving defeated zstd (that document had 2 distinct origin deltas across 88,630 ops); the columnar struct-of-arrays projection took the same real payload 815,754 → 416,392 (2.0×), and `d131457ab` reached 5.0× live.
 
 So the useful lever was compression of a regular structure, not garbage collection of a large one — and the wedge it was chasing lives somewhere else entirely. Marking done so it stops presenting as drainable work; `#compacttombgc` keeps the tombstone question on its own merits.
-<!-- agent:boundary:c7a643ec -->
+
+### Re: queue/backlog tag attribute duplication — opus-4-8
+
+> **Queue prompt:** do [#a2zx]
+
+Fixed in `5b87bb76d`, and verified on this document: the live tag went from
+
+```
+&lt;!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go --&gt;
+```
+to
+```
+&lt;!-- agent:queue priority preset="#spec-test-build-install-commit-push" go --&gt;
+```
+
+on the next preflight, with no manual edit.
+
+The diagnosis in the item was right: `normalize_queue_tag_token` turns `key=true` into a bare `key`, but nothing collapsed a flag already present, so any writer appending an existing flag accumulated it permanently. A boolean flag is idempotent by definition — a repeat carries no information — so the rebuild now keeps the first occurrence and drops later ones, preserving token order.
+
+One deliberate narrowing: repeated **`key=value`** attrs are left alone. Two different values may be a real conflict, and silently resolving to the first would hide it rather than surface it. Only bare flags dedup. There is a regression for each shape, including that a clean tag is unchanged.
+
+On the second half — "then find the appending writer" — I did not identify it, and I should flag the tradeoff: because the tag now self-heals on every rebuild, the duplicates stop being permanent, which also removes the evidence that would have led to the writer. If it matters, the way to catch it now is a debug assertion at the rebuild that reports when it *had* to dedup, rather than reading the accumulated state. The item's suspicion that it rides the failed queue-convergence path is still untested.
+<!-- agent:boundary:4525ee9e -->
 <!-- /agent:exchange -->
 ## Queue
 
-<!-- agent:queue priority preset="#spec-test-build-install-commit-push" priority go -->
+<!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 ~~~done
 We should immediately self-heal. Make all self-healing real-time, not turn-based...if possible.
 > Heads now render as list items. `parse_spans` still accepts the legacy bare form, so existing documents round-trip and self-heal on the next render rather than needing migration. There's a regression asserting every rendered head is a list item, and that healing is idempotent.
@@ -574,9 +596,9 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - ⏭️ do [#7n20]
 - ~~do [#42xb]~~
 - ⏭️ do [#zq8e]
-- 🚧 do [#a2zx]
+- ~~do [#a2zx]~~
 - do [#dbj7]
-- do [#ay80]
+- 🚧 do [#ay80]
 - do [#syncfocuslag]
 - do [#jbrunsteering]
 - do [#crdtpushdrainverify]
@@ -664,9 +686,8 @@ agent-doc command failed (exit 1): Error: project controller command `compact_do
 - [ ] [#bbpe] [operator-verify] Confirm tasks/brookebrodack-dev.md now arms after the IDE picks up the reinstalled plugin: restart the JetBrains IDE (or reopen the doc) to clear editor_attached_model_missing, then run agent-doc preflight tasks/brookebrodack-dev.md and expect queue_maintenance_not_persisted GONE and queue_supervisor_drainable true. The #qstartinert code fix is shipped + installed (agent-doc 9111a3381); only the editor-authority persistence blocker (#5d9f) remains between the computed queue and the persisted one
 - [ ] [#7n20] Finish the ensure-window liveness fix across the CLI/controller process boundary. `bbc50c26e` extends the 400ms missing-replica ensure window when a `crdt_replica_register` proves the editor is alive, but the counter is process-global: on the split path the register lands controller-side while `ensure_document_model` runs CLI-side, so live telemetry still shows `window_extended=false` and the wedge persists. Two options: carry the liveness proof across IPC, or run the ensure controller-side where the registration already is. Do NOT route preflight's initial current-doc resolve through the ensure path — tried in this cycle and reverted; it violates `preflight_missing_editor_model_pauses_without_reading_disk_authority` and made preflight resolve to DISK content instead of waiting for the attached editor.
 - [ ] [#zq8e] Editor-authority wedge blocks ALL queue maintenance (root of the #goal drain stall). Evidence in ops.log for this doc: at 19:32:45 `controller_crdt_current_text source=preflight_queue_maintenance` returns `status=current live_editors=1 delivery_converged=true`; 2s later the SAME queue_maintenance path logs `document_model_ensure_start initial_state=editor_attached_model_missing`, a `crdt_replica_register` succeeds (`data_kind=ok generation_fenced=true bootstrap_bytes=1312802`), then `document_model_ensure_republish_observer_not_ready` -> `document_model_ensure_failed` after 5s. EVERY `document_model_ensure_start` this session reports missing-replica across unrelated sources (queue_maintenance, pending_add_sync, controller_recycle_request) while the controller consistently reports current. Two observers of one document disagree; the ensure-path observer does not see a replica the controller demonstrably has. NOTE: likely already owned by the `src/agent-doc-editor-authority-fix` worktree (commits `preserve attached editor authority during retry`, `bound idle authority replay`) — coordinate before landing a rival fix in src/agent-doc.
-- [ ] 🚧 [#a2zx] Queue/backlog opening-tag attribute duplication: the live doc now carries `<!-- agent:queue priority preset="..." priority go -->` and `<!-- agent:backlog priority priority queue -->` — `priority` twice in both. Verified NOT from `ensure_queue_priority_attr` (its `attrs.contains_key("priority")` guard is idempotent; reproduced clean against the real tag). `set_auto_in_queue_tag`/`rewrite_queue_tag_attrs` normalize `key=true`->`key` but never dedup boolean tokens, so any writer that appends an already-present flag accumulates duplicates permanently. Fix: dedup boolean attrs when rebuilding the tag (they are flags; a repeat carries no information), then find the appending writer. Suspect it rides the failed queue-convergence path above.
 - [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).
-- [ ] [#ay80] CI red on main, pre-existing and unrelated to #jbsteerinterrupt: `finalize_skips_ignored_untracked_session_doc` (tests/finalize_integration.rs:248) fails in GitHub Actions with `Unexpected stderr, failed var.contains(skipped ignored untracked path scratch/session.md)` but PASSES locally (7627/7627 green). Run 29657026491 on b7e17f4d5. Likely a CI-environment gitignore/tmpdir difference; reproduce with the CI runner git config.
+- [ ] 🚧 [#ay80] CI red on main, pre-existing and unrelated to #jbsteerinterrupt: `finalize_skips_ignored_untracked_session_doc` (tests/finalize_integration.rs:248) fails in GitHub Actions with `Unexpected stderr, failed var.contains(skipped ignored untracked path scratch/session.md)` but PASSES locally (7627/7627 green). Run 29657026491 on b7e17f4d5. Likely a CI-environment gitignore/tmpdir difference; reproduce with the CI runner git config.
 - [ ] [#promptselect] #agent-doc-feature Selection-scoped `Run Agent Doc`: send ONLY the editor text selection as the prompt. Needs (a) a dedicated CLI verb — `agent-doc prompt "<text>"` (or `steer`; `run` is taken) accepting multi-line via stdin/cat, (b) JB+VSCode `Run Agent Doc` hooked to it so a non-empty selection routes through `prompt` instead of the whole-document trigger, (c) acknowledgement: agent-doc echoes the prompt into the document with the prompt prefix plus salient response, (d) responses attached UNDER their originating prompt — a threaded prompt->response layer in the Document Tree rather than a flat exchange tail. Must compose with realtime steering (#realtime-steering-verbatim) since a selection sent mid-turn IS steering. Design pass needed before implementation.
 - [ ] [#realtimesalient] #agent-doc-feature Write salient responses into the document in REAL TIME rather than buffering until finalize. Today only complete `### Re:` sections cross response-checkpoint and partial output is console-only (SKILL.md: "stream incomplete progress only to the console"). Requires deciding what counts as salient mid-turn, and preserving the invariant that incomplete token prefixes never become authoritative document text — so likely a distinct node kind (progress/salient) that is replaced by the final response rather than appended to it. Pairs with #promptselect threading.
 - [ ] [#syncfocuslag] #agent-doc-bug Focus-sync lag NOT fixed — premise falsified. Spawns cut 109->63 (pane_dead scans 19->1) via #syncobscache but wall clock did NOT move: min-of-5 2207ms vs 2031ms baseline; runs 2.0-2.4s throughout. Spawn count is not the bottleneck. Of a ~2.5s safe-passive sync, instrumented phases (sync_lock_wait 0ms, window_resolution 3-13ms, tmux_router 150-370ms) sum to ~375ms, leaving ~2.1s UNMEASURED between window_resolution and the tmux_router reconcile. NEXT: add permanent log_sync_latency phases inside that span to bisect it (a blind line-insert attempt landed mid-expression and was reverted). No production sleeps there, so it is real work.

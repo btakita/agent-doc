@@ -2089,6 +2089,29 @@ pub fn fresh_route_start_ack_timeout(test_mode: bool) -> Duration {
     }
 }
 
+/// The ack wait, capped at the client's own deadline (`#jbroutasync`).
+///
+/// `submit.deadline_ms` was written (`rpc.rs`, `command_plane.rs`) but never
+/// read by dispatch. With a live child the controller waited 30s while the
+/// JetBrains client gave up at `waitForReadySeconds * 1000` (observed
+/// `timeout_ms=15000`), so the operator saw a timeout while the route was still
+/// running — and the controller kept waiting for an ack nobody was listening
+/// for. Waiting past the client's deadline cannot produce a useful outcome, so
+/// take the smaller of the two.
+///
+/// A deadline of `None` (no client deadline supplied) keeps the base timeout.
+pub fn routed_cycle_ack_timeout_with_client_deadline(
+    live_child_for_file: bool,
+    test_mode: bool,
+    client_deadline: Option<Duration>,
+) -> Duration {
+    let base = routed_cycle_ack_timeout(live_child_for_file, test_mode);
+    match client_deadline {
+        Some(deadline) => base.min(deadline),
+        None => base,
+    }
+}
+
 pub fn routed_cycle_ack_timeout(live_child_for_file: bool, test_mode: bool) -> Duration {
     if test_mode {
         if live_child_for_file {
@@ -2901,6 +2924,48 @@ fn valid_preset_pause_id(candidate: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#jbroutasync`: the controller must not outwait the client that asked.
+    /// Observed live — the JetBrains client gave up at 15s while the controller
+    /// waited to 30s, so the operator saw a timeout while the route was still
+    /// running and the controller waited for an ack nobody would read.
+    #[test]
+    fn routed_cycle_ack_wait_is_capped_at_the_client_deadline() {
+        let base = routed_cycle_ack_timeout(true, false);
+        assert_eq!(base, Duration::from_secs(30), "base timeout with live child");
+
+        // The live regression: client deadline shorter than the base.
+        assert_eq!(
+            routed_cycle_ack_timeout_with_client_deadline(
+                true,
+                false,
+                Some(Duration::from_secs(15))
+            ),
+            Duration::from_secs(15),
+            "must not wait past the client's own deadline"
+        );
+
+        // A longer client deadline must not extend the controller's own bound.
+        assert_eq!(
+            routed_cycle_ack_timeout_with_client_deadline(
+                true,
+                false,
+                Some(Duration::from_secs(120))
+            ),
+            base,
+            "a generous client deadline must not raise the controller bound"
+        );
+
+        // No deadline supplied keeps existing behavior exactly.
+        assert_eq!(
+            routed_cycle_ack_timeout_with_client_deadline(true, false, None),
+            base
+        );
+        assert_eq!(
+            routed_cycle_ack_timeout_with_client_deadline(false, false, None),
+            routed_cycle_ack_timeout(false, false)
+        );
+    }
 
     #[test]
     fn controller_dispatch_receipt_vocabulary_has_stable_labels() {

@@ -12,7 +12,7 @@ use crate::startup_ready::{AgentReadyWaitOutcome, wait_for_agent_ready_outcome};
 use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
     MissingCycleAckFacts, RoutedCycleAckFacts, RoutedDispatchStartProof,
-    fresh_route_start_ack_timeout, routed_cycle_ack_timeout,
+    fresh_route_start_ack_timeout, routed_cycle_ack_timeout_with_client_deadline,
     should_optimistically_accept_missing_cycle_ack, should_require_routed_cycle_ack,
 };
 use agent_doc_harness::HarnessConfig;
@@ -321,6 +321,10 @@ pub fn require_routed_cycle_ack(
     prompt_bearing_marker: Option<&str>,
     live_child_for_file: bool,
     dispatch_start: RoutedDispatchStartProof,
+    // `#jbroutasync`: the requesting client's own deadline
+    // (`submit.deadline_ms`), when it supplied one. Waiting past it cannot
+    // produce a useful outcome.
+    client_deadline: Option<std::time::Duration>,
     effects: RouteCycleAckEffects,
 ) -> Result<Option<String>> {
     if !should_require_routed_cycle_ack(RoutedCycleAckFacts {
@@ -331,7 +335,11 @@ pub fn require_routed_cycle_ack(
     }
 
     let marker = prompt_bearing_marker.expect("marker checked above");
-    let ack_timeout = routed_cycle_ack_timeout(live_child_for_file, cfg!(test));
+    let ack_timeout = routed_cycle_ack_timeout_with_client_deadline(
+        live_child_for_file,
+        cfg!(test),
+        client_deadline,
+    );
     if live_child_for_file {
         eprintln!(
             "[route] live agent-doc child active in pane {} for {} — waiting up to {}s for a new cycle ack for pending {}",
@@ -473,6 +481,7 @@ pub fn require_routed_cycle_ack(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_doc_controller::dispatch::routed_cycle_ack_timeout;
 
     struct TestPipelineFrontmatterEffects;
 

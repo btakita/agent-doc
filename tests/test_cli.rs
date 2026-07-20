@@ -16807,10 +16807,14 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
             "agent-doc-route-io cycle_ack.rs must not wrap focused route timeout policy: {forbidden_snippet}"
         );
     }
+    // `#jbroutasync`: pin the INVARIANT (route/test facts are passed into the
+    // controller's timeout policy rather than recomputed locally), not the exact
+    // call syntax — the ack timeout now also takes the client deadline.
     assert!(
         route_cycle_ack_source.contains("fresh_route_start_ack_timeout(cfg!(test))")
-            && route_cycle_ack_source
-                .contains("routed_cycle_ack_timeout(live_child_for_file, cfg!(test))"),
+            && route_cycle_ack_source.contains("routed_cycle_ack_timeout_with_client_deadline(")
+            && route_cycle_ack_source.contains("live_child_for_file,")
+            && route_cycle_ack_source.contains("cfg!(test),"),
         "agent-doc-route-io cycle_ack.rs should pass route/test facts into focused controller timeout policy"
     );
     assert!(

@@ -163,6 +163,30 @@ role.
 **Scope:** 8 bindings, spec prose, 114 fixtures, the Lean model, both blog posts,
 the wire protocol.
 
+**Blog: the post titled *Signal Is Not a Reactive Primitive* survives the
+rename** — its "Signal" is the ecosystem's word (TC39, SolidJS, Preact, Angular,
+`rmemo`), and lazily is the evidence rather than the subject. Retiring the name
+*vindicates* the title: the post argues Signal is a composition that does not
+belong in the kernel, and the library then removed it from the primitive
+namespace. Keep the title.
+
+Three edits owed at rename time:
+
+1. This passage becomes false and must change — "I am not arguing that
+   frameworks should stop exposing `signal()`. `lazily` exposes it too, and will
+   keep exposing it." Replace with: the composition still deserves a
+   constructor, because the puller-must-be-an-effect invariant is easy to get
+   wrong, but it deserves a name at the right taxonomic level, so it is
+   `Computed.eager` and the word `Signal` goes back to the ecosystem that uses it
+   for the category.
+2. The opening five-line Rust snippet and the `SignalHandle` discussion become
+   historical. They can stay — the argument is about what the construction *is*,
+   not how it is spelled — with a note.
+3. Add a closing section: the family stopped shipping the name. That is the
+   post's own rule ("treat an ambiguous, conflicting, or inaccurate name as a bug
+   report about the architecture") applied reflexively, and it is a better ending
+   than the post currently has.
+
 **Process note worth institutionalizing:** nobody audited `Slot` against the
 ecosystems lazily ships into before adopting it. That check belongs in the spec's
 naming guidance next to the `unmeasured` discipline.

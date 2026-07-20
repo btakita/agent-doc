@@ -561,7 +561,17 @@ Implemented the transport refinements in `src/haiven-websocket-hub`.
 Commits: hub `f245f69`; parent gitlink `d08d39e0e` (the current parent revision also points at `f245f69`).
 
 The exchange is at the session-accretion warning threshold; the active queue remains drainable, so I am continuing without compacting it.
-<!-- agent:boundary:a877bc9c -->
+
+### Re: Track C resilience load gate — gpt-5
+
+Implemented `-suite=trackc` for the websocket hub. It now exercises concurrent hard drops and duplicate-connection reconnects, delayed readers, paced sustained fan-out, concurrent burst fan-out, and a killed/recovered chat downstream through the real circuit breaker.
+
+The command is an assertion gate, not just a report. It exits non-zero unless client-wire p99 stays within `-trackc-latency-slo`, reconnect churn stays within the heap ceiling at the same live population, all delayed readers are shed, every healthy peer remains connected, every healthy message reaches a fast client, and the downstream breaker opens and recovers. `make loadtest-trackc` runs the 10k-client default.
+
+The production-sized run passed: 1,000 sustained + 1,000 burst messages, 1,000 reconnects, 200 delayed readers shed, 9,800 healthy peers still live, heap 18.69 MiB before / 18.70 MiB after churn, and client-wire p99 6.91 ms against a 250 ms SLO. `make check` passed, including the race suite and both builds. This repository has no GitHub Actions workflow named `CI`, as confirmed during the preceding queue cycle.
+
+Commits: `a21dda3` in `haiven-websocket-hub`; parent gitlink `41c13912a`.
+<!-- agent:boundary:efcede79 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -574,7 +584,7 @@ The exchange is at the session-accretion warning threshold; the active queue rem
 - ~~/goal Implement backlog item(s): #yyzn~~
 - ~~do [#friendsnapshot]~~
 - ~~do [#yyzn-clarify]~~
-- ~~⏭️ do [#haivenwsopt]~~
+- ~~do [#haivenwsopt]~~
 - ⏭️ do [#tnpa]
 <!-- /agent:queue -->
 

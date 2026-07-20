@@ -288,7 +288,41 @@ naming guidance next to the `unmeasured` discipline.
 
 ---
 
-## 4. Mutation-verify the rest of the corpus
+## 4. Fixture the MergeCell-fed-from-a-reactive clause
+
+Added to `reactive-graph.md` 2026-07-20 as normative prose, **explicitly marked
+not yet fixtured**. That is the same state the signal semantics sat in for
+months — detailed prose, zero MUST/SHOULD enforcement, no fixture — while a
+binding shipped a structurally different construction under a green checkmark.
+Do not let this one sit as long.
+
+Four properties worth pinning, in rough priority:
+
+1. **One merge per settled cone, not per write.** `1 → 2 → 3` inside a batch
+   produces one merge of `3`. Discriminating against a binding that delivers
+   per-write. Needs `computes_of`-style counting on the merge, not values —
+   values converge either way for `KeepLatest`, so use a non-idempotent policy
+   (`+`) where 3 versus 6 separates them.
+2. **`merge` folds synchronously inside a batch; only propagation defers.** N
+   calls inside a batch → N folds, ONE invalidation. Catches a binding that
+   defers the fold itself.
+3. **The cell acquires no dependency edge.** `dependents_of` / `dependencies_of`
+   on the merge cell stays 0 after the construction — pins the Source/Dependent
+   partition structurally.
+4. **Exact-fold paths stay exact.** Explicit calls and `Topic`-driven merges fold
+   every op regardless of batching, in contrast to (1).
+
+The runner surface needed is small — a `merge` op and a policy parameter on the
+cell op. Nothing like the `computes_of` lift, since the counting machinery now
+exists in all eight runners.
+
+Also unenforced and worth a thought: bindings **SHOULD** bound effect-flush
+re-entry, because an effect reading `R` and merging into `M` upstream of `R` is a
+feedback loop closed through the scheduler rather than the graph — invisible to
+cycle detection, manifesting as a non-terminating flush. No binding is known to
+bound this today; nobody has checked.
+
+## 5. Mutation-verify the rest of the corpus
 
 The disposal area was found to pin one of three semantics it is named after,
 9-of-9 green, discovered only by mutation. The signal fixtures were mutation-

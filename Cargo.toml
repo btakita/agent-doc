@@ -267,6 +267,7 @@ agent-doc-status-io = { path = "agent-doc-status-io", version = "0.35.6" }
 agent-doc-stream-io = { path = "agent-doc-stream-io", version = "0.35.6" }
 agent-doc-supervisor = { path = "agent-doc-supervisor", version = "0.35.6" }
 agent-doc-supervisor-io = { path = "agent-doc-supervisor-io", version = "0.35.6" }
+agent-doc-supervisor-process = { path = "agent-doc-supervisor-process", version = "0.35.6" }
 agent-doc-sync-io = { path = "agent-doc-sync-io", version = "0.35.6" }
 agent-doc-template = { path = "agent-doc-template", version = "0.35.6" }
 agent-doc-template-io = { path = "agent-doc-template-io", version = "0.35.6" }

@@ -35,6 +35,27 @@ pub fn local_model_reap_command_args(lease_file: Option<&str>, host: Option<&str
     args
 }
 
+/// Scope key for the queue drain-owner coordination lease (`#kp5z` / `#qflood`).
+///
+/// Both the in-session loop that claims the lease and the controller that reads
+/// it share this dependency-free definition, so ownership policy cannot drift.
+pub const DRAIN_OWNER_SCOPE: &str = "queue_drain";
+
+/// Env override for the drain-owner lease TTL.
+pub const DRAIN_OWNER_TTL_SECS_ENV: &str = "AGENT_DOC_DRAIN_OWNER_TTL_SECS";
+
+const DEFAULT_DRAIN_OWNER_TTL_SECS: u64 = 90;
+
+/// TTL for the drain-owner lease. It is deliberately short and self-expiring so
+/// a stopped loop returns ownership to the unattended drainer.
+pub fn drain_owner_ttl() -> Duration {
+    let secs = std::env::var(DRAIN_OWNER_TTL_SECS_ENV)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_DRAIN_OWNER_TTL_SECS);
+    Duration::from_secs(secs.max(1))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +96,15 @@ mod tests {
         let unload_idx = args.iter().position(|a| a == "--unload-empty").unwrap();
         let host_idx = args.iter().position(|a| a == "--host").unwrap();
         assert!(unload_idx < host_idx);
+    }
+
+    #[test]
+    fn drain_owner_ttl_is_short_and_positive() {
+        let ttl = drain_owner_ttl();
+        assert!(ttl >= Duration::from_secs(1));
+        assert!(
+            ttl <= Duration::from_secs(600),
+            "a long-lived drain lease would strand the queue when a loop stops"
+        );
     }
 }

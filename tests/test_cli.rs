@@ -9798,10 +9798,28 @@ fn test_agent_doc_queue_owns_drain_owner_lease_policy() {
 
     let drain_owner_source =
         fs::read_to_string(manifest_dir.join("agent-doc-queue-io/src/drain_owner.rs")).unwrap();
+    let lease_policy = fs::read_to_string(manifest_dir.join("agent-doc-lease/src/lib.rs")).unwrap();
+    for required in ["pub const DRAIN_OWNER_SCOPE", "pub fn drain_owner_ttl("] {
+        assert!(
+            lease_policy.contains(required),
+            "drain-owner lease scope/TTL policy must live in the dependency-free lease crate so \
+             both the claiming loop and the reading controller share one definition: {required}"
+        );
+    }
+    let lease_manifest =
+        fs::read_to_string(manifest_dir.join("agent-doc-lease/Cargo.toml")).unwrap();
+    let lease_manifest: toml::Value = toml::from_str(&lease_manifest).unwrap();
+    assert!(
+        lease_manifest
+            .get("dependencies")
+            .and_then(toml::Value::as_table)
+            .is_none_or(|dependencies| dependencies.is_empty()),
+        "agent-doc-lease is shared lease policy and must stay dependency-free"
+    );
     for required in [
         "pub const DRAIN_OWNER_CLAUDE_LOOP",
         "pub struct DrainOwnerLease",
-        "pub fn drain_owner_ttl(",
+        "pub use agent_doc_lease::drain_owner_ttl;",
         "pub fn refresh_drain_owner_lease(",
         "pub fn read_drain_owner_lease(",
         "pub fn fresh_drain_owner_lease(",
@@ -9861,6 +9879,39 @@ fn test_agent_doc_queue_owns_drain_owner_lease_policy() {
             "agent-doc-queue drain-owner lease policy must stay free of orchestration and route effects: {forbidden_dependency}"
         );
     }
+}
+
+#[test]
+fn test_controller_orphan_drain_dispatch_is_external_and_durably_fenced() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let controller = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    let start = controller
+        .find("fn controller_orphan_drain_tick(")
+        .expect("controller owns the orphan-drain effect");
+    let end = controller[start..]
+        .find("/// Env override (seconds)")
+        .map(|offset| start + offset)
+        .expect("orphan-drain effect ends before watchdog policy");
+    let orphan_drain = &controller[start..end];
+    assert!(
+        orphan_drain.contains("spawn_editor_route_detached(invocation)"),
+        "orphan drain must launch route outside the controller event loop"
+    );
+    assert!(
+        !orphan_drain.contains("effects.run_editor_route(invocation)"),
+        "orphan drain must never synchronously re-enter its own controller"
+    );
+    assert!(
+        orphan_drain.contains("claim_coordination_lease_if_expired_in_db"),
+        "orphan drain must atomically persist its per-document dispatch backoff"
+    );
+    assert!(
+        orphan_drain.contains("current_text_for_file_nonblocking"),
+        "orphan drain must inspect operator-visible realtime text when an editor is attached"
+    );
 }
 
 #[test]
@@ -17212,11 +17263,11 @@ fn test_jetbrains_run_agent_doc_uses_cp_editor_route_rpc() {
             .join("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TerminalUtil.kt"),
     )
     .unwrap();
-    let route_client =
-        fs::read_to_string(manifest_dir.join(
-            "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CpRouteClient.kt",
-        ))
-        .unwrap();
+    let route_client = fs::read_to_string(
+        manifest_dir
+            .join("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/CpRouteClient.kt"),
+    )
+    .unwrap();
     let controller_rpc = fs::read_to_string(
         manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
     )
@@ -18796,7 +18847,9 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         );
     }
     assert!(
-        !preflight_io.contains("let ensured = agent_doc_crdt_relay_io::ensure_document_model(file, source);"),
+        !preflight_io.contains(
+            "let ensured = agent_doc_crdt_relay_io::ensure_document_model(file, source);"
+        ),
         "queue maintenance must not ensure the document model against this process's empty local hub registry"
     );
 

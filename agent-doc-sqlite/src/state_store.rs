@@ -1579,6 +1579,35 @@ pub fn upsert_coordination_lease_in_db(
     Ok(())
 }
 
+/// Atomically claim a durable coordination lease when it is absent or expired.
+///
+/// The conditional conflict update is one SQLite statement so competing or
+/// restarted controllers cannot both observe an expired timestamp and dispatch.
+pub fn claim_coordination_lease_if_expired_in_db(
+    conn: &Connection,
+    lease: &CoordinationLeaseRecord,
+    eligible_at_or_before_secs: u64,
+) -> Result<bool> {
+    Ok(conn.execute(
+        "INSERT INTO coordination_leases \
+         (scope_kind, scope_id, holder, holder_pid, heartbeat_secs) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(scope_kind, scope_id) DO UPDATE SET \
+           holder = excluded.holder, \
+           holder_pid = excluded.holder_pid, \
+           heartbeat_secs = excluded.heartbeat_secs \
+         WHERE coordination_leases.heartbeat_secs <= ?6",
+        params![
+            lease.scope_kind,
+            lease.scope_id,
+            lease.holder,
+            lease.holder_pid.map(i64::from),
+            lease.heartbeat_secs as i64,
+            eligible_at_or_before_secs as i64,
+        ],
+    )? > 0)
+}
+
 pub fn load_coordination_lease_from_db(
     conn: &Connection,
     scope_kind: &str,
@@ -5475,6 +5504,54 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(remaining, 1, "a lone checkpoint must never be pruned");
+        Ok(())
+    }
+
+    #[test]
+    fn coordination_lease_claim_is_atomic_and_survives_reopen() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let first = CoordinationLeaseRecord {
+            scope_kind: "queue_orphan_drain_backoff".to_string(),
+            scope_id: "doc-a".to_string(),
+            holder: "controller-orphan-drain".to_string(),
+            holder_pid: Some(11),
+            heartbeat_secs: 1_000,
+        };
+        let conn = open_state_db(dir.path())?;
+        assert!(claim_coordination_lease_if_expired_in_db(
+            &conn, &first, 910
+        )?);
+
+        let too_soon = CoordinationLeaseRecord {
+            holder_pid: Some(22),
+            heartbeat_secs: 1_050,
+            ..first.clone()
+        };
+        assert!(!claim_coordination_lease_if_expired_in_db(
+            &conn, &too_soon, 960
+        )?);
+        drop(conn);
+
+        let reopened = open_state_db(dir.path())?;
+        assert_eq!(
+            load_coordination_lease_from_db(&reopened, "queue_orphan_drain_backoff", "doc-a")?,
+            Some(first.clone()),
+            "a rejected contender must not overwrite the durable claim"
+        );
+
+        let elapsed = CoordinationLeaseRecord {
+            holder_pid: Some(33),
+            heartbeat_secs: 1_090,
+            ..first
+        };
+        assert!(claim_coordination_lease_if_expired_in_db(
+            &reopened, &elapsed, 1_000
+        )?);
+        assert_eq!(
+            load_coordination_lease_from_db(&reopened, "queue_orphan_drain_backoff", "doc-a")?,
+            Some(elapsed),
+            "the claim becomes eligible exactly at the interval boundary"
+        );
         Ok(())
     }
 }

@@ -7028,6 +7028,9 @@ pub(crate) fn serve_with_options(
                         &runtime,
                         &mut supervisor_watchdog_halt_notified,
                     );
+                    // `#orphandrain`: sweep the documents the supervisor watchdog
+                    // cannot help — those with no supervisor to revive.
+                    controller_orphan_drain_tick(&runtime);
                 }
                 std::thread::sleep(CONNECT_POLL);
             }
@@ -7036,6 +7039,223 @@ pub(crate) fn serve_with_options(
     }
     let _ = std::fs::remove_file(&sock);
     Ok(())
+}
+
+const ORPHAN_DRAIN_BACKOFF_SCOPE: &str = "queue_orphan_drain_backoff";
+const ORPHAN_DRAIN_BACKOFF_HOLDER: &str = "controller_orphan_drain";
+
+/// `#orphandrain` — advance `queue: go` documents that have no supervisor.
+///
+/// The controller only decides and launches here. The route itself runs in a
+/// detached `agent-doc route` child so it can call back through the controller
+/// after this event-loop tick has returned. The per-document dispatch fence is
+/// an atomic durable claim in `state.db`, surviving controller restarts and
+/// excluding simultaneous controller processes.
+fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
+    use agent_doc_controller::orphan_drain::{
+        DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainObservation,
+        orphan_drain_decision,
+    };
+
+    let bootstrap = match runtime.bootstrap_snapshot() {
+        Ok(bootstrap) => bootstrap,
+        Err(err) => {
+            eprintln!("[controller] orphan drain: bootstrap snapshot unavailable: {err}");
+            return;
+        }
+    };
+    let project_root = bootstrap.project_root.clone();
+    let conn = match open_state_db(&project_root) {
+        Ok(conn) => conn,
+        Err(err) => {
+            eprintln!(
+                "[controller] orphan drain: failed to open state db in {}: {err}",
+                project_root.display()
+            );
+            return;
+        }
+    };
+    let store = match load_actor_store_from_db(&conn) {
+        Ok(store) => store,
+        Err(err) => {
+            eprintln!(
+                "[controller] orphan drain: failed to load actor store in {}: {err}",
+                project_root.display()
+            );
+            return;
+        }
+    };
+    let registry = match agent_doc_session_registry_io::load_in(&project_root) {
+        Ok(registry) => registry,
+        Err(err) => {
+            eprintln!(
+                "[controller] orphan drain: failed to load session registry in {}: {err}",
+                project_root.display()
+            );
+            return;
+        }
+    };
+
+    for record in store.values() {
+        if record.pane_id.is_empty()
+            || record.state == agent_doc_sqlite::state_store::ActorState::Closed
+        {
+            continue;
+        }
+        let Some(file) = registry
+            .get(&record.document_id)
+            .map(|entry| PathBuf::from(&entry.file))
+            .filter(|file| !file.as_os_str().is_empty())
+        else {
+            continue;
+        };
+
+        // Operator-visible live text is authoritative. Disk is consulted only
+        // when no editor owns the document; an attached-but-pending replica
+        // fails closed until the relay can supply a consistent cut.
+        let content = match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&file) {
+            Ok(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+            Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => {
+                let Ok(content) = std::fs::read_to_string(&file) else {
+                    continue;
+                };
+                content
+            }
+            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+            | Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => continue,
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!("controller_orphan_drain_authority_failed error={err:#}"),
+                );
+                continue;
+            }
+        };
+        let drainable = agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+            &content,
+            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        );
+        let document_hash = match agent_doc_fs::document_state_hash(&file) {
+            Ok(hash) => hash,
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!("controller_orphan_drain_hash_failed error={err:#}"),
+                );
+                continue;
+            }
+        };
+        let now = controller_model_pressure_now_secs();
+        let loop_owns_drain = match state_store::load_coordination_lease_from_db(
+            &conn,
+            agent_doc_lease::DRAIN_OWNER_SCOPE,
+            &document_hash,
+        ) {
+            Ok(Some(lease)) => agent_doc_lease::timestamp_is_fresh(
+                lease.heartbeat_secs,
+                now,
+                agent_doc_lease::drain_owner_ttl(),
+            ),
+            Ok(None) => false,
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!("controller_orphan_drain_owner_read_failed error={err:#}"),
+                );
+                continue;
+            }
+        };
+        let last_dispatch = match state_store::load_coordination_lease_from_db(
+            &conn,
+            ORPHAN_DRAIN_BACKOFF_SCOPE,
+            &document_hash,
+        ) {
+            Ok(last_dispatch) => last_dispatch,
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!("controller_orphan_drain_backoff_read_failed error={err:#}"),
+                );
+                continue;
+            }
+        };
+        let observation = OrphanDrainObservation {
+            // The supervisor-scope resolver owns activation (`queue: go`,
+            // queue-tag `go`, and legacy active state) as well as drainability.
+            queue_active: drainable.is_some(),
+            has_drainable_head: drainable.is_some(),
+            supervisor_alive: agent_doc_supervisor_io::process::supervisor_pid_for_doc(&file)
+                .is_some(),
+            loop_owns_drain,
+            pane_busy: record.state != agent_doc_sqlite::state_store::ActorState::Ready,
+            secs_since_last_dispatch: last_dispatch
+                .map(|lease| now.saturating_sub(lease.heartbeat_secs)),
+        };
+
+        if orphan_drain_decision(observation, DEFAULT_MIN_DISPATCH_INTERVAL_SECS)
+            != OrphanDrainDecision::Dispatch
+        {
+            continue;
+        }
+
+        let dispatch_claim = state_store::CoordinationLeaseRecord {
+            scope_kind: ORPHAN_DRAIN_BACKOFF_SCOPE.to_string(),
+            scope_id: document_hash,
+            holder: ORPHAN_DRAIN_BACKOFF_HOLDER.to_string(),
+            holder_pid: Some(std::process::id()),
+            heartbeat_secs: now,
+        };
+        let eligible_at_or_before = now.saturating_sub(DEFAULT_MIN_DISPATCH_INTERVAL_SECS);
+        match state_store::claim_coordination_lease_if_expired_in_db(
+            &conn,
+            &dispatch_claim,
+            eligible_at_or_before,
+        ) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!("controller_orphan_drain_backoff_claim_failed error={err:#}"),
+                );
+                continue;
+            }
+        }
+
+        let relative_path = file
+            .strip_prefix(&project_root)
+            .unwrap_or(&file)
+            .to_string_lossy()
+            .to_string();
+        agent_doc_ops_log_io::log_op(
+            &file,
+            &format!(
+                "controller_orphan_drain_dispatch file={} pane={} head={} reason=no_supervisor_idle_watch",
+                file.display(),
+                record.pane_id,
+                drainable.as_deref().unwrap_or("unknown")
+            ),
+        );
+        let invocation = ControllerEditorRouteInvocation {
+            file: file.clone(),
+            relative_path,
+            layout_args: Vec::new(),
+            dispatch_only: true,
+            plain_trigger: true,
+            wait_for_ready_secs: None,
+            force_disk: false,
+        };
+        if let Err(err) =
+            runtime_effects().and_then(|effects| effects.spawn_editor_route_detached(invocation))
+        {
+            // Keep the durable claim even on spawn failure. Releasing it here
+            // would recreate the original restart/dispatch storm.
+            agent_doc_ops_log_io::log_op(
+                &file,
+                &format!("controller_orphan_drain_dispatch_failed error={err:#}"),
+            );
+        }
+    }
 }
 
 /// Env override (seconds) for the [`controller_supervisor_watchdog_tick`] cadence.

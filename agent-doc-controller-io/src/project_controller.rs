@@ -218,6 +218,13 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         invocation: ControllerEditorRouteInvocation,
     ) -> Result<ControllerEditorRouteRuntimeResult>;
 
+    /// Launch an editor route outside the controller event loop and return as
+    /// soon as the child has been spawned.
+    fn spawn_editor_route_detached(
+        &self,
+        invocation: ControllerEditorRouteInvocation,
+    ) -> Result<()>;
+
     fn sync_tmux_layout(
         &self,
         project_root: &Path,
@@ -328,6 +335,13 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
                 invocation.relative_path
             ),
         })
+    }
+
+    fn spawn_editor_route_detached(
+        &self,
+        _invocation: ControllerEditorRouteInvocation,
+    ) -> Result<()> {
+        Ok(())
     }
 
     fn commit_document(

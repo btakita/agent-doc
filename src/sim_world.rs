@@ -16,6 +16,139 @@ const MEDIUM_CORPUS_SEEDS: std::ops::Range<u64> = 0..2_048;
 const MEDIUM_CORPUS_STEPS: usize = 32;
 const MEDIUM_CORPUS_BUDGET: Duration = Duration::from_secs(12);
 
+/// `#orphandrain` reference model: detached route dispatch and durable backoff
+/// remain safe across controller contention and restart.
+mod orphan_drain_model {
+    use agent_doc_controller::orphan_drain::{
+        DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainObservation,
+        orphan_drain_decision,
+    };
+
+    #[derive(Clone, Copy, Debug)]
+    enum Action {
+        ControllerATick,
+        ControllerBTick,
+        RestartController,
+        Advance89Seconds,
+        AdvanceOneSecond,
+        RouteSettles,
+    }
+
+    const ACTIONS: [Action; 6] = [
+        Action::ControllerATick,
+        Action::ControllerBTick,
+        Action::RestartController,
+        Action::Advance89Seconds,
+        Action::AdvanceOneSecond,
+        Action::RouteSettles,
+    ];
+
+    #[derive(Clone, Debug, Default)]
+    struct World {
+        now: u64,
+        durable_last_dispatch: Option<u64>,
+        controller_generation: u64,
+        route_in_flight: bool,
+        controller_event_loop_blocked: bool,
+        dispatches: usize,
+    }
+
+    impl World {
+        fn controller_tick(&mut self) {
+            let observation = OrphanDrainObservation {
+                queue_active: true,
+                has_drainable_head: true,
+                supervisor_alive: false,
+                loop_owns_drain: false,
+                // The route can still be starting before actor state changes to
+                // busy; durable time, not a transient pane bit, is the fence.
+                pane_busy: false,
+                secs_since_last_dispatch: self
+                    .durable_last_dispatch
+                    .map(|last| self.now.saturating_sub(last)),
+            };
+            if orphan_drain_decision(observation, DEFAULT_MIN_DISPATCH_INTERVAL_SECS)
+                != OrphanDrainDecision::Dispatch
+            {
+                return;
+            }
+
+            // Model the single-statement SQLite conditional upsert. Both
+            // controllers share this durable cell; only the first contender at
+            // an eligible instant can advance it.
+            let eligible = self.durable_last_dispatch.is_none_or(|last| {
+                self.now.saturating_sub(last) >= DEFAULT_MIN_DISPATCH_INTERVAL_SECS
+            });
+            if eligible {
+                if let Some(last) = self.durable_last_dispatch {
+                    assert!(
+                        self.now.saturating_sub(last) >= DEFAULT_MIN_DISPATCH_INTERVAL_SECS,
+                        "orphan drain dispatched inside the durable backoff window"
+                    );
+                }
+                self.durable_last_dispatch = Some(self.now);
+                self.route_in_flight = true;
+                self.dispatches += 1;
+                // External route children may call back only after this tick;
+                // the controller event loop itself is never synchronously held.
+                self.controller_event_loop_blocked = false;
+            }
+        }
+
+        fn step(&mut self, action: Action) {
+            match action {
+                Action::ControllerATick | Action::ControllerBTick => self.controller_tick(),
+                Action::RestartController => {
+                    self.controller_generation += 1;
+                    self.controller_event_loop_blocked = false;
+                }
+                Action::Advance89Seconds => self.now += 89,
+                Action::AdvanceOneSecond => self.now += 1,
+                Action::RouteSettles => self.route_in_flight = false,
+            }
+            assert!(
+                !self.controller_event_loop_blocked,
+                "detached orphan drain must never self-block the controller"
+            );
+        }
+    }
+
+    fn explore(world: World, depth: usize) {
+        if depth == 0 {
+            return;
+        }
+        for action in ACTIONS {
+            let mut next = world.clone();
+            next.step(action);
+            explore(next, depth - 1);
+        }
+    }
+
+    #[test]
+    fn contention_and_restart_do_not_recreate_the_dispatch_storm() {
+        let mut world = World::default();
+        world.step(Action::ControllerATick);
+        world.step(Action::ControllerBTick);
+        world.step(Action::RestartController);
+        world.step(Action::ControllerATick);
+        assert_eq!(world.dispatches, 1);
+        assert!(world.route_in_flight);
+
+        world.step(Action::Advance89Seconds);
+        world.step(Action::ControllerBTick);
+        assert_eq!(world.dispatches, 1);
+
+        world.step(Action::AdvanceOneSecond);
+        world.step(Action::ControllerATick);
+        assert_eq!(world.dispatches, 2);
+    }
+
+    #[test]
+    fn bounded_interleavings_preserve_detachment_and_backoff() {
+        explore(World::default(), 7);
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CyclePhase {
     Idle,

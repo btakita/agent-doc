@@ -2,17 +2,16 @@
 
 ## agent-doc Recovery & Dogfooding
 
-- **Editor thrash on restart** (~1295% CPU): [JB restart thrash = 400GB reindex + leftover DEBUG log-category](reference_jb_editor_thrash_on_restart_indexing_and_debug_logcat.md) — IDE-config fixes; sample `/proc/task/*/stat` for real CPU, jstack `emitAllInternal` is the coroutine-dump not a Flow storm.
-- **Crash/handoff/spin**: [start-crash cross-root autostart](reference_agent_doc_start_crash_cross_root_submodule_autostart.md), [stranded handoff→IPC drift](feedback_stranded_handoff_socket_causes_ipc_snapshot_drift.md), [controller+JB spin on corrupt HEAD](feedback_wedged_controller_and_jb_ide_spin_on_corrupt_crdt_response_in_head.md).
-- **force-disk/commit repair**: force-disk wedge + queue/pending recovery procedures → see [recovery index](reference_agent_doc_recovery_index.md) (covers this category).
-- **Concurrency/shared tree**: [force-push superproject→verify+STOP](feedback_concurrent_sessions_force_push_shared_superproject.md), [refactor churns tree→commit selectively](feedback_concurrent_agent_doc_refactor_session_build_coordination.md), [JB route-owned pane→check owner](feedback_jb_run_agentdoc_route_owned_pane_processing_prompt_collision.md).
-- **Concurrent agent-doc DEV session stalls your closeout**: [stale binary + 100s uncommitted src/agent-doc files → editor/disk divergence, auto-recycle never idles](reference_concurrent_agentdoc_dev_session_stalls_closeout_recycle.md) — don't force finalize/write/repair/force-disk (binary refuses correctly); commit+push real work to its OWN repo remote first, then report the stuck session-doc bookkeeping and stop.
-- **Facts**: [bugs2.done.md=ARCHIVE (live agent-doc-bugs2.md)](reference_agent_doc_bugs2_done_is_archive_not_session.md), [boundary accum worktree-only](feedback_boundary_accum_worktree_only_ipc_repair_checkout_head.md) #boundaryaccum1.
-- **Detailed failure/recovery pointers** → [recovery index](reference_agent_doc_recovery_index.md) (stale-binary, preflight/HEAD corruption, queue/pending, no_ack, force-disk wedge, misc).
-- **Stale-plugin-heartbeat wedge (IDE alive, buffer behind)**: [restart controller → force-disk → manual commit → reset](reference_agent_doc_stale_plugin_heartbeat_forcedisk_recovery.md) — auto-heal skips (IDE pid alive); corruption in live plugin, disk clean.
-- **Stale-plugin delivery-ACK wedge** (finalize loops `delivery_ack_pending`, `stale_plugin` warn): [`admin reload-lib` then re-run `write --commit`](reference_agent_doc_stale_plugin_ack_wedge_reload_lib_unwedge.md) — response already on reliable-sync plane; NON-destructive, prefer over force-disk; escalate to make install + recycle only if it fails.
-- **Recovery replay duplicates boundary marker → integrity gate wedges everything**: [2 `agent:boundary` in editor authority; gate hard-fails preflight AND session-check first, so recovery can't run](reference_agent_doc_recovery_replay_duplicate_boundary_wedges_integrity_gate.md) — response in live buffer, absent on disk; no self-heal; don't force/repair.
-- **Resurrected operator-deleted queue head** (dangling `[#id]`, e.g. #sy71): [stale baseline overlay.yrs + wedged controller IPC model](reference_agent_doc_dangling_queue_head_resurrect_baseline_overlay_and_controller_model_wedge.md) — `read`=live controller model not snapshot; `reset --from-current` skips `.baselines/<h>.overlay.yrs`; `admin recycle` defers→**kill `controller serve` pid**; commit clean HEAD first.
+- **Editor thrash on restart** (~1295% CPU): [400GB reindex + leftover DEBUG log-category](reference_jb_editor_thrash_on_restart_indexing_and_debug_logcat.md) — sample `/proc/task/*/stat` for real CPU.
+- **Crash/handoff/spin**: [start-crash cross-root autostart](reference_agent_doc_start_crash_cross_root_submodule_autostart.md), [stranded handoff→IPC drift](feedback_stranded_handoff_socket_causes_ipc_snapshot_drift.md), [spin on corrupt HEAD](feedback_wedged_controller_and_jb_ide_spin_on_corrupt_crdt_response_in_head.md).
+- **Concurrency/shared tree**: [force-push superproject→verify+STOP](feedback_concurrent_sessions_force_push_shared_superproject.md), [refactor churn→commit selectively](feedback_concurrent_agent_doc_refactor_session_build_coordination.md), [JB route-owned pane](feedback_jb_run_agentdoc_route_owned_pane_processing_prompt_collision.md).
+- **Concurrent DEV session stalls closeout**: [stale binary + uncommitted src/agent-doc](reference_concurrent_agentdoc_dev_session_stalls_closeout_recycle.md) — don't force anything; commit+push real work to its OWN remote, report, stop.
+- **Facts**: [bugs2.done.md=ARCHIVE](reference_agent_doc_bugs2_done_is_archive_not_session.md), [boundary accum worktree-only](feedback_boundary_accum_worktree_only_ipc_repair_checkout_head.md).
+- **All detailed failure/recovery procedures** → [recovery index](reference_agent_doc_recovery_index.md) (stale-binary, preflight/HEAD corruption, queue/pending, no_ack, force-disk wedge, misc).
+- **Stale-plugin heartbeat wedge** (IDE alive, buffer behind): [restart controller → force-disk → manual commit → reset](reference_agent_doc_stale_plugin_heartbeat_forcedisk_recovery.md).
+- **Stale-plugin delivery-ACK wedge** (finalize loops `delivery_ack_pending`): [`admin reload-lib`, re-run `write --commit`](reference_agent_doc_stale_plugin_ack_wedge_reload_lib_unwedge.md) — NON-destructive, prefer over force-disk.
+- **Duplicate boundary marker wedges the integrity gate**: [gate hard-fails preflight AND session-check, so recovery can't run](reference_agent_doc_recovery_replay_duplicate_boundary_wedges_integrity_gate.md) — no self-heal; don't force/repair.
+- **Resurrected operator-deleted queue head** (dangling `[#id]`): [stale baseline overlay.yrs + wedged controller model](reference_agent_doc_dangling_queue_head_resurrect_baseline_overlay_and_controller_model_wedge.md) — `admin recycle` defers → **kill `controller serve` pid**.
 
 ## agent-doc Project Intent
 
@@ -22,8 +21,8 @@
 - [IPC root-cause audit + #stale-plugin-detect](project_ipc_audit_and_stale_plugin_detect.md) — 5 causes A-E; patchboard NOT IPC.
 - [provauth1/2/3 — 3b blocked on crdtauth6](project_provauth_series_status.md) — 1/2 DONE, 3 binary-half 0.34.57.
 - [Per-cell CRDT merge isolation = deeper fix](project_agent_doc_percell_crdt_merge_intent.md) — #qcellmerge1. [[feedback_stop_cutting_agent_doc_releases]]
-- [Reliable-sync plane IS authority; sidecar = durability only](project_reliable_sync_plane_is_authority_sidecar_durability_only.md) — directive 2026-07-12: `AGENT_DOC_RELIABLE_SYNC_AUTHORITY` always true; plane primary + sidecar cold-miss backstop.
-- [live_editor→reactive-family initiative](project_live_editor_reactive_family_initiative.md) — S1–S5 done; S6 sidecar-retirement DONE 2026-07-12 (authority flip + #lzsync 3B wire flip + lazily-lib mirror retirement); release still gated. [[project_reliable_sync_plane_is_authority_sidecar_durability_only]]
+- [Reliable-sync plane IS authority; sidecar = durability only](project_reliable_sync_plane_is_authority_sidecar_durability_only.md) — `AGENT_DOC_RELIABLE_SYNC_AUTHORITY` always true.
+- [live_editor→reactive-family initiative](project_live_editor_reactive_family_initiative.md) — S1–S6 done 2026-07-12; release still gated. [[project_reliable_sync_plane_is_authority_sidecar_durability_only]]
 - [Supervisor-in-process migration (08b) CODE-COMPLETE](project_agent_doc_supervisor_migration_intent.md) — rollback flags deleted.
 - [#fintol2/#pcwc fight carry-forward invariant](project_fintol_pcwc_carry_forward_invariant.md) — need operator go + Phase-0 re-baseline.
 - [agent-doc decomposition progress](project_agent_doc_module_decomposition.md) — preflight/sync/session_check/git/start/template left.
@@ -34,6 +33,7 @@
 
 - [0.34.x publish reality](reference_agent_doc_034x_publish_reality.md) — local cargo install + lib-install ONLY.
 - [STOP cutting releases (2026-06-20)](feedback_stop_cutting_agent_doc_releases.md) — none until per-cell CRDT fixed; confirm first.
+- **[ALWAYS install + recycle after any fix](feedback_always_install_and_recycle_agent_doc.md)** — never ask, never defer for a concurrent session's uncommitted tree; ≠ cutting a release (still no bump/tag/publish).
 - [CPC+Supervisor auto-install](feedback_supervisor_autoinstall_drives_install_not_manual.md) — trust preflight stale_install.
 - [FlowCore token budget gate](reference_flowcore_token_budget_gate.md) — guard_/proof=/reason= breaks hot_path_guard; bump budget.
 - [Document is source of truth](feedback_agent_doc_document_is_source_of_truth.md) — go-mode queue IS authorization.
@@ -45,26 +45,36 @@
 
 ## lazily / Design
 
-- [Realtime + distributed primitives — 8 families](project_lazily_realtime_distributed_primitives.md) — #lztime/#lzrateshape/#lzmemb/#lzcoord/#lzpresence/#lzwindow/#lzresilience/#lzservice RELEASED 2026-07-14 (rs 0.40.0, kt 0.29.0, js 0.19.0 npm-owed, spec/formal 0.34.0); Signal demoted core→derived; py/zig/dart/go/cpp mirroring.
-- [RelayCell + algebra-backed backpressure design](project_relaycell_backpressure_design.md) — **FULL 8-BINDING PARITY 2026-07-13** (rs 0.36.0, py 0.26.0, kt 0.25.0, js 0.16.0, dart 0.15.0, go v0.11.0, zig v0.20.0, cpp v0.14.0). **ONLY gap = js npm publish (USER 2FA/OIDC)**. 6 invariants; Phase 0 = reader-kinds Cell→Slot; Signal→Slot.eager.
+- [Realtime + distributed primitives — 8 families](project_lazily_realtime_distributed_primitives.md) — RELEASED 2026-07-14; Signal demoted core→derived; py/zig/dart/go/cpp mirroring. Versions in topic file.
+- [RelayCell + algebra-backed backpressure](project_relaycell_backpressure_design.md) — **FULL 8-BINDING PARITY 2026-07-13**; only gap = js npm publish (USER 2FA/OIDC). 6 invariants; Signal→Slot.eager.
+- **[NO observers — only Effects (`#lzdartobservercow`)](reference_lazily_no_observers_only_effects.md)** — 2026-07-19: banned on every reactive (Cell/Slot/Signal); `on_transition` is an Effect; streams are Topic. zig `@sizeOf(Cell)` 168→32B. Answers "isn't a reactive just an observer?".
+- **[Hybrid staleness loses writes at depth 2](reference_lazily_hybrid_staleness_cascade_defect.md)** — eager-mark and lazy-pull each correct; *one-level mark + cache-trusting read* is not. Shipped in dart+go async. Lean thm + depth-4 fixture.
+- **[Edge set vs observer registry — one test](reference_lazily_edge_set_vs_observer_registry_test.md)** — *anything surviving an invalidation is not a graph edge*. py had 3 registries; two readers misclassified one each.
+- **[Edge index + teardown scopes (`#lzspecedgeindex`)](reference_lazily_edge_index_teardown_scope.md)** — 2026-07-19: all 8 bindings O(1) edge dedup, thresholds **differ per binding (32/64/128/160)** — never copy one. `ctx.scope() -> TeardownScope`, `disarm()`. Measure the *hybrid*, not the pure crossover.
+
+- **[Cell kernel v2 EXECUTED across all 11 repos 2026-07-21](project_lazily_memo_rename_plan_status.md)** — `Source`/`Computed`/`Effect` handles (no `Cell<T,K>` genus; `Cell`=value-node concept), `computed(f).eager()`/`.lazy()`, ALL cells guarded (`memo` removed, `PartialEq` uniform); committed-not-pushed, pending push/deploy go-no-go. KNOWN pre-existing red: 6 mergefeed fixtures drift in non-rs runners (cpp fixed, others owe it).
+- [MergeCell fixtures parked on `pending/mergefeed-fixtures`](project_lazily_mergefeed_fixtures_parked.md) — runners panic on unknown ops; land only after all 8 accept `merge_cell`/`merge`.
 
 ## lazily / Releases
 
-- **[Reliable Sync full parity — all 8 bindings](reference_reliable_sync_full_parity_all_bindings.md)** — ✅ 2026-07-12: `#lzsync`+`#sync-driver` (ResyncCoordinator/DurableOutbox/OrSet/LWW/SyncDriver + FFI kinds 4/5). Released py 0.23.0, go v0.8.0, zig v0.17.0, dart v0.12.0. [[reference_lazily_release_targets]]
-- **[ReactiveMap keyed-collection migration](project_reactivemap_keyed_collection_migration.md)** — ✅ COMPLETE 2026-07-12, all 10 repos (spec v0.27.0/formal v0.28.0/rs v0.33.0/kt v0.22.0/py v0.22.0/zig v0.16.0/cpp v0.11.0/dart v0.11.0/go v0.7.0). **js 0.15.0 npm publish still owed by USER** (2FA); superproject gitlinks not bumped.
-- [lazily release targets](reference_lazily_release_targets.md) — per-lang versions/targets; **py 0.21.0 = FULL parity (25 rows)**; #lzbenchver bump BENCHMARKS.md on rs release. Detail in topic file.
-- [lazily-cpp family/wire model](reference_lazily_cpp_family_features_wire_level_model.md) — **v0.10.0 reliable sync (#lzsync) = FULL parity** (reliable_sync.hpp from kt; CrdtPlaneRuntime wire-level); publish=tag+`gh release`. Detail in topic file.
-- [lazily-js npm Trusted Publisher E404](reference_lazily_js_npm_trusted_publisher_e404.md) — #lzzcpy shipped js 0.9.0 (isomorphic); publish blocked E404-on-PUT (OIDC not configured on npm pkg) — owner fix then rerun.
-- [cargo publish token in passage](reference_cargo_publish_token_passage.md) — credentials.toml stale (403); use `CARGO_REGISTRY_TOKEN="$(passage show btak/CARGO_REGISTRY_TOKEN)"`.
-- [lazily publish + coverage generator](reference_lazily_publish_and_coverage_generator.md) — js npm 2FA; kt→GitHub Packages on v* tag; `make coverage-check`.
-- [lazily-kt release = immutable GitHub Packages](reference_lazily_kt_release_immutable_packages.md) — check registry before tagging (409 kills publish); **kt 0.21.0 = FULL PARITY**. CI gotcha: bundle fixtures into `src/test/resources/conformance/` (CI has no lazily-spec sibling).
-- [lazily-zig test suite + coldrecalc](reference_lazily_zig_test_suite_and_coldrecalc_bottleneck.md) — publish=tag+`gh release` (no CI). **v0.14.0 FULL PARITY 32/32**; v0.15.0 ThreadSafeContext + AsyncContext(V). Detail in topic file.
-- [zig master gutted std.posix/std.fs file API](reference_zig_master_posix_file_api_moved_to_os_linux.md) — use `std.os.linux` raw syscalls for fd/shm; `mise run test` on master.
-- [coverage.json is a hot multi-session file](reference_lazily_coverage_json_hot_multisession_file.md) — committing it swallows other sessions' pending flips; one-commit-per-binding. [[feedback_concurrent_sessions_force_push_shared_superproject]]
+- [Reliable Sync full parity, 8 bindings](reference_reliable_sync_full_parity_all_bindings.md) — ✅ 2026-07-12 `#lzsync`. [[reference_lazily_release_targets]]
+- [ReactiveMap migration](project_reactivemap_keyed_collection_migration.md) — ✅ 2026-07-12 all 10 repos; **js npm publish still owed by USER** (2FA).
+- [lazily release targets](reference_lazily_release_targets.md) — per-lang versions/targets; `#lzbenchver` bump BENCHMARKS.md on rs release.
+- [lazily-cpp family/wire model](reference_lazily_cpp_family_features_wire_level_model.md) — publish = tag + `gh release`.
+- [lazily-js npm Trusted Publisher E404](reference_lazily_js_npm_trusted_publisher_e404.md) — OIDC not configured on pkg; owner fix then rerun.
+- [cargo publish token in passage](reference_cargo_publish_token_passage.md) — credentials.toml 403s; use `CARGO_REGISTRY_TOKEN="$(passage show btak/CARGO_REGISTRY_TOKEN)"`.
+- [lazily-py wheels CI](reference_lazily_py_wheels_ci.md) — mypyc+cibuildwheel on tag; `PYPI_PUBLISH_TOKEN`.
+- [lazily publish + coverage generator](reference_lazily_publish_and_coverage_generator.md) — js npm 2FA; kt→GH Packages on `v*`.
+- [lazily-kt = immutable GH Packages](reference_lazily_kt_release_immutable_packages.md) — check registry before tagging (409 kills publish).
+- [lazily-zig test suite](reference_lazily_zig_test_suite_and_coldrecalc_bottleneck.md) — publish = tag + `gh release`, no CI.
+- [zig master gutted std.posix/std.fs](reference_zig_master_posix_file_api_moved_to_os_linux.md) — use `std.os.linux` raw syscalls; `mise run test`.
+- [coverage.json is hot multi-session](reference_lazily_coverage_json_hot_multisession_file.md) — one-commit-per-binding. [[feedback_concurrent_sessions_force_push_shared_superproject]]
 - [Queue `go` overrides queue:stop](feedback_queue_go_marker_overrides_stop_churn.md) — remove `go` AND set stop.
-- [lazily-dart CI missing lazily-spec sibling](reference_lazily_dart_ci_missing_spec_sibling.md) — `test` skips `../lazily-spec` → sibling-only conformance red is baseline; copy fixtures locally.
+- **[Signal clause 3 caught 4 bindings, 2 mechanisms (`#lzsignaleager`)](reference_lazily_signal_clause3_welded_eagerness.md)** — 2026-07-20: py/dart/go welded eagerness into slot invalidation *independently*; zig's batch didn't gate the flush. All returned correct values at 2–3× compute. go blocked on a **consuming cascade** — ledgered, not migrated. New observable `computes_of`.
+- **[Conformance delivery — 3 ways to report green while testing nothing](reference_lazily_conformance_delivery_three_failure_modes.md)** — REPAIRED family-wide 2026-07-19. Absence guard catches only 1 of 3; **always add a positive assertion that fixtures ran**. Supersedes the older kt-drift note (that drift was already resynced; kt's real defect was coverage).
 
 ## Decision / Communication
+- **[Use the AST, never regex, for source edits](feedback_use_ast_not_regex_for_source_edits.md)** — `tsift edit-intents --apply --verify`; regex silently ate match arms, hit out-of-scope files, and truncated a function in one session.
 
 - [Refactor-spiral pattern + guardrails](user_refactor_spiral_pattern_guardrails.md) — spike-before-commit, conviction gates, recovery tripwire.
 - [AskUserQuestion no-option + note](feedback_askuserquestion_no_option_confirm_actual_choice.md) — note ≠ endorsement; confirm actual choice.
@@ -72,6 +82,8 @@
 - [No sycophancy](feedback_no_sycophancy.md).
 - [Don't oversimplify when asked "simpler"](feedback_no_oversimplify.md) — keep terse; elaborate the action.
 - [Brian's Communication Priorities](user_communication_priorities.md) — bias-stripped prioritization.
+- **[Discuss naming to convergence BEFORE editing](feedback_discuss_naming_before_applying.md)** — don't apply each candidate as proposed; 5 renames mid-discussion caused cross-repo churn.
+- **[NEVER run two subagents against one repo](feedback_never_dispatch_concurrent_agents_into_one_repo.md)** — one `git reset`s the other's uncommitted work; a clean `git status` does NOT prove it survived.
 
 ## equityfundingsource
 
@@ -110,8 +122,8 @@
 
 ## JetBrains Plugins (general)
 
-- **ActionPromoter breaks intentions** in .md — self-disabling `update()`. **python-intentions verifier false positives** (bare IU lacks PythonCore) — src ~/work/btakita/python-intentions. **Build both zips**; full uninstall only for structural class changes.
-- **agent-doc JB plugin** = K2/JVM21/IntelliJ 2024.2 (sinceBuild 242); consume lazily-kt via **conditional Gradle composite** (`includeBuild(...).exists()` + dependencySubstitution + `mavenLocal()` fallback). **NEVER bundle platform transitives** — `exclude(group="org.jetbrains.kotlinx")` (breaks IDE dispatcher), kotlin/annotations/jna too; verify `unzip -l <zip>`.
+- **ActionPromoter breaks intentions** in .md — self-disabling `update()`. python-intentions verifier false positives (bare IU lacks PythonCore). Build both zips; full uninstall only for structural class changes.
+- **agent-doc JB plugin** = K2/JVM21/IntelliJ 2024.2 (sinceBuild 242); lazily-kt via conditional Gradle composite (`includeBuild(...).exists()` + `mavenLocal()` fallback). **NEVER bundle platform transitives** — exclude `org.jetbrains.kotlinx` (breaks IDE dispatcher), kotlin/annotations/jna too; verify `unzip -l`.
 
 ## Misc Conventions
 
@@ -119,9 +131,9 @@
 - **corky `--features diarize`** ([f](feedback_corky_diarize_feature.md)); **bun for briantakita.me** ([f](feedback_bun_not_pnpm.md)); **file:// paths** ([f](feedback_file_protocol_paths.md)).
 - **Writing voice**: `...` not spaced em-dash; avoid delve/leverage/hedging ([f](feedback_writing_voice.md)).
 - **Verify live system after fix**, not just tests ([f](feedback_verify_live_system.md)).
-- **"do" = execute ALL now** ([f](feedback_do_means_execute_all.md)); approval ≠ cut corners ([f](feedback_approval_not_skip_processes.md)); precommit testing ([f](feedback_precommit_testing.md)); no confirm for obvious iteration ([f](feedback_no_confirmation_iterate.md)).
-- **No hallucinating** — "I don't know" ([f](feedback_no_hallucinate_uncertainty.md)); don't call broken "correct" ([f](feedback_no_hallucinate_correct_errors.md)); verify proxy before killing ([f](feedback_verify_proxy_before_kill.md)).
-- **Distribution-aware reorg** ([f](feedback_distribution_aware_reorg.md)); [cross-crate `#[cfg(test)]`](feedback_cross_crate_cfg_test_extraction.md); **scope to session doc's project** ([f](feedback_session_document_scope_discipline.md)).
+- **"do" = execute ALL now** ([f](feedback_do_means_execute_all.md)); approval ≠ cut corners ([f](feedback_approval_not_skip_processes.md)); [precommit testing](feedback_precommit_testing.md); [no confirm for obvious iteration](feedback_no_confirmation_iterate.md).
+- **No hallucinating** — [say "I don't know"](feedback_no_hallucinate_uncertainty.md); [don't call broken "correct"](feedback_no_hallucinate_correct_errors.md); [verify proxy before killing](feedback_verify_proxy_before_kill.md).
+- [Distribution-aware reorg](feedback_distribution_aware_reorg.md); [cross-crate `#[cfg(test)]`](feedback_cross_crate_cfg_test_extraction.md); [scope to session doc's project](feedback_session_document_scope_discipline.md).
 
 ## Email Drafting (corky)
 
@@ -132,12 +144,10 @@
 ## References
 
 - [`.bin/agent-doc` symlink is repo-root-relative](reference_bin_agent_doc_symlink_is_reporoot_relative.md) — target `src/agent-doc/...`; don't "fix".
-- **EFS concurrent-deploy (clobber-immune)** — winner: [worktree as deploy AND commit source](reference_efs_worktree_as_deploy_and_commit_source_clobber_immune.md) (edits into clean HEAD worktree, build/deploy/commit there, CAS main). Verify: [string-grep bundles](reference_efs_verify_deploy_via_string_grep.md) (admin 401s). Gotcha: [deploy from main, NOT fresh-install worktree](reference_efs_deploy_from_main_checkout_not_fresh_install_worktree.md) (fresh `bun install` breaks CSS). Related: [[feedback_efs_commit_only_your_files_via_temp_index_compare_and_swap]] [[feedback_concurrent_session_clobbers_efs_worker_deploy]].
-- [EFS document type catalogue locations](reference_efs_document_type_catalogue_locations.md) — new `dt_*` = seed migration + 4 client mirrors.
-- [Drive EFS portal locally](reference_efs_local_portal_drive_recipe.md) — migrate:local, seed, mint `efs_session` JWT, CDP setCookie.
-- [Verify EFS lender on PROD via curl login](reference_efs_prod_lender_login_verify_recipe.md) — POST /login, efs_session cookie, GET /api/investor/deals.
+- **EFS concurrent-deploy (clobber-immune)** — [worktree as deploy AND commit source](reference_efs_worktree_as_deploy_and_commit_source_clobber_immune.md); verify via [string-grep bundles](reference_efs_verify_deploy_via_string_grep.md); gotcha: [deploy from main, NOT fresh-install worktree](reference_efs_deploy_from_main_checkout_not_fresh_install_worktree.md). [[feedback_efs_commit_only_your_files_via_temp_index_compare_and_swap]] [[feedback_concurrent_session_clobbers_efs_worker_deploy]]
+- [EFS doc-type catalogue](reference_efs_document_type_catalogue_locations.md) — new `dt_*` = seed migration + 4 client mirrors. [Drive portal locally](reference_efs_local_portal_drive_recipe.md). [Verify lender on PROD](reference_efs_prod_lender_login_verify_recipe.md).
 - [agent-doc build-worktree needs sibling ../tmux-router](reference_agent_doc_build_worktree_needs_sibling_tmux_router.md) — under src/, not /tmp.
-- [monsterrodholders SSH](reference_monsterrodholders_ssh.md) — `ssh monsterrodholders-server`→root@50.28.2.199. WordPress/CRS ops → use [wp-liquidweb-ops skill](reference_monsterrodholders_waf_933120.md).
-- [monsterrodholders "down" = expired origin cert](reference_monsterrodholders_origin_cert_expiry_outage.md) — Cloudflare→origin 443 leg; certbot-renew.timer was enabled-but-never-started (inactive 98d). Fixed: renew+reload, started timer, added httpd deploy hook. HTTP works / HTTPS hangs = check origin cert expiry.
-- [NEVER set CSF DOCKER=1 on monsterrodholders VPS](feedback_never_set_csf_docker_1_monsterrodholders.md) — flushes Docker NAT chain → outage (May-4 mechanism). Keep `DOCKER="0"`; a Claude session set it to 1 on 2026-07-14 11:33 → down. Verify via `check-firewall-stack.sh`.
-- [monsterrodholders monitoring+alerting stack](reference_monsterrodholders_monitoring_alerting_stack.md) — boost-health worker: 5-min public probe + email/SMS via CF `send_email` (NO MX change), `/alert` relay, `?selftest=1`; csf-drift-check cron auto-reverts DOCKER=1 + pages. Recipients brian(email/vtext)+Ron(att, pending verify). Worker/script deployed but UNCOMMITTED.
+- [monsterrodholders SSH](reference_monsterrodholders_ssh.md) — `ssh monsterrodholders-server`. WordPress/CRS ops → [wp-liquidweb-ops skill](reference_monsterrodholders_waf_933120.md).
+- [monsterrodholders "down" = expired origin cert](reference_monsterrodholders_origin_cert_expiry_outage.md) — HTTP works / HTTPS hangs ⇒ check origin cert expiry; certbot-renew.timer was enabled-but-never-started.
+- [NEVER set CSF DOCKER=1 on monsterrodholders VPS](feedback_never_set_csf_docker_1_monsterrodholders.md) — flushes Docker NAT chain → outage. Keep `DOCKER="0"`; verify via `check-firewall-stack.sh`.
+- [monsterrodholders monitoring+alerting](reference_monsterrodholders_monitoring_alerting_stack.md) — boost-health worker 5-min probe + CF `send_email`; csf-drift-check cron auto-reverts DOCKER=1. Worker/script deployed but UNCOMMITTED.

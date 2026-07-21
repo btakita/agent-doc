@@ -738,6 +738,102 @@ differ; measure each.
 
 ---
 
+## 9.4 Execution — spec and formal first, always
+
+**The plan leads with the spec, then the formal model. No binding churns until
+both are green.** This is not generic process hygiene; it is the specific
+discipline this design needs, for three reasons the design itself supplies:
+
+1. **The names are the whole risk.** The reason the rename was put on hold is
+   that ~12,000 sites cannot churn toward a moving target. The spec is where the
+   vocabulary stops moving. Settle `Cell<T, K>` / `SourceCell` / `FormulaCell`,
+   `Slot`-as-storage, `source` / `formula` / `.drive()`, and guarded-by-default
+   in prose **first**, and every later step targets a fixed vocabulary.
+2. **This design's core claims are theorems, not conventions.** The partition
+   (§1), "a writer is always a sink" (§9.2.2), and "feedback is when an argument
+   is also a dependency" (§9.2.3) belong in the formal model, where they are
+   *proved* rather than asserted. If they cannot be expressed, that is a defect
+   in the design, and the formal model is the cheapest place on earth to find it
+   — before eight bindings, not after.
+3. **The formal model is already ahead of the bindings here.**
+   `lazily-formal/LazilyFormal/Signal.lean` (29.4 KB, 649+ lines) already proves
+   `Signal ≡ Slot.eager` as *"a memo `Slot` plus a puller `Effect`"* — the exact
+   composition `.drive()` makes canonical. The bindings shipped *welded*
+   eagerness (`#lzsignaleager`); the proof never did. So formal-first is not
+   speculative: the model already validates the eager story, and reframing it as
+   `formula().drive()` should preserve the proof, which is a thing to *check in
+   Lean*, not hope for in Rust.
+
+### Step 1 — Spec prose. No fixture-op or code changes.
+
+Settle the vocabulary and the theorems in `lazily-spec`:
+
+- `docs/reactive-graph.md` — the kernel (`Cell<T, K>`, `SourceCell`,
+  `FormulaCell`), `Slot` redefined as the storage position (§5.0), the
+  constructor surface (§9.3), guarded-by-default, and the three theorems stated
+  once each: writer-is-a-sink (§9.2.2), feedback = argument-is-dependency
+  (§9.2.3), merge-must-be-cheap (§9.2.1).
+- Root `cell-model.md` and `protocol.md` (mdBook `{{#include}}` stubs in `docs/`
+  — edit the root, §5.1 correction: no symlink hazard).
+- `README.md`, `coverage.json`, `book/`, `examples/`.
+- **`SlotValue` on the wire stays** (§5.0) — no wire change, no dual-accept, no
+  `agent-doc` IPC break. The §13 dilemma of the superseded plan is void.
+
+Gate: `make check` green. Nothing structural has moved yet.
+
+### Step 2 — Formal. Prove the kernel; catch the inexpressible cheaply.
+
+In `lazily-formal` (and `lazily-spec/formal/lean` where it mirrors):
+
+- `Reactive.lean` (33.4 KB) — the kernel and the partition. Prove every node is
+  exactly one of source / formula / effect, and that a writer occupies the sink
+  position. This is §1 and §9.2.2 as a proof.
+- `Signal.lean` (29.4 KB) — **reframe, do not rewrite.** It already proves the
+  slot+effect composition; restate it as `formula().drive()` and confirm the
+  materialize-once-per-batch property (clause 3) survives the renaming. That
+  property is what a binding got wrong; the proof is what says the composition
+  cannot.
+- `AsyncSlotState.lean` (6.7 KB) — the async formula FSM; rename in step with the
+  vocabulary.
+- Generation-tagged `SlotId` (§9.3.5): if the recycled-read property is to be
+  *proved* rather than only fixtured, it lives in `Reactive.lean` (not
+  `StableId.lean`, which is text identity). Optional at this step; flag if
+  deferred.
+- **CARVE-OUT: `Signaling.lean` and `SignalingRoster.lean` are WebRTC
+  peer-discovery** ("anti-spoof forwarding"), semantically unrelated to reactive
+  `Signal`. **Do not touch.** Confirmed by reading their headers.
+
+Gate: `lake build` clean, no `sorry`. If `Cell<T, K>`'s kind-restricted write
+protection cannot be modelled, stop and revisit §3 — that is the signal to catch
+here, at the cost of a Lean file, not a nine-repo migration.
+
+### Step 3 onward — the mechanical fan-out, unchanged in shape
+
+Only after steps 1–2 are green:
+
+3. Conformance runners **dual-accept** any renamed ops before any fixture emits
+   them (runners panic on unknown ops and assert the on-disk set equals
+   `FIXTURES` exactly — §8). Land the parked `pending/mergefeed-fixtures`
+   (§8) once the merge ops exist in the runners.
+4. Reference binding `lazily-rs` — the kernel, `source`/`formula`/`.drive()`, the
+   driven bit + `driven_by` side table (§9.3.3), generation `SlotId` (§9.3.5),
+   `SlotId`→internal / `distributed::NodeId`→`WireNodeId` (§5.1). Include
+   `benches/` — `#lzbenchver` gates on drift.
+5. `lazily-js`, honouring the `slot()`/`disposeSlot()` deprecation.
+6. `lazily-react` — depends on 5; `useSlot` deleted (zero call sites).
+7. Remaining six in parallel — **one agent per repo, never two**. Each replays
+   the full corpus and prints counts as proof it ran.
+8. `lazily-go` last among them — interface for the write-protection (§4), and it
+   is already blocked on a consuming cascade, so do not stack two migrations.
+9. Blog (superseded plan §11 survives), superproject pointers, deploy.
+
+**The already-landed work stands and does not re-order:** the drain bound
+(`lazily-rs` f65676c) and the merge allowlist (`lazily-spec` 845283a) are
+decision-independent infrastructure (Tracks B/C), valid under any naming. They do
+not depend on steps 1–2 and are not invalidated by them.
+
+---
+
 ## 10. Non-goals
 
 - **`Cell` → anything.** It survives the spreadsheet-genus objection and is now

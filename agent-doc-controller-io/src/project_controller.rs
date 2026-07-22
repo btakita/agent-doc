@@ -25,7 +25,7 @@ use interprocess::local_socket::{
     GenericFilePath, ListenerNonblockingMode, ListenerOptions, ToFsName,
     traits::{Listener as _, Stream as _},
 };
-use lazily::{CellHandle, ThreadSafeContext, ThreadSafeSignalHandle};
+use lazily::{Source, ThreadSafeContext, ThreadSafeSignalHandle};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -617,17 +617,17 @@ impl ControllerRuntime {
 
 struct ControllerSupervisorRecycleGraph {
     ctx: ThreadSafeContext,
-    projection: CellHandle<agent_doc_state_backbone::SupervisorRecycleProjection>,
+    projection: Source<agent_doc_state_backbone::SupervisorRecycleProjection>,
     in_flight: ThreadSafeSignalHandle<bool>,
 }
 
 impl ControllerSupervisorRecycleGraph {
     fn new(initial: agent_doc_state_backbone::SupervisorRecycleProjection) -> Self {
         let ctx = ThreadSafeContext::new();
-        let projection = ctx.cell(initial);
+        let projection = ctx.source(initial);
         let in_flight = ctx.signal(move |ctx| {
             matches!(
-                ctx.get_cell(&projection).phase,
+                ctx.get(&projection).phase,
                 agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
             )
         });
@@ -639,11 +639,11 @@ impl ControllerSupervisorRecycleGraph {
     }
 
     fn set(&self, projection: agent_doc_state_backbone::SupervisorRecycleProjection) {
-        self.ctx.set_cell(&self.projection, projection);
+        self.ctx.set(&self.projection, projection);
     }
 
     fn projection(&self) -> agent_doc_state_backbone::SupervisorRecycleProjection {
-        self.ctx.get_cell(&self.projection)
+        self.ctx.get(&self.projection)
     }
 
     fn in_flight(&self) -> bool {

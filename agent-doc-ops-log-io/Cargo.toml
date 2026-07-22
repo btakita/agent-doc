@@ -16,7 +16,7 @@ name = "agent_doc_ops_log_io"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-lazily = "0.46.0"
+lazily = "0.48.1"
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.8" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.8" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.8" }

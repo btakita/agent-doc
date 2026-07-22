@@ -8,7 +8,7 @@ use std::cell::Cell as StdCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use lazily::{CellHandle, Context, SlotHandle};
+use lazily::{Compute, Computed, Context, Source};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ComponentHash {
@@ -160,14 +160,14 @@ impl RenderedContextManifest {
     }
 }
 
-type ComponentHashesCell = CellHandle<Vec<ComponentHash>>;
-type PromptInputsCell = CellHandle<PromptTargetInputs>;
-type CandidateChunksCell = CellHandle<Vec<ContextChunk>>;
-type InjectionLedgerCell = CellHandle<InjectionLedgerSnapshot>;
-type PromptTargetsSlot = SlotHandle<Vec<String>>;
-type CandidateChunksSlot = SlotHandle<Vec<ContextChunk>>;
-type DecisionsSlot = SlotHandle<Vec<ContextChunkDecision>>;
-type RenderedManifestSlot = SlotHandle<RenderedContextManifest>;
+type ComponentHashesCell = Source<Vec<ComponentHash>>;
+type PromptInputsCell = Source<PromptTargetInputs>;
+type CandidateChunksCell = Source<Vec<ContextChunk>>;
+type InjectionLedgerCell = Source<InjectionLedgerSnapshot>;
+type PromptTargetsSlot = Computed<Vec<String>>;
+type CandidateChunksSlot = Computed<Vec<ContextChunk>>;
+type DecisionsSlot = Computed<Vec<ContextChunkDecision>>;
+type RenderedManifestSlot = Computed<RenderedContextManifest>;
 
 pub struct DynamicContextProjection {
     ctx: Context,
@@ -206,38 +206,38 @@ impl DynamicContextProjection {
         render_count: Rc<StdCell<usize>>,
     ) -> Self {
         let ctx = Context::new();
-        let component_hashes_cell = ctx.cell(component_hashes);
-        let prompt_inputs_cell = ctx.cell(prompt_inputs);
-        let candidate_chunks_cell = ctx.cell(candidate_chunks);
-        let ledger_snapshot_cell = ctx.cell(ledger_snapshot);
+        let component_hashes_cell = ctx.source(component_hashes);
+        let prompt_inputs_cell = ctx.source(prompt_inputs);
+        let candidate_chunks_cell = ctx.source(candidate_chunks);
+        let ledger_snapshot_cell = ctx.source(ledger_snapshot);
 
-        let prompt_targets = ctx.memo({
+        let prompt_targets = ctx.computed({
             let input = prompt_inputs_cell;
-            move |ctx: &Context| derive_prompt_targets(&ctx.get_cell(&input))
+            move |ctx: &Compute| derive_prompt_targets(&ctx.get(&input))
         });
 
-        let candidate_context_chunks = ctx.memo({
+        let candidate_context_chunks = ctx.computed({
             let candidates = candidate_chunks_cell;
-            move |ctx: &Context| normalize_candidate_chunks(ctx.get_cell(&candidates))
+            move |ctx: &Compute| normalize_candidate_chunks(ctx.get(&candidates))
         });
 
-        let duplicate_decisions = ctx.memo({
+        let duplicate_decisions = ctx.computed({
             let candidates = candidate_context_chunks;
             let ledger = ledger_snapshot_cell;
-            move |ctx: &Context| {
-                decide_context_injections(ctx.get(&candidates), &ctx.get_cell(&ledger))
+            move |ctx: &Compute| {
+                decide_context_injections(ctx.get(&candidates), &ctx.get(&ledger))
             }
         });
 
-        let rendered_manifest = ctx.memo({
+        let rendered_manifest = ctx.computed({
             let components = component_hashes_cell;
             let targets = prompt_targets;
             let decisions = duplicate_decisions;
             let render_count = Rc::clone(&render_count);
-            move |ctx: &Context| {
+            move |ctx: &Compute| {
                 render_count.set(render_count.get() + 1);
                 render_context_manifest(
-                    ctx.get_cell(&components),
+                    ctx.get(&components),
                     ctx.get(&targets),
                     ctx.get(&decisions),
                 )
@@ -259,22 +259,22 @@ impl DynamicContextProjection {
     }
 
     pub fn set_component_hashes(&self, component_hashes: Vec<ComponentHash>) {
-        self.ctx.set_cell(
+        self.ctx.set(
             &self.component_hashes,
             normalize_component_hashes(component_hashes),
         );
     }
 
     pub fn set_prompt_inputs(&self, prompt_inputs: PromptTargetInputs) {
-        self.ctx.set_cell(&self.prompt_inputs, prompt_inputs);
+        self.ctx.set(&self.prompt_inputs, prompt_inputs);
     }
 
     pub fn set_candidate_chunks(&self, candidate_chunks: Vec<ContextChunk>) {
-        self.ctx.set_cell(&self.candidate_chunks, candidate_chunks);
+        self.ctx.set(&self.candidate_chunks, candidate_chunks);
     }
 
     pub fn set_ledger_snapshot(&self, ledger_snapshot: InjectionLedgerSnapshot) {
-        self.ctx.set_cell(&self.ledger_snapshot, ledger_snapshot);
+        self.ctx.set(&self.ledger_snapshot, ledger_snapshot);
     }
 
     pub fn prompt_targets(&self) -> Vec<String> {

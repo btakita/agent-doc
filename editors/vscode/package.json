@@ -234,7 +234,7 @@
     "publish": "vsce publish"
   },
   "dependencies": {
-    "@lazily-hub/lazily-js": "^0.25.0",
+    "@lazily-hub/lazily-js": "^0.27.0",
     "koffi": "^2.9.0"
   },
   "devDependencies": {

@@ -40,7 +40,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write;
 
 use anyhow::{Result, anyhow};
-use lazily::{CellHandle, EphemeralMapCore, SlotHandle, ThreadSafeCellMap, ThreadSafeContext};
+use lazily::{Computed, EphemeralMapCore, Source, ThreadSafeCellMap, ThreadSafeContext};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -228,7 +228,7 @@ pub struct RelayHub {
     /// The thread-safe reactive graph that owns member liveness (#live-editor-reactive).
     /// `RelayHub` lives in a `static Mutex<HashMap<String, RelayHub>>`, so every
     /// reactive handle stored here must be `Send`; [`ThreadSafeContext`] and the
-    /// `Arc`-based [`ThreadSafeCellMap`]/[`CellHandle`]/[`SlotHandle`] all qualify.
+    /// `Arc`-based [`ThreadSafeCellMap`]/[`Source`]/[`Computed`] all qualify.
     ctx: ThreadSafeContext,
     /// Per-member liveness as a keyed reactive family (keyed by `client_id`). This is
     /// the **single** source of truth for whether a member is connected — the former
@@ -239,11 +239,11 @@ pub struct RelayHub {
     /// Bumped on [`Self::register`] so the derived count picks up a newly-present key
     /// (a brand-new cell is not yet a dependency of `live_editor_count`; the epoch is,
     /// so the register forces a recompute that then observes the new cell).
-    membership_epoch: CellHandle<u64>,
+    membership_epoch: Source<u64>,
     /// Reactive derived count of currently-live members: recomputes as
     /// `count(present_keys whose cell is true)` whenever the epoch or any observed
     /// liveness cell changes. [`Self::live_count`] is a reactive read of this slot.
-    live_editor_count: SlotHandle<usize>,
+    live_editor_count: Computed<usize>,
 }
 
 impl RelayHub {
@@ -288,20 +288,20 @@ impl RelayHub {
     fn build_liveness_core() -> (
         ThreadSafeContext,
         ThreadSafeCellMap<u64, bool>,
-        CellHandle<u64>,
-        SlotHandle<usize>,
+        Source<u64>,
+        Computed<usize>,
     ) {
         let ctx = ThreadSafeContext::new();
-        let membership_epoch = ctx.cell(0u64);
+        let membership_epoch = ctx.source(0u64);
         // Cells materialize on `register`; the factory value (`true` = live-on-register)
-        // only applies before the explicit `set_cell` in `set_live`.
+        // only applies before the explicit `set` in `set_live`.
         let liveness: ThreadSafeCellMap<u64, bool> = ThreadSafeCellMap::new(&ctx);
         let live_editor_count = {
             let liveness = liveness.clone();
             ctx.computed(move |ctx| {
                 // Depend on the membership epoch so a newly-registered (not-yet-observed)
                 // key forces a recompute that then picks it up in `present_keys`.
-                let _ = ctx.get_cell(&membership_epoch);
+                let _ = ctx.get(&membership_epoch);
                 liveness
                     .present_keys()
                     .into_iter()
@@ -323,9 +323,9 @@ impl RelayHub {
     /// newly-present key. Called on [`Self::register`] only (value-only transitions
     /// already dirty the derived count through the cell dependency).
     fn bump_membership_epoch(&self) {
-        let epoch = self.ctx.get_cell(&self.membership_epoch);
+        let epoch = self.ctx.get(&self.membership_epoch);
         self.ctx
-            .set_cell(&self.membership_epoch, epoch.wrapping_add(1));
+            .set(&self.membership_epoch, epoch.wrapping_add(1));
     }
 
     /// Reactive read of member `client_id`'s liveness (the single source of truth that

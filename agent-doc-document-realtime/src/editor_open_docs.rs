@@ -24,7 +24,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use lazily::{CellHandle, SlotHandle, ThreadSafeCellMap, ThreadSafeContext};
+use lazily::{Computed, Source, ThreadSafeCellMap, ThreadSafeContext};
 
 /// Per-document open state held in the reactive family.
 ///
@@ -59,25 +59,25 @@ pub struct EditorOpenDocs {
     docs: ThreadSafeCellMap<String, DocOpenState>,
     /// Bumped when a brand-new key is materialized so the derived counts observe it
     /// (a not-yet-observed cell is not yet a dependency; the epoch is).
-    epoch: CellHandle<u64>,
+    epoch: Source<u64>,
     /// Reactive count of currently-open documents.
-    open_count: SlotHandle<usize>,
+    open_count: Computed<usize>,
     /// Reactive count of currently-open agent-doc session documents.
-    open_agent_doc_count: SlotHandle<usize>,
+    open_agent_doc_count: Computed<usize>,
 }
 
 impl EditorOpenDocs {
     /// Build an empty registry.
     pub fn new() -> Self {
         let ctx = ThreadSafeContext::new();
-        let epoch = ctx.cell(0u64);
+        let epoch = ctx.source(0u64);
         let docs: ThreadSafeCellMap<String, DocOpenState> = ThreadSafeCellMap::new(&ctx);
         let open_count = {
             let docs = docs.clone();
             ctx.computed(move |ctx| {
                 // Depend on the membership epoch so a newly-present key forces a
                 // recompute that then picks it up in `present_keys`.
-                let _ = ctx.get_cell(&epoch);
+                let _ = ctx.get(&epoch);
                 docs.present_keys()
                     .into_iter()
                     .filter(|key| {
@@ -91,7 +91,7 @@ impl EditorOpenDocs {
         let open_agent_doc_count = {
             let docs = docs.clone();
             ctx.computed(move |ctx| {
-                let _ = ctx.get_cell(&epoch);
+                let _ = ctx.get(&epoch);
                 docs.present_keys()
                     .into_iter()
                     .filter(|key| {
@@ -120,8 +120,8 @@ impl EditorOpenDocs {
     }
 
     fn bump_epoch(&self) {
-        let epoch = self.ctx.get_cell(&self.epoch);
-        self.ctx.set_cell(&self.epoch, epoch.wrapping_add(1));
+        let epoch = self.ctx.get(&self.epoch);
+        self.ctx.set(&self.epoch, epoch.wrapping_add(1));
     }
 
     /// Record that `path` is open in an editor, with its agent-doc classification.

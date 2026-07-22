@@ -42,7 +42,7 @@ use parking_lot::Mutex;
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
-use lazily::{CellHandle, SlotHandle, ThreadSafeCellMap, ThreadSafeContext};
+use lazily::{Computed, Source, ThreadSafeCellMap, ThreadSafeContext};
 
 /// A source of process-exit **events** (not a poll on the hot path).
 ///
@@ -78,9 +78,9 @@ pub struct EditorAttach {
     /// explicit deregister. A closed pair stays present-but-false (uncounted).
     registered: ThreadSafeCellMap<(String, u32), bool>,
     /// Bumped when a brand-new key is materialized so the derived count observes it.
-    epoch: CellHandle<u64>,
+    epoch: Source<u64>,
     /// Reactive count of distinct currently-attached documents (observability/tests).
-    attached_count: SlotHandle<usize>,
+    attached_count: Computed<usize>,
     /// The installed OS process-exit watcher, if any. Absent ⇒ this process does not
     /// seed reactive state (CLI-safety rule), so consumers cold-miss to the lease.
     watcher: Mutex<Option<std::sync::Arc<dyn ProcessExitWatcher>>>,
@@ -90,7 +90,7 @@ impl EditorAttach {
     /// Build an empty registry with no watcher installed.
     pub fn new() -> Self {
         let ctx = ThreadSafeContext::new();
-        let epoch = ctx.cell(0u64);
+        let epoch = ctx.source(0u64);
         let alive: ThreadSafeCellMap<u32, bool> = ThreadSafeCellMap::new(&ctx);
         let registered: ThreadSafeCellMap<(String, u32), bool> = ThreadSafeCellMap::new(&ctx);
         let attached_count = {
@@ -99,7 +99,7 @@ impl EditorAttach {
             ctx.computed(move |ctx| {
                 // Depend on the membership epoch so a newly-present key forces a
                 // recompute that then picks it up in `present_keys`.
-                let _ = ctx.get_cell(&epoch);
+                let _ = ctx.get(&epoch);
                 let mut docs: BTreeSet<String> = BTreeSet::new();
                 for key in registered.present_keys() {
                     let (doc, pid) = key.clone();
@@ -136,8 +136,8 @@ impl EditorAttach {
     }
 
     fn bump_epoch(&self) {
-        let epoch = self.ctx.get_cell(&self.epoch);
-        self.ctx.set_cell(&self.epoch, epoch.wrapping_add(1));
+        let epoch = self.ctx.get(&self.epoch);
+        self.ctx.set(&self.epoch, epoch.wrapping_add(1));
     }
 
     /// Materialize (if needed) and set a `registered` pair. Never holds the family lock

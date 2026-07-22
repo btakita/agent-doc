@@ -1253,7 +1253,15 @@ pub fn settle_retained_captured_projection_through_authority(
     // retained journal over the current canonical text; never require Ctrl+S,
     // preflight repair, recapture, or a force-disk reset to make progress.
     let mut canonical = try_resolve_current_document_content(path, source)?;
-    if canonical != pending.target_content {
+    // A newer authority cut that already contains the durable response is the
+    // desired semantic result. Replaying an older incomplete intent over it can
+    // only regress the closeout and may discard newer operator-owned edits.
+    let response_already_materialized =
+        agent_doc_turn::response_replay::response_materialized_in_content(
+            captured_response,
+            &canonical,
+        );
+    if canonical != pending.target_content && !response_already_materialized {
         let Some(rebased_target) = deferred_document_write_reconnect_content(path, &canonical)?
         else {
             return Ok(false);
@@ -7578,6 +7586,40 @@ mod tests {
             captured_target,
         );
         assert_eq!(std::fs::read_to_string(&file).unwrap(), captured_target);
+    }
+
+    #[test]
+    fn retained_capture_settles_when_current_authority_already_contains_response() {
+        let editor_base =
+            "# Session\n\n<!-- agent:exchange -->\nPlease investigate.\n<!-- /agent:exchange -->\n";
+        let captured_response = "### Re: investigate\n\nFixed the retained closeout.\n";
+        let captured_current = format!(
+            "# Session\n\n<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            captured_response.trim_end()
+        );
+        let (_dir, file, _canonical) = temp_doc(&captured_current);
+
+        ensure_deferred_document_write_intent(
+            &file,
+            &captured_current,
+            editor_base,
+            "editor_reconnect",
+            DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget,
+        )
+        .unwrap();
+        assert!(pending_document_write(&file).is_some());
+
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_capture_current_authority_test",
+            )
+            .unwrap(),
+            "current canonical and disk authority already prove the durable captured response"
+        );
+        assert!(pending_document_write(&file).is_none());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), captured_current);
     }
 
     #[test]

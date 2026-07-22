@@ -206,15 +206,29 @@ Completed and pushed the agent-doc cycle.
 - Verified with focused regressions, full `make check`, install, and controller recycle.
 - Reaped `#libgcpidrace`; its deterministic PID-liveness fix was already shipped and passes.
 - Pushed source commit `ad62c73bb` and root/session commits through `9111771ba`.
+- Regression coverage proves uncommitted hubs remain resident, both eviction orderings work, stale passive polls do not allocate, and proper re-contact restores identical canonical text.
+- Reliable-sync-open documents retain explicit missing-model authority, while closed evicted routes demote to disk. Missing-model writes retain the Lazily intent and defer immediately without touching disk.
+- Registration, deregistration, and commit-triggered eviction are serialized; late deregistration and passive pull/ACK/presence traffic cannot recreate an evicted phantom hub.
+- Relay hubs now evict only when membership and pending rebootstrap state are empty and the canonical exactly matches the committed baseline.
 
 Session-check passed. The remaining 46 queue items were explicitly handed to the supervisor’s fresh-session drain path. Unrelated worktree changes were preserved.
-<!-- agent:boundary:9c0756a7 -->
+### Re: #hubregistryevict
+
+Implemented #hubregistryevict and published source commit 405042fb4.
+
+- Relay hubs now evict only when membership and pending rebootstrap state are empty and the canonical exactly matches the committed baseline.
+- Registration, deregistration, and commit-triggered eviction are serialized; late deregistration and passive pull/ACK/presence traffic cannot recreate an evicted phantom hub.
+- Reliable-sync-open documents retain explicit missing-model authority, while closed evicted routes demote to disk. Missing-model writes retain the Lazily intent and defer immediately without touching disk.
+- Regression coverage proves uncommitted hubs remain resident, both eviction orderings work, stale passive polls do not allocate, and proper re-contact restores identical canonical text.
+
+Verification: focused affected suites passed; clean make check passed all 7,869 tests. Source was pushed to origin/main; CI run 29930545828 was in progress at the single required observation. The verified binary and shared library were installed with agent-doc self-install.
+<!-- agent:boundary:61c856ac -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~⏭️ 📌 do [#libgcpidrace]~~
-- 📌 do [#hubregistryevict]
+- ~~📌 do [#libgcpidrace]~~
+- ⏭️ 📌 do [#hubregistryevict]
 - 📌 do [#missingreplicarebuild]
 - 📌 do [#authoritydescentstd]
 - 📌 do [#patchretryidem]

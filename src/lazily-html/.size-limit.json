@@ -1,0 +1,38 @@
+[
+  {
+    "name": "lite: h + Component + hooks + render",
+    "path": "src/index.js",
+    "import": "{ h, Component, useState, useEffect, useContext, createContext, render }",
+    "limit": "4.5 KB"
+  },
+  {
+    "name": "lite: tags (relementjs-style)",
+    "path": "src/lite.js",
+    "import": "{ tags }",
+    "limit": "3.8 KB"
+  },
+  {
+    "name": "server: renderToString (SSR)",
+    "path": "src/server.js",
+    "import": "{ renderToString, renderToStreamable }",
+    "limit": "2.5 KB"
+  },
+  {
+    "name": "hydrate (client) + SyncedView",
+    "path": "src/hydrate.js",
+    "import": "{ hydrate }",
+    "limit": "1.5 KB"
+  },
+  {
+    "name": "owner bridge (lazily adapter)",
+    "path": "src/owner.js",
+    "import": "{ root, effect, source, memo, onCleanup }",
+    "limit": "1.5 KB"
+  },
+  {
+    "name": "full: h + Component + hooks + render (dom-expressions-backed)",
+    "path": "src/full/index.js",
+    "import": "{ h, Component, useState, useEffect, render }",
+    "limit": "7.5 KB"
+  }
+]

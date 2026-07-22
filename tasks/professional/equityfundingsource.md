@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -176,15 +176,12 @@ Unrelated but worth noting: the queue is healthy again this cycle — the JetBra
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#tmo-getlender-verify]~~
-- ⏭️ do [#efs-do-hibernation]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#efs-deploy-hibernation] [operator-verify] Deploy the worker so #efs-do-hibernation's billing fix is actually live. The code shipped in EFS b75f92ca (2026-07-18 18:23 EDT) but the newest production deployment is version 1b9c8d69 from 2026-07-18 16:03 UTC / 12:03 EDT — SIX HOURS EARLIER. The live worker still runs the non-hibernating rooms, so the ~328,500 GB-s per always-on room is still accruing. Blocked on operator go only because 23 commits sit between the deployed version and HEAD (hibernation, TMO backup/restore/snapshot/orphan tooling, admin binding queue, Dropbox fail-soft, TMO contacts/vesting-gap admin screens), so 'make deploy' ships far more than the DO change and needs a deliberate go. Verify after deploying with 'CLOUDFLARE_API_TOKEN="$(passage show btak/equityfundingsource/cloudflare_api_token | head -1)" bunx wrangler deployments list --name equityfundingsource' and confirm the newest version postdates b75f92ca.
-- [x] [#efs-do-hibernation] Switch the three Durable Object room classes to the WebSocket Hibernation API. BorrowerChatRoom, AdminEventsRoom, and PortalMessagesRoom all call the non-hibernating server.accept() with no idle alarm (app/equityfundingsource/lib/messages/realtime.ts:35, lib/borrower/messages/realtime.ts:76, lib/admin/events/realtime.ts:50), so an open browser tab pins its DO active and accrues GB-s duration billing whether or not anyone is typing — cost scales with concurrent open tabs instead of business volume. A single always-on room is ~328,500 GB-s of the 400,000 GB-s included in Workers Paid (~82%); ten rooms open 8h/day x 22 days is ~792,000 GB-s (~+$4.90/mo). Fix: state.acceptWebSocket() plus webSocketMessage/webSocketClose handlers; Cloudflare does not bill duration while a hibernatable socket is idle. Cost detail: src/equityfundingsource-dev/docs/deploy.md 'C — What this costs'. KEPT OPEN 2026-07-18: not started — this cycle was preempted by the operator's live Jeff Blake / Lucas Huang TMO investigation prompt.
 - [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). UNBLOCKED 2026-07-19: #tmo-snapshot-verify passed — the snapshot tool ran against real TMO sandbox and reported complete=true (loans=18 fundings=5 attachment_metas=20 lenders=1 borrowers=16, zero errors), so the gate command 'bun ./bin/tmo-snapshot.ts --covers <the 16> --out tmp/tmo-before-purge.json' is now known-good. Take that snapshot immediately before purging. Still held on operator go ONLY because DeleteLoan is permanent with no TMO-side undo. Note the snapshot is evidence, not a restore: attachment BYTES are not captured (20 attachment metas across 554466/AVW580/MBQ435/SRV532/TST766 would be unrecoverable), and RecIDs do not round-trip. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
 <!-- /agent:backlog -->
 

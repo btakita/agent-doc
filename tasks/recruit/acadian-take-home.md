@@ -14,7 +14,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -524,7 +524,6 @@ One note on process: `agent-doc preflight` failed closed twice this cycle trying
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
-- 🚧 do [#proposeablequickly]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -546,4 +545,5 @@ One note on process: `agent-doc preflight` failed closed twice this cycle trying
 - 2026-07-18 [#acad4] Bonus polish: cross-ticker SummaryTable, responsive pass, empty-range/API-down UX, stats unit tests (plan: tasks/recruit/acadian/plan.md)
 - 2026-07-18 [#acad5] Submission: README (setup/run/assumptions), final make check, create + push public GitHub repo, clean-clone sanity test (plan: tasks/recruit/acadian/plan.md)
 - 2026-07-20 [#backendsilentlydrops] Backend silently drops a requested ticker when yfinance returns no data for it (MSFT absent on the trailing-6-month range, present on a shorter range). Report unavailable symbols in the response payload instead of omitting them.
+- 2026-07-20 [#proposeablequickly] Propose a UX to be able to quickly select a diffrent date range via mouse while over the chart or range slider. Perhaps a slider?
 <!-- /agent:done -->

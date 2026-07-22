@@ -9,6 +9,14 @@
             "type": "command"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "agent-doc turn-status idle",
+            "type": "command"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -20,8 +28,16 @@
             "type": "command"
           },
           {
-            "command": "tsift index --check --exit-code --workspace \"/home/brian/work/btakita/agent-loop\" >/dev/null 2>&1 || tsift index --workspace \"/home/brian/work/btakita/agent-loop\" >/dev/null 2>&1",
+            "command": "/home/brian/work/btakita/agent-loop/.codex/tsift-autoindex.sh",
             "statusMessage": "tsift auto-reindex",
+            "type": "command"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "agent-doc turn-status active",
             "type": "command"
           }
         ]

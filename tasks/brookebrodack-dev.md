@@ -1,5 +1,6 @@
 ---
 agent_doc_session: d2691213-7160-4943-9751-c954341df959
+resume: aff3725f-f537-4991-9ede-2d5b54545e7d
 agent: claude
 claude_model: opus
 agent_doc_format: template
@@ -153,16 +154,16 @@ Closing this one, because the rappstack work above resolved it and the recorded 
 So the symptom this item existed to track is fixed, and the stated root cause is no longer accurate. All three rappstack packages that ship marked (`ui--any`, `ui--server`, `dev-bin`) are on `^17.0.4` — the `#rappdeps` sweep aligned them. The `^13.0.2` edge that remains comes from `@btakita/dev-bin@0.1.0` on npm, which is a separate published package and only a bin-tool dependency; it no longer reaches the type program. brookebrodack's own `bun.lock` also still carries a stale metadata entry for the yalc'd `@rappstack/ui--any` claiming `^13.0.2`, which is why the split looked like a rappstack problem — the local yalc source says `^17.0.4`.
 
 Two marked majors coexisting is untidy, but it is now inert rather than a type-check blocker, and it is not something this repo can pin away. Not filing a follow-up for it.
-<!-- agent:boundary:5f513439 -->
+<!-- agent:boundary:5d323eb2 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority go -->
-- do [#rjrh]
-- do [#nm8q]
+- ⏭️ do [#rjrh]
+- 🚧 do [#nm8q]
 - ~~do [#tsappclean]~~
-- ~~⏭️ do [#ciappts]~~
+- ~~do [#ciappts]~~
 - ~~do [#yalcdrift]~~
 - do [#gbdeploy1]
 - do [#mc4f]
@@ -185,7 +186,7 @@ Two marked majors coexisting is untidy, but it is now inert rather than a type-c
 
 <!-- agent:backlog priority queue -->
 - [ ] [#rjrh] Publish @rappstack/ui--any, @rappstack/domain--server, and @rappstack/domain--server--blog to npm from /home/brian/work/rappstack/dev (fixes committed at 9ddb68d, currently only in the local yalc store). Needs npm 2FA. This is the sole remaining blocker on #ciappts — once published, uncomment the two type-check steps in brookebrodack-dev .github/workflows/check.yml
-- [ ] [#nm8q] rappstack/dev has the same typescript dist-tag problem #tsnextpin fixed in ctx-core-dev: 13 packages pin `typescript: "*"` and 2 pin `"next"`, and the installed compiler is a 5.5.0-dev from April 2024 that hard-crashes tsc (TypeError: Cannot read properties of undefined reading 'flags' in getCheckFlags). Pin the repo to ^7.0.2 so rappstack can type-check itself instead of relying on downstream repos to find its errors
+- [ ] 🚧 [#nm8q] rappstack/dev has the same typescript dist-tag problem #tsnextpin fixed in ctx-core-dev: 13 packages pin `typescript: "*"` and 2 pin `"next"`, and the installed compiler is a 5.5.0-dev from April 2024 that hard-crashes tsc (TypeError: Cannot read properties of undefined reading 'flags' in getCheckFlags). Pin the repo to ^7.0.2 so rappstack can type-check itself instead of relying on downstream repos to find its errors
 - [ ] [#mc4f] Push the ctx-core-dev typescript pin sweep: 190 per-package submodule commits + superproject are committed LOCALLY and unpushed. Same ~190-public-repo motion as #pushctxcore, so it needs operator go before pushing each submodule and the superproject
 - [ ] [#lzeffectvoid] lazily-js types EffectRun as `() => (() => void) | null | undefined`, so a block-bodied effect arrow (inferred `void`) will not type-check and every cleanup-free effect must write `return undefined`. Widen to `| void` in src/lazily-js and mirror to the other bindings; then drop the three explicit returns in lib/ui--browser--brookebrodack/guestbook/hyop/guestbook__hyop.ts. KEPT OPEN: not blocked, just not started — the 2026-07-18 esbuild/dependency-sweep prompt took that cycle, and this is a published-package type change across the binding family rather than a tail-end edit
 - [ ] [#gbdeploy1] Confirm the re-run Deploy to Cloudflare Pages workflow went green (runs 29659909999 / 29660239368 were still in progress at closeout). The original run FAILED its post-deploy smoke test because the guestbook API was serving an error page — code reading deleted_at shipped before migration 0003 was applied. Prod was verified healthy by hand afterwards (GET /guestbook/api/entries → 200 application/json), so this is a green-signal confirmation, not a suspected outage

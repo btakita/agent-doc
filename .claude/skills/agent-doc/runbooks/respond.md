@@ -18,7 +18,7 @@ rule. This runbook carries the rest.
   `session-check` reports a committed cycle plus a fresh operator prompt, that is
   realtime steering, **not** a failed closeout: your prior response is already in
   HEAD. Address the surfaced prompt (the binary hands it to you **verbatim**) in
-  your current turn — continue with `agent-doc <FILE>`. Do NOT re-run finalize on
+  your current turn — continue with `agent-doc <FILE>`. Do NOT re-run respond/finalize on
   the prior response, do NOT `--force-disk` (it clobbers the operator's live
   edits), and do NOT re-answer a prompt already committed in HEAD.
 - If session-accretion supplies bounded context, use the included `### Re:`
@@ -72,9 +72,13 @@ em dash: `### Re: topic — gpt-5` or `### Re: topic — opus-4-6`. Use
 model identity. Never use the harness label (`codex`, `claude`) as the suffix, and
 never omit it.
 
-**Final-response atomicity:** stream progress only to the harness console. Never
-write partial response text to the document. Buffer until every patch block is
-complete, then persist the full response once; see
+**Response checkpoints and sealing:** stream incomplete progress only to the
+harness console. After each complete `### Re:` section (balanced fences and
+component markers), the harness may persist the cumulative response with
+`agent-doc response-checkpoint <FILE>`. The binary replaces the uncommitted
+response tail in Lazily; it does not consume queue/backlog work or commit.
+Turn-end `agent-doc respond` asks the binary to resolve those closeout mutations
+and commit exactly once (`finalize` remains an alias). See
 [streaming-checkpoints.md](streaming-checkpoints.md).
 
 **`#agent-doc-bug` plan proof:** if the prompt contract requires a plan, create
@@ -102,7 +106,7 @@ include `[recommended]`.
 
 **Cross-document backlog rule:** if a prompt preset or user instruction names
 another backlog file, add the item to that target with `--backlog-add-to
-<target-file> "<item>"` on the final `agent-doc finalize` command. Do not satisfy
+<target-file> "<item>"` on the final `agent-doc respond` command. Do not satisfy
 an explicit target by running `--backlog-add` against the current session
 document. If the target is missing or lacks a backlog component, stop on the
 binary error and report the blocker.

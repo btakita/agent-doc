@@ -39,6 +39,7 @@ pub fn run_with_tmux_with_options(
     col_args: &[String],
     mode: RouteMode,
     plain_trigger: bool,
+    prune_before_lookup: bool,
     effects: RouteCommandEffects,
 ) -> Result<()> {
     tracing::debug!(file = %file.display(), pane, debounce_ms, cols = ?col_args, "route::run start");
@@ -57,10 +58,12 @@ pub fn run_with_tmux_with_options(
     // Route only needs stale registry rows + dead non-stash panes pruned for an
     // accurate pane lookup; orphaned stash-pane hygiene belongs to explicit
     // `resync`/`sync`, mirroring `safe_passive_prune_cleanup_mode`.
-    let _ = agent_doc_sync_io::resync::prune_with_tmux_timed_in_mode(
-        tmux,
-        agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup,
-    );
+    if prune_before_lookup {
+        let _ = agent_doc_sync_io::resync::prune_with_tmux_timed_in_mode(
+            tmux,
+            agent_doc_tmux::PruneCleanupMode::SkipExpensiveStashCleanup,
+        );
+    }
 
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());

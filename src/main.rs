@@ -149,33 +149,6 @@ fn route_repair_closeout(file: &Path) -> anyhow::Result<String> {
     agent_doc_repair_command_io::repair(file).map(|outcome| format!("{outcome:?}"))
 }
 
-fn detached_editor_route_command(
-    binary: &Path,
-    invocation: &agent_doc_controller_io::project_controller::ControllerEditorRouteInvocation,
-) -> std::process::Command {
-    let mut command = std::process::Command::new(binary);
-    command.arg("route").arg(&invocation.file);
-    if invocation.dispatch_only {
-        command.arg("--dispatch-only");
-    }
-    if invocation.plain_trigger {
-        command.arg("--plain-trigger");
-    }
-    for column in &invocation.layout_args {
-        command.arg("--col").arg(column);
-    }
-    command.arg("--debounce").arg("0");
-    if let Some(secs) = invocation.wait_for_ready_secs {
-        command
-            .arg("--wait-for-ready")
-            .arg(secs.min(600).to_string());
-    }
-    if invocation.force_disk {
-        command.arg("--force-disk");
-    }
-    command
-}
-
 struct CliProjectControllerRuntimeEffects;
 
 impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffects
@@ -236,15 +209,16 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         let wait_for_ready = invocation
             .wait_for_ready_secs
             .map(|secs| Duration::from_secs(secs.min(600)));
-        match agent_doc_route_io::invocation::run_with_force_disk(
+        match agent_doc_route_io::invocation::run_with_force_disk_and_prune(
             &invocation.file,
-            None,
+            invocation.pane.as_deref(),
             500,
             &invocation.layout_args,
             mode,
             invocation.plain_trigger,
             wait_for_ready,
             invocation.force_disk,
+            invocation.prune_before_lookup,
             agent_doc_route_io::runtime_effects::route_command_effects(route_repair_closeout),
         ) {
             Ok(()) => Ok(
@@ -263,65 +237,6 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                 },
             ),
         }
-    }
-
-    fn spawn_editor_route_detached(
-        &self,
-        invocation: agent_doc_controller_io::project_controller::ControllerEditorRouteInvocation,
-    ) -> anyhow::Result<()> {
-        let binary = std::env::current_exe().context("resolve current agent-doc binary")?;
-        let mut command = detached_editor_route_command(&binary, &invocation);
-        command
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-
-        // Start the reaper before the route process. If the thread cannot be
-        // created, no child exists to leak or re-enter the controller.
-        let (child_tx, child_rx) =
-            std::sync::mpsc::sync_channel::<std::process::Child>(1);
-        let log_file = invocation.file.clone();
-        let reaper = std::thread::Builder::new()
-            .name("orphan-drain-route-reaper".to_string())
-            .spawn(move || {
-                let Ok(child) = child_rx.recv() else {
-                    return;
-                };
-                match child.wait_with_output() {
-                    Ok(output) if output.status.success() => {}
-                    Ok(output) => {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        agent_doc_ops_log_io::log_op(
-                            &log_file,
-                            &format!(
-                                "controller_orphan_drain_child_failed status={} stdout={} stderr={}",
-                                output.status,
-                                stdout.trim(),
-                                stderr.trim()
-                            ),
-                        );
-                    }
-                    Err(err) => agent_doc_ops_log_io::log_op(
-                        &log_file,
-                        &format!("controller_orphan_drain_child_wait_failed error={err}"),
-                    ),
-                }
-            })
-            .context("spawn orphan-drain route reaper")?;
-
-        let child = command.spawn().with_context(|| {
-            format!(
-                "spawn detached editor route for {}",
-                invocation.file.display()
-            )
-        })?;
-        if let Err(err) = child_tx.send(child) {
-            agent_doc_supervisor_process::detached_child::reap_detached(err.0);
-            anyhow::bail!("orphan-drain route reaper exited before accepting child");
-        }
-        drop(reaper);
-        Ok(())
     }
 
     fn sync_tmux_layout(
@@ -5774,41 +5689,6 @@ fn try_main() -> anyhow::Result<()> {
                 agent_doc_callback_io::cleanup_expired(&root_path, 300)
             }
         },
-    }
-}
-
-#[cfg(test)]
-mod orphan_drain_route_tests {
-    use super::*;
-
-    #[test]
-    fn detached_route_reuses_the_external_dispatch_only_cli() {
-        let invocation =
-            agent_doc_controller_io::project_controller::ControllerEditorRouteInvocation {
-                file: PathBuf::from("/project/tasks/doc.md"),
-                relative_path: "tasks/doc.md".to_string(),
-                layout_args: Vec::new(),
-                dispatch_only: true,
-                plain_trigger: true,
-                wait_for_ready_secs: None,
-                force_disk: false,
-            };
-        let command = detached_editor_route_command(Path::new("/bin/agent-doc"), &invocation);
-        let args: Vec<_> = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(
-            args,
-            vec![
-                "route",
-                "/project/tasks/doc.md",
-                "--dispatch-only",
-                "--plain-trigger",
-                "--debounce",
-                "0"
-            ]
-        );
     }
 }
 

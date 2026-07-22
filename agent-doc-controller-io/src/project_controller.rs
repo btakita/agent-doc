@@ -106,11 +106,18 @@ pub struct ControllerQueueConsumptionOutcome {
 pub struct ControllerEditorRouteInvocation {
     pub file: PathBuf,
     pub relative_path: String,
+    /// Known authoritative pane for controller-owned recovery work. Editor
+    /// requests leave this unset and use the normal route resolver.
+    pub pane: Option<String>,
     pub layout_args: Vec<String>,
     pub dispatch_only: bool,
     pub plain_trigger: bool,
     pub wait_for_ready_secs: Option<u64>,
     pub force_disk: bool,
+    /// Whether route may perform the fleet-wide stale-registry prune before
+    /// lookup. Targeted controller recovery already owns a proven pane and
+    /// must not mutate unrelated sessions.
+    pub prune_before_lookup: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -217,13 +224,6 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         &self,
         invocation: ControllerEditorRouteInvocation,
     ) -> Result<ControllerEditorRouteRuntimeResult>;
-
-    /// Launch an editor route outside the controller event loop and return as
-    /// soon as the child has been spawned.
-    fn spawn_editor_route_detached(
-        &self,
-        invocation: ControllerEditorRouteInvocation,
-    ) -> Result<()>;
 
     fn sync_tmux_layout(
         &self,
@@ -335,13 +335,6 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
                 invocation.relative_path
             ),
         })
-    }
-
-    fn spawn_editor_route_detached(
-        &self,
-        _invocation: ControllerEditorRouteInvocation,
-    ) -> Result<()> {
-        Ok(())
     }
 
     fn commit_document(

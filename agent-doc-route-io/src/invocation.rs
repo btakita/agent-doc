@@ -94,6 +94,36 @@ pub fn run_with_force_disk(
     force_disk: bool,
     effects: RouteCommandEffects,
 ) -> Result<()> {
+    run_with_force_disk_and_prune(
+        file,
+        pane,
+        debounce_ms,
+        col_args,
+        mode,
+        plain_trigger,
+        wait_for_ready,
+        force_disk,
+        true,
+        effects,
+    )
+}
+
+/// Run a route with explicit control over its pre-lookup fleet prune.
+/// Controller recovery work that already owns an authoritative pane sets this
+/// false so one orphaned document cannot resync unrelated sessions.
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_force_disk_and_prune(
+    file: &Path,
+    pane: Option<&str>,
+    debounce_ms: u64,
+    col_args: &[String],
+    mode: RouteMode,
+    plain_trigger: bool,
+    wait_for_ready: Option<Duration>,
+    force_disk: bool,
+    prune_before_lookup: bool,
+    effects: RouteCommandEffects,
+) -> Result<()> {
     run_with_tmux_with_options(
         file,
         &Tmux::default_server(),
@@ -104,6 +134,7 @@ pub fn run_with_force_disk(
         plain_trigger,
         wait_for_ready,
         force_disk,
+        prune_before_lookup,
         effects,
     )
 }
@@ -130,6 +161,7 @@ pub fn run_with_tmux(
         plain_trigger,
         wait_for_ready,
         false,
+        true,
         effects,
     )
 }
@@ -145,6 +177,7 @@ pub fn run_with_tmux_with_options(
     plain_trigger: bool,
     wait_for_ready: Option<Duration>,
     force_disk: bool,
+    prune_before_lookup: bool,
     effects: RouteCommandEffects,
 ) -> Result<()> {
     let _wait_for_ready_guard = WaitForReadyOverrideGuard::set(wait_for_ready);
@@ -157,6 +190,7 @@ pub fn run_with_tmux_with_options(
         col_args,
         mode,
         plain_trigger,
+        prune_before_lookup,
         effects,
     )
 }

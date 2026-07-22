@@ -35,7 +35,7 @@
 //!   bounded delay with a fresh document-bound child. Process-global history
 //!   selectors are never used for managed replacements.
 //! - On clean exit (code 0): honors the active harness policy.
-//!   Claude prompts on stderr and waits for Enter (fresh restart) or `q` + Enter (exit).
+//!   Claude prompts on stdout and waits for Enter (fresh restart) or `q` + Enter (exit).
 //!   Codex auto-restarts in resume mode so `codex exec` remains a persistent session.
 //!   Exception: if a fresh/fresh-restart Codex child exits cleanly before it ever
 //!   surfaces an idle prompt, treat that as failed startup provenance and restart
@@ -125,7 +125,6 @@ use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use portable_pty::PtySize;
 use std::io;
-#[cfg(test)]
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -480,7 +479,13 @@ fn prompt_for_restart_or_quit(
     eof_policy: PromptEofPolicy,
 ) -> PromptOutcome {
     loop {
-        eprintln!("{prompt_text}");
+        if let Err(err) = write_operator_prompt_line(prompt_text) {
+            log_event(
+                session_log,
+                &format!("operator_prompt_write_failed prompt={prompt_kind} error={err}"),
+            );
+            return PromptOutcome::Quit;
+        }
         let mut input = String::new();
         let bytes_read = match std::io::stdin().read_line(&mut input) {
             Ok(n) => n,
@@ -523,7 +528,15 @@ fn prompt_for_restart_or_quit(
                 return PromptOutcome::RestartFresh;
             }
             SupervisorPromptDecision::Invalid => {
-                eprintln!("Unrecognized input. Press Enter to restart fresh, or 'q' to exit.");
+                if let Err(err) = write_operator_prompt_line(
+                    "Unrecognized input. Press Enter to restart fresh, or 'q' to exit.",
+                ) {
+                    log_event(
+                        session_log,
+                        &format!("operator_prompt_write_failed prompt={prompt_kind} error={err}"),
+                    );
+                    return PromptOutcome::Quit;
+                }
                 log_event(
                     session_log,
                     &format!(
@@ -536,6 +549,17 @@ fn prompt_for_restart_or_quit(
             }
         }
     }
+}
+
+fn write_operator_prompt_line(prompt_text: &str) -> io::Result<()> {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    write_operator_prompt_line_to(&mut output, prompt_text)
+}
+
+fn write_operator_prompt_line_to(output: &mut impl Write, prompt_text: &str) -> io::Result<()> {
+    writeln!(output, "{prompt_text}")?;
+    output.flush()
 }
 
 fn route_owned_live_pane_busy_reason(
@@ -2394,6 +2418,18 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::TempDir;
     use tmux_router::IsolatedTmux;
+
+    #[test]
+    fn supervisor_restart_prompt_is_flushed_to_operator_output() {
+        let mut output = Vec::new();
+        write_operator_prompt_line_to(&mut output, "Press Enter to restart fresh, or 'q' to exit.")
+            .unwrap();
+
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "Press Enter to restart fresh, or 'q' to exit.\n"
+        );
+    }
 
     #[test]
     fn stale_busy_reconcile_preserves_already_dispatched_head_dedup() {

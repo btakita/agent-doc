@@ -207,6 +207,7 @@ pub trait SupervisorInjectDeliveryState {
 }
 
 pub trait SupervisorIpcLifecycleState {
+    fn actor_waiting_input(&self) -> bool;
     fn transition_actor_busy(&self, caller: &str, reason: &str);
     fn transition_actor_waiting_input(&self, caller: &str, reason: &str);
     fn set_restart_mode(&self, mode: String);
@@ -216,6 +217,10 @@ pub trait SupervisorIpcLifecycleState {
     fn set_stop_requested(&self, requested: bool);
     fn set_stop_agent_requested(&self, requested: bool);
     fn kill_child_for_ipc(&self);
+    /// Submit the empty line that releases the supervisor's own blocking
+    /// restart/quit prompt. This is used only when `actor_waiting_input()` was
+    /// true before the lifecycle transition.
+    fn wake_restart_prompt(&self) -> Result<(), String>;
 }
 
 pub fn mark_supervisor_inject_dispatched<S>(state: &S)
@@ -245,10 +250,11 @@ pub enum SupervisorInjectDeliveryOutcome {
     DuplicateSuppressed,
 }
 
-pub fn request_supervisor_restart<S>(state: &S, mode: String)
+pub fn request_supervisor_restart<S>(state: &S, mode: String) -> Result<(), String>
 where
     S: SupervisorIpcLifecycleState + ?Sized,
 {
+    let waiting_input = state.actor_waiting_input();
     state.transition_actor_busy("supervisor", "ipc_restart_requested");
     state.set_restart_mode(mode);
     state.set_restart_requested(true);
@@ -257,6 +263,13 @@ where
     if !reexec {
         state.kill_child_for_ipc();
     }
+    if waiting_input && let Err(err) = state.wake_restart_prompt() {
+        state.set_restart_requested(false);
+        state.set_restart_reexec(false);
+        state.transition_actor_waiting_input("supervisor", "ipc_restart_prompt_wake_failed");
+        return Err(err);
+    }
+    Ok(())
 }
 
 pub fn request_supervisor_stop<S>(state: &S)
@@ -400,6 +413,16 @@ where
             ),
             Err(err) => IpcResponse::err(err),
         },
+        IpcMethod::Clear { bytes: _ } if state.actor_waiting_input() => {
+            match request_supervisor_restart(state, "fresh".to_string()) {
+                Ok(()) => IpcResponse::ok(serde_json::json!({
+                    "n": 0,
+                    "restart_fresh": true,
+                    "reason": "supervisor_waiting_input"
+                })),
+                Err(err) => IpcResponse::err(err),
+            }
+        }
         IpcMethod::Clear { bytes } => match deliver_supervisor_inject(state, &bytes, "ipc_clear") {
             Ok(SupervisorInjectDeliveryOutcome::Delivered) => {
                 mark_supervisor_clear_dispatched(state);
@@ -410,10 +433,10 @@ where
             ),
             Err(err) => IpcResponse::err(err),
         },
-        IpcMethod::Restart { mode } => {
-            request_supervisor_restart(state, mode);
-            IpcResponse::ok_empty()
-        }
+        IpcMethod::Restart { mode } => match request_supervisor_restart(state, mode) {
+            Ok(()) => IpcResponse::ok_empty(),
+            Err(err) => IpcResponse::err(err),
+        },
         IpcMethod::Stop { graceful: _ } => {
             request_supervisor_stop(state);
             IpcResponse::ok_empty()
@@ -785,6 +808,50 @@ pub fn is_active(project_root: &Path, session_uuid: &str) -> bool {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicU32;
+
+    struct RestartLifecycleState {
+        waiting_input: bool,
+        restart_requested: AtomicBool,
+        prompt_woken: AtomicBool,
+    }
+
+    impl SupervisorIpcLifecycleState for RestartLifecycleState {
+        fn actor_waiting_input(&self) -> bool {
+            self.waiting_input
+        }
+
+        fn transition_actor_busy(&self, _caller: &str, _reason: &str) {}
+        fn transition_actor_waiting_input(&self, _caller: &str, _reason: &str) {}
+        fn set_restart_mode(&self, _mode: String) {}
+        fn set_restart_requested(&self, requested: bool) {
+            self.restart_requested.store(requested, Ordering::Relaxed);
+        }
+        fn binary_stale(&self) -> bool {
+            false
+        }
+        fn set_restart_reexec(&self, _reexec: bool) {}
+        fn set_stop_requested(&self, _requested: bool) {}
+        fn set_stop_agent_requested(&self, _requested: bool) {}
+        fn kill_child_for_ipc(&self) {}
+        fn wake_restart_prompt(&self) -> Result<(), String> {
+            self.prompt_woken.store(true, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn restart_request_wakes_waiting_supervisor_prompt() {
+        let state = RestartLifecycleState {
+            waiting_input: true,
+            restart_requested: AtomicBool::new(false),
+            prompt_woken: AtomicBool::new(false),
+        };
+
+        request_supervisor_restart(&state, "fresh".to_string()).unwrap();
+
+        assert!(state.restart_requested.load(Ordering::Relaxed));
+        assert!(state.prompt_woken.load(Ordering::Relaxed));
+    }
 
     fn start_echo_handler(root: &Path, uuid: &str) -> SupervisorIpc {
         SupervisorIpc::start(root, uuid, |method| match method {

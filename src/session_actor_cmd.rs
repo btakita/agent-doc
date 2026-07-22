@@ -705,6 +705,7 @@ pub fn clear(file: &Path) -> Result<()> {
         // (`#autoloop-command-preemption` Phase 2.)
         return Ok(());
     }
+    let mut restarted_fresh_from_supervisor_prompt = false;
     if supervisor_clear_inject_available(&ctx) {
         let pre_delivery_capture_hash = ctx
             .supervisor_runtime
@@ -712,6 +713,16 @@ pub fn clear(file: &Path) -> Result<()> {
             .as_deref()
             .and_then(|pane| capture_context_clear_submit_content_hash(&tmux, pane));
         match send_clear_via_supervisor(&ctx)? {
+            SupervisorClearDelivery::RestartedFresh => {
+                restarted_fresh_from_supervisor_prompt = true;
+                agent_doc_ops_log_io::log_op(
+                    &ctx.canonical_file,
+                    &format!(
+                        "session_clear_sent file={} delivery=supervisor_restart_fresh reason=waiting_input",
+                        ctx.canonical_file.display()
+                    ),
+                );
+            }
             SupervisorClearDelivery::Sent => {
                 agent_doc_ops_log_io::log_op(
                     &ctx.canonical_file,
@@ -748,6 +759,16 @@ pub fn clear(file: &Path) -> Result<()> {
             .as_deref()
             .and_then(|pane| capture_context_clear_submit_content_hash(&tmux, pane));
         match send_clear_via_supervisor(&ctx)? {
+            SupervisorClearDelivery::RestartedFresh => {
+                restarted_fresh_from_supervisor_prompt = true;
+                agent_doc_ops_log_io::log_op(
+                    &ctx.canonical_file,
+                    &format!(
+                        "session_clear_sent file={} delivery=supervisor_restart_fresh reason=waiting_input",
+                        ctx.canonical_file.display()
+                    ),
+                );
+            }
             SupervisorClearDelivery::Sent => {
                 agent_doc_ops_log_io::log_op(
                     &ctx.canonical_file,
@@ -772,7 +793,9 @@ pub fn clear(file: &Path) -> Result<()> {
             }
         }
     }
-    if matches!(ctx.harness.as_str(), "codex" | "opencode") {
+    if !restarted_fresh_from_supervisor_prompt
+        && matches!(ctx.harness.as_str(), "codex" | "opencode")
+    {
         agent_doc_codex_hook_io::record_external_prompt_for_file(
             &ctx.canonical_file,
             &ctx.session_id,
@@ -875,6 +898,7 @@ fn session_clear_already_satisfied_facts(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum SupervisorClearDelivery {
+    RestartedFresh,
     Sent,
     LegacyClearUnsupported { error: String },
 }
@@ -908,6 +932,15 @@ fn send_clear_via_supervisor(ctx: &SessionContext) -> Result<SupervisorClearDeli
             return Ok(SupervisorClearDelivery::LegacyClearUnsupported { error });
         }
         anyhow::bail!("{error}");
+    }
+    if response
+        .data
+        .as_ref()
+        .and_then(|data| data.get("restart_fresh"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(SupervisorClearDelivery::RestartedFresh);
     }
     Ok(SupervisorClearDelivery::Sent)
 }
@@ -3329,6 +3362,13 @@ fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) 
 }
 
 fn live_pane_prompt_ready(harness: &agent_doc_harness::HarnessConfig, captured: &str) -> bool {
+    // The harness child has exited and the persistent agent-doc wrapper owns
+    // the pane. This is an operator-input surface, not a busy harness turn.
+    // Recognizing only the bottom-most exact wrapper prompt prevents stale
+    // scrollback from making a live turn look idle.
+    if agent_doc_restart_prompt_visible(captured) {
+        return true;
+    }
     let candidate = harness.last_prompt_candidate(captured);
     let latest_dispatch_ready_prompt = candidate
         .as_deref()
@@ -3364,6 +3404,23 @@ fn live_pane_prompt_ready(harness: &agent_doc_harness::HarnessConfig, captured: 
         return true;
     }
     false
+}
+
+fn agent_doc_restart_prompt_visible(captured: &str) -> bool {
+    let Some(line) = captured
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+    else {
+        return false;
+    };
+    matches!(
+        line,
+        "Press Enter to restart, or 'q' to exit."
+            | "Press Enter to restart fresh, or 'q' to exit."
+            | "Unrecognized input. Press Enter to restart fresh, or 'q' to exit."
+    )
 }
 
 fn live_pane_bottom_status_is_idle(
@@ -5561,5 +5618,28 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
             reclaim_orphaned_cycle_on_clear(&doc),
             agent_doc_turn::repair::CancelOutcome::NoOpenCycle
         );
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_accepts_agent_doc_restart_control_prompt() {
+        let harness = agent_doc_harness::HarnessConfig::codex();
+        let captured = concat!(
+            "To continue this session, run codex resume abc123\n",
+            "Press Enter to restart fresh, or 'q' to exit.\n",
+        );
+
+        assert!(live_pane_prompt_ready(&harness, captured));
+    }
+
+    #[test]
+    fn live_pane_prompt_ready_rejects_stale_agent_doc_restart_prompt() {
+        let harness = agent_doc_harness::HarnessConfig::codex();
+        let captured = concat!(
+            "Press Enter to restart fresh, or 'q' to exit.\n",
+            "• Working (3s • esc to interrupt)\n",
+        );
+
+        assert!(!agent_doc_restart_prompt_visible(captured));
+        assert!(!live_pane_prompt_ready(&harness, captured));
     }
 }

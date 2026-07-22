@@ -9882,7 +9882,7 @@ fn test_agent_doc_queue_owns_drain_owner_lease_policy() {
 }
 
 #[test]
-fn test_controller_orphan_drain_dispatch_is_external_and_durably_fenced() {
+fn test_controller_orphan_drain_dispatch_is_serialized_scoped_and_durably_fenced() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let controller = fs::read_to_string(
         manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
@@ -9897,12 +9897,21 @@ fn test_controller_orphan_drain_dispatch_is_external_and_durably_fenced() {
         .expect("orphan-drain effect ends before watchdog policy");
     let orphan_drain = &controller[start..end];
     assert!(
-        orphan_drain.contains("spawn_editor_route_detached(invocation)"),
-        "orphan drain must launch route outside the controller event loop"
+        controller.contains("static ORPHAN_DRAIN_ROUTE_WORKER:")
+            && controller
+                .contains("std::sync::mpsc::sync_channel::<ControllerEditorRouteInvocation>(1)",)
+            && controller.contains("effects.run_editor_route(invocation)"),
+        "orphan drain must use one bounded controller-owned worker thread"
     );
     assert!(
-        !orphan_drain.contains("effects.run_editor_route(invocation)"),
-        "orphan drain must never synchronously re-enter its own controller"
+        orphan_drain.contains("enqueue_orphan_drain_route(invocation)")
+            && orphan_drain.contains("pane: Some(record.pane_id.clone())")
+            && orphan_drain.contains("prune_before_lookup: false"),
+        "orphan drain must enqueue target-scoped route work without a fleet prune"
+    );
+    assert!(
+        !controller.contains("spawn_editor_route_detached"),
+        "orphan drain must not spawn recursive agent-doc route processes"
     );
     assert!(
         orphan_drain.contains("claim_coordination_lease_if_expired_in_db"),

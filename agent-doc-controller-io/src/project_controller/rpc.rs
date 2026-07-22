@@ -5313,11 +5313,13 @@ fn handle_editor_route_rpc(
     let result = runtime_effects()?.run_editor_route(ControllerEditorRouteInvocation {
         file: canonical.clone(),
         relative_path: relative_path.clone(),
+        pane: None,
         layout_args,
         dispatch_only: payload.dispatch_only.unwrap_or(true),
         plain_trigger: payload.plain_trigger.unwrap_or(true),
         wait_for_ready_secs: Some(wait_secs),
         force_disk: payload.force_disk.unwrap_or(false),
+        prune_before_lookup: true,
     })?;
     agent_doc_ops_log_io::log_op(
         &canonical,
@@ -7134,11 +7136,95 @@ const ORPHAN_DRAIN_BACKOFF_HOLDER: &str = "controller_orphan_drain";
 
 /// `#orphandrain` — advance `queue: go` documents that have no supervisor.
 ///
-/// The controller only decides and launches here. The route itself runs in a
-/// detached `agent-doc route` child so it can call back through the controller
-/// after this event-loop tick has returned. The per-document dispatch fence is
-/// an atomic durable claim in `state.db`, surviving controller restarts and
-/// excluding simultaneous controller processes.
+/// The controller only decides and enqueues here. One bounded controller-owned
+/// thread runs routes after this event-loop tick has returned, and an in-memory
+/// per-document guard prevents overlapping work inside the process. The durable
+/// dispatch fence is an atomic claim in `state.db`, surviving controller
+/// restarts and excluding simultaneous controller processes.
+struct OrphanDrainRouteWorker {
+    sender: std::sync::mpsc::SyncSender<ControllerEditorRouteInvocation>,
+    in_flight: Arc<Mutex<BTreeSet<PathBuf>>>,
+}
+
+static ORPHAN_DRAIN_ROUTE_WORKER: OnceLock<Result<OrphanDrainRouteWorker, String>> =
+    OnceLock::new();
+
+fn start_orphan_drain_route_worker() -> Result<OrphanDrainRouteWorker> {
+    // One bounded controller-owned worker serializes autonomous recovery across
+    // documents. This keeps route work off the RPC accept loop without letting
+    // one detached process per document contend for global controller/tmux state.
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<ControllerEditorRouteInvocation>(1);
+    let in_flight = Arc::new(Mutex::new(BTreeSet::<PathBuf>::new()));
+    let worker_in_flight = Arc::clone(&in_flight);
+    std::thread::Builder::new()
+        .name("controller-orphan-drain-route".to_string())
+        .spawn(move || {
+            while let Ok(invocation) = receiver.recv() {
+                let file = invocation.file.clone();
+                let route_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    runtime_effects().and_then(|effects| effects.run_editor_route(invocation))
+                }));
+                match route_result {
+                    Ok(Ok(result)) if result.exit_code == 0 => {
+                        agent_doc_ops_log_io::log_op(
+                            &file,
+                            "controller_orphan_drain_worker_settled status=success",
+                        );
+                    }
+                    Ok(Ok(result)) => agent_doc_ops_log_io::log_op(
+                        &file,
+                        &format!(
+                            "controller_orphan_drain_worker_failed exit_code={} output={}",
+                            result.exit_code,
+                            result.output.replace('\n', "\\n")
+                        ),
+                    ),
+                    Ok(Err(err)) => agent_doc_ops_log_io::log_op(
+                        &file,
+                        &format!("controller_orphan_drain_worker_failed error={err:#}"),
+                    ),
+                    Err(_) => agent_doc_ops_log_io::log_op(
+                        &file,
+                        "controller_orphan_drain_worker_panicked recovery=worker_continues",
+                    ),
+                }
+                worker_in_flight.lock().remove(&file);
+            }
+        })
+        .context("spawn controller orphan-drain route worker")?;
+    Ok(OrphanDrainRouteWorker { sender, in_flight })
+}
+
+fn orphan_drain_route_worker() -> Result<&'static OrphanDrainRouteWorker> {
+    match ORPHAN_DRAIN_ROUTE_WORKER
+        .get_or_init(|| start_orphan_drain_route_worker().map_err(|err| format!("{err:#}")))
+    {
+        Ok(worker) => Ok(worker),
+        Err(err) => anyhow::bail!("{err}"),
+    }
+}
+
+fn enqueue_orphan_drain_route(invocation: ControllerEditorRouteInvocation) -> Result<bool> {
+    use std::sync::mpsc::TrySendError;
+
+    let worker = orphan_drain_route_worker()?;
+    let file = invocation.file.clone();
+    if !worker.in_flight.lock().insert(file.clone()) {
+        return Ok(false);
+    }
+    match worker.sender.try_send(invocation) {
+        Ok(()) => Ok(true),
+        Err(TrySendError::Full(_)) => {
+            worker.in_flight.lock().remove(&file);
+            anyhow::bail!("controller orphan-drain route worker queue is full")
+        }
+        Err(TrySendError::Disconnected(_)) => {
+            worker.in_flight.lock().remove(&file);
+            anyhow::bail!("controller orphan-drain route worker disconnected")
+        }
+    }
+}
+
 fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
     use agent_doc_controller::orphan_drain::{
         DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainObservation,
@@ -7327,21 +7413,28 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
         let invocation = ControllerEditorRouteInvocation {
             file: file.clone(),
             relative_path,
+            pane: Some(record.pane_id.clone()),
             layout_args: Vec::new(),
             dispatch_only: true,
             plain_trigger: true,
             wait_for_ready_secs: None,
             force_disk: false,
+            prune_before_lookup: false,
         };
-        if let Err(err) =
-            runtime_effects().and_then(|effects| effects.spawn_editor_route_detached(invocation))
-        {
-            // Keep the durable claim even on spawn failure. Releasing it here
-            // would recreate the original restart/dispatch storm.
-            agent_doc_ops_log_io::log_op(
+        match enqueue_orphan_drain_route(invocation) {
+            Ok(true) => {}
+            Ok(false) => agent_doc_ops_log_io::log_op(
                 &file,
-                &format!("controller_orphan_drain_dispatch_failed error={err:#}"),
-            );
+                "controller_orphan_drain_dispatch_skipped reason=route_already_in_flight",
+            ),
+            Err(err) => {
+                // Keep the durable claim even on enqueue failure. Releasing it
+                // here would recreate the original restart/dispatch storm.
+                agent_doc_ops_log_io::log_op(
+                    &file,
+                    &format!("controller_orphan_drain_dispatch_failed error={err:#}"),
+                );
+            }
         }
     }
 }

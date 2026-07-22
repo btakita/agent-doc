@@ -62,6 +62,10 @@ impl agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState for SupervisorS
 }
 
 impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorShared {
+    fn actor_waiting_input(&self) -> bool {
+        *self.actor_state.lock() == Some(agent_doc_sqlite::state_store::ActorState::WaitingInput)
+    }
+
     fn transition_actor_busy(&self, caller: &str, reason: &str) {
         self.transition_actor_state(
             agent_doc_sqlite::state_store::ActorState::Busy,
@@ -105,6 +109,16 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcLifecycleState for SupervisorSha
 
     fn kill_child_for_ipc(&self) {
         self.kill_child();
+    }
+
+    fn wake_restart_prompt(&self) -> Result<(), String> {
+        let pane = self
+            .inject_pane
+            .as_deref()
+            .ok_or_else(|| "supervisor restart prompt has no owned pane".to_string())?;
+        tmux_router::Tmux::default_server()
+            .send_keys(pane, "")
+            .map_err(|err| format!("failed to wake supervisor restart prompt on {pane}: {err:#}"))
     }
 }
 
@@ -248,7 +262,8 @@ mod tests {
         shared.supervisor_pid = 0;
 
         assert!(!shared.binary_stale.load(Ordering::Relaxed));
-        agent_doc_supervisor_io::ipc::request_supervisor_restart(&shared, "continue".to_string());
+        agent_doc_supervisor_io::ipc::request_supervisor_restart(&shared, "continue".to_string())
+            .expect("request restart");
 
         assert!(shared.binary_stale.load(Ordering::Relaxed));
         assert!(shared.restart_requested.load(Ordering::Relaxed));
@@ -270,7 +285,8 @@ mod tests {
         );
         shared.supervisor_pid = 0;
 
-        agent_doc_supervisor_io::ipc::request_supervisor_restart(&shared, "continue".to_string());
+        agent_doc_supervisor_io::ipc::request_supervisor_restart(&shared, "continue".to_string())
+            .expect("request restart");
 
         assert!(!shared.binary_stale.load(Ordering::Relaxed));
         assert!(shared.restart_requested.load(Ordering::Relaxed));

@@ -105,6 +105,11 @@ Completed and shipped the controller-side drain for `queue: go` documents that h
 - The per-document 90-second backoff is an atomic conditional claim in project `state.db`, so it survives controller restarts and excludes contending controller processes. A spawn failure deliberately retains the claim instead of reopening the dispatch storm.
 - The sweep reads operator-visible CRDT text while an editor is attached, falls back to disk only when detached, respects live supervisors, pane-busy state, and the shared in-session drain-owner lease, and restores the previously proven pure policy module from history.
 - Added pure policy coverage, SQLite reopen/claim coverage, an architecture guard against synchronous self-RPC, detached-route argument coverage, and deterministic SimWorld contention/restart coverage.
+- Pushed source commit `ad62c73bb` and root/session commits through `9111771ba`.
+- Reaped `#libgcpidrace`; its deterministic PID-liveness fix was already shipped and passes.
+- Verified with focused regressions, full `make check`, install, and controller recycle.
+- Replaced detached orphan-route processes with one bounded controller worker thread.
+- Fixed cross-session thrashing, supervisor restart/Clear hangs, and route-result timeouts.
 
 Verification passed: focused regressions; `make check` with 7,853/7,853 tests plus all local model checks; `make tmux-ci`; and `make install`. The install replaced the release-local binary/library, delivered `reload_library` to the live editor endpoint, installed the matching JetBrains plugin into four IDEs, and marked four supervisors for idle recycle. The newest hosted CI result is still the older failed run from the preceding commit; local tmux and SimWorld coverage for this change are green.
 
@@ -191,15 +196,19 @@ The changes span the controller route worker, route invocation scoping, supervis
 
 ### Re: `#libgcpidrace` — gpt-5
 
-> **Queue prompt:**
->
-> 📌 do [#libgcpidrace]
-
-
 This item was already resolved in source but had not been reaped from the backlog. Commit `5e3daf2a6` (`test(gc): inject deterministic PID liveness`) extracted `gc_libs_with_pid_alive` in `src/agent-doc/src/lib_gc.rs`: the public production path still supplies the real process-table probe, while the live- and dead-lock tests inject explicit predicates. The dead-lock fixture now uses the current process PID with an injected `false`, so ambient PID reuse or another parallel test cannot change its meaning.
 
 The commit is an ancestor of the pushed `src/agent-doc` `main` branch and is included in the currently installed binary. The exact focused test `lib_gc::tests::gc_removes_lib_with_dead_pid_lock` passes; the current full `make check` and install also passed earlier in this session. Confidence is high because the flaky ambient dependency has been removed from the fixture rather than retried. No files needed a new edit in this cycle, and no escalation or follow-up is needed.
-<!-- agent:boundary:709fd5a4 -->
+Completed and pushed the agent-doc cycle.
+
+- Fixed cross-session thrashing, supervisor restart/Clear hangs, and route-result timeouts.
+- Replaced detached orphan-route processes with one bounded controller worker thread.
+- Verified with focused regressions, full `make check`, install, and controller recycle.
+- Reaped `#libgcpidrace`; its deterministic PID-liveness fix was already shipped and passes.
+- Pushed source commit `ad62c73bb` and root/session commits through `9111771ba`.
+
+Session-check passed. The remaining 46 queue items were explicitly handed to the supervisor’s fresh-session drain path. Unrelated worktree changes were preserved.
+<!-- agent:boundary:9c0756a7 -->
 <!-- /agent:exchange -->
 ## Queue
 

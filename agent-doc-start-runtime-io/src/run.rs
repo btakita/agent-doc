@@ -203,6 +203,142 @@ pub fn record_document_resume_id(file: &Path, id: &str) -> Result<bool> {
     Ok(true)
 }
 
+/// Clear a stale conversation pointer only when it still names the failed id.
+///
+/// The compare protects a concurrent operator edit: a newer replacement id (or
+/// an already-removed pointer) must never be overwritten by late child-exit
+/// handling from the failed resume attempt.
+fn document_without_matching_resume_id(current: &str, id: &str) -> Result<Option<String>> {
+    let (mut fm, body) = frontmatter::parse(current)?;
+    if fm.resume.as_deref().map(str::trim) != Some(id.trim()) {
+        return Ok(None);
+    }
+    fm.resume = None;
+    Ok(Some(frontmatter::write(&fm, body)?))
+}
+
+fn clear_document_resume_id_if_matches(file: &Path, id: &str) -> Result<bool> {
+    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "start_stale_resume_clear",
+    )?;
+    let Some(updated) = document_without_matching_resume_id(&current, id)? else {
+        return Ok(false);
+    };
+    agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
+        file,
+        &updated,
+        &current,
+        "start_stale_resume_clear",
+    )?;
+    Ok(true)
+}
+
+/// Codex cannot currently be preflighted through a verified transcript layout,
+/// so its definitive child error is the authority that a recorded id is stale.
+fn codex_reports_missing_resume_id(output: &[u8], attempted_id: &str) -> bool {
+    let output = String::from_utf8_lossy(output).to_ascii_lowercase();
+    output.contains("no saved session found with id")
+        && output.contains(&attempted_id.to_ascii_lowercase())
+}
+
+fn document_has_resume_pointer(current: &str) -> Result<bool> {
+    let (fm, _) = frontmatter::parse(current)?;
+    Ok(fm.resume.as_deref().is_some_and(|id| !id.trim().is_empty()))
+}
+
+fn document_resume_pointer_was_removed(file: &Path) -> Result<bool> {
+    let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "start_resume_authority_recheck",
+    )?;
+    Ok(!document_has_resume_pointer(&current)?)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CodexResumeRecoveryReason {
+    MissingSession,
+    PointerRemoved,
+}
+
+impl CodexResumeRecoveryReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::MissingSession => "missing_session",
+            Self::PointerRemoved => "pointer_removed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RestartBackoffOutcome {
+    Elapsed,
+    StopRequested,
+    OperatorInterrupt,
+}
+
+fn restart_backoff_input_requests_interrupt(bytes: &[u8]) -> bool {
+    bytes.contains(&0x03)
+}
+
+/// Wait for a crash-policy backoff without making the raw terminal deaf.
+///
+/// The child stdin-forwarder is intentionally stopped after child exit. A plain
+/// `thread::sleep` here therefore leaves no reader for Ctrl+C, while raw mode
+/// prevents the kernel from translating it into SIGINT. Poll stdin in bounded
+/// slices so Ctrl+C and controller stop requests can end the supervisor.
+fn wait_for_restart_backoff(
+    shared: &SupervisorShared,
+    route_owned_completion: &AtomicBool,
+    total: Duration,
+) -> RestartBackoffOutcome {
+    let deadline = Instant::now() + total;
+    loop {
+        if shared.stop_requested.load(Ordering::Relaxed)
+            || route_owned_completion.load(Ordering::Relaxed)
+        {
+            return RestartBackoffOutcome::StopRequested;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return RestartBackoffOutcome::Elapsed;
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let slice = std::cmp::min(remaining, Duration::from_millis(100));
+
+        #[cfg(unix)]
+        {
+            let mut fd = libc::pollfd {
+                fd: libc::STDIN_FILENO,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let timeout_ms = slice.as_millis().min(i32::MAX as u128) as i32;
+            let ready = unsafe { libc::poll(&mut fd, 1, timeout_ms) };
+            if ready > 0 && fd.revents & libc::POLLIN != 0 {
+                let mut bytes = [0u8; 64];
+                let read = unsafe {
+                    libc::read(
+                        libc::STDIN_FILENO,
+                        bytes.as_mut_ptr() as *mut libc::c_void,
+                        bytes.len(),
+                    )
+                };
+                if read > 0 && restart_backoff_input_requests_interrupt(&bytes[..read as usize]) {
+                    return RestartBackoffOutcome::OperatorInterrupt;
+                }
+            } else if ready > 0 {
+                // EOF/HUP can make poll return immediately. Preserve the bounded
+                // polling cadence instead of spinning while no input is readable.
+                std::thread::sleep(slice);
+            }
+        }
+
+        #[cfg(not(unix))]
+        std::thread::sleep(slice);
+    }
+}
+
 struct StartRunLaunchLog<'a> {
     session_log: &'a mut Option<std::fs::File>,
     route_owned: bool,
@@ -441,6 +577,10 @@ pub fn run_with_reap_policy_and_resume(
     let mut base_args = initial_launch_spec.base_args.clone();
     let mut resolved_env = initial_launch_spec.resolved_env.clone();
     let mut capability_proof_frontmatter = fm.clone();
+    let mut active_resume_id = resume.as_ref().and_then(|request| match request {
+        agent_doc_harness::ResumeRequest::Id(id) => Some(id.clone()),
+        agent_doc_harness::ResumeRequest::Latest => None,
+    });
 
     // `#resumecapture`: mint this launch's conversation id, hand it to the
     // harness, and record it on the document — so the NEXT restart can resume
@@ -1214,6 +1354,47 @@ pub fn run_with_reap_policy_and_resume(
         drop(session);
         let _ = reader_thread.join();
 
+        let missing_resume_id = active_resume_id
+            .as_deref()
+            .filter(|id| {
+                harness.binary == "codex"
+                    && shared
+                        .output
+                        .with_recent_output(|output| codex_reports_missing_resume_id(output, id))
+            })
+            .map(str::to_string);
+        let removed_resume_id = if harness.binary == "codex" && missing_resume_id.is_none() {
+            if let Some(id) = active_resume_id.as_deref() {
+                match document_resume_pointer_was_removed(&canonical) {
+                    Ok(true) => Some(id.to_string()),
+                    Ok(false) => None,
+                    Err(err) => {
+                        eprintln!(
+                            "[start] warning: failed to recheck the Codex resume pointer in {}: {err:#}",
+                            canonical.display()
+                        );
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "codex_resume_authority_recheck_failed id={id} error={}",
+                                format!("{err:#}").replace('\n', "\\n")
+                            ),
+                        );
+                        None
+                    }
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let codex_resume_recovery = missing_resume_id
+            .map(|id| (id, CodexResumeRecoveryReason::MissingSession))
+            .or_else(|| {
+                removed_resume_id.map(|id| (id, CodexResumeRecoveryReason::PointerRemoved))
+            });
+
         // Flush any stale stdin bytes that the writer thread consumed from the
         // kernel but couldn't forward (e.g., user pressed Enter during the
         // tiny race window between session.wait() and writer_stop.signal()).
@@ -1299,6 +1480,73 @@ pub fn run_with_reap_policy_and_resume(
                 continue;
             }
             PostChildExitAction::NormalExitClassification => {}
+        }
+
+        if let Some((stale_id, recovery_reason)) = codex_resume_recovery {
+            let cleared = if recovery_reason == CodexResumeRecoveryReason::MissingSession {
+                match clear_document_resume_id_if_matches(&canonical, &stale_id) {
+                    Ok(cleared) => cleared,
+                    Err(err) => {
+                        eprintln!(
+                            "[start] warning: failed to clear stale Codex resume id {stale_id} from {}: {err:#}",
+                            canonical.display()
+                        );
+                        log_event(
+                            &mut session_log,
+                            &format!(
+                                "codex_stale_resume_clear_failed id={stale_id} error={}",
+                                format!("{err:#}").replace('\n', "\\n")
+                            ),
+                        );
+                        false
+                    }
+                }
+            } else {
+                false
+            };
+
+            // Rebuild from the admitted frontmatter with resume forced off. The
+            // writeback above is best-effort because a live editor may race it;
+            // the next launch must still never reuse the proven-bad id.
+            let mut fresh_fm = capability_proof_frontmatter.clone();
+            fresh_fm.resume = None;
+            let mut launch_log = StartRunLaunchLog {
+                session_log: &mut session_log,
+                route_owned,
+            };
+            let fresh_spec =
+                build_harness_launch_spec(&fresh_fm, &global_config, &canonical, &mut launch_log)?;
+            base_args = fresh_spec.base_args;
+            resolved_env = fresh_spec.resolved_env;
+            capability_proof_frontmatter = fresh_fm;
+            active_resume_id = None;
+            policy.reset();
+            failed_resume_tracker.reset();
+            first_run = true;
+            // A resumed conversation already owns its document context. A new
+            // Codex conversation does not, so submit the document trigger once
+            // the fresh prompt becomes dispatch-ready.
+            auto_trigger_next_launch = true;
+            restart_count += 1;
+            let recovery_message = match recovery_reason {
+                CodexResumeRecoveryReason::MissingSession => format!(
+                    "[start] Codex session {stale_id} does not exist; cleared={} and starting a fresh document-bound session",
+                    cleared
+                ),
+                CodexResumeRecoveryReason::PointerRemoved => format!(
+                    "[start] Codex resume pointer {stale_id} was removed from the document; discarding cached launch arguments and starting a fresh document-bound session"
+                ),
+            };
+            start_console_status(&mut session_log, route_owned, recovery_message);
+            log_event(
+                &mut session_log,
+                &format!(
+                    "codex_stale_resume_recovered id={stale_id} reason={} cleared={} action=spawn_fresh_and_trigger restart_count={restart_count}",
+                    recovery_reason.as_str(),
+                    cleared
+                ),
+            );
+            continue;
         }
 
         // Normal exit classification via CrashPolicy
@@ -1586,7 +1834,18 @@ pub fn run_with_reap_policy_and_resume(
                         restart_count + 1
                     ),
                 );
-                std::thread::sleep(delay);
+                match wait_for_restart_backoff(&shared, &route_owned_completion, delay) {
+                    RestartBackoffOutcome::Elapsed => {}
+                    RestartBackoffOutcome::StopRequested => {
+                        log_event(&mut session_log, "restart_backoff_stop_requested");
+                        break "restart_backoff_stop_requested";
+                    }
+                    RestartBackoffOutcome::OperatorInterrupt => {
+                        eprintln!("\nSupervisor interrupted during restart backoff.");
+                        log_event(&mut session_log, "restart_backoff_ctrl_c");
+                        break "user_interrupt_restart_backoff";
+                    }
+                }
                 if !with_continue {
                     first_run = true;
                 }
@@ -1748,6 +2007,59 @@ mod tests {
             "an unverified layout is not evidence of absence"
         );
         unsafe { std::env::remove_var("HOME") };
+    }
+
+    #[test]
+    fn codex_missing_resume_error_requires_the_attempted_id() {
+        let id = "9ebbc95c-25e9-4c7c-abe9-fd96040c3461";
+        let output = format!(
+            "ERROR: No saved session found with ID {id}. Run `codex resume` without an ID to choose from existing sessions."
+        );
+
+        assert!(codex_reports_missing_resume_id(output.as_bytes(), id));
+        assert!(!codex_reports_missing_resume_id(
+            output.as_bytes(),
+            "00000000-0000-0000-0000-000000000000"
+        ));
+        assert!(!codex_reports_missing_resume_id(
+            b"ERROR: transient transport failure while resuming",
+            id
+        ));
+    }
+
+    #[test]
+    fn stale_resume_clear_only_removes_the_matching_pointer() {
+        let source = "---\nagent: codex\nresume: stale-id\nqueue: stop\n---\n\n# Plan\n";
+        let updated = document_without_matching_resume_id(source, "stale-id")
+            .unwrap()
+            .expect("matching stale pointer should be removed");
+        let (fm, body) = frontmatter::parse(&updated).unwrap();
+        assert_eq!(fm.resume, None);
+        assert_eq!(fm.queue.as_deref(), Some("stop"));
+        assert_eq!(body, "\n# Plan\n");
+
+        assert_eq!(
+            document_without_matching_resume_id(source, "newer-id").unwrap(),
+            None,
+            "a different current resume pointer must survive stale recovery"
+        );
+    }
+
+    #[test]
+    fn resume_authority_recheck_detects_manual_pointer_removal() {
+        let resumed = "---\nagent: codex\nresume: stale-id\n---\n\n# Plan\n";
+        let fresh = "---\nagent: codex\nqueue: stop\n---\n\n# Plan\n";
+
+        assert!(document_has_resume_pointer(resumed).unwrap());
+        assert!(!document_has_resume_pointer(fresh).unwrap());
+    }
+
+    #[test]
+    fn restart_backoff_ctrl_c_detection_is_byte_exact() {
+        assert!(restart_backoff_input_requests_interrupt(b"\x03"));
+        assert!(restart_backoff_input_requests_interrupt(b"noise\x03more"));
+        assert!(!restart_backoff_input_requests_interrupt(b"^C"));
+        assert!(!restart_backoff_input_requests_interrupt(b"\x1a"));
     }
 
     /// `#resumeclaim`: the ordering fix. The claim check must run on the

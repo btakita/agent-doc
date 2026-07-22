@@ -6,6 +6,11 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.9
+
+- **Missing Codex resume sessions now recover with a fresh session.** When Codex definitively reports `No saved session found with ID <id>`, the supervisor removes only that matching frontmatter `resume` pointer and immediately relaunches fresh instead of retrying the stale ID forever. It also rechecks document authority before a cached resume retry, so an operator removal made while the supervisor is running takes effect immediately.
+- **Ctrl+C now stops the supervisor during crash backoff.** The bounded restart delay polls supervisor stdin while the child is absent, so raw terminal mode no longer swallows the operator interrupt.
+
 ## 0.35.8
 
 - **Windows release builds no longer type-check Unix-only auto-install file-descriptor routing.** The explicit log-fd stdio plan is now compiled only on Unix; Windows keeps its existing null-stdout/inherited-stderr plan.

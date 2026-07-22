@@ -33,7 +33,9 @@
 //!   unresolved exchange-tail prompt stay alive for continued interaction.
 //! - On non-zero exit (context exhaustion, crash, etc.): auto-restarts after a
 //!   bounded delay with a fresh document-bound child. Process-global history
-//!   selectors are never used for managed replacements.
+//!   selectors are never used for managed replacements. The bounded delay
+//!   remains interruptible by Ctrl+C even while the child is absent and the
+//!   supervisor owns a raw terminal.
 //! - On clean exit (code 0): honors the active harness policy.
 //!   Claude prompts on stdout and waits for Enter (fresh restart) or `q` + Enter (exit).
 //!   Codex auto-restarts in resume mode so `codex exec` remains a persistent session.
@@ -57,6 +59,11 @@
 //!   silently restarting fresh.
 //!   If the resume handoff just failed, the first failure restarts fresh and
 //!   repeated failures escalate to that same prompt instead of looping blindly.
+//!   A definitive Codex "No saved session found with ID" response clears only
+//!   that matching frontmatter pointer and immediately launches a fresh session.
+//!   The same fresh recovery occurs when document authority shows that the
+//!   operator already removed the pointer while the supervisor was running, so
+//!   cached launch arguments cannot keep resurrecting an obsolete resume id.
 //! - Prints the truncated session UUID and pane ID to stderr on registration.
 //! - Opens a persistent session log at `.agent-doc/logs/<session-uuid>.log`,
 //!   appending timestamped events for session start, claude start/restart/exit,

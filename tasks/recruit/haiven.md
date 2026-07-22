@@ -706,7 +706,7 @@ The proof of ownership is not a percentage estimate; it is your ability to expla
 #### Final rehearsal rule
 
 Answer each question in this order: **decision → reason → tradeoff → evidence → what would change your mind**. Keep the first answer under 90 seconds, then let them pull you deeper. The biggest risk is sounding attached to the sophistication. The strongest version of you in this interview is the engineer who can explain the advanced prototype and still say, “Given a modest real target, I would ship the simpler design first.”
-<!-- agent:boundary:69aeb532 -->
+<!-- agent:boundary:9c60f5a5 -->
 <!-- /agent:exchange -->
 
 ## Queue

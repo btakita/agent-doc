@@ -1,6 +1,5 @@
 ---
 agent_doc_session: 7a3dfe1a-875b-4b93-9e8e-12d156448f63
-resume: 9ebbc95c-25e9-4c7c-abe9-fd96040c3461
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -576,17 +575,149 @@ The command is an assertion gate, not just a report. It exits non-zero unless cl
 The production-sized run passed: 1,000 sustained + 1,000 burst messages, 1,000 reconnects, 200 delayed readers shed, 9,800 healthy peers still live, heap 18.69 MiB before / 18.70 MiB after churn, and client-wire p99 6.91 ms against a 250 ms SLO. `make check` passed, including the race suite and both builds. This repository has no GitHub Actions workflow named `CI`, as confirmed during the preceding queue cycle.
 
 Commits: `a21dda3` in `haiven-websocket-hub`; parent gitlink `41c13912a`.
-<!-- agent:boundary:b0e2aef5 -->
+❯ 🚧 Please help me prepare for my haiven interview. They will be going over my solution. They have not seen the code.
+
+### Re: Haiven interview preparation — gpt-5
+
+Your strongest framing is: **this is a design review backed by executable experiments, not a claim that the prototype is production-ready.** They said they care about reasoning and communication. Lead with the reasoning; use the code and benchmarks as evidence.
+
+#### Your 90-second opening
+
+> The problem is to give each client one persistent connection while multiplexing chat, presence, notifications, moderation, and future services behind it. I separated that into four concerns: a small versioned envelope, authenticated connection lifecycle, routing through downstream interfaces, and per-message-class delivery and backpressure policy.
+>
+> The central invariant is that one slow client or failed downstream must never block shared work. Every client has a bounded, nonblocking outbound queue. Replaceable state such as presence and typing is conflated; durable events such as chat spill to an outbox; a persistently slow consumer can be disconnected and resume.
+>
+> I began with a simpler goroutine-per-connection transport and actor-style registry. I then used load tests to find where those assumptions stopped scaling. That led to an event-loop transport, sharded registry and sequence allocation, bounded rendered friend frames, and explicit failure isolation. I would not prescribe all of those choices before learning the product's actual scale and delivery requirements—the prototype exists to make those tradeoffs measurable.
+
+Stop there. Do not open with “100 million connections” or with the library list. First establish that you understand the product problem and the correctness boundary.
+
+#### A clean 12–15 minute walkthrough
+
+1. **Problem and assumptions (1–2 minutes).** One connection per client, unreliable networks, low-latency small messages, multiple downstream services, and unknown target scale. Say that the two decisions you need from the team are target scale and which message classes are genuinely durable.
+
+2. **One inbound message (2 minutes).** `server.OnTraffic` completes and authenticates the WebSocket upgrade, then `Conn.Feed` parses frames. A bounded worker pool moves decode/routing off the poller while a serial drain per connection preserves that client's order. `Conn.onMessage` validates the envelope, ignores client-supplied identity fields, stamps authenticated identity, and calls `Router.dispatch`. The router applies unknown-service handling, rate limiting, the downstream circuit breaker, then `Downstream.Handle`.
+
+3. **One outbound message (2 minutes).** A downstream uses `Sink.SendToClient` or `SendToTopic`. The hub stamps ID/time and, for at-least-once classes, a per-client/per-service sequence. It looks up the class policy and enqueues without blocking. `AsyncWrite` drains one frame at a time through completion callbacks, preserving connection-local order without a write goroutine.
+
+4. **Backpressure—the heart of the design (3 minutes).** Walk through `backpressure.go` and `sendqueue.go`:
+
+   - chat, notifications, and moderation are interactive, at-least-once, and spill when memory is full;
+   - presence and typing are bulk, at-most-once, and conflate by entity because only the latest state matters;
+   - interactive traffic drains before fresh bulk traffic, with age promotion to prevent starvation;
+   - no overflow policy blocks the fan-out path.
+
+   The best concrete example is typing: `DropNewest` can discard the terminal “stopped” state and strand the UI. `ConflateByEntity` replaces the pending state in place, while a client-side TTL handles a crashed typist whose final state never arrives.
+
+5. **Reconnect and fan-out correctness (2 minutes).** The registry is sharded behind an interface. Paths touching both tables lock **connection shard, then topic shard**, preventing lock cycles. A reconnect is last-writer-wins; unregister removes a connection only if it is still the registered instance, so cleanup from an old socket cannot evict the replacement. Topic membership is copied under lock and delivery happens after releasing it.
+
+6. **What testing changed (2 minutes).** Use only two evolution stories:
+
+   - the single actor/lock shape stayed flat around 1.5M deliveries/s; 64 shards reached about 3.7M/s at 1M clients without changing per-connection memory;
+   - an unbounded friend graph made memory depend on other users' graph size, so a 50-friend rendered frame plus snapshot-on-frame-change made capacity depend on a product-controlled constant.
+
+7. **Close with deferrals (1 minute).** Production multi-node ownership/routing, a truly durable outbox, exact product delivery semantics, and operational rollout remain team decisions. The prototype establishes seams and invariants; it does not pretend those decisions are finished.
+
+#### Code tour order
+
+Keep the repository tree closed and pre-open these files in this order:
+
+1. `envelope/envelope.go` — the wire contract and server-owned fields.
+2. `server/server.go` — `OnTraffic`, authenticated upgrade, bounded dispatch, and timing-wheel liveness.
+3. `hub/conn.go` — `Feed`, `onMessage`, nonblocking enqueue, and the self-clocking `AsyncWrite` chain.
+4. `hub/router.go` — the short, legible inbound policy pipeline.
+5. `hub/backpressure.go` and `hub/sendqueue.go` — the main design invariant.
+6. `hub/registry.go` — sharding, lock order, reconnect race prevention.
+7. `hub/hub.go` — `SendToClient`, `SendToTopic`, delivery stamping, snapshots, and resume.
+8. Tests only after the design: `sendqueue_test.go`, `registry_test.go`, `race_test.go`, `sim_test.go`, and `cmd/loadtest/trackc.go`.
+
+Do not tour every downstream adapter. The interfaces are the point; the sample services merely prove the seam.
+
+#### The questions they are most likely to ask
+
+**Why gnet instead of ordinary goroutines?**
+
+> Goroutine-per-connection is the simpler default and may be entirely correct at Haiven's real scale. I moved to gnet only after treating per-connection memory as a measured constraint. The benefit is no fixed read/write goroutine pair per idle connection. The cost is more explicit lifecycle and dispatch machinery. I would choose after learning the actual connection target, not from benchmark fashion.
+
+**Why sharded locks instead of an actor?**
+
+> The actor was easier to reason about, but it created one serialization point. Keeping `Registry` behind an interface let me replace the implementation after measurement. Shards preserve local reasoning: each map has an owner lock, cross-table paths have one lock order, and reconnect cleanup checks connection identity.
+
+**What ordering do you guarantee?**
+
+> Per client, per service—not a global order across unrelated services. Inbound work is serialized per connection. Outbound writes are one-at-a-time per connection, and durable classes receive a per-client/per-service sequence. A service may not span priority bands because that could let a newer sequence overtake an older one.
+
+**Does at-least-once actually work?**
+
+> The protocol shape is present: IDs, per-service sequences, acknowledgements, resume, client deduplication, and spill. The prototype outbox is in memory, so it demonstrates semantics but is not durable across process loss. In production I would back it with a durable log/service or make the owning downstream the replay authority.
+
+**What happens to a slow client?**
+
+> It never blocks shared fan-out. Replaceable state is conflated or dropped according to class; durable events spill; a class configured to disconnect closes the client so it can resume. Queue depth, drops, spills, disconnects, and breaker state are observable.
+
+**What happens when a downstream dies?**
+
+> Each downstream has a circuit breaker. Dispatch fails fast rather than allowing a dead dependency to consume the hub's bounded queues indefinitely. The Track C harness kills and recovers a downstream while also exercising reconnects, slow readers, sustained fan-out, and bursts.
+
+**How do you scale across nodes?**
+
+> Connections and subscriptions are node-local. An external routing plane publishes once; each node fans out only to its local subscribers. The prototype deliberately does not claim that multi-node ownership, presence aggregation, or resume storage is solved.
+
+**Why JSON?**
+
+> The hub treats payloads as opaque and only owns a small envelope. JSON keeps the contract inspectable and avoids forcing every service schema into the hub. Protobuf or MsgPack is a measured optimization later; zero-copy claims are limited because the event loop and asynchronous dispatch still require clear buffer ownership.
+
+**Why keep services in process?**
+
+> Not simply because of message volume. The deciding questions are failure isolation, ownership, and resource-profile compatibility. A service with a large heap, heavy CPU, or separate deployment lifecycle may belong out of process even if the socket can carry its traffic.
+
+**What would you build first with two other engineers?**
+
+> Engineer one owns transport/auth/lifecycle and the client SDK contract. Engineer two owns registry, subscriptions, and fan-out. Engineer three owns downstream adapters, class policies, and observability. Agree first on the envelope, `Downstream`/`Sink` interfaces, class-policy table, and test fixtures so the three tracks can proceed independently. Integrate with an end-to-end reconnect/slow-consumer test before optimization.
+
+#### Benchmark numbers worth remembering
+
+Use a small set and always attach scope:
+
+- **Memory shape:** about **700 B Go heap / 1.08 KiB RSS per materialized hub connection**, flat from 5M to 100M in the in-process scale harness.
+- **Fan-out:** roughly **3.5–3.9M deliveries/s**, depending on the exact suite and room width. Distinguish **sends** from **deliveries**; one send can fan out to many recipients.
+- **Sharding:** about **1.57M → 3.70M deliveries/s** at 1M clients, a **2.4×** improvement, with unchanged marginal memory.
+- **Overload:** at 10× offered load the breaker shed about **93%** while keeping the 1M connection population live and memory bounded.
+- **Track C:** at the production-sized 10k-client resilience run, client-wire p99 was **6.91 ms against a 250 ms SLO**, with reconnect churn, delayed-reader shedding, burst+sustained traffic, and downstream recovery assertions.
+
+Do **not** imply that the 100M run was 100M kernel TCP/TLS sockets. It materialized 100M real `*hub.Conn` objects and exercised the in-process subscription path; it validates marginal application-state memory and data-structure scaling. It does not validate file-descriptor limits, kernel socket memory, TLS, NIC bandwidth, load-balancer behavior, or internet clients. Saying this unprompted will make the benchmark more credible.
+
+Also say that the out-of-process socket benchmark is withheld because the harness produced impossible results. That is good engineering judgment: you found a measurement you could not trust and refused to use it.
+
+#### Four corrections to own before they catch them
+
+1. **CAS means compare-and-swap, not copy-and-swap.** Do not repeat “lock-free Copy And Swap.” The code uses atomic compare-and-swap for state flags; the registry's reconnect-safe unregister is an identity check under a shard lock. `slices.Clone` is copying, not CAS.
+2. **gnet does not provide your heartbeat policy.** Your server implements ping/read-deadline behavior using an `antlabs/timer` timing wheel; gnet supplies the event loop and asynchronous write primitive.
+3. **The in-memory outbox is not durable storage.** Present it as a replaceable prototype implementation of the interface and protocol.
+4. **The 100M headline is not an end-to-end network claim.** Use the precise scope above.
+
+#### How to answer the AI question
+
+The prompt explicitly limited AI, and your write-up mentions Claude Code, so assume they will ask. Do not minimize or imply that you manually authored every line.
+
+> I used AI to accelerate prototype implementation and test generation. I retained responsibility for the design and reviewed the output against explicit invariants. I corrected decisions that were wrong—for example typing used `DropNewest`, which could lose the terminal stopped state; I changed it to keyed conflation. I also rejected benchmark results when the harness contradicted basic expectations. I can explain the code path, locking, delivery semantics, failure modes, and what I would remove for a production first version.
+
+The proof of ownership is not a percentage estimate; it is your ability to explain why each policy exists, identify the prototype's limits, and change your mind when evidence contradicts a claim.
+
+#### Final rehearsal rule
+
+Answer each question in this order: **decision → reason → tradeoff → evidence → what would change your mind**. Keep the first answer under 90 seconds, then let them pull you deeper. The biggest risk is sounding attached to the sophistication. The strongest version of you in this interview is the engineer who can explain the advanced prototype and still say, “Given a modest real target, I would ship the simpler design first.”
+<!-- agent:boundary:69aeb532 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#haivenmock] [recommended] Run a timed Haiven solution mock interview: 90-second opening, 10-minute code tour, 15-minute adversarial design Q&A, then tighten weak answers.
 <!-- /agent:backlog -->
 
 ## Icebox

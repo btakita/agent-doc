@@ -64,7 +64,6 @@ Three open items closed, and the last one turned out to have a much sharper root
 **The boundary re-mint** — I had this filed as "carry-forward effectively never takes." That was wrong, and the truth is simpler: `element.rs::append_with_boundary` **deliberately minted a fresh id on every append**. Its comment justified this as "matching the binary's post-patch behavior in `apply_patches_with_overrides()`" — but that path mints only when the boundary was *lost* (its snowball guard), never on an ordinary append. The two were never actually matched, and they don't even mint the same format: `element.rs` produces 8 hex chars via `new_boundary_id()`, `template.rs` a full `Uuid::new_v4()`. That mismatch is visible in the evidence — the ids I traced (`8d469cee`, `32505ea3`, `c9654f1d`) are all 8-hex, while compact-io's are full UUIDs.
 
 With live and committed minting independently, they differed by exactly one marker line and no later cycle could settle it, because each side kept re-minting its own. The marker is a *position*, not a per-response event. `append_with_boundary` now moves the id it already receives rather than discarding it.
-
 One existing test asserted the old behavior (`!result.contains(boundary_id)`). I rewrote it to pin the invariants that actually matter — exactly one boundary, carried forward, and moved to *after* the appended response — and added a three-append test proving the id is identical at the end. `make check`: 7839 passed, 240 skipped.
 
 **Remaining under `#boundaryaccum1`:** the two minting sites still use different id formats, and compact-io has its own `resolve_boundary_marker`. Folding all three onto one helper is the tidy-up; the divergence itself is fixed.
@@ -161,43 +160,69 @@ No new actionable follow-up work was created by this response.
 `#c8tb` is implementation-complete but still lacks its required live proof. The latest JetBrains attempt recorded for this document reached `route_success` in 29,709 ms, not under two seconds, and the current typed route log contains neither `route_dispatch_only_authoritative_degraded_direct_pane` nor `route_existing_pane_busy_active_turn_skip_wait` for this invocation.
 
 I moved the item to gated review instead of claiming completion. It unblocks only when a live click is performed with the supervisor socket unavailable and the pane mid-turn, and the attempt ledger plus ops log prove the expected fast-path markers and latency. No additional backlog follow-up is needed because the implementation is already complete and the sole remainder is that external live verification.
-<!-- agent:boundary:a1d6329e -->
+❯ agent-doc causes thrashing machine on all Codex + Claude sessions...including non-agent-doc sessions.
+
+❯ Why an external process? Could this be a thread instead?
+❯ > The controller now launches a detached external `agent-doc route --dispatch-only --plain-trigger` child and returns to its event loop before that child calls back. It no longer synchronously self-enters `run_editor_route`.
+
+❯ Clear Session Context + Run Agent Doc both hang:
+```
+agent-doc command failed (exit 1): Error: session_interrupt_clear timed out for /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md because pane %59 stayed alive-busy after interrupt (source=authoritative_actor, current_command=agent-doc, prompt_ready=false, tail="To continue this session, run codex resume 019f8018-8da2-7912-9501-482113d2f4e3"). Run `agent-doc session status /home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md` before retrying.
+```
+❯ `editor_route did not publish a terminal result within 20000ms`
+
+### Re: fleet-wide thrashing and the external route process — gpt-5
+
+Yes—a thread is the right boundary here. The controller's orphan-drain path was spawning a detached `agent-doc route` process per eligible document. Those children could overlap, and each route ran the normal fleet-wide pre-lookup resync; logs showed simultaneous orphan dispatches and a child pruning six unrelated sessions. That is the mechanism behind the Codex/Claude thrash, including non-agent-doc panes.
+
+I replaced it with one bounded controller-owned worker thread (queue capacity one) plus a per-document in-flight guard. Orphan recovery now passes its already-authoritative pane and skips the fleet prune; ordinary editor routes keep normal prune behavior. The controller accept loop remains responsive while the worker route calls back through it.
+
+### Re: Clear Session Context, Run Agent Doc, and the 20-second editor result — gpt-5
+
+These were one downstream failure chain. The persistent supervisor printed its restart/quit prompt to stderr, but route-owned stderr is intentionally redirected to a log. The pane therefore stopped at Codex's “To continue this session…” line and looked permanently busy. Supervisor Restart also could not release the blocking prompt because there was no child left to kill.
+
+The restart prompt is now written and flushed to pane-visible stdout. Restart IPC detects `waiting_input` and submits exactly one Enter to the owned pane; Clear at that prompt performs a fresh restart instead of injecting `/clear` into a dead child. Exact bottom-of-pane wrapper prompts are recognized as control surfaces, while stale prompt scrollback remains busy. This lets the accepted editor route settle and publish its terminal result; the JetBrains 20-second timeout remains a fail-closed guard rather than being lengthened to hide the wedge.
+
+### Re: implementation and proof — gpt-5
+
+The changes span the controller route worker, route invocation scoping, supervisor IPC and prompt output, session-actor prompt detection, and their regression tests under `src/agent-doc`. They are committed in subrepo commit `ad62c73bb` (root gitlink commit `030caa1eb`), and the subrepo commit is pushed.
+
+`make check` passed, all five focused regressions passed, the latest CI run was green, and `make install` plus `agent-doc admin recycle` completed. Confidence is high: the logged cross-session resync and invisible-prompt mechanisms are directly covered. No escalation or additional follow-up is needed.
+<!-- agent:boundary:eb07b1db -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#jetbrainsrunroute-9z37]
-- do [#jetbrainsrunroute]
-- do [#libgcpidrace]
-- do [#hubregistryevict]
-- do [#missingreplicarebuild]
-- do [#authoritydescentstd]
-- do [#patchretryidem]
-- do [#hvw0]
-- do [#bbpe]
-- do [#dbj7]
-- do [#crdtpushdrainverify]
-- do [#compactindcellsverify]
-- do [#zqv8]
-- do [#vscsaveproj]
-- do [#r4gq]
-- do [#af88]
-- do [#claimnewpane]
-- do [#boundaryaccum1]
-- do [#qactsync]
-- do [#ftimmediate]
-- do [#qeditrace]
-- do [#jbcompactcommit]
-- do [#tmuxsynccrashlog]
-- do [#60ev]
-- do [#2y8j]
-- do [#cdtcutover]
-- do [#coredecomp]
-- do [#orchdecomp]
-- do [#skillharnessplugin]
-- do [#crdtauth6]
-- do [#nsfz]
-- do [#suprestassoc-live]
+- 🚧 📌 do [#libgcpidrace]
+- 📌 do [#hubregistryevict]
+- 📌 do [#missingreplicarebuild]
+- 📌 do [#authoritydescentstd]
+- 📌 do [#patchretryidem]
+- 📌 do [#hvw0]
+- 📌 do [#bbpe]
+- 📌 do [#dbj7]
+- 📌 do [#crdtpushdrainverify]
+- 📌 do [#compactindcellsverify]
+- 📌 do [#zqv8]
+- 📌 do [#vscsaveproj]
+- 📌 do [#r4gq]
+- 📌 do [#af88]
+- 📌 do [#claimnewpane]
+- 📌 do [#boundaryaccum1]
+- 📌 do [#qactsync]
+- 📌 do [#ftimmediate]
+- 📌 do [#qeditrace]
+- 📌 do [#jbcompactcommit]
+- 📌 do [#tmuxsynccrashlog]
+- 📌 do [#60ev]
+- 📌 do [#2y8j]
+- 📌 do [#cdtcutover]
+- 📌 do [#coredecomp]
+- 📌 do [#orchdecomp]
+- 📌 do [#skillharnessplugin]
+- 📌 do [#crdtauth6]
+- 📌 do [#nsfz]
+- 📌 do [#suprestassoc-live]
 - 📌 do [#jbedtledgerverify]
 - 📌 do [#fmgc]
 - 📌 do [#0dsr]
@@ -230,7 +255,7 @@ I moved the item to gated review instead of claiming completion. It unblocks onl
 - [ ] [#jetbrainsrunroute] JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md stage=dispatch_only_dispatch_start_proof pane=%59 actor_generation=1602 editor_attempt_id=1784586262592-1 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof) [symptom-key invariant=run_agent_doc_route_dispatch_failure document=483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0 component=route/dispatch_only_dispatch_start_proof content_hash=sha256:b494e8e34988037b3fcbb3a5c6c5b33368883f4b4a849d9bb07876ec2678ffb5]
   evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md stage=dispatch_only_dispatch_start_proof pane=%66 actor_generation=1604 editor_attempt_id=1784586442853-2 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof)
   evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md stage=dispatch_only_dispatch_start_proof pane=%2 actor_generation=1610 editor_attempt_id=unknown dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof)
-- [ ] [#libgcpidrace] #agent-doc-bug lib_gc::tests::gc_removes_lib_with_dead_pid_lock (src/lib_gc.rs:302, 'assertion failed: !v1.exists()') fails intermittently under nextest parallelism and passes in isolation and on re-run. Observed 2026-07-19 during the #ay80ci cycle: one make check run failed it, the next full run was 7804/7804 green. Dead-pid lib GC is racing another concurrently-running test's pid/lib dir, so the 'is this pid dead' probe sees a pid that is alive/reused (or the lib dir is recreated between the probe and the assert). Will redden CI intermittently the same way #ay80ci did, so pin it deterministically rather than retrying: isolate the lib root per test (unique temp dir keyed by test name) and/or make the liveness probe take an explicit injected pid-alive predicate instead of consulting the real process table.
+- [ ] 🚧 [#libgcpidrace] #agent-doc-bug lib_gc::tests::gc_removes_lib_with_dead_pid_lock (src/lib_gc.rs:302, 'assertion failed: !v1.exists()') fails intermittently under nextest parallelism and passes in isolation and on re-run. Observed 2026-07-19 during the #ay80ci cycle: one make check run failed it, the next full run was 7804/7804 green. Dead-pid lib GC is racing another concurrently-running test's pid/lib dir, so the 'is this pid dead' probe sees a pid that is alive/reused (or the lib dir is recreated between the probe and the assert). Will redden CI intermittently the same way #ay80ci did, so pin it deterministically rather than retrying: isolate the lib root per test (unique temp dir keyed by test name) and/or make the liveness probe take an explicit injected pid-alive predicate instead of consulting the real process table.
 - [ ] [#hubregistryevict] [focused-cycle] #agent-doc-bug agent-doc-crdt-relay-io's hub_registry (static Mutex<HashMap<String, RelayHub>>) is never evicted in production code — only tests call .remove(). Every document the controller ever touches leaves one RelayHub (its own ThreadSafeContext, canonical replica, member mirrors, liveness cell family) alive for the process lifetime. Found while proving #lazilyscopeadopt: this is the ONLY real process-lifetime growth in the reactive layer, and it is a registry-eviction question, not a ctx.scope() one. Eviction is not free: with_hub recreates an EMPTY hub on next contact, so a wrong eviction is exactly the phantom missing_replica shape. Sequence AFTER #missingreplicarebuild since eviction increases traffic on that recovery path. A missing hub is already a first-class handled state (CurrentText::EditorAttachedMissingReplica + recover_missing_hub_from_durable_projection), so the safe shape is evict-only-when-no-members-and-committed, verified by a test that re-contact after eviction recovers the same canonical text.
 - [ ] [#authoritydescentstd] [focused-cycle] #agent-doc-bug Standardize the authority rebuild/descent order into ONE shared pure decision fn. IMPLEMENTED TWICE, independently, under the SAME tags (#px82/#bn41): (1) agent-doc-document-realtime-io reobserve_missing_editor_replica_with_reregistration + resolve_editor_unavailable_disk_read_fallback; (2) agent-doc-preflight-io current_text_via_preflight_authority_retrying + observe_current_text_with_bounded_retry. PROVEN DRIFT: separate budgets/env overrides (AGENT_DOC_EDITOR_REPLICA_REOBSERVE_ATTEMPTS vs AGENT_DOC_QUEUE_AUTHORITY_ATTEMPTS, both default 3 but independently tunable), and the liveness-witness memo from adefcda0a exists ONLY in the realtime-io copy (grep in preflight-io = 0) — a policy fix silently applied to half the paths. DESIGN DECIDED 2026-07-19: home is agent-doc-turn, NOT a new crate (every agent-doc crate is already publish=false, so a crate buys a boundary not privacy) and NOT agent-doc-document-realtime (preflight-io does not depend on it and would take a new edge onto write_policy.rs 161KB + crdt_relay.rs 107KB; both consumers ALREADY depend on agent-doc-turn, which already hosts closeout_recovery/cycle_policy/wait_machine/repair). SHAPE: follow the closeout_recovery.rs precedent — 'File/effect adapters classify concrete diffs into this smaller vocabulary before asking the turn policy to pick the recovery state.' Pure observation vocabulary (Current/Detached/MissingReplica/SyncPending/Error) + decision enum (Retry/RebuildFromPlugin/DescendToDisk/FailClosed); each -io site maps its own CurrentText in. The adapter is load-bearing, not ceremony: CurrentText lives in agent-doc-crdt-relay-io (effectful), so a direct dependency would invert the layering and make agent-doc-turn depend on an -io crate. CONSTRAINT: the two sites are similar, NOT identical — realtime-io gates rebuild eligibility on sync_pending vs missing_replica, preflight-io retries both. Preserve that as a parameter; flattening it reintroduces the ~28s-per-read-site double rebuild the exclusion was added to fix. Prerequisite for #missingreplicarebuild.
 - [ ] [#missingreplicarebuild] [focused-cycle] #agent-doc-bug Read authority descends to DISK while an editor is attached, on the missing_replica path. The operator's directive — realtime model, then rebuild from the plugin, then disk — is ALREADY the structure: resolve_editor_unavailable_disk_read_fallback has an explicit 'Tier 1 retry: rebuild the model from the live editor buffer' calling ensure_document_model_through_authority. But it is gated `rebuild_eligible = reason == "sync_pending" && observe_editor_open(file)`; missing_replica is EXCLUDED because reobserve_missing_editor_replica_with_reregistration self-heals it upstream (excluding it was a real fix: rebuilding twice measured ~28s per read site). The gap is what happens when that upstream self-heal EXHAUSTS — the descent then reaches disk with an editor still attached, which is the corruption vector (operator-observed: frontmatter closing fence gained a leading space, deleted queue heads resurrected). Fix direction: on missing_replica exhaustion, do NOT descend to disk while observe_editor_open(file) — request one plugin rebuild (the forceRefresh/re-register the runbook describes) and fail closed if it cannot answer, rather than adopting disk. Depends on #deliveryackcut: a live-but-non-ACKing replica is why the upstream heal exhausts in the first place.

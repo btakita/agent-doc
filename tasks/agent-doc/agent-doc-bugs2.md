@@ -54,6 +54,13 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 
 ### Re: #missingreplicarebuild and #authoritydescentstd — gpt-5.6-sol
 
+> **Queue prompt:**
+>
+> 📌 do [#missingreplicarebuild]
+>
+> 📌 do [#authoritydescentstd]
+
+
 Completed `#missingreplicarebuild` and its prerequisite `#authoritydescentstd` in agent-doc commit `0e7a5a0ed`.
 
 The invariant is now explicit: while an editor remains attached, missing-replica or sync-pending reads may retry or rebuild, but they never adopt disk content. The policy owner is the pure `agent-doc-turn::authority_recovery` decision table.
@@ -61,13 +68,13 @@ The invariant is now explicit: while an editor remains attached, missing-replica
 Transition coverage now distinguishes current, detached, missing-replica, sync-pending, and error observations. Current state is accepted; detached state may descend to disk; missing replicas retry with plugin refresh; sync-pending retries without a duplicate refresh; exhausted attached states rebuild when the adapter owns that effect or fail closed; unavailable detached states descend.
 
 The shared policy is consumed by both realtime and preflight adapters. The authority spec, changelog, focused unit tests, affected crate suites, and finalize integration coverage were updated. Full `make check` passed, and a clean `make install` completed at version 0.35.9. No operator verification or migration remains for these items.
-<!-- agent:boundary:a8b5d994 -->
+<!-- agent:boundary:a868404e -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ 📌 do [#missingreplicarebuild]
-- ⏭️ 📌 do [#authoritydescentstd]
+- ~~⏭️ 📌 do [#missingreplicarebuild]~~
+- ~~⏭️ 📌 do [#authoritydescentstd]~~
 - ⏭️ 📌 do [#patchretryidem]
 - 📌 do [#hvw0]
 - 📌 do [#bbpe]

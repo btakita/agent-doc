@@ -175,25 +175,47 @@ fn observe_current_text_with_bounded_retry(
                 status
             ),
         );
-        let transient = matches!(
-            observed,
-            Ok(Some(
-                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
-                    | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending
-            ))
-        );
-        if !transient || attempt == attempts {
+        use agent_doc_turn::authority_recovery::{
+            AuthorityObservation, AuthorityRecoveryDecision, AuthorityRecoveryFacts,
+            decide_authority_recovery,
+        };
+        let observation = match &observed {
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current { .. })) => {
+                AuthorityObservation::Current
+            }
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) => {
+                AuthorityObservation::Detached
+            }
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)) => {
+                AuthorityObservation::MissingReplica
+            }
+            Ok(Some(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending)) => {
+                AuthorityObservation::SyncPending
+            }
+            Ok(None) | Err(_) => AuthorityObservation::Error,
+        };
+        let decision = decide_authority_recovery(AuthorityRecoveryFacts {
+            observation,
+            editor_open: matches!(
+                observation,
+                AuthorityObservation::MissingReplica | AuthorityObservation::SyncPending
+            ),
+            retries_remaining: attempt < attempts,
+            // Preflight's bounded loop owns both transient retries. It returns
+            // the exhausted observation to the caller rather than duplicating
+            // realtime-io's model-rebuild effect.
+            rebuild_after_retry_exhaustion: false,
+        });
+        let AuthorityRecoveryDecision::Retry {
+            request_plugin_refresh,
+        } = decision
+        else {
             return observed;
-        }
+        };
         // `#bn41`: the missing piece is the editor REPLICA, not the controller.
         // Ask for re-registration and then re-observe rather than reporting an
         // error the operator has to clear with two manual admin commands.
-        if matches!(
-            observed,
-            Ok(Some(
-                agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
-            ))
-        ) {
+        if request_plugin_refresh {
             let reregister = match agent_doc_crdt_relay_io::signal_crdt_replica_event(
                 file,
                 agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,

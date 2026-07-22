@@ -543,15 +543,13 @@ fn attached_model_missing_does_not_merge_from_stale_recovery_projection() {
         )
         .assert()
         .failure()
-        // The WRITE must still refuse — that is the invariant. Its reason moved:
-        // read resolution now descends `editor buffer -> disk` for reads, so the
-        // read no longer bails with `editor_attached_model_missing`; the refusal
-        // now comes from the write/endpoint guard, which is intentionally still
-        // fail-closed. Reads may descend a tier; writes may not. The substantive
-        // assertions below (no merge, operator text intact, HEAD unmoved, no
-        // filesystem inbox) are what actually pin the anti-clobber behaviour.
+        // The read-authority guard now refuses before the write/endpoint guard:
+        // an attached missing replica cannot make stale disk current even as an
+        // intermediate read. The substantive assertions below (no merge,
+        // operator text intact, HEAD unmoved, no filesystem inbox) pin the same
+        // anti-clobber behavior at the earlier authority boundary.
         .stderr(predicates::str::contains(
-            "no registered Lazily editor endpoint accepted the write",
+            "disk read authority is refused",
         ));
 
     let content = fs::read_to_string(&doc).unwrap();

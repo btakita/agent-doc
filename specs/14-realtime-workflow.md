@@ -76,6 +76,10 @@ editor publish/re-registration before returning an error. A failed ensure is a
 named startup/reconciliation failure; it must not be collapsed into the raw
 missing-replica observation, and it must not use disk as a successful
 editor-authoritative value.
+After bounded missing-replica recovery exhausts, an editor that remains open
+keeps disk ineligible even for reads: the adapter records a named refusal and
+fails closed. Disk becomes read authority only after the editor is proven
+detached. Sync-pending follows the same rule after its one model-rebuild attempt.
 
 An explicitly authorized `--force-disk` write is the sole exception to waiting
 for editor delivery. It must first retain the complete pre-write disk base and

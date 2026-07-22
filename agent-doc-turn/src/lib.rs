@@ -6,6 +6,7 @@
 use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
+pub mod authority_recovery;
 pub mod coined_ids;
 pub mod closeout_guard;
 pub mod closeout_recovery;

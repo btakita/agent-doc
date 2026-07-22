@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Attached-editor reads no longer descend to stale disk after replica recovery exhausts (`#missingreplicarebuild`).** Realtime and preflight adapters now share a pure authority-recovery decision table in `agent-doc-turn`: missing replicas request the bounded plugin refresh, sync-pending may run its single model rebuild, and both fail closed while the editor remains open. Disk becomes read authority only after proven detach, preventing saved projections from resurrecting operator-deleted document nodes.
+
 ## 0.35.9
 
 - **Missing Codex resume sessions now recover with a fresh session.** When Codex definitively reports `No saved session found with ID <id>`, the supervisor removes only that matching frontmatter `resume` pointer and immediately relaunches fresh instead of retrying the stale ID forever. It also rechecks document authority before a cached resume retry, so an operator removal made while the supervisor is running takes effect immediately.

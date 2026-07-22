@@ -643,18 +643,11 @@ mod tests {
             }]);
     }
 
-    /// Preflight's current-document resolution is a READ, so it follows the
-    /// `editor buffer -> disk` precedence and descends instead of pausing.
-    ///
-    /// This is a deliberate behavioural change from the previous pause: an
-    /// attached-but-unanswering editor no longer wedges the cycle before it
-    /// starts. The anti-clobber protection is unchanged and lives where it
-    /// belongs — commit authority (`agent-doc-commit-io`) is a separate guard
-    /// and still refuses to treat disk as authoritative while an editor is
-    /// attached. So a stale read can begin a cycle, but it cannot silently
-    /// commit over unsaved editor text.
+    /// Preflight must not adopt disk after an attached editor's bounded replica
+    /// refresh exhausts. Even a read can feed stale structure into later cycle
+    /// mutations, so the authority boundary fails closed before that happens.
     #[test]
-    fn preflight_missing_editor_model_reads_disk_tier_without_pausing() {
+    fn preflight_missing_editor_model_refuses_disk_while_editor_is_attached() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("session.md");
@@ -665,20 +658,20 @@ mod tests {
         let owner = "preflight-missing-editor-model-test";
         seed_reliable_sync_open(&file, owner);
 
-        let resolved = resolve_current_preflight_document(&file, "test")
-            .expect("a read descends to the disk tier instead of pausing");
+        let err = resolve_current_preflight_document(&file, "test")
+            .expect_err("attached editor authority must fail closed");
         assert!(
-            resolved.contains("body"),
-            "preflight must read the disk replica: {resolved:?}"
+            format!("{err:#}").contains("disk read authority is refused"),
+            "unexpected refusal: {err:#}"
         );
 
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("realtime_doc_resolve_disk_read_fallback")
-                && ops_log.contains("scope=read_only"),
-            "the descent must be recorded as a read-scoped disk tier:\n{ops_log}"
+            ops_log.contains("realtime_doc_resolve_disk_read_refused")
+                && ops_log.contains("upstream_replica_refresh_exhausted"),
+            "the refusal must record the exhausted attached-editor recovery:\n{ops_log}"
         );
-        // Recover BEFORE descent. For the MISSING-REPLICA family that recovery
+        // Recover BEFORE refusing. For the MISSING-REPLICA family that recovery
         // is the upstream self-heal (`#bn41`/`#px82`), which re-registers and
         // re-observes with backoff before resolution ever reaches the disk tier.
         // The read-path model rebuild is deliberately NOT run again here — it
@@ -688,12 +681,9 @@ mod tests {
         // (see `current_resolve_rebuilds_editor_model_when_sync_pending`).
         assert!(
             ops_log.contains("editor_replica_reregister_attempt"),
-            "the disk tier must be preceded by the upstream replica self-heal:\n{ops_log}"
+            "the refusal must be preceded by the upstream replica self-heal:\n{ops_log}"
         );
-        assert!(
-            ops_log.contains("after_rebuild_attempt=false"),
-            "missing-replica must not re-run the read-path rebuild:\n{ops_log}"
-        );
+        assert!(!ops_log.contains("realtime_doc_resolve_disk_read_fallback"));
     }
 
     #[test]

@@ -5359,6 +5359,11 @@ fn resolve_editor_unavailable_disk_read_fallback(
     source: &str,
     reason: &str,
 ) -> Result<Reconciliation> {
+    use agent_doc_turn::authority_recovery::{
+        AuthorityObservation, AuthorityRecoveryDecision, AuthorityRecoveryFacts,
+        decide_authority_recovery,
+    };
+
     // Tier 1 retry: rebuild the model from the live editor buffer.
     //
     // Two preconditions:
@@ -5373,10 +5378,25 @@ fn resolve_editor_unavailable_disk_read_fallback(
     //    here. Rebuilding it again duplicates that work at real cost — measured
     //    ~28s per read site, which multiplied across the several resolutions a
     //    single compact/commit performs and pushed those tests past their
-    //    timeout. Sync-pending has no upstream self-heal, so the rebuild is the
-    //    only attempt there, and it is where it demonstrably recovers the editor
-    //    tier instead of reading past unsaved text.
-    let rebuild_eligible = reason == "sync_pending" && observe_editor_open(file);
+    //    timeout. Once that upstream refresh exhausts, missing-replica must fail
+    //    closed while the editor remains open. Sync-pending has no upstream
+    //    self-heal, so the rebuild is the only attempt there.
+    let observation = match reason {
+        "missing_replica" => AuthorityObservation::MissingReplica,
+        "sync_pending" => AuthorityObservation::SyncPending,
+        _ => AuthorityObservation::Error,
+    };
+    let initial_decision = decide_authority_recovery(AuthorityRecoveryFacts {
+        observation,
+        editor_open: observe_editor_open(file),
+        retries_remaining: false,
+        // Missing-replica already spent its plugin refresh loop upstream.
+        rebuild_after_retry_exhaustion: reason == "sync_pending",
+    });
+    let rebuild_eligible = matches!(
+        initial_decision,
+        AuthorityRecoveryDecision::RebuildFromPlugin
+    );
     if rebuild_eligible {
         agent_doc_ops_log_io::log_op(
             file,
@@ -5460,7 +5480,42 @@ fn resolve_editor_unavailable_disk_read_fallback(
         }
     }
 
-    // Tier 2: the rebuild could not restore a live model — read the disk replica.
+    // Tier 2 is reachable only after the editor is proven detached. A failed
+    // rebuild while it remains open must not turn stale disk into current text.
+    let descent_decision = decide_authority_recovery(AuthorityRecoveryFacts {
+        observation,
+        editor_open: observe_editor_open(file),
+        retries_remaining: false,
+        rebuild_after_retry_exhaustion: false,
+    });
+    if descent_decision == AuthorityRecoveryDecision::FailClosed {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "realtime_doc_resolve_disk_read_refused file={} source={} reason={} \
+                 editor_open=true recovery={} invariant=attached_editor_never_descends_to_disk",
+                file.display(),
+                source,
+                reason,
+                if rebuild_eligible {
+                    "plugin_rebuild_exhausted"
+                } else {
+                    "upstream_replica_refresh_exhausted"
+                },
+            ),
+        );
+        anyhow::bail!(
+            "editor is still attached for {}; {reason} recovery exhausted and disk read authority is refused",
+            file.display()
+        );
+    }
+    debug_assert_eq!(
+        descent_decision,
+        AuthorityRecoveryDecision::DescendToDisk,
+        "only a detached editor may reach disk fallback"
+    );
+
+    // The editor is detached — read the disk replica.
     let disk = match disk {
         Some(disk) => disk.to_string(),
         None => std::fs::read_to_string(file).with_context(|| {
@@ -5474,7 +5529,7 @@ fn resolve_editor_unavailable_disk_read_fallback(
         file,
         &format!(
             "realtime_doc_resolve_disk_read_fallback file={} source={} reason={} tier=disk \
-             precedence=editor_then_disk scope=read_only after_rebuild_attempt={} disk_len={}",
+         precedence=editor_then_disk scope=read_only editor_open=false after_rebuild_attempt={} disk_len={}",
             file.display(),
             source,
             reason,
@@ -8616,46 +8671,33 @@ mod tests {
         );
     }
 
-    /// Read-path precedence is `editor buffer -> disk`, with no git tier.
-    ///
-    /// This previously bailed. An attached-but-unanswering editor (missing
-    /// replica) wedged every READ of the document behind a transient condition,
-    /// even though the last saved disk image was right there and adequate to
-    /// read. Reads now descend one tier.
-    ///
-    /// The invariant the old bail actually protected is preserved and asserted
-    /// below: disk must not become COMMIT authority. That is a separate guard
-    /// (`agent-doc-commit-io`), because reading a slightly stale image is
-    /// recoverable while committing one over unsaved editor text destroys
-    /// operator edits.
+    /// An attached editor with an exhausted missing-replica recovery fails closed.
+    /// Disk may contain an older saved projection, so treating it as current text
+    /// can resurrect operator-deleted nodes before the separate commit guard runs.
     #[test]
-    fn current_resolve_falls_back_to_disk_for_reads_when_editor_model_missing() {
+    fn current_resolve_refuses_disk_when_editor_model_is_still_missing() {
         let disk = "plain disk body\n";
         let (dir, file, _canonical) = temp_doc(disk);
         seed_reliable_sync_open(&file, "test-editor-authority-message");
 
-        let resolved = try_resolve_current_doc_from_file(&file).unwrap();
-        assert_eq!(
-            resolved.authority,
-            agent_doc_document_realtime::DocAuthority::Disk,
-            "an unanswering editor descends to the disk replica for reads"
+        let err = try_resolve_current_doc_from_file(&file)
+            .expect_err("an attached editor must block disk read authority");
+        assert!(
+            format!("{err:#}").contains("disk read authority is refused"),
+            "unexpected refusal: {err:#}"
         );
-        assert_eq!(resolved.content, disk);
-        // The descent is read-only: it must not write the document.
         assert_eq!(std::fs::read_to_string(&file).unwrap(), disk);
 
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("realtime_doc_resolve_disk_read_fallback")
+            log.contains("realtime_doc_resolve_disk_read_refused")
                 && log.contains("reason=missing_replica")
-                && log.contains("scope=read_only"),
-            "the descent must be recorded as a read-scoped disk tier:\n{log}"
+                && log.contains("upstream_replica_refresh_exhausted"),
+            "the refusal must name the exhausted recovery:\n{log}"
         );
-        // Disk is still recorded as a REPLICA, so nothing downstream mistakes
-        // this for editor-authoritative text.
         assert!(
-            !log.contains("authority=editor_buffer reason=missing_replica"),
-            "the disk tier must never be labelled editor-authoritative:\n{log}"
+            !log.contains("realtime_doc_resolve_disk_read_fallback"),
+            "an attached editor must never descend to disk:\n{log}"
         );
     }
 
@@ -8766,18 +8808,16 @@ mod tests {
         let (dir, file, _canonical) = temp_doc(disk);
         seed_reliable_sync_open(&file, "test-no-git-tier");
 
-        let resolved = try_resolve_current_doc_from_file(&file).unwrap();
-        assert_eq!(
-            resolved.authority,
-            agent_doc_document_realtime::DocAuthority::Disk,
-            "the descent stops at disk"
-        );
+        let err = try_resolve_current_doc_from_file(&file)
+            .expect_err("an attached editor stops before every lower authority tier");
+        assert!(format!("{err:#}").contains("disk read authority is refused"));
 
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
             !log.to_lowercase().contains("tier=git") && !log.contains("authority=git"),
             "read resolution must never descend to a git tier:\n{log}"
         );
+        assert!(!log.contains("realtime_doc_resolve_disk_read_fallback"));
     }
 
     #[test]

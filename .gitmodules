@@ -196,3 +196,6 @@
 [submodule "src/pubnub-example"]
 	path = src/pubnub-example
 	url = git@github.com:btakita/pubnub-example.git
+[submodule "src/community-pulse"]
+	path = src/community-pulse
+	url = git@github.com:btakita/community-pulse.git

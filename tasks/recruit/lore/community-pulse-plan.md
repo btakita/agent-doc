@@ -114,6 +114,75 @@ headless interaction rehearsal are complete.
   § Affordance update). And the research report view must render
   markdown-lite instead of plain text (spec: research-interface-plan
   § Punch).
+- [ ] **Collapsible left panel (The Mix)** (requested from Codex directly,
+  in flight): the composer column collapses to a slim rail (icon +
+  budget readout at minimum — the attention meter should stay visible
+  even collapsed) and expands back; digest column absorbs the space.
+  Acceptance: collapse state persists (settings table), animated
+  transition respects reduced-motion, faders/mutes keep working after
+  expand, keyboard/agent-driven mix changes while collapsed still land
+  (state is shared; the panel is just a view), and a mix change arriving
+  while collapsed gives a subtle cue on the rail (e.g., budget readout
+  pulse) so the demo's "chat moved the faders" beat isn't invisible if
+  the panel happens to be collapsed.
+- [x] **Right-panel width stability + resizable pane** (requested from
+  Codex directly, implemented): AGENT and RESEARCH tabs share one fixed
+  panel width so switching never reflows the digest column; the panel
+  gains a drag-to-resize splitter on its left edge. Acceptance: tab
+  switch causes zero layout shift in the center column; splitter drag
+  persists across tab switches (and ideally across restarts via the
+  settings table); sane min/max widths so neither chat input nor digest
+  cards collapse; rotation/companion windows unaffected.
+- [x] **Source-provided post summaries (operator request)**: capture the
+  author-provided text the sources sometimes have (PH descriptions, HN
+  self-post story_text, Lobsters text-post descriptions — link posts
+  have none and get NO affordance; never fabricate), stored plain-text
+  ≤500 chars. UI: ¶ glyph on evidence rows → hover tooltip (~200 chars)
+  + click-to-expand inline; headline tooltip on cards; labeled
+  "author's text · <source>". Spec: repo `docs/design/IMPLEMENTATION.md`
+  § Source-provided post summaries.
+- [ ] **Remove channels from The Mix (operator request)**: hover-revealed
+  ✕ icon per channel (beside M), wired to existing `set_interest(topic,
+  0)` — clears the stance, channel leaves the mix, may resurface in
+  suggested. Semantics made explicit in the tooltip: removal ≠ mute (a
+  neutral topic stays digest-eligible at affinity 1.0; M excludes).
+  Empty mix is legal. Spec: repo `docs/design/IMPLEMENTATION.md`
+  § Remove channels from The Mix.
+- [ ] **Viewport fit (requested from Codex directly, in flight)**: the
+  desktop window overflows the physical screen (titlebar clipped under
+  the tmux bar, bottom edge past the display). Acceptance: on launch the
+  window sizes to fit the current monitor's work area (min sizes
+  respected, never larger than available space), nothing renders
+  off-screen, and the running-report chip row + status bar stay fully
+  visible at the fitted size.
+- [ ] **Wire the titlebar traffic-light buttons (operator request)**: the
+  red/yellow/green dots are decorative — make them functional: red =
+  quit (clean shutdown, terminal reaped per lifecycle spec), yellow =
+  minimize, green = maximize/restore toggle. Hover states per the icon
+  family; hit targets ≥ the dot visuals; mobile frame's dots follow the
+  same wiring where applicable (red closes that window only in
+  companion mode).
+- [x] **Report readability pass (operator feedback)**: replace the
+  single StyledText blob with block-level rendering — paragraph gaps
+  (10px), heading margins (18/6), bullet marker column with hanging
+  indent, code chips, body 13px/1.55, ~68ch measure cap now that the
+  pane is resizable. Shared block component across report + comparison
+  panes; parser is a pure function with block-list tests. Spec: repo
+  `docs/design/research-interface-plan.md` § Readability pass.
+- [x] **Dynamic z-score tooltip (operator request)**: hover on any z badge
+  shows the concrete numbers (6h mentions vs μ ± σ), a value-dependent
+  interpretation band (rare / unusual / elevated / normal / cooling),
+  conditional honesty caveats (σ floor engaged; small-baseline
+  overstatement), and the fixed self-normalization line. Pure-function
+  content (unit-testable), hover popup component. Spec: repo
+  `docs/design/IMPLEMENTATION.md` § Dynamic z-score tooltip.
+- [ ] **Local file deep links + selectable chat text (operator feedback)**:
+  clickable `research/logs/` + `research/reports/` paths in chat/tool
+  chips (allowlisted, via open-url path), and chat bodies as read-only
+  TextInput for native selection/Ctrl+C plus a hover copy button
+  (arboard) for formatted panes. Spec: repo
+  `docs/design/IMPLEMENTATION.md` § Local file deep links + selectable
+  chat text.
 - [ ] **Mobile research parity** remains intentionally deferred, including the
 evidence-sheet report view, badges/live report acceptance, companion-window
 parity, and bundled i3 floating-rule work.

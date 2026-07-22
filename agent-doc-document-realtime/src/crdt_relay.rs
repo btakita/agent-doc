@@ -426,6 +426,21 @@ impl RelayHub {
         self.ctx.get(&self.live_editor_count)
     }
 
+    /// Whether the process-global owner may drop this hub without losing live
+    /// or uncommitted document state.
+    ///
+    /// An empty member set alone is insufficient: the canonical may still be
+    /// ahead of the last disk commit. Re-contact can safely rebuild from disk
+    /// only after that committed baseline exactly matches the canonical text.
+    pub fn is_safe_to_evict(&self) -> bool {
+        self.members.is_empty()
+            && self.pending_rebootstrap.is_empty()
+            && self
+                .last_committed_text
+                .as_ref()
+                .is_some_and(|committed| self.canonical.text() == *committed)
+    }
+
     /// Whether `client_id` is registered (live or offline).
     pub fn is_registered(&self, client_id: u64) -> bool {
         self.members.contains_key(&client_id)
@@ -480,6 +495,7 @@ impl RelayHub {
         self.awareness.remove(client_id);
         let removed = self.members.remove(&client_id).is_some();
         if removed {
+            self.pending_rebootstrap.remove(&client_id);
             // The cell stays present-but-false (deferral, not de-allocation) so it is
             // no longer counted; a later re-register flips the same cell back to true.
             self.set_live(client_id, false);
@@ -2221,6 +2237,38 @@ mod tests {
             hub.canonical_text(),
             "PREFIX committed body",
             "the un-flushed live op survives the no-op reconcile"
+        );
+    }
+
+    #[test]
+    fn hub_eviction_requires_no_members_and_an_exact_committed_canonical() {
+        let mut hub = RelayHub::new(1);
+        hub.canonical.apply_local_edit(0, 0, "current body");
+        assert!(
+            !hub.is_safe_to_evict(),
+            "an uncheckpointed canonical must remain resident"
+        );
+
+        hub.record_committed_baseline("older body");
+        assert!(
+            !hub.is_safe_to_evict(),
+            "a stale committed baseline must not authorize eviction"
+        );
+
+        hub.record_committed_baseline("current body");
+        assert!(hub.is_safe_to_evict());
+
+        let editor = mint_client_id("intellij:eviction");
+        hub.register(editor).unwrap();
+        assert!(
+            !hub.is_safe_to_evict(),
+            "a registered member keeps the hub resident"
+        );
+        hub.adopt_authoritative_text("new committed body").unwrap();
+        assert!(hub.deregister(editor));
+        assert!(
+            hub.is_safe_to_evict(),
+            "deregister drops the member's stale rebootstrap flag"
         );
     }
 

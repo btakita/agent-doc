@@ -3961,7 +3961,7 @@ mod tests {
     );
 
     #[test]
-    fn compact_stale_zero_editor_relay_is_repaired_to_live_not_committed_target() {
+    fn compact_passive_poll_does_not_recreate_an_evicted_zero_editor_relay() {
         use std::fs;
 
         let dir = tempfile::tempdir().unwrap();
@@ -3981,7 +3981,6 @@ mod tests {
                 .unwrap()
         );
 
-        let committed = COMPACTED_DOC;
         let live = COMPACTED_DOC.replace(
             "<!-- /agent:exchange -->\n",
             "unresolved operator prompt\n<!-- /agent:exchange -->\n",
@@ -3989,16 +3988,11 @@ mod tests {
         ensure_compact_live_relay_target(&file, &live).unwrap();
 
         let current = agent_doc_crdt_relay_io::current_text_for_file(&file).unwrap();
-        match current {
-            agent_doc_crdt_relay_io::CurrentText::Current {
-                text, live_editors, ..
-            } => {
-                assert_eq!(live_editors, 0);
-                assert_eq!(text, live);
-                assert_ne!(text, committed);
-            }
-            other => panic!("expected repaired zero-editor relay target, got {other:?}"),
-        }
+        assert_eq!(
+            current,
+            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica,
+            "compact's fail-open missing-model path and the stale delivery poll must not recreate a disk-seeded phantom hub"
+        );
     }
 
     #[test]

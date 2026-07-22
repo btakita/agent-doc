@@ -1927,6 +1927,34 @@ pub fn apply_canonical_replace_if_attached(
             })?;
         }
 
+        if matches!(
+            query_live_editor_authority(file, source),
+            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+        ) {
+            let intent_id = ensure_deferred_document_write_intent(
+                file,
+                expected_current,
+                content,
+                source,
+                DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+            )?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_crdt_write_deferred file={} intent_id={} content_hash={} targets=0 live_editors=0 recovery=await_editor_replica_no_disk_write reason=missing_relay_model",
+                    file.display(),
+                    intent_id,
+                    agent_doc_hash::content_hash(content),
+                ),
+            );
+            let recycle_status = agent_doc_controller_io::project_controller::
+                schedule_stale_editor_replica_cp_recycle(file, source);
+            return Err(await_editor_replica_no_disk_write(format!(
+                "{source}: retained the canonical write for {} in Lazily state (intent_id={intent_id}), but no editor replica was registered to receive it; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
+                file.display(),
+            )));
+        }
+
         let observed = match observe_live_editor_authority_after_model_ensure(file, source) {
             Ok(current) => Some(current),
             Err(err) if transient_convergence_backpressure_error(&err) => {
@@ -4327,20 +4355,34 @@ pub fn guard_visible_write_current_transition_with_budget(
 ) -> Result<()> {
     let start = std::time::Instant::now();
     loop {
-        let (ready, state) = match query_live_editor_authority_after_model_ensure(file, source) {
-            Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => (true, "detached"),
-            Ok(agent_doc_crdt_relay_io::CurrentText::Current {
-                delivery_converged: true,
-                ..
-            }) => (true, "lazily_current"),
-            Ok(agent_doc_crdt_relay_io::CurrentText::Current { .. }) => (false, "delivery_pending"),
-            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
-                (false, "missing_replica")
+        // An evicted hub is already a first-class missing-model state. Let the
+        // CP write layer attempt durable-projection recovery (or retain/defer
+        // immediately when none exists) instead of spending the whole settle
+        // budget trying to make a model current before that recovery seam runs.
+        let missing_model = matches!(
+            query_live_editor_authority(file, source),
+            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+        );
+        let (ready, state) = if missing_model {
+            (true, "missing_replica_defer")
+        } else {
+            match query_live_editor_authority_after_model_ensure(file, source) {
+                Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => (true, "detached"),
+                Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                    delivery_converged: true,
+                    ..
+                }) => (true, "lazily_current"),
+                Ok(agent_doc_crdt_relay_io::CurrentText::Current { .. }) => {
+                    (false, "delivery_pending")
+                }
+                Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+                    (false, "missing_replica")
+                }
+                Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
+                    (false, "current_pending")
+                }
+                Err(_) => (false, "authority_unavailable"),
             }
-            Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
-                (false, "current_pending")
-            }
-            Err(_) => (false, "authority_unavailable"),
         };
         if ready {
             agent_doc_ops_log_io::log_op(
@@ -8787,7 +8829,8 @@ mod tests {
         );
         let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            log.contains("realtime_doc_resolve_crdt_no_live_editors_disk_authority"),
+            log.contains("crdt_relay_hub_evicted")
+                && log.contains("realtime_doc_resolve authority=disk reason=editor_absent"),
             "closed-editor disk demotion should be auditable:\n{log}"
         );
     }

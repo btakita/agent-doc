@@ -188,8 +188,11 @@ pub fn reliable_sync_editor_registrations_for_file(
 
 /// Resolve CRDT authority from the shared durable reliable-sync liveness plane.
 pub fn crdt_authority_for_file(file: &Path) -> CrdtAuthority {
-    if embedded_relay_route_is_registered_for_file(file) || reliable_sync_editor_live_for_file(file)
-    {
+    let routed_model_is_allocated = embedded_relay_route_is_registered_for_file(file)
+        && agent_doc_fs::document_state_hash(file)
+            .ok()
+            .is_some_and(|hash| hub_registry().lock().contains_key(&hash));
+    if routed_model_is_allocated || reliable_sync_editor_live_for_file(file) {
         CrdtAuthority::MultiReplica
     } else {
         CrdtAuthority::GitAuthoritative
@@ -529,6 +532,35 @@ fn with_existing_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Resu
     let hash = agent_doc_fs::document_state_hash(file)?;
     let mut registry = hub_registry().lock();
     Ok(registry.get_mut(&hash).map(f))
+}
+
+/// Drop an inactive hub only after its canonical text is known to be durable.
+///
+/// Callers hold the per-document replica-registration lock so a concurrent
+/// registration cannot add a member between the predicate and removal.
+fn evict_hub_if_safe(file: &Path, document_hash: &str, source: &str) -> bool {
+    let evicted = {
+        let mut registry = hub_registry().lock();
+        let should_evict = registry
+            .get(document_hash)
+            .is_some_and(RelayHub::is_safe_to_evict);
+        if should_evict {
+            registry.remove(document_hash);
+        }
+        should_evict
+    };
+    if evicted {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "crdt_relay_hub_evicted file={} doc_hash={} source={} reason=no_members_and_canonical_committed",
+                file.display(),
+                document_hash,
+                source,
+            ),
+        );
+    }
+    evicted
 }
 
 /// Whether this process already owns an embedded Lazily relay for `file`.
@@ -1434,16 +1466,21 @@ pub fn deregister_replica_for_file(file: &Path, identity: &str) -> Result<bool> 
         return Ok(false);
     }
     let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let registration_lock = replica_registration_lock(&document_hash)?;
+    let _registration_guard = registration_lock.lock();
     let client_id = mint_client_id(identity);
-    let removed = with_hub_seeded_from_file(file, |hub| hub.deregister(client_id))?;
+    // A duplicate/late deregistration after eviction must not recreate the hub.
+    let removed = with_existing_hub(file, |hub| hub.deregister(client_id))?.unwrap_or(false);
     forget_replica_identity(&document_hash, client_id)?;
+    let hub_evicted = evict_hub_if_safe(file, &document_hash, "replica_deregister");
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_replica_deregister file={} authority=multi_replica client_id={} removed={}",
+            "crdt_replica_deregister file={} authority=multi_replica client_id={} removed={} hub_evicted={}",
             file.display(),
             client_id,
             removed,
+            hub_evicted,
         ),
     );
     Ok(removed)
@@ -1889,13 +1926,22 @@ pub fn pull_replica_updates_for_file(file: &Path, identity: &str) -> Result<Opti
         return Ok(None);
     }
     let client_id = mint_client_id(identity);
-    let updates = with_hub_seeded_from_file(file, |hub| hub.pending_updates(client_id))??;
-    let delivery = with_hub_seeded_from_file(file, |hub| {
-        hub.delivery_snapshot()
+    let Some(pull) = with_existing_hub(file, |hub| {
+        let updates = hub.pending_updates(client_id)?;
+        let delivery = hub
+            .delivery_snapshot()
             .into_iter()
             .find(|entry| entry.client_id == client_id)
+            .ok_or_else(|| anyhow::anyhow!("replica {client_id} is not registered"))?;
+        Ok::<_, anyhow::Error>((updates, delivery))
     })?
-    .ok_or_else(|| anyhow::anyhow!("replica {client_id} is not registered"))?;
+    else {
+        // Passive polls carry no editor state with which to rebuild an evicted
+        // canonical. Registration or an authoritative update must re-contact
+        // first; otherwise a stale poll recreates the phantom zero-member hub.
+        return Ok(None);
+    };
+    let (updates, delivery) = pull?;
     // Only log a pull that actually delivers work or advances the ack frontier.
     // The editor replica forwarder polls this ~4×/second while attached; logging
     // every empty steady-state poll floods ops.log (observed growing it to
@@ -1934,7 +1980,7 @@ pub fn pull_rebootstrap_for_file(file: &Path, identity: &str) -> Result<Option<S
         return Ok(None);
     }
     let client_id = mint_client_id(identity);
-    let text = with_hub_seeded_from_file(file, |hub| {
+    let text = with_existing_hub(file, |hub| {
         if hub.pending_rebootstrap_members().contains(&client_id) {
             let text = hub.rebootstrap_text();
             hub.clear_rebootstrap(client_id);
@@ -1942,7 +1988,8 @@ pub fn pull_rebootstrap_for_file(file: &Path, identity: &str) -> Result<Option<S
         } else {
             None
         }
-    })?;
+    })?
+    .flatten();
     if text.is_some() {
         agent_doc_ops_log_io::log_op(
             file,
@@ -1983,9 +2030,13 @@ pub fn ack_replica_update_for_file_with_content_hash(
         return Ok(None);
     }
     let client_id = mint_client_id(identity);
-    let acknowledged = with_hub_seeded_from_file(file, |hub| {
+    let Some(acknowledged) = with_existing_hub(file, |hub| {
         hub.ack_delivery_with_content_hash(client_id, patch_id, generation, applied_content_hash)
-    })??;
+    })?
+    else {
+        return Ok(None);
+    };
+    let acknowledged = acknowledged?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -2015,10 +2066,13 @@ pub fn set_replica_awareness_for_file(
         return Ok(None);
     }
     let client_id = mint_client_id(identity);
-    let snapshot = with_hub_seeded_from_file(file, |hub| {
+    let Some(snapshot) = with_existing_hub(file, |hub| {
         hub.set_awareness(client_id, state);
         hub.awareness_snapshot()
-    })?;
+    })?
+    else {
+        return Ok(None);
+    };
     Ok(Some(snapshot))
 }
 
@@ -2620,9 +2674,27 @@ pub fn record_committed_baseline_for_file(file: &Path) {
             return;
         }
     };
-    if let Some(hub) = hub_registry().lock().get_mut(&hash) {
-        hub.record_committed_baseline(&on_disk);
+    let registration_lock = match replica_registration_lock(&hash) {
+        Ok(lock) => lock,
+        Err(e) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "crdt_record_committed_baseline_registration_lock_error file={} error={}",
+                    file.display(),
+                    e
+                ),
+            );
+            return;
+        }
+    };
+    let _registration_guard = registration_lock.lock();
+    {
+        if let Some(hub) = hub_registry().lock().get_mut(&hash) {
+            hub.record_committed_baseline(&on_disk);
+        }
     }
+    evict_hub_if_safe(file, &hash, "committed_baseline");
 }
 
 /// Authority-gated reconciliation of an explicit cold restart projection into
@@ -3628,6 +3700,78 @@ mod tests {
         register_replica_for_file(&doc, "intellij:retry")
             .unwrap()
             .expect("a refresh retry must not be refused as detached authority");
+    }
+
+    #[test]
+    fn committed_empty_hub_is_evicted_and_recontact_restores_canonical() {
+        let (_dir, doc) = temp_doc("hub-eviction.md");
+        let file_str = doc.display().to_string();
+        seed_live_reliable_sync_open(&file_str);
+        let document_hash = agent_doc_fs::document_state_hash(&doc).unwrap();
+        let identity = "intellij:hub-eviction";
+        let (client_id, _) = register_replica_for_file(&doc, identity)
+            .unwrap()
+            .expect("the live editor should attach");
+        let on_disk = std::fs::read_to_string(&doc).unwrap();
+
+        with_hub(&doc, |hub| {
+            hub.apply_local(
+                client_id,
+                on_disk.chars().count() as u32,
+                0,
+                "\nunsaved canonical",
+            )
+            .unwrap();
+        })
+        .unwrap();
+        let canonical = with_hub(&doc, |hub| hub.canonical_text()).unwrap();
+        assert_ne!(canonical, on_disk);
+
+        assert!(deregister_replica_for_file(&doc, identity).unwrap());
+        assert!(
+            hub_is_allocated_for_test(&document_hash),
+            "an uncommitted canonical must pin an empty hub"
+        );
+
+        std::fs::write(&doc, &canonical).unwrap();
+        record_committed_baseline_for_file(&doc);
+        assert!(
+            !hub_is_allocated_for_test(&document_hash),
+            "the committed empty hub should be evicted"
+        );
+        assert_eq!(
+            current_text_for_file(&doc).unwrap(),
+            CurrentText::EditorAttachedMissingReplica,
+            "eviction must remain a first-class missing-hub state"
+        );
+
+        register_replica_for_file(&doc, "intellij:hub-eviction-recontact")
+            .unwrap()
+            .expect("re-contact should seed a fresh hub from the durable projection");
+        with_hub(&doc, |hub| {
+            assert_eq!(hub.canonical_text(), canonical);
+            assert_eq!(hub.live_count(), 1);
+        })
+        .unwrap();
+        assert!(deregister_replica_for_file(&doc, "intellij:hub-eviction-recontact").unwrap());
+        assert!(
+            !hub_is_allocated_for_test(&document_hash),
+            "last-member deregistration should evict an already committed hub"
+        );
+        assert!(
+            pull_replica_updates_for_file(&doc, "intellij:hub-eviction-recontact")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            !hub_is_allocated_for_test(&document_hash),
+            "a stale passive poll must not recreate the hub"
+        );
+        assert!(!deregister_replica_for_file(&doc, "intellij:hub-eviction-recontact").unwrap());
+        assert!(
+            !hub_is_allocated_for_test(&document_hash),
+            "a late duplicate deregistration must not recreate the hub"
+        );
     }
 
     #[test]

@@ -69,8 +69,10 @@ Examples:
 
 Events must carry stable ids where available: document hash, session id, cycle
 id, actor generation, patch id, queue node key, backlog id, and causation id.
-The event log is append-only. Corrections are new events that supersede earlier
-facts by projection rules; they are not in-place mutation of old facts.
+The event log is append-only on the write path. Corrections are new events that
+supersede earlier facts by projection rules; they are not in-place mutation of
+old facts. Retention is the sole deletion path and follows the live-peer
+watermark and fact-specific rules below.
 Content-bearing visible-write receipts include the model revision in their
 stable event identity so a fresh editor publication can supersede a legacy
 hash-only fact for the same patch without losing idempotence. A visible-write
@@ -101,12 +103,16 @@ next subscription; the controller accepts it only while the exact registration
 is live. Acknowledgements advance monotonically and a peer cannot acknowledge a
 version above the document's durable high-water mark.
 
-This acknowledgement table is collection-only for now. Existing fact-specific
-count caps remain the retention authority and do not consult peer cursors. A
-future retention change may delete below `MIN(acked_version)` across live peers
-only after it also defines deterministic crashed-peer eviction; until both
-rules land together, a missing or stale acknowledgement is never grounds for
-additional deletion.
+Retention deletes ledger rows strictly below `MIN(acked_version)` across the
+controller's exact live PID-scoped registrations. A live registration without
+an acknowledgement contributes zero and pins deletion. Ack rows for
+registrations absent from that authoritative live set are evicted atomically
+before the minimum is calculated; the OS-exit watcher and cold-start liveness
+reconciliation therefore prevent a crashed IDE from pinning the watermark
+forever. With no live registrations there is no peer watermark and this path
+deletes no events. The row at the minimum is retained as the monotonic
+per-document high-water anchor, and existing fact-specific count caps remain a
+bounded-storage backstop.
 
 ## Projections
 

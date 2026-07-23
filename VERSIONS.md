@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.23
+
+_JetBrains plugin 0.2.291; VS Code extension 0.2.56._
+
+- **State-event retention now follows the slowest exact live editor acknowledgement (`#retentionwatermarklive`).** The controller passes its authoritative PID-scoped registration set into SQLite; a live peer without an acknowledgement pins the minimum at zero, while registrations removed by the durable OS-exit/cold-start liveness path have their stale ack rows evicted atomically. Ledger rows strictly below `MIN(acked_version)` are deleted while the minimum row remains as the monotonic version anchor, and the existing fact-specific count caps remain the bounded-storage backstop.
+
 ## 0.35.22
 
 _JetBrains plugin 0.2.291; VS Code extension 0.2.56._

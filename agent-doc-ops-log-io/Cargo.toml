@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-ops-log-io"
-version = "0.35.22"
+version = "0.35.23"
 edition = "2024"
 description = "Ops log read/write adapters for agent-doc"
 license = "MIT"
@@ -17,13 +17,13 @@ name = "agent_doc_ops_log_io"
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
 lazily = "0.48.1"
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.22" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.22" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.22" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.22" }
-agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.22" }
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.22" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.22" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.23" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.23" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.23" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.23" }
+agent-doc-log-time = { path = "../agent-doc-log-time", version = "0.35.23" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.23" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.23" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

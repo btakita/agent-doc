@@ -8695,29 +8695,28 @@ fn handle_state_subscribe(
     )
     .context("serialize native IpcMessage for state_subscribe")?;
 
+    let live_registrations = controller_liveness_plane()
+        .lock()
+        .projection()
+        .live_registrations(&document_hash);
+    let project_root = runtime.bootstrap_snapshot()?.project_root;
+    let state_db = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+
     // The cursor reports the PREVIOUS response, so it is safe only after the
     // editor successfully folded that snapshot/delta. Bind it to the exact
     // live PID-scoped registration; never let a synthetic socket client create
     // a retention peer. Failure to collect an ack must not make the read path
-    // unavailable — the retention phase still uses count caps and a missing
-    // cursor is the conservative outcome.
+    // unavailable — a missing cursor contributes zero to the live-peer minimum.
     let peer_ack_recorded = match (
         payload.peer_pid,
         payload.editor_id.as_deref(),
         payload.acked_version.filter(|version| *version > 0),
     ) {
         (Some(peer_pid), Some(editor_id), Some(acked_version))
-            if controller_liveness_plane()
-                .lock()
-                .projection()
-                .live_registrations(&document_hash)
-                .iter()
-                .any(|registration| {
-                    registration.pid == peer_pid && registration.editor_id == editor_id
-                }) =>
+            if live_registrations.iter().any(|registration| {
+                registration.pid == peer_pid && registration.editor_id == editor_id
+            }) =>
         {
-            let project_root = runtime.bootstrap_snapshot()?.project_root;
-            let state_db = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
             match agent_doc_sqlite::state_store::record_state_event_peer_ack_in_db(
                 &state_db,
                 &document_hash,
@@ -8737,6 +8736,33 @@ fn handle_state_subscribe(
         }
         _ => false,
     };
+    let live_peers = live_registrations
+        .iter()
+        .map(|registration| (registration.pid, registration.editor_id.clone()))
+        .collect::<Vec<_>>();
+    match agent_doc_sqlite::state_store::prune_state_events_to_live_peer_watermark_in_db(
+        &state_db,
+        &document_hash,
+        &live_peers,
+    ) {
+        Ok(outcome) if outcome.evicted_peer_rows > 0 || outcome.deleted_event_rows > 0 => {
+            eprintln!(
+                "[state-retention] document_hash={document_hash} \
+                 live_peers={} evicted_peers={} minimum_acked_version={:?} deleted_events={}",
+                outcome.live_peer_count,
+                outcome.evicted_peer_rows,
+                outcome.minimum_acked_version,
+                outcome.deleted_event_rows,
+            );
+        }
+        Ok(_) => {}
+        Err(err) => {
+            eprintln!(
+                "[agent-doc] warning: live-peer state retention failed \
+                 document_hash={document_hash}: {err:#}"
+            );
+        }
+    }
     Ok(ControllerStateSubscribeResponse {
         document_hash,
         message,
@@ -8939,6 +8965,23 @@ impl agent_doc_reliable_sync_io::push::LivenessPushTransport for RpcDocumentPush
 fn controller_liveness_plane()
 -> &'static parking_lot::Mutex<agent_doc_reliable_sync_io::plane::ControllerLivenessPlane> {
     agent_doc_reliable_sync_io::global_liveness_plane()
+}
+
+fn retain_state_events_for_live_registrations(
+    project_root: &Path,
+    document_hash: &str,
+    registrations: &[agent_doc_reliable_sync_io::liveness::EditorRegistration],
+) -> Result<agent_doc_sqlite::state_store::StateEventWatermarkRetention> {
+    let state_db = agent_doc_sqlite::state_store::open_state_db(project_root)?;
+    let live_peers = registrations
+        .iter()
+        .map(|registration| (registration.pid, registration.editor_id.clone()))
+        .collect::<Vec<_>>();
+    agent_doc_sqlite::state_store::prune_state_events_to_live_peer_watermark_in_db(
+        &state_db,
+        document_hash,
+        &live_peers,
+    )
 }
 
 fn restored_reliable_sync_projects() -> &'static parking_lot::Mutex<BTreeSet<PathBuf>> {
@@ -9216,7 +9259,49 @@ pub fn record_reliable_sync_editor_exit(project_root: &Path, pid: u64) {
         );
         return;
     }
-    controller_liveness_plane().lock().apply_local(&op);
+    let affected_documents = {
+        let mut plane = controller_liveness_plane().lock();
+        let affected_documents = plane
+            .projection()
+            .all_live_registrations()
+            .into_iter()
+            .filter(|registration| registration.pid == pid)
+            .map(|registration| registration.document_hash)
+            .collect::<BTreeSet<_>>();
+        plane.apply_local(&op);
+        affected_documents
+            .into_iter()
+            .map(|document_hash| {
+                let registrations = plane.projection().live_registrations(&document_hash);
+                (document_hash, registrations)
+            })
+            .collect::<Vec<_>>()
+    };
+    for (document_hash, registrations) in affected_documents {
+        match retain_state_events_for_live_registrations(
+            project_root,
+            &document_hash,
+            &registrations,
+        ) {
+            Ok(outcome) if outcome.evicted_peer_rows > 0 || outcome.deleted_event_rows > 0 => {
+                eprintln!(
+                    "[state-retention] editor_exit_pid={pid} document_hash={document_hash} \
+                     live_peers={} evicted_peers={} minimum_acked_version={:?} deleted_events={}",
+                    outcome.live_peer_count,
+                    outcome.evicted_peer_rows,
+                    outcome.minimum_acked_version,
+                    outcome.deleted_event_rows,
+                );
+            }
+            Ok(_) => {}
+            Err(error) => {
+                eprintln!(
+                    "[reliable-sync] record_reliable_sync_editor_exit: \
+                     state retention failed document_hash={document_hash}: {error:#}"
+                );
+            }
+        }
+    }
 }
 
 /// `plugin → controller` reliable-sync liveness push (`#lzsync`, Phase 3C).
@@ -17882,6 +17967,54 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].acked_version, 2);
         assert_eq!(rows[0].registration_pid, 100);
+        let remaining_versions: Vec<i64> = conn
+            .prepare(
+                "SELECT document_version FROM state_events \
+                 WHERE document_hash = ?1 ORDER BY document_version",
+            )
+            .unwrap()
+            .query_map([&document_hash], |row| row.get(0))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            remaining_versions,
+            vec![2],
+            "the controller wires the exact live registration into delete-below retention"
+        );
+        let cold_runtime = ControllerRuntime::new(bootstrap.clone()).unwrap();
+        let (cold_wire, cold_version) = cold_runtime.state_subscribe(&document_hash, 0).unwrap();
+        let mut cold_message = serde_json::to_value(
+            agent_doc_state_wire::lazily_convert::wire_subscribe_to_ipc_message(&cold_wire)
+                .unwrap(),
+        )
+        .unwrap();
+        let mut expected_message = acknowledged.message.clone();
+        for message in [&mut cold_message, &mut expected_message] {
+            if let Some(snapshot) = message
+                .get_mut("Snapshot")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                snapshot.remove("epoch");
+            }
+        }
+        assert_eq!(cold_version, 2);
+        assert_eq!(
+            cold_message, expected_message,
+            "the retained minimum row must cold-rebuild the same graph content; \
+             the Lazily epoch is process-local and intentionally restarts"
+        );
+
+        record_reliable_sync_editor_exit(&bootstrap.project_root, 100);
+        assert!(
+            agent_doc_sqlite::state_store::load_state_event_peer_acks_from_db(
+                &conn,
+                &document_hash,
+            )
+            .unwrap()
+            .is_empty(),
+            "the durable OS-exit liveness transition evicts the crashed registration's ack"
+        );
 
         *controller_liveness_plane().lock() =
             agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new();

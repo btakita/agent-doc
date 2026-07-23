@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 pub use rusqlite::Connection;
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -340,6 +340,14 @@ pub struct StateEventPeerAck {
     pub editor_id: String,
     pub acked_version: u64,
     pub acknowledged_at_secs: u64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StateEventWatermarkRetention {
+    pub live_peer_count: usize,
+    pub evicted_peer_rows: usize,
+    pub minimum_acked_version: Option<u64>,
+    pub deleted_event_rows: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2934,8 +2942,7 @@ pub fn state_event_document_high_water_in_db(
 /// Advance one registered editor peer's replay acknowledgement monotonically.
 ///
 /// Future acknowledgements are rejected instead of clamped: accepting a cursor
-/// the controller never issued would make a later delete-below-watermark unsafe.
-/// Retention deliberately does not consult this table yet (`#fmgc` phase 1).
+/// the controller never issued would make delete-below-watermark unsafe.
 pub fn record_state_event_peer_ack_in_db(
     conn: &Connection,
     document_hash: &str,
@@ -3061,6 +3068,84 @@ pub fn load_state_event_peer_acks_from_db(
         })
     })?;
     Ok(rows.collect::<std::result::Result<_, _>>()?)
+}
+
+/// Prune one document's replay ledger below the minimum acknowledgement held by
+/// its exact live PID-scoped editor registrations (`#retentionwatermarklive`).
+///
+/// The controller-owned liveness projection supplies `live_peers`; SQLite never
+/// guesses liveness from a PID alone. An exact live registration without an ack
+/// contributes zero and therefore pins pruning. Ack rows absent from the live
+/// set are removed in the same transaction before the minimum is computed, so a
+/// crashed or replaced editor cannot pin the watermark forever. With no live
+/// peers there is no replay watermark and no event is deleted; the existing
+/// fact-specific count caps remain the bounded-storage backstop.
+///
+/// Rows with `document_version == MIN(acked_version)` are retained. Besides
+/// matching delete-*below* semantics, that preserves the document high-water
+/// anchor used to assign the next monotonic version.
+pub fn prune_state_events_to_live_peer_watermark_in_db(
+    conn: &Connection,
+    document_hash: &str,
+    live_peers: &[(u64, String)],
+) -> Result<StateEventWatermarkRetention> {
+    anyhow::ensure!(
+        !document_hash.is_empty(),
+        "state-event watermark retention requires a document hash"
+    );
+
+    let live_peer_keys = live_peers
+        .iter()
+        .map(|(registration_pid, editor_id)| state_event_peer_key(*registration_pid, editor_id))
+        .collect::<BTreeSet<_>>();
+    let transaction = conn
+        .unchecked_transaction()
+        .context("begin state-event watermark retention transaction")?;
+    let acknowledgements = load_state_event_peer_acks_from_db(&transaction, document_hash)?;
+    let mut evicted_peer_rows = 0;
+    let mut acked_by_peer = BTreeMap::new();
+
+    for acknowledgement in acknowledgements {
+        if live_peer_keys.contains(&acknowledgement.peer_key) {
+            acked_by_peer.insert(acknowledgement.peer_key, acknowledgement.acked_version);
+            continue;
+        }
+        evicted_peer_rows += transaction.execute(
+            "DELETE FROM state_event_peer_acks \
+             WHERE document_hash = ?1 AND peer_key = ?2",
+            params![document_hash, acknowledgement.peer_key],
+        )?;
+    }
+
+    let minimum_acked_version = if live_peer_keys.is_empty() {
+        None
+    } else {
+        live_peer_keys
+            .iter()
+            .map(|peer_key| acked_by_peer.get(peer_key).copied().unwrap_or(0))
+            .min()
+    };
+    let deleted_event_rows = match minimum_acked_version {
+        Some(version) if version > 0 => transaction.execute(
+            "DELETE FROM state_events \
+             WHERE document_hash = ?1 AND document_version < ?2",
+            params![
+                document_hash,
+                sqlite_i64(version, "state-event live-peer watermark")?
+            ],
+        )?,
+        _ => 0,
+    };
+    transaction
+        .commit()
+        .context("commit state-event watermark retention transaction")?;
+
+    Ok(StateEventWatermarkRetention {
+        live_peer_count: live_peer_keys.len(),
+        evicted_peer_rows,
+        minimum_acked_version,
+        deleted_event_rows,
+    })
 }
 
 /// Load the durable facts consumed by cycle closeout and proof projections.
@@ -5479,11 +5564,162 @@ mod tests {
         Ok(())
     }
 
-    /// `#fmgc`: the ack ledger is collection-only in this phase. Existing count
-    /// caps remain the retention backstop until the live-peer minimum and
-    /// liveness-eviction phase lands.
+    /// `#retentionwatermarklive`: the slowest exact live registration owns the
+    /// delete-below frontier, and advancing that peer advances retention without
+    /// renumbering the remaining ledger.
     #[test]
-    fn peer_ack_table_does_not_change_existing_count_cap_retention() -> Result<()> {
+    fn live_peer_minimum_controls_delete_below_watermark() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        for version in 1..=6 {
+            let event_id = format!("event-{version}");
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id: &event_id,
+                    document_hash: "docA",
+                    domain: "document",
+                    fact_type: "write_applied",
+                    payload_json: "{}",
+                },
+            )?;
+        }
+        record_state_event_peer_ack_in_db(&conn, "docA", 101, "jetbrains-101-a", 5)?;
+        record_state_event_peer_ack_in_db(&conn, "docA", 202, "vscode-202-b", 3)?;
+
+        let first = prune_state_events_to_live_peer_watermark_in_db(
+            &conn,
+            "docA",
+            &[
+                (101, "jetbrains-101-a".to_string()),
+                (202, "vscode-202-b".to_string()),
+            ],
+        )?;
+        assert_eq!(
+            first,
+            StateEventWatermarkRetention {
+                live_peer_count: 2,
+                evicted_peer_rows: 0,
+                minimum_acked_version: Some(3),
+                deleted_event_rows: 2,
+            }
+        );
+        let versions = || -> Result<Vec<i64>> {
+            Ok(conn
+                .prepare(
+                    "SELECT document_version FROM state_events \
+                     WHERE document_hash = 'docA' ORDER BY document_version",
+                )?
+                .query_map([], |row| row.get(0))?
+                .collect::<std::result::Result<_, _>>()?)
+        };
+        assert_eq!(versions()?, vec![3, 4, 5, 6]);
+
+        record_state_event_peer_ack_in_db(&conn, "docA", 202, "vscode-202-b", 4)?;
+        let second = prune_state_events_to_live_peer_watermark_in_db(
+            &conn,
+            "docA",
+            &[
+                (101, "jetbrains-101-a".to_string()),
+                (202, "vscode-202-b".to_string()),
+            ],
+        )?;
+        assert_eq!(second.minimum_acked_version, Some(4));
+        assert_eq!(second.deleted_event_rows, 1);
+        assert_eq!(versions()?, vec![4, 5, 6]);
+        assert_eq!(
+            state_event_document_high_water_in_db(&conn, "docA")?,
+            6,
+            "retention preserves the monotonic high-water anchor"
+        );
+        Ok(())
+    }
+
+    /// `#retentionwatermarklive`: a missing ack contributes zero, while a peer
+    /// absent from the controller's exact live-registration set is evicted and
+    /// can no longer pin the surviving peers' minimum.
+    #[test]
+    fn crashed_peer_eviction_unpins_watermark_but_missing_live_ack_pins_zero() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        for version in 1..=6 {
+            let event_id = format!("event-{version}");
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id: &event_id,
+                    document_hash: "docA",
+                    domain: "document",
+                    fact_type: "write_applied",
+                    payload_json: "{}",
+                },
+            )?;
+        }
+        record_state_event_peer_ack_in_db(&conn, "docA", 101, "jetbrains-101-a", 5)?;
+        record_state_event_peer_ack_in_db(&conn, "docA", 202, "vscode-202-b", 2)?;
+
+        let initial = prune_state_events_to_live_peer_watermark_in_db(
+            &conn,
+            "docA",
+            &[
+                (101, "jetbrains-101-a".to_string()),
+                (202, "vscode-202-b".to_string()),
+            ],
+        )?;
+        assert_eq!(initial.minimum_acked_version, Some(2));
+        assert_eq!(initial.deleted_event_rows, 1);
+
+        let pinned = prune_state_events_to_live_peer_watermark_in_db(
+            &conn,
+            "docA",
+            &[
+                (101, "jetbrains-101-a".to_string()),
+                (303, "jetbrains-303-new".to_string()),
+            ],
+        )?;
+        assert_eq!(pinned.evicted_peer_rows, 1);
+        assert_eq!(
+            pinned.minimum_acked_version,
+            Some(0),
+            "a live registration cannot be skipped before its first ack"
+        );
+        assert_eq!(pinned.deleted_event_rows, 0);
+
+        let unpinned = prune_state_events_to_live_peer_watermark_in_db(
+            &conn,
+            "docA",
+            &[(101, "jetbrains-101-a".to_string())],
+        )?;
+        assert_eq!(unpinned.minimum_acked_version, Some(5));
+        assert_eq!(unpinned.deleted_event_rows, 3);
+        let remaining: Vec<i64> = conn
+            .prepare(
+                "SELECT document_version FROM state_events \
+                 WHERE document_hash = 'docA' ORDER BY document_version",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(remaining, vec![5, 6]);
+        assert_eq!(
+            load_state_event_peer_acks_from_db(&conn, "docA")?
+                .iter()
+                .map(|row| row.registration_pid)
+                .collect::<Vec<_>>(),
+            vec![101]
+        );
+
+        let no_live_peers = prune_state_events_to_live_peer_watermark_in_db(&conn, "docA", &[])?;
+        assert_eq!(no_live_peers.evicted_peer_rows, 1);
+        assert_eq!(no_live_peers.minimum_acked_version, None);
+        assert_eq!(no_live_peers.deleted_event_rows, 0);
+        assert!(load_state_event_peer_acks_from_db(&conn, "docA")?.is_empty());
+        Ok(())
+    }
+
+    /// `#retentionwatermarklive`: existing fact-specific count caps remain a
+    /// bounded-storage backstop alongside the live-peer replay watermark.
+    #[test]
+    fn count_cap_retention_remains_active_as_watermark_backstop() -> Result<()> {
         let dir = tempfile::TempDir::new()?;
         let conn = open_state_db(dir.path())?;
         for event_id in ["capture-1", "capture-2", "capture-3"] {
@@ -5511,7 +5747,7 @@ mod tests {
         assert_eq!(
             remaining,
             vec!["capture-3".to_string()],
-            "count-cap retention remains active and does not consult peer acks yet"
+            "count-cap retention remains active as the bounded-storage backstop"
         );
         assert_eq!(
             load_state_event_peer_acks_from_db(&conn, "docA")?[0].acked_version,

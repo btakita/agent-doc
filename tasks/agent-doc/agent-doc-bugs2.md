@@ -237,7 +237,17 @@ That produced a split-brain WAL. Direct process evidence showed old connections 
 The current linked `.agent-doc/state.db` passes `PRAGMA quick_check`, but only after the bad path was quarantined/recreated. IDEA still holds dozens of descriptors to the deleted predecessor and deleted WAL/SHM, so the running plugin remains split from the linked database until IDEA is fully restarted. There were no ext4/NVMe I/O errors, SQLite was in WAL mode with `synchronous=FULL`, and this was not an ordinary lock-contention failure.
 
 I added focused follow-ups for the native-generation drain/fail-closed reload fix and for delivering selected JetBrains text as realtime steering while a pane is busy.
-<!-- agent:boundary:a3a2d0d8 -->
+
+### Re: supervisor recycle termination — gpt-5
+
+This report combines the pre-`v0.35.17` harness-switch workaround with later attempts made during the corrupted SQLite runtime.
+
+The earlier acadian-take-home event did reach the supervisor handoff path: the operations log records the replacement request, background IPC acceptance, and `agent_restart_performed ... old_harness=claude new_harness=codex`. The subsequent frontmatter/harness state changed again, which made the visible result look like a terminated/non-restarted switch. `v0.35.17` removes that manual-recycle dependency by retaining a typed pending harness handoff and performing it at the safe idle boundary.
+
+The later stale-supervisor recycle requests at 05:49Z are not clean lifecycle evidence. They coincide exactly with repeated `document_authority_state_event_error ... database disk image is malformed`, and the orphan drain then failed during route document preparation with SQLite error 11. A restart pipeline that cannot read its state store cannot prove relaunch completion.
+
+The explicit **Recycle Supervisor** contract still requires either an in-place re-exec for a stale binary or a child relaunch for a fresh binary, and both branches have deterministic coverage. No separate lifecycle item is warranted from this contaminated report alone. A valid post-release repro requires a full IDEA restart first so the deleted old native/SQLite generation is gone; if an explicit recycle then terminates a session without relaunching, capture the document and click timestamp so the replacement-request, boundary, and relaunch markers can be correlated.
+<!-- agent:boundary:d69be4ac -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -34,47 +34,16 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260722-214842.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260723-004701.md`*
 
 Compacted content:
-- Archived 15 response topic(s): finish the open items; `#boundarystableid` and `#writestdinhang`; `#operatorverifylive`; 12 more
-- Prior summary/context: prior compacted content: Archived 1 response topic(s): I tried agent-doc start, but it started a new claude session
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_visible_write patch_id=e75e29d2-85cf-4ee2-b9f8-6dbe598bdb8f invariant=live_prompt_drift_after_preflight recovery=visible_repair_required snap_source=lazily_visible_write_event candidate_len=83079 candidate_hash=cbe7fc2425ce29f181a0960826652dfe9fed9a799a58f1f2d67a3086d00333e5 content_ours_len=84173 content_ours_hash=4d00c7d70a33f8b7312e791343584ecfdc627255f7861b32b23a7eee68d64afe doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1784732624468
-```
-
-### Re: #missingreplicarebuild and #authoritydescentstd — gpt-5.6-sol
-
-> **Queue prompt:**
->
-> 📌 do [#missingreplicarebuild]
->
-> 📌 do [#authoritydescentstd]
-
-
-Completed `#missingreplicarebuild` and its prerequisite `#authoritydescentstd` in agent-doc commit `0e7a5a0ed`.
-
-The invariant is now explicit: while an editor remains attached, missing-replica or sync-pending reads may retry or rebuild, but they never adopt disk content. The policy owner is the pure `agent-doc-turn::authority_recovery` decision table.
-
-Transition coverage now distinguishes current, detached, missing-replica, sync-pending, and error observations. Current state is accepted; detached state may descend to disk; missing replicas retry with plugin refresh; sync-pending retries without a duplicate refresh; exhausted attached states rebuild when the adapter owns that effect or fail closed; unavailable detached states descend.
-
-The shared policy is consumed by both realtime and preflight adapters. The authority spec, changelog, focused unit tests, affected crate suites, and finalize integration coverage were updated. Full `make check` passed, and a clean `make install` completed at version 0.35.9. No operator verification or migration remains for these items.
-<!-- agent:boundary:a868404e -->
+- Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #missingreplicarebuild and #authoritydescentstd
+- Prior summary/context: prior compacted content: Archived 15 response topic(s): finish the open items; `#boundarystableid` and `#writestdinha...
+<!-- agent:boundary:99e2e059 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~⏭️ 📌 do [#missingreplicarebuild]~~
-- ~~⏭️ 📌 do [#authoritydescentstd]~~
 - ⏭️ 📌 do [#patchretryidem]
 - 📌 do [#hvw0]
 - 📌 do [#bbpe]

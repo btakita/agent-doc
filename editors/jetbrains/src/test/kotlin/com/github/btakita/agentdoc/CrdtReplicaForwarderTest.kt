@@ -336,7 +336,11 @@ class CrdtReplicaForwarderTest {
     fun `socket loss is distinguishable from an idle controller pull`() {
         val projectRoot = Files.createTempDirectory("agent-doc-missing-controller").toFile()
         try {
-            val transport = CpSocketReplicaTransport(projectRoot.absolutePath)
+            val transport =
+                CpSocketReplicaTransport(
+                    projectRoot = projectRoot.absolutePath,
+                    flushRetainedOpsBeforePull = false,
+                )
 
             val delivery = transport.pullDelivery("plan.md", "intellij:lost-controller")
 

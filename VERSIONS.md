@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.20
+
+_JetBrains plugin 0.2.290._
+
+- **Selected text from JetBrains `Run Agent Doc` now safely steers the active turn (`#selectedturnsteering`).** The action captures the exact selection before asynchronous dispatch and sends it through a dedicated Project Controller and supervisor `Steer` admission instead of the ordinary dispatch-only reopen path. The supervisor accepts steering only while the authoritative actor is busy, deduplicates retries by steering id, returns a typed `delivered`/`duplicate` acknowledgement, and leaves the active turn running. Invocations without a selection retain the existing busy-pane no-new-trigger refusal. Live-socket coverage proves exact-once byte delivery and stable busy state; controller and plugin tests pin the typed acknowledgement and verbatim payload.
+
 ## 0.35.19
 
 _JetBrains plugin 0.2.289._

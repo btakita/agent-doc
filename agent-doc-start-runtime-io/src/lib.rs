@@ -1789,6 +1789,10 @@ pub(crate) struct SupervisorShared {
     /// actor generation. The controller's durable dispatch receipt remains
     /// authoritative; this only prevents a local duplicate write before Ready.
     prompt_dispatch_projection: Mutex<Option<PromptDispatchProjection>>,
+    /// Bounded exact-once admission cache for realtime steering. A selection
+    /// retry carries the same steering id, while a later intentional selection
+    /// receives a fresh id even when its text is identical.
+    turn_steering_admissions: Mutex<std::collections::VecDeque<String>>,
     /// Claimed tmux pane that should receive supervisor-owned injected input.
     inject_pane: Option<String>,
     /// Filtered output and visible terminal projection for the current child process.
@@ -1876,6 +1880,7 @@ impl SupervisorShared {
             harness_binary: Mutex::new(harness_binary.to_string()),
             inject_writer: Mutex::new(None),
             prompt_dispatch_projection: Mutex::new(None),
+            turn_steering_admissions: Mutex::new(std::collections::VecDeque::new()),
             inject_pane,
             output: SupervisorOutputState::default(),
             child_pid: AtomicU32::new(0),

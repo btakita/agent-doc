@@ -441,7 +441,9 @@ mod tests {
             dir.path(),
             "queue-session",
             move |method| match method {
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     captured_for_ipc.lock().push(bytes);
                     IpcResponse::ok_empty()
                 }
@@ -501,7 +503,9 @@ mod tests {
             dir.path(),
             "queue-session",
             move |method| match method {
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     captured_for_ipc.lock().push(bytes);
                     IpcResponse::ok_empty()
                 }

@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-repair-command-io"
-version = "0.35.19"
+version = "0.35.20"
 edition = "2024"
 description = "Default repair command runtime bridge for agent-doc"
 license = "MIT"
@@ -11,27 +11,27 @@ publish = false
 name = "agent_doc_repair_command_io"
 
 [dependencies]
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.19" }
-agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.35.19" }
-agent-doc-repair-runtime-io = { path = "../agent-doc-repair-runtime-io", version = "0.35.19" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.19" }
-agent-doc-write-command-io = { path = "../agent-doc-write-command-io", version = "0.35.19" }
-agent-doc-write-runtime-io = { path = "../agent-doc-write-runtime-io", version = "0.35.19" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.20" }
+agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.35.20" }
+agent-doc-repair-runtime-io = { path = "../agent-doc-repair-runtime-io", version = "0.35.20" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.20" }
+agent-doc-write-command-io = { path = "../agent-doc-write-command-io", version = "0.35.20" }
+agent-doc-write-runtime-io = { path = "../agent-doc-write-runtime-io", version = "0.35.20" }
 anyhow = "1"
 
 [dev-dependencies]
-agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.19" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.19", features = ["test-support"] }
-agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.19" }
-agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.19" }
-agent-doc-diff-io = { path = "../agent-doc-diff-io", version = "0.35.19" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.19" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.19" }
-agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.19" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.19" }
-agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.19" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.19" }
-agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.19" }
-agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.19" }
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.20" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.20", features = ["test-support"] }
+agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.20" }
+agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.20" }
+agent-doc-diff-io = { path = "../agent-doc-diff-io", version = "0.35.20" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.20" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.20" }
+agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.20" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.20" }
+agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.20" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.20" }
+agent-doc-test-support = { path = "../agent-doc-test-support", version = "0.35.20" }
+agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.20" }
 serde_json = "1"
 tempfile = "3"

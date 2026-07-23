@@ -239,6 +239,18 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         }
     }
 
+    fn steer_active_turn(
+        &self,
+        invocation: agent_doc_controller_io::project_controller::ControllerTurnSteeringInvocation,
+    ) -> anyhow::Result<agent_doc_controller_io::project_controller::ControllerTurnSteeringReceipt>
+    {
+        agent_doc_route_io::turn_steering::deliver_active_turn_steering(
+            &invocation.file,
+            &invocation.steering_id,
+            &invocation.text,
+        )
+    }
+
     fn sync_tmux_layout(
         &self,
         project_root: &Path,

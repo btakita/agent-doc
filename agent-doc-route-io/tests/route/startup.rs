@@ -791,7 +791,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
@@ -929,7 +931,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1059,7 +1063,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     if let Some(target) = injected_pane_for_ipc.lock().clone() {
                         let _ = ipc_tmux.send_keys(&target, &bytes);
                     }
@@ -1226,7 +1232,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
@@ -1391,7 +1399,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     injects_for_ipc.lock().push(bytes.clone());
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
@@ -1742,7 +1752,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "actor_state": "ready",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1881,7 +1893,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "actor_state": "ready",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -2025,7 +2039,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "actor_state": "ready",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -2164,7 +2180,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "actor_state": "ready",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -2275,7 +2293,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                         "actor_state": actor_state,
                         "restart_count": 0
                     })),
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    IpcMethod::Inject { bytes }
+                    | IpcMethod::Steer { bytes, .. }
+                    | IpcMethod::Clear { bytes } => {
                         injects_for_ipc.lock().push(bytes.clone());
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
@@ -2391,7 +2411,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "actor_state": "busy",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -2539,7 +2561,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "actor_state": "starting",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -2677,7 +2701,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "actor_state": "starting",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -2789,7 +2815,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "actor_state": "starting",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -2923,7 +2951,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
                 "actor_state": "starting",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -3009,7 +3039,9 @@ zai/glm-5 · ~/work/btakita/agent-loop · context 0% used
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": mock_agent_pid })),
             IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }

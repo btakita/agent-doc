@@ -14,6 +14,14 @@ import java.util.concurrent.TimeUnit
 internal data class CpEditorRouteResult(
     val exitCode: Int,
     val output: String,
+    val steering: CpTurnSteeringAck? = null,
+)
+
+internal data class CpTurnSteeringAck(
+    val kind: String,
+    val steeringId: String,
+    val outcome: String,
+    val acceptedBytes: Int,
 )
 
 internal data class CpTmuxLayoutSyncState(
@@ -40,6 +48,8 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
+        selectedText: String? = null,
+        steeringId: String? = null,
     ): CpEditorRouteResult {
         val socket = cpcSocket(projectRoot)
         if (commandPlaneEnabled()) {
@@ -51,9 +61,11 @@ internal object CpRouteClient {
                 waitForReadySeconds = waitForReadySeconds,
             attemptId = attemptId,
             routeKey = routeKey,
-            commandId = commandId,
-            controllerCommand = "editor_command_submit_async",
-        )
+                commandId = commandId,
+                controllerCommand = "editor_command_submit_async",
+                selectedText = selectedText,
+                steeringId = steeringId,
+            )
         return try {
             val accepted = sendAcceptedCommandSubmitToSocket(socket, request, commandId, "editor_route")
             if (accepted.exitCode != 0) {
@@ -81,6 +93,8 @@ internal object CpRouteClient {
             waitForReadySeconds = waitForReadySeconds,
             attemptId = attemptId,
             routeKey = routeKey,
+            selectedText = selectedText,
+            steeringId = steeringId,
         )
         return try {
             sendToSocket(socket, request)
@@ -227,6 +241,8 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
+        selectedText: String? = null,
+        steeringId: String? = null,
     ): JsonObject {
         val payload = JsonObject()
         payload.addProperty("source", "jetbrains_plugin")
@@ -239,6 +255,8 @@ internal object CpRouteClient {
         })
         attemptId?.let { payload.addProperty("attempt_id", it) }
         routeKey?.let { payload.addProperty("route_key", it) }
+        selectedText?.let { payload.addProperty("selected_text", it) }
+        steeringId?.let { payload.addProperty("steering_id", it) }
         return payload
     }
 
@@ -249,8 +267,18 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
         routeKey: String?,
+        selectedText: String? = null,
+        steeringId: String? = null,
     ): JsonObject {
-        val payload = editorRoutePayload(relativePath, layoutArgs, waitForReadySeconds, attemptId, routeKey)
+        val payload = editorRoutePayload(
+            relativePath,
+            layoutArgs,
+            waitForReadySeconds,
+            attemptId,
+            routeKey,
+            selectedText,
+            steeringId,
+        )
         val request = JsonObject()
         request.addProperty("command", "editor_route")
         request.addProperty("file", filePath)
@@ -278,10 +306,20 @@ internal object CpRouteClient {
         waitForReadySeconds: Long,
         attemptId: String?,
     routeKey: String?,
-    commandId: String,
-    controllerCommand: String = "editor_command_submit",
-): JsonObject {
-        val payload = editorRoutePayload(relativePath, layoutArgs, waitForReadySeconds, attemptId, routeKey)
+        commandId: String,
+        controllerCommand: String = "editor_command_submit",
+        selectedText: String? = null,
+        steeringId: String? = null,
+    ): JsonObject {
+        val payload = editorRoutePayload(
+            relativePath,
+            layoutArgs,
+            waitForReadySeconds,
+            attemptId,
+            routeKey,
+            selectedText,
+            steeringId,
+        )
         return commandSubmitRequest(
             filePath = filePath,
             name = "editor_route",
@@ -290,7 +328,7 @@ internal object CpRouteClient {
             // Retries of one click share an attempt id; a later intentional click
             // gets a new id. Durable controller receipts still coalesce attempts
             // while the prior document turn is in flight.
-            idempotencyKey = attemptId ?: routeKey ?: relativePath,
+            idempotencyKey = steeringId ?: attemptId ?: routeKey ?: relativePath,
             commandId = commandId,
         deadlineMs = waitForReadySeconds * 1000,
         supersede = false,
@@ -445,7 +483,11 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
             val reason = entry.get("reason")?.takeIf { !it.isJsonNull }?.asString
             return CpEditorRouteResult(1, output.ifEmpty { "editor_route ${status ?: "rejected"}: ${reason ?: ""}" })
         }
-        return CpEditorRouteResult(0, output)
+        return CpEditorRouteResult(
+            0,
+            output,
+            steering = parseTurnSteeringAck(data.getAsJsonObject("payload")),
+        )
     }
 
     internal fun resolveCommandSubmitAcceptedData(
@@ -544,6 +586,17 @@ private const val COMMAND_COMPLETION_POLL_MS = 100L
         return CpEditorRouteResult(
             exitCode = data.get("exit_code")?.asInt ?: 1,
             output = data.get("output")?.asString ?: "",
+            steering = parseTurnSteeringAck(data),
+        )
+    }
+
+    private fun parseTurnSteeringAck(routeResult: JsonObject?): CpTurnSteeringAck? {
+        val steering = routeResult?.getAsJsonObject("steering") ?: return null
+        return CpTurnSteeringAck(
+            kind = steering.get("kind")?.asString ?: return null,
+            steeringId = steering.get("steering_id")?.asString ?: return null,
+            outcome = steering.get("outcome")?.asString ?: return null,
+            acceptedBytes = steering.get("accepted_bytes")?.asInt ?: return null,
         )
     }
 

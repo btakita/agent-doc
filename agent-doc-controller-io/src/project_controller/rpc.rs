@@ -4993,12 +4993,18 @@ struct ControllerEditorRoutePayload {
     route_key: Option<String>,
     #[serde(default)]
     source: Option<String>,
+    #[serde(default)]
+    selected_text: Option<String>,
+    #[serde(default)]
+    steering_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct ControllerEditorRouteResult {
     exit_code: i32,
     output: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    steering: Option<ControllerTurnSteeringReceipt>,
 }
 
 fn handle_crdt_current_text_rpc(
@@ -5305,6 +5311,53 @@ fn handle_editor_route_rpc(
         .filter(|value| !value.is_empty())
         .unwrap_or("jetbrains_plugin");
 
+    if let Some(selected_text) = payload.selected_text {
+        let steering_id = payload
+            .steering_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .context("selected-text editor route requires steering_id")?
+            .to_string();
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_turn_steering_started file={} source={} steering_id={} selected_bytes={}",
+                canonical.display(),
+                source,
+                steering_id,
+                selected_text.len(),
+            ),
+        );
+        let receipt = runtime_effects()?.steer_active_turn(ControllerTurnSteeringInvocation {
+            file: canonical.clone(),
+            steering_id: steering_id.clone(),
+            text: selected_text,
+        })?;
+        agent_doc_ops_log_io::log_op(
+            &canonical,
+            &format!(
+                "controller_turn_steering_ack file={} source={} steering_id={} outcome={:?} accepted_bytes={} actor_session={} actor_pane={} actor_generation={}",
+                canonical.display(),
+                source,
+                receipt.steering_id,
+                receipt.outcome,
+                receipt.accepted_bytes,
+                receipt.actor_session_id,
+                receipt.actor_pane_id,
+                receipt.actor_generation,
+            ),
+        );
+        return Ok(ControllerEditorRouteResult {
+            exit_code: 0,
+            output: format!(
+                "[route] realtime turn steering {:?} for {}",
+                receipt.outcome, relative_path
+            ),
+            steering: Some(receipt),
+        });
+    }
+
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
@@ -5347,6 +5400,7 @@ fn handle_editor_route_rpc(
     Ok(ControllerEditorRouteResult {
         exit_code: result.exit_code,
         output: result.output,
+        steering: None,
     })
 }
 
@@ -13734,6 +13788,44 @@ mod tests {
         );
         assert_eq!(response["projection"]["commands"][0]["status"], "applied");
         assert_eq!(response["projection"]["commands"][0]["terminal"], true);
+    }
+
+    #[test]
+    fn command_submit_selected_text_returns_typed_turn_steering_ack() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        std::fs::write(&file, "# Plan\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let selected = "Preserve this\n  exact selection  ";
+        let request = command_submit_request_for_test(
+            Some(file),
+            "editor_route",
+            "agent-doc.editor_route.v1",
+            serde_json::json!({
+                "relative_path": "plan.md",
+                "dispatch_only": true,
+                "plain_trigger": true,
+                "layout_args": [],
+                "selected_text": selected,
+                "steering_id": "steer-exact-1",
+            }),
+            "cmd-steer",
+        );
+
+        let response = handle_editor_command_submit_rpc(&bootstrap, request).unwrap();
+        assert_eq!(response["exit_code"], 0);
+        assert_eq!(response["payload"]["steering"]["kind"], "turn_steering_ack");
+        assert_eq!(
+            response["payload"]["steering"]["steering_id"],
+            "steer-exact-1"
+        );
+        assert_eq!(response["payload"]["steering"]["outcome"], "delivered");
+        assert_eq!(
+            response["payload"]["steering"]["accepted_bytes"],
+            selected.len()
+        );
+        assert_eq!(response["projection"]["commands"][0]["status"], "applied");
     }
 
     #[test]

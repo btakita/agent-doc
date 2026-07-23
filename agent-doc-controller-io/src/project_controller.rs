@@ -126,6 +126,31 @@ pub struct ControllerEditorRouteRuntimeResult {
     pub output: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ControllerTurnSteeringInvocation {
+    pub file: PathBuf,
+    pub steering_id: String,
+    pub text: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ControllerTurnSteeringOutcome {
+    Delivered,
+    Duplicate,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControllerTurnSteeringReceipt {
+    pub kind: String,
+    pub steering_id: String,
+    pub outcome: ControllerTurnSteeringOutcome,
+    pub accepted_bytes: usize,
+    pub actor_session_id: String,
+    pub actor_pane_id: String,
+    pub actor_generation: u64,
+}
+
 /// Outcome of an in-controller git commit (`commit_document`). The commit runs
 /// inside the controller process, where its own converged relay canonical IS the
 /// authority — so a document with a live editor commits authoritatively instead
@@ -224,6 +249,11 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
         &self,
         invocation: ControllerEditorRouteInvocation,
     ) -> Result<ControllerEditorRouteRuntimeResult>;
+
+    fn steer_active_turn(
+        &self,
+        invocation: ControllerTurnSteeringInvocation,
+    ) -> Result<ControllerTurnSteeringReceipt>;
 
     fn sync_tmux_layout(
         &self,
@@ -334,6 +364,21 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
                 "test editor route accepted for {}",
                 invocation.relative_path
             ),
+        })
+    }
+
+    fn steer_active_turn(
+        &self,
+        invocation: ControllerTurnSteeringInvocation,
+    ) -> Result<ControllerTurnSteeringReceipt> {
+        Ok(ControllerTurnSteeringReceipt {
+            kind: "turn_steering_ack".to_string(),
+            steering_id: invocation.steering_id,
+            outcome: ControllerTurnSteeringOutcome::Delivered,
+            accepted_bytes: invocation.text.len(),
+            actor_session_id: "test-session".to_string(),
+            actor_pane_id: "%test".to_string(),
+            actor_generation: 1,
         })
     }
 

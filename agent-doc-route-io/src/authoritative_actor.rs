@@ -1294,7 +1294,9 @@ mod tests {
                 "actor_state": "ready",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Inject { .. } | IpcMethod::Steer { .. } | IpcMethod::Clear { .. } => {
+                IpcResponse::ok_empty()
+            }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
             IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),

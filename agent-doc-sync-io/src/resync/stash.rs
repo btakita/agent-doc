@@ -967,7 +967,9 @@ mod tests {
             move |method| match method {
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": live_pid })),
                 IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 IpcMethod::Restart { .. }
@@ -1023,7 +1025,9 @@ mod tests {
             move |method| match method {
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": live_pid })),
                 IpcMethod::State => IpcResponse::ok(serde_json::json!({ "running": true })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 IpcMethod::Restart { .. }

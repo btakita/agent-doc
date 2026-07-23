@@ -51,6 +51,29 @@ class CpRouteClientCommandPlaneTest {
     }
 
     @Test
+    fun `editor route payload preserves selected text and uses steering id for dedupe`() {
+        val selected = "Keep this line\n  and these spaces  "
+        val request = CpRouteClient.editorCommandSubmitRequest(
+            filePath = "/proj/plan.md",
+            relativePath = "plan.md",
+            layoutArgs = emptyList(),
+            waitForReadySeconds = 30,
+            attemptId = "attempt-steer",
+            routeKey = "root:plan.md:run",
+            commandId = "cmd-steer",
+            selectedText = selected,
+            steeringId = "steering-exact-1",
+        )
+
+        val message = JsonParser.parseString(request.get("diagnostic_payload").asString).asJsonObject
+        val submit = message.getAsJsonObject("CommandSubmit")
+        val payload = inlinePayload(submit)
+        assertEquals("steering-exact-1", submit.get("idempotency_key").asString)
+        assertEquals(selected, payload.get("selected_text").asString)
+        assertEquals("steering-exact-1", payload.get("steering_id").asString)
+    }
+
+    @Test
     fun `editorCommandSubmitRequest can target async submit endpoint`() {
         val request = CpRouteClient.editorCommandSubmitRequest(
             filePath = "/proj/plan.md",
@@ -271,6 +294,29 @@ class CpRouteClientCommandPlaneTest {
 
         assertEquals(0, result?.exitCode)
         assertEquals("routed ok", result?.output)
+    }
+
+    @Test
+    fun `resolveCommandSubmitTerminalData preserves typed turn steering acknowledgement`() {
+        val data = projectionData("applied", true, "steered").apply {
+            add("payload", com.google.gson.JsonObject().apply {
+                addProperty("exit_code", 0)
+                addProperty("output", "steered")
+                add("steering", com.google.gson.JsonObject().apply {
+                    addProperty("kind", "turn_steering_ack")
+                    addProperty("steering_id", "steering-exact-1")
+                    addProperty("outcome", "delivered")
+                    addProperty("accepted_bytes", 34)
+                })
+            })
+        }
+
+        val result = CpRouteClient.resolveCommandSubmitTerminalData(data, "cmd-1")
+
+        assertEquals("turn_steering_ack", result?.steering?.kind)
+        assertEquals("steering-exact-1", result?.steering?.steeringId)
+        assertEquals("delivered", result?.steering?.outcome)
+        assertEquals(34, result?.steering?.acceptedBytes)
     }
 
     @Test

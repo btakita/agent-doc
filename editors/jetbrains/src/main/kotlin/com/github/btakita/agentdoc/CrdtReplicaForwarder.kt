@@ -371,7 +371,10 @@ interface ReplicaTransport {
 /**
  * Production transport over the CP/project-controller NDJSON Unix-domain socket.
  */
-class CpSocketReplicaTransport(private val projectRoot: String) : ReplicaTransport {
+class CpSocketReplicaTransport(
+    private val projectRoot: String,
+    private val flushRetainedOpsBeforePull: Boolean = true,
+) : ReplicaTransport {
     private val log = com.intellij.openapi.diagnostic.Logger.getInstance(CpSocketReplicaTransport::class.java)
 
     @Volatile
@@ -453,7 +456,9 @@ class CpSocketReplicaTransport(private val projectRoot: String) : ReplicaTranspo
     }
 
     override fun pullDelivery(filePath: String, identity: String): ReplicaPullDelivery {
-        flushDocumentOps(filePath)
+        if (flushRetainedOpsBeforePull) {
+            flushDocumentOps(filePath)
+        }
         val response = send(controllerRequest("replica_pull", filePath, identity))
             ?: return ReplicaPullDelivery.Unavailable(lastSendError ?: "controller_socket_unavailable")
         if (!response.ok) {

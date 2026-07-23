@@ -25,6 +25,7 @@
 //! |-----------|-----------------------------------------|----------------------------------------------|
 //! | `restart` | `{ "method": "restart", "mode": "..." }`| `{ "ok": true, "pid": <u32> }`               |
 //! | `inject`  | `{ "method": "inject", "bytes": "..." }`| `{ "ok": true, "n": <usize> }`               |
+//! | `steer`   | `{ "method": "steer", "steering_id": "...", "bytes": "..." }`| typed delivery acknowledgement |
 //! | `state`   | `{ "method": "state" }`                 | `{ "ok": true, "data": { ... } }`            |
 //! | `pid`     | `{ "method": "pid" }`                   | `{ "ok": true, "pid": <u32?> }`              |
 //! | `stop`    | `{ "method": "stop", "graceful": bool }`| `{ "ok": true }`                              |
@@ -207,6 +208,12 @@ pub trait SupervisorInjectDeliveryState {
     fn write_child_pty(&self, bytes: &[u8]) -> Result<(), String>;
     fn begin_prompt_dispatch(&self, source: &str, bytes: &str) -> PromptDispatchAdmission;
     fn clear_prompt_dispatch_on_failure(&self, key: &str);
+    fn begin_turn_steering(&self, steering_id: &str, bytes: &str) -> PromptDispatchAdmission {
+        self.begin_prompt_dispatch(&format!("ipc_turn_steering:{steering_id}"), bytes)
+    }
+    fn clear_turn_steering_on_failure(&self, steering_id: &str) {
+        self.clear_prompt_dispatch_on_failure(steering_id);
+    }
 }
 
 pub trait SupervisorIpcLifecycleState {
@@ -360,6 +367,78 @@ where
     }
 }
 
+pub fn deliver_supervisor_turn_steering<S>(
+    state: &S,
+    steering_id: &str,
+    bytes: &str,
+) -> Result<SupervisorInjectDeliveryOutcome, String>
+where
+    S: SupervisorInjectDeliveryState + ?Sized,
+{
+    if steering_id.trim().is_empty() {
+        return Err("turn steering requires a non-empty steering_id".to_string());
+    }
+    let admission = state.begin_turn_steering(steering_id, bytes);
+    let admission_key = match admission {
+        PromptDispatchAdmission::Accepted { key } => Some(key),
+        PromptDispatchAdmission::Duplicate { .. } => {
+            return Ok(SupervisorInjectDeliveryOutcome::DuplicateSuppressed);
+        }
+        PromptDispatchAdmission::Untracked => None,
+    };
+    let result = deliver_supervisor_input(state, bytes, "ipc_turn_steering");
+    if let Err(err) = &result {
+        if admission_key.is_some() {
+            state.clear_turn_steering_on_failure(steering_id);
+        }
+        return Err(err.clone());
+    }
+    Ok(SupervisorInjectDeliveryOutcome::Delivered)
+}
+
+fn deliver_supervisor_input<S>(state: &S, bytes: &str, diag_op: &str) -> Result<(), String>
+where
+    S: SupervisorInjectDeliveryState + ?Sized,
+{
+    let harness = state.harness_binary();
+    let harness = harness.as_str();
+    let source = format!("supervisor.{diag_op}");
+    if let Some(pane_id) = state.inject_pane_id() {
+        let profile = agent_doc_tmux_commands::tmux_submit_profile_for_harness(harness);
+        agent_doc_tmux_io::input_diag::log_text_submit(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, noop_input_diag_log),
+            &source,
+            &format!("pane:{pane_id}"),
+            bytes,
+            Some(harness),
+            profile.transform(),
+            profile.submit_key(),
+        );
+        let tmux = tmux_router::Tmux::default_server();
+        agent_doc_tmux_io::send_submitted_text_for_harness_logged(
+            &tmux,
+            &pane_id,
+            bytes,
+            harness,
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, noop_input_diag_log),
+            "sessions.send_submitted_text_for_harness",
+        )
+        .map_err(|err| err.to_string())
+    } else {
+        let normalized = normalize_supervisor_inject_bytes(bytes);
+        agent_doc_tmux_io::input_diag::log_transform_event(
+            agent_doc_tmux_io::input_diag::InputDiagSink::new(None, noop_input_diag_log),
+            &source,
+            "child_pty",
+            "normalize_lf_to_cr",
+            bytes.as_bytes(),
+            &normalized,
+            Some(harness),
+        );
+        state.write_child_pty(&normalized)
+    }
+}
+
 fn noop_input_diag_log(_file: &Path, _message: &str) {}
 
 /// Handle one decoded supervisor IPC method against a concrete supervisor
@@ -417,6 +496,32 @@ where
             ),
             Err(err) => IpcResponse::err(err),
         },
+        IpcMethod::Steer { steering_id, bytes } => {
+            if state.actor_state_label().as_deref() != Some("busy") {
+                return IpcResponse::err(
+                    "turn steering requires an authoritative actor with an active busy turn",
+                );
+            }
+            match deliver_supervisor_turn_steering(state, &steering_id, &bytes) {
+                Ok(SupervisorInjectDeliveryOutcome::Delivered) => {
+                    IpcResponse::ok(serde_json::json!({
+                        "kind": "turn_steering_ack",
+                        "steering_id": steering_id,
+                        "outcome": "delivered",
+                        "n": bytes.len(),
+                    }))
+                }
+                Ok(SupervisorInjectDeliveryOutcome::DuplicateSuppressed) => {
+                    IpcResponse::ok(serde_json::json!({
+                        "kind": "turn_steering_ack",
+                        "steering_id": steering_id,
+                        "outcome": "duplicate",
+                        "n": 0,
+                    }))
+                }
+                Err(err) => IpcResponse::err(err),
+            }
+        }
         IpcMethod::Clear { bytes: _ } if state.actor_waiting_input() => {
             match request_supervisor_restart(state, "fresh".to_string()) {
                 Ok(()) => IpcResponse::ok(serde_json::json!({
@@ -873,6 +978,12 @@ mod tests {
                 IpcResponse::ok(serde_json::json!({ "pid": 99999, "mode": mode }))
             }
             IpcMethod::Inject { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
+            IpcMethod::Steer { steering_id, bytes } => IpcResponse::ok(serde_json::json!({
+                "kind": "turn_steering_ack",
+                "steering_id": steering_id,
+                "outcome": "delivered",
+                "n": bytes.len(),
+            })),
             IpcMethod::Clear { bytes } => IpcResponse::ok(serde_json::json!({ "n": bytes.len() })),
         })
         .expect("start test handler")

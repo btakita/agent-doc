@@ -17,6 +17,15 @@ pub enum IpcMethod {
     Inject {
         bytes: String,
     },
+    /// Realtime operator input for the currently active harness turn.
+    ///
+    /// Unlike `Inject`, this never starts a new agent-doc turn. The supervisor
+    /// accepts it only while its authoritative actor is busy and deduplicates
+    /// retries by `steering_id`.
+    Steer {
+        steering_id: String,
+        bytes: String,
+    },
     /// Gate-exempt operator control injection (e.g. `/clear`). Unlike
     /// [`IpcMethod::Inject`], this bypasses the managed-capability dispatch gate
     /// so an operator can stop/clear a session whose capability proof failed
@@ -50,7 +59,7 @@ fn default_restart_mode() -> String {
 /// Return true when an IPC method is a real prompt dispatch that must pass the
 /// managed-capability proof gate before delivery.
 pub const fn ipc_method_requires_capability_gate(method: &IpcMethod) -> bool {
-    matches!(method, IpcMethod::Inject { .. })
+    matches!(method, IpcMethod::Inject { .. } | IpcMethod::Steer { .. })
 }
 
 /// Build the canonical raw-PTY submit bytes for a single-line harness input.
@@ -172,6 +181,14 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&IpcMethod::Inject { bytes: "x".into() }).unwrap(),
             r#"{"method":"inject","bytes":"x"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&IpcMethod::Steer {
+                steering_id: "steer-1".into(),
+                bytes: "keep going".into(),
+            })
+            .unwrap(),
+            r#"{"method":"steer","steering_id":"steer-1","bytes":"keep going"}"#
         );
         assert_eq!(
             serde_json::from_str::<IpcMethod>(r#"{"method":"pid"}"#).unwrap(),

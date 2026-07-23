@@ -141,7 +141,9 @@ mod tests {
         let injects = Arc::new(Mutex::new(Vec::<String>::new()));
         let injects_for_ipc = injects.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 injects_for_ipc.lock().push(bytes.clone());
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -234,7 +236,9 @@ mod tests {
                 dir.path(),
                 "route-live-child-skip",
                 move |method| match method {
-                    IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                    IpcMethod::Inject { bytes }
+                    | IpcMethod::Steer { bytes, .. }
+                    | IpcMethod::Clear { bytes } => {
                         injects_for_ipc.lock().push(bytes.clone());
                         IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                     }
@@ -346,7 +350,9 @@ mod tests {
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     if let Some(target) = injected_pane_for_ipc.lock().clone() {
                         let _ = ipc_tmux.send_keys(&target, bytes.trim_end_matches('\n'));
                     }
@@ -509,7 +515,9 @@ mod tests {
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     injects_for_ipc.lock().push(bytes.clone());
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
@@ -965,7 +973,9 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1071,7 +1081,9 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1179,7 +1191,9 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1311,7 +1325,9 @@ mod tests {
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     if let Some(target) = injected_pane_for_ipc.lock().clone() {
                         let _ = ipc_tmux.send_keys(&target, &bytes);
                     }
@@ -1402,7 +1418,9 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1555,7 +1573,9 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1652,7 +1672,9 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -1754,7 +1776,9 @@ mod tests {
         let ipc_tmux = iso.clone();
         let pane_for_ipc = pane.clone();
         let mut ipc = SupervisorIpc::start(dir.path(), session_id, move |method| match method {
-            IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+            IpcMethod::Inject { bytes }
+            | IpcMethod::Steer { bytes, .. }
+            | IpcMethod::Clear { bytes } => {
                 let _ = ipc_tmux.send_keys(&pane_for_ipc, &bytes);
                 IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
             }
@@ -2078,7 +2102,9 @@ mod tests {
                 restart_called_for_ipc.store(true, Ordering::Relaxed);
                 IpcResponse::ok_empty()
             }
-            IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => IpcResponse::ok_empty(),
+            IpcMethod::Inject { .. } | IpcMethod::Steer { .. } | IpcMethod::Clear { .. } => {
+                IpcResponse::ok_empty()
+            }
             IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": 12345 })),
             IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),
         })
@@ -2223,7 +2249,7 @@ mod tests {
                 "actor_state": "starting",
                 "restart_count": 0
             })),
-            IpcMethod::Inject { .. } | IpcMethod::Clear { .. } => {
+            IpcMethod::Inject { .. } | IpcMethod::Steer { .. } | IpcMethod::Clear { .. } => {
                 panic!("ready-prompt dispatch-only reroute must use direct pane submit")
             }
             IpcMethod::Restart { .. } => IpcResponse::ok_empty(),
@@ -2860,7 +2886,9 @@ mod tests {
                     IpcResponse::ok_empty()
                 }
                 IpcMethod::Pid => IpcResponse::ok(serde_json::json!({ "pid": null })),
-                IpcMethod::Inject { bytes } | IpcMethod::Clear { bytes } => {
+                IpcMethod::Inject { bytes }
+                | IpcMethod::Steer { bytes, .. }
+                | IpcMethod::Clear { bytes } => {
                     IpcResponse::ok(serde_json::json!({ "n": bytes.len() }))
                 }
                 IpcMethod::Stop { .. } | IpcMethod::StopAgent { .. } => IpcResponse::ok_empty(),

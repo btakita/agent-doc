@@ -1,6 +1,5 @@
 ---
 agent_doc_session: 7605b2c4-eaba-4a4c-9739-bb52a499521e
-resume: ad1125c2-24f9-4650-942c-4b774833fed2
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -47,7 +46,29 @@ One nuance: FastAPI already dispatches ordinary synchronous route functions thro
 Verification passed: `make check` (35 backend tests, mypy, 93 frontend tests, TypeScript typecheck, production build) and `git diff --check`. The required `gh run list --workflow CI --limit 1` check reported that this repo has no workflow named `CI`.
 
 Commits: `a2892ad` (`feat: make API handlers async`), `018deda` (automatic tsift navigation refresh), and superproject pointer `303ccfe40`.
-<!-- agent:boundary:0185b17d -->
+When I drag the date selector, a request fires and stops dragging after 1 tick. The deounce logic seems to be buggy.
+
+### Re: date selector drag interruption — gpt-5
+
+Fixed. The debounce timer was working, but `App` immediately passed `loading` into both date controls as `disabled`. The first slider change set `loading=true`, disabled the active range input, and caused the browser to end the drag after one tick.
+
+The date picker, preset chips, and master range handles now remain interactive during both the 300 ms debounce window and an in-flight fetch. Subsequent changes can therefore reset the timer and abort a superseded request as intended.
+
+Changed paths:
+
+- `frontend/src/App.tsx`
+- `frontend/src/components/DateRangePicker.tsx`
+- `frontend/src/components/MasterRangeSlider.tsx`
+- `frontend/src/App.test.tsx`
+- `SPEC.md`
+- `README.md`
+
+Regression proof: the new app-level server-render test first failed because the loading state rendered `disabled` date controls, then passed after the fix. Full verification passed with `make check`: 35 backend tests, mypy, 94 frontend tests, TypeScript typecheck, and the production build. `git diff --check` also passed. The required `gh run list --workflow CI --limit 1` check found no workflow named `CI` in this repository.
+
+Confidence is high; no implementation escalation or follow-up work is needed.
+
+Editor-delivery warning from preflight: the live JetBrains plugin is 0.2.283 while the installed agent-doc binary expects 0.2.285. Update the plugin package and restart/reload the IDE host before relying on its delivery acknowledgements.
+<!-- agent:boundary:0305e520 -->
 <!-- /agent:exchange -->
 
 ## Queue

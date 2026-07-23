@@ -284,14 +284,31 @@ The queued IDE failure came from the Project Controller socket being absent at t
 ### Re: Sync Tmux Layout on equityfundingsource.md — gpt-5
 
 Completed successfully. The original IDE request failed because `.agent-doc/controller.sock` did not exist at that moment. With the controller healthy, I replayed the exact layout through `agent-doc sync`: pane `%37` (`agent-doc-bugs2.md`) and pane `%40` (`equityfundingsource.md`) are in two columns in `0:agent-doc`, with `%40` focused. The sync exited 0 after doctor repair and final reconciliation reported the layout already correct.
-<!-- agent:boundary:93003e66 -->
+
+### Re: #selectedturnsteering — gpt-5
+
+> **Queue prompt:**
+>
+> do [#selectedturnsteering]
+
+
+Implemented and released in agent-doc `v0.35.20` / JetBrains plugin `0.2.290` (`d1b44e9e5`).
+
+- `Run Agent Doc` now captures the editor selection synchronously and sends its exact UTF-8 text through a dedicated active-turn steering route. Whitespace and multiline selections are preserved.
+- The route admits steering only for the matching authoritative supervisor while its actor is `busy`; the ordinary no-selection route is unchanged and still refuses to start a second trigger in a busy pane.
+- Supervisor IPC now returns a typed `turn_steering_ack` with the stable steering id, `delivered`/`duplicate` outcome, and byte count. A bounded id cache makes retries exact-once while later intentional submissions of identical text remain distinct.
+- Live socket coverage proves the active turn stays busy and receives the selection once. Deterministic controller, supervisor-protocol, route, and JetBrains command-plane tests cover admission, rejection, typed acknowledgement, byte counts, and duplicate handling.
+- `make check`, `make tmux-ci`, the complete 368-test JetBrains suite, `buildPlugin`, `signPlugin`, and the full optimized install passed. CI and the multi-platform Release workflow were in progress at the required single lookup.
+
+The new CLI/native library and plugin package are installed locally. Because this plugin update adds structural classes/fields/methods, restart the affected JetBrains IDE before testing it; safe hot reload cannot replace those structures inside an already-running JVM.
+<!-- agent:boundary:c00ac711 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#jbnativehotreload]~~
-- ~~Sync Tmux Layout on equityfundingsource.md: `Sync failed through the project controller; see IDE log for details.`~~ — auto-struck: answered this cycle (#ftstrike)
-- do [#selectedturnsteering]
+- ~~Sync Tmux Layout on equityfundingsource.md: `Sync failed through the project controller; see IDE log for details.`~~
+- ~~⏭️ do [#selectedturnsteering]~~
 - ⏭️ do [#fmgc]
 - 📌 do [#boundaryaccum1]
 - 📌 do [#qactsync]
@@ -333,7 +350,6 @@ Completed successfully. The original IDE request failed because `.agent-doc/cont
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#selectedturnsteering] [focused-cycle] #agent-doc-feature When JetBrains Run Agent Doc is invoked with selected text while the authoritative pane has an active turn, deliver the exact selection as realtime turn steering instead of rejecting the dispatch-only route as busy. Preserve the existing busy-pane no-new-trigger safety for invocations without a selection; record a typed steering admission/ack outcome and add live plus deterministic coverage proving the active turn continues and receives the selected text exactly once.
 - [ ] [#fmgc] [focused-cycle] Per-peer ack watermark for replay-state retention (#retentionwatermark). Tagged [focused-cycle] 2026-07-19: this is a schema migration plus retention-correctness change, and retention bugs are silent and asymmetric. Needs: (a) a (document_hash, peer_key) ack table keyed by the PID-scoped editor registration; (b) retention keyed off MIN(acked_version) across LIVE peers only; (c) a liveness eviction rule so a crashed IDE cannot pin the watermark forever. Count caps stay as a backstop. PushChannel::flush already implements the single-consumer shape; land the per-peer table plus ack recording additively before changing retention behavior.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 ### Re: #bbpe — gpt-5

@@ -6,7 +6,10 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.10
+
 - **Attached-editor reads no longer descend to stale disk after replica recovery exhausts (`#missingreplicarebuild`).** Realtime and preflight adapters now share a pure authority-recovery decision table in `agent-doc-turn`: missing replicas request the bounded plugin refresh, sync-pending may run its single model rebuild, and both fail closed while the editor remains open. Disk becomes read authority only after proven detach, preventing saved projections from resurrecting operator-deleted document nodes.
+- **Post-CAS response retries are pinned to semantic idempotency (`#patchretryidem`).** The component-idempotent retained-write path shipped in `6e6830a8d` is now covered by the exact reported artifact shape: a second response image already containing the quoted `> **Queue prompt:**` block is composed once over the original content-bearing base, concurrent operator text survives, and later retries keep one response, boundary, exchange close, and no bare `-->` terminator debris.
 
 ## 0.35.9
 

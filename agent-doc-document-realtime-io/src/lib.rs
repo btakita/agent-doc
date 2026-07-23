@@ -7479,6 +7479,78 @@ mod tests {
     }
 
     #[test]
+    fn post_cas_retry_keeps_queue_prompt_response_and_terminator_singleton() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Drain the queue head.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let first_target = base.replace(
+            "<!-- agent:boundary:base -->",
+            concat!(
+                "> **Queue prompt:** Drain the queue head.\n\n",
+                "### Re: queue head — gpt-5\n\n",
+                "Done once.\n",
+                "<!-- agent:boundary:response -->",
+            ),
+        );
+        let raced_retry = first_target.replace(
+            "<!-- /agent:exchange -->",
+            concat!(
+                "<!-- /agent:exchange -->\n",
+                "Operator follow-up typed during the CAS retry.",
+            ),
+        );
+        let (_dir, file, _canonical) = temp_doc(base);
+
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &first_target,
+            "patchretryidem_first_attempt",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &raced_retry,
+            "patchretryidem_second_attempt",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+
+        let composed = pending_document_write(&file).expect("raced retry retained");
+        let target = composed.target_content.clone();
+        assert_eq!(target.matches("> **Queue prompt:**").count(), 1);
+        assert_eq!(target.matches("### Re: queue head — gpt-5").count(), 1);
+        assert_eq!(target.matches("<!-- agent:boundary:").count(), 1);
+        assert_eq!(target.matches("<!-- /agent:exchange -->").count(), 1);
+        assert!(
+            target.contains("Operator follow-up typed during the CAS retry."),
+            "concurrent operator text must survive the retry:\n{target}"
+        );
+        assert!(
+            !target.lines().any(|line| line.trim() == "-->"),
+            "the retry must not splice a bare partial terminator:\n{target}"
+        );
+        assert!(agent_projection_integrity_valid(&target));
+
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &raced_retry,
+            "patchretryidem_third_attempt",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        let retried = pending_document_write(&file).expect("idempotent retry retained");
+        assert_eq!(retried.target_content, target);
+    }
+
+    #[test]
     fn reconnect_replays_each_deferred_backlog_change_in_order() {
         let base = concat!(
             "---\nagent_doc_format: template\n---\n\n",

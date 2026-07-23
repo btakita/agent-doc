@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -78,11 +78,10 @@ The failure had two production causes: the Worker was using a stale REST API-tok
 Deployed Worker version `936721b6-3a97-4051-ba68-3892f61e75ac` from EFS commit `926da811`. Clean-install `make check` and the production dry run passed. Production then returned HTTP 200 with `sent: true` for fresh login-link emails to both Judith Krug and Robert Waldman, and the live Worker tail confirmed both requests completed on that deployed version without email exceptions.
 
 The implementation is pushed on `origin/main` in commits `edc4940a`, `b3e00873`, `0c809925`, and `926da811`.
-<!-- agent:boundary:6fb0e157 -->
+<!-- agent:boundary:5e562f36 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- 🚧 do [#fixauthenticationerror]
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog

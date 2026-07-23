@@ -16,7 +16,7 @@ Common behavior required of all `agent-doc` editor plugins.
 ## 2. Claim for Tmux Pane
 
 - **Trigger:** `Ctrl+Shift+Alt+C` (configurable)
-- **Behavior:** Detect which editor split the file is in (left/right/top/bottom), call `agent-doc claim <relative-path> --position <pos>`. Falls back to no `--position` if split is not detected. The binary must use the current live `agent-doc` tmux session for the claim before falling back to a configured project `tmux_session`, so users do not have to edit `.agent-doc/config.toml` when their visible `agent-doc` window is temporarily in another tmux session.
+- **Behavior:** Detect which editor split the file is in (left/right/top/bottom), call `agent-doc claim <relative-path> --position <pos>`. Falls back to no `--position` if split is not detected. If that target is already owned by another document, the binary provisions a distinct pane instead of replacing it. On a cross-session reject, both editors offer **New Pane in This Session**, which invokes `agent-doc claim <relative-path> --new-pane` without positional/force flags; the binary owns authoritative-session selection and pane allocation.
 - **Feedback:** Inline hint near cursor. After a successful claim, trigger a layout sync (silent). A failed claim must leave the active editor document selected: do not run a layout sync after the failure, and do not let reverse tmux-to-editor focus mirroring reopen the previously focused tmux document as a side effect of the failed claim.
 
 ## 3. Sync Tmux Layout

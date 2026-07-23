@@ -40,6 +40,8 @@ append-only ownership-generation provenance.
 
 `claim` binds a document to a **tmux pane**, not a Claude session. The pane is the routing target — `route` sends keystrokes to the pane. Claude sessions come and go (restart, resume), but the pane persists. If Claude restarts on the same pane, routing still works without re-claiming.
 
+`claim --new-pane` explicitly provisions a fresh pane in the project's authoritative tmux session and binds the document there. This path never resolves, replaces, or migrates the current pane/window. Normal claim retains last-call-wins for an unoccupied target, while an occupied target already provisions rather than commandeering it.
+
 Last-call-wins: any `claim` overwrites the previous mapping for that document's session UUID.
 
 **Canonical same-document claim reuse:** `claim` must judge "is this pane already mine?" by canonical document identity, not by an incidental caller path. The registry key is a canonical file path, not a session UUID. Re-claiming the same live pane for the same document, including submodule-relative `entry.file` shapes, must remain idempotent and must not provision a duplicate pane.

@@ -23,7 +23,7 @@ import com.intellij.openapi.ui.Messages
  * than the configured project session, `agent-doc claim` exits non-zero and emits
  * a structured `[claim] cross-session-reject ...` marker (claim.rs). Instead of
  * surfacing the raw exit-1 text, this action parses the marker and prompts the
- * user with Force Claim / Switch Project Session / Cancel.
+ * user with New Pane in This Session / Force Claim / Switch Project Session / Cancel.
  */
 class ClaimAction : AnAction() {
 
@@ -65,6 +65,22 @@ class ClaimAction : AnAction() {
         }
 
         internal fun shouldSyncLayoutAfterClaim(exitCode: Int): Boolean = exitCode == 0
+
+        internal fun buildClaimCommand(
+            agentDoc: String,
+            relativePath: String,
+            position: String?,
+            force: Boolean,
+            newPane: Boolean,
+        ): List<String> {
+            val cmd = mutableListOf(agentDoc, "claim", relativePath)
+            when {
+                newPane -> cmd.add("--new-pane")
+                force -> cmd.add("--force")
+            }
+            if (!newPane && position != null) cmd.addAll(listOf("--position", position))
+            return cmd
+        }
     }
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -95,7 +111,9 @@ class ClaimAction : AnAction() {
             try {
                 TmuxPaneFocusSync.recordCurrentTmuxFocus(project)
                 val agentDoc = TerminalUtil.resolveAgentDoc(cwd)
-                val (exitCode, output) = runClaim(cwd, agentDoc, relativePath, position, force = false)
+                val (exitCode, output) = runClaim(
+                    cwd, agentDoc, relativePath, position, force = false, newPane = false,
+                )
                 if (exitCode == 0) {
                     TerminalUtil.showHint(project, output.ifEmpty { "Claimed $relativePath" })
                     SyncLayoutAction.syncLayout(project, notify = false, noAutostart = false)
@@ -120,10 +138,9 @@ class ClaimAction : AnAction() {
         relativePath: String,
         position: String?,
         force: Boolean,
+        newPane: Boolean,
     ): Pair<Int, String> {
-        val cmd = mutableListOf(agentDoc, "claim", relativePath)
-        if (force) cmd.add("--force")
-        if (position != null) cmd.addAll(listOf("--position", position))
+        val cmd = buildClaimCommand(agentDoc, relativePath, position, force, newPane)
         LOG.debug("claim: ${cmd.joinToString(" ")}")
         val process = ProcessBuilder(cmd)
             .directory(java.io.File(cwd))
@@ -143,7 +160,7 @@ class ClaimAction : AnAction() {
         return process.waitFor() to output
     }
 
-    /** Show the 3-choice dialog on the EDT and dispatch the chosen recovery. */
+    /** Show the cross-session recovery dialog on the EDT and dispatch the chosen recovery. */
     private fun promptCrossSessionChoice(
         project: Project,
         cwd: String,
@@ -158,15 +175,22 @@ class ClaimAction : AnAction() {
                 "Pane ${reject.paneId} is in tmux session '${reject.paneSession}', but this project's " +
                     "configured session is '${reject.configured}'.\n\nHow do you want to claim it?",
                 "Claim for Tmux Pane — Cross-Session",
-                arrayOf("Force Claim", "Switch Project Session", "Cancel"),
+                arrayOf("New Pane in This Session", "Force Claim", "Switch Project Session", "Cancel"),
                 0,
                 Messages.getQuestionIcon(),
             )
             when (choice) {
-                0 -> runClaimChoice(project, cwd, agentDoc, relativePath, position, switchTo = null, force = true)
+                0 -> runClaimChoice(
+                    project, cwd, agentDoc, relativePath, position,
+                    switchTo = null, force = false, newPane = true,
+                )
                 1 -> runClaimChoice(
                     project, cwd, agentDoc, relativePath, position,
-                    switchTo = reject.paneSession, force = false,
+                    switchTo = null, force = true, newPane = false,
+                )
+                2 -> runClaimChoice(
+                    project, cwd, agentDoc, relativePath, position,
+                    switchTo = reject.paneSession, force = false, newPane = false,
                 )
                 else -> { /* Cancel — leave the file unclaimed, no mutation */ }
             }
@@ -186,6 +210,7 @@ class ClaimAction : AnAction() {
         position: String?,
         switchTo: String?,
         force: Boolean,
+        newPane: Boolean,
     ) {
         Thread {
             try {
@@ -197,7 +222,9 @@ class ClaimAction : AnAction() {
                         return@Thread
                     }
                 }
-                val (exitCode, output) = runClaim(cwd, agentDoc, relativePath, position, force = force)
+                val (exitCode, output) = runClaim(
+                    cwd, agentDoc, relativePath, position, force = force, newPane = newPane,
+                )
                 if (exitCode == 0) {
                     TerminalUtil.showHint(project, output.ifEmpty { "Claimed $relativePath" })
                 } else {

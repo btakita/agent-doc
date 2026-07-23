@@ -17,6 +17,8 @@ Two strategies for detecting the file's position in the editor split:
 1. **Splitter tree walk:** Get the `EDITOR` component from action context, walk the Swing `Splitter` tree to determine if it's in the first child (left/top) or second child (right/bottom).
 2. **Window index fallback:** If no EDITOR context (e.g., context menu), enumerate `FileEditorManagerEx.windows`, find which window contains the file, determine position from the Splitter tree or use window index + orientation as heuristic.
 
+On a cross-session claim reject, the first recovery choice is **New Pane in This Session**. The plugin invokes `agent-doc claim <file> --new-pane` without `--position` or `--force`; all allocation/session decisions remain binary-owned. The existing Force Claim and Switch Project Session choices remain explicit destructive/migration alternatives.
+
 ### Prompt Panel
 
 - Rendered as a `JLayeredPane` overlay at `POPUP_LAYER` — no `JDialog` (avoids WM leaks and focus-loss dismissal).

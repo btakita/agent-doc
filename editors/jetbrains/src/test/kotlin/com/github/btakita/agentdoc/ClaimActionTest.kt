@@ -52,4 +52,32 @@ class ClaimActionTest {
     fun `successful claim requests layout sync`() {
         assertTrue(ClaimAction.shouldSyncLayoutAfterClaim(0))
     }
+
+    @Test
+    fun `new pane recovery invokes only binary owned new pane mode`() {
+        assertEquals(
+            listOf("agent-doc", "claim", "plan.md", "--new-pane"),
+            ClaimAction.buildClaimCommand(
+                "agent-doc",
+                "plan.md",
+                "right",
+                force = false,
+                newPane = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `normal claim preserves positional targeting`() {
+        assertEquals(
+            listOf("agent-doc", "claim", "plan.md", "--position", "right"),
+            ClaimAction.buildClaimCommand(
+                "agent-doc",
+                "plan.md",
+                "right",
+                force = false,
+                newPane = false,
+            ),
+        )
+    }
 }

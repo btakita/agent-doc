@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { parseCrossSessionReject } from './crossSession.js';
+import { buildCrossSessionClaimArgs, parseCrossSessionReject } from './crossSession.js';
 
 describe('parseCrossSessionReject', () => {
     it('parses the marker from merged claim output', () => {
@@ -31,6 +31,22 @@ describe('parseCrossSessionReject', () => {
         assert.strictEqual(
             parseCrossSessionReject('[claim] cross-session-reject pane_id=%1 pane_session=2'),
             undefined,
+        );
+    });
+});
+
+describe('buildCrossSessionClaimArgs', () => {
+    it('maps new-pane recovery to the binary mode without positional reuse', () => {
+        assert.deepStrictEqual(
+            buildCrossSessionClaimArgs('plan.md', 'right', { newPane: true }),
+            ['claim', 'plan.md', '--new-pane'],
+        );
+    });
+
+    it('preserves force and position for explicit pane reuse', () => {
+        assert.deepStrictEqual(
+            buildCrossSessionClaimArgs('plan.md', 'right', { force: true }),
+            ['claim', 'plan.md', '--force', '--position', 'right'],
         );
     });
 });

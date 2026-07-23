@@ -1,12 +1,12 @@
 //! # Module: claim — Binding (explicit)
 //!
-//! `agent-doc claim` — create a **Binding** between a document and an existing tmux pane.
+//! `agent-doc claim` — create a **Binding** between a document and a tmux pane.
 //!
 //! **Ontology:** Claim creates a **Binding** (document→pane association) by registering
-//! the session→pane mapping in the durable registry. Unlike **Provisioning** (which creates
-//! new panes), claim binds to a pane that already exists. In normal editor workflow,
-//! users don't need to call claim — **Reconciliation** (`sync`) + **Provisioning**
-//! (`auto_start`) handle pane creation automatically. Claim is for manual pane assignment.
+//! the session→pane mapping in the durable registry. Normal claim binds to an existing
+//! pane; `--new-pane` explicitly delegates to **Provisioning** first. In normal editor
+//! workflow, **Reconciliation** (`sync`) + **Provisioning** (`auto_start`) handle pane
+//! creation automatically. Claim remains the explicit/manual assignment surface.
 //!
 //! Usage: `agent-doc claim <file.md> [--position left|right|top|bottom] [--pane %N] [--window @N]`
 //!
@@ -16,7 +16,7 @@
 //! direct commands to the correct tmux pane.
 //!
 //! ## Spec
-//! - `run(file, position, pane, window, _force)` is the sole public entry point.
+//! - `run(file, options, effects)` is the sole public entry point.
 //! - Prunes stale registry entries via `agent_doc_sync_io::resync::prune()` before any resolution.
 //! - Calls `validate_file_claim(file)` to remove dead-pane entries for this specific
 //!   file and log why the re-claim was needed (complements the bulk prune).
@@ -32,6 +32,8 @@
 //!   writes the UUID back to disk if it was freshly generated.
 //! - Pane resolution priority: explicit `--pane` > `--position` (scoped to
 //!   effective window if set) > `TMUX_PANE` / active pane.
+//! - `--new-pane` bypasses pane resolution and cross-session validation, then
+//!   provisions exactly one pane in the project's authoritative tmux session.
 //! - **Session validation:** After resolving `pane_id`, checks that the pane belongs to
 //!   the project's configured tmux session (`project_tmux_session()`). Cross-session
 //!   mismatches fail closed while the configured session is still alive; stale
@@ -131,6 +133,19 @@ pub trait ClaimRuntimeEffects {
     ) -> Result<String>;
 }
 
+fn provision_authoritative_pane(
+    effects: &dyn ClaimRuntimeEffects,
+    tmux: &tmux_router::Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    configured_session: Option<&str>,
+) -> Result<()> {
+    effects
+        .provision_pane(tmux, file, session_id, file_path, configured_session, &[])
+        .map(|_| ())
+}
+
 fn enforce_cross_session_claim(
     file: &Path,
     pane_id: &str,
@@ -175,15 +190,29 @@ fn enforce_cross_session_claim(
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ClaimOptions<'a> {
+    pub position: Option<&'a str>,
+    pub pane: Option<&'a str>,
+    pub window: Option<&'a str>,
+    pub force: bool,
+    pub isolate: bool,
+    pub new_pane: bool,
+}
+
 pub fn run(
     file: &Path,
-    position: Option<&str>,
-    pane: Option<&str>,
-    window: Option<&str>,
-    force: bool,
-    isolate: bool,
+    options: ClaimOptions<'_>,
     effects: &dyn ClaimRuntimeEffects,
 ) -> Result<()> {
+    let ClaimOptions {
+        position,
+        pane,
+        window,
+        force,
+        isolate,
+        new_pane,
+    } = options;
     // --isolate: spawn a fresh Claude Code process in a new tmux window scoped to
     // the nearest git repo root for this document (#8jzg).
     if isolate {
@@ -226,32 +255,40 @@ pub fn run(
     // touches disk. The `// Pane validated — now safe to modify files` invariant
     // below applies to the auto-scaffold too.
     let tmux = tmux_router::Tmux::default_server();
-    let pane_id = if let Some(p) = pane {
-        p.to_string() // Plugin-provided, authoritative
-    } else if let Some(pos) = position {
-        if let Some(ref win) = effective_window {
-            // Scope position detection to the specified window
-            agent_doc_tmux_io::pane_by_position_in_window(&tmux, pos, win)?
-        } else {
-            agent_doc_tmux_io::pane_by_position(&tmux, pos)?
-        }
+    let pane_id = if new_pane {
+        None
     } else {
-        agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
-            .context("failed to query current tmux pane")?
+        Some(if let Some(p) = pane {
+            p.to_string() // Plugin-provided, authoritative
+        } else if let Some(pos) = position {
+            if let Some(ref win) = effective_window {
+                // Scope position detection to the specified window
+                agent_doc_tmux_io::pane_by_position_in_window(&tmux, pos, win)?
+            } else {
+                agent_doc_tmux_io::pane_by_position(&tmux, pos)?
+            }
+        } else {
+            agent_doc_tmux_io::current_pane_id_from_env_or_tmux(&tmux)
+                .context("failed to query current tmux pane")?
+        })
     };
+
+    let configured_session = project_config_io::project_tmux_session();
 
     // tmux_session frontmatter field is deprecated — no longer written on claim.
     // Session targeting now uses current_tmux_session() at route time.
     // Validate claiming pane is in the configured target session.
     // Reject cross-session claims unless --force is passed.
-    if tmux.pane_alive(&pane_id) {
+    if let Some(pane_id) = pane_id.as_deref()
+        && tmux.pane_alive(pane_id)
+    {
         let pane_tmux_session =
-            agent_doc_tmux_io::target_session_name(&tmux, &pane_id).unwrap_or_default();
-        if let Some(configured) = project_config_io::project_tmux_session()
+            agent_doc_tmux_io::target_session_name(&tmux, pane_id).unwrap_or_default();
+        if let Some(configured) = configured_session.as_deref()
             && !pane_tmux_session.is_empty()
             && pane_tmux_session != configured
         {
-            let configured_alive = tmux.session_alive(&configured);
+            let configured_alive = tmux.session_alive(configured);
             // `#xdocsuper0`: before an `AcceptStale` auto-force can commandeer
             // this document, consult its supervisor lease. If a live foreign
             // supervisor still holds a fresh lease on the document, refuse the
@@ -271,12 +308,12 @@ pub fn run(
                 .unwrap_or(false);
             enforce_cross_session_claim(
                 file,
-                &pane_id,
+                pane_id,
                 &pane_tmux_session,
-                &configured,
+                configured,
                 cross_session_decision_with_current(
                     &pane_tmux_session,
-                    &configured,
+                    configured,
                     configured_alive,
                     tmux.current_session().as_deref(),
                     force,
@@ -322,7 +359,7 @@ pub fn run(
     // Per the Binding invariant (SPEC §8.5): "document drives pane resolution —
     // find existing OR provision new, NEVER commandeer another document's pane."
     let file_str = file.to_string_lossy();
-    {
+    if let Some(pane_id) = pane_id.as_deref() {
         let registry = agent_doc_session_registry_io::load().unwrap_or_default();
         for (registry_key, entry) in &registry {
             let same_document = registry_entry_matches_claimed_document(
@@ -337,7 +374,7 @@ pub fn run(
                 },
                 agent_doc_git_io::dirs::resolve_canonical_or_absolute_file_path,
             );
-            if entry.pane == pane_id && !same_document && tmux.pane_alive(&pane_id) {
+            if entry.pane == pane_id && !same_document && tmux.pane_alive(pane_id) {
                 let existing_label = claimed_session_label(ClaimRegistryEntry {
                     registry_key,
                     session_id: &entry.session_id,
@@ -359,9 +396,14 @@ pub fn run(
                         "[claim] pane {} is already claimed by {} (file: {}); provisioning a new pane",
                         pane_id, existing_label, entry.file
                     );
-                    effects
-                        .provision_pane(&tmux, file, &session_id, &file_str, None, &[])
-                        .map(|_| ())?;
+                    provision_authoritative_pane(
+                        effects,
+                        &tmux,
+                        file,
+                        &session_id,
+                        &file_str,
+                        configured_session.as_deref(),
+                    )?;
                     return Ok(());
                 }
             }
@@ -376,17 +418,23 @@ pub fn run(
     // pane. Without this, a new document claimed from inside another document's
     // live pane (e.g. a submodule Codex session) aliases onto that pane and no
     // real pane for the new document ever appears.
-    if !force
-        && tmux.pane_alive(&pane_id)
-        && agent_doc_sync_io::sync::pane_runs_other_document_owner(&tmux, &pane_id, file)
+    if let Some(pane_id) = pane_id.as_deref()
+        && !force
+        && tmux.pane_alive(pane_id)
+        && agent_doc_sync_io::sync::pane_runs_other_document_owner(&tmux, pane_id, file)
     {
         eprintln!(
             "[claim] pane {} runs a live agent-doc/codex session for another document; provisioning a new pane instead of commandeering it",
             pane_id
         );
-        effects
-            .provision_pane(&tmux, file, &session_id, &file_str, None, &[])
-            .map(|_| ())?;
+        provision_authoritative_pane(
+            effects,
+            &tmux,
+            file,
+            &session_id,
+            &file_str,
+            configured_session.as_deref(),
+        )?;
         return Ok(());
     }
 
@@ -442,6 +490,24 @@ pub fn run(
             }
         }
     }
+
+    if new_pane {
+        eprintln!(
+            "[claim] provisioning a new pane in authoritative session {}",
+            configured_session.as_deref().unwrap_or("(auto-detect)")
+        );
+        provision_authoritative_pane(
+            effects,
+            &tmux,
+            file,
+            &session_id,
+            &file_str,
+            configured_session.as_deref(),
+        )?;
+        return Ok(());
+    }
+
+    let pane_id = pane_id.context("claim pane resolution unexpectedly omitted a target")?;
 
     // Register session → pane (use the pane's actual PID, not our short-lived CLI PID)
     // Resolve cwd to the nearest git repo root for the document to avoid superproject
@@ -669,6 +735,63 @@ fn run_isolate(file: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingEffects {
+        provisions: Mutex<Vec<(Option<String>, Vec<String>)>>,
+    }
+
+    impl ClaimRuntimeEffects for RecordingEffects {
+        fn current_document_content(&self, _file: &Path, _source: &str) -> Result<String> {
+            unreachable!("not used by provisioning contract test")
+        }
+
+        fn atomic_write(&self, _file: &Path, _content: &str) -> Result<()> {
+            unreachable!("not used by provisioning contract test")
+        }
+
+        fn commit(&self, _file: &Path) -> Result<bool> {
+            unreachable!("not used by provisioning contract test")
+        }
+
+        fn provision_pane(
+            &self,
+            _tmux: &tmux_router::Tmux,
+            _file: &Path,
+            _session_id: &str,
+            _file_path: &str,
+            context_session: Option<&str>,
+            col_args: &[String],
+        ) -> Result<String> {
+            self.provisions
+                .lock()
+                .unwrap()
+                .push((context_session.map(str::to_owned), col_args.to_vec()));
+            Ok("%new".to_string())
+        }
+    }
+
+    #[test]
+    fn new_pane_provisioning_targets_authoritative_session_once_without_column_reuse() {
+        let effects = RecordingEffects::default();
+        let tmux = tmux_router::Tmux::default_server();
+
+        provision_authoritative_pane(
+            &effects,
+            &tmux,
+            Path::new("/repo/plan.md"),
+            "session-id",
+            "/repo/plan.md",
+            Some("project-session"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            *effects.provisions.lock().unwrap(),
+            vec![(Some("project-session".to_string()), Vec::new())]
+        );
+    }
 
     #[test]
     fn enforce_cross_session_claim_errors_on_reject() {

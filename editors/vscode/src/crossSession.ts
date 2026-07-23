@@ -8,6 +8,11 @@ export interface CrossSessionReject {
     configured: string;
 }
 
+export interface CrossSessionClaimOptions {
+    force?: boolean;
+    newPane?: boolean;
+}
+
 export const CROSS_SESSION_REJECT_MARKER = '[claim] cross-session-reject';
 
 /**
@@ -31,4 +36,20 @@ export function parseCrossSessionReject(output: string): CrossSessionReject | un
         paneSession: fields.pane_session,
         configured: fields.configured,
     };
+}
+
+/** Build the binary recovery command without mixing new-pane and reuse targeting. */
+export function buildCrossSessionClaimArgs(
+    rel: string,
+    position: string | undefined,
+    opts: CrossSessionClaimOptions,
+): string[] {
+    const args = ['claim', rel];
+    if (opts.newPane) {
+        args.push('--new-pane');
+    } else {
+        if (opts.force) args.push('--force');
+        if (position) args.push('--position', position);
+    }
+    return args;
 }

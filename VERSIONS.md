@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.16
+
+_JetBrains plugin 0.2.286._
+
+- **Claims can explicitly provision a fresh pane in the authoritative tmux session (`#claimnewpane`).** `agent-doc claim <file> --new-pane` bypasses current-pane resolution and cross-session reuse, provisions through the existing route startup path, and conflicts with force/position/window/pane/isolate targeting. Normal claims still provision automatically when the resolved pane belongs to another document, and `session set` remains the supported managed-window round trip between sessions.
+- **Cross-session editor recovery now offers “New Pane in This Session.”** JetBrains and VS Code map that choice to the binary-owned `--new-pane` mode without forwarding a positional or force flag; command builders and CLI parsing are regression-tested so the choice cannot silently replace the current pane or migrate its window.
+
 ## 0.35.15
 
 - **Supervisor stdin forwarding now has one interruptible implementation (`#af88`).** The obsolete `PtySession::forward_stdio` path that held `stdin.lock()` across a blocking read is removed. Production forwarding remains in `io_threads`: Unix polls raw stdin beside a stop pipe, joins promptly on child exit, and releases stdin before restart/quit prompts.

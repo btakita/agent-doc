@@ -68,10 +68,11 @@ Or automatic grouping: layout reads each doc's `--position` (left/right from IDE
 ## Lifecycle
 
 1. User opens doc A → `agent-doc claim` creates window, registers primary pane
-2. Agent spawns parallel tasks → new panes split within the window, registered as group members
-3. User switches to doc B → `agent-doc focus` switches tmux window → doc B's panes visible
-4. User switches back to doc A → window switch → all 3 panes reappear
-5. Parallel tasks complete → panes close, deregister → window returns to 1 pane
+2. User claims distinct doc B with `claim --new-pane` → one pane is provisioned in the same authoritative session; doc A's pane and the containing window stay in place
+3. Agent spawns parallel tasks → new panes split within the window, registered as group members
+4. User switches to doc B → `agent-doc focus` switches tmux window → doc B's panes visible
+5. User switches back to doc A → window switch → all 3 panes reappear
+6. Parallel tasks complete → panes close, deregister → window returns to 1 pane
 
 ## Open questions
 

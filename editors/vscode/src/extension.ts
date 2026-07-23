@@ -11,7 +11,11 @@ import { createEditorApplyProof, isEditorApplyProofCurrent } from './patchGuard.
 import { EditorIntent } from './editorIntent.js';
 import { processSaveDocumentIntent } from './saveDocumentIntent.js';
 import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement } from './patchPlan.js';
-import { parseCrossSessionReject, CrossSessionReject } from './crossSession.js';
+import {
+    buildCrossSessionClaimArgs,
+    parseCrossSessionReject,
+    CrossSessionReject,
+} from './crossSession.js';
 import { buildEditorRoutePayload, buildEditorRouteCommandMessage, resolveEditorRouteTerminal } from './commandPlane.js';
 import { annotateExchangeHeadingsAgainstBaseline, repositionBoundaryToEnd, repositionBoundaryToEndPreserveHead } from './reposition.js';
 import {
@@ -1674,7 +1678,7 @@ async function claimActionInternal(force: boolean): Promise<void> {
     }
 }
 
-/** Prompt Force Claim / Switch Project Session / Cancel on a cross-session reject. */
+/** Prompt for a fresh authoritative-session pane or an explicit cross-session recovery. */
 async function handleCrossSessionReject(
     cwd: string,
     rel: string,
@@ -1685,10 +1689,13 @@ async function handleCrossSessionReject(
         `Pane ${reject.paneId} is in tmux session '${reject.paneSession}', but this project's ` +
             `configured session is '${reject.configured}'. How do you want to claim it?`,
         { modal: true },
+        'New Pane in This Session',
         'Force Claim',
         'Switch Project Session',
     );
-    if (choice === 'Force Claim') {
+    if (choice === 'New Pane in This Session') {
+        await reclaimAfterCrossSession(cwd, rel, position, { newPane: true });
+    } else if (choice === 'Force Claim') {
         await reclaimAfterCrossSession(cwd, rel, position, { force: true });
     } else if (choice === 'Switch Project Session') {
         await reclaimAfterCrossSession(cwd, rel, position, { switchTo: reject.paneSession });
@@ -1696,12 +1703,12 @@ async function handleCrossSessionReject(
     // undefined (Esc / dismiss) => Cancel, leave the file unclaimed.
 }
 
-/** Force-claim, or switch the configured session then claim, after a cross-session reject. */
+/** Provision, force-claim, or switch the configured session after a cross-session reject. */
 async function reclaimAfterCrossSession(
     cwd: string,
     rel: string,
     position: string | undefined,
-    opts: { force?: boolean; switchTo?: string },
+    opts: { force?: boolean; newPane?: boolean; switchTo?: string },
 ): Promise<void> {
     if (commandRunning) {
         showHint('Command already in progress');
@@ -1712,13 +1719,7 @@ async function reclaimAfterCrossSession(
         if (opts.switchTo) {
             await runCli(['session', 'set', opts.switchTo], cwd);
         }
-        const args = ['claim', rel];
-        if (opts.force) {
-            args.push('--force');
-        }
-        if (position) {
-            args.push('--position', position);
-        }
+        const args = buildCrossSessionClaimArgs(rel, position, opts);
         const output = await runCli(args, cwd);
         showHint(output || `Claimed ${rel}`);
         await syncLayoutInternal(cwd, false, true);

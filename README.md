@@ -43,6 +43,9 @@ agent-doc init session.md "My Topic"
 # 3. Claim the document to the current tmux pane
 agent-doc claim session.md
 
+# Or provision a distinct pane in this project's current tmux session
+agent-doc claim another-session.md --new-pane
+
 # 4. Route hotkey triggers to the correct tmux pane
 agent-doc route --dispatch-only --plain-trigger --wait-for-ready 60 session.md
 

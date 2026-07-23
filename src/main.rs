@@ -95,7 +95,7 @@ mod undo;
 mod upgrade;
 mod worktree;
 
-use agent_doc_claim_io::ClaimRuntimeEffects;
+use agent_doc_claim_io::{ClaimOptions, ClaimRuntimeEffects};
 use agent_doc_frontmatter::frontmatter;
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_template_io as template_io;
@@ -1995,7 +1995,7 @@ enum Commands {
         /// Path to the session document
         file: PathBuf,
     },
-    /// Claim a document for the current tmux pane
+    /// Claim a document for a tmux pane
     Claim {
         /// Path to the session document
         file: PathBuf,
@@ -2016,6 +2016,13 @@ enum Commands {
         /// that repo rather than the superproject)
         #[arg(long)]
         isolate: bool,
+        /// Provision a fresh pane in the project's authoritative tmux session
+        /// instead of binding to or replacing the currently resolved pane
+        #[arg(
+            long,
+            conflicts_with_all = ["position", "pane", "window", "force", "isolate"]
+        )]
+        new_pane: bool,
     },
     /// Claim (or release) the drain-owner lease for a self-driving harness loop
     /// (#kp5z / #qflood). The Claude Code `/loop` auto-loop refreshes this lease
@@ -3981,13 +3988,17 @@ fn try_main() -> anyhow::Result<()> {
             window,
             force,
             isolate,
+            new_pane,
         } => agent_doc_claim_io::run(
             &file,
-            position.as_deref(),
-            pane.as_deref(),
-            window.as_deref(),
-            force,
-            isolate,
+            ClaimOptions {
+                position: position.as_deref(),
+                pane: pane.as_deref(),
+                window: window.as_deref(),
+                force,
+                isolate,
+                new_pane,
+            },
             &CliClaimRuntimeEffects,
         ),
         Commands::DrainClaim {
@@ -5783,6 +5794,50 @@ mod recycle_force_tests {
             }
             _ => panic!("expected admin recycle subcommand"),
         }
+    }
+
+    #[test]
+    fn claim_new_pane_flag_selects_binary_owned_provisioning() {
+        let cmd = parse(&["agent-doc", "claim", "plan.md", "--new-pane"]);
+        match cmd {
+            Commands::Claim {
+                file,
+                new_pane,
+                force,
+                position,
+                pane,
+                window,
+                isolate,
+            } => {
+                assert_eq!(file, PathBuf::from("plan.md"));
+                assert!(new_pane);
+                assert!(!force);
+                assert!(!isolate);
+                assert!(position.is_none());
+                assert!(pane.is_none());
+                assert!(window.is_none());
+            }
+            _ => panic!("expected claim subcommand"),
+        }
+    }
+
+    #[test]
+    fn claim_new_pane_rejects_existing_pane_targeting_flags() {
+        let owned = vec![
+            "agent-doc".to_string(),
+            "claim".to_string(),
+            "plan.md".to_string(),
+            "--new-pane".to_string(),
+            "--pane".to_string(),
+            "%7".to_string(),
+        ];
+        let parsed = std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .spawn(move || Cli::try_parse_from(&owned))
+            .expect("spawn parse thread")
+            .join()
+            .expect("parse thread");
+        assert!(parsed.is_err(), "--new-pane must not silently reuse --pane");
     }
 
     #[test]

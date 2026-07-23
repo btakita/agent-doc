@@ -240,6 +240,11 @@ I added focused follow-ups for the native-generation drain/fail-closed reload fi
 
 ### Re: supervisor recycle termination — gpt-5
 
+> **Queue prompt:**
+>
+> Recycling the supervisors terminated the sessions and did not restart.
+
+
 This report combines the pre-`v0.35.17` harness-switch workaround with later attempts made during the corrupted SQLite runtime.
 
 The earlier acadian-take-home event did reach the supervisor handoff path: the operations log records the replacement request, background IPC acceptance, and `agent_restart_performed ... old_harness=claude new_harness=codex`. The subsequent frontmatter/harness state changed again, which made the visible result look like a terminated/non-restarted switch. `v0.35.17` removes that manual-recycle dependency by retaining a typed pending harness handoff and performing it at the safe idle boundary.
@@ -247,12 +252,24 @@ The earlier acadian-take-home event did reach the supervisor handoff path: the o
 The later stale-supervisor recycle requests at 05:49Z are not clean lifecycle evidence. They coincide exactly with repeated `document_authority_state_event_error ... database disk image is malformed`, and the orphan drain then failed during route document preparation with SQLite error 11. A restart pipeline that cannot read its state store cannot prove relaunch completion.
 
 The explicit **Recycle Supervisor** contract still requires either an in-place re-exec for a stale binary or a child relaunch for a fresh binary, and both branches have deterministic coverage. No separate lifecycle item is warranted from this contaminated report alone. A valid post-release repro requires a full IDEA restart first so the deleted old native/SQLite generation is gone; if an explicit recycle then terminates a session without relaunching, capture the document and click timestamp so the replacement-request, boundary, and relaunch markers can be correlated.
-<!-- agent:boundary:d69be4ac -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_visible_write patch_id=151bfee5-9431-4003-bba9-243d34d213a0 invariant=live_prompt_drift_after_preflight recovery=visible_repair_required snap_source=lazily_visible_write_event candidate_len=68130 candidate_hash=78175b9f8c6645c683b98bde1f832e2416914b50516a4776c650e928b660648b content_ours_len=68416 content_ours_hash=d75457f1e36d206b3e23df18cc7236a6f82615205f719c08a0284371397b30c9 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1784772615948
+```
+<!-- agent:boundary:6b2b327b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- Recycling the supervisors terminated the sessions and did not restart.
+- ~~Recycling the supervisors terminated the sessions and did not restart.~~
 - ~~do [#harnesshotrebind]~~
 - do [#fmgc]
 - 📌 do [#boundaryaccum1]

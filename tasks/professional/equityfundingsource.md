@@ -55,7 +55,19 @@ Production D1 is updated directly:
 The invite emails are **not sent**. Both authenticated production sign-in-link calls returned HTTP 502. A live Worker trace proved the underlying cause: `Cloudflare Email Service 401: Authentication error`. The production Worker has a `CLOUDFLARE_EMAIL_API_TOKEN` secret name, but its value is invalid or unauthorized for the configured Email Sending account. The stored Resend keys are suspended, so they are not a viable fallback. The application invalidated each unsent one-time token after the failed send, so there are no live orphaned login links.
 
 I kept `#judithkrugjudithkrug` gated with the exact retry endpoints and credential prerequisite. No additional backlog follow-up is needed because that gated item names both the external token signal and the deterministic remaining operation; there is nothing executable until an Email Sending-authorized token is provisioned.
-<!-- agent:boundary:4c5fc317 -->
+### Re: Judith and Robert production admins — gpt-5
+
+You were right to question putting the accounts in code. I initially followed the existing `BOOTSTRAP_ADMINS` pattern and the queue's spec/test/commit preset, but these are one-time production records, not application configuration. I reverted those four source/test/spec edits before any commit or push; no EFS code change remains.
+
+Production D1 is updated directly:
+
+- `judithkrug@gmail.com`: existing active account promoted from `lender` to `admin`.
+- `rwaldman100@gmail.com`: new active `admin` account created.
+
+The invite emails are **not sent**. Both authenticated production sign-in-link calls returned HTTP 502. A live Worker trace proved the underlying cause: `Cloudflare Email Service 401: Authentication error`. The production Worker has a `CLOUDFLARE_EMAIL_API_TOKEN` secret name, but its value is invalid or unauthorized for the configured Email Sending account. The stored Resend keys are suspended, so they are not a viable fallback. The application invalidated each unsent one-time token after the failed send, so there are no live orphaned login links.
+
+I kept `#judithkrugjudithkrug` gated with the exact retry endpoints and credential prerequisite. No additional backlog follow-up is needed because that gated item names both the external token signal and the deterministic remaining operation; there is nothing executable until an Email Sending-authorized token is provisioned.
+<!-- agent:boundary:86290439 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->

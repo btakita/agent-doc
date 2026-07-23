@@ -187,12 +187,23 @@ The implementation report can be reaped. Live JetBrains confirmation remains sep
 This companion dispatch-start-unproven report is also superseded by the shipped busy-pane routing fix. It records the same pre-fix false failure class as #jetbrainsrunroute-9z37 and is retained historically in completed work rather than as a second active bug.
 
 Live proof remains exclusively tracked by gated item #r4gq, so closing this duplicate does not overstate verification.
-<!-- agent:boundary:8697d35d -->
+
+### Re: #af88 — gpt-5
+
+Resolved and released in agent-doc 0.35.15.
+
+The audit found that the editor-listener read deadline and bounded connect watchdog (B/D and F) had already shipped in 539eabb984, and the production supervisor stdin path had already moved to raw-fd poll plus a stop pipe in 79f918dd2f. The remaining defect was the obsolete alternate PtySession::forward_stdio implementation, which still held stdin.lock() across a blocking read. That divergent path and its unused thread ownership are removed, leaving io_threads as the single interruptible runtime path so child exit can release stdin before restart/quit prompts.
+
+Deterministic regressions now prove the stdin writer joins within a bounded interval after its stop signal, a wedged connect returns at its watchdog deadline, and a half-open listener connection closes at its read deadline without reaching the handler. Focused package tests and clippy passed. Full make check passed with 7,890 tests plus simulation, version sync, Lean, and six TLA+ models.
+
+The one fat-LTO release build completed successfully. Because its Cargo target lived on the larger filesystem, the Makefile wrapper missed its worktree-local artifact path after the build; the already-built release binary and library were then promoted directly without rebuilding. The installed binary and native library report 0.35.15, native reload reached the live editor endpoint, and JetBrains package 0.2.285 was rebuilt and installed to four IDEs.
+
+agent-doc commit/tag: 9b088ea1b; parent gitlink: fe564460a. Both repositories are pushed. CI run 29979632754 was in progress at the required single post-push check.
+<!-- agent:boundary:a74e9099 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~📌 do [#r4gq]~~
 - 📌 do [#af88]
 - 📌 do [#claimnewpane]
 - 📌 do [#boundaryaccum1]
@@ -226,8 +237,6 @@ Live proof remains exclusively tracked by gated item #r4gq, so closing this dupl
 - 📌 do [#ipcpostcommitinv]
 - 📌 do [#5qjj]
 - do [#fmgc]
-- ~~do [#jetbrainsrunroute-9z37]~~
-- ~~do [#jetbrainsrunroute]~~
 <!-- /agent:queue -->
 
 ## Notes

@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -30,18 +30,40 @@ complete
 ## Exchange
 
 <!-- agent:exchange patch=append -->
+### Session Summary
 
-<!-- agent:boundary:c2101204 -->
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260723-052313.md`*
+
+Compacted content:
+- Archived 5 response topic(s): What do you need me to verify for #tmo-snapshot-verify?; Add backlogs into the queue in priority order; Correction; 2 more
+- Prior summary/context: prior compacted content: Archived 3 response topic(s): I don't understand what I need to verify; Print #tmo-orphan-ap...
+
+### Re: Judith and Robert production admins — gpt-5
+
+> **Queue prompt:**
+>
+> do [#judithkrugjudithkrug]
+
+
+You were right to question putting the accounts in code. I initially followed the existing `BOOTSTRAP_ADMINS` pattern and the queue's spec/test/commit preset, but these are one-time production records, not application configuration. I reverted those four source/test/spec edits before any commit or push; no EFS code change remains.
+
+Production D1 is updated directly:
+
+- `judithkrug@gmail.com`: existing active account promoted from `lender` to `admin`.
+- `rwaldman100@gmail.com`: new active `admin` account created.
+
+The invite emails are **not sent**. Both authenticated production sign-in-link calls returned HTTP 502. A live Worker trace proved the underlying cause: `Cloudflare Email Service 401: Authentication error`. The production Worker has a `CLOUDFLARE_EMAIL_API_TOKEN` secret name, but its value is invalid or unauthorized for the configured Email Sending account. The stored Resend keys are suspended, so they are not a viable fallback. The application invalidated each unsent one-time token after the failed send, so there are no live orphaned login links.
+
+I kept `#judithkrugjudithkrug` gated with the exact retry endpoints and credential prerequisite. No additional backlog follow-up is needed because that gated item names both the external token signal and the deterministic remaining operation; there is nothing executable until an Email Sending-authorized token is provisioned.
+<!-- agent:boundary:4c5fc317 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
-- 🚧 do [#judithkrugjudithkrug]
+<!-- agent:queue preset="#spec-test-commit-push" priority start -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#judithkrugjudithkrug] Please add Judith Krug <judithkrug@gmail.com> + Robert Waldman <rwaldman100@gmail.com> as admins on production. Ensure the invite email is sent.
 - [ ] [#efs-deploy-hibernation] [operator-verify] Deploy the worker so #efs-do-hibernation's billing fix is actually live. The code shipped in EFS b75f92ca (2026-07-18 18:23 EDT) but the newest production deployment is version 1b9c8d69 from 2026-07-18 16:03 UTC / 12:03 EDT — SIX HOURS EARLIER. The live worker still runs the non-hibernating rooms, so the ~328,500 GB-s per always-on room is still accruing. Blocked on operator go only because 23 commits sit between the deployed version and HEAD (hibernation, TMO backup/restore/snapshot/orphan tooling, admin binding queue, Dropbox fail-soft, TMO contacts/vesting-gap admin screens), so 'make deploy' ships far more than the DO change and needs a deliberate go. Verify after deploying with 'CLOUDFLARE_API_TOKEN="$(passage show btak/equityfundingsource/cloudflare_api_token | head -1)" bunx wrangler deployments list --name equityfundingsource' and confirm the newest version postdates b75f92ca.
 - [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). UNBLOCKED 2026-07-19: #tmo-snapshot-verify passed — the snapshot tool ran against real TMO sandbox and reported complete=true (loans=18 fundings=5 attachment_metas=20 lenders=1 borrowers=16, zero errors), so the gate command 'bun ./bin/tmo-snapshot.ts --covers <the 16> --out tmp/tmo-before-purge.json' is now known-good. Take that snapshot immediately before purging. Still held on operator go ONLY because DeleteLoan is permanent with no TMO-side undo. Note the snapshot is evidence, not a restore: attachment BYTES are not captured (20 attachment metas across 554466/AVW580/MBQ435/SRV532/TST766 would be unrecoverable), and RecIDs do not round-trip. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
 <!-- /agent:backlog -->
@@ -49,6 +71,7 @@ complete
 ## Review
 
 <!-- agent:review -->
+- [/] [#judithkrugjudithkrug] PARTIAL 2026-07-23: Production D1 account provisioning is complete without source-code changes — judithkrug@gmail.com was promoted from active lender to active admin, and rwaldman100@gmail.com was created as an active admin. Remaining: send each one-time admin sign-in email after a valid dedicated CLOUDFLARE_EMAIL_API_TOKEN is installed on equityfundingsource-production. Three authenticated retry attempts reached the production endpoint but returned 502; production Worker logs prove Cloudflare Email Service 401 Authentication error, and failed sends invalidated their unsent tokens. Unblock by provisioning an Email Sending-authorized token for the configured account/sender, then POST /api/admin/users/5cca5b02-c9f4-4baa-8d54-b070ad13e77d/login-link and /api/admin/users/453e59670e2b41cd2039d522d4ef89cc/login-link and require HTTP 200 / sent=true.
 - [/] [#tmo-orphan-apply] [operator-verify] Apply the orphan reconcile plan: TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-orphan-reconcile.ts --remote --apply. Dry run re-verified 2026-07-18 against remote D1: reconcile_cache=12 + tombstone=6, push_funding=0, blocked_no_vesting=0, zero TMO writes (EFS-local only). CORRECTION 2026-07-18: this targets the STAGING database (equityfundingsource, 280e1539-b940-4c59-8988-fbed63c12ac0), NOT production — the earlier 'mutates PRODUCTION D1' note was wrong; --d1 defaults to the staging binding and production (293f0a4d) is untouched. TMO side is the sandbox database (001-8553-000-Equity Funding - Sandbox, sandbox=true). All 6 tombstone rows (TST217, TST254, TST374, TST723, TST762, TST999) verified inert: efs_id NULL, zero rows in loans.tmo_loan_number, zero rows in funds (funds is empty entirely). Operator confirmed 2026-07-18 that staging data is test data. Remaining gate is operator go only.
 - [/] [#tmo-reconcile-auto] Automated reconciliation attempt over tmo_unmatched_fundings: for each unmatched TMO funding try RecID -> Account against lender_vestings.tmo_lender_account -> lender email, record confidence plus evidence, auto-bind above a threshold and queue the rest with the candidate ranking pre-computed. Per PRD D4 a bind reconciles EFS to TMO (TMO funding wins) and must record what it overrode. The matcher must be a pure function over pulled fundings + the lender/vesting roster so it is testable without TMO, mirroring vesting_gap_. Phase 3 of src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.
 - [/] [#tmo-orphan-as-fundings] Replace #tmo-orphan-cache's tombstone plan per the operator directive: for each of the 18 orphan tmo_cache_entities 'loan' rows, reconcile against TMO if the loan exists, push the EFS-side funding into TMO via LOS.svc/AddLoanFunding (LOS-embed lender, PRD D1) and adopt the returned RecID if it does not, and tombstone only pure debris with no EFS deal. Gated on the EFS->TMO push gate (#dzmm/#7a4d). Phase 2 of src/equityfundingsource-dev/prds/vesting-and-tmo-reconciliation.md.

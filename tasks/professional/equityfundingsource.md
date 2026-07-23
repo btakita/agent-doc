@@ -1,6 +1,6 @@
 ---
 agent_doc_session: 62fe1f41-886c-4f3d-b6fa-48d46106ec27
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -30,22 +30,18 @@ complete
 ## Exchange
 
 <!-- agent:exchange patch=append -->
-### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/71b0db3f68b7c54571017f333b0989d1db07efa4e5ecf5ec73437e2e857072ad-20260723-052313.md`*
-
-Compacted content:
-- Archived 5 response topic(s): What do you need me to verify for #tmo-snapshot-verify?; Add backlogs into the queue in priority order; Correction; 2 more
-- Prior summary/context: prior compacted content: Archived 3 response topic(s): I don't understand what I need to verify; Print #tmo-orphan-ap...
-<!-- agent:boundary:58a03319 -->
+<!-- agent:boundary:c2101204 -->
 <!-- /agent:exchange -->
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
+- 🚧 do [#judithkrugjudithkrug]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] 🚧 [#judithkrugjudithkrug] Please add Judith Krug <judithkrug@gmail.com> + Robert Waldman <rwaldman100@gmail.com> as admins on production. Ensure the invite email is sent.
 - [ ] [#efs-deploy-hibernation] [operator-verify] Deploy the worker so #efs-do-hibernation's billing fix is actually live. The code shipped in EFS b75f92ca (2026-07-18 18:23 EDT) but the newest production deployment is version 1b9c8d69 from 2026-07-18 16:03 UTC / 12:03 EDT — SIX HOURS EARLIER. The live worker still runs the non-hibernating rooms, so the ~328,500 GB-s per always-on room is still accruing. Blocked on operator go only because 23 commits sit between the deployed version and HEAD (hibernation, TMO backup/restore/snapshot/orphan tooling, admin binding queue, Dropbox fail-soft, TMO contacts/vesting-gap admin screens), so 'make deploy' ships far more than the DO change and needs a deliberate go. Verify after deploying with 'CLOUDFLARE_API_TOKEN="$(passage show btak/equityfundingsource/cloudflare_api_token | head -1)" bunx wrangler deployments list --name equityfundingsource' and confirm the newest version postdates b75f92ca.
 - [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). UNBLOCKED 2026-07-19: #tmo-snapshot-verify passed — the snapshot tool ran against real TMO sandbox and reported complete=true (loans=18 fundings=5 attachment_metas=20 lenders=1 borrowers=16, zero errors), so the gate command 'bun ./bin/tmo-snapshot.ts --covers <the 16> --out tmp/tmo-before-purge.json' is now known-good. Take that snapshot immediately before purging. Still held on operator go ONLY because DeleteLoan is permanent with no TMO-side undo. Note the snapshot is evidence, not a restore: attachment BYTES are not captured (20 attachment metas across 554466/AVW580/MBQ435/SRV532/TST766 would be unrecoverable), and RecIDs do not round-trip. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
 <!-- /agent:backlog -->

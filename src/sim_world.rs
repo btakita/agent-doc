@@ -4517,6 +4517,57 @@ fn closeout_sim_fault_points_fail_closed_then_recover() {
 }
 
 #[test]
+fn repeated_wedged_post_commit_cycles_never_accumulate_boundaries() {
+    let mut world = SimWorld::new(1_099);
+
+    for cycle in 0..8 {
+        let stale = format!("<!-- agent:boundary:wedged-{cycle} -->\n");
+        world.doc = world.doc.replace(
+            "<!-- /agent:exchange -->",
+            &(stale + "<!-- /agent:exchange -->"),
+        );
+        world.snapshot = world.doc.clone();
+        world.phase = CyclePhase::WriteApplied;
+
+        world
+            .apply(SimCommand::CrashAt(
+                FaultPoint::PostCommitBoundaryReposition,
+            ))
+            .unwrap();
+        world.apply(SimCommand::Commit).unwrap();
+        assert!(
+            matches!(
+                world.phase,
+                CyclePhase::Interrupted(FaultPoint::PostCommitBoundaryReposition)
+            ),
+            "cycle {cycle} must model the wedged post-commit handoff"
+        );
+        assert_eq!(
+            world
+                .doc
+                .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
+                .count(),
+            1,
+            "the binary-owned committed projection must already be collapsed before the wedged editor handoff; cycle={cycle}\n{}",
+            world.doc
+        );
+
+        world.apply(SimCommand::Recover).unwrap();
+        assert_eq!(world.phase, CyclePhase::Committed);
+        assert_eq!(world.snapshot, world.doc);
+        assert_eq!(
+            world
+                .snapshot
+                .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
+                .count(),
+            1,
+            "recovery must preserve the singleton boundary; cycle={cycle}\n{}",
+            world.snapshot
+        );
+    }
+}
+
+#[test]
 fn closeout_sim_harness_matrix_covers_agent_backends_and_edge_classes() {
     let mut observed = BTreeSet::new();
 

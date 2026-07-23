@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-markdown-ast"
-version = "0.35.21"
+version = "0.35.22"
 edition = "2024"
 license = "MIT"
 description = "Structured markdown block AST for agent-doc session documents (tree-sitter-md based)"
@@ -8,7 +8,7 @@ repository = "https://github.com/btakita/agent-doc"
 publish = false
 
 [dependencies]
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.21" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.22" }
 serde_json = "1"
 tree-sitter = "0.26"
 tree-sitter-md = "0.5"

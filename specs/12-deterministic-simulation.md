@@ -137,7 +137,10 @@ Closeout invariants currently exercised by the simulator:
 - A captured or write-applied response cannot be reported successful until it
   crosses the commit boundary.
 - Duplicate visible response patchbacks are rejected before commit.
-- Boundary cleanup leaves at most one live exchange boundary marker.
+- Boundary cleanup leaves exactly one live exchange boundary marker. The focused
+  repeated-wedge regression runs eight post-commit handoff failures and recoveries
+  and requires both the binary-owned committed projection and snapshot to retain
+  that singleton on every cycle.
 - A captured response cannot commit until its tracked-work mutation envelope is
   also captured; retained-delivery recovery preserves and applies both exactly
   once.

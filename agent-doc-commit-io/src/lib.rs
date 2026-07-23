@@ -1611,7 +1611,7 @@ where
                 file,
                 &git_root,
                 &resolved,
-            );
+            )?;
             agent_doc_git_io::post_commit_cleanup::finalize_successful_commit(
                 ports.post_commit_cleanup,
                 file,

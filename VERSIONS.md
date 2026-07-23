@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.22
+
+_JetBrains plugin 0.2.291; VS Code extension 0.2.56._
+
+- **Committed boundary cleanup now proves its own self-heal (`#boundaryaccum1`, `#ipcpostcommitinv`).** Binary-owned snapshot and staged content collapse scattered `agent:boundary` markers independently of active-run and IPC-listener guards; those guards apply only to editor working-tree rewrites. If a post-commit check finds multiple markers, the exact-path repair commit must succeed and a fresh HEAD read must contain exactly one marker, otherwise closeout fails loudly with a phase-labeled invariant error. Template coverage and an eight-cycle deterministic wedged-handoff simulation prevent recurrence.
+
 ## 0.35.21
 
 _JetBrains plugin 0.2.291; VS Code extension 0.2.56._

@@ -2001,6 +2001,44 @@ mod tests {
     }
 
     #[test]
+    fn apply_patches_boundary_invariant_keeps_one_marker_at_exchange_end() {
+        let doc = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Earlier response.\n",
+            "<!-- agent:boundary:stale-one -->\n",
+            "Operator prompt.\n",
+            "<!-- agent:boundary:stale-two -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let patches = vec![PatchBlock {
+            name: "exchange".to_string(),
+            content: "### Re: prompt — gpt-5\n\nComplete.\n".to_string(),
+            attrs: std::collections::HashMap::new(),
+        }];
+        let configs = std::collections::HashMap::new();
+        let max_lines = std::collections::HashMap::new();
+
+        let result = apply_patches_pure(doc, &patches, "", None, &configs, &max_lines).unwrap();
+
+        assert_eq!(
+            result
+                .matches(agent_doc_element_boundary::boundary::BOUNDARY_PREFIX)
+                .count(),
+            1,
+            "{result}"
+        );
+        assert!(
+            result.contains("Complete.\n<!-- agent:boundary:"),
+            "the sole boundary must follow the applied response: {result}"
+        );
+        assert!(
+            result.contains("-->\n<!-- /agent:exchange -->"),
+            "the sole boundary must be the final exchange node: {result}"
+        );
+    }
+
+    #[test]
     fn parse_single_patch() {
         let response = "<!-- patch:status -->\nBuild passing.\n<!-- /patch:status -->\n";
         let (patches, unmatched) = parse_patches(response).unwrap();

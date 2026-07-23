@@ -237,7 +237,19 @@ The range-refresh fix is complete and the binary-owned closeout has now been re-
 The implemented behavior remains unchanged: existing graphs stay visible during loading, ticker-card zoom state resets before paint when the final response arrives, and the browser shows no intermediate old-index graph frame. Application commit `b04e1d7`, superproject gitlink commit `7420699aa`, and the prior detailed verification record remain authoritative; both repositories are pushed and clean for the scoped paths.
 
 No additional implementation changes or follow-up work were needed during this closeout repair.
-<!-- agent:boundary:13d6a26f -->
+
+### Re: eliminate the range-refresh jank without hiding content — gpt-5
+
+> **Queue prompt:**
+>
+> The last commit hides then shows the content after selecting the date range. This is not correct behavior...and it does not even fix the jank. Please do not hide then show the content. Please fix the jank as well.
+
+Completed and pushed. Existing graphs now remain visible, accessible, and at full opacity while the final committed range loads. When that response arrives, each ticker card resets its old local zoom indices in a pre-paint layout effect, so the browser paints the new series directly at its correct full range instead of exposing the intermediate old-index frame.
+
+The application fix is commit `b04e1d7`; the superproject gitlink and session closeouts are also pushed. Full verification remains green: 35 backend tests, mypy, 99 frontend tests, TypeScript typecheck, production build, and a real hit-tested Chromium slider test that observed exactly one final-range request and no intermediate animation-frame state.
+
+No additional implementation or follow-up work remains.
+<!-- agent:boundary:3067aee7 -->
 <!-- /agent:exchange -->
 
 ## Queue

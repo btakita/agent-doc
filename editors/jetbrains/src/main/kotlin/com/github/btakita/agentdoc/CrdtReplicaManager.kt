@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 private const val CRDT_LISTENER_WARN_MS = 10L
 private const val CRDT_WORKER_WARN_MS = 100L
+private const val NATIVE_RELOAD_WORKER_TIMEOUT_MS = 5_000L
 private const val CRDT_EDT_WARN_MS = 50L
 private const val CRDT_AWAIT_ATTACH_TIMEOUT_MS = 750L
 private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
@@ -286,6 +287,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         forwarders.clear()
         shadows.clear()
         executor.shutdownNow()
+    }
+
+    private fun awaitWorkerTermination(timeoutMs: Long): Boolean = try {
+        executor.awaitTermination(timeoutMs, TimeUnit.MILLISECONDS)
+    } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+        false
     }
 
     override fun documentChanged(event: DocumentEvent) {
@@ -1684,6 +1692,26 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun disposeProject(project: Project) {
             instances.remove(project)?.dispose()
+        }
+
+        internal fun quiesceAllForNativeReload(): Pair<List<Project>, Boolean> {
+            val managers = instances.entries.mapNotNull { (project, manager) ->
+                if (instances.remove(project, manager)) project to manager else null
+            }
+            managers.forEach { (_, manager) -> manager.dispose() }
+            val quiesced = managers.map { (_, manager) ->
+                manager.awaitWorkerTermination(NATIVE_RELOAD_WORKER_TIMEOUT_MS)
+            }.all { it }
+            return managers.map { it.first } to quiesced
+        }
+
+        internal fun restartAfterNativeReload(projects: List<Project>) {
+            projects
+                .filterNot { it.isDisposed }
+                .forEach { project ->
+                    getInstance(project)
+                    forceRefreshOpenDocumentReplicas(project, "native-generation-handoff")
+                }
         }
 
         fun requestRemoteDrain(project: Project, filePath: String? = null, reason: String = "event") {

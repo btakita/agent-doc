@@ -24562,15 +24562,15 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     );
     let ffi_source = fs::read_to_string(manifest_dir.join("src/ffi.rs")).unwrap();
     assert!(
-        ffi_source.contains("agent_doc_ipc_io::start_listener_with_logger(")
+        ffi_source.contains("agent_doc_ipc_io::start_listener_with_logger_until(")
             && ffi_source.contains("agent_doc_ops_log_io::log_op")
-            && ffi_source.contains("agent_doc_ipc_io::socket_path(")
+            && ffi_source.contains("agent_doc_ipc_io::wake_listener(")
             && ffi_source.contains(
                 "agent_doc_controller_io::project_controller::load_state_backbone_projection("
             )
             && !ffi_source.contains("agent_doc_cycle_state_io::load_with_closeout_projection(")
             && !ffi_source.contains("agent_doc_orchestration::ipc_socket"),
-        "FFI should call focused IPC IO directly, inject the ops-log sink, and read the Project Controller state-backbone projection (sidecars demoted, #sidecardemote) for editor-facing turn projection"
+        "FFI should call cancellable focused IPC IO directly, inject the ops-log sink, wake listeners during native reload quiescence, and read the Project Controller state-backbone projection (sidecars demoted, #sidecardemote) for editor-facing turn projection"
     );
     for relative in [
         "agent-doc-preflight-runtime-io/src/lib.rs",

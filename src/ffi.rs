@@ -70,6 +70,20 @@ static SYNC_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 static SYNC_LOCK_ACQUIRED_AT_MS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+struct IpcListenerGeneration {
+    root: PathBuf,
+    shutdown: std::sync::Arc<AtomicBool>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+static IPC_LISTENER_GENERATIONS: std::sync::LazyLock<
+    parking_lot::Mutex<std::collections::HashMap<String, IpcListenerGeneration>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
+
+/// Reject new listeners while the currently-loaded cdylib is crossing its
+/// quiesce boundary. A freshly loaded generation starts with this flag clear.
+static NATIVE_GENERATION_QUIESCING: AtomicBool = AtomicBool::new(false);
+
 /// Default stale bound for the cross-editor sync guard. Sized above the JetBrains
 /// plugin's `SYNC_PROCESS_TIMEOUT_MS` (30s) plus margin so a legitimately in-flight sync
 /// is never superseded — only a guard held past this bound (a wedged/dead holder) is.
@@ -743,34 +757,21 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener(
         Ok(s) => s.to_string(),
         Err(_) => return 0,
     };
-    let root_path = std::path::PathBuf::from(&root_str);
-
-    std::thread::spawn(move || {
-        let result = agent_doc_ipc_io::start_listener_with_logger(
-            &root_path,
-            move |msg| {
-                // Lend the message to the callback (no ownership transfer)
-                let c_msg = match CString::new(msg) {
-                    Ok(c) => c,
-                    Err(_) => {
-                        return Some(r#"{"type":"receipt","status":"rejected"}"#.to_string());
-                    }
-                };
-                let success = callback(c_msg.as_ptr()) != 0;
-                if success {
-                    Some(r#"{"type":"receipt","status":"applied"}"#.to_string())
-                } else {
-                    Some(r#"{"type":"receipt","status":"rejected"}"#.to_string())
-                }
-            },
-            agent_doc_ops_log_io::log_op,
-        );
-        if let Err(e) = result {
-            eprintln!("[ffi] IPC listener error: {}", e);
+    spawn_ipc_listener(root_str, "v1", move |msg| {
+        // Lend the message to the callback (no ownership transfer).
+        let c_msg = match CString::new(msg) {
+            Ok(c) => c,
+            Err(_) => {
+                return Some(r#"{"type":"receipt","status":"rejected"}"#.to_string());
+            }
+        };
+        let success = callback(c_msg.as_ptr()) != 0;
+        if success {
+            Some(r#"{"type":"receipt","status":"applied"}"#.to_string())
+        } else {
+            Some(r#"{"type":"receipt","status":"rejected"}"#.to_string())
         }
-    });
-
-    1
+    })
 }
 
 /// V2 of [`agent_doc_start_ipc_listener`] with extended receipt-result encoding.
@@ -806,57 +807,170 @@ pub unsafe extern "C" fn agent_doc_start_ipc_listener_v2(
         Ok(s) => s.to_string(),
         Err(_) => return 0,
     };
-    let root_path = std::path::PathBuf::from(&root_str);
-
-    std::thread::spawn(move || {
-        let result = agent_doc_ipc_io::start_listener_with_logger(
-            &root_path,
-            move |msg| {
-                let c_msg = match CString::new(msg) {
-                    Ok(c) => c,
-                    Err(_) => {
-                        return Some(r#"{"type":"receipt","status":"rejected"}"#.to_string());
-                    }
-                };
-                match callback(c_msg.as_ptr()) {
-                    1 => Some(r#"{"type":"receipt","status":"applied"}"#.to_string()),
-                    2 => Some(
-                        r#"{"type":"receipt","status":"applied","reason":"already_applied"}"#
-                            .to_string(),
-                    ),
-                    _ => Some(r#"{"type":"receipt","status":"rejected"}"#.to_string()),
-                }
-            },
-            agent_doc_ops_log_io::log_op,
-        );
-        if let Err(e) = result {
-            eprintln!("[ffi] IPC listener v2 error: {}", e);
+    spawn_ipc_listener(root_str, "v2", move |msg| {
+        let c_msg = match CString::new(msg) {
+            Ok(c) => c,
+            Err(_) => {
+                return Some(r#"{"type":"receipt","status":"rejected"}"#.to_string());
+            }
+        };
+        match callback(c_msg.as_ptr()) {
+            1 => Some(r#"{"type":"receipt","status":"applied"}"#.to_string()),
+            2 => Some(
+                r#"{"type":"receipt","status":"applied","reason":"already_applied"}"#.to_string(),
+            ),
+            _ => Some(r#"{"type":"receipt","status":"rejected"}"#.to_string()),
         }
-    });
+    })
+}
 
+fn spawn_ipc_listener<F>(root_str: String, label: &'static str, handler: F) -> i32
+where
+    F: Fn(&str) -> Option<String> + Send + Sync + 'static,
+{
+    if NATIVE_GENERATION_QUIESCING.load(Ordering::SeqCst) {
+        eprintln!("[ffi] refusing to start IPC listener while native generation is quiescing");
+        return 0;
+    }
+
+    let mut generations = IPC_LISTENER_GENERATIONS.lock();
+    if let Some(existing) = generations.remove(&root_str) {
+        if !existing.thread.is_finished() {
+            generations.insert(root_str, existing);
+            return 1;
+        }
+        let _ = existing.thread.join();
+    }
+
+    let root = PathBuf::from(&root_str);
+    let thread_root = root.clone();
+    let shutdown = std::sync::Arc::new(AtomicBool::new(false));
+    let thread_shutdown = std::sync::Arc::clone(&shutdown);
+    let thread = match std::thread::Builder::new()
+        .name(format!("agent-doc-ipc-listener-{label}"))
+        .spawn(move || {
+            let result = agent_doc_ipc_io::start_listener_with_logger_until(
+                &thread_root,
+                handler,
+                agent_doc_ops_log_io::log_op,
+                thread_shutdown,
+            );
+            if let Err(error) = result {
+                eprintln!("[ffi] IPC listener {label} error: {error}");
+            }
+        }) {
+        Ok(thread) => thread,
+        Err(error) => {
+            eprintln!("[ffi] failed to spawn IPC listener {label}: {error}");
+            return 0;
+        }
+    };
+    generations.insert(
+        root_str,
+        IpcListenerGeneration {
+            root,
+            shutdown,
+            thread,
+        },
+    );
     1
 }
 
-/// Stop the IPC socket listener by removing the socket file.
-///
-/// The listener thread will exit on its next accept() call when the socket
-/// is removed. Call this on project close / plugin disposal.
+fn stop_ipc_listener_generation(root_str: &str, timeout: std::time::Duration) -> bool {
+    let Some(generation) = IPC_LISTENER_GENERATIONS.lock().remove(root_str) else {
+        return true;
+    };
+    generation.shutdown.store(true, Ordering::SeqCst);
+    let _ = agent_doc_ipc_io::wake_listener(&generation.root);
+    let deadline = std::time::Instant::now() + timeout;
+    while !generation.thread.is_finished() && std::time::Instant::now() < deadline {
+        let _ = agent_doc_ipc_io::wake_listener(&generation.root);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if generation.thread.is_finished() {
+        let _ = generation.thread.join();
+        true
+    } else {
+        IPC_LISTENER_GENERATIONS
+            .lock()
+            .insert(root_str.to_string(), generation);
+        false
+    }
+}
+
+/// Stop and join one IPC socket listener.
 ///
 /// # Safety
 ///
 /// `project_root` must be a valid, NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn agent_doc_stop_ipc_listener(project_root: *const c_char) {
+pub unsafe extern "C" fn agent_doc_stop_ipc_listener(project_root: *const c_char) -> c_int {
     let root_str = match unsafe { CStr::from_ptr(project_root) }.to_str() {
         Ok(s) => s,
-        Err(_) => return,
+        Err(_) => return 0,
     };
-    let sock = agent_doc_ipc_io::socket_path(std::path::Path::new(root_str));
-    if let Err(e) = std::fs::remove_file(&sock)
-        && e.kind() != std::io::ErrorKind::NotFound
-    {
-        eprintln!("[ffi] failed to remove socket {:?}: {}", sock, e);
+    if !stop_ipc_listener_generation(root_str, std::time::Duration::from_secs(7)) {
+        eprintln!("[ffi] timed out joining IPC listener for {root_str}");
+        0
+    } else {
+        1
     }
+}
+
+/// Quiesce every writable/background resource owned by this native generation.
+///
+/// Returns `1` only after all IPC accept/connection threads have joined and all
+/// cdylib-hosted CRDT replicas have been dropped. A timeout returns `0`; the
+/// caller must keep this generation loaded and may call
+/// [`agent_doc_resume_after_reload_failure`] before restarting its listeners.
+#[unsafe(no_mangle)]
+pub extern "C" fn agent_doc_quiesce_for_reload(timeout_ms: i64) -> i32 {
+    let timeout = std::time::Duration::from_millis(timeout_ms.max(1) as u64);
+    NATIVE_GENERATION_QUIESCING.store(true, Ordering::SeqCst);
+    let mut generations = {
+        let mut registry = IPC_LISTENER_GENERATIONS.lock();
+        registry.drain().collect::<Vec<_>>()
+    };
+    for (_, generation) in &generations {
+        generation.shutdown.store(true, Ordering::SeqCst);
+        let _ = agent_doc_ipc_io::wake_listener(&generation.root);
+    }
+
+    let deadline = std::time::Instant::now() + timeout;
+    while generations
+        .iter()
+        .any(|(_, generation)| !generation.thread.is_finished())
+        && std::time::Instant::now() < deadline
+    {
+        for (_, generation) in &generations {
+            if !generation.thread.is_finished() {
+                let _ = agent_doc_ipc_io::wake_listener(&generation.root);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if generations
+        .iter()
+        .any(|(_, generation)| !generation.thread.is_finished())
+    {
+        let mut registry = IPC_LISTENER_GENERATIONS.lock();
+        for (root, generation) in generations {
+            registry.insert(root, generation);
+        }
+        NATIVE_GENERATION_QUIESCING.store(false, Ordering::SeqCst);
+        return 0;
+    }
+    for (_, generation) in generations.drain(..) {
+        let _ = generation.thread.join();
+    }
+    agent_doc_ffi::close_all_replicas_for_reload();
+    1
+}
+
+/// Re-open a quiesced generation after the replacement library failed to load.
+#[unsafe(no_mangle)]
+pub extern "C" fn agent_doc_resume_after_reload_failure() {
+    NATIVE_GENERATION_QUIESCING.store(false, Ordering::SeqCst);
 }
 
 /// Legacy ACK-content ABI retained only to fail old editor plugins closed.
@@ -1704,6 +1818,7 @@ fn ffi_git_commit(file: &std::path::Path) -> bool {
 /// Caller must free with `agent_doc_free_string`.
 #[unsafe(no_mangle)]
 pub extern "C" fn agent_doc_version() -> *mut c_char {
+    agent_doc_controller_io::project_controller::mark_embedded_native_host();
     CString::new(env!("CARGO_PKG_VERSION")).unwrap().into_raw()
 }
 
@@ -2077,83 +2192,31 @@ pub unsafe extern "C" fn agent_doc_document_id_for_path(file_path: *const c_char
         .unwrap_or(std::ptr::null_mut())
 }
 
-/// Per-`(project_root, document_hash)` plugin-side liveness push endpoints
-/// (sidecar-retirement Phase 3C). Global because the JNA/JS FFI boundary is
-/// stateless; each holds a durable `SqliteOutbox` so a push survives a plugin or
-/// controller recycle.
-static RELIABLE_SYNC_LIVENESS_ENDPOINTS: std::sync::LazyLock<
-    parking_lot::Mutex<
-        std::collections::HashMap<
-            String,
-            agent_doc_reliable_sync_io::push::LivenessPushEndpoint<lazily::SqliteOutbox>,
-        >,
-    >,
-> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
-
-/// Per-file ordered channel for continuous document deltas and bounded reattach
-/// adopts. It deliberately uses a channel hash distinct from liveness so the
-/// controller's monotone reliable-sync cursor cannot make the two producers
-/// suppress one another.
-static RELIABLE_SYNC_DOCUMENT_ENDPOINTS: std::sync::LazyLock<
-    parking_lot::Mutex<
-        std::collections::HashMap<
-            String,
-            agent_doc_reliable_sync_io::push::FramePushEndpoint<lazily::SqliteOutbox>,
-        >,
-    >,
-> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
-
-fn reliable_sync_registry_key(project_root: &Path, document_hash: &str) -> String {
-    format!("{}\u{0}{document_hash}", project_root.display())
-}
-
-fn with_liveness_push_endpoint<T>(
-    project_root: &Path,
-    document_hash: &str,
-    operation: impl FnOnce(
-        &mut agent_doc_reliable_sync_io::push::LivenessPushEndpoint<lazily::SqliteOutbox>,
-    ) -> anyhow::Result<T>,
-) -> anyhow::Result<T> {
-    let key = reliable_sync_registry_key(project_root, document_hash);
-    let mut registry = RELIABLE_SYNC_LIVENESS_ENDPOINTS.lock();
-    let endpoint = match registry.entry(key) {
-        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-        std::collections::hash_map::Entry::Vacant(entry) => {
-            let outbox = lazily::SqliteOutbox::open(
-                &agent_doc_sqlite::state_store::state_db_path(project_root),
-                document_hash.to_string(),
-            )?;
-            let acked_through = outbox.acked_through();
-            entry.insert(
-                agent_doc_reliable_sync_io::push::LivenessPushEndpoint::resuming(
-                    document_hash.to_string(),
-                    outbox,
-                    acked_through,
-                ),
-            )
-        }
-    };
-    operation(endpoint)
-}
-
 fn enqueue_liveness_ops(
     project_root: &Path,
     document_hash: &str,
     ops: &[agent_doc_reliable_sync_io::liveness::LivenessOp],
 ) -> anyhow::Result<()> {
-    with_liveness_push_endpoint(project_root, document_hash, |endpoint| {
-        endpoint.enqueue(ops)?;
-        Ok(())
-    })
+    let frame = agent_doc_reliable_sync_io::liveness::encode_liveness_frame(ops)?;
+    agent_doc_controller_io::project_controller::enqueue_reliable_sync_frame(
+        project_root,
+        None,
+        document_hash,
+        frame,
+        false,
+    )?;
+    Ok(())
 }
 
 fn flush_liveness_endpoint(project_root: &Path, document_hash: &str) -> anyhow::Result<u64> {
-    with_liveness_push_endpoint(project_root, document_hash, |endpoint| {
-        let transport = agent_doc_controller_io::project_controller::RpcLivenessPushTransport::new(
+    Ok(
+        agent_doc_controller_io::project_controller::flush_reliable_sync_channel(
             project_root,
-        );
-        Ok(endpoint.flush(&transport)?.acked_through)
-    })
+            None,
+            document_hash,
+        )?
+        .ack_through,
+    )
 }
 
 fn document_op_channel_hash(file_path: &Path) -> String {
@@ -2163,52 +2226,35 @@ fn document_op_channel_hash(file_path: &Path) -> String {
     )
 }
 
-fn with_document_push_endpoint<T>(
+fn enqueue_document_push_frame(
     project_root: &Path,
     file_path: &Path,
-    operation: impl FnOnce(
-        &mut agent_doc_reliable_sync_io::push::FramePushEndpoint<lazily::SqliteOutbox>,
-    ) -> anyhow::Result<T>,
-) -> anyhow::Result<T> {
+    frame: lazily::IpcMessage,
+) -> anyhow::Result<()> {
     let channel_hash = document_op_channel_hash(file_path);
-    let key = reliable_sync_registry_key(project_root, &channel_hash);
-    let mut registry = RELIABLE_SYNC_DOCUMENT_ENDPOINTS.lock();
-    let endpoint = match registry.entry(key) {
-        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
-        std::collections::hash_map::Entry::Vacant(entry) => {
-            let outbox = lazily::SqliteOutbox::open(
-                &agent_doc_sqlite::state_store::state_db_path(project_root),
-                channel_hash.clone(),
-            )?;
-            let acked_through = outbox.acked_through();
-            entry.insert(
-                agent_doc_reliable_sync_io::push::FramePushEndpoint::resuming(
-                    channel_hash,
-                    outbox,
-                    acked_through,
-                ),
-            )
-        }
-    };
-    operation(endpoint)
+    agent_doc_controller_io::project_controller::enqueue_reliable_sync_frame(
+        project_root,
+        Some(file_path),
+        &channel_hash,
+        frame,
+        true,
+    )?;
+    Ok(())
 }
 
 fn flush_document_push_endpoint(project_root: &Path, file_path: &Path) -> anyhow::Result<()> {
-    with_document_push_endpoint(project_root, file_path, |endpoint| {
-        let transport = agent_doc_controller_io::project_controller::RpcDocumentPushTransport::new(
-            project_root,
-            file_path,
-        );
-        endpoint.flush(&transport)?;
-        Ok(())
-    })
+    let channel_hash = document_op_channel_hash(file_path);
+    agent_doc_controller_io::project_controller::flush_reliable_sync_channel(
+        project_root,
+        Some(file_path),
+        &channel_hash,
+    )?;
+    Ok(())
 }
 
-/// Enqueue a JSON batch of `LivenessOp`s into a document's durable push outbox
-/// (sidecar-retirement Phase 3C). The editor plugin calls this on open / close /
-/// attach / exit events; the frame is appended durably **before** any send, then
-/// delivered by [`agent_doc_reliable_sync_liveness_flush`]. Returns `0` on
-/// success, `-1` on error.
+/// Enqueue a JSON batch of `LivenessOp`s through the controller-owned durable
+/// push outbox (sidecar-retirement Phase 3C). The reloadable cdylib encodes the
+/// frame but never opens SQLite. Returns `0` on success, `-1` on error.
 ///
 /// # Safety
 ///
@@ -2237,11 +2283,9 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_liveness_enqueue(
     }
 }
 
-/// Flush a document's durable push outbox to the controller `reliable_sync` RPC
-/// (sidecar-retirement Phase 3C). Replays every un-acked frame and prunes on the
-/// controller's ack cursor; a push that fails while the controller is down stays
-/// retained for the next flush. Returns the ack cursor (`>= 0`) on success, `-1`
-/// on error.
+/// Ask the controller to flush its durable push outbox through `reliable_sync`
+/// (sidecar-retirement Phase 3C). Returns the ack cursor (`>= 0`) on success,
+/// `-1` on error.
 ///
 /// # Safety
 ///
@@ -2268,9 +2312,9 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_liveness_flush(
 
 /// Durably append and flush one incremental `Vec<TextOp>` produced by
 /// `agent_doc_replica_diff`. The file-scoped controller request continuously feeds
-/// the relay canonical; retries and controller downtime are absorbed by the SQLite
-/// outbox. Returns `0` after durable enqueue (including retain-and-stall), `-1` on
-/// invalid input/internal error.
+/// the relay canonical; retries and controller downtime are absorbed by the
+/// controller-owned SQLite outbox. Returns `0` after durable enqueue (including
+/// retain-and-stall), `-1` on invalid input/internal error.
 ///
 /// # Safety
 ///
@@ -2290,15 +2334,7 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_document_op_push(
         else {
             return flush_document_push_endpoint(Path::new(&project_root), Path::new(&file_path));
         };
-        with_document_push_endpoint(
-            Path::new(&project_root),
-            Path::new(&file_path),
-            |endpoint| {
-                endpoint.enqueue_frame(frame);
-                Ok(())
-            },
-        )?;
-        flush_document_push_endpoint(Path::new(&project_root), Path::new(&file_path))
+        enqueue_document_push_frame(Path::new(&project_root), Path::new(&file_path), frame)
     })();
     match result {
         Ok(()) => 0,
@@ -2327,15 +2363,7 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_text_adopt_push(
         let file_path = unsafe { required_ffi_string(file_path, "file_path") }?;
         let text = unsafe { required_ffi_string(text, "text") }?;
         let frame = agent_doc_reliable_sync_io::document_op::encode_text_adopt_frame(&text)?;
-        with_document_push_endpoint(
-            Path::new(&project_root),
-            Path::new(&file_path),
-            |endpoint| {
-                endpoint.enqueue_frame(frame);
-                Ok(())
-            },
-        )?;
-        flush_document_push_endpoint(Path::new(&project_root), Path::new(&file_path))
+        enqueue_document_push_frame(Path::new(&project_root), Path::new(&file_path), frame)
     })();
     match result {
         Ok(()) => 0,

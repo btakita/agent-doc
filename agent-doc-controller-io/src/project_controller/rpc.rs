@@ -33,8 +33,18 @@ const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_dea
 /// gets a generous ceiling.
 const CONTROLLER_COMMIT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(120);
 const CONTROLLER_COMPACT_DOCUMENT_TIMEOUT: Duration = Duration::from_secs(300);
+static EMBEDDED_NATIVE_HOST: AtomicBool = AtomicBool::new(false);
 #[cfg(not(any(test, feature = "test-support")))]
 const CONTROLLER_SYNC_TMUX_LAYOUT_TIMEOUT: Duration = Duration::from_secs(35);
+
+/// Mark this process as a reloadable native-library host.
+///
+/// A JVM-hosted cdylib must not spawn a controller-lifetime child-reaper thread,
+/// because that thread would pin the old generation across `dlclose`. Controller
+/// launch instead goes through a short-lived external `agent-doc` helper.
+pub fn mark_embedded_native_host() {
+    EMBEDDED_NATIVE_HOST.store(true, Ordering::SeqCst);
+}
 
 pub(crate) fn connect(project_root: &Path) -> Result<interprocess::local_socket::Stream> {
     connect_path(&socket_path(project_root))
@@ -6145,8 +6155,16 @@ enum EditorNativeReloadPolicy {
     RestartRequired,
 }
 
-fn editor_native_reload_policy(editor_id: &str) -> EditorNativeReloadPolicy {
-    if editor_id.starts_with("vscode-") {
+fn editor_native_reload_policy(
+    editor_id: &str,
+    capabilities: &[String],
+) -> EditorNativeReloadPolicy {
+    if editor_id.starts_with("vscode-")
+        || (editor_id.starts_with("jetbrains-")
+            && capabilities
+                .iter()
+                .any(|value| value == "native_hot_reload_generation_v1"))
+    {
         EditorNativeReloadPolicy::HotReload
     } else {
         EditorNativeReloadPolicy::RestartRequired
@@ -6158,8 +6176,8 @@ fn editor_native_reload_policy(editor_id: &str) -> EditorNativeReloadPolicy {
 ///
 /// Registrations come from the reliable-sync Lazily projection. A process that
 /// has several open documents receives one intent per project, not one per
-/// document. JetBrains and unknown adapters are counted as restart-required:
-/// fail closed rather than risk loading two SQLite-owning cdylibs in one process.
+/// document. VS Code and JetBrains are explicitly hot-reload capable; unknown
+/// adapters are counted as restart-required and fail closed.
 /// Failures are counted so install can remain best-effort without inventing a
 /// filesystem broadcast path.
 pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutReport {
@@ -6176,7 +6194,13 @@ pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutRepo
         let mut endpoints = status
             .registrations
             .into_iter()
-            .map(|registration| (registration.pid, registration.editor_id))
+            .map(|registration| {
+                (
+                    registration.pid,
+                    registration.editor_id,
+                    registration.capabilities,
+                )
+            })
             .collect::<std::collections::BTreeSet<_>>();
         // `#editorendpointzero`: the registration record can be empty while the
         // editor is alive and listening on its PID-scoped socket — the state that
@@ -6185,17 +6209,18 @@ pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutRepo
         // always reachable, whatever the record says. `editor_id` is only a
         // payload field, so an unknown one does not block delivery.
         for pid in agent_doc_ipc_io::discover_listening_editor_pids(&project_root) {
-            if !endpoints.iter().any(|(known, _)| *known == pid) {
-                endpoints.insert((pid, String::new()));
+            if !endpoints.iter().any(|(known, _, _)| *known == pid) {
+                endpoints.insert((pid, String::new(), Vec::new()));
             }
         }
         report.endpoints += endpoints.len();
-        for (pid, editor_id) in endpoints {
+        for (pid, editor_id, capabilities) in endpoints {
             if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, pid) {
                 report.failed += 1;
                 continue;
             }
-            if editor_native_reload_policy(&editor_id) == EditorNativeReloadPolicy::RestartRequired
+            if editor_native_reload_policy(&editor_id, &capabilities)
+                == EditorNativeReloadPolicy::RestartRequired
             {
                 report.restart_required += 1;
                 continue;
@@ -6638,6 +6663,16 @@ pub(crate) fn launch_detached_at(
     previous_controller_pid: Option<u32>,
     handoff_state: ControllerHandoffState,
 ) -> Result<()> {
+    if EMBEDDED_NATIVE_HOST.load(Ordering::SeqCst) {
+        return launch_detached_via_helper(
+            project_root,
+            launch_mode,
+            listen_socket,
+            controller_generation,
+            previous_controller_pid,
+            handoff_state,
+        );
+    }
     let build_command = |exe: &Path| -> Command {
         let mut command = Command::new(exe);
         command
@@ -6770,6 +6805,64 @@ pub(crate) fn launch_detached_at(
     // peer owning the socket exits fast, and an unreaped handle becomes a
     // `<defunct>` zombie parented to the supervisor forever (`#zombiereap`).
     agent_doc_supervisor_process::detached_child::reap_detached(child);
+    Ok(())
+}
+
+fn launch_detached_via_helper(
+    project_root: &Path,
+    launch_mode: LaunchMode,
+    listen_socket: Option<&Path>,
+    controller_generation: Option<u64>,
+    previous_controller_pid: Option<u32>,
+    handoff_state: ControllerHandoffState,
+) -> Result<()> {
+    let exe = current_agent_doc_binary()?;
+    let mut command = Command::new(&exe);
+    command
+        .current_dir(project_root)
+        .arg("controller")
+        .arg("launch-detached")
+        .arg("--project-root")
+        .arg(project_root)
+        .arg("--launch-mode")
+        .arg(launch_mode.as_str());
+    if let Some(path) = listen_socket {
+        command.arg("--listen-socket").arg(path);
+    }
+    if let Some(generation) = controller_generation {
+        command
+            .arg("--controller-generation")
+            .arg(generation.to_string());
+    }
+    if let Some(pid) = previous_controller_pid {
+        command
+            .arg("--previous-controller-pid")
+            .arg(pid.to_string());
+    }
+    if handoff_state != ControllerHandoffState::Stable {
+        command.arg("--handoff-state").arg(match handoff_state {
+            ControllerHandoffState::Stable => "stable",
+            ControllerHandoffState::Preparing => "preparing",
+            ControllerHandoffState::Promoted => "promoted",
+            ControllerHandoffState::Retiring => "retiring",
+            ControllerHandoffState::Failed => "failed",
+        });
+    }
+    close_inherited_fds_on_exec(&mut command);
+    let status = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .with_context(|| {
+            format!(
+                "failed to launch controller through detached helper {}",
+                exe.display()
+            )
+        })?;
+    if !status.success() {
+        anyhow::bail!("detached controller helper exited with {status}");
+    }
     Ok(())
 }
 
@@ -8373,6 +8466,10 @@ pub(crate) fn handle_request_locked(
             &bootstrap_snapshot.project_root,
             request,
         )),
+        "reliable_sync_outbox" => controller_envelope(handle_reliable_sync_outbox(
+            &bootstrap_snapshot.project_root,
+            request,
+        )),
         "reliable_sync_status" => {
             controller_envelope(handle_reliable_sync_status(&bootstrap_snapshot))
         }
@@ -8542,6 +8639,76 @@ pub struct ControllerReliableSyncResponse {
     pub ack_through: u64,
     /// Lazily accepted the frame into the authoritative plane.
     pub accepted: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ControllerReliableSyncOutboxPayload {
+    document_hash: String,
+    /// A raw Lazily frame to durably append. `None` means flush only.
+    frame: Option<lazily::IpcMessage>,
+    /// Flush the retained suffix after an optional append.
+    flush: bool,
+}
+
+/// Ask the project controller to own the durable sender outbox for one raw
+/// reliable-sync frame. The caller is deliberately stateless: epoch allocation,
+/// append-before-apply, replay, and pruning all occur in the controller process.
+pub fn enqueue_reliable_sync_frame(
+    project_root: &Path,
+    file: Option<&Path>,
+    document_hash: &str,
+    frame: lazily::IpcMessage,
+    flush: bool,
+) -> Result<ControllerReliableSyncResponse> {
+    request_reliable_sync_outbox(
+        project_root,
+        file,
+        ControllerReliableSyncOutboxPayload {
+            document_hash: document_hash.to_string(),
+            frame: Some(frame),
+            flush,
+        },
+    )
+}
+
+/// Flush a controller-owned reliable-sync sender channel without appending.
+pub fn flush_reliable_sync_channel(
+    project_root: &Path,
+    file: Option<&Path>,
+    document_hash: &str,
+) -> Result<ControllerReliableSyncResponse> {
+    request_reliable_sync_outbox(
+        project_root,
+        file,
+        ControllerReliableSyncOutboxPayload {
+            document_hash: document_hash.to_string(),
+            frame: None,
+            flush: true,
+        },
+    )
+}
+
+fn request_reliable_sync_outbox(
+    project_root: &Path,
+    file: Option<&Path>,
+    payload: ControllerReliableSyncOutboxPayload,
+) -> Result<ControllerReliableSyncResponse> {
+    let request = ControllerRequest {
+        command: "reliable_sync_outbox".to_string(),
+        file: file.map(Path::to_path_buf),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("reliable_sync_outbox_client".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(serde_json::to_string(&payload)?),
+    };
+    request_controller::<ControllerReliableSyncResponse>(project_root, request)
 }
 
 /// Client side of the `reliable_sync` RPC: push one liveness envelope to the
@@ -8946,6 +9113,79 @@ pub fn record_reliable_sync_editor_exit(project_root: &Path, pid: u64) {
 /// the outbox epoch as `generation`. The frame folds into the
 /// `ControllerLivenessPlane` and the returned
 /// `ack_through` lets the plugin outbox prune / resume from the frontier.
+struct InProcessReliableSyncTransport<'a> {
+    project_root: &'a Path,
+    file: Option<&'a Path>,
+}
+
+impl agent_doc_reliable_sync_io::push::LivenessPushTransport
+    for InProcessReliableSyncTransport<'_>
+{
+    fn push(&self, _document_hash: &str, epoch: u64, envelope: &serde_json::Value) -> Result<u64> {
+        let response = handle_reliable_sync(
+            self.project_root,
+            ControllerRequest {
+                command: "reliable_sync".to_string(),
+                file: self.file.map(Path::to_path_buf),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: Some(epoch),
+                state: None,
+                caller: Some("controller_owned_reliable_sync_outbox".to_string()),
+                reason: None,
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(envelope.to_string()),
+            },
+        )?;
+        Ok(response.ack_through)
+    }
+}
+
+fn handle_reliable_sync_outbox(
+    project_root: &Path,
+    request: ControllerRequest,
+) -> Result<ControllerReliableSyncResponse> {
+    let payload: ControllerReliableSyncOutboxPayload = serde_json::from_str(
+        request
+            .diagnostic_payload
+            .as_deref()
+            .context("reliable_sync_outbox request missing diagnostic_payload")?,
+    )
+    .context("parse reliable_sync_outbox payload")?;
+    let outbox = lazily::SqliteOutbox::open(
+        &agent_doc_sqlite::state_store::state_db_path(project_root),
+        payload.document_hash.clone(),
+    )?;
+    let acked_through = outbox.acked_through();
+    let mut endpoint = agent_doc_reliable_sync_io::push::FramePushEndpoint::resuming(
+        payload.document_hash.clone(),
+        outbox,
+        acked_through,
+    );
+    if let Some(frame) = payload.frame {
+        endpoint.enqueue_frame(frame);
+    }
+    let ack_through = if payload.flush {
+        endpoint
+            .flush(&InProcessReliableSyncTransport {
+                project_root,
+                file: request.file.as_deref(),
+            })?
+            .acked_through
+            .max(acked_through)
+    } else {
+        acked_through
+    };
+    Ok(ControllerReliableSyncResponse {
+        document_hash: payload.document_hash,
+        ack_through,
+        accepted: true,
+    })
+}
+
 fn handle_reliable_sync(
     project_root: &Path,
     request: ControllerRequest,
@@ -13068,6 +13308,25 @@ pub fn run_serve(
     )
 }
 
+pub fn run_launch_detached(
+    root: Option<&Path>,
+    launch_mode: &str,
+    listen_socket: Option<&Path>,
+    controller_generation: Option<u64>,
+    previous_controller_pid: Option<u32>,
+    handoff_state: &str,
+) -> Result<()> {
+    let project_root = agent_doc_project_root_io::project_root_from_arg(root)?;
+    launch_detached_at(
+        &project_root,
+        LaunchMode::parse(launch_mode)?,
+        listen_socket,
+        controller_generation,
+        previous_controller_pid,
+        status::parse_handoff_state(handoff_state)?,
+    )
+}
+
 #[cfg(all(unix, not(test)))]
 fn sanitize_controller_serve_inherited_fds() -> usize {
     let fds = controller_serve_inherited_fds_to_close()
@@ -13219,23 +13478,31 @@ mod tests {
     // directly to assert the schema/rows the seam writes. `Connection` is the
     // `state_store` re-export already in scope via `super::*`.
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
+    use lazily::DurableOutbox;
 
     #[test]
     fn native_reload_policy_requires_an_explicit_safe_adapter() {
         assert_eq!(
-            editor_native_reload_policy("vscode-123-uuid"),
+            editor_native_reload_policy("vscode-123-uuid", &[]),
             EditorNativeReloadPolicy::HotReload
         );
         assert_eq!(
-            editor_native_reload_policy("jetbrains-123-uuid"),
+            editor_native_reload_policy(
+                "jetbrains-123-uuid",
+                &["native_hot_reload_generation_v1".to_string()],
+            ),
+            EditorNativeReloadPolicy::HotReload
+        );
+        assert_eq!(
+            editor_native_reload_policy("jetbrains-123-uuid", &[]),
             EditorNativeReloadPolicy::RestartRequired
         );
         assert_eq!(
-            editor_native_reload_policy(""),
+            editor_native_reload_policy("", &[]),
             EditorNativeReloadPolicy::RestartRequired
         );
         assert_eq!(
-            editor_native_reload_policy("future-editor-123"),
+            editor_native_reload_policy("future-editor-123", &[]),
             EditorNativeReloadPolicy::RestartRequired
         );
     }
@@ -17368,6 +17635,65 @@ mod tests {
         assert_eq!(resp.document_hash, "docwire-on");
         // Folded ⇒ the per-channel ack cursor advanced past the initial 0.
         assert!(resp.ack_through >= 1);
+    }
+
+    #[test]
+    fn controller_owned_outbox_persists_then_flushes_without_plugin_state() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let document_hash = "controller-owned-outbox";
+        let frame = agent_doc_reliable_sync_io::liveness::encode_liveness_frame(&[
+            agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash: document_hash.to_string(),
+                pid: 101,
+                tag: "controller-owner".to_string(),
+            },
+        ])
+        .unwrap();
+        let request = |frame, flush| ControllerRequest {
+            command: "reliable_sync_outbox".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("test".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::to_string(&ControllerReliableSyncOutboxPayload {
+                    document_hash: document_hash.to_string(),
+                    frame,
+                    flush,
+                })
+                .unwrap(),
+            ),
+        };
+
+        let enqueued = handle_reliable_sync_outbox(dir.path(), request(Some(frame), false))
+            .expect("controller durably enqueues raw frame");
+        assert_eq!(enqueued.ack_through, 0);
+        let outbox = lazily::SqliteOutbox::open(
+            &agent_doc_sqlite::state_store::state_db_path(dir.path()),
+            document_hash.to_string(),
+        )
+        .unwrap();
+        assert_eq!(outbox.retained_epochs(), vec![1]);
+        drop(outbox);
+
+        let flushed = handle_reliable_sync_outbox(dir.path(), request(None, true))
+            .expect("controller reopens and flushes its durable channel");
+        assert_eq!(flushed.ack_through, 1);
+        let outbox = lazily::SqliteOutbox::open(
+            &agent_doc_sqlite::state_store::state_db_path(dir.path()),
+            document_hash.to_string(),
+        )
+        .unwrap();
+        assert!(outbox.retained_epochs().is_empty());
+        assert_eq!(outbox.acked_through(), 1);
     }
 
     #[test]

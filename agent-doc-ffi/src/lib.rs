@@ -437,6 +437,18 @@ fn replica_registry() -> &'static Mutex<HashMap<u64, ReplicaState>> {
     REPLICA_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Drop every cdylib-hosted replica before a native generation is unloaded.
+///
+/// Editor adapters normally close replicas individually. The generation
+/// handoff calls this as a defensive final fence so a missed adapter reference
+/// cannot keep writable CRDT state alive in the retired library.
+pub fn close_all_replicas_for_reload() -> usize {
+    let mut registry = replica_registry().lock();
+    let count = registry.len();
+    registry.clear();
+    count
+}
+
 /// Leak `bytes` to the C caller (freed with [`agent_doc_free_state`]); writes the
 /// length to `out_len` when non-null.
 fn leak_state(bytes: Vec<u8>, out_len: *mut usize) -> *mut u8 {

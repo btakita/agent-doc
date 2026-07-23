@@ -185,18 +185,20 @@ class TypingTrackerEdtBudgetTest {
             .substringAfter("EditorIntent.ReloadLibrary.token -> {")
             .substringBefore("EditorIntent.SaveDocument.token -> {")
         assertTrue(
-            "JetBrains reload intents must require restart instead of loading a second native generation",
-            reloadIntentBody.contains("AgentDocLib.markRestartRequired(libVersion)") &&
-                !reloadIntentBody.contains("forceReload") &&
-                !reloadIntentBody.contains("forceRefreshOpenDocumentReplicas"),
+            "JetBrains reload intents must enter the application-wide generation handoff",
+            reloadIntentBody.contains("NativeReloadCoordinator.requestReload(libVersion)") &&
+                !reloadIntentBody.contains("markRestartRequired"),
         )
-        assertEquals(
-            "the JetBrains JVM must call Native.load exactly once",
-            1,
-            Regex("""Native\.load\(""").findAll(native).count(),
+        assertTrue(
+            "the old generation must quiesce and drain calls before its JNA handle closes",
+            native.contains("agent_doc_quiesce_for_reload") &&
+                native.contains("stopAcceptingAndAwait") &&
+                native.contains("executor.awaitTermination") &&
+                native.contains("handler.nativeLibrary.close()") &&
+                native.contains("nativeGenerationIsUnmapped"),
         )
-        assertFalse("JetBrains must not expose an in-process native reload entrypoint", native.contains("fun forceReload"))
-        assertFalse("mtime changes must not trigger an in-process native reload", native.contains("return reload(path)"))
+        assertFalse("JNA's path-cached Native.load shortcut must not own generations", native.contains("Native.load("))
+        assertTrue("mtime changes must schedule the same generation handoff", native.contains("requestReload(\"mtime\")"))
         assertTrue("reload must have no filesystem watcher", !watcher.contains("newWatchService()"))
 
         val publishBody = tracker.substringAfter("fun observeLazilyCurrentNow")

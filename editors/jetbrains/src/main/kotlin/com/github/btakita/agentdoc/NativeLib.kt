@@ -2,16 +2,48 @@ package com.github.btakita.agentdoc
 
 import com.sun.jna.Callback
 import com.sun.jna.Library
-import com.sun.jna.Native
 import com.sun.jna.Pointer
 import com.sun.jna.Structure
 import java.io.File
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Proxy
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 internal fun libMtimeChanged(path: String, storedMtime: Long): Boolean {
     val currentMtime = File(path).lastModified()
     return currentMtime != storedMtime && currentMtime != 0L
+}
+
+internal enum class NativeReloadTransition {
+    KeepCurrent,
+    PublishReplacement,
+    RetainOldGeneration,
+}
+
+internal fun nativeReloadTransition(
+    loadedMtime: Long,
+    targetMtime: Long,
+    nativeQuiesced: Boolean,
+    callsDrained: Boolean,
+    replacementReady: Boolean = true,
+): NativeReloadTransition = when {
+    targetMtime == 0L || targetMtime == loadedMtime -> NativeReloadTransition.KeepCurrent
+    !nativeQuiesced || !callsDrained || !replacementReady -> NativeReloadTransition.RetainOldGeneration
+    else -> NativeReloadTransition.PublishReplacement
+}
+
+internal sealed interface NativeReloadOutcome {
+    data object AlreadyCurrent : NativeReloadOutcome
+    data class Reloaded(val mtime: Long) : NativeReloadOutcome
+    data class RetainedOld(val reason: String) : NativeReloadOutcome
+    data class RestartRequired(val reason: String) : NativeReloadOutcome
 }
 
 /**
@@ -24,9 +56,10 @@ internal fun libMtimeChanged(path: String, storedMtime: Long): Boolean {
  * `agent-doc lib-install` until a full IDE restart. Copying to
  * `libagent_doc-<mtime>.<ext>` under [cacheRoot] gives each install a distinct
  * inode, forcing a real load and enabling hot-reload without restarting the IDE.
- * Stale shadow copies from earlier installs in this JVM are pruned. Returns the
- * shadow path, or null on failure so the caller can fall back to the canonical
- * path (never worse than today).
+ * Stale shadow copies are pruned only after their native generation is closed;
+ * deleting a still-mapped file would leave a `(deleted)` mapping and make
+ * generation ownership impossible to prove. Returns the shadow path, or null
+ * on failure so the caller can fall back to the canonical path.
  */
 internal fun nativeShadowCopyPath(canonicalPath: String, mtime: Long, cacheRoot: File): String? {
     return try {
@@ -36,15 +69,17 @@ internal fun nativeShadowCopyPath(canonicalPath: String, mtime: Long, cacheRoot:
         val dest = File(cacheRoot, "libagent_doc-$mtime.$ext")
         if (!dest.exists() || dest.length() != src.length()) {
             Files.copy(src.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            cacheRoot.listFiles()?.forEach {
-                if (it.absolutePath != dest.absolutePath && it.name.startsWith("libagent_doc-")) {
-                    it.delete()
-                }
-            }
         }
         dest.absolutePath
     } catch (e: Exception) {
         null
+    }
+}
+
+internal fun nativePathIsMapped(path: String, procMaps: String): Boolean {
+    val absolutePath = File(path).absolutePath
+    return procMaps.lineSequence().any { line ->
+        line.endsWith(" $absolutePath") || line.endsWith(" $absolutePath (deleted)")
     }
 }
 
@@ -332,7 +367,16 @@ interface AgentDocLib : Library {
     fun agent_doc_start_ipc_listener_v2(project_root: String, callback: IpcMessageCallbackV2): Boolean
 
     /** Stop the IPC socket listener by removing the socket file. */
-    fun agent_doc_stop_ipc_listener(project_root: String)
+    fun agent_doc_stop_ipc_listener(project_root: String): Int
+
+    /**
+     * Stop and join every native listener/connection thread, then drop any
+     * remaining cdylib-hosted replicas. Returns 1 only at a safe unload point.
+     */
+    fun agent_doc_quiesce_for_reload(timeout_ms: Long): Int
+
+    /** Re-enable a quiesced generation when loading its replacement failed. */
+    fun agent_doc_resume_after_reload_failure()
 
     /**
      * Capability-bearing editor content endpoint for a successfully applied
@@ -647,21 +691,161 @@ interface AgentDocLib : Library {
     fun agent_doc_free_string(ptr: Pointer?)
 
     companion object {
+        private class LoadedGeneration private constructor(
+            val proxy: AgentDocLib,
+            private val delegate: AgentDocLib,
+            private val handler: Library.Handler,
+            private val executor: ExecutorService,
+            private val workerThread: AtomicReference<Thread?>,
+            val loadTarget: String,
+        ) {
+            private val callMonitor = java.lang.Object()
+            private val activeCalls = AtomicInteger(0)
+            @Volatile private var acceptingCalls = true
+
+            fun stopAcceptingAndAwait(timeoutMs: Long): Boolean {
+                val deadline = System.nanoTime() + timeoutMs * 1_000_000L
+                synchronized(callMonitor) {
+                    acceptingCalls = false
+                    while (activeCalls.get() != 0) {
+                        val remainingNanos = deadline - System.nanoTime()
+                        if (remainingNanos <= 0L) return false
+                        val waitMillis = (remainingNanos / 1_000_000L).coerceAtLeast(1L)
+                        callMonitor.wait(waitMillis)
+                    }
+                    return true
+                }
+            }
+
+            fun resumeCalls() {
+                synchronized(callMonitor) {
+                    acceptingCalls = true
+                    callMonitor.notifyAll()
+                }
+            }
+
+            fun resumeNativeAfterFailure() {
+                try {
+                    callOnWorker { delegate.agent_doc_resume_after_reload_failure() }
+                } catch (error: Throwable) {
+                    LOG.warn("[native] failed to resume retained native generation: ${error.message}")
+                }
+            }
+
+            fun retireAndClose(timeoutMs: Long): Boolean {
+                executor.shutdown()
+                val terminated = try {
+                    executor.awaitTermination(timeoutMs, TimeUnit.MILLISECONDS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    false
+                }
+                if (!terminated) return false
+                handler.nativeLibrary.close()
+                return true
+            }
+
+            fun requireReloadAbi() {
+                listOf(
+                    "agent_doc_version",
+                    "agent_doc_quiesce_for_reload",
+                    "agent_doc_resume_after_reload_failure",
+                    "agent_doc_start_ipc_listener_v2",
+                    "agent_doc_stop_ipc_listener",
+                    "agent_doc_reliable_sync_liveness_enqueue",
+                    "agent_doc_reliable_sync_liveness_flush",
+                    "agent_doc_reliable_sync_document_op_push",
+                ).forEach { symbol ->
+                    handler.nativeLibrary.getFunction(symbol)
+                }
+            }
+
+            private fun <T> callOnWorker(call: () -> T): T {
+                if (Thread.currentThread() === workerThread.get()) return call()
+                val future = executor.submit<T> { call() }
+                return try {
+                    future.get()
+                } catch (error: ExecutionException) {
+                    throw error.cause ?: error
+                }
+            }
+
+            companion object {
+                fun load(path: String): LoadedGeneration {
+                    val handler = Library.Handler(path, AgentDocLib::class.java, emptyMap<String, Any>())
+                    val delegate = Proxy.newProxyInstance(
+                        AgentDocLib::class.java.classLoader,
+                        arrayOf(AgentDocLib::class.java),
+                        handler,
+                    ) as AgentDocLib
+                    val workerThread = AtomicReference<Thread?>()
+                    val executor = Executors.newSingleThreadExecutor { runnable ->
+                        Thread(runnable, "agent-doc-native-generation").also { thread ->
+                            thread.isDaemon = true
+                            workerThread.set(thread)
+                        }
+                    }
+                    lateinit var generation: LoadedGeneration
+                    val guarded = Proxy.newProxyInstance(
+                        AgentDocLib::class.java.classLoader,
+                        arrayOf(AgentDocLib::class.java),
+                    ) { _, method, args ->
+                        synchronized(generation.callMonitor) {
+                            if (!generation.acceptingCalls) {
+                                throw IllegalStateException("native generation is quiescing")
+                            }
+                            generation.activeCalls.incrementAndGet()
+                        }
+                        try {
+                            generation.callOnWorker {
+                                try {
+                                    method.invoke(delegate, *(args ?: emptyArray()))
+                                } catch (error: InvocationTargetException) {
+                                    throw error.targetException
+                                }
+                            }
+                        } catch (error: InvocationTargetException) {
+                            throw error.targetException
+                        } finally {
+                            synchronized(generation.callMonitor) {
+                                if (generation.activeCalls.decrementAndGet() == 0) {
+                                    generation.callMonitor.notifyAll()
+                                }
+                            }
+                        }
+                    } as AgentDocLib
+                    generation = LoadedGeneration(
+                        guarded,
+                        delegate,
+                        handler,
+                        executor,
+                        workerThread,
+                        path,
+                    )
+                    return generation
+                }
+            }
+        }
+
         @Volatile private var instance: AgentDocLib? = null
+        @Volatile private var loadedGeneration: LoadedGeneration? = null
         @Volatile private var loadError: String? = null
         @Volatile private var loadedPath: String? = null
         @Volatile private var loadedMtime: Long = 0L
-        @Volatile private var restartRequiredMtime: Long = 0L
+        @Volatile private var failedReloadMtime: Long = 0L
         @Volatile private var currentLockFile: File? = null
         private var shutdownHookRegistered = false
+        private const val NATIVE_QUIESCE_TIMEOUT_MS = 7_000L
 
+        @Synchronized
         fun get(): AgentDocLib? {
             val current = instance
             val path = loadedPath
 
             if (current != null && path != null) {
-                if (libMtimeChanged(path, loadedMtime)) {
-                    markRestartRequired()
+                val currentMtime = File(path).lastModified()
+                if (currentMtime != failedReloadMtime && libMtimeChanged(path, loadedMtime)) {
+                    NativeReloadCoordinator.requestReload("mtime")
                 }
                 return current
             }
@@ -678,24 +862,92 @@ interface AgentDocLib : Library {
         }
 
         @Synchronized
-        fun markRestartRequired(libVersion: String? = null) {
-            val path = loadedPath
-            if (instance == null || path == null) {
-                LOG.info(
-                    "[native] reload_library received for cdylib v${libVersion ?: "?"}; " +
-                        "the native library is not loaded yet, so the next initial load will use it",
+        internal fun hotReload(libVersion: String? = null): NativeReloadOutcome {
+            val path = loadedPath ?: resolveLibPath()
+                ?: return NativeReloadOutcome.RetainedOld("libagent_doc path is unavailable")
+            val old = loadedGeneration
+            if (old == null) {
+                return if (loadFrom(path) != null) {
+                    NativeReloadOutcome.Reloaded(loadedMtime)
+                } else {
+                    NativeReloadOutcome.RetainedOld(loadError ?: "initial native load failed")
+                }
+            }
+            val targetMtime = File(path).lastModified()
+            if (targetMtime != 0L && targetMtime == failedReloadMtime) {
+                return NativeReloadOutcome.RetainedOld(
+                    "replacement mtime $targetMtime already failed validation",
                 )
-                return
+            }
+            if (nativeReloadTransition(loadedMtime, targetMtime, true, true) ==
+                NativeReloadTransition.KeepCurrent
+            ) {
+                return NativeReloadOutcome.AlreadyCurrent
             }
 
-            val currentMtime = File(path).lastModified()
-            if (currentMtime != 0L && currentMtime == restartRequiredMtime) return
-            restartRequiredMtime = currentMtime
-            LOG.warn(
-                "[native] libagent_doc v${libVersion ?: "?"} changed at $path; " +
-                    "in-process reload is disabled because loading multiple native generations " +
-                    "can split SQLite/WAL ownership. Restart the IDE to activate it.",
+            val nativeQuiesced = try {
+                old.proxy.agent_doc_quiesce_for_reload(NATIVE_QUIESCE_TIMEOUT_MS) == 1
+            } catch (error: Throwable) {
+                LOG.warn("[native] generation quiesce failed: ${error.message}")
+                false
+            }
+            if (!nativeQuiesced) {
+                return NativeReloadOutcome.RetainedOld("native listener/replica quiesce timed out")
+            }
+            val callsDrained = old.stopAcceptingAndAwait(NATIVE_QUIESCE_TIMEOUT_MS)
+            if (!callsDrained) {
+                old.resumeNativeAfterFailure()
+                old.resumeCalls()
+                return NativeReloadOutcome.RetainedOld("native calls did not drain")
+            }
+
+            val loadTarget = shadowCopyForLoad(path, targetMtime)
+            val oldMtime = loadedMtime
+            if (!old.retireAndClose(NATIVE_QUIESCE_TIMEOUT_MS)) {
+                return markRestartRequired(
+                    "old native generation worker did not terminate after calls drained",
+                )
+            }
+            loadedGeneration = null
+            instance = null
+            if (!nativeGenerationIsUnmapped(old.loadTarget)) {
+                return markRestartRequired(
+                    "old native generation remains mapped after worker exit and dlclose",
+                )
+            }
+
+            val replacement = try {
+                loadValidatedGeneration(loadTarget, path)
+            } catch (replacementError: Throwable) {
+                failedReloadMtime = targetMtime
+                val restored = try {
+                    loadValidatedGeneration(old.loadTarget, path)
+                } catch (restoreError: Throwable) {
+                    LOG.warn(
+                        "[native] replacement and old-generation restore both failed",
+                        restoreError,
+                    )
+                    return markRestartRequired(
+                        "replacement load failed (${replacementError.message}); " +
+                            "old generation restore failed (${restoreError.message})",
+                    )
+                }
+                publishGeneration(restored, path, oldMtime)
+                LOG.warn(
+                    "[native] replacement load failed; restored prior generation: ${replacementError.message}",
+                )
+                return NativeReloadOutcome.RetainedOld(
+                    "replacement load failed; restored prior generation: ${replacementError.message}",
+                )
+            }
+            publishGeneration(replacement, path, targetMtime)
+            failedReloadMtime = 0L
+            pruneRetiredShadow(old.loadTarget, replacement.loadTarget)
+            LOG.info(
+                "[native] hot-reloaded libagent_doc v${libVersion ?: "?"} from $path " +
+                    "after quiesce/close handoff",
             )
+            return NativeReloadOutcome.Reloaded(targetMtime)
         }
 
         @Synchronized
@@ -703,51 +955,126 @@ interface AgentDocLib : Library {
             return try {
                 loadedPath = path
                 loadedMtime = File(path).lastModified()
-                restartRequiredMtime = 0L
                 val loadTarget = shadowCopyForLoad(path, loadedMtime)
-                val newLib = Native.load(loadTarget, AgentDocLib::class.java)
-                instance = newLib
-                writePidLock(path)
+                val generation = loadValidatedGeneration(loadTarget, path)
+                publishGeneration(generation, path, loadedMtime)
                 registerShutdownHook()
-                verifyVersion(newLib, path)
-                newLib
-            } catch (e: Exception) {
-                loadError = "Failed to load libagent_doc: ${e.message}"
+                generation.proxy
+            } catch (error: Throwable) {
+                loadError = "Failed to load libagent_doc: ${error.message}"
                 LOG.warn(loadError!!)
                 null
             }
         }
 
-        private fun verifyVersion(lib: AgentDocLib, path: String) {
+        private fun loadValidatedGeneration(loadTarget: String, canonicalPath: String): LoadedGeneration {
+            val generation = LoadedGeneration.load(loadTarget)
             try {
-                val ptr = lib.agent_doc_version()
-                if (ptr != null) {
-                    val version = ptr.getString(0)
-                    lib.agent_doc_free_string(ptr)
-                    LOG.info("[native] loaded libagent_doc v$version from $path")
-                } else {
-                    LOG.warn("[native] agent_doc_version() returned null — possible ABI mismatch at $path")
+                generation.requireReloadAbi()
+                verifyVersion(generation.proxy, canonicalPath)
+                return generation
+            } catch (error: Throwable) {
+                try {
+                    generation.retireAndClose(NATIVE_QUIESCE_TIMEOUT_MS)
+                } catch (_: Throwable) {
                 }
-            } catch (e: Exception) {
-                LOG.warn("[native] agent_doc_version() failed — ABI mismatch at $path: ${e.message}")
+                throw error
+            }
+        }
+
+        private fun publishGeneration(generation: LoadedGeneration, path: String, mtime: Long) {
+            loadedPath = path
+            loadedMtime = mtime
+            loadedGeneration = generation
+            instance = generation.proxy
+            loadError = null
+            removePidLock()
+            writePidLock(path)
+        }
+
+        private fun markRestartRequired(reason: String): NativeReloadOutcome.RestartRequired {
+            loadedGeneration = null
+            instance = null
+            loadError = "IDE restart required: $reason"
+            removePidLock()
+            LOG.warn("[native] $loadError")
+            return NativeReloadOutcome.RestartRequired(reason)
+        }
+
+        private fun nativeGenerationIsUnmapped(path: String): Boolean {
+            if (!System.getProperty("os.name").lowercase().contains("linux")) {
+                return false
+            }
+            val maps = try {
+                File("/proc/self/maps").readText()
+            } catch (error: Exception) {
+                LOG.warn("[native] cannot inspect /proc/self/maps after dlclose", error)
+                return false
+            }
+            return !nativePathIsMapped(path, maps)
+        }
+
+        private fun verifyVersion(lib: AgentDocLib, path: String) {
+            val ptr = lib.agent_doc_version()
+                ?: throw IllegalStateException("agent_doc_version() returned null at $path")
+            try {
+                val version = ptr.getString(0)
+                require(version.isNotBlank()) { "agent_doc_version() returned an empty version at $path" }
+                LOG.info("[native] loaded libagent_doc v$version from $path")
+            } finally {
+                lib.agent_doc_free_string(ptr)
             }
         }
 
         /**
-         * Resolve the initial load target for [canonicalPath]. The per-process
-         * shadow copy avoids mutating a mapped library during installation, while
-         * this JVM still loads exactly one native generation. Falls back to the
-         * canonical path in place if the copy fails.
+         * Resolve the load target for [canonicalPath]. The per-process shadow
+         * copy avoids mutating a mapped library during installation and gives
+         * each active generation a distinct handle. Falls back to the canonical
+         * path in place if the copy fails.
          */
         private fun shadowCopyForLoad(canonicalPath: String, mtime: Long): String {
-            val pid = ProcessHandle.current().pid()
-            val cacheRoot = File(System.getProperty("java.io.tmpdir"), "agent-doc-native-$pid")
+            val cacheRoot = nativeCacheRoot()
             val shadow = nativeShadowCopyPath(canonicalPath, mtime, cacheRoot)
             if (shadow == null) {
                 LOG.warn("[native] shadow copy failed; loading canonical path in place (may keep stale native code until restart)")
                 return canonicalPath
             }
             return shadow
+        }
+
+        private fun pruneRetiredShadow(retiredPath: String, activePath: String) {
+            if (retiredPath == activePath) return
+            val retired = File(retiredPath)
+            if (!retired.name.startsWith("libagent_doc-")) return
+            if (System.getProperty("os.name").lowercase().contains("linux")) {
+                val maps = try {
+                    File("/proc/self/maps").readText()
+                } catch (error: Exception) {
+                    LOG.debug("[native] cannot prove retired shadow is unmapped: ${error.message}")
+                    return
+                }
+                if (nativePathIsMapped(retiredPath, maps)) {
+                    LOG.debug("[native] retaining inert mapped shadow until process exit: $retiredPath")
+                    return
+                }
+            } else {
+                // Rust TLS destructors can defer dlclose on Unix-like hosts. If
+                // the host has no authoritative mapping view, retain the file
+                // rather than turning a still-mapped generation into `(deleted)`.
+                return
+            }
+            try {
+                if (retired.exists() && !retired.delete()) {
+                    LOG.debug("[native] retired shadow remains on disk: $retiredPath")
+                }
+            } catch (error: Exception) {
+                LOG.debug("[native] failed to prune retired shadow: ${error.message}")
+            }
+        }
+
+        private fun nativeCacheRoot(): File {
+            val pid = ProcessHandle.current().pid()
+            return File(System.getProperty("java.io.tmpdir"), "agent-doc-native-$pid")
         }
 
         private fun writePidLock(libPath: String) {
@@ -780,6 +1107,10 @@ interface AgentDocLib : Library {
             shutdownHookRegistered = true
             Runtime.getRuntime().addShutdownHook(Thread {
                 removePidLock()
+                try {
+                    nativeCacheRoot().deleteRecursively()
+                } catch (_: Exception) {
+                }
             })
         }
 

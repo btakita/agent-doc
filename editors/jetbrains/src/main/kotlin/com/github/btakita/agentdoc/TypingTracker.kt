@@ -39,11 +39,15 @@ private const val LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = "lazily_transport_recei
 // (it binds agent_doc_lossless_tree_render/project via LosslessTreeFrames). Kept in
 // sync with agent_doc_debounce::LOSSLESS_TREE_CRDT_CAPABILITY on the binary side.
 private const val LOSSLESS_TREE_CRDT_CAPABILITY = "lossless_tree_crdt_v1"
-internal val EDITOR_CAPABILITIES = listOf(
-    OPERATOR_TEXT_AUTHORITY_CAPABILITY,
-    LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
-    LOSSLESS_TREE_CRDT_CAPABILITY,
-).joinToString(",")
+private const val NATIVE_HOT_RELOAD_CAPABILITY = "native_hot_reload_generation_v1"
+internal val EDITOR_CAPABILITIES = buildList {
+    add(OPERATOR_TEXT_AUTHORITY_CAPABILITY)
+    add(LAZILY_TRANSPORT_RECEIPTS_CAPABILITY)
+    add(LOSSLESS_TREE_CRDT_CAPABILITY)
+    if (System.getProperty("os.name").lowercase().contains("linux")) {
+        add(NATIVE_HOT_RELOAD_CAPABILITY)
+    }
+}.joinToString(",")
 
 // #stale-plugin-detect: report the real plugin version over FFI so the binary's
 // stale-plugin detection is not blind. The IntelliJ plugin descriptor (patched

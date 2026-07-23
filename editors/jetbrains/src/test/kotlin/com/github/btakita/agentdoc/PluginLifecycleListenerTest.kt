@@ -29,7 +29,7 @@ class PluginLifecycleListenerTest {
     }
 
     @Test
-    fun `plugin package upgrades require a full IDE restart`() {
+    fun `plugin package restart policy is independent of native generation hot reload`() {
         val pluginXml = Files.readString(
             Paths.get("src/main/resources/META-INF/plugin.xml")
                 .takeIf { Files.exists(it) }

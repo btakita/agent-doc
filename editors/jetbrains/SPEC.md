@@ -6,16 +6,26 @@ Extends `editors/SPEC.md` with JetBrains-specific behavior.
 
 - **ID:** `com.github.btakita.agent-doc`
 - **Name:** Agent Doc
-- **Restart:** Required for plugin/native upgrades (`require-restart="true"`)
-- **Native upgrades:** One cdylib generation is loaded per JVM
+- **Restart:** Required for Kotlin plugin package upgrades (`require-restart="true"`)
+- **Native upgrades:** Safe in-process generation handoff
 
 ## Implementation Details
 
-JetBrains never hot-reloads `libagent_doc` in process. An installed-library
-mtime change or typed `reload_library` intent retains the currently loaded
-generation and records a restart-required warning. This prevents independent
-SQLite/WAL lock domains from coexisting in one JVM; the replacement library and
-its replicas become active only after a full IDE restart.
+An installed-library mtime change or typed `reload_library` intent enters one
+application-wide handoff. On Linux, JetBrains marshals every JNA call onto one
+generation-owned thread, stops and joins every CRDT/listener worker, drains
+calls, asks the old cdylib to quiesce replicas, terminates the owner thread so
+Rust TLS destructors run, closes the old handle, and verifies `/proc/self/maps`
+no longer contains it before loading the replacement. Controller launch from
+the cdylib uses a short-lived external helper, so no child-reaper thread pins
+the old mapping. Failure at any drain, unmap, or ABI boundary loads no second
+generation and requires restart; a replacement-load failure restores the old
+named shadow only after its prior mapping is gone. Durable reliable-sync
+outboxes live in the project controller; the reloadable cdylib sends typed
+controller RPCs and retains no SQLite connection.
+
+`require-restart="true"` applies to Kotlin package/classloader upgrades only;
+it does not disable the native-library handoff.
 
 ### Claim — Split Position Detection
 

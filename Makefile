@@ -41,7 +41,7 @@ release: check
 test:
 	@set -e; \
 	test_agent_doc_bin="$$(pwd)/target/debug/agent-doc"; \
-	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --quiet; \
+	$(CARGO_CLEAN_ENV) cargo build --bin agent-doc --lib --quiet; \
 	if command -v cargo-nextest >/dev/null 2>&1; then \
 		if ! AGENT_DOC_BIN="$$test_agent_doc_bin" $(CARGO_CLEAN_ENV) cargo nextest run --workspace --all-targets $(NEXTEST_QUIET_FLAGS); then \
 			exit 1; \

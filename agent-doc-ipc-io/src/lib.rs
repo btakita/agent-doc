@@ -49,7 +49,10 @@ use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 
 pub mod editor_target;
@@ -661,7 +664,39 @@ where
         handler,
         ops_logger,
         Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
+        None,
     )
+}
+
+/// Start a listener that can be quiesced and joined by its owner.
+///
+/// Setting `shutdown` to `true` does not itself wake a blocked `accept`; call
+/// [`wake_listener`] after setting it. Once woken, the accept loop stops taking
+/// work, joins every bounded per-connection handler, removes the socket, and
+/// returns. This is the native-library generation handoff boundary used by
+/// reloadable editor adapters.
+pub fn start_listener_with_logger_until<F>(
+    project_root: &Path,
+    handler: F,
+    ops_logger: OpsLogger,
+    shutdown: Arc<AtomicBool>,
+) -> Result<()>
+where
+    F: Fn(&str) -> Option<String> + Send + Sync + 'static,
+{
+    start_listener_with_logger_and_read_timeout(
+        project_root,
+        handler,
+        ops_logger,
+        Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
+        Some(shutdown),
+    )
+}
+
+/// Wake a listener blocked in `accept` so it can observe its shutdown token.
+pub fn wake_listener(project_root: &Path) -> Result<()> {
+    drop(try_connect(project_root)?);
+    Ok(())
 }
 
 fn start_listener_with_logger_and_read_timeout<F>(
@@ -669,6 +704,7 @@ fn start_listener_with_logger_and_read_timeout<F>(
     handler: F,
     ops_logger: OpsLogger,
     listener_read_timeout: Duration,
+    shutdown: Option<Arc<AtomicBool>>,
 ) -> Result<()>
 where
     F: Fn(&str) -> Option<String> + Send + Sync + 'static,
@@ -687,7 +723,7 @@ where
 
     eprintln!("[ipc-socket] listening on {:?}", sock_path);
 
-    let name = sock_path.to_fs_name::<GenericFilePath>()?;
+    let name = sock_path.clone().to_fs_name::<GenericFilePath>()?;
     let opts = ListenerOptions::new().name(name);
     let listener = opts.create_sync()?;
 
@@ -700,9 +736,23 @@ where
     let root_buf = project_root.to_path_buf();
 
     let mut resource_exhaustion_logged = false;
+    let mut connection_threads = Vec::new();
     loop {
+        if shutdown
+            .as_ref()
+            .is_some_and(|token| token.load(Ordering::SeqCst))
+        {
+            break;
+        }
         match listener.accept() {
             Ok(stream) => {
+                if shutdown
+                    .as_ref()
+                    .is_some_and(|token| token.load(Ordering::SeqCst))
+                {
+                    drop(stream);
+                    break;
+                }
                 resource_exhaustion_logged = false;
                 let current_inflight =
                     INFLIGHT_CONNECTION_HANDLERS.load(std::sync::atomic::Ordering::SeqCst);
@@ -736,7 +786,7 @@ where
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
                     + 1;
                 ops_logger(&handler_root_buf, &ipc_accept_thread_ops_marker(inflight));
-                if let Err(e) = std::thread::Builder::new()
+                match std::thread::Builder::new()
                     .name("agent-doc-ipc-conn".to_string())
                     .spawn(move || {
                         let _inflight_guard = InflightConnectionGuard;
@@ -829,15 +879,26 @@ where
                             }
                             line.clear();
                         }
-                    })
-                {
-                    INFLIGHT_CONNECTION_HANDLERS
-                        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-                    ops_logger(
-                        &root_buf,
-                        &format!("ipc_accept_thread_spawn_failed error={e}"),
-                    );
+                    }) {
+                    Ok(handle) => connection_threads.push(handle),
+                    Err(e) => {
+                        INFLIGHT_CONNECTION_HANDLERS
+                            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                        ops_logger(
+                            &root_buf,
+                            &format!("ipc_accept_thread_spawn_failed error={e}"),
+                        );
+                    }
                 }
+                let mut still_running = Vec::new();
+                for handle in connection_threads.drain(..) {
+                    if handle.is_finished() {
+                        let _ = handle.join();
+                    } else {
+                        still_running.push(handle);
+                    }
+                }
+                connection_threads = still_running;
             }
             Err(e) => {
                 if ipc_accept_error_is_resource_exhaustion(&e) {
@@ -857,6 +918,16 @@ where
             }
         }
     }
+
+    for handle in connection_threads {
+        let _ = handle.join();
+    }
+    if let Err(error) = std::fs::remove_file(&sock_path)
+        && error.kind() != ErrorKind::NotFound
+    {
+        return Err(error).with_context(|| format!("remove listener socket {sock_path:?}"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -900,6 +971,7 @@ mod tests {
                 |_| panic!("a half-open client must not reach the message handler"),
                 noop_ops_logger,
                 Duration::from_millis(100),
+                None,
             )
             .ok()
         });
@@ -929,6 +1001,60 @@ mod tests {
         drop(writer);
         let _ = std::fs::remove_file(socket_path(&root));
         drop(server);
+    }
+
+    #[test]
+    fn quiesced_listener_joins_connection_workers_and_removes_socket() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        let root_clone = root.clone();
+        let shutdown_clone = Arc::clone(&shutdown);
+        let server = thread::spawn(move || {
+            start_listener_with_logger_until(
+                &root_clone,
+                |_| Some(r#"{"ok":true}"#.to_string()),
+                noop_ops_logger,
+                shutdown_clone,
+            )
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !socket_path(&root).exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            socket_path(&root).exists(),
+            "listener socket was not published"
+        );
+
+        let mut stream = try_connect_with_timeout_for_pid(
+            &root,
+            u64::from(std::process::id()),
+            Duration::from_secs(1),
+        )
+        .expect("connect to cancellable listener");
+        stream
+            .set_recv_timeout(Some(Duration::from_secs(2)))
+            .expect("set client-side test backstop");
+        stream.write_all(b"ping\n").expect("write request");
+        drop(stream);
+
+        shutdown.store(true, Ordering::SeqCst);
+        // The listener may observe the token and unlink before this wake races
+        // in; either outcome is a successful shutdown transition.
+        let _ = wake_listener(&root);
+        server
+            .join()
+            .expect("listener thread should join")
+            .expect("listener shutdown should succeed");
+
+        assert!(
+            !socket_path(&root).exists(),
+            "joined listener must remove its socket"
+        );
     }
 
     /// `#editorendpointzero`: discovery must find a live listener that the

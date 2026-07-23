@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.19
+
+_JetBrains plugin 0.2.289._
+
+- **JetBrains native hot reload is restored with a proved one-generation handoff (`#jbnativehotreload`).** Linux JetBrains advertises `native_hot_reload_generation_v1` and marshals every JNA call through a generation-owned thread. Reload stops and joins CRDT replicas and IPC listeners, drains calls, quiesces the old cdylib, terminates the owner thread so Rust TLS destructors run, closes the JNA handle, and verifies the old `/proc/self/maps` entry is absent before loading the replacement. A failed drain, unmap, or ABI proof loads no second generation and requires IDE restart; a replacement-load failure can restore the prior named shadow only after its old mapping is gone.
+- **Reloadable editor code no longer owns the durable reliable-sync outbox.** Raw liveness/document frames go through a typed `reliable_sync_outbox` controller command; epoch allocation, append-before-send, replay, ACK pruning, and `SqliteOutbox` all live in the project controller. Embedded controller launch uses a short-lived external helper, so a controller-lifetime child-reaper thread cannot pin the old cdylib. The real-process regression cycles two generations with an active listener and CRDT replica, proves each old mapping disappears, verifies the plugin process has no `state.db` descriptors, rejects deleted DB/native mappings and split DB/WAL/SHM inode generations, and finishes with `PRAGMA quick_check = ok`.
+
 ## 0.35.18
 
 _JetBrains plugin 0.2.288._

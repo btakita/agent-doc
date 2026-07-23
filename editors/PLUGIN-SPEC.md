@@ -125,11 +125,13 @@ controller rebases pending intents from `state.db`; the plugin must not reread
 an old delivery or replay a full document. A zero-member state is not proof of
 a visible write.
 
-`reload_library` is accepted only by an adapter that can quiesce and unload all
-old native calls before loading the announced ABI. Such an adapter re-registers
-capabilities, preserves the same Lazily replica, and does not change the active
-document or editor focus. An adapter that cannot prove that boundary must retain
-its one loaded native generation and report that a process restart is required.
+`reload_library` is accepted only by an adapter that can quiesce and join every
+old native worker, drain calls, terminate any generation-owned call thread,
+close the old library handle, and prove the old mapping is absent before loading
+the announced ABI. Such an adapter re-registers capabilities, preserves the
+same Lazily replica, and does not change the active document or editor focus.
+An adapter that cannot prove that boundary must load no replacement and report
+that a process restart is required.
 Unknown adapter identities fail closed to restart-required.
 
 ## 7. User actions and routing

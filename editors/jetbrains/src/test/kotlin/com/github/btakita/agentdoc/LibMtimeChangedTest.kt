@@ -66,7 +66,7 @@ class LibMtimeChangedTest {
     }
 
     @Test
-    fun `shadow copy on a new install prunes the prior stale copy`() {
+    fun `shadow copy keeps prior generation until explicit close handoff`() {
         val src = File.createTempFile("libagent_doc_src", ".so")
         val cacheRoot = File(System.getProperty("java.io.tmpdir"), "agent-doc-native-test-${System.nanoTime()}")
         try {
@@ -83,12 +83,24 @@ class LibMtimeChangedTest {
 
             assertNotEquals(first, second)
             assertEquals("native-code-v2-longer", File(second!!).readText())
-            // The prior stale shadow copy is pruned so it cannot be reloaded.
-            assertFalse(File(first!!).exists())
+            // The old mapping is not unlinked while it may still be loaded.
+            assertTrue(File(first!!).exists())
         } finally {
             cacheRoot.deleteRecursively()
             src.delete()
         }
+    }
+
+    @Test
+    fun `mapped shadow detection distinguishes live deleted and unrelated paths`() {
+        val path = "/tmp/agent-doc-native-42/libagent_doc-123.so"
+        val maps = """
+            7f000000-7f001000 r--p 00000000 00:00 0 $path
+            7f002000-7f003000 r-xp 00000000 00:00 0 /tmp/unrelated.so
+        """.trimIndent()
+        assertTrue(nativePathIsMapped(path, maps))
+        assertTrue(nativePathIsMapped(path, maps.replace(path, "$path (deleted)")))
+        assertFalse(nativePathIsMapped("/tmp/missing.so", maps))
     }
 
     @Test
@@ -105,5 +117,39 @@ class LibMtimeChangedTest {
             cacheRoot.deleteRecursively()
             src.delete()
         }
+    }
+
+    @Test
+    fun `reload transition table is exhaustive at the publish boundary`() {
+        assertEquals(
+            NativeReloadTransition.KeepCurrent,
+            nativeReloadTransition(10L, 10L, nativeQuiesced = true, callsDrained = true),
+        )
+        assertEquals(
+            NativeReloadTransition.KeepCurrent,
+            nativeReloadTransition(10L, 0L, nativeQuiesced = true, callsDrained = true),
+        )
+        assertEquals(
+            NativeReloadTransition.RetainOldGeneration,
+            nativeReloadTransition(10L, 11L, nativeQuiesced = false, callsDrained = true),
+        )
+        assertEquals(
+            NativeReloadTransition.RetainOldGeneration,
+            nativeReloadTransition(10L, 11L, nativeQuiesced = true, callsDrained = false),
+        )
+        assertEquals(
+            NativeReloadTransition.RetainOldGeneration,
+            nativeReloadTransition(
+                10L,
+                11L,
+                nativeQuiesced = true,
+                callsDrained = true,
+                replacementReady = false,
+            ),
+        )
+        assertEquals(
+            NativeReloadTransition.PublishReplacement,
+            nativeReloadTransition(10L, 11L, nativeQuiesced = true, callsDrained = true),
+        )
     }
 }

@@ -59,10 +59,13 @@ private enum class EditorIntent(val token: String) {
 class PatchWatcher(private val project: Project) : Disposable {
     private val operatorTextAuthorityCapability = "operator_text_authority_v1"
     private val lazilyTransportReceiptsCapability = "lazily_transport_receipts_v1"
-    private val editorCapabilities = listOf(
-        operatorTextAuthorityCapability,
-        lazilyTransportReceiptsCapability,
-    ).joinToString(",")
+    private val editorCapabilities = buildList {
+        add(operatorTextAuthorityCapability)
+        add(lazilyTransportReceiptsCapability)
+        if (System.getProperty("os.name").lowercase().contains("linux")) {
+            add("native_hot_reload_generation_v1")
+        }
+    }.joinToString(",")
 
     private data class RootState(
         val root: String,
@@ -197,6 +200,37 @@ class PatchWatcher(private val project: Project) : Disposable {
         if (rootStates.putIfAbsent(root, state) != null) return // race: another caller won
         startSocketListenerViaFfi(state)
         LOG.info("[lazily-endpoint] registered root: $root")
+    }
+
+    internal fun quiesceNativeEndpointsForReload(): Boolean {
+        val lib = AgentDocLib.get()
+        var allStopped = true
+        for (state in rootStates.values) {
+            val stopped = try {
+                state.ipcCallback == null && state.ipcCallbackV2 == null ||
+                    lib?.agent_doc_stop_ipc_listener(state.root) == 1
+            } catch (error: Throwable) {
+                LOG.warn("[native] failed to stop listener for ${state.root}", error)
+                false
+            }
+            if (stopped) {
+                state.ipcCallback = null
+                state.ipcCallbackV2 = null
+            } else {
+                allStopped = false
+                LOG.warn("[native] listener did not quiesce for ${state.root}; retaining its callback")
+            }
+        }
+        return allStopped
+    }
+
+    internal fun restartNativeEndpointsAfterReload() {
+        if (!running) return
+        for (state in rootStates.values) {
+            if (state.ipcCallback == null && state.ipcCallbackV2 == null) {
+                startSocketListenerViaFfi(state)
+            }
+        }
     }
 
     /**
@@ -489,11 +523,8 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
             EditorIntent.ReloadLibrary.token -> {
                 val libVersion = extractStringField(json, "lib_version") ?: "?"
-                LOG.warn(
-                    "[socket] reload_library received (lib_version=$libVersion); " +
-                        "a full IDE restart is required to activate the new native library",
-                )
-                AgentDocLib.markRestartRequired(libVersion)
+                LOG.info("[socket] reload_library received (lib_version=$libVersion); scheduling generation handoff")
+                NativeReloadCoordinator.requestReload(libVersion)
                 APPLY_APPLIED
             }
             EditorIntent.SaveDocument.token -> {
@@ -1526,8 +1557,16 @@ class PatchWatcher(private val project: Project) : Disposable {
         running = false
         val lib = AgentDocLib.get()
         for (state in rootStates.values) {
-            try { lib?.agent_doc_stop_ipc_listener(state.root) } catch (_: Exception) {}
-            state.ipcCallback = null
+            val stopped = try {
+                state.ipcCallback == null && state.ipcCallbackV2 == null ||
+                    lib?.agent_doc_stop_ipc_listener(state.root) == 1
+            } catch (_: Exception) {
+                false
+            }
+            if (stopped) {
+                state.ipcCallback = null
+                state.ipcCallbackV2 = null
+            }
         }
         rootStates.clear()
     }
@@ -1637,13 +1676,21 @@ class PatchWatcher(private val project: Project) : Disposable {
         }
 
         fun getInstance(project: Project): PatchWatcher {
-            return instances.getOrPut(project) {
-                PatchWatcher(project).also { it.start() }
+            return synchronized(instances) {
+                instances.getOrPut(project) {
+                    PatchWatcher(project).also { it.start() }
+                }
             }
         }
 
         fun disposeProject(project: Project) {
-            instances.remove(project)?.dispose()
+            synchronized(instances) { instances.remove(project) }?.dispose()
+        }
+
+        internal fun quiesceAllForNativeReload(): Pair<List<PatchWatcher>, Boolean> {
+            val watchers = synchronized(instances) { instances.values.toList() }
+            val quiesced = watchers.map { it.quiesceNativeEndpointsForReload() }.all { it }
+            return watchers to quiesced
         }
     }
 }

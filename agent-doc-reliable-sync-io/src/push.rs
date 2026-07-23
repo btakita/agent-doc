@@ -1,10 +1,9 @@
-//! Plugin-side reliable-sync liveness push endpoint (sidecar-retirement Phase 3C
-//! — the editor-plugin *send* half).
+//! Reliable-sync liveness push endpoint (sidecar-retirement Phase 3C).
 //!
 //! The editor plugins are thin event reporters: they call an FFI that turns
-//! open/close/attach/crash events into [`LivenessOp`]s and hands them to a
-//! [`LivenessPushEndpoint`]. The endpoint owns the durability + at-least-once
-//! push loop so the plugins never have to (the FFI-first Shared Foundation rule):
+//! open/close/attach/crash events into [`LivenessOp`]s and hands them to the
+//! controller. The controller-owned [`LivenessPushEndpoint`] owns durability
+//! and the at-least-once push loop so reloadable plugins never open SQLite:
 //!
 //! 1. **enqueue** — assign the next epoch and [`append`](lazily::DurableOutbox::append)
 //!    the frame to the [`DurableOutbox`] **before** any send (so a crash between
@@ -15,12 +14,11 @@
 //!    failure so a push lost while the controller is down is re-sent on the next
 //!    flush / reconnect.
 //!
-//! This is the send-side mirror of [`crate::plane::ControllerLivenessPlane`];
-//! together they are the full plugin→controller push loop, proven end to end in
-//! the SimWorld below. The transport + outbox are injected so the loop is
-//! deterministic-testable without a live socket or SQLite (production plugs a
-//! `SqliteOutbox` + the RPC client; the FFI + JNA/JS glue + the S4b exit-watcher
-//! hookup are the operator-verified remainder).
+//! This is the send-side mirror of [`crate::plane::ControllerLivenessPlane`].
+//! The transport + outbox are injected so the loop is deterministic-testable
+//! without a live socket or SQLite. Production instantiates `SqliteOutbox`
+//! inside the project controller; FFI/JNA/JS code sends raw frames through a
+//! typed controller request.
 
 use anyhow::Result;
 use lazily::DurableOutbox;

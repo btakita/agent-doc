@@ -229,8 +229,8 @@ pub(crate) fn run_paths(
     auto_recycle_after_install();
 
     // Proactively send the shared `reload_library` intent to editor adapters that
-    // explicitly support safe hot reload. JetBrains and unknown adapters require
-    // a process restart so two SQLite-owning cdylibs never coexist in one process.
+    // explicitly support safe hot reload. JetBrains uses a quiesce/drain/close
+    // generation handoff; unknown adapters still require a process restart.
     signal_reload_after_install(version);
 
     Ok(())

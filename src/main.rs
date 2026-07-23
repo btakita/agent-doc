@@ -3210,6 +3210,22 @@ enum ControllerAction {
         #[arg(long, hide = true, default_value = "stable")]
         handoff_state: String,
     },
+    /// Launch the controller through a short-lived helper process
+    #[command(hide = true)]
+    LaunchDetached {
+        #[arg(long)]
+        project_root: Option<PathBuf>,
+        #[arg(long, default_value = "managed")]
+        launch_mode: String,
+        #[arg(long, hide = true)]
+        listen_socket: Option<PathBuf>,
+        #[arg(long, hide = true)]
+        controller_generation: Option<u64>,
+        #[arg(long, hide = true)]
+        previous_controller_pid: Option<u32>,
+        #[arg(long, hide = true, default_value = "stable")]
+        handoff_state: String,
+    },
     /// Stop the project controller if it is running
     Shutdown {
         /// Project root to inspect (defaults to nearest project from CWD)
@@ -4907,6 +4923,21 @@ fn try_main() -> anyhow::Result<()> {
                 previous_controller_pid,
                 handoff_state,
             } => agent_doc_controller_io::project_controller::run_serve(
+                project_root.as_deref(),
+                &launch_mode,
+                listen_socket.as_deref(),
+                controller_generation,
+                previous_controller_pid,
+                &handoff_state,
+            ),
+            ControllerAction::LaunchDetached {
+                project_root,
+                launch_mode,
+                listen_socket,
+                controller_generation,
+                previous_controller_pid,
+                handoff_state,
+            } => agent_doc_controller_io::project_controller::run_launch_detached(
                 project_root.as_deref(),
                 &launch_mode,
                 listen_socket.as_deref(),

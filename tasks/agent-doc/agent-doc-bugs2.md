@@ -315,17 +315,44 @@ Also fixed the reported `Run Agent Doc` failure on `acadian-take-home.md`: Proje
 Safe JetBrains native hot reload is restored and covered by the quiesce/reload/restart handoff regression. The currently running IDE was still on the older `0.2.288` plugin during preflight, so it needs one restart to load installed `0.2.291`; subsequent compatible native-library upgrades can use the safe hot-reload path.
 
 Verification passed: targeted SQLite/controller/JetBrains tests, all 142 VS Code tests, and the full `make check`. The final binary and plugin packages were installed locally. The Release workflow was queued from the pushed tag; per repository policy it was recorded once without polling.
-<!-- agent:boundary:f39b502d -->
+
+### Re: #boundaryaccum1 — gpt-5
+
+Implemented and released the committed-blob boundary invariant as `agent-doc 0.35.22` (`v0.35.22`, commit `1af353160`).
+
+The long-term rule is now explicit:
+
+- Binary-owned snapshot/staged content always collapses scattered `agent:boundary` markers, regardless of active-run or IPC-listener state.
+- Active-run and IPC-listener guards apply only to the editor working-tree rewrite.
+- If the post-commit invariant sees multiple markers, its exact-path self-heal commit must succeed, then it re-reads HEAD and requires exactly one marker. Snapshot, repair-commit, inspection, and verification failures now propagate with phase-labeled `boundary_invariant_violation` errors instead of being swallowed.
+
+Regression coverage now includes the real `apply_patches` path, a real temporary Git repository proving the follow-up commit and fresh HEAD verification, a fail-loud transaction case, and eight consecutive wedged post-commit handoff/recovery cycles proving that the binary-owned document and snapshot never accumulate boundaries.
+
+Acceptance is green:
+
+- focused boundary invariant, template, and repeated-wedge tests
+- `make check`: 7,915 tests passed; all model checks passed
+- `make tmux-ci`
+- `git diff --check` and changed-line private-name hygiene
+- latest `main` CI observed green before push
+- release-parity build/install
+
+The source and tag are pushed; the `v0.35.22` Release workflow is queued. Installed locally: CLI `0.35.22`, JetBrains `0.2.291` in four IDE installations, and VSCodium `0.2.56`. The controller is marked to recycle onto the fresh binary at its next idle boundary.
+
+The remaining live-editor eyeball is tracked as operator verification rather than blocking the code/release task. Restart any currently running JetBrains IDE that is still on the older package generation before performing that check.
+<!-- agent:boundary:c7f84014 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#retentionwatermarklive]
+- do [#fmgcverify]
 - ~~do [#jbnativehotreload]~~
 - ~~Sync Tmux Layout on equityfundingsource.md: `Sync failed through the project controller; see IDE log for details.`~~
 - ~~do [#selectedturnsteering]~~
-- ⏭️ do [#fmgc]
-- ⏭️ 📌 do [#boundaryaccum1]
-- 📌 do [#qactsync]
+- ~~do [#fmgc]~~
+- ~~📌 do [#boundaryaccum1]~~
+- ⏭️ 📌 do [#qactsync]
 - 📌 do [#ftimmediate]
 - 📌 do [#qeditrace]
 - 📌 do [#jbcompactcommit]
@@ -352,7 +379,7 @@ Verification passed: targeted SQLite/controller/JetBrains tests, all 142 VS Code
 - 📌 do [#ipcauthority]
 - 📌 do [#ipcliveness]
 - 📌 do [#ipcverhandshake]
-- 📌 do [#ipcpostcommitinv]
+- ~~📌 do [#ipcpostcommitinv]~~
 - 📌 do [#5qjj]
 <!-- /agent:queue -->
 
@@ -364,7 +391,6 @@ Verification passed: targeted SQLite/controller/JetBrains tests, all 142 VS Code
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#fmgc] [focused-cycle] Per-peer ack watermark for replay-state retention (#retentionwatermark). Tagged [focused-cycle] 2026-07-19: this is a schema migration plus retention-correctness change, and retention bugs are silent and asymmetric. Needs: (a) a (document_hash, peer_key) ack table keyed by the PID-scoped editor registration; (b) retention keyed off MIN(acked_version) across LIVE peers only; (c) a liveness eviction rule so a crashed IDE cannot pin the watermark forever. Count caps stay as a backstop. PushChannel::flush already implements the single-consumer shape; land the per-peer table plus ack recording additively before changing retention behavior.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 ### Re: #bbpe — gpt-5
 
@@ -382,8 +408,6 @@ This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack wa
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
-- [ ] [#ipcpostcommitinv] [focused-cycle] #agent-doc-bug IPC root-cause C: structural invariants enforced on wrong write path. #boundaryaccum root fix landed (git.rs unconditional snapshot collapse) but needs a POST-COMMIT verification gate that fails loudly/self-heals if HEAD carries more than one boundary or a duplicated scaffold. Reuse ipc_corruption.rs detect_duplicated_scaffold. Touches git.rs, ipc_corruption.rs, flow/closeout.rs. Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md.
-- [ ] [#boundaryaccum1] [focused-cycle] #agent-doc-bug Scattered agent:boundary markers accumulate in committed content (3 in this doc: d0dd7c4e, qactsync1, ftimm0001) — violates the exactly-one-boundary invariant. Root cause: reposition_boundary_in_snapshot (git.rs:1613) hands the collapse to the finalize/IPC path via the active-run guard AND delegates the working-tree rewrite to the IDE plugin via the IPC-listener guard; when finalize wedges on stale_install and the response lands via direct commit (and the stale plugin never applies the IPC reposition signal), nothing re-enforces the single-boundary invariant on the binary's own staged/committed blob, so one boundary accretes per wedged cycle. Fix: always collapse boundaries in the binary-owned snapshot/staged blob independent of the guards (git stages a snapshot, not the live editor buffer, so it never races user text) and scope the guards to the working-tree disk rewrite only; add a post-commit invariant check that reconciles or fails loudly if HEAD carries >1 boundary; promote the aspirational reposition_boundary_removes_stale/apply_patches_boundary_invariant tests to real regressions + SimWorld coverage for N wedged-finalize→direct-commit cycles. Distinct from #fullboundary (convergence gate reduces the wedge trigger; this makes the invariant self-healing regardless of write path). Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md
 - [ ] [#qactsync] [focused-cycle] #agent-doc-feature Bidirectional realtime sync of queue-activation state: when the operator adds/removes go on agent:queue OR changes the queue: frontmatter value, the realtime system converges BOTH representations to the operator edit (operator-authoritative, never revert). Today explicit_queue_go_mode reads both but they are not synced, so halting needs editing both (go-marker churn). Define a canonical QueueActivation state + edit-provenance propagation; deterministic on two-sided conflict; fixed-point on synced input. SimWorld both directions + conflict; make tmux-ci + live editor proof. Plan: tasks/agent-doc/plan-queue-activation-state-sync.md
 - [ ] [#ftimmediate] [focused-cycle] #agent-doc-feature Free-text prompts begin work immediately — ROOT GAP IDENTIFIED 2026-07-19. The run-after-clear route the item wants ALREADY EXISTS for id-backed items: DrainScope::Supervisor defers only [operator-verify], and ExecutionContext::loop_undrainable's own doc says a [focused-cycle] item is deferred by the in-session loop but DRAINED by the supervisor clear-and-continue path (#qfocsup). The gap is that partition_drainable_backlog_ids takes backlog IDS and ExecutionContext is a HashMap keyed by id, so a FREE-TEXT head has no carrier for the tag and can never be routed there — leaving the agent to park it in prose, which is the reported behavior. FIX: give free-text heads an execution context (inline marker parsed off the head text, or a synthesized id at queue-materialization time so every head is id-backed) so an agent judging 'this needs fresh context' can route it to the supervisor clear-and-continue drain instead of handing it back. Note #multilineheadbullet and #qconsumenostrike point the same way: free-text heads lacking a stable identity is the shared root.
 - [ ] [#qeditrace] [focused-cycle] #agent-doc-bug Pre-run queue edits partially reverted: when the operator adds multiple queue heads before a run (or JB Run Agent Doc) with no active turn, only the FIRST added head survives and the rest revert to the pre-edit queue. Distinct from the during-turn race - the preflight queue-maintenance reconcile drops all-but-first operator addition. Investigate preflight/maintenance.rs: queue_journal record + record_live_buffer (#qftloss mode-6), #mirrorall backlog-to-queue mirror, #rz3a freshly-added hold-out, #7r2s manual-add pin, #qdedupsync dedup - hypothesis is convergence keeps the first new head (pin/anchor match) but journals-without-replaying the rest. Repro 2026-07-01 reitrades.md; live dup heads in bugs2 (do #tmuxsynccrashlog x2, do #60ev x2). Add SimWorld coverage for multi-line pre-run operator-add survival + fail-closed recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
@@ -398,11 +422,14 @@ This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack wa
 - [ ] [#crdtauth6] [operator-verify] CRDT authority live proof: verify the existing JB DocumentListener -> CrdtReplicaForwarder.forwardLocalDelta path, Kotlin Unix-socket ReplicaTransport, VS Code koffi replica seam, and Rust fan-out stay connected in a live editor session. This is proof/parity work only; operator-visible text is already authoritative and must not wait on this item. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
+- [ ] [#retentionwatermarklive] [focused-cycle] Switch state-event retention to MIN(acked_version) across LIVE PID-scoped peers, with deterministic crashed-IDE liveness eviction; keep count caps as a backstop. Depends on #fmgc durable per-peer ack collection.
+- [ ] [#fmgcverify] [operator-verify] After restarting JetBrains onto plugin 0.2.291, confirm the live registration is current and state_event_peer_acks advances for the document after two Project Controller state subscriptions.
 <!-- /agent:backlog -->
 
 ## Review
  
 <!-- agent:review -->
+- [/] [#boundaryaccumverify] [operator-verify] After restarting any JetBrains IDE still on the older package generation, reproduce a wedged finalize/direct-commit handoff and confirm visible document, snapshot, and committed HEAD each retain exactly one agent:boundary marker; report any boundary_invariant_violation that does not self-heal.
 - [/] [#r4gq] [operator-verify] Live JB Run Agent Doc dispatch-hang proof (#kjw0 fix, shipped 0.34.66 build): after the recycled build is running, trigger Run Agent Doc into a BUSY codex pane (mid-turn, 'esc to interrupt' visible) and confirm it returns FAST with a queued-behind-active-turn outcome (pane shows queued status) instead of hanging ~21s then a dispatch-start-unproven notification. Grep ops.log for route_dispatch_start_queued_behind_active_turn (present on success) and confirm accepted_without_dispatch_start_proof is ABSENT for the busy case. Root cause: route injected the trigger into a mid-turn pane; codex queued it behind the active turn so the UserPromptSubmit hook could not advance within the 10s proof budget, and the direct-pane path paid TWO 10s waits (initial + late-resubmit) then filed a false bug. Fix: short_circuit_dispatch_start_when_pane_busy in route/dispatch.rs detects busy_proof_line and returns RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn (accepted, not fail-closed).
 - [/] [#zqv8] [operator-verify] #jbrelaylive Restart IntelliJ IDEA 2026.1 to activate the installed JetBrains plugin 0.2.247, rerun Run Agent Doc on tasks/professional/equityfundingsource.md while the dim Summarize recent commits suggestion is visible, and confirm dispatch succeeds without a protected-input refusal or a long UI freeze.
 - [/] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.

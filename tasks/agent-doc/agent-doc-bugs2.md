@@ -107,6 +107,12 @@ Success requires all three observations in the same attempt: the Claude turn con
 ### Re: realtime steering residue after #dbj7 — gpt-5
 
 The repeated `📌 do [#dbj7]` directive points to the operator-verification response already committed in the preceding cycle, so it is acknowledged here without re-answering or re-running that work. The standalone `-->` is a leaked markup terminator, not an independent operator instruction. `#dbj7` remains gated in Review pending the live Claude/JetBrains evidence described in the committed response.
+
+### Re: #crdtpushdrainverify — gpt-5
+
+This remains an operator/live-IDE timing proof. Preflight in this session registered JetBrains plugin `0.2.283`, which supersedes the backlog item's older `0.2.278` pin, so no downgrade is required. In an IDE using that current plugin, leave an agent-doc document idle for more than 30 seconds, run **Compact Exchange**, and capture the corresponding ops-log attempt.
+
+Pass only if `compact_crdt_relay_acknowledged ... wait_ms=` is materially below the former ~4.5-second floor (roughly one pull/apply round trip) and the same attempt does not require `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh`. If either condition fails, retain the attempt markers and timing for diagnosis; this pane cannot manufacture the host-IDE idle interval or action.
 <!-- agent:boundary:8ce8ee32 -->
 <!-- /agent:exchange -->
 ## Queue

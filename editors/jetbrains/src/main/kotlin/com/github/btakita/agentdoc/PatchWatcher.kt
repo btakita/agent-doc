@@ -489,9 +489,11 @@ class PatchWatcher(private val project: Project) : Disposable {
             }
             EditorIntent.ReloadLibrary.token -> {
                 val libVersion = extractStringField(json, "lib_version") ?: "?"
-                LOG.info("[socket] reload_library received (lib_version=$libVersion); forcing cdylib reload")
-                AgentDocLib.forceReload()
-                CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project, "reload-lib-$libVersion")
+                LOG.warn(
+                    "[socket] reload_library received (lib_version=$libVersion); " +
+                        "a full IDE restart is required to activate the new native library",
+                )
+                AgentDocLib.markRestartRequired(libVersion)
                 APPLY_APPLIED
             }
             EditorIntent.SaveDocument.token -> {

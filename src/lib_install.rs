@@ -228,9 +228,9 @@ pub(crate) fn run_paths(
     // `lib-install` is safe. Opt out with a falsey AGENT_DOC_RECYCLE_ON_INSTALL.
     auto_recycle_after_install();
 
-    // Proactively send the shared `reload_library` intent to every editor process
-    // registered on the reliable-sync plane. This is best-effort: an editor that
-    // is currently disconnected reloads lazily on its next native call.
+    // Proactively send the shared `reload_library` intent to editor adapters that
+    // explicitly support safe hot reload. JetBrains and unknown adapters require
+    // a process restart so two SQLite-owning cdylibs never coexist in one process.
     signal_reload_after_install(version);
 
     Ok(())
@@ -239,8 +239,8 @@ pub(crate) fn run_paths(
 fn signal_reload_after_install(version: &str) {
     let report = agent_doc_controller_io::project_controller::reload_library_all_projects(version);
     eprintln!(
-        "[lib-install] reload_library intent: delivered {}/{} editor endpoints across {} projects ({} unavailable)",
-        report.delivered, report.endpoints, report.projects, report.failed
+        "[lib-install] reload_library intent: delivered {}/{} editor endpoints across {} projects ({} restart required, {} unavailable)",
+        report.delivered, report.endpoints, report.projects, report.restart_required, report.failed
     );
 }
 
@@ -252,10 +252,11 @@ pub struct ReloadLibReport {
     pub editor_projects: usize,
     pub editor_endpoints: usize,
     pub delivered: usize,
+    pub restart_required: usize,
     pub failed: usize,
 }
 
-/// Send a typed `reload_library` intent to every reliable-sync editor member.
+/// Send a typed `reload_library` intent to safe hot-reload editor members.
 pub fn reload_lib() -> Result<ReloadLibReport> {
     let version = env!("CARGO_PKG_VERSION");
     let fanout = agent_doc_controller_io::project_controller::reload_library_all_projects(version);
@@ -264,6 +265,7 @@ pub fn reload_lib() -> Result<ReloadLibReport> {
         editor_projects: fanout.projects,
         editor_endpoints: fanout.endpoints,
         delivered: fanout.delivered,
+        restart_required: fanout.restart_required,
         failed: fanout.failed,
     })
 }

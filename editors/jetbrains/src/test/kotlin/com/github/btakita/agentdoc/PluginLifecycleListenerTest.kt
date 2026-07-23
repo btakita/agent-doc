@@ -27,4 +27,16 @@ class PluginLifecycleListenerTest {
         assertFalse(source.contains("openFile("))
         assertFalse(source.contains("TmuxPaneFocusSync.install(project)"))
     }
+
+    @Test
+    fun `plugin package upgrades require a full IDE restart`() {
+        val pluginXml = Files.readString(
+            Paths.get("src/main/resources/META-INF/plugin.xml")
+                .takeIf { Files.exists(it) }
+                ?: Paths.get("editors/jetbrains/src/main/resources/META-INF/plugin.xml")
+        )
+
+        assertTrue(pluginXml.contains("<idea-plugin require-restart=\"true\">"))
+        assertFalse(pluginXml.contains("<idea-plugin require-restart=\"false\">"))
+    }
 }

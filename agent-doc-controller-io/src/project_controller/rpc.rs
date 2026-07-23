@@ -6135,15 +6135,33 @@ pub struct ReloadLibraryFanoutReport {
     pub projects: usize,
     pub endpoints: usize,
     pub delivered: usize,
+    pub restart_required: usize,
     pub failed: usize,
 }
 
-/// Send one PID-scoped `reload_library` intent to every live editor process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorNativeReloadPolicy {
+    HotReload,
+    RestartRequired,
+}
+
+fn editor_native_reload_policy(editor_id: &str) -> EditorNativeReloadPolicy {
+    if editor_id.starts_with("vscode-") {
+        EditorNativeReloadPolicy::HotReload
+    } else {
+        EditorNativeReloadPolicy::RestartRequired
+    }
+}
+
+/// Send one PID-scoped `reload_library` intent to every live editor process
+/// whose adapter is explicitly known to support safe native hot reload.
 ///
 /// Registrations come from the reliable-sync Lazily projection. A process that
 /// has several open documents receives one intent per project, not one per
-/// document. Failures are counted so install can remain best-effort without
-/// inventing a filesystem broadcast path.
+/// document. JetBrains and unknown adapters are counted as restart-required:
+/// fail closed rather than risk loading two SQLite-owning cdylibs in one process.
+/// Failures are counted so install can remain best-effort without inventing a
+/// filesystem broadcast path.
 pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutReport {
     let mut report = ReloadLibraryFanoutReport::default();
     for project_root in crate::process::controller_project_roots(std::process::id()) {
@@ -6175,6 +6193,11 @@ pub fn reload_library_all_projects(lib_version: &str) -> ReloadLibraryFanoutRepo
         for (pid, editor_id) in endpoints {
             if !agent_doc_ipc_io::is_listener_active_for_pid(&project_root, pid) {
                 report.failed += 1;
+                continue;
+            }
+            if editor_native_reload_policy(&editor_id) == EditorNativeReloadPolicy::RestartRequired
+            {
+                report.restart_required += 1;
                 continue;
             }
             match agent_doc_ipc_io::send_reload_library_to_editor(
@@ -13196,6 +13219,26 @@ mod tests {
     // directly to assert the schema/rows the seam writes. `Connection` is the
     // `state_store` re-export already in scope via `super::*`.
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
+
+    #[test]
+    fn native_reload_policy_requires_an_explicit_safe_adapter() {
+        assert_eq!(
+            editor_native_reload_policy("vscode-123-uuid"),
+            EditorNativeReloadPolicy::HotReload
+        );
+        assert_eq!(
+            editor_native_reload_policy("jetbrains-123-uuid"),
+            EditorNativeReloadPolicy::RestartRequired
+        );
+        assert_eq!(
+            editor_native_reload_policy(""),
+            EditorNativeReloadPolicy::RestartRequired
+        );
+        assert_eq!(
+            editor_native_reload_policy("future-editor-123"),
+            EditorNativeReloadPolicy::RestartRequired
+        );
+    }
 
     #[test]
     fn mutating_rpc_binary_guard_covers_dispatch_and_compact_callers() {

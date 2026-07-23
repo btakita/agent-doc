@@ -6,9 +6,16 @@ Extends `editors/SPEC.md` with JetBrains-specific behavior.
 
 - **ID:** `com.github.btakita.agent-doc`
 - **Name:** Agent Doc
-- **Restart:** Not required (`require-restart="false"`)
+- **Restart:** Required for plugin/native upgrades (`require-restart="true"`)
+- **Native upgrades:** One cdylib generation is loaded per JVM
 
 ## Implementation Details
+
+JetBrains never hot-reloads `libagent_doc` in process. An installed-library
+mtime change or typed `reload_library` intent retains the currently loaded
+generation and records a restart-required warning. This prevents independent
+SQLite/WAL lock domains from coexisting in one JVM; the replacement library and
+its replicas become active only after a full IDE restart.
 
 ### Claim — Split Position Detection
 

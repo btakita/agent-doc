@@ -67,7 +67,7 @@ Rust, JetBrains, and VS Code use the same `EditorIntent` names:
 | `observe_lazily_current` | Return current value, generation, and causal proof |
 | `deliver_crdt_remote` | Integrate a remote Lazily change |
 | `refresh_vcs` | Refresh editor VCS decoration after a durable commit |
-| `reload_library` | Reload a compatible native library at a safe boundary |
+| `reload_library` | Reload a compatible native library only when the adapter can prove a safe boundary; otherwise require process restart |
 
 Every mutating intent carries `intent_id`, `cycle_id`, `expected_generation`,
 and expected current-value proof. Unknown fields may be observed for forward
@@ -125,10 +125,12 @@ controller rebases pending intents from `state.db`; the plugin must not reread
 an old delivery or replay a full document. A zero-member state is not proof of
 a visible write.
 
-`reload_library` is accepted only at a safe operation boundary. The adapter
-must quiesce old native calls, load the announced ABI, re-register capabilities,
-and preserve the same Lazily replica. A library reload must not change the
-active document or editor focus.
+`reload_library` is accepted only by an adapter that can quiesce and unload all
+old native calls before loading the announced ABI. Such an adapter re-registers
+capabilities, preserves the same Lazily replica, and does not change the active
+document or editor focus. An adapter that cannot prove that boundary must retain
+its one loaded native generation and report that a process restart is required.
+Unknown adapter identities fail closed to restart-required.
 
 ## 7. User actions and routing
 

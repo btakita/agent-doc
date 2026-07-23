@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.18
+
+_JetBrains plugin 0.2.288._
+
+- **JetBrains native and package upgrades now fail closed to a full IDE restart.** The plugin loads exactly one `libagent_doc` generation per JVM, no longer reloads on mtime changes or `reload_library` intents, and declares `require-restart="true"` so a package update cannot dynamically replace the classloader and bypass that invariant. This prevents independent SQLite/WAL lock domains from corrupting `state.db`.
+- **Library reload fanout is adapter-policy aware.** VS Code remains explicitly hot-reload capable, while JetBrains and unknown registrations are counted as restart-required and receive no unsafe reload intent. Install and admin reports expose the restart-required count.
+
 ## 0.35.17
 
 _JetBrains plugin 0.2.286._

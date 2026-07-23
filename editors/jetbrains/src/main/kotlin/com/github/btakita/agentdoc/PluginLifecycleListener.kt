@@ -10,11 +10,10 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.vfs.VirtualFileManager
 
 /**
- * Disposes per-project resources when a project closes or when the plugin is
- * dynamically unloaded.
+ * Disposes per-project resources when a project closes.
  *
  * Registered in plugin.xml as a projectListener so IntelliJ manages the lifecycle.
- * This enables `require-restart="false"` (dynamic plugin install/update/unload).
+ * Native code is process-lifetime state, so plugin updates require a full IDE restart.
  */
 class PluginLifecycleListener : ProjectManagerListener {
     override fun projectOpened(project: Project) {
@@ -22,12 +21,11 @@ class PluginLifecycleListener : ProjectManagerListener {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, project)
         // Attach markdown buffers as CRDT replicas when the CP endpoint is available.
         CrdtReplicaManager.getInstance(project)
-        // Dynamic plugin upgrades re-run project lifecycle startup, but do not
-        // necessarily emit a later reload_lib broadcast. Re-register every
-        // already-open markdown document through the deferred-reconnect path so
-        // a Lazily-retained response/backlog target cannot remain parked until
-        // another install or operator focus change. This scans open documents
-        // without selecting or focusing any editor.
+        // Re-register every already-open markdown document through the
+        // deferred-reconnect path after process startup so a Lazily-retained
+        // response/backlog target cannot remain parked until an operator focus
+        // change. This scans open documents without selecting or focusing any
+        // editor.
         CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project, "plugin-startup")
         // Start watching for IPC patch files from agent-doc write --ipc
         PatchWatcher.getInstance(project)

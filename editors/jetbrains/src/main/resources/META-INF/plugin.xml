@@ -1,4 +1,4 @@
-<idea-plugin require-restart="false">
+<idea-plugin require-restart="true">
     <id>com.github.btakita.agent-doc</id>
     <name>Agent Doc</name>
     <vendor url="https://github.com/btakita">btakita</vendor>

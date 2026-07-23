@@ -168,8 +168,13 @@ class TypingTrackerEdtBudgetTest {
             Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
             Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
         ).first { Files.exists(it) }
+        val nativePath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt"),
+        ).first { Files.exists(it) }
         val tracker = Files.readString(trackerPath)
         val watcher = Files.readString(watcherPath)
+        val native = Files.readString(nativePath)
 
         assertTrue(
             "the shared socket intent should refresh the Lazily current document",
@@ -180,10 +185,18 @@ class TypingTrackerEdtBudgetTest {
             .substringAfter("EditorIntent.ReloadLibrary.token -> {")
             .substringBefore("EditorIntent.SaveDocument.token -> {")
         assertTrue(
-            "the typed reload intent must reload native code and re-register every open replica",
-            reloadIntentBody.contains("AgentDocLib.forceReload()") &&
-                reloadIntentBody.contains("CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project"),
+            "JetBrains reload intents must require restart instead of loading a second native generation",
+            reloadIntentBody.contains("AgentDocLib.markRestartRequired(libVersion)") &&
+                !reloadIntentBody.contains("forceReload") &&
+                !reloadIntentBody.contains("forceRefreshOpenDocumentReplicas"),
         )
+        assertEquals(
+            "the JetBrains JVM must call Native.load exactly once",
+            1,
+            Regex("""Native\.load\(""").findAll(native).count(),
+        )
+        assertFalse("JetBrains must not expose an in-process native reload entrypoint", native.contains("fun forceReload"))
+        assertFalse("mtime changes must not trigger an in-process native reload", native.contains("return reload(path)"))
         assertTrue("reload must have no filesystem watcher", !watcher.contains("newWatchService()"))
 
         val publishBody = tracker.substringAfter("fun observeLazilyCurrentNow")

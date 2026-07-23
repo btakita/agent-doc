@@ -651,6 +651,7 @@ interface AgentDocLib : Library {
         @Volatile private var loadError: String? = null
         @Volatile private var loadedPath: String? = null
         @Volatile private var loadedMtime: Long = 0L
+        @Volatile private var restartRequiredMtime: Long = 0L
         @Volatile private var currentLockFile: File? = null
         private var shutdownHookRegistered = false
 
@@ -660,8 +661,7 @@ interface AgentDocLib : Library {
 
             if (current != null && path != null) {
                 if (libMtimeChanged(path, loadedMtime)) {
-                    LOG.info("[native] libagent_doc mtime changed, reloading from $path")
-                    return reload(path)
+                    markRestartRequired()
                 }
                 return current
             }
@@ -678,23 +678,24 @@ interface AgentDocLib : Library {
         }
 
         @Synchronized
-        private fun reload(path: String): AgentDocLib? {
-            val currentMtime = File(path).lastModified()
-            if (currentMtime == loadedMtime || currentMtime == 0L) return instance
-            return try {
-                removePidLock()
-                val loadTarget = shadowCopyForLoad(path, currentMtime)
-                val newLib = Native.load(loadTarget, AgentDocLib::class.java)
-                instance = newLib
-                loadedMtime = currentMtime
-                loadError = null
-                writePidLock(path)
-                verifyVersion(newLib, path)
-                newLib
-            } catch (e: Exception) {
-                LOG.warn("[native] reload failed, keeping previous instance: ${e.message}")
-                instance
+        fun markRestartRequired(libVersion: String? = null) {
+            val path = loadedPath
+            if (instance == null || path == null) {
+                LOG.info(
+                    "[native] reload_library received for cdylib v${libVersion ?: "?"}; " +
+                        "the native library is not loaded yet, so the next initial load will use it",
+                )
+                return
             }
+
+            val currentMtime = File(path).lastModified()
+            if (currentMtime != 0L && currentMtime == restartRequiredMtime) return
+            restartRequiredMtime = currentMtime
+            LOG.warn(
+                "[native] libagent_doc v${libVersion ?: "?"} changed at $path; " +
+                    "in-process reload is disabled because loading multiple native generations " +
+                    "can split SQLite/WAL ownership. Restart the IDE to activate it.",
+            )
         }
 
         @Synchronized
@@ -702,6 +703,7 @@ interface AgentDocLib : Library {
             return try {
                 loadedPath = path
                 loadedMtime = File(path).lastModified()
+                restartRequiredMtime = 0L
                 val loadTarget = shadowCopyForLoad(path, loadedMtime)
                 val newLib = Native.load(loadTarget, AgentDocLib::class.java)
                 instance = newLib
@@ -732,9 +734,10 @@ interface AgentDocLib : Library {
         }
 
         /**
-         * Resolve the load target for [canonicalPath]: a per-mtime shadow copy so
-         * a new install actually reloads (see [nativeShadowCopyPath]). Falls back
-         * to the canonical path in place if the copy fails.
+         * Resolve the initial load target for [canonicalPath]. The per-process
+         * shadow copy avoids mutating a mapped library during installation, while
+         * this JVM still loads exactly one native generation. Falls back to the
+         * canonical path in place if the copy fails.
          */
         private fun shadowCopyForLoad(canonicalPath: String, mtime: Long): String {
             val pid = ProcessHandle.current().pid()
@@ -778,36 +781,6 @@ interface AgentDocLib : Library {
             Runtime.getRuntime().addShutdownHook(Thread {
                 removePidLock()
             })
-        }
-
-        /**
-         * Force a fresh `Native.load` for the typed `reload_library` intent,
-         * bypassing the lazy mtime-equality guard in [get] / [reload].
-         */
-        @Synchronized
-        fun forceReload(): AgentDocLib? {
-            val path = loadedPath ?: resolveLibPath() ?: run {
-                LOG.warn("[native] forceReload: no libagent_doc path to reload")
-                return null
-            }
-            loadedPath = path
-            return try {
-                removePidLock()
-                val currentMtime = File(path).lastModified()
-                val loadTarget = shadowCopyForLoad(path, currentMtime)
-                val newLib = Native.load(loadTarget, AgentDocLib::class.java)
-                instance = newLib
-                loadedMtime = currentMtime
-                loadError = null
-                writePidLock(path)
-                registerShutdownHook()
-                verifyVersion(newLib, path)
-                LOG.info("[native] forceReload: reloaded libagent_doc from $path")
-                newLib
-            } catch (e: Exception) {
-                LOG.warn("[native] forceReload failed, keeping previous instance: ${e.message}")
-                instance
-            }
         }
 
         private fun resolveLibPath(): String? {

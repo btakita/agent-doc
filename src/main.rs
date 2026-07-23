@@ -5128,20 +5128,22 @@ fn try_main() -> anyhow::Result<()> {
                         println!(
                             "{}",
                             serde_json::json!({
-                                "lib_version": report.lib_version,
-                                "editor_projects": report.editor_projects,
-                                "editor_endpoints": report.editor_endpoints,
-                                "delivered": report.delivered,
-                                "failed": report.failed,
-                            })
+                                    "lib_version": report.lib_version,
+                                    "editor_projects": report.editor_projects,
+                            "editor_endpoints": report.editor_endpoints,
+                            "delivered": report.delivered,
+                            "restart_required": report.restart_required,
+                            "failed": report.failed,
+                                })
                         );
                     } else {
                         println!(
-                            "[admin] reload-lib: cdylib v{} typed reload delivered to {}/{} editor endpoints across {} projects ({} unavailable)",
+                            "[admin] reload-lib: cdylib v{} typed reload delivered to {}/{} editor endpoints across {} projects ({} restart required, {} unavailable)",
                             report.lib_version,
                             report.delivered,
                             report.editor_endpoints,
                             report.editor_projects,
+                            report.restart_required,
                             report.failed,
                         );
                     }

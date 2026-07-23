@@ -146,7 +146,10 @@ class VisualHighlighterManager private constructor(private val project: Project)
             } ?: return null
             VisualTokenSnapshot(
                 modificationStamp = snapshot.modificationStamp,
-                tokens = NativePatching.visualTokens(snapshot.text),
+                // FFI unavailability is not an empty token projection. Keeping
+                // the last valid ranges avoids erasing agent-doc highlighting
+                // while a restart-required native generation is recovered.
+                tokens = NativePatching.visualTokensOrNull(snapshot.text) ?: return null,
             )
         } catch (e: Throwable) {
             LOG.debug("[visual] token refresh skipped: ${e.message}")

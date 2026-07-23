@@ -152,4 +152,16 @@ class LibMtimeChangedTest {
             nativeReloadTransition(10L, 11L, nativeQuiesced = true, callsDrained = true),
         )
     }
+
+    @Test
+    fun `retired generation transition restores old code when dlclose leaves it mapped`() {
+        assertEquals(
+            NativeRetiredGenerationTransition.LoadReplacement,
+            nativeRetiredGenerationTransition(oldGenerationUnmapped = true),
+        )
+        assertEquals(
+            NativeRetiredGenerationTransition.RestoreOldForRestart,
+            nativeRetiredGenerationTransition(oldGenerationUnmapped = false),
+        )
+    }
 }

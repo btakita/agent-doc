@@ -2391,6 +2391,43 @@ mod tests {
     }
 
     #[test]
+    fn drain_cancels_empty_preflight_before_document_repair() {
+        use agent_doc_controller::dispatch::RouteCloseoutDrainOutcome as DrainOutcome;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("drain-empty-preflight.md");
+        let content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "<!-- agent:boundary:abc123 -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let outcome = super::drain_open_closeout_before_routed_dispatch(
+            &doc,
+            super::route_closeout_drain_effects(super::route_repair_closeout),
+        )
+        .unwrap();
+
+        assert_eq!(
+            outcome,
+            DrainOutcome::Recovered("empty_preflight_cancelled".to_string()),
+        );
+        let state = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::Abandoned);
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
     fn closeout_block_decision_queues_prompt_context_before_failing_closed() {
         let dir = tempfile::tempdir().unwrap();
         let doc = dir.path().join("route-block.md");

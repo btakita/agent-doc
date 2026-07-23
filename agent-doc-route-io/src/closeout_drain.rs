@@ -9,7 +9,9 @@ use agent_doc_controller::dispatch::{
     RouteCloseoutDrainOutcome, classify_closeout_block_dispatch, dispatch_drain_retry_decision,
 };
 use agent_doc_session_check_io::SessionCheckStatus;
-use agent_doc_turn::closeout_recovery::{CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput};
+use agent_doc_turn::closeout_recovery::{
+    CloseoutRecoveryCycleInput, CloseoutRecoveryDecision, CloseoutRecoveryDecisionInput,
+};
 
 pub type DecideRouteCloseoutRecoveryFn =
     for<'a> fn(&Path, CloseoutRecoveryDecisionInput<'a>) -> CloseoutRecoveryDecision;
@@ -18,6 +20,7 @@ pub type DecideRouteCloseoutRecoveryFn =
 pub struct RouteCloseoutDrainEffects {
     pub force_disk_route_writes: fn() -> bool,
     pub run_pending_maintenance: fn(&Path, bool) -> Result<()>,
+    pub cancel_empty_preflight: fn(&Path) -> Result<bool>,
     pub repair_closeout: fn(&Path) -> Result<String>,
     pub inspect_session: fn(&Path) -> Result<SessionCheckStatus>,
     pub decide_closeout_recovery: DecideRouteCloseoutRecoveryFn,
@@ -32,6 +35,28 @@ pub fn drain_open_closeout_before_routed_dispatch(
     };
     if !state.is_open() {
         return Ok(RouteCloseoutDrainOutcome::NoOpenCycle);
+    }
+
+    let cycle = CloseoutRecoveryCycleInput {
+        phase: state.phase,
+        has_capture: state.capture_id.is_some(),
+        has_response_hash: state.response_sha256.is_some(),
+        had_pending_mutations: state.had_pending_mutations,
+    };
+    if cycle.is_empty_preflight()
+        && state.tracked_work_maintenance_required_at_preflight != Some(true)
+        && (effects.cancel_empty_preflight)(file)?
+    {
+        let label = "empty_preflight_cancelled".to_string();
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_drain_empty_preflight_cancelled file={} cycle_id={}",
+                file.display(),
+                state.cycle_id,
+            ),
+        );
+        return Ok(RouteCloseoutDrainOutcome::Recovered(label));
     }
 
     agent_doc_ops_log_io::log_op(

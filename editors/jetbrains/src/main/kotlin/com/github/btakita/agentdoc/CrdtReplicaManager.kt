@@ -392,6 +392,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 // from this exact editor cut, then let binary-owned semantic intents
                 // replay granularly over the new baseline.
                 val registrationText = text
+                if (!NativePatching.isAvailable()) {
+                    log.warn(
+                        "[crdt-replica] open-document replica registration deferred for ${File(filePath).name}; " +
+                            "native FFI unavailable",
+                    )
+                    return@attach false
+                }
                 val registrationState = templateStructureState(filePath, registrationText, "replica-registration")
                 if (!replicaRegistrationStructureAcceptedUtil(registrationState)) {
                     log.warn(

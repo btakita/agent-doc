@@ -147,6 +147,14 @@ fn route_inspect_session(file: &Path) -> Result<agent_doc_session_check_io::Sess
     )
 }
 
+fn route_cancel_empty_preflight(file: &Path) -> Result<bool> {
+    agent_doc_repair_io::cancel_preflight_cycle(
+        &agent_doc_closeout_runtime_io::REPAIR_IO_EFFECTS,
+        file,
+    )
+    .map(|outcome| matches!(outcome, agent_doc_turn::repair::CancelOutcome::Abandoned))
+}
+
 fn route_decide_closeout_recovery(
     file: &Path,
     input: CloseoutRecoveryDecisionInput<'_>,
@@ -164,6 +172,7 @@ pub fn route_closeout_drain_effects(
     RouteCloseoutDrainEffects {
         force_disk_route_writes: crate::invocation::force_disk_route_writes,
         run_pending_maintenance: route_run_pending_maintenance,
+        cancel_empty_preflight: route_cancel_empty_preflight,
         repair_closeout,
         inspect_session: route_inspect_session,
         decide_closeout_recovery: route_decide_closeout_recovery,

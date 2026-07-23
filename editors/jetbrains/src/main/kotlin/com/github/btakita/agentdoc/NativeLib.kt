@@ -27,6 +27,18 @@ internal enum class NativeReloadTransition {
     RetainOldGeneration,
 }
 
+internal enum class NativeRetiredGenerationTransition {
+    LoadReplacement,
+    RestoreOldForRestart,
+}
+
+internal fun nativeRetiredGenerationTransition(oldGenerationUnmapped: Boolean): NativeRetiredGenerationTransition =
+    if (oldGenerationUnmapped) {
+        NativeRetiredGenerationTransition.LoadReplacement
+    } else {
+        NativeRetiredGenerationTransition.RestoreOldForRestart
+    }
+
 internal fun nativeReloadTransition(
     loadedMtime: Long,
     targetMtime: Long,
@@ -724,13 +736,15 @@ interface AgentDocLib : Library {
                 }
             }
 
-            fun resumeNativeAfterFailure() {
-                try {
-                    callOnWorker { delegate.agent_doc_resume_after_reload_failure() }
-                } catch (error: Throwable) {
-                    LOG.warn("[native] failed to resume retained native generation: ${error.message}")
-                }
+        fun resumeNativeAfterFailure(): Boolean {
+            return try {
+                callOnWorker { delegate.agent_doc_resume_after_reload_failure() }
+                true
+            } catch (error: Throwable) {
+                LOG.warn("[native] failed to resume retained native generation: ${error.message}")
+                false
             }
+        }
 
             fun retireAndClose(timeoutMs: Long): Boolean {
                 executor.shutdown()
@@ -907,14 +921,21 @@ interface AgentDocLib : Library {
                 return markRestartRequired(
                     "old native generation worker did not terminate after calls drained",
                 )
-            }
-            loadedGeneration = null
-            instance = null
-            if (!nativeGenerationIsUnmapped(old.loadTarget)) {
-                return markRestartRequired(
-                    "old native generation remains mapped after worker exit and dlclose",
+        }
+        loadedGeneration = null
+        instance = null
+        when (nativeRetiredGenerationTransition(nativeGenerationIsUnmapped(old.loadTarget))) {
+            NativeRetiredGenerationTransition.LoadReplacement -> Unit
+            NativeRetiredGenerationTransition.RestoreOldForRestart -> {
+                return restoreRetiredGenerationForRestart(
+                    oldLoadTarget = old.loadTarget,
+                    canonicalPath = path,
+                    oldMtime = oldMtime,
+                    targetMtime = targetMtime,
+                    reason = "old native generation remains mapped after worker exit and dlclose",
                 )
             }
+        }
 
             val replacement = try {
                 loadValidatedGeneration(loadTarget, path)
@@ -947,8 +968,39 @@ interface AgentDocLib : Library {
                 "[native] hot-reloaded libagent_doc v${libVersion ?: "?"} from $path " +
                     "after quiesce/close handoff",
             )
-            return NativeReloadOutcome.Reloaded(targetMtime)
+        return NativeReloadOutcome.Reloaded(targetMtime)
+    }
+
+    private fun restoreRetiredGenerationForRestart(
+        oldLoadTarget: String,
+        canonicalPath: String,
+        oldMtime: Long,
+        targetMtime: Long,
+        reason: String,
+    ): NativeReloadOutcome {
+        val restored = try {
+            loadValidatedGeneration(oldLoadTarget, canonicalPath)
+        } catch (restoreError: Throwable) {
+            LOG.warn("[native] failed to reopen retired generation for restart fallback", restoreError)
+            return markRestartRequired(
+                "$reason; prior generation restore failed (${restoreError.message})",
+            )
         }
+        if (!restored.resumeNativeAfterFailure()) {
+            try {
+                restored.retireAndClose(NATIVE_QUIESCE_TIMEOUT_MS)
+            } catch (_: Throwable) {
+            }
+            return markRestartRequired("$reason; prior generation could not resume")
+        }
+        publishGeneration(restored, canonicalPath, oldMtime)
+        failedReloadMtime = targetMtime
+        LOG.warn(
+            "[native] IDE restart required; restored prior generation at mtime=$oldMtime " +
+                "after failed unload: $reason",
+        )
+        return NativeReloadOutcome.RestartRequired("$reason; retained prior generation")
+    }
 
         @Synchronized
         private fun loadFrom(path: String): AgentDocLib? {
@@ -1605,9 +1657,9 @@ object NativePatching {
     /**
      * Collect visual token ranges for agent-doc-specific markdown structures.
      */
-    fun visualTokens(doc: String): List<VisualToken> {
-        val lib = AgentDocLib.get() ?: return emptyList()
-        val ptr = lib.agent_doc_visual_tokens_json(doc) ?: return emptyList()
+    fun visualTokensOrNull(doc: String): List<VisualToken>? {
+        val lib = AgentDocLib.get() ?: return null
+        val ptr = lib.agent_doc_visual_tokens_json(doc) ?: return null
         try {
             val raw = ptr.getString(0)
             val root = com.google.gson.JsonParser.parseString(raw).asJsonArray
@@ -1620,11 +1672,13 @@ object NativePatching {
             }
         } catch (e: Exception) {
             LOG.warn("[native] visual_tokens_json error: ${e.message}")
-            return emptyList()
+            return null
         } finally {
             lib.agent_doc_free_string(ptr)
         }
     }
+
+    fun visualTokens(doc: String): List<VisualToken> = visualTokensOrNull(doc).orEmpty()
 
     /**
      * Merge frontmatter fields using the native library.

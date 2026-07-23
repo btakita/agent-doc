@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.24
+
+_JetBrains plugin 0.2.292; VS Code extension 0.2.56._
+
+- **JetBrains native reload now preserves the last valid generation when the JVM cannot unload it.** A restart-required update reopens and resumes the retired native shadow instead of leaving FFI unavailable; CRDT replica registration therefore remains live, and visual-token refreshes retain the last valid Markdown highlighting when native data is temporarily unavailable.
+- **Routed dispatch cancels an exact empty preflight before resolving the authoritative document.** A replay-safe `open_empty_preflight` closeout is abandoned without a document read when it has no captured response, mutations, or tracked maintenance, unblocking `Run Agent Doc` while preserving the rule that an editor-attached document may never fall back to disk authority.
+
 ## 0.35.23
 
 _JetBrains plugin 0.2.291; VS Code extension 0.2.56._

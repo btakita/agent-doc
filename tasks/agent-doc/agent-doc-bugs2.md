@@ -203,13 +203,28 @@ agent-doc commit/tag: 9b088ea1b; parent gitlink: fe564460a. Both repositories ar
 ### Re: #af88 — gpt-5
 
 The #af88 response is complete. Binary-owned repair reaped the completed backlog item, struck its stale queue prompt, and preserved the released 0.35.15 implementation and verification record. No additional follow-up was created in this closeout.
-<!-- agent:boundary:c2860a3c -->
+After switching from Claude to Codex then Run Agent Doc: `Agent Doc did not switch harnesses for tasks/recruit/acadian-take-home.md. Current actor is claude-code; frontmatter now resolves to codex. The pane is not at a dispatch-ready boundary. Use Interrupt and restart to force the harness switch.` The agent switch should resolve in real-time. It would be better if the supervisor could also switch in real-time...without requiring a restart.
+
+### Re: #claimnewpane — gpt-5
+
+Implemented and released fresh-pane claims in agent-doc 0.35.16.
+
+- `agent-doc claim <file> --new-pane` now provisions exactly one pane in the document's authoritative tmux session without rebinding or replacing the current pane. It rejects conflicting position, pane, window, force, and isolate options.
+- JetBrains and VS Code now offer **New Pane in This Session** for cross-session claims and pass only `--new-pane`; existing force-claim and project-session-switch choices remain available. A later `agent-doc session set <original-session>` is the supported round trip.
+- Focused Rust/Kotlin/TypeScript tests, Clippy, 142 VS Code tests, full `make check` (7,893 passed; 240 skipped), and `make tmux-ci` all passed.
+
+Released as agent-doc commit `f144ab3ea`, tag `v0.35.16`; parent gitlink commit `d80a4b7bc`. Both repositories are pushed. CI run 29980933678 was in progress at the single required post-push check.
+
+The JetBrains 0.2.286 distribution is now written to `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.286.zip` (SHA-256 `74126fafd4d40394212ee1fd453bfb7de2fdf38b96a3f3f95b2ca4a31c7c0c9c`) and installed into four detected IDE installations. The currently running IDE still reports 0.2.285, so it must be restarted/reloaded before editor delivery ACKs use the new plugin.
+
+The separate request for real-time supervisor harness switching was preserved as `#harnesshotrebind` for a focused cycle.
+<!-- agent:boundary:7251c712 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~📌 do [#af88]~~
-- 📌 do [#claimnewpane]
+- do [#fmgc]
+- ~~📌 do [#claimnewpane]~~
 - 📌 do [#boundaryaccum1]
 - 📌 do [#qactsync]
 - 📌 do [#ftimmediate]
@@ -240,7 +255,6 @@ The #af88 response is complete. Binary-owned repair reaped the completed backlog
 - 📌 do [#ipcverhandshake]
 - 📌 do [#ipcpostcommitinv]
 - 📌 do [#5qjj]
-- do [#fmgc]
 <!-- /agent:queue -->
 
 ## Notes
@@ -270,7 +284,6 @@ This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack wa
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
 - [ ] [#ipcpostcommitinv] [focused-cycle] #agent-doc-bug IPC root-cause C: structural invariants enforced on wrong write path. #boundaryaccum root fix landed (git.rs unconditional snapshot collapse) but needs a POST-COMMIT verification gate that fails loudly/self-heals if HEAD carries more than one boundary or a duplicated scaffold. Reuse ipc_corruption.rs detect_duplicated_scaffold. Touches git.rs, ipc_corruption.rs, flow/closeout.rs. Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md.
-- [ ] [#claimnewpane] [focused-cycle] #agent-doc-feature Claim for Tmux Pane should open a new document in a fresh pane in the SAME tmux session (never replace the current pane or move the window to another session). Plan: tasks/agent-doc/plan-claim-new-pane-same-session.md
 - [ ] [#boundaryaccum1] [focused-cycle] #agent-doc-bug Scattered agent:boundary markers accumulate in committed content (3 in this doc: d0dd7c4e, qactsync1, ftimm0001) — violates the exactly-one-boundary invariant. Root cause: reposition_boundary_in_snapshot (git.rs:1613) hands the collapse to the finalize/IPC path via the active-run guard AND delegates the working-tree rewrite to the IDE plugin via the IPC-listener guard; when finalize wedges on stale_install and the response lands via direct commit (and the stale plugin never applies the IPC reposition signal), nothing re-enforces the single-boundary invariant on the binary's own staged/committed blob, so one boundary accretes per wedged cycle. Fix: always collapse boundaries in the binary-owned snapshot/staged blob independent of the guards (git stages a snapshot, not the live editor buffer, so it never races user text) and scope the guards to the working-tree disk rewrite only; add a post-commit invariant check that reconciles or fails loudly if HEAD carries >1 boundary; promote the aspirational reposition_boundary_removes_stale/apply_patches_boundary_invariant tests to real regressions + SimWorld coverage for N wedged-finalize→direct-commit cycles. Distinct from #fullboundary (convergence gate reduces the wedge trigger; this makes the invariant self-healing regardless of write path). Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md
 - [ ] [#qactsync] [focused-cycle] #agent-doc-feature Bidirectional realtime sync of queue-activation state: when the operator adds/removes go on agent:queue OR changes the queue: frontmatter value, the realtime system converges BOTH representations to the operator edit (operator-authoritative, never revert). Today explicit_queue_go_mode reads both but they are not synced, so halting needs editing both (go-marker churn). Define a canonical QueueActivation state + edit-provenance propagation; deterministic on two-sided conflict; fixed-point on synced input. SimWorld both directions + conflict; make tmux-ci + live editor proof. Plan: tasks/agent-doc/plan-queue-activation-state-sync.md
 - [ ] [#ftimmediate] [focused-cycle] #agent-doc-feature Free-text prompts begin work immediately — ROOT GAP IDENTIFIED 2026-07-19. The run-after-clear route the item wants ALREADY EXISTS for id-backed items: DrainScope::Supervisor defers only [operator-verify], and ExecutionContext::loop_undrainable's own doc says a [focused-cycle] item is deferred by the in-session loop but DRAINED by the supervisor clear-and-continue path (#qfocsup). The gap is that partition_drainable_backlog_ids takes backlog IDS and ExecutionContext is a HashMap keyed by id, so a FREE-TEXT head has no carrier for the tag and can never be routed there — leaving the agent to park it in prose, which is the reported behavior. FIX: give free-text heads an execution context (inline marker parsed off the head text, or a synthesized id at queue-materialization time so every head is id-backed) so an agent judging 'this needs fresh context' can route it to the supervisor clear-and-continue drain instead of handing it back. Note #multilineheadbullet and #qconsumenostrike point the same way: free-text heads lacking a stable identity is the shared root.
@@ -286,6 +299,7 @@ This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack wa
 - [ ] [#crdtauth6] [operator-verify] CRDT authority live proof: verify the existing JB DocumentListener -> CrdtReplicaForwarder.forwardLocalDelta path, Kotlin Unix-socket ReplicaTransport, VS Code koffi replica seam, and Rust fan-out stay connected in a live editor session. This is proof/parity work only; operator-visible text is already authoritative and must not wait on this item. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
+- [ ] [#harnesshotrebind] [focused-cycle] #agent-doc-feature Switch a live supervisor actor between Claude, Codex, and OpenCode in real time when frontmatter changes and Run Agent Doc is invoked, without requiring Interrupt/restart; preserve dispatch-ready safety and hand off only after the replacement harness is ready. Repro: tasks/recruit/acadian-take-home.md remained on claude-code after frontmatter resolved to codex.
 <!-- /agent:backlog -->
 
 ## Review

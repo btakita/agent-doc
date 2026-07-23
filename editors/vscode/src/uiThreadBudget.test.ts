@@ -149,6 +149,24 @@ describe('editor UI thread budget', () => {
         assert.strictEqual(publisher.includes('.save('), false);
     });
 
+    it('VS Code records every save_document outcome through the shared native surface ABI', () => {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf-8');
+        const intent = fs.readFileSync(path.join(__dirname, '..', 'src', 'saveDocumentIntent.ts'), 'utf-8');
+        const start = source.indexOf('case EditorIntent.SaveDocument:');
+        assert.ok(start >= 0, 'save_document socket handler should exist');
+        const end = source.indexOf('case EditorIntent.RefreshVcs:', start);
+        assert.ok(end > start, 'save_document handler should precede refresh_vcs');
+        const handler = source.slice(start, end);
+
+        assert.ok(handler.includes('return processSaveDocumentIntent(filePath, {'));
+        assert.ok(handler.includes('native.recordEditorSurfaceEvent('));
+        for (const status of ['missing_file', 'missing_document', 'saved', 'failed']) {
+            assert.ok(intent.includes(`'${status}'`), `save_document should record ${status}`);
+        }
+        assert.ok(handler.includes('publishSavedContent:'));
+        assert.ok(handler.includes('observeSavedContent:'));
+    });
+
     it('VS Code reliable-sync liveness seeds restored tabs exactly once', () => {
         const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'reliableSyncLiveness.ts'), 'utf-8');
         assert.ok(source.includes('for (const document of vscode.workspace.textDocuments) reportOpen(document);'));

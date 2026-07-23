@@ -27,6 +27,8 @@
 //! - `agent_doc_lazily_current_observed_v1(...)`: publishes the editor's complete current
 //!   document into the Lazily authority model. No typing, live-buffer, or status sidecar is
 //!   created.
+//! - `agent_doc_record_editor_surface_event(...)`: records one cross-editor surface event through
+//!   the shared Rust ops-log formatter so JetBrains and VS Code emit the same schema.
 //! - `agent_doc_admin_*_json(...)`: controller-backed admin/editor wrappers for inspect, queue
 //!   pause/resume/drain, handoff, reap, and projection repair. They return the same JSON receipt
 //!   envelopes as the CLI `--json` forms.
@@ -225,6 +227,119 @@ fn required_generation(value: i64, name: &str) -> anyhow::Result<u64> {
 
 fn optional_path(value: Option<String>) -> Option<PathBuf> {
     value.map(PathBuf::from)
+}
+
+fn editor_surface_relative_path(project_root: &Path, file_path: &str) -> String {
+    if file_path == "." {
+        return ".".to_string();
+    }
+    let root = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    let file = Path::new(file_path)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(file_path));
+    let relative = file.strip_prefix(&root).unwrap_or(&file);
+    let rendered = relative.to_string_lossy();
+    if rendered.is_empty() {
+        ".".to_string()
+    } else {
+        rendered.into_owned()
+    }
+}
+
+struct EditorSurfaceEvent<'a> {
+    source: &'a str,
+    file_path: &'a str,
+    surface: &'a str,
+    action: &'a str,
+    agent_command: &'a str,
+    patch_id: Option<&'a str>,
+    status: &'a str,
+}
+
+fn editor_surface_event_message(project_root: &Path, event: EditorSurfaceEvent<'_>) -> String {
+    let relative_path = editor_surface_relative_path(project_root, event.file_path);
+    let doc = Path::new(&relative_path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty() && *value != ".")
+        .unwrap_or("project");
+    format!(
+        "editor_surface_event source={} surface={} action={} agent_command={} status={} \
+         file={relative_path} patch_id={} doc={doc} #cyh0",
+        event.source,
+        event.surface,
+        event.action,
+        event.agent_command,
+        event.status,
+        event.patch_id.unwrap_or("-")
+    )
+}
+
+/// Record a typed editor-surface outcome in the project ops log.
+///
+/// This is the shared formatter/writer for JetBrains and VS Code. `file_path`
+/// may be `"."` for a project-scoped event and `patch_id` may be null or empty.
+/// Returns `1` only when the event was appended, and `0` for invalid input or an
+/// ops-log write failure.
+///
+/// # Safety
+/// Every non-null pointer must reference a NUL-terminated UTF-8 string for the
+/// duration of this call. `patch_id` is the only nullable argument.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_record_editor_surface_event(
+    project_root: *const c_char,
+    source: *const c_char,
+    file_path: *const c_char,
+    surface: *const c_char,
+    action: *const c_char,
+    agent_command: *const c_char,
+    patch_id: *const c_char,
+    status: *const c_char,
+) -> c_int {
+    let result = (|| -> anyhow::Result<()> {
+        let project_root =
+            PathBuf::from(unsafe { required_ffi_string(project_root, "project_root") }?);
+        let source = unsafe { required_ffi_string(source, "source") }?;
+        let file_path = unsafe { required_ffi_string(file_path, "file_path") }?;
+        let surface = unsafe { required_ffi_string(surface, "surface") }?;
+        let action = unsafe { required_ffi_string(action, "action") }?;
+        let agent_command = unsafe { required_ffi_string(agent_command, "agent_command") }?;
+        let patch_id = unsafe { optional_ffi_string(patch_id, "patch_id") }?;
+        let status = unsafe { required_ffi_string(status, "status") }?;
+        anyhow::ensure!(
+            project_root.join(".agent-doc").is_dir(),
+            "project_root has no .agent-doc directory"
+        );
+        let message = editor_surface_event_message(
+            &project_root,
+            EditorSurfaceEvent {
+                source: &source,
+                file_path: &file_path,
+                surface: &surface,
+                action: &action,
+                agent_command: &agent_command,
+                patch_id: patch_id.as_deref(),
+                status: &status,
+            },
+        );
+        agent_doc_ops_log_io::append_ops_log_at_project(
+            &project_root,
+            &message,
+            agent_doc_ops_log_io::OpsLogTracking::default(),
+        )
+        .context("failed to append editor surface event")?;
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => 1,
+        Err(error) => {
+            eprintln!("[ffi] record editor surface event failed: {error:#}");
+            0
+        }
+    }
 }
 
 fn resolve_admin_root(
@@ -2791,6 +2906,44 @@ fn force_link_core_ffi_symbols() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_surface_event_ffi_writes_one_shared_cross_editor_schema() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("tasks/session.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body\n").unwrap();
+
+        let root = CString::new(tmp.path().to_string_lossy().as_bytes()).unwrap();
+        let source = CString::new("vscode").unwrap();
+        let file = CString::new(doc.to_string_lossy().as_bytes()).unwrap();
+        let surface = CString::new("vcs_refresh_save").unwrap();
+        let action = CString::new("save_document").unwrap();
+        let command = CString::new("save_document").unwrap();
+        let patch = CString::new("patch-1").unwrap();
+        let status = CString::new("saved").unwrap();
+
+        let recorded = unsafe {
+            agent_doc_record_editor_surface_event(
+                root.as_ptr(),
+                source.as_ptr(),
+                file.as_ptr(),
+                surface.as_ptr(),
+                action.as_ptr(),
+                command.as_ptr(),
+                patch.as_ptr(),
+                status.as_ptr(),
+            )
+        };
+        assert_eq!(recorded, 1);
+
+        let ops = std::fs::read_to_string(tmp.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(ops.contains("editor_surface_event source=vscode"));
+        assert!(ops.contains("surface=vcs_refresh_save action=save_document"));
+        assert!(ops.contains("agent_command=save_document status=saved"));
+        assert!(ops.contains("file=tasks/session.md patch_id=patch-1 doc=session #cyh0"));
+    }
 
     #[test]
     fn editor_reregister_never_returns_a_divergent_whole_document_candidate() {

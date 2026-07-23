@@ -368,34 +368,23 @@ One.
     }
 
     @Test
-    fun `editor surface ops marker distinguishes content projection and vcs surfaces`() {
-        val projection = buildEditorSurfaceOpsLogLine(
-            timestamp = "2026-06-24T12:34:56Z",
-            relativePath = "tasks/agent-doc/agent-doc-bugs2.md",
-            surface = "content_projection",
-            action = "editor_content_applied_for_editor_v1",
-            agentCommand = "write_finalize_ipc",
-            patchId = "patch-1",
-            status = "ok",
-        )
-        val vcs = buildEditorSurfaceOpsLogLine(
-            timestamp = "2026-06-24T12:34:57Z",
-            relativePath = ".",
-            surface = "vcs_refresh",
-            action = "refresh_vcs",
-            agentCommand = "commit_vcs_refresh",
-            patchId = null,
-            status = "triggered",
-        )
+    fun `editor surface ops route through shared native ffi`() {
+        val patchWatcherPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/PatchWatcher.kt"),
+        ).first { Files.exists(it) }
+        val nativeLibPath = listOf(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt"),
+            Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/NativeLib.kt"),
+        ).first { Files.exists(it) }
+        val watcher = Files.readString(patchWatcherPath)
+        val nativeLib = Files.readString(nativeLibPath)
 
-        assertTrue(projection.contains("editor_surface_event"))
-        assertTrue(projection.contains("surface=content_projection"))
-        assertTrue(projection.contains("action=editor_content_applied_for_editor_v1"))
-        assertTrue(projection.contains("agent_command=write_finalize_ipc"))
-        assertTrue(projection.contains("patch_id=patch-1"))
-        assertTrue(vcs.contains("surface=vcs_refresh"))
-        assertTrue(vcs.contains("agent_command=commit_vcs_refresh"))
-        assertTrue(vcs.contains("doc=project"))
+        assertTrue(nativeLib.contains("fun agent_doc_record_editor_surface_event("))
+        assertTrue(watcher.contains("lib.agent_doc_record_editor_surface_event("))
+        assertTrue(watcher.contains("root, \"jetbrains\", filePath"))
+        assertTrue(watcher.contains("root, \"jetbrains\", \".\""))
+        assertFalse(watcher.contains("buildEditorSurfaceOpsLogLine("))
     }
 
     @Test

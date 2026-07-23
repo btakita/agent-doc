@@ -88,7 +88,7 @@ fn vscode_run_agent_doc_uses_jetbrains_route_contract() {
 #[test]
 fn vscode_manifest_exposes_jetbrains_parity_commands() {
     let package_json = "editors/vscode/package.json";
-    assert_source_contains(package_json, "\"version\": \"0.2.54\"");
+    assert_source_contains(package_json, "\"version\": \"0.2.55\"");
     assert_source_contains(package_json, "\"command\": \"agentDoc.fixDocument\"");
     assert_source_contains(package_json, "\"command\": \"agentDoc.loadTmuxWindow\"");
     assert_source_contains(

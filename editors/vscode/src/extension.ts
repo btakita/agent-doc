@@ -9,6 +9,7 @@ import * as native from './native.js';
 import * as stateMirror from './stateMirror.js';
 import { createEditorApplyProof, isEditorApplyProofCurrent } from './patchGuard.js';
 import { EditorIntent } from './editorIntent.js';
+import { processSaveDocumentIntent } from './saveDocumentIntent.js';
 import { appendPatchAlreadyPresent, calculateMinimalReplacement, isFullDocumentReplacement } from './patchPlan.js';
 import { parseCrossSessionReject, CrossSessionReject } from './crossSession.js';
 import { buildEditorRoutePayload, buildEditorRouteCommandMessage, resolveEditorRouteTerminal } from './commandPlane.js';
@@ -2460,14 +2461,38 @@ class PatchWatcher implements vscode.Disposable {
                 this.crdtReplicas?.requestRemoteDrain(filePath);
                 return 1;
             case EditorIntent.SaveDocument: {
-                const document = filePath
-                    ? vscode.workspace.textDocuments.find((candidate) => candidate.uri.fsPath === filePath)
-                    : undefined;
-                if (!document || !await document.save()) return 0;
                 const patchId = typeof message.patch_id === 'string' ? message.patch_id : undefined;
-                if (!this.writeEditorContentProjection(patchId, filePath!, document.getText(), projectRoot)) return 0;
-                this.observeLazilyCurrentNow(document, projectRoot);
-                return 1;
+                return processSaveDocumentIntent(filePath, {
+                    fileExists: (candidate) => fs.existsSync(candidate),
+                    findOpenDocument: (candidate) => vscode.workspace.textDocuments.find(
+                        (document) => document.uri.fsPath === candidate,
+                    ),
+                    publishSavedContent: (candidate, content) => this.writeEditorContentProjection(
+                        patchId,
+                        candidate,
+                        content,
+                        projectRoot,
+                    ),
+                    observeSavedContent: (document) => this.observeLazilyCurrentNow(
+                        document as vscode.TextDocument,
+                        projectRoot,
+                    ),
+                    recordOutcome: (candidate, status) => {
+                        native.recordEditorSurfaceEvent(
+                            projectRoot,
+                            EDITOR_ID,
+                            candidate,
+                            'vcs_refresh_save',
+                            EditorIntent.SaveDocument,
+                            EditorIntent.SaveDocument,
+                            patchId,
+                            status,
+                        );
+                    },
+                    reportFailure: (candidate, error) => this.outputChannel.appendLine(
+                        `PatchWatcher: save_document failed for ${candidate}: ${error instanceof Error ? error.message : String(error)}`,
+                    ),
+                });
             }
             case EditorIntent.RefreshVcs:
                 await vscode.commands.executeCommand('git.refresh');

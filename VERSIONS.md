@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.11
+
+_JetBrains plugin 0.2.284; VS Code extension 0.2.55._
+
+- **Editor-owned save observability now has one shared Rust schema (`#vscsaveproj`).** `agent_doc_record_editor_surface_event` owns ops-log timestamping, relative-path/document attribution, and event formatting for both editor plugins. VS Code's typed `save_document` socket handler records `missing_file`, `missing_document`, `saved`, and `failed`, while JetBrains no longer builds or appends editor-surface log lines in Kotlin. The VS Code behavioral regression proves an open document is saved before its post-save content receipt and success event are published.
+
 ## 0.35.10
 
 - **Attached-editor reads no longer descend to stale disk after replica recovery exhausts (`#missingreplicarebuild`).** Realtime and preflight adapters now share a pure authority-recovery decision table in `agent-doc-turn`: missing replicas request the bounded plugin refresh, sync-pending may run its single model rebuild, and both fail closed while the editor remains open. Disk becomes read authority only after proven detach, preventing saved projections from resurrecting operator-deleted document nodes.

@@ -188,6 +188,7 @@ function resetBindings(): void {
     _editor_content_applied_for_editor_v1 = null;
     _editor_patch_applied = null;
     _editor_patch_rejected = null;
+    _record_editor_surface_event = null;
     _record_editor_op = null;
     _document_base_hash = null;
     _replica_open = null;
@@ -202,7 +203,7 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
-export const EDITOR_PLUGIN_VERSION = '0.2.52';
+export const EDITOR_PLUGIN_VERSION = '0.2.55';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
 export const EDITOR_CAPABILITY_LIST = [
@@ -353,6 +354,7 @@ let _record_state_event: any = null;
 let _editor_content_applied_for_editor_v1: any = null;
 let _editor_patch_applied: any = null;
 let _editor_patch_rejected: any = null;
+let _record_editor_surface_event: any = null;
 let _record_editor_op: any = null;
 let _document_base_hash: any = null;
 let _replica_open: any = null;
@@ -552,6 +554,16 @@ function bindFunctions(): void {
         _editor_content_applied_for_editor_v1 = null;
         _editor_patch_applied = null;
         _editor_patch_rejected = null;
+    }
+    try {
+        _record_editor_surface_event = lib.func(
+            'agent_doc_record_editor_surface_event',
+            'int32',
+            ['str', 'str', 'str', 'str', 'str', 'str', 'str', 'str'],
+        );
+    } catch (e: any) {
+        console.log(`[agent-doc/native] editor-surface event ABI unavailable: ${e.message}`);
+        _record_editor_surface_event = null;
     }
     try {
         // Project Controller→plugin turn-state projection (Shared Foundation parity with the JB
@@ -1239,6 +1251,43 @@ export function recordEditorContentApplied(
         return ok;
     } catch (e: any) {
         console.warn(`[agent-doc/native] editor content receipt ABI error: ${e.message}`);
+        return false;
+    }
+}
+
+export function recordEditorSurfaceEvent(
+    projectRoot: string,
+    source: string,
+    filePath: string,
+    surface: string,
+    action: string,
+    agentCommand: string,
+    patchId: string | undefined,
+    status: string,
+): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    if (!_record_editor_surface_event) {
+        console.warn('[agent-doc/native] incompatible agent-doc native library: missing agent_doc_record_editor_surface_event; reinstall the plugin/native library');
+        return false;
+    }
+    try {
+        const ok = _record_editor_surface_event(
+            projectRoot,
+            source,
+            filePath,
+            surface,
+            action,
+            agentCommand,
+            patchId ?? '',
+            status,
+        ) === 1;
+        if (!ok) {
+            console.warn(`[agent-doc/native] editor surface event rejected: ${action} status=${status}`);
+        }
+        return ok;
+    } catch (e: any) {
+        console.warn(`[agent-doc/native] editor surface event ABI error: ${e.message}`);
         return false;
     }
 }

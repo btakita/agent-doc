@@ -1040,20 +1040,20 @@ class PatchWatcher(private val project: Project) : Disposable {
         status: String,
     ) {
         val root = resolveRootFor(filePath) ?: return
-        val relativePath = File(filePath).relativeToOrSelf(File(root)).path
-        appendOpsLog(
-            root,
-            buildEditorSurfaceOpsLogLine(
-                timestamp = Instant.ofEpochSecond(Instant.now().epochSecond).toString(),
-                relativePath = relativePath,
-                surface = surface,
-                action = action,
-                agentCommand = agentCommand,
-                patchId = patchId,
-                status = status,
-            ),
-            "[patch-watcher]",
-        )
+        val lib = AgentDocLib.get()
+        if (lib == null) {
+            LOG.warn("[patch-watcher] cannot record editor surface event: native library unavailable")
+            return
+        }
+        try {
+            if (!lib.agent_doc_record_editor_surface_event(
+                    root, "jetbrains", filePath, surface, action, agentCommand, patchId, status,
+                )) {
+                LOG.warn("[patch-watcher] native editor surface event rejected: $action status=$status")
+            }
+        } catch (e: Exception) {
+            LOG.warn("[patch-watcher] editor surface event ABI failed: ${e.message}", e)
+        }
     }
 
     private fun recordProjectSurfaceOps(
@@ -1063,19 +1063,20 @@ class PatchWatcher(private val project: Project) : Disposable {
         status: String,
     ) {
         val root = project.basePath ?: return
-        appendOpsLog(
-            root,
-            buildEditorSurfaceOpsLogLine(
-                timestamp = Instant.ofEpochSecond(Instant.now().epochSecond).toString(),
-                relativePath = ".",
-                surface = surface,
-                action = action,
-                agentCommand = agentCommand,
-                patchId = null,
-                status = status,
-            ),
-            "[patch-watcher]",
-        )
+        val lib = AgentDocLib.get()
+        if (lib == null) {
+            LOG.warn("[patch-watcher] cannot record project surface event: native library unavailable")
+            return
+        }
+        try {
+            if (!lib.agent_doc_record_editor_surface_event(
+                    root, "jetbrains", ".", surface, action, agentCommand, null, status,
+                )) {
+                LOG.warn("[patch-watcher] native project surface event rejected: $action status=$status")
+            }
+        } catch (e: Exception) {
+            LOG.warn("[patch-watcher] project surface event ABI failed: ${e.message}", e)
+        }
     }
 
     private fun appendOpsLog(root: String, line: String, logPrefix: String) {
@@ -2357,20 +2358,6 @@ internal fun buildFileCacheConflictOpsLogLine(
     val doc = File(relativePath).nameWithoutExtension.ifBlank { "unknown" }
     return "[$timestamp] file_cache_conflict_detected source=jetbrains outcome=$outcome " +
         "surface=$surface action=$action agent_command=$agentCommand file=$relativePath $proof doc=$doc #cyh0"
-}
-
-internal fun buildEditorSurfaceOpsLogLine(
-    timestamp: String,
-    relativePath: String,
-    surface: String,
-    action: String,
-    agentCommand: String,
-    patchId: String?,
-    status: String,
-): String {
-    val doc = File(relativePath).nameWithoutExtension.ifBlank { "project" }
-    return "[$timestamp] editor_surface_event source=jetbrains surface=$surface action=$action " +
-        "agent_command=$agentCommand status=$status file=$relativePath patch_id=${patchId ?: "-"} doc=$doc #cyh0"
 }
 
 private fun collectReHeadingsUtil(content: String): Set<String> {

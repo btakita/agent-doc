@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-document-realtime"
-version = "0.35.10"
+version = "0.35.11"
 edition = "2024"
 description = "Realtime document authority state machine for agent-doc"
 license = "MIT"
@@ -16,19 +16,19 @@ name = "agent_doc_document_realtime"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.10" }
-agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.10" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.10" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.10" }
-agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.10" }
-agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.10" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.10" }
-agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.10" }
-agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.10" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.10" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.10" }
-agent-doc-template = { path = "../agent-doc-template", version = "0.35.10" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.10" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.11" }
+agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.11" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.11" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.11" }
+agent-doc-element-exchange = { path = "../agent-doc-element-exchange", version = "0.35.11" }
+agent-doc-flow = { path = "../agent-doc-flow", version = "0.35.11" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.11" }
+agent-doc-merge = { path = "../agent-doc-merge", version = "0.35.11" }
+agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.11" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.11" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.11" }
+agent-doc-template = { path = "../agent-doc-template", version = "0.35.11" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.11" }
 anyhow = "1"
 lazily = { version = "0.48.1", features = ["thread-safe"] }
 serde = { version = "1", features = ["derive"] }

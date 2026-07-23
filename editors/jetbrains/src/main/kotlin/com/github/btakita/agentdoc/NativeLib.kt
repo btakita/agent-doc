@@ -350,6 +350,18 @@ interface AgentDocLib : Library {
         capabilities_csv: String,
     ): Boolean
 
+    /** Record one editor-surface outcome through the shared Rust ops-log schema. */
+    fun agent_doc_record_editor_surface_event(
+        project_root: String,
+        source: String,
+        file_path: String,
+        surface: String,
+        action: String,
+        agent_command: String,
+        patch_id: String?,
+        status: String,
+    ): Boolean
+
     /**
      * True when the current disk file matches committed HEAD and HEAD already
      * contains the incoming response patch content. Used to no-op stale editor

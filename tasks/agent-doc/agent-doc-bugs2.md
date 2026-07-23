@@ -169,7 +169,7 @@ The live verification is not satisfied yet. This cycle was entered through the n
 A bounded check of .agent-doc/logs/ops.log found no actual route_dispatch_start_queued_behind_active_turn event for this busy case. The accepted_without_dispatch_start_proof matches are historical failure text embedded in document snapshots and prior backlog evidence, not a contemporaneous route event from this invocation.
 
 Leave #r4gq open. The remaining operator proof is to invoke JetBrains Run Agent Doc while the Codex pane is visibly mid-turn, confirm the action returns immediately with the prompt queued behind the active turn, and correlate that click timestamp with route_dispatch_start_queued_behind_active_turn and no new accepted_without_dispatch_start_proof event.
-<!-- agent:boundary:f3a851ca -->
+<!-- agent:boundary:76175a31 -->
 <!-- /agent:exchange -->
 ## Queue
 

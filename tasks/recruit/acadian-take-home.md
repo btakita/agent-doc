@@ -13,7 +13,7 @@ prompt_presets:
   '#commit-push-deploy': commit all uncommitted files + deploy
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -283,7 +283,7 @@ Verification passed:
 Committed the application change as `95a2aff` (`feat: persist date range in URL`) and the isolated superproject gitlink as `5ac23e0cc` (`feat: persist MAG7 date range in URL`). Both branches will be pushed immediately after this binary-owned response commit, ensuring the session closeout is included in the superproject push.
 
 Confidence is high; no escalation or follow-up work is needed. The exchange is large, but the active queue was drained without compaction. The separate preflight warning that the locally built `agent-doc` binary/library predates unrelated source edits remains intentionally outside this application commit.
-❯ 🚧 In TickerCard.tsx, why do you use `useLayoutEffect` instead of `useEffect`?
+❯ In TickerCard.tsx, why do you use `useLayoutEffect` instead of `useEffect`?
 ```
 	useLayoutEffect(() => {
 		setRange(fullRange(points.length))
@@ -319,12 +319,44 @@ There is a tradeoff: layout effects block painting, so they should be small and 
 A more structural alternative would be to key/remount each `TickerCard` for every returned dataset, or move the zoom state to a parent and reset it atomically with the data. Either would remove the need for this layout effect, but both have wider lifecycle/state consequences. Given that the zoom state is intentionally local to the card, the layout effect is the targeted fix.
 
 No files were changed and no tests were run because this was an explanation-only turn. I inspected the current `TickerCard` implementation; confidence is high, and no escalation or follow-up work is needed.
-<!-- agent:boundary:cc945ae0 -->
+
+### Re: do [#commitpushcurrent] — gpt-5
+
+Completed the ordered checkpoint and refactor.
+
+First, I preserved the user-authored compounded-return implementation unchanged:
+
+- Committed `frontend/src/components/TickerCard.tsx` and `frontend/src/types.ts` as `8206b55` (`feat: add compounded return series`).
+- Pushed that checkpoint to `mag7-viewer` `origin/main` before beginning the refactor.
+
+Then I centralized the compounded-return state boundary:
+
+- `useReturns` now owns chart-ready return state and immutably enriches each successful API payload exactly once before storing it.
+- New pure helpers in `frontend/src/lib/compoundedReturns.ts` compute each symbol independently without mutating API response points.
+- Raw `ReturnPoint` remains the API contract; required `ChartReturnPoint` and `ReturnsState` types describe the enriched frontend state.
+- `TickerCard` is presentation-only again: it receives chart-ready points directly and no longer mutates its `points` prop inside `useMemo`.
+- Added regression tests for the running compound calculation, per-symbol isolation, and input immutability.
+- Updated `SPEC.md`, `README.md`, and the app test fixture to document and exercise the centralized state contract.
+
+Verification passed:
+
+- Targeted compounded-return and request-state tests.
+- TypeScript typecheck.
+- Full `make check`: 35 backend tests, mypy, 118 frontend tests, TypeScript typecheck, and production build.
+- Real Chromium against the fresh Vite frontend: all seven ticker cards rendered two nonempty SVG series, with distinct daily and running-compounded paths; visual inspection confirmed both lines across the grid.
+- `git diff --check`.
+- The required GitHub lookup found no workflow named `CI` in this repository.
+
+Committed and pushed the refactor as `b0e7731` (`refactor: centralize compounded return state`). Committed only the updated `src/mag7-viewer` gitlink in the superproject as `bd8106f25` (`refactor: centralize MAG7 compounded returns`); the superproject branch will be pushed immediately after this binary-owned response commit so the session closeout is included.
+
+Confidence is high. No escalation or follow-up work is needed. The exchange is large, but the active queue was drained without compaction. Preflight also reports that the live JetBrains plugin `0.2.288` is older than the `0.2.291` build expected by this agent-doc binary; update the plugin package and restart/reload the IDE host before relying on future editor-delivery acknowledgements.
+<!-- agent:boundary:774b8898 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
+- 🚧 do [#commitpushcurrent]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -350,4 +382,5 @@ No files were changed and no tests were run because this was an explanation-only
 - 2026-07-23 [#fetchonsettle] Implement commit-on-settle fetching for the master range slider, with draft UI state, committed query state, specs, tests, and live browser verification
 - 2026-07-23 [#commitpushexisting] commit + push the existing bug fix as well.
 - 2026-07-23 [#urlparamssave] Please add url params to save the date range in the URL...so refreshing the page will load the date range.
+- 2026-07-23 [#commitpushcurrent] Please commit + push the current mag7-viewer code. I added compounding returns. Then refactor compounding returns. Centralize the state management.
 <!-- /agent:done -->

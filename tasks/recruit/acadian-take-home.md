@@ -249,13 +249,46 @@ Completed and pushed. Existing graphs now remain visible, accessible, and at ful
 The application fix is commit `b04e1d7`; the superproject gitlink and session closeouts are also pushed. Full verification remains green: 35 backend tests, mypy, 99 frontend tests, TypeScript typecheck, production build, and a real hit-tested Chromium slider test that observed exactly one final-range request and no intermediate animation-frame state.
 
 No additional implementation or follow-up work remains.
-<!-- agent:boundary:3067aee7 -->
+
+### Re: do [#urlparamssave] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#urlparamssave]
+
+
+Implemented URL-backed date ranges.
+
+- Every committed range now replaces the current URL's `start` and `end` query parameters without adding a browser-history entry.
+- A refresh reads a complete valid pair synchronously before the first returns request, so the restored controls and fetched data start on the same range.
+- Missing, malformed, future, inverted, or API-oversized pairs fall back to the trailing-six-month default.
+- Unrelated query parameters and the URL hash are preserved.
+
+Changed paths:
+
+- `frontend/src/App.tsx` and `frontend/src/App.test.tsx`
+- `frontend/src/lib/rangeUrl.ts` and `frontend/src/lib/rangeUrl.test.ts`
+- `SPEC.md`
+- `README.md`
+
+Verification passed:
+
+- Targeted URL/parser and app-initialization tests: 12 tests.
+- TypeScript typecheck.
+- Live headless-Chromium check: loaded `start`/`end` from the URL, changed the start date through the real input, observed the address update while preserving `theme=dark` and `#summary`, then hard-reloaded and confirmed the changed range was restored.
+- Full `make check` (backend pytest and mypy; frontend Vitest, typecheck, and production build).
+- `git diff --check`.
+- The required GitHub lookup found no workflow named `CI` in this repository.
+
+Committed the application change as `95a2aff` (`feat: persist date range in URL`) and the isolated superproject gitlink as `5ac23e0cc` (`feat: persist MAG7 date range in URL`). Both branches will be pushed immediately after this binary-owned response commit, ensuring the session closeout is included in the superproject push.
+
+Confidence is high; no escalation or follow-up work is needed. The exchange is large, but the active queue was drained without compaction. The separate preflight warning that the locally built `agent-doc` binary/library predates unrelated source edits remains intentionally outside this application commit.
+<!-- agent:boundary:1a6011f4 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
-- The last commit hides then shows the content after selecting the date range. This is not correct behavior...and it does not even fix the jank. Please do not hide then show the content. Please fix the jank as well.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -280,4 +313,5 @@ No additional implementation or follow-up work remains.
 - 2026-07-20 [#proposeablequickly] Propose a UX to be able to quickly select a diffrent date range via mouse while over the chart or range slider. Perhaps a slider?
 - 2026-07-23 [#fetchonsettle] Implement commit-on-settle fetching for the master range slider, with draft UI state, committed query state, specs, tests, and live browser verification
 - 2026-07-23 [#commitpushexisting] commit + push the existing bug fix as well.
+- 2026-07-23 [#urlparamssave] Please add url params to save the date range in the URL...so refreshing the page will load the date range.
 <!-- /agent:done -->

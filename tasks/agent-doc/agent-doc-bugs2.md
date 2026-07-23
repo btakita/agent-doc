@@ -89,10 +89,25 @@ A one-line suppression is unsafe because the CLI mutation payload is not durably
 
 ### Re: #dbj7 — gpt-5
 
+> **Queue prompt:**
+>
+> 📌 do [#dbj7]
+
+
 This remains an operator/live-pane verification gate. The proof requires a Claude pane that has been continuously mid-turn for more than 60 seconds, followed by a JetBrains **Run Agent Doc** action; this Codex pane cannot manufacture that Claude/IDE interaction without invalidating the test.
 
 Success requires all three observations in the same attempt: the Claude turn continues without an `Interrupted` banner, the new document prompt is surfaced to that running turn as realtime steering, and the route reports a busy/queued outcome rather than replacing the active turn. Capture the relevant route/ops-log markers if any condition fails and leave `#dbj7` open for diagnosis.
-<!-- agent:boundary:f288411f -->
+> **Queue prompt:**
+>
+> 📌 do [#dbj7]
+
+
+ -->
+
+### Re: realtime steering residue after #dbj7 — gpt-5
+
+The repeated `📌 do [#dbj7]` directive points to the operator-verification response already committed in the preceding cycle, so it is acknowledged here without re-answering or re-running that work. The standalone `-->` is a leaked markup terminator, not an independent operator instruction. `#dbj7` remains gated in Review pending the live Claude/JetBrains evidence described in the committed response.
+<!-- agent:boundary:8ce8ee32 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -101,7 +116,7 @@ Success requires all three observations in the same attempt: the Claude turn con
 - ~~📌 do [#patchretryidem]~~
 - ~~📌 do [#hvw0]~~
 - ~~📌 do [#bbpe]~~
-- 📌 do [#dbj7]
+- ~~📌 do [#dbj7]~~
 - 📌 do [#crdtpushdrainverify]
 - 📌 do [#compactindcellsverify]
 - 📌 do [#zqv8]
@@ -163,7 +178,6 @@ Success requires all three observations in the same attempt: the Claude turn con
 This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack watermark for replay-state retention (#retentionwatermark). Tagged [focused-cycle] 2026-07-19: this is a schema migration plus retention-correctness change, and retention bugs are silent and asymmetric (evict early = replay state lost; evict late = unbounded growth), so it needs a clean context rather than a mid-drain slot. Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: reliable_sync_outbox_cursor/reliable_sync_inbox_cursor are PRIMARY KEY (document_hash) holding ONE scalar acked_through — there is no per-peer ack vector to take a MIN over, and reliable_sync_liveness_journal.source_key is a document hash, not a peer id. Needs: (a) a (document_hash, peer_key) ack table keyed by the PID-scoped editor registration; (b) retention keyed off MIN(acked_version) across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps STAY as a backstop rather than being replaced. PushChannel::flush (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via outbox.ack_through(ack); generalize that, do not rebuild it. SUGGESTED FIRST INCREMENT for whoever takes it: land (a) additively — table plus ack recording, retention still on count caps — so the per-peer data exists to design (b)/(c) against, rather than changing retention behaviour and schema in one step.
 - [ ] [#0dsr] [focused-cycle] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Tagged [focused-cycle] 2026-07-19 — this is WRITE-PATH work whose failure modes are destructive (replaying a stale intent clobbers operator text; broken idempotency double-archives a compact), so it needs fresh context, not a mid-drain slot. MAP (the expensive part, traced 2026-07-19): (1) durable journal = pending_write_journal, agent-doc-state-backbone/src/lib.rs:1433 — deduped by intent_id, entries cleared on DocumentWriteConverged; (2) accessor = pending_document_write_journal, agent-doc-document-realtime-io/src/lib.rs:2824; (3) EXISTING replay = deferred_document_write_reconnect_content, same file :3115 — but triggered only by editor RECONNECT (:1214) and closing cut (:3571), which is the actual gap: a retained intent waits for a reconnect that may never come; (4) settle entry points already exposed to preflight via its effects = settle_retained_committed_projection / settle_retained_captured_projection, agent-doc-closeout-runtime-io/src/lib.rs:170/226/289; (5) the repair step to hook = agent-doc-preflight-command-io/src/run.rs:296, which runs on every Run Agent Doc. IDEMPOTENCY NOTE: intent_id dedup gives you 'do not replay the SAME intent twice' for free, but it does NOT prove replaying a STALE intent over newer content is safe — that guard still has to be designed and is the real risk. Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms' and left work retained with no operator surface to resume it.
 - [ ] [#30p6] [focused-cycle] Go-mode idle-queue dispatch adds the run to the composer but never submits it — SUSPECT WEAKENED 2026-07-19 by evidence. Gate chain confirmed: idle_queue_pending_payload_needs_enter_resubmit = pending_draft_enter_resubmit() (true unconditionally, NOT the filter) && drain_dispatch_dedup_skip(payload_already_pending) && !already_resubmitted, with drain_dispatch_dedup_skip = matches!(x, Some(true)) — so the resubmit fires only on positive recognition, and None (pane uncapturable) or Some(false) (recognition failed) both strand the draft. My earlier prime suspect was the trailing !later_has_prompt condition in route_trigger_visible_in_current_draft (dispatch.rs:412). The #64we capture ARGUES AGAINST it: a real stranded codex draft shows NO is_prompt_line after the trigger (codex patterns are ❯ > ›; the footer line starts 'gpt-5.5'), so that condition would have returned true and the resubmit would have fired. Remaining candidates: payload_already_pending == None (live_pane_content unavailable at the decision point), or recognition failing earlier in the chain. CONFIRM BY capturing the pane AND the computed payload_already_pending together at a live stall — the pane capture alone is not sufficient, which is what this pass established.
-- [ ] [#dbj7] [operator-verify] Live #jbsteerinterrupt proof: with a Claude pane mid-turn (let it run past 60s so the timer is in minute form, e.g. `(2m 10s`), trigger JB Run Agent Doc. Expect a busy/queued outcome with the turn UNINTERRUPTED — no "Interrupted" banner, and the added prompt consumed as steering by the running turn per #realtime-steering-verbatim. Fix shipped in 6ef6dd056, installed 0.35.6 (restart IDEs to pick up the JB package).
 - [ ] [#crdtpushdrainverify] [operator-verify] #crdtpushdrain live proof: after an IDE restart loads JetBrains plugin 0.2.278, run Compact Exchange on a document that has been idle for >30s and confirm ops.log `compact_crdt_relay_acknowledged ... wait_ms=` drops well below the prior ~4.5s floor (expect roughly the pull/apply round trip), with no `compact_crdt_ack_recovery_signal ... reason=ack_recovery_force_refresh` line needed to unstick it. Restart is required because reload-lib only swaps the cdylib, not the Kotlin plugin.
 - [ ] [#compactindcellsverify] [operator-verify] With agent-doc 0.35.3 and JetBrains plugin 0.2.276 active, run Compact Exchange while deleting several queue items and editing a post-boundary prompt; confirm the deletions and prompt survive, compaction commits, and ops.log records compact_rebased_authoritative_siblings without compact_dropped_non_exchange_item.
 - [ ] [#5qjj] [operator-verify] #steeringmirrorverify — REFRESHED 2026-07-19: the original 0.2.258 pin is 24 versions stale (gradle.properties now reads pluginVersion = 0.2.282, and a live registration confirmed 0.2.282 during this session), so 'restart to activate 0.2.258' is no longer the action. Verify against the CURRENT plugin instead: during an active turn make MULTIPLE exchange edits, then confirm (a) the JetBrains banner and VS Code status item report the AGGREGATE count with the full hover — not just the first edit, since steering is a concurrent aggregate (#realtime-steering-aggregate) and delivering one head at a time is the specific regression — and (b) running agent-doc once after editing queues the handoff WITHOUT submitting a partial edit. Reinstall/restart only if stale bytecode appears. The aggregate-delivery code half landed 2026-07-12 (all_unstarted_prompt_bearing_changes_from_diff + RealtimeSteeringSet::verbatim_aggregate); this is the editor-surface proof of it.

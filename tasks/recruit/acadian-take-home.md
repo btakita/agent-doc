@@ -68,7 +68,7 @@ Regression proof: the new app-level server-render test first failed because the 
 Confidence is high; no implementation escalation or follow-up work is needed.
 
 Editor-delivery warning from preflight: the live JetBrains plugin is 0.2.283 while the installed agent-doc binary expects 0.2.285. Update the plugin package and restart/reload the IDE host before relying on its delivery acknowledgements.
-❯ 🚧 Try again
+❯ Try again
 
 ### Re: closeout retry — gpt-5
 
@@ -105,7 +105,7 @@ So my recommendation is: **commit-on-settle for fetching, continuous updates onl
 No files were changed and no tests were run because this turn asked for design judgment rather than implementation. I inspected the current `App`, `MasterRangeSlider`, and `useReturns` flow; confidence is high, and no escalation is needed.
 
 If your last message meant that you restarted the IDE, thank you—the closeout check will use the refreshed editor registration. The package itself still needs to report 0.2.286 for the earlier version warning to clear.
-❯ 🚧 Please go with your recommendation. 0.2.286 is running.
+❯ Please go with your recommendation. 0.2.286 is running.
 
 ### Re: fetch on slider commit — gpt-5
 
@@ -194,13 +194,12 @@ Verification passed:
 Committed the application change as `5e9b547` (`fix: hide stale graphs during range refresh`) and the isolated superproject gitlink as `772d38e83` (`fix: hide stale MAG7 refresh state`). The submodule and superproject branches will be pushed immediately after this binary-owned response commit, so the session closeout is included in the superproject push.
 
 Confidence is high; no escalation or follow-up work is needed. The separate stale local `agent-doc` build warning still belongs to unrelated shared work in `src/agent-doc` and was not included.
-<!-- agent:boundary:e9841cfd -->
+<!-- agent:boundary:532f9111 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
-- There is still jank when selecting a date range using the slider. After the selection, an intermediate state is show with the graphs then the final state is shown. Please remove the intermediate state from being rendered.
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
 <!-- /agent:queue -->
 
 ## Backlog

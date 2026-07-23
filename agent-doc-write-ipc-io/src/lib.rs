@@ -268,7 +268,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
             } else {
                 (
                     "lazily_deferred",
-                    agent_doc_document_realtime_io::retain_deferred_document_write_target(
+                    agent_doc_document_realtime_io::refine_deferred_document_write_target(
                         file,
                         working,
                         &target,

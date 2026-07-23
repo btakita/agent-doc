@@ -1162,6 +1162,54 @@ pub fn malformed_agent_comment_reason(doc: &str) -> Option<String> {
             ));
         }
     }
+    standalone_orphan_comment_terminator_reason(doc, &code_ranges, &quoted_ranges)
+}
+
+fn standalone_orphan_comment_terminator_reason(
+    doc: &str,
+    code_ranges: &[(usize, usize)],
+    quoted_ranges: &[(usize, usize)],
+) -> Option<String> {
+    let mut cursor = 0usize;
+    let mut comment_open = false;
+    while cursor < doc.len() {
+        let opener = doc[cursor..].find("<!--").map(|offset| cursor + offset);
+        let closer = doc[cursor..].find("-->").map(|offset| cursor + offset);
+        let (marker_start, is_opener) = match (opener, closer) {
+            (Some(open), Some(close)) if open <= close => (open, true),
+            (Some(_), Some(close)) => (close, false),
+            (Some(open), None) => (open, true),
+            (None, Some(close)) => (close, false),
+            (None, None) => break,
+        };
+        let marker_len = if is_opener { "<!--".len() } else { "-->".len() };
+        cursor = marker_start + marker_len;
+        if byte_in_ranges(marker_start, code_ranges) || byte_in_ranges(marker_start, quoted_ranges)
+        {
+            continue;
+        }
+        if is_opener {
+            comment_open = true;
+            continue;
+        }
+        if comment_open {
+            comment_open = false;
+            continue;
+        }
+
+        let line_start = doc[..marker_start].rfind('\n').map_or(0, |pos| pos + 1);
+        let line_end = doc[marker_start..]
+            .find('\n')
+            .map_or(doc.len(), |relative| marker_start + relative);
+        if doc[line_start..line_end].trim() == "-->" {
+            let line = doc[..line_start]
+                .bytes()
+                .filter(|byte| *byte == b'\n')
+                .count()
+                + 1;
+            return Some(format!("orphan_html_comment_terminator:line{line}"));
+        }
+    }
     None
 }
 
@@ -2758,6 +2806,32 @@ Fix applied to skip non-agent <!-- sequences.
             reason.starts_with("malformed_agent_comment:"),
             "reason was: {reason}"
         );
+    }
+
+    #[test]
+    fn structural_corruption_flags_standalone_orphan_comment_terminator() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "> 📌 do [#dbj7]\n\n",
+            "### Re: #dbj7 — gpt-5\n\n",
+            "Response body.\n\n",
+            "-->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        assert_eq!(
+            structural_corruption_reason(doc).as_deref(),
+            Some("orphan_html_comment_terminator:line8")
+        );
+    }
+
+    #[test]
+    fn structural_corruption_allows_balanced_and_quoted_comment_terminators() {
+        let doc = concat!(
+            "<!--\nordinary multiline comment\n-->\n",
+            "> -->\n",
+            "```md\n-->\n```\n",
+        );
+        assert_eq!(structural_corruption_reason(doc), None);
     }
 
     #[test]

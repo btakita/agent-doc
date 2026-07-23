@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.12
+
+- **CRDT writes now carry one captured CAS base through the serialized writer.** Stream, inline, recovery, and compare-if-current writes no longer pre-apply a whole-document CRDT target and then submit it again through the disk-projection path. One queued mutation rebases over a newer editor cut, waits for delivery plus the native editor save, and fails closed if a detached disk replica changed.
+- **Post-commit boundary moves refine retained targets without replaying their stale document branch.** The committed/current cut already contains the response, so boundary normalization replaces the retained target exactly while preserving its original reconnect base. This prevents the observed duplicate `#dbj7` prompt and bare `-->` suffix from a deferred-target composition race.
+- **Canonical structure validation rejects standalone orphan HTML-comment terminators.** A bare `-->` outside code, blockquotes, quoted literals, or a balanced multiline comment can no longer pass the write-authority gate as an empty response.
+
 ## 0.35.11
 
 _JetBrains plugin 0.2.284; VS Code extension 0.2.55._

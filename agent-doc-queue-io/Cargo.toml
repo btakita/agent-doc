@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-queue-io"
-version = "0.35.11"
+version = "0.35.12"
 edition = "2024"
 description = "Queue-related I/O for agent-doc"
 license = "MIT"
@@ -16,27 +16,27 @@ name = "agent_doc_queue_io"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.11" }
-agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.11" }
-agent-doc-element = { path = "../agent-doc-element", version = "0.35.11" }
-agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.11" }
-agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.11" }
-agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.11" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.11" }
-agent-doc-document = { path = "../agent-doc-document", version = "0.35.11" }
-agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.11" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.11" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.11" }
-agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.11" }
-agent-doc-owner-pane-io = { path = "../agent-doc-owner-pane-io", version = "0.35.11" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.11" }
-agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.11" }
-agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.11" }
-agent-doc-lease = { path = "../agent-doc-lease", version = "0.35.11" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.11" }
-agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.11" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.11" }
-agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.11" }
+agent-doc-debounce = { path = "../agent-doc-debounce", version = "0.35.12" }
+agent-doc-document-realtime = { path = "../agent-doc-document-realtime", version = "0.35.12" }
+agent-doc-element = { path = "../agent-doc-element", version = "0.35.12" }
+agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.12" }
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.12" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.12" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.12" }
+agent-doc-document = { path = "../agent-doc-document", version = "0.35.12" }
+agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.12" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.12" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.12" }
+agent-doc-markdown-ast = { path = "../agent-doc-markdown-ast", version = "0.35.12" }
+agent-doc-owner-pane-io = { path = "../agent-doc-owner-pane-io", version = "0.35.12" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.12" }
+agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.12" }
+agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.12" }
+agent-doc-lease = { path = "../agent-doc-lease", version = "0.35.12" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.12" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.12" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.12" }
+agent-doc-workflow-io = { path = "../agent-doc-workflow-io", version = "0.35.12" }
 anyhow = "1"
 libc = "0.2"
 fs2 = "0.4"

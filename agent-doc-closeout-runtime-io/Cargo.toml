@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-closeout-runtime-io"
-version = "0.35.11"
+version = "0.35.12"
 edition = "2024"
 description = "Closeout, session-check, and repair recovery runtime effects for agent-doc"
 license = "MIT"
@@ -20,20 +20,20 @@ test-support = [
 ]
 
 [dependencies]
-agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.11" }
-agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.11" }
-agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.11" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.11" }
-agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.35.11" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.11" }
-agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.11" }
-agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.35.11" }
-agent-doc-preflight-runtime-io = { path = "../agent-doc-preflight-runtime-io", version = "0.35.11" }
-agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.35.11" }
-agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.11" }
-agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.35.11" }
-agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.11" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.11" }
+agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.12" }
+agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.12" }
+agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.12" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.12" }
+agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.35.12" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.12" }
+agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.12" }
+agent-doc-preflight-io = { path = "../agent-doc-preflight-io", version = "0.35.12" }
+agent-doc-preflight-runtime-io = { path = "../agent-doc-preflight-runtime-io", version = "0.35.12" }
+agent-doc-repair-io = { path = "../agent-doc-repair-io", version = "0.35.12" }
+agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version = "0.35.12" }
+agent-doc-template-io = { path = "../agent-doc-template-io", version = "0.35.12" }
+agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.12" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.12" }
 anyhow = "1"
 
 [dev-dependencies]

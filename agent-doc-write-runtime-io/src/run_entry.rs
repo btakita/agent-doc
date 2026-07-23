@@ -51,11 +51,22 @@ fn resolve_document_content_for_write_mode(
     }
 }
 
-fn atomic_write_for_write_mode(file: &Path, content: &str, force_disk: bool) -> Result<()> {
+fn atomic_write_for_write_mode(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    force_disk: bool,
+    source: &str,
+) -> Result<()> {
     if force_disk {
         agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(file, content)
     } else {
-        atomic_write(file, content)
+        agent_doc_document_realtime_io::atomic_write_rebased_through_authority(
+            file,
+            expected_current,
+            content,
+            source,
+        )
     }
 }
 
@@ -440,7 +451,13 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
         agent_doc_ops_log_io::log_op,
     )?;
 
-    atomic_write_for_write_mode(file, &final_content, flags.force_disk)?;
+    atomic_write_for_write_mode(
+        file,
+        &content_current,
+        &final_content,
+        flags.force_disk,
+        "write_inline",
+    )?;
 
     agent_doc_ops_log_io::log_cycle(
         file,
@@ -1600,35 +1617,18 @@ pub(crate) fn run_stream(
         &patches,
         &unmatched,
     );
-    // Visible-write guard already reconciled above (see #ipc-drift-visbuf-reconcile).
-    if !force_disk
-        && editor_crdt_authority_attached(file)
-        && let Some(relay_write) =
-            agent_doc_document_realtime_io::apply_cp_write_through_relay_authority(
-                file,
-                &content_current,
-                &final_content,
-                "run_stream",
-            )?
-    {
-        agent_doc_ops_log_io::log_op(
-            file,
-            &format!(
-                "run_stream_crdt_relay_materialized file={} content_hash={} update_bytes={} targets={} delivery_converged={}",
-                file.display(),
-                relay_write.content_hash,
-                relay_write.update_bytes,
-                relay_write.targets,
-                relay_write.delivery_converged,
-            ),
-        );
-    }
     agent_doc_snapshot_io::checkpoint_document_baseline(
         file,
         &snapshot_content,
         agent_doc_ops_log_io::log_op,
     )?;
-    atomic_write_for_write_mode(file, &final_content, force_disk)?;
+    atomic_write_for_write_mode(
+        file,
+        &content_current,
+        &final_content,
+        force_disk,
+        "run_stream",
+    )?;
     if force_disk && snapshot_content != final_content {
         match
             agent_doc_controller_io::project_controller::record_visible_write_materialized_carry_forward_for_file(
@@ -2213,7 +2213,12 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
         &content_current,
         Some(&final_content),
     )?;
-    atomic_write(file, &final_content)?;
+    agent_doc_document_realtime_io::atomic_write_rebased_through_authority(
+        file,
+        &content_current,
+        &final_content,
+        "apply_append_from_string",
+    )?;
     // Save snapshot as content_ours, not final_content
     save_recovery_snapshot(file, &content_ours, use_crdt)?;
     drop(doc_lock);

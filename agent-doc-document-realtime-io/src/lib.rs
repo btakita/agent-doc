@@ -744,21 +744,84 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
         return result;
     }
 
-    if visible_document {
-        // Inside the per-document write actor, make the CRDT canonical the
-        // mutation plane and materialize disk only after every live editor has
-        // ACKed the same canonical frontier. The existing disk projection is
-        // the best available merge base for this legacy no-CAS API; the CRDT
-        // convergence path rebases `content` over a newer operator cut.
-        let projection_base = std::fs::read_to_string(path).unwrap_or_default();
+    // Inside the per-document write actor, make the CRDT canonical the
+    // mutation plane and materialize disk only after every live editor has
+    // ACKed the same canonical frontier. The existing disk projection is the
+    // best available merge base for this legacy no-CAS API.
+    let projection_base = std::fs::read_to_string(path).unwrap_or_default();
+    atomic_write_rebased_through_authority_inner(
+        path,
+        &projection_base,
+        content,
+        "serialized_atomic_write",
+    )
+}
+
+/// Serialize one compare-and-swap intent through the canonical CRDT authority.
+///
+/// Unlike the legacy [`atomic_write_through_authority`] entry point, callers
+/// provide the exact document cut from which `content` was derived. This keeps
+/// the captured CAS base attached to the queued mutation and avoids the old
+/// apply-then-project sequence submitting the same whole-document target twice.
+/// A newer editor cut is component-rebased exactly once inside the write actor.
+pub fn atomic_write_rebased_through_authority(
+    path: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+) -> Result<()> {
+    validate_canonical_document_target(path, content, source)?;
+    let visible_document = agent_doc_document_realtime::write_authority::is_visible_document(path);
+    if visible_document && !agent_doc_document_realtime::write_authority::within_owner_scope() {
+        log_fence_count_drop_if_any(path, content);
+        let base_dir = agent_doc_project_root_io::project_root_containing(path)
+            .unwrap_or_else(|| path.parent().unwrap_or(Path::new(".")).to_path_buf());
+        let file = path.to_string_lossy().to_string();
+        let projection_base = expected_current.to_string();
+        let queued_source = source.to_string();
+        let result = agent_doc_queue_io::write_queue::serialized_atomic_write_with(
+            &SESSION_ACTOR_WRITE_QUEUE,
+            &base_dir,
+            &file,
+            path,
+            content,
+            move |queued_path, queued_content| {
+                atomic_write_rebased_through_authority_inner(
+                    queued_path,
+                    &projection_base,
+                    queued_content,
+                    &queued_source,
+                )
+            },
+        );
+        if result.is_ok() {
+            agent_doc_ops_log_io::log_op(
+                path,
+                &format!(
+                    "write_authority action=routed transport=write_queue_cas source={} len={} hash={}",
+                    source,
+                    content.len(),
+                    agent_doc_hash::content_hash(content)
+                ),
+            );
+        }
+        return result;
+    }
+
+    atomic_write_rebased_through_authority_inner(path, expected_current, content, source)
+}
+
+fn atomic_write_rebased_through_authority_inner(
+    path: &Path,
+    projection_base: &str,
+    content: &str,
+    source: &str,
+) -> Result<()> {
+    if agent_doc_document_realtime::write_authority::is_visible_document(path) {
         let mut post_proof_rebases = 0usize;
         loop {
-            let Some(relay_write) = apply_canonical_replace_if_attached(
-                path,
-                &projection_base,
-                content,
-                "serialized_atomic_write",
-            )?
+            let Some(relay_write) =
+                apply_canonical_replace_if_attached(path, projection_base, content, source)?
             else {
                 break;
             };
@@ -793,7 +856,7 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
                     )? {
                         let intent_id = ensure_deferred_document_write_intent(
                             path,
-                            &projection_base,
+                            projection_base,
                             &text,
                             "serialized_atomic_write_editor_save_pending",
                             DocumentWriteDeferredReason::CrdtDeliveryAckPending,
@@ -849,7 +912,7 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
                     };
                     let intent_id = ensure_deferred_document_write_intent(
                         path,
-                        &projection_base,
+                        projection_base,
                         content,
                         "serialized_atomic_write_projection_rebase",
                         DocumentWriteDeferredReason::MergeUnsavedEditorCutWithDeferredTarget,
@@ -884,6 +947,15 @@ pub fn atomic_write_through_authority(path: &Path, content: &str) -> Result<()> 
         }
     }
 
+    let current = std::fs::read_to_string(path).unwrap_or_default();
+    anyhow::ensure!(
+        visible_write_content_matches(&current, projection_base)
+            || visible_write_content_matches(&current, content),
+        "{source}: compare-and-swap raced for detached document {}; expected_hash={} current_hash={}",
+        path.display(),
+        agent_doc_hash::content_hash(projection_base),
+        agent_doc_hash::content_hash(&current),
+    );
     atomic_write_authority_raw(path, content)
 }
 
@@ -1098,11 +1170,7 @@ pub fn atomic_write_if_current_through_authority(
     source: &str,
 ) -> Result<()> {
     guard_visible_write_expected_current_or_target(path, source, expected_current, Some(content))?;
-    let resolved = try_resolve_current_document_content(path, source)?;
-    if !visible_write_content_matches(&resolved, content) {
-        apply_canonical_replace_if_attached(path, expected_current, content, source)?;
-    }
-    atomic_write_through_authority(path, content)
+    atomic_write_rebased_through_authority(path, expected_current, content, source)
 }
 
 /// Settle a committed projection that is known to differ from the current
@@ -3164,6 +3232,28 @@ pub fn retain_deferred_document_write_target(
     ensure_deferred_document_write_intent(file, expected_current, content, source, reason)
 }
 
+/// Replace a retained target with a canonical refinement derived from the
+/// current complete document cut. This is for post-commit normalization such
+/// as moving the exchange boundary: the committed/current cut already includes
+/// every earlier response, so component-merging the older whole-document
+/// target back into it can duplicate prompt cells or split comment delimiters.
+pub fn refine_deferred_document_write_target(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+    reason: DocumentWriteDeferredReason,
+) -> Result<String> {
+    ensure_deferred_document_write_intent_with_mode(
+        file,
+        expected_current,
+        content,
+        source,
+        reason,
+        true,
+    )
+}
+
 fn pending_document_write_for_target(
     file: &Path,
     target_hash: &str,
@@ -3219,6 +3309,24 @@ fn ensure_deferred_document_write_intent(
     source: &str,
     reason: DocumentWriteDeferredReason,
 ) -> Result<String> {
+    ensure_deferred_document_write_intent_with_mode(
+        file,
+        expected_current,
+        content,
+        source,
+        reason,
+        false,
+    )
+}
+
+fn ensure_deferred_document_write_intent_with_mode(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+    reason: DocumentWriteDeferredReason,
+    refine_current_cut: bool,
+) -> Result<String> {
     validate_canonical_document_target(file, content, source)?;
     let mut expected_content = expected_current.to_string();
     let mut target_content = content.to_string();
@@ -3246,7 +3354,28 @@ fn ensure_deferred_document_write_intent(
         // a CRDT branch. A later filesystem event replaces the candidate while
         // preserving the exact current editor cut; never component-merge two
         // successive disk versions into the live buffer.
-        if external_disk_candidate {
+        if refine_current_cut && !external_disk_candidate {
+            // The caller proves `content` was derived from the complete
+            // current/committed cut. Preserve the original reconnect base but
+            // replace the stale target exactly; merging the old target again
+            // would replay an already-materialized response branch.
+            expected_content = pending
+                .expected_content
+                .clone()
+                .filter(|base| {
+                    agent_doc_hash::content_hash(base).eq_ignore_ascii_case(&pending.expected_hash)
+                })
+                .unwrap_or_else(|| expected_current.to_string());
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{source}_deferred_write_refined_from_current_cut file={} prior_intent_id={} prior_target_hash={} requested_hash={requested_target_hash}",
+                    file.display(),
+                    pending.intent_id,
+                    pending.target_hash,
+                ),
+            );
+        } else if external_disk_candidate {
             // Boundary/marker cleanup after one operator-authorized force-disk
             // write refines that same candidate. Keep the original editor cut
             // as its comparison base; the bytes currently on disk are the
@@ -6462,6 +6591,37 @@ mod tests {
     }
 
     #[test]
+    fn cas_atomic_write_submits_the_captured_target_once() {
+        let baseline = "# Session\n\nbody\n";
+        let target = "# Session\n\nbody\n\n### Re: once\n\nApplied once.\n";
+        let (dir, file, _canonical) = temp_doc(baseline);
+        let identity = "test-crdt-cas-single-submit";
+        seed_reliable_sync_open(&file, identity);
+        test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+        let ack = ack_next_crdt_delivery(file.clone(), identity);
+
+        atomic_write_if_current_through_authority(&file, target, baseline, "cas_single_submit")
+            .unwrap();
+        ack.join().unwrap();
+
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
+        let log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        let relay_writes = log
+            .lines()
+            .filter(|line| line.contains("crdt_cp_write file="))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            relay_writes.len(),
+            1,
+            "CAS target was resubmitted: {relay_writes:?}"
+        );
+        assert!(relay_writes[0].contains("source=cas_single_submit"));
+        assert!(relay_writes[0].contains("applied=true"));
+    }
+
+    #[test]
     fn serialized_atomic_write_rebases_post_proof_editor_advance_exactly_once() {
         let baseline = concat!(
             "# Session\n\n",
@@ -7548,6 +7708,72 @@ mod tests {
         .unwrap();
         let retried = pending_document_write(&file).expect("idempotent retry retained");
         assert_eq!(retried.target_content, target);
+    }
+
+    #[test]
+    fn committed_boundary_refinement_replaces_retained_target_without_recomposition() {
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "> 📌 do [#dbj7]\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let committed_cut = base.replace(
+            "<!-- agent:boundary:base -->",
+            concat!(
+                "<!-- agent:boundary:response -->\n",
+                "### Re: #dbj7 — gpt-5\n\n",
+                "Complete response."
+            ),
+        );
+        let refined = committed_cut.replace(
+            concat!(
+                "<!-- agent:boundary:response -->\n",
+                "### Re: #dbj7 — gpt-5\n\n",
+                "Complete response."
+            ),
+            concat!(
+                "### Re: #dbj7 — gpt-5\n\n",
+                "Complete response.\n",
+                "<!-- agent:boundary:response -->"
+            ),
+        );
+        let (_dir, file, _canonical) = temp_doc(base);
+
+        ensure_deferred_document_write_intent(
+            &file,
+            base,
+            &committed_cut,
+            "post_commit_refinement_seed",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        refine_deferred_document_write_target(
+            &file,
+            &committed_cut,
+            &refined,
+            "post_commit_reposition",
+            DocumentWriteDeferredReason::ExtendPendingEditorReconnectTarget,
+        )
+        .unwrap();
+
+        let pending = pending_document_write(&file).expect("refined target retained");
+        assert_eq!(pending.target_content, refined);
+        assert_eq!(pending.expected_content.as_deref(), Some(base));
+        assert_eq!(pending.target_content.matches("> 📌 do [#dbj7]").count(), 1);
+        assert_eq!(pending.target_content.matches("### Re: #dbj7").count(), 1);
+        assert_eq!(pending.target_content.matches("agent:boundary:").count(), 1);
+        assert!(
+            !pending
+                .target_content
+                .lines()
+                .any(|line| line.trim() == "-->")
+        );
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&pending.target_content),
+            None
+        );
     }
 
     #[test]

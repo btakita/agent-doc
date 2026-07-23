@@ -2398,6 +2398,7 @@ fn normalize_final_template_content(
     Ok(normalized)
 }
 
+#[cfg(test)]
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
     agent_doc_document_realtime_io::atomic_write_through_authority(path, content)
 }

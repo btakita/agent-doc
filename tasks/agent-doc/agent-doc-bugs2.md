@@ -80,7 +80,13 @@ This document’s preflight also reports the dirty local `src/agent-doc` source 
 `#8ybz` was a synthetic corruption artifact, not an authored task. A retained `#bbpe` closeout spliced its exchange response into the `#fmgc` backlog row, destroyed that row's item boundary, and caused the parser to mint `#8ybz` from the remaining `[` fragment.
 
 I archived the synthetic item, restored `#fmgc` as a complete focused-cycle backlog item, and narrowed `#capturebacklogatomic` with this live response-plus-backlog-gate recurrence. The evidence now names the missing regression: an ACK/CAS retry carrying both an exchange response and granular backlog mutation must preserve component boundaries and one atomic cycle intent.
-<!-- agent:boundary:fa2ea914 -->
+
+### Re: #capturebacklogatomic — gpt-5
+
+Root cause is confirmed from the live `#8ybz` artifact and production ordering. After a response write returns `retry_without_disk`, `run_command_inner` treats the retained response as permission to call `apply_pending_and_status_mutations` immediately. That starts a second editor projection while the response intent is still awaiting ACK; the two retained targets can then merge exchange bytes into the backlog component.
+
+A one-line suppression is unsafe because the CLI mutation payload is not durably captured; skipping the second projection would silently lose `--done`, gate, add, and edit operations. The item is therefore gated on the correct structural change: extend the durable cycle intent to store the complete granular mutation envelope, replay it only after the response target converges, and add the exact retained-ACK/CAS regression proving exchange and backlog boundaries remain disjoint. No speculative write-path change was shipped.
+<!-- agent:boundary:c843b2c5 -->
 <!-- /agent:exchange -->
 ## Queue
 

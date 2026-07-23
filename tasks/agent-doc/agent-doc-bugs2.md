@@ -301,16 +301,30 @@ Implemented and released in agent-doc `v0.35.20` / JetBrains plugin `0.2.290` (`
 - `make check`, `make tmux-ci`, the complete 368-test JetBrains suite, `buildPlugin`, `signPlugin`, and the full optimized install passed. CI and the multi-platform Release workflow were in progress at the required single lookup.
 
 The new CLI/native library and plugin package are installed locally. Because this plugin update adds structural classes/fields/methods, restart the affected JetBrains IDE before testing it; safe hot reload cannot replace those structures inside an already-running JVM.
-<!-- agent:boundary:c00ac711 -->
+
+### Re: #fmgc — gpt-5
+
+Implemented and released the additive per-peer replay acknowledgement phase as agent-doc `0.35.21` (JetBrains `0.2.291`, VS Code `0.2.56`; commit `2ca2a4d85`, tag `v0.35.21`).
+
+The editor plugins do not need or open a SQLite connection. The Project Controller remains the sole persistence owner: it stores `state_event_peer_acks` in `state.db`, validates ACKs against the exact live PID-scoped `(pid, editor_id)` registration, and returns the durable `document_version` represented by the exact ledger snapshot sent to the editor. JetBrains and VS Code remember that version only after applying the message successfully and acknowledge it on the next subscription. ACKs are monotonic, reject future cursors, and repeated polls do not churn SQLite.
+
+This cycle intentionally leaves retention behavior unchanged. Existing fact-specific count caps remain authoritative until the follow-up lands `MIN(acked_version)` across live peers together with deterministic crashed-peer eviction.
+
+Also fixed the reported `Run Agent Doc` failure on `acadian-take-home.md`: Project Controller now accepts the intentionally empty `--col` placeholder used for an IDE split with no Markdown file, while still rejecting empty `--focus` and whitespace-only values.
+
+Safe JetBrains native hot reload is restored and covered by the quiesce/reload/restart handoff regression. The currently running IDE was still on the older `0.2.288` plugin during preflight, so it needs one restart to load installed `0.2.291`; subsequent compatible native-library upgrades can use the safe hot-reload path.
+
+Verification passed: targeted SQLite/controller/JetBrains tests, all 142 VS Code tests, and the full `make check`. The final binary and plugin packages were installed locally. The Release workflow was queued from the pushed tag; per repository policy it was recorded once without polling.
+<!-- agent:boundary:f39b502d -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#jbnativehotreload]~~
 - ~~Sync Tmux Layout on equityfundingsource.md: `Sync failed through the project controller; see IDE log for details.`~~
-- ~~⏭️ do [#selectedturnsteering]~~
+- ~~do [#selectedturnsteering]~~
 - ⏭️ do [#fmgc]
-- 📌 do [#boundaryaccum1]
+- ⏭️ 📌 do [#boundaryaccum1]
 - 📌 do [#qactsync]
 - 📌 do [#ftimmediate]
 - 📌 do [#qeditrace]

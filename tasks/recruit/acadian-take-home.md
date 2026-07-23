@@ -283,7 +283,43 @@ Verification passed:
 Committed the application change as `95a2aff` (`feat: persist date range in URL`) and the isolated superproject gitlink as `5ac23e0cc` (`feat: persist MAG7 date range in URL`). Both branches will be pushed immediately after this binary-owned response commit, ensuring the session closeout is included in the superproject push.
 
 Confidence is high; no escalation or follow-up work is needed. The exchange is large, but the active queue was drained without compaction. The separate preflight warning that the locally built `agent-doc` binary/library predates unrelated source edits remains intentionally outside this application commit.
-<!-- agent:boundary:1a6011f4 -->
+❯ 🚧 In TickerCard.tsx, why do you use `useLayoutEffect` instead of `useEffect`?
+```
+	useLayoutEffect(() => {
+		setRange(fullRange(points.length))
+		setDragStart(null)
+		setDragEnd(null)
+	}, [points])
+```
+
+### Re: why `useLayoutEffect` resets the ticker range — gpt-5
+
+It is specifically there to prevent a stale intermediate frame from being painted.
+
+When `points` changes, React renders `TickerCard` with two pieces of state from different moments:
+
+1. `points` is the newly returned series.
+2. `range`, `dragStart`, and `dragEnd` are still local state from the previous series.
+
+That means the first render can apply the old zoom indices to the new data. If this were `useEffect`, the sequence would be:
+
+1. Commit the new series using the old range.
+2. Let the browser paint that incorrect graph.
+3. Run the effect and reset the range.
+4. Render and paint again at the correct full range.
+
+That one incorrect paint is the graph jank we were fixing.
+
+`useLayoutEffect` runs after React updates the DOM but before the browser paints. Its state updates cause React to synchronously re-render, so the first frame the user sees for the new `points` already uses `fullRange(points.length)` and has cleared the old drag selection.
+
+The dependency is intentionally `[points]`, not `[points.length]`: a replacement series should reset the card even when it contains the same number of observations.
+
+There is a tradeoff: layout effects block painting, so they should be small and uncommon. This one only resets three local state values and exists at a visual consistency boundary, which is an appropriate use. The other effects in the component can remain passive because they install event listeners and do not need to correct state before paint.
+
+A more structural alternative would be to key/remount each `TickerCard` for every returned dataset, or move the zoom state to a parent and reset it atomically with the data. Either would remove the need for this layout effect, but both have wider lifecycle/state consequences. Given that the zoom state is intentionally local to the card, the layout effect is the targeted fix.
+
+No files were changed and no tests were run because this was an explanation-only turn. I inspected the current `TickerCard` implementation; confidence is high, and no escalation or follow-up work is needed.
+<!-- agent:boundary:cc945ae0 -->
 <!-- /agent:exchange -->
 
 ## Queue

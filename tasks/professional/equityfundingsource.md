@@ -67,7 +67,7 @@ Production D1 is updated directly:
 The invite emails are **not sent**. Both authenticated production sign-in-link calls returned HTTP 502. A live Worker trace proved the underlying cause: `Cloudflare Email Service 401: Authentication error`. The production Worker has a `CLOUDFLARE_EMAIL_API_TOKEN` secret name, but its value is invalid or unauthorized for the configured Email Sending account. The stored Resend keys are suspended, so they are not a viable fallback. The application invalidated each unsent one-time token after the failed send, so there are no live orphaned login links.
 
 I kept `#judithkrugjudithkrug` gated with the exact retry endpoints and credential prerequisite. No additional backlog follow-up is needed because that gated item names both the external token signal and the deterministic remaining operation; there is nothing executable until an Email Sending-authorized token is provisioned.
-❯ 🚧 Fix the Authentication Error. The site is live and the emails are not working.
+❯ Fix the Authentication Error. The site is live and the emails are not working.
 
 ### Re: Production email authentication fixed — gpt-5
 
@@ -78,7 +78,7 @@ The failure had two production causes: the Worker was using a stale REST API-tok
 Deployed Worker version `936721b6-3a97-4051-ba68-3892f61e75ac` from EFS commit `926da811`. Clean-install `make check` and the production dry run passed. Production then returned HTTP 200 with `sent: true` for fresh login-link emails to both Judith Krug and Robert Waldman, and the live Worker tail confirmed both requests completed on that deployed version without email exceptions.
 
 The implementation is pushed on `origin/main` in commits `edc4940a`, `b3e00873`, `0c809925`, and `926da811`.
-<!-- agent:boundary:f8e5c9f2 -->
+<!-- agent:boundary:6fb0e157 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
@@ -88,7 +88,6 @@ The implementation is pushed on `origin/main` in commits `edc4940a`, `b3e00873`,
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [x] [#fixauthenticationerror] Fix the Authentication Error. The site is live and the emails are not working.
 - [ ] [#efs-deploy-hibernation] [operator-verify] Deploy the worker so #efs-do-hibernation's billing fix is actually live. The code shipped in EFS b75f92ca (2026-07-18 18:23 EDT) but the newest production deployment is version 1b9c8d69 from 2026-07-18 16:03 UTC / 12:03 EDT — SIX HOURS EARLIER. The live worker still runs the non-hibernating rooms, so the ~328,500 GB-s per always-on room is still accruing. Blocked on operator go only because 23 commits sit between the deployed version and HEAD (hibernation, TMO backup/restore/snapshot/orphan tooling, admin binding queue, Dropbox fail-soft, TMO contacts/vesting-gap admin screens), so 'make deploy' ships far more than the DO change and needs a deliberate go. Verify after deploying with 'CLOUDFLARE_API_TOKEN="$(passage show btak/equityfundingsource/cloudflare_api_token | head -1)" bunx wrangler deployments list --name equityfundingsource' and confirm the newest version postdates b75f92ca.
 - [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). UNBLOCKED 2026-07-19: #tmo-snapshot-verify passed — the snapshot tool ran against real TMO sandbox and reported complete=true (loans=18 fundings=5 attachment_metas=20 lenders=1 borrowers=16, zero errors), so the gate command 'bun ./bin/tmo-snapshot.ts --covers <the 16> --out tmp/tmo-before-purge.json' is now known-good. Take that snapshot immediately before purging. Still held on operator go ONLY because DeleteLoan is permanent with no TMO-side undo. Note the snapshot is evidence, not a restore: attachment BYTES are not captured (20 attachment metas across 554466/AVW580/MBQ435/SRV532/TST766 would be unrecoverable), and RecIDs do not round-trip. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
 <!-- /agent:backlog -->

@@ -194,12 +194,48 @@ Verification passed:
 Committed the application change as `5e9b547` (`fix: hide stale graphs during range refresh`) and the isolated superproject gitlink as `772d38e83` (`fix: hide stale MAG7 refresh state`). The submodule and superproject branches will be pushed immediately after this binary-owned response commit, so the session closeout is included in the superproject push.
 
 Confidence is high; no escalation or follow-up work is needed. The separate stale local `agent-doc` build warning still belongs to unrelated shared work in `src/agent-doc` and was not included.
-<!-- agent:boundary:532f9111 -->
+
+### Re: eliminate range refresh jank — gpt-5
+
+Fixed the actual two-frame graph transition without hiding or showing the content.
+
+The jank was inside each ticker card, after the final response arrived. A card first rendered the new series through its previous local zoom indices, then a passive effect reset those indices to the new full range. That exposed an intermediate graph frame. The previous commit's `visibility: hidden` rule only masked the loading interval and did not address this post-response reset.
+
+The corrected refresh behavior is:
+
+- Existing graphs remain visible, accessible, and at full opacity while the final committed range loads.
+- The results region remains `aria-busy` during that refresh; it is never `aria-hidden`.
+- When the final response arrives, ticker-card range state resets in a pre-paint layout effect, so the new series is first painted at its correct full range.
+- The ambient loading indicator remains visible without moving the page.
+
+Changed paths:
+
+- `frontend/src/components/TickerCard.tsx`
+- `frontend/src/App.tsx`
+- `frontend/src/App.test.tsx`
+- `frontend/src/lib/viewState.ts`
+- `frontend/src/styles.css`
+- `SPEC.md`
+- `README.md`
+
+Verification passed:
+
+- Targeted app/view-state regression tests and TypeScript typecheck.
+- Live headless-Chromium test using actual hit-testing on the master slider handle. A 650 ms pause during the drag fired zero requests; release fired exactly one request for the final range. The results stayed visible at opacity 1 throughout loading. Animation-frame sampling showed the first card move directly from `2026-01-26…2026-07-22` to `2024-08-08…2026-07-22`, with no intermediate old-index graph frame.
+- Full `make check`: 35 backend tests, mypy across 9 source files, 99 frontend tests, TypeScript typecheck, and production build.
+- `git diff --check`.
+- The required GitHub check found no workflow named `CI` in this repository.
+
+Committed and pushed the application change as `b04e1d7` (`fix: eliminate range refresh graph jank`). Committed the isolated superproject gitlink as `7420699aa` (`fix: eliminate MAG7 range refresh jank`); the superproject branch will be pushed immediately after this binary-owned document closeout so this response commit is included as well.
+
+Confidence is high. No escalation or follow-up work is needed.
+<!-- agent:boundary:6147d1cf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
+- The last commit hides then shows the content after selecting the date range. This is not correct behavior...and it does not even fix the jank. Please do not hide then show the content. Please fix the jank as well.
 <!-- /agent:queue -->
 
 ## Backlog

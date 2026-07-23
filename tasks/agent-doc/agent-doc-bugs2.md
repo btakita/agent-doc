@@ -218,13 +218,33 @@ Released as agent-doc commit `f144ab3ea`, tag `v0.35.16`; parent gitlink commit 
 The JetBrains 0.2.286 distribution is now written to `/home/brian/work/btakita/agent-loop/src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.286.zip` (SHA-256 `74126fafd4d40394212ee1fd453bfb7de2fdf38b96a3f3f95b2ca4a31c7c0c9c`) and installed into four detected IDE installations. The currently running IDE still reports 0.2.285, so it must be restarted/reloaded before editor delivery ACKs use the new plugin.
 
 The separate request for real-time supervisor harness switching was preserved as `#harnesshotrebind` for a focused cycle.
-<!-- agent:boundary:7251c712 -->
+I attempted turn steering by selecting text + Run Agent Doc: `authoritative actor generation 107 for /home/brian/work/btakita/agent-loop/tasks/recruit/acadian-take-home.md owns pane %31 but dispatch-only route will not inject a new trigger because the pane is busy on an active codex turn (• Working (1m 41s • esc to interrupt)), not at a dispatch-ready prompt. Wait for the active turn to finish before rerouting this document. ui_outcome_contract=ui-outcome-v1 ui_outcome=blocked_with_exact_unblocker ui_outcome_class=blocked next_action=follow_unblocker unblocker=wait_for_owner_turn_to_finish`
+
+When I select text + Run Agent Doc, the selected text should be sent to the agent for turn steering.
+
+### Re: #harnesshotrebind — gpt-5
+
+Implemented and released `#harnesshotrebind` in agent-doc `v0.35.17`.
+
+An explicit frontmatter `agent:` change now returns a typed pending handoff instead of dispatching into the old harness or demanding an Interrupt/restart. The supervisor preserves the active turn, waits for the safe idle boundary, switches the actor, and automatically triggers the replacement harness. Paused queues remain paused, disabled restart still fails explicitly, IPC state exposes `current_harness`, and stale actor records are repaired when the runtime has already switched. SimWorld coverage pins accepted, active, paused, disabled, in-flight, and stale-record cases.
+
+Released source commit `9533a31d9`, tag `v0.35.17`, and parent gitlink commit `34b25004f`; both repositories are pushed. Full `make check`, `make tmux-ci`, focused clippy, and `make install-full` passed. The installed CLI reports 0.35.17, JetBrains plugin 0.2.286 was installed into four detected IDEs, and the canonical distribution ZIP exists at `src/agent-doc/editors/jetbrains/build/distributions/agent-doc-jetbrains-0.2.286.zip` with SHA-256 `74126fafd4d40394212ee1fd453bfb7de2fdf38b96a3f3f95b2ca4a31c7c0c9c`. The single required CI snapshot, run `29983122249`, was in progress.
+
+The SQLite warning is a real structural-consistency failure, not malformed markdown. Its proximate cause is the JetBrains native-library hot reload. At the reload boundary, `AgentDocLib.forceReload()` shadow-loaded a new `libagent_doc` and replaced `instance` without first shutting down the old generation. The active IDEA process still maps both the current `.so` and the deleted old `.so`. The reload handler calls `forceRefreshOpenDocumentReplicas` only after that swap, so old replica IDs are acted on through the new generation's separate registry and the old generation's SQLite connections remain alive.
+
+That produced a split-brain WAL. Direct process evidence showed old connections holding deleted state DB/WAL/SHM inodes while another WAL/SHM generation existed at the same database pathname. Because the two cdylibs embed independent SQLite copies inside one process, their process-scoped POSIX locking cannot safely distinguish the generations: one copy can conclude that it owns the last connection and unlink/checkpoint WAL state while the other copy is still using it. The pruning query then encountered inconsistent b-tree pages and SQLite returned error 11, `database disk image is malformed`.
+
+The current linked `.agent-doc/state.db` passes `PRAGMA quick_check`, but only after the bad path was quarantined/recreated. IDEA still holds dozens of descriptors to the deleted predecessor and deleted WAL/SHM, so the running plugin remains split from the linked database until IDEA is fully restarted. There were no ext4/NVMe I/O errors, SQLite was in WAL mode with `synchronous=FULL`, and this was not an ordinary lock-contention failure.
+
+I added focused follow-ups for the native-generation drain/fail-closed reload fix and for delivering selected JetBrains text as realtime steering while a pane is busy.
+<!-- agent:boundary:a3a2d0d8 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- Recycling the supervisors terminated the sessions and did not restart.
+- ~~do [#harnesshotrebind]~~
 - do [#fmgc]
-- ~~📌 do [#claimnewpane]~~
 - 📌 do [#boundaryaccum1]
 - 📌 do [#qactsync]
 - 📌 do [#ftimmediate]
@@ -265,6 +285,8 @@ The separate request for real-time supervisor harness switching was preserved as
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#jbnativehotreload] [focused-cycle] #agent-doc-bug Eliminate JetBrains split-brain SQLite state during native cdylib reload. `AgentDocLib.forceReload()` currently shadow-loads and swaps to a new `libagent_doc` generation before old-generation replicas, background work, and SQLite connections are drained; the subsequent force-refresh calls the new generation, so it cannot close old-generation registry IDs. The live recurrence left both `.so` generations mapped and dozens of old-generation descriptors to deleted state.db/WAL/SHM while a replacement database existed at the same pathname. Implement a generation handoff that invokes shutdown/drain on the OLD instance and proves every old connection/thread is gone before swap, or fail closed and require an IDE restart if safe in-process unload cannot be guaranteed. Add a JetBrains/native integration regression that reloads with active replicas and asserts one mapped SQLite/native generation, one WAL/SHM inode generation, successful `PRAGMA quick_check`, and no deleted state DB descriptors.
+- [ ] [#selectedturnsteering] [focused-cycle] #agent-doc-feature When JetBrains Run Agent Doc is invoked with selected text while the authoritative pane has an active turn, deliver the exact selection as realtime turn steering instead of rejecting the dispatch-only route as busy. Preserve the existing busy-pane no-new-trigger safety for invocations without a selection; record a typed steering admission/ack outcome and add live plus deterministic coverage proving the active turn continues and receives the selected text exactly once.
 - [ ] [#fmgc] [focused-cycle] Per-peer ack watermark for replay-state retention (#retentionwatermark). Tagged [focused-cycle] 2026-07-19: this is a schema migration plus retention-correctness change, and retention bugs are silent and asymmetric. Needs: (a) a (document_hash, peer_key) ack table keyed by the PID-scoped editor registration; (b) retention keyed off MIN(acked_version) across LIVE peers only; (c) a liveness eviction rule so a crashed IDE cannot pin the watermark forever. Count caps stay as a backstop. PushChannel::flush already implements the single-consumer shape; land the per-peer table plus ack recording additively before changing retention behavior.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 ### Re: #bbpe — gpt-5
@@ -299,7 +321,6 @@ This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack wa
 - [ ] [#crdtauth6] [operator-verify] CRDT authority live proof: verify the existing JB DocumentListener -> CrdtReplicaForwarder.forwardLocalDelta path, Kotlin Unix-socket ReplicaTransport, VS Code koffi replica seam, and Rust fan-out stay connected in a live editor session. This is proof/parity work only; operator-visible text is already authoritative and must not wait on this item. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
-- [ ] [#harnesshotrebind] [focused-cycle] #agent-doc-feature Switch a live supervisor actor between Claude, Codex, and OpenCode in real time when frontmatter changes and Run Agent Doc is invoked, without requiring Interrupt/restart; preserve dispatch-ready safety and hand off only after the replacement harness is ready. Repro: tasks/recruit/acadian-take-home.md remained on claude-code after frontmatter resolved to codex.
 <!-- /agent:backlog -->
 
 ## Review

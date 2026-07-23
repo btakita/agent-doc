@@ -69,14 +69,21 @@ This remains an operator/live-editor verification gate. Preflight confirmed `tas
 To resolve `#bbpe`, restart/reopen the document in the JetBrains IDE so its installed plugin re-registers the editor authority, then run `agent-doc preflight tasks/brookebrodack-dev.md` from its owning pane. The required proof is that `queue_maintenance_not_persisted` is absent and `queue_supervisor_drainable` is true. If either condition fails, retain the diagnostics and leave the gate open.
 
 This document’s preflight also reports the dirty local `src/agent-doc` source tree as newer than the installed binary/library, so any live result should record the actual loaded binary/plugin generation rather than assuming source parity.
-<!-- agent:boundary:a34fa3db -->
+
+### Re: #8ybz — gpt-5
+
+`#8ybz` was a synthetic corruption artifact, not an authored task. A retained `#bbpe` closeout spliced its exchange response into the `#fmgc` backlog row, destroyed that row's item boundary, and caused the parser to mint `#8ybz` from the remaining `[` fragment.
+
+I archived the synthetic item, restored `#fmgc` as a complete focused-cycle backlog item, and narrowed `#capturebacklogatomic` with this live response-plus-backlog-gate recurrence. The evidence now names the missing regression: an ACK/CAS retry carrying both an exchange response and granular backlog mutation must preserve component boundaries and one atomic cycle intent.
+<!-- agent:boundary:20f8dab4 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- 🚧 do [#8ybz]
 - ~~📌 do [#patchretryidem]~~
 - ~~📌 do [#hvw0]~~
-- 📌 do [#bbpe]
+- ~~📌 do [#bbpe]~~
 - 📌 do [#dbj7]
 - 📌 do [#crdtpushdrainverify]
 - 📌 do [#compactindcellsverify]
@@ -101,7 +108,7 @@ This document’s preflight also reports the dirty local `src/agent-doc` source 
 - 📌 do [#nsfz]
 - 📌 do [#suprestassoc-live]
 - 📌 do [#jbedtledgerverify]
-- 📌 do [#fmgc]
+- ~~📌 do [#fmgc]~~
 - 📌 do [#0dsr]
 - 📌 do [#30p6]
 - 📌 do [#capturebacklogatomic]
@@ -133,7 +140,7 @@ This document’s preflight also reports the dirty local `src/agent-doc` source 
   evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md stage=dispatch_only_dispatch_start_proof pane=%66 actor_generation=1604 editor_attempt_id=1784586442853-2 dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof)
   evidence: JetBrains Run Agent Doc route/dispatch failed after bounded submit/start proof retries #jbrunautobug #agent-doc-bug failure_class=accepted_without_dispatch_start_proof document=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md stage=dispatch_only_dispatch_start_proof pane=%2 actor_generation=1610 editor_attempt_id=unknown dispatch_proof_state=accepted_without_dispatch_start_proof elapsed_ms=10000 diagnostic_path=none ops_log_path=/home/brian/work/btakita/agent-loop/.agent-doc/logs/ops.log ops_log_marker=route_submit_issue(issue=accepted_without_dispatch_start_proof,phase=dispatch_only_dispatch_start_proof,result=accepted_without_dispatch_start_proof)
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
-- [ ] [#8ybz] [
+- [ ] 🚧 [#8ybz] [
 ### Re: #bbpe — gpt-5
 
 This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack watermark for replay-state retention (#retentionwatermark). Tagged [focused-cycle] 2026-07-19: this is a schema migration plus retention-correctness change, and retention bugs are silent and asymmetric (evict early = replay state lost; evict late = unbounded growth), so it needs a clean context rather than a mid-drain slot. Today every rule except #deferredintentretention is a COUNT cap; the watermark shape is strictly better where an ack exists. Blocker found 2026-07-18: reliable_sync_outbox_cursor/reliable_sync_inbox_cursor are PRIMARY KEY (document_hash) holding ONE scalar acked_through — there is no per-peer ack vector to take a MIN over, and reliable_sync_liveness_journal.source_key is a document hash, not a peer id. Needs: (a) a (document_hash, peer_key) ack table keyed by the PID-scoped editor registration; (b) retention keyed off MIN(acked_version) across LIVE peers only; (c) a liveness eviction rule so a crashed IDE that never acks cannot pin the watermark forever and stop retention entirely — that failure mode is worse than the count caps, so the caps STAY as a backstop rather than being replaced. PushChannel::flush (agent-doc-reliable-sync-io/src/push.rs:90) already implements the single-consumer version via outbox.ack_through(ack); generalize that, do not rebuild it. SUGGESTED FIRST INCREMENT for whoever takes it: land (a) additively — table plus ack recording, retention still on count caps — so the per-peer data exists to design (b)/(c) against, rather than changing retention behaviour and schema in one step.

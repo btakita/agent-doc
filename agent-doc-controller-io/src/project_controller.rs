@@ -465,17 +465,24 @@ pub struct ControllerBootstrap {
 struct ControllerMemoryState {
     actor_store: BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>,
     state_ledger: agent_doc_state_backbone::EventLedger,
+    /// Durable high-water captured from the exact rows folded into
+    /// `state_ledger`. This must travel with the in-memory snapshot: reading a
+    /// later SQLite MAX could acknowledge a concurrently appended event that
+    /// the outgoing graph does not contain.
+    state_document_versions: BTreeMap<String, u64>,
     state_projection: agent_doc_state_backbone::StateBackboneProjection,
     map_backend: &'static str,
 }
 
 impl ControllerMemoryState {
     fn load(project_root: &Path) -> Result<Self> {
-        let state_ledger = load_state_event_ledger(project_root)?;
+        let (state_ledger, state_document_versions) =
+            load_state_event_ledger_with_versions(project_root)?;
         let state_projection = state_ledger.project();
         Ok(Self {
             actor_store: load_actor_store(project_root)?,
             state_ledger,
+            state_document_versions,
             state_projection,
             map_backend: "std_btree_map",
         })
@@ -582,12 +589,15 @@ impl ControllerRuntime {
         &self,
         document_hash: &str,
         last_epoch: u64,
-    ) -> Result<agent_doc_state_wire::WireSubscribe> {
+    ) -> Result<(agent_doc_state_wire::WireSubscribe, u64)> {
         let memory = self.memory.lock();
-        Ok(agent_doc_state_wire::subscribe(
-            &memory.state_ledger,
-            document_hash,
-            last_epoch,
+        Ok((
+            agent_doc_state_wire::subscribe(&memory.state_ledger, document_hash, last_epoch),
+            memory
+                .state_document_versions
+                .get(document_hash)
+                .copied()
+                .unwrap_or(0),
         ))
     }
 
@@ -1471,9 +1481,20 @@ pub fn append_state_event(
 pub fn load_state_event_ledger(
     project_root: &Path,
 ) -> Result<agent_doc_state_backbone::EventLedger> {
+    Ok(load_state_event_ledger_with_versions(project_root)?.0)
+}
+
+fn load_state_event_ledger_with_versions(
+    project_root: &Path,
+) -> Result<(agent_doc_state_backbone::EventLedger, BTreeMap<String, u64>)> {
     let conn = open_state_db(project_root)?;
     let mut ledger = agent_doc_state_backbone::EventLedger::new();
+    let mut document_versions: BTreeMap<String, u64> = BTreeMap::new();
     for row in load_state_events_from_db(&conn, None)? {
+        document_versions
+            .entry(row.document_hash.clone())
+            .and_modify(|version| *version = (*version).max(row.document_version))
+            .or_insert(row.document_version);
         let event: agent_doc_state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
             .with_context(|| {
             format!(
@@ -1483,7 +1504,7 @@ pub fn load_state_event_ledger(
         })?;
         ledger.append(event);
     }
-    Ok(ledger)
+    Ok((ledger, document_versions))
 }
 
 pub fn load_state_backbone_projection(
@@ -6316,6 +6337,7 @@ agent:queue\n\
             memory: Mutex::new(ControllerMemoryState {
                 actor_store: BTreeMap::new(),
                 state_ledger,
+                state_document_versions: BTreeMap::new(),
                 state_projection,
                 map_backend: "std_btree_map",
             }),

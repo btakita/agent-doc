@@ -50,13 +50,21 @@ describe('typed reload_library intent', () => {
         const start = watcher.indexOf('EditorIntent.ReloadLibrary.token ->');
         assert.ok(start >= 0);
         const handler = watcher.slice(start, start + 500);
-        assert.ok(handler.includes('AgentDocLib.forceReload()'));
-        assert.ok(handler.includes('CrdtReplicaManager.forceRefreshOpenDocumentReplicas('));
+        assert.ok(handler.includes('NativeReloadCoordinator.requestReload(libVersion)'));
         assert.ok(!watcher.includes('newWatchService()'));
         assert.ok(!watcher.includes('reloadBroadcastFile'));
 
         const native = fs.readFileSync(path.join(jetbrainsDir, 'NativeLib.kt'), 'utf-8');
-        assert.ok(native.includes('fun forceReload('));
+        assert.ok(native.includes('fun hotReload('));
         assert.ok(!native.includes('reloadBroadcastFile'));
+
+        const coordinator = fs.readFileSync(
+            path.join(jetbrainsDir, 'NativeReloadCoordinator.kt'),
+            'utf-8',
+        );
+        assert.ok(coordinator.includes('CrdtReplicaManager.quiesceAllForNativeReload()'));
+        assert.ok(coordinator.includes('PatchWatcher.quiesceAllForNativeReload()'));
+        assert.ok(coordinator.includes('AgentDocLib.hotReload(libVersion)'));
+        assert.ok(coordinator.includes('CrdtReplicaManager.restartAfterNativeReload(replicaProjects)'));
     });
 });

@@ -297,6 +297,17 @@ class StateProjectionBridgeTest {
     }
 
     @Test
+    fun `applied replay version advances monotonically and clears on eviction`() {
+        val path = "/tmp/agent-doc-fmgc-replay-ack-${System.nanoTime()}.md"
+        StateProjectionBridge.noteAppliedReplayVersionForTest(path, 4)
+        StateProjectionBridge.noteAppliedReplayVersionForTest(path, 2)
+        assertEquals(4L, StateProjectionBridge.appliedReplayVersionForTest(path))
+
+        StateProjectionBridge.evictForFile(path)
+        assertNull(StateProjectionBridge.appliedReplayVersionForTest(path))
+    }
+
+    @Test
     fun `evictForFile clears owner-generation counters and restarts fresh`() {
         // #jbmirrorevict / #nsq2: the mirrors + generations maps must not leak
         // across document close/reopen.

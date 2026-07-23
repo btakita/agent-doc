@@ -91,6 +91,23 @@ during projection replay so duplicate delivery stays idempotent, while
 `causation_id` preserves the chain from prompt, queue head, IPC patch, route
 dispatch, or proof marker to the emitted fact.
 
+Every durable event also has a monotonic per-document `document_version`.
+Editor replay acknowledgements are collected in `state_event_peer_acks`, keyed
+by `(document_hash, peer_key)`, where `peer_key` is derived from the live
+PID-scoped editor registration `(pid, editor_id)`. A state subscription returns
+the durable version represented by its snapshot/delta. The editor records that
+version only after the graph message applies successfully and reports it on the
+next subscription; the controller accepts it only while the exact registration
+is live. Acknowledgements advance monotonically and a peer cannot acknowledge a
+version above the document's durable high-water mark.
+
+This acknowledgement table is collection-only for now. Existing fact-specific
+count caps remain the retention authority and do not consult peer cursors. A
+future retention change may delete below `MIN(acked_version)` across live peers
+only after it also defines deterministic crashed-peer eviction; until both
+rules land together, a missing or stale acknowledgement is never grounds for
+additional deletion.
+
 ## Projections
 
 Current state is derived by deterministic reducers over the event ledger and the

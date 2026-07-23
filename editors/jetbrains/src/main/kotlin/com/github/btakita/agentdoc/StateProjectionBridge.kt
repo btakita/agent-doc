@@ -28,6 +28,14 @@ object StateProjectionBridge {
     private val generations = ConcurrentHashMap<String, AtomicLong>()
     /** Per-document generic materialized view (`#lzsync` 3B), advanced by [subscribeMirrorForFile]. */
     private val mirrors = ConcurrentHashMap<String, GraphView>()
+    /**
+     * Durable ledger version successfully folded by this peer. The NEXT
+     * Project Controller subscription reports it, so a crash between delivery
+     * and apply can never manufacture an acknowledgement.
+     */
+    private val appliedDocumentVersions = ConcurrentHashMap<String, Long>()
+    /** Versions the Project Controller confirmed were durably recorded. */
+    private val recordedDocumentVersions = ConcurrentHashMap<String, Long>()
 
     data class ProjectionSummary(
         val routeReadiness: String?,
@@ -132,17 +140,25 @@ object StateProjectionBridge {
         val docHash = documentHash(filePath)
         val view = mirrors.computeIfAbsent(docHash) { GraphView() }
         val lastEpoch = if (view.isInitialized) view.epoch else 0L
+        val appliedVersion = appliedDocumentVersions[docHash] ?: 0L
+        val recordedVersion = recordedDocumentVersions[docHash] ?: 0L
+        val pendingAck = appliedVersion.takeIf { it > recordedVersion } ?: 0L
         val response = CpRouteClient.stateSubscribe(
             projectRoot = projectRoot.path,
             filePath = filePath,
             documentHash = docHash,
             lastEpoch = lastEpoch,
+            ackedVersion = pendingAck,
         )
         if (response.documentHash != docHash) {
             LOG.debug("[state-projection] Project Controller returned state for ${response.documentHash}, expected $docHash")
             return null
         }
+        if (response.peerAckRecorded && pendingAck > 0L) {
+            recordedDocumentVersions.merge(docHash, pendingAck, ::maxOf)
+        }
         return if (applyNativeMessage(view, response.messageJson)) {
+            noteAppliedDocumentVersion(docHash, response.documentVersion)
             messageKind(response.messageJson)
         } else {
             null
@@ -214,12 +230,28 @@ object StateProjectionBridge {
     fun evictForFile(filePath: String) {
         val docHash = documentHash(filePath)
         mirrors.remove(docHash)
+        appliedDocumentVersions.remove(docHash)
+        recordedDocumentVersions.remove(docHash)
         val genPrefix = "$docHash:"
         generations.keys.filter { it.startsWith(genPrefix) }.forEach { generations.remove(it) }
     }
 
     /** Test-only: live view + generation entry counts (for eviction coverage). */
     internal fun debugEntryCounts(): Pair<Int, Int> = mirrors.size to generations.size
+
+    /** Test seam for the apply-then-ack replay cursor. */
+    internal fun noteAppliedReplayVersionForTest(filePath: String, documentVersion: Long) {
+        noteAppliedDocumentVersion(documentHash(filePath), documentVersion)
+    }
+
+    /** Test seam for the cursor sent on the next Project Controller read. */
+    internal fun appliedReplayVersionForTest(filePath: String): Long? =
+        appliedDocumentVersions[documentHash(filePath)]
+
+    private fun noteAppliedDocumentVersion(documentHash: String, documentVersion: Long) {
+        if (documentVersion <= 0L) return
+        appliedDocumentVersions.merge(documentHash, documentVersion, ::maxOf)
+    }
 
     /**
      * Test-only seam (`#lzsync` 3B): seed the per-document view by applying a native

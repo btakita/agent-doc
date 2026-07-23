@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.21
+
+_JetBrains plugin 0.2.291; VS Code extension 0.2.56._
+
+- **State-event replay now collects a durable acknowledgement per live editor peer (`#fmgc`).** `state_event_peer_acks` is keyed by the PID-scoped `(document_hash, pid, editor_id)` registration, advances each peer monotonically, and rejects cursors above the durable document high-water. Project Controller subscriptions carry the `document_version` captured from the exact ledger snapshot used to build the outgoing graph; JetBrains and VS Code report that version only on the next subscription after successfully applying the snapshot/delta, so delivery or a concurrent append cannot manufacture an acknowledgement. Migration, stale-writer, independent multi-peer, and cross-editor apply-then-ack regressions are included. Retention still uses the existing fact-specific count caps; switching to `MIN(acked_version)` remains gated on live-peer selection and deterministic crashed-peer eviction landing together.
+- **Project Controller editor routes accept the empty `--col` placeholder used for non-Markdown IDE splits.** The validator now preserves the established sync-layout contract while continuing to reject empty `--focus` and whitespace-only layout values, so `Run Agent Doc` no longer fails with `editor route layout arg --col has empty value`.
+
 ## 0.35.20
 
 _JetBrains plugin 0.2.290._

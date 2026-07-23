@@ -5943,8 +5943,9 @@ fn validate_editor_route_layout_args(args: &[String]) -> Result<Vec<String>> {
                 let value = iter
                     .next()
                     .with_context(|| format!("editor route layout arg {flag} missing value"))?;
+                let empty_column_placeholder = flag == "--col" && value.is_empty();
                 anyhow::ensure!(
-                    !value.trim().is_empty(),
+                    empty_column_placeholder || !value.trim().is_empty(),
                     "editor route layout arg {flag} has empty value"
                 );
                 validated.push(flag.clone());
@@ -8642,6 +8643,22 @@ pub(crate) fn controller_envelope<T: Serialize>(result: Result<T>) -> Result<Str
 struct ControllerStateSubscribeResponse {
     document_hash: String,
     message: serde_json::Value,
+    /// Durable `state_events.document_version` represented by this response.
+    ///
+    /// This is not the Lazily graph epoch: it remains monotonic across
+    /// count-cap retention and is the cursor peers acknowledge on their next
+    /// subscription.
+    document_version: u64,
+    /// Whether the preceding cursor supplied by this peer was accepted.
+    peer_ack_recorded: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ControllerStateSubscribePayload {
+    document_hash: Option<String>,
+    peer_pid: Option<u64>,
+    editor_id: Option<String>,
+    acked_version: Option<u64>,
 }
 
 fn handle_state_subscribe(
@@ -8649,16 +8666,13 @@ fn handle_state_subscribe(
     request: ControllerRequest,
 ) -> Result<ControllerStateSubscribeResponse> {
     let file = request_file(&request)?;
-    let document_hash = request
+    let payload = request
         .diagnostic_payload
         .as_deref()
-        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
-        .and_then(|value| {
-            value
-                .get("document_hash")
-                .and_then(|hash| hash.as_str())
-                .map(str::to_string)
-        })
+        .and_then(|payload| serde_json::from_str::<ControllerStateSubscribePayload>(payload).ok())
+        .unwrap_or_default();
+    let document_hash = payload
+        .document_hash
         .unwrap_or_else(|| agent_doc_hash::document_id_for_path(&file));
     let last_epoch = request.generation.unwrap_or(0);
 
@@ -8675,14 +8689,59 @@ fn handle_state_subscribe(
     // `build_delta` still produces the internal `WireDelta` producer form; the
     // state-wire bridge converts it here (fully porting `build_delta` to native is a
     // follow-up).
-    let wire = runtime.state_subscribe(&document_hash, last_epoch)?;
+    let (wire, document_version) = runtime.state_subscribe(&document_hash, last_epoch)?;
     let message = serde_json::to_value(
         agent_doc_state_wire::lazily_convert::wire_subscribe_to_ipc_message(&wire)?,
     )
     .context("serialize native IpcMessage for state_subscribe")?;
+
+    // The cursor reports the PREVIOUS response, so it is safe only after the
+    // editor successfully folded that snapshot/delta. Bind it to the exact
+    // live PID-scoped registration; never let a synthetic socket client create
+    // a retention peer. Failure to collect an ack must not make the read path
+    // unavailable — the retention phase still uses count caps and a missing
+    // cursor is the conservative outcome.
+    let peer_ack_recorded = match (
+        payload.peer_pid,
+        payload.editor_id.as_deref(),
+        payload.acked_version.filter(|version| *version > 0),
+    ) {
+        (Some(peer_pid), Some(editor_id), Some(acked_version))
+            if controller_liveness_plane()
+                .lock()
+                .projection()
+                .live_registrations(&document_hash)
+                .iter()
+                .any(|registration| {
+                    registration.pid == peer_pid && registration.editor_id == editor_id
+                }) =>
+        {
+            let project_root = runtime.bootstrap_snapshot()?.project_root;
+            let state_db = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+            match agent_doc_sqlite::state_store::record_state_event_peer_ack_in_db(
+                &state_db,
+                &document_hash,
+                peer_pid,
+                editor_id,
+                acked_version,
+            ) {
+                Ok(_) => true,
+                Err(err) => {
+                    eprintln!(
+                        "[agent-doc] warning: state replay ack rejected \
+                         document_hash={document_hash} pid={peer_pid} editor_id={editor_id}: {err:#}"
+                    );
+                    false
+                }
+            }
+        }
+        _ => false,
+    };
     Ok(ControllerStateSubscribeResponse {
         document_hash,
         message,
+        document_version,
+        peer_ack_recorded,
     })
 }
 
@@ -13562,6 +13621,29 @@ mod tests {
     }
 
     #[test]
+    fn editor_route_layout_args_preserve_empty_column_placeholders() {
+        let args = vec![
+            "--col".to_string(),
+            String::new(),
+            "--col".to_string(),
+            "/repo/acadian-take-home.md".to_string(),
+            "--focus".to_string(),
+            "/repo/acadian-take-home.md".to_string(),
+        ];
+
+        assert_eq!(validate_editor_route_layout_args(&args).unwrap(), args);
+    }
+
+    #[test]
+    fn editor_route_layout_args_reject_other_empty_values() {
+        let empty_focus = vec!["--focus".to_string(), String::new()];
+        assert!(validate_editor_route_layout_args(&empty_focus).is_err());
+
+        let whitespace_column = vec!["--col".to_string(), "   ".to_string()];
+        assert!(validate_editor_route_layout_args(&whitespace_column).is_err());
+    }
+
+    #[test]
     fn mutating_rpc_binary_guard_covers_dispatch_and_compact_callers() {
         let current = identity_version();
         assert_eq!(stale_mutating_client_binary(None), None);
@@ -17727,6 +17809,82 @@ mod tests {
         assert_eq!(resp.document_hash, "docwire-on");
         // Folded ⇒ the per-channel ack cursor advanced past the initial 0.
         assert!(resp.ack_through >= 1);
+    }
+
+    #[test]
+    fn state_subscribe_records_only_the_previously_applied_live_peer_cursor() {
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("peer-ack.md");
+        std::fs::write(&file, "# peer ack\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        for (cycle, current) in [("cycle-1", "one"), ("cycle-2", "two")] {
+            let event = realtime_steering_event_for_text(&document_hash, cycle, "", current);
+            append_state_event(&bootstrap.project_root, &event).unwrap();
+        }
+        let runtime = ControllerRuntime::new(bootstrap.clone()).unwrap();
+
+        let registration = agent_doc_reliable_sync_io::liveness::EditorRegistration {
+            document_hash: document_hash.clone(),
+            pid: 100,
+            path: file.to_string_lossy().into_owned(),
+            editor_id: "jetbrains-100-fmgc".to_string(),
+            editor_kind: "jetbrains".to_string(),
+            editor_version: "test".to_string(),
+            capabilities: vec![],
+            timestamp_ms: 1,
+        };
+        {
+            let mut plane = controller_liveness_plane().lock();
+            *plane = agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new();
+            plane.restore_liveness(&[
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                    document_hash: document_hash.clone(),
+                    pid: 100,
+                    tag: "open-fmgc".to_string(),
+                },
+                agent_doc_reliable_sync_io::liveness::LivenessOp::Register(registration),
+            ]);
+        }
+
+        let subscribe = |acked_version| {
+            let mut request = empty_controller_request("state_subscribe");
+            request.file = Some(file.clone());
+            request.generation = Some(0);
+            request.diagnostic_payload = Some(
+                serde_json::json!({
+                    "document_hash": document_hash,
+                    "peer_pid": 100,
+                    "editor_id": "jetbrains-100-fmgc",
+                    "acked_version": acked_version,
+                })
+                .to_string(),
+            );
+            handle_state_subscribe(&runtime, request).unwrap()
+        };
+
+        let delivered = subscribe(0);
+        assert_eq!(delivered.document_version, 2);
+        assert!(
+            !delivered.peer_ack_recorded,
+            "the response being delivered is not acknowledged optimistically"
+        );
+        let acknowledged = subscribe(delivered.document_version);
+        assert!(acknowledged.peer_ack_recorded);
+
+        let conn = agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root).unwrap();
+        let rows = agent_doc_sqlite::state_store::load_state_event_peer_acks_from_db(
+            &conn,
+            &document_hash,
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].acked_version, 2);
+        assert_eq!(rows[0].registration_pid, 100);
+
+        *controller_liveness_plane().lock() =
+            agent_doc_reliable_sync_io::plane::ControllerLivenessPlane::new();
     }
 
     #[test]

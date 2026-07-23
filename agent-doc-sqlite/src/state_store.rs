@@ -320,10 +320,26 @@ pub struct StateEventStatus {
     pub sequence: u64,
     pub event_id: String,
     pub document_hash: String,
+    pub document_version: u64,
     pub domain: String,
     pub fact_type: String,
     pub payload_json: String,
     pub timestamp: u64,
+}
+
+/// One editor replica's durable replay acknowledgement for a document.
+///
+/// `peer_key` is derived from the PID-scoped editor registration rather than
+/// supplied by the caller, so two editor processes (or two generations of one
+/// editor identity) cannot overwrite each other's cursor.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StateEventPeerAck {
+    pub document_hash: String,
+    pub peer_key: String,
+    pub registration_pid: u64,
+    pub editor_id: String,
+    pub acked_version: u64,
+    pub acknowledged_at_secs: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -662,6 +678,19 @@ CREATE TABLE IF NOT EXISTS editor_op_captures (
             timestamp INTEGER NOT NULL,
             document_version INTEGER NOT NULL DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS state_event_peer_acks (
+            document_hash TEXT NOT NULL,
+            peer_key TEXT NOT NULL,
+            registration_pid INTEGER NOT NULL,
+            editor_id TEXT NOT NULL,
+            acked_version INTEGER NOT NULL DEFAULT 0,
+            acknowledged_at_secs INTEGER NOT NULL,
+            PRIMARY KEY (document_hash, peer_key)
+        );
+
+        CREATE INDEX IF NOT EXISTS state_event_peer_acks_document_version
+            ON state_event_peer_acks(document_hash, acked_version);
 
         CREATE TABLE IF NOT EXISTS state_schema_migrations (
             migration_id TEXT PRIMARY KEY,
@@ -2828,12 +2857,15 @@ pub fn load_session_operator_status_from_db(
 
 fn state_event_status_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StateEventStatus> {
     let sequence: i64 = row.get("id")?;
+    let document_version: i64 = row.get("document_version")?;
     let timestamp: i64 = row.get("timestamp")?;
     Ok(StateEventStatus {
         sequence: sqlite_u64(sequence, "state event sequence")
             .map_err(|_| rusqlite::Error::InvalidQuery)?,
         event_id: row.get("event_id")?,
         document_hash: row.get("document_hash")?,
+        document_version: sqlite_u64(document_version, "state event document version")
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
         domain: row.get("domain")?,
         fact_type: row.get("fact_type")?,
         payload_json: row.get("payload_json")?,
@@ -2850,7 +2882,7 @@ pub fn load_state_events_from_db(
     if let Some(document_hash) = document_hash {
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, event_id, document_hash, domain, fact_type, payload_json, timestamp
+            SELECT id, event_id, document_hash, document_version, domain, fact_type, payload_json, timestamp
             FROM state_events
             WHERE document_hash = ?1
             ORDER BY id
@@ -2862,7 +2894,7 @@ pub fn load_state_events_from_db(
     } else {
         let mut stmt = conn.prepare(
             r#"
-            SELECT id, event_id, document_hash, domain, fact_type, payload_json, timestamp
+            SELECT id, event_id, document_hash, document_version, domain, fact_type, payload_json, timestamp
             FROM state_events
             ORDER BY id
             "#,
@@ -2872,6 +2904,163 @@ pub fn load_state_events_from_db(
         }
     }
     Ok(events)
+}
+
+/// Stable key for the PID-scoped editor registration that owns a replay cursor.
+///
+/// The decimal PID is terminated by a delimiter, so arbitrary editor ids remain
+/// collision-free without constraining their existing wire vocabulary.
+pub fn state_event_peer_key(registration_pid: u64, editor_id: &str) -> String {
+    format!("pid:{registration_pid}:editor:{editor_id}")
+}
+
+/// The highest durable version assigned to `document_hash`.
+///
+/// This is intentionally distinct from the Lazily projection epoch: retention
+/// may remove old ledger rows, while `document_version` never renumbers.
+pub fn state_event_document_high_water_in_db(
+    conn: &Connection,
+    document_hash: &str,
+) -> Result<u64> {
+    let high_water: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(document_version), 0) \
+         FROM state_events WHERE document_hash = ?1",
+        [document_hash],
+        |row| row.get(0),
+    )?;
+    sqlite_u64(high_water, "state event document high-water")
+}
+
+/// Advance one registered editor peer's replay acknowledgement monotonically.
+///
+/// Future acknowledgements are rejected instead of clamped: accepting a cursor
+/// the controller never issued would make a later delete-below-watermark unsafe.
+/// Retention deliberately does not consult this table yet (`#fmgc` phase 1).
+pub fn record_state_event_peer_ack_in_db(
+    conn: &Connection,
+    document_hash: &str,
+    registration_pid: u64,
+    editor_id: &str,
+    acked_version: u64,
+) -> Result<StateEventPeerAck> {
+    anyhow::ensure!(
+        !document_hash.is_empty(),
+        "state-event peer ack requires a document hash"
+    );
+    anyhow::ensure!(
+        !editor_id.is_empty(),
+        "state-event peer ack requires an editor id"
+    );
+    let high_water = state_event_document_high_water_in_db(conn, document_hash)?;
+    anyhow::ensure!(
+        acked_version <= high_water,
+        "state-event peer ack {acked_version} exceeds document high-water {high_water}"
+    );
+
+    let peer_key = state_event_peer_key(registration_pid, editor_id);
+    let acknowledged_at_secs = timestamp_secs();
+    conn.execute(
+        r#"
+        INSERT INTO state_event_peer_acks (
+            document_hash,
+            peer_key,
+            registration_pid,
+            editor_id,
+            acked_version,
+            acknowledged_at_secs
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        ON CONFLICT(document_hash, peer_key) DO UPDATE SET
+            registration_pid = excluded.registration_pid,
+            editor_id = excluded.editor_id,
+            acked_version = excluded.acked_version,
+            acknowledged_at_secs = excluded.acknowledged_at_secs
+        WHERE excluded.acked_version > state_event_peer_acks.acked_version
+        "#,
+        params![
+            document_hash,
+            peer_key,
+            sqlite_i64(registration_pid, "state-event peer pid")?,
+            editor_id,
+            sqlite_i64(acked_version, "state-event peer ack")?,
+            sqlite_i64(acknowledged_at_secs, "state-event peer ack timestamp")?,
+        ],
+    )?;
+
+    conn.query_row(
+        r#"
+        SELECT
+            document_hash,
+            peer_key,
+            registration_pid,
+            editor_id,
+            acked_version,
+            acknowledged_at_secs
+        FROM state_event_peer_acks
+        WHERE document_hash = ?1 AND peer_key = ?2
+        "#,
+        params![document_hash, peer_key],
+        |row| {
+            let registration_pid: i64 = row.get(2)?;
+            let acked_version: i64 = row.get(4)?;
+            let acknowledged_at_secs: i64 = row.get(5)?;
+            Ok(StateEventPeerAck {
+                document_hash: row.get(0)?,
+                peer_key: row.get(1)?,
+                registration_pid: sqlite_u64(registration_pid, "state-event peer pid")
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                editor_id: row.get(3)?,
+                acked_version: sqlite_u64(acked_version, "state-event peer ack")
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                acknowledged_at_secs: sqlite_u64(
+                    acknowledged_at_secs,
+                    "state-event peer ack timestamp",
+                )
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            })
+        },
+    )
+    .context("load recorded state-event peer ack")
+}
+
+pub fn load_state_event_peer_acks_from_db(
+    conn: &Connection,
+    document_hash: &str,
+) -> Result<Vec<StateEventPeerAck>> {
+    let mut stmt = conn.prepare(
+        r#"
+        SELECT
+            document_hash,
+            peer_key,
+            registration_pid,
+            editor_id,
+            acked_version,
+            acknowledged_at_secs
+        FROM state_event_peer_acks
+        WHERE document_hash = ?1
+        ORDER BY peer_key
+        "#,
+    )?;
+    let rows = stmt.query_map([document_hash], |row| {
+        let registration_pid: i64 = row.get(2)?;
+        let acked_version: i64 = row.get(4)?;
+        let acknowledged_at_secs: i64 = row.get(5)?;
+        Ok(StateEventPeerAck {
+            document_hash: row.get(0)?,
+            peer_key: row.get(1)?,
+            registration_pid: sqlite_u64(registration_pid, "state-event peer pid")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            editor_id: row.get(3)?,
+            acked_version: sqlite_u64(acked_version, "state-event peer ack")
+                .map_err(|_| rusqlite::Error::InvalidQuery)?,
+            acknowledged_at_secs: sqlite_u64(
+                acknowledged_at_secs,
+                "state-event peer ack timestamp",
+            )
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
+        })
+    })?;
+    Ok(rows.collect::<std::result::Result<_, _>>()?)
 }
 
 /// Load the durable facts consumed by cycle closeout and proof projections.
@@ -2887,7 +3076,7 @@ pub fn load_state_events_for_cycle_projection_from_db(
 ) -> Result<Vec<StateEventStatus>> {
     let mut stmt = conn.prepare(
         r#"
-        SELECT id, event_id, document_hash, domain, fact_type, payload_json, timestamp
+        SELECT id, event_id, document_hash, document_version, domain, fact_type, payload_json, timestamp
         FROM state_events
         WHERE document_hash = ?1
           AND fact_type <> 'document_authority_observed'
@@ -2915,7 +3104,7 @@ pub fn load_recent_state_events_by_fact_type_from_db(
     let limit = i64::try_from(limit.max(1)).context("state event history limit too large")?;
     let mut stmt = conn.prepare(
         r#"
-        SELECT id, event_id, document_hash, domain, fact_type, payload_json, timestamp
+            SELECT id, event_id, document_hash, document_version, domain, fact_type, payload_json, timestamp
         FROM state_events
         WHERE document_hash = ?1
           AND fact_type = ?2
@@ -5189,6 +5378,146 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(highest, 3, "an ignored duplicate does not burn a version");
+        Ok(())
+    }
+
+    /// `#fmgc`: upgrading an existing state ledger creates the per-peer ack
+    /// table additively. Existing events and their retention behavior are not
+    /// rewritten as part of the schema change.
+    #[test]
+    fn peer_ack_table_is_added_to_an_existing_state_ledger() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        std::fs::create_dir_all(dir.path().join(".agent-doc"))?;
+        let legacy = Connection::open(state_db_path(dir.path()))?;
+        legacy.execute_batch(
+            r#"
+            CREATE TABLE state_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                document_hash TEXT NOT NULL,
+                domain TEXT NOT NULL,
+                fact_type TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                document_version INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO state_events (
+                event_id, document_hash, domain, fact_type, payload_json, timestamp, document_version
+            ) VALUES ('legacy-event', 'docA', 'document', 'write_applied', '{}', 1, 1);
+            "#,
+        )?;
+        drop(legacy);
+
+        let conn = open_state_db(dir.path())?;
+        let table_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master \
+             WHERE type = 'table' AND name = 'state_event_peer_acks')",
+            [],
+            |row| row.get(0),
+        )?;
+        assert!(table_exists, "legacy database gains the additive ack table");
+        let existing: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM state_events WHERE event_id = 'legacy-event'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(existing, 1, "schema migration preserves existing events");
+        Ok(())
+    }
+
+    /// `#fmgc`: acknowledgements are independent per PID-scoped editor
+    /// registration and can only advance. A late/stale writer must never move
+    /// the cursor backwards.
+    #[test]
+    fn peer_acknowledgements_advance_monotonically_and_independently() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        for event_id in ["a-1", "a-2", "a-3"] {
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id,
+                    document_hash: "docA",
+                    domain: "document",
+                    fact_type: "write_applied",
+                    payload_json: "{}",
+                },
+            )?;
+        }
+
+        let first = record_state_event_peer_ack_in_db(&conn, "docA", 101, "jetbrains-101-a", 1)?;
+        let second = record_state_event_peer_ack_in_db(&conn, "docA", 202, "vscode-202-b", 2)?;
+        let stale = record_state_event_peer_ack_in_db(&conn, "docA", 101, "jetbrains-101-a", 0)?;
+        assert_eq!(first.acked_version, 1);
+        assert_eq!(second.acked_version, 2);
+        assert_eq!(
+            stale.acked_version, 1,
+            "a stale acknowledgement cannot regress its peer"
+        );
+        assert_ne!(
+            first.peer_key, second.peer_key,
+            "PID-scoped registrations own independent rows"
+        );
+
+        let rows = load_state_event_peer_acks_from_db(&conn, "docA")?;
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows.iter()
+                .map(|row| (row.registration_pid, row.acked_version))
+                .collect::<BTreeMap<_, _>>(),
+            BTreeMap::from([(101, 1), (202, 2)])
+        );
+
+        let future = record_state_event_peer_ack_in_db(&conn, "docA", 101, "jetbrains-101-a", 4);
+        assert!(
+            future
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds document high-water 3"),
+            "a peer cannot acknowledge a version the controller never issued"
+        );
+        Ok(())
+    }
+
+    /// `#fmgc`: the ack ledger is collection-only in this phase. Existing count
+    /// caps remain the retention backstop until the live-peer minimum and
+    /// liveness-eviction phase lands.
+    #[test]
+    fn peer_ack_table_does_not_change_existing_count_cap_retention() -> Result<()> {
+        let dir = tempfile::TempDir::new()?;
+        let conn = open_state_db(dir.path())?;
+        for event_id in ["capture-1", "capture-2", "capture-3"] {
+            insert_state_event_in_db(
+                &conn,
+                &StateEventInsert {
+                    event_id,
+                    document_hash: "docA",
+                    domain: "closeout",
+                    fact_type: "response_captured",
+                    payload_json: "{}",
+                },
+            )?;
+        }
+        record_state_event_peer_ack_in_db(&conn, "docA", 101, "jetbrains-101-a", 1)?;
+
+        prune_superseding_fact_to(&conn, "response_captured", 1)?;
+        let remaining: Vec<String> = conn
+            .prepare(
+                "SELECT event_id FROM state_events \
+                 WHERE document_hash = 'docA' AND fact_type = 'response_captured' ORDER BY id",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        assert_eq!(
+            remaining,
+            vec!["capture-3".to_string()],
+            "count-cap retention remains active and does not consult peer acks yet"
+        );
+        assert_eq!(
+            load_state_event_peer_acks_from_db(&conn, "docA")?[0].acked_version,
+            1,
+            "retention does not rewrite the acknowledgement ledger"
+        );
         Ok(())
     }
 

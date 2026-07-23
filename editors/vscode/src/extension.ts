@@ -400,6 +400,11 @@ let turnStatusRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 let turnStatusLastRefreshMs = 0;
 let turnStatusRefreshSeq = 0;
 const turnStatusMirrors = new Map<string, InstanceType<typeof stateMirror.GraphView>>();
+// Durable state-event versions successfully folded by this peer. Each value is
+// reported on the NEXT subscription, so delivery without a successful apply is
+// never acknowledged.
+const turnStatusAppliedDocumentVersions = new Map<string, number>();
+const turnStatusRecordedDocumentVersions = new Map<string, number>();
 
 function activeAgentDocProjectRoot(): string | undefined {
     const editor = vscode.window.activeTextEditor;
@@ -414,6 +419,8 @@ function disposeTurnStatusWatcher(): void {
     if (turnStatusRefreshTimer) clearTimeout(turnStatusRefreshTimer);
     turnStatusRefreshTimer = undefined;
     turnStatusMirrors.clear();
+    turnStatusAppliedDocumentVersions.clear();
+    turnStatusRecordedDocumentVersions.clear();
 }
 
 function configureTurnStatusWatcher(): void {
@@ -457,6 +464,9 @@ async function turnProjectionFromProjectController(
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TURN_STATUS_PROJECT_CONTROLLER_TIMEOUT_MS);
+    const appliedVersion = turnStatusAppliedDocumentVersions.get(docHash) ?? 0;
+    const recordedVersion = turnStatusRecordedDocumentVersions.get(docHash) ?? 0;
+    const pendingAck = appliedVersion > recordedVersion ? appliedVersion : 0;
     try {
         const data = await requestProjectController(
             projectRoot,
@@ -464,7 +474,12 @@ async function turnProjectionFromProjectController(
                 command: 'state_subscribe',
                 file: filePath,
                 generation: mirror.isInitialized ? mirror.epoch : 0,
-                diagnostic_payload: JSON.stringify({ document_hash: docHash }),
+                diagnostic_payload: JSON.stringify({
+                    document_hash: docHash,
+                    peer_pid: process.pid,
+                    editor_id: EDITOR_ID,
+                    acked_version: pendingAck,
+                }),
             },
             controller.signal,
         );
@@ -475,9 +490,23 @@ async function turnProjectionFromProjectController(
         if (data?.document_hash && data.document_hash !== docHash) {
             throw new Error('Project Controller returned state for a different document');
         }
+        if (data?.peer_ack_recorded === true && pendingAck > 0) {
+            turnStatusRecordedDocumentVersions.set(
+                docHash,
+                Math.max(recordedVersion, pendingAck),
+            );
+        }
         if (!stateMirror.applyIpcMessageToView(mirror, JSON.stringify(message))) {
             throw new Error('Project Controller state_subscribe message did not apply');
         }
+        if (typeof data?.document_version !== 'number') {
+            throw new Error('Project Controller state_subscribe response missing document_version');
+        }
+        const previousVersion = turnStatusAppliedDocumentVersions.get(docHash) ?? 0;
+        turnStatusAppliedDocumentVersions.set(
+            docHash,
+            Math.max(previousVersion, data.document_version),
+        );
         return stateMirror.agentDocTurnProjectionFromView(mirror);
     } finally {
         clearTimeout(timer);

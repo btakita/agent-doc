@@ -32,6 +32,8 @@ internal data class CpTmuxLayoutSyncState(
 internal data class ProjectControllerStateSubscribeResult(
     val documentHash: String,
     val messageJson: String,
+    val documentVersion: Long,
+    val peerAckRecorded: Boolean,
 )
 
 /**
@@ -213,6 +215,7 @@ internal object CpRouteClient {
         filePath: String,
         documentHash: String,
         lastEpoch: Long,
+        ackedVersion: Long,
     ): ProjectControllerStateSubscribeResult {
         val socket = cpcSocket(projectRoot)
         val request = JsonObject().also {
@@ -223,6 +226,9 @@ internal object CpRouteClient {
                 "diagnostic_payload",
                 JsonObject().also { payload ->
                     payload.addProperty("document_hash", documentHash)
+                    payload.addProperty("peer_pid", ProcessHandle.current().pid())
+                    payload.addProperty("editor_id", EditorIdentity.id)
+                    payload.addProperty("acked_version", ackedVersion)
                 }.toString(),
             )
         }
@@ -230,7 +236,14 @@ internal object CpRouteClient {
         val returnedHash = data.get("document_hash")?.asString ?: documentHash
         val message = data.get("message")
             ?: throw IllegalStateException("Project Controller state_subscribe response missing message")
-        return ProjectControllerStateSubscribeResult(returnedHash, message.toString())
+        val documentVersion = data.get("document_version")?.asLong
+            ?: throw IllegalStateException("Project Controller state_subscribe response missing document_version")
+        return ProjectControllerStateSubscribeResult(
+            returnedHash,
+            message.toString(),
+            documentVersion,
+            data.get("peer_ack_recorded")?.asBoolean ?: false,
+        )
     }
 
     // The `agent-doc.editor_route.v1` payload the controller consumes, shared by

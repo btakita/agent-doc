@@ -67,6 +67,10 @@ describe('editor UI thread budget', () => {
         assert.ok(source.includes('configureTurnStatusWatcher()'));
         assert.ok(source.includes('TURN_STATUS_MIN_REFRESH_INTERVAL_MS'));
         assert.ok(source.includes("command: 'state_subscribe'"));
+        assert.ok(source.includes('acked_version: pendingAck'));
+        assert.ok(source.includes('data?.peer_ack_recorded === true && pendingAck > 0'));
+        assert.ok(source.includes("typeof data?.document_version !== 'number'"));
+        assert.ok(source.includes('Math.max(previousVersion, data.document_version)'));
         assert.ok(source.includes('turnProjectionFromProjectController'));
         assert.ok(source.includes('Project Controller disconnected'));
         assert.ok(source.includes('async function refreshTurnStatusNow('));

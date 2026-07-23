@@ -68,7 +68,18 @@ Regression proof: the new app-level server-render test first failed because the 
 Confidence is high; no implementation escalation or follow-up work is needed.
 
 Editor-delivery warning from preflight: the live JetBrains plugin is 0.2.283 while the installed agent-doc binary expects 0.2.285. Update the plugin package and restart/reload the IDE host before relying on its delivery acknowledgements.
-<!-- agent:boundary:0305e520 -->
+❯ 🚧 Try again
+
+### Re: closeout retry — gpt-5
+
+Retried the guarded document closeout.
+
+- The earlier `agent-doc commit` completed, and its session check correctly stopped when it detected this newer “Try again” prompt.
+- The current JetBrains plugin is now 0.2.285, matching the agent-doc binary; the previous stale-plugin warning is superseded.
+- No implementation files changed during this retry. The date-selector fix remains in the `src/mag7-viewer` working tree.
+- Verification remains the completed `make check` run: 35 backend tests, mypy, 94 frontend tests, TypeScript typecheck, production build, and clean `git diff --check`.
+- Confidence is high. No escalation or follow-up work is needed.
+<!-- agent:boundary:f21b163b -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -3210,11 +3210,17 @@ mod tests {
         // spawns a fresh harness and must update the harness identity reported to the
         // authoritative actor record via IPC `state` IMMEDIATELY, so route stops
         // emitting a stale harness-mismatch defer keyed off the old harness.
-        use agent_doc_supervisor_io::ipc::SupervisorInjectDeliveryState;
+        use agent_doc_supervisor_io::ipc::{
+            SupervisorInjectDeliveryState, supervisor_ipc_state_snapshot,
+        };
         let shared = SupervisorShared::new("test", "test-instance".to_string());
         // `new` defaults to the claude harness; pretend the live child launched codex.
         shared.set_current_harness("codex");
         assert_eq!(shared.current_harness(), "codex");
+        assert_eq!(
+            supervisor_ipc_state_snapshot(&shared).current_harness,
+            "codex"
+        );
         assert_eq!(
             SupervisorInjectDeliveryState::harness_binary(&shared),
             "codex"
@@ -3222,6 +3228,10 @@ mod tests {
         // Operator switches `agent:` back to claude → fresh spawn writes it back.
         shared.set_current_harness("claude");
         assert_eq!(shared.current_harness(), "claude");
+        assert_eq!(
+            supervisor_ipc_state_snapshot(&shared).current_harness,
+            "claude"
+        );
         // IPC `state` and the tmux submit profile see the switch immediately.
         assert_eq!(
             SupervisorInjectDeliveryState::harness_binary(&shared),

@@ -945,9 +945,8 @@ impl SimWorld {
     /// - When `agent_change_restart` is DISABLED the defer would never self-heal, so
     ///   route bails EXPLICITLY (`action=bail_restart_disabled`) rather than handing
     ///   back a `restart-supervisor` recovery hint that will not switch harnesses.
-    /// - Otherwise it bails with the operator-actionable defer message, carrying the
-    ///   paused/stuck `restart-supervisor` recovery suffix when the boundary restart
-    ///   cannot fire yet (no silent drop of the switch).
+    /// - Otherwise it accepts a non-dispatchable boundary handoff. A paused queue
+    ///   holds that handoff for resume; no manual supervisor restart is required.
     fn dispatch_route_after_harness_switch(&mut self) {
         let pending_switch = !self.recycle_clear.frontmatter_harness.is_empty()
             && self.recycle_clear.frontmatter_harness != self.recycle_clear.launch_harness;
@@ -971,10 +970,6 @@ impl SimWorld {
 
         let old = self.recycle_clear.launch_harness.clone();
         let new = self.recycle_clear.frontmatter_harness.clone();
-        // The switch is DEFERRED, never a live-pane replacement.
-        self.coverage.actor_switch_route_defers += 1;
-        self.coverage.route_dispatch_acceptances += 0; // no dispatch acceptance on a defer
-
         if !self.recycle_clear.agent_change_restart_enabled {
             // Part B explicit disabled-bail: the defer would never self-heal.
             self.coverage.actor_switch_restart_disabled_bails += 1;
@@ -984,23 +979,30 @@ impl SimWorld {
             return;
         }
 
-        // The pane is paused / not at a dispatch-ready boundary while a turn is in
-        // flight or the queue is paused — the boundary restart cannot fire yet, so
-        // the bail must carry the `restart-supervisor` recovery suffix and the switch
-        // must be held pending (no silent drop).
+        // The route itself is accepted as a boundary handoff, but no prompt is
+        // accepted by the old harness. The fresh-spawn path auto-triggers the
+        // document after the switch.
+        self.coverage.actor_switch_route_handoffs_accepted += 1;
+        self.coverage.route_dispatch_acceptances += 0;
+
+        // An active turn or paused queue cannot reach the boundary yet. Preserve the
+        // accepted handoff without injecting the old harness; a pause names resume
+        // as the exact prerequisite.
         let queue_paused = matches!(self.route.queue_control, QueueControlState::Paused);
         let turn_active = matches!(
             self.route.durable.lifecycle,
             SupervisorLifecycle::Busy | SupervisorLifecycle::WaitingInput
         );
         if queue_paused || turn_active {
-            self.coverage.actor_switch_defer_bail_recoveries += 1;
+            if queue_paused {
+                self.coverage.actor_switch_queue_resume_holds += 1;
+            }
             self.record_ops_proof(format!(
-                "route_authoritative_actor_harness_mismatch_deferred stored_harness={old} expected_harness={new} queue_paused={queue_paused} action=defer_to_boundary_restart recovery=agent-doc_session_restart-supervisor"
+                "route_harness_switch_handoff_accepted stored_harness={old} expected_harness={new} queue_paused={queue_paused} turn_active={turn_active} action=accepted_boundary_handoff prerequisite=resume_queue_if_paused dispatch_old_harness=false auto_trigger=new_harness"
             ));
         } else {
             self.record_ops_proof(format!(
-                "route_authoritative_actor_harness_mismatch_deferred stored_harness={old} expected_harness={new} action=defer_to_boundary_restart recovery=agent-doc_session_restart-supervisor"
+                "route_harness_switch_handoff_accepted stored_harness={old} expected_harness={new} action=accepted_boundary_handoff dispatch_old_harness=false auto_trigger=new_harness"
             ));
         }
     }
@@ -1131,9 +1133,9 @@ impl SimWorld {
         let stored =
             agent_doc_harness::normalize_harness_name(&self.recycle_clear.persisted_actor_harness);
         if !stored.is_empty() && stored != "default" && stored != expected {
-            self.coverage.actor_switch_route_defers += 1;
+            self.coverage.actor_switch_route_handoffs_accepted += 1;
             self.record_ops_proof(format!(
-                "route_authoritative_actor_harness_mismatch_deferred stored_harness={stored} expected_harness={expected} action=defer_to_boundary_restart recovery=agent-doc_session_restart-supervisor"
+                "route_harness_switch_handoff_accepted stored_harness={stored} expected_harness={expected} action=accepted_boundary_handoff dispatch_old_harness=false auto_trigger=new_harness"
             ));
             return;
         }

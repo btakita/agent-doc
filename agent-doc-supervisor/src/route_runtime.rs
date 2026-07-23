@@ -62,6 +62,10 @@ impl SupervisorHealth {
 pub struct SupervisorRuntime {
     pub health: SupervisorHealth,
     pub actor_state: Option<RouteActorState>,
+    /// Current harness identity reported by the live supervisor. This is
+    /// independent of the persisted actor record and lets route distinguish a
+    /// pending switch from a completed switch whose writeback lagged.
+    pub current_harness: Option<String>,
 }
 
 impl SupervisorRuntime {
@@ -255,12 +259,14 @@ mod tests {
         let healthy = SupervisorRuntime {
             health: SupervisorHealth::Healthy,
             actor_state: Some(RouteActorState::Ready),
+            current_harness: None,
         };
         assert!(authoritative_actor_dispatch_target_eligible(&healthy));
 
         let degraded = SupervisorRuntime {
             health: SupervisorHealth::NoSocket,
             actor_state: None,
+            current_harness: None,
         };
         assert_eq!(
             authoritative_actor_dispatch_guard_reason(degraded.facts()).as_deref(),
@@ -270,6 +276,7 @@ mod tests {
         let missing_state = SupervisorRuntime {
             health: SupervisorHealth::Healthy,
             actor_state: None,
+            current_harness: None,
         };
         assert_eq!(
             authoritative_actor_dispatch_guard_reason(missing_state.facts()).as_deref(),
@@ -282,6 +289,7 @@ mod tests {
         let healthy_ready = SupervisorRuntime {
             health: SupervisorHealth::Healthy,
             actor_state: Some(RouteActorState::Ready),
+            current_harness: None,
         };
         assert!(
             !mismatched_authoritative_actor_can_be_replaced(&healthy_ready, RouteActorState::Ready),
@@ -291,6 +299,7 @@ mod tests {
         let healthy_closed = SupervisorRuntime {
             health: SupervisorHealth::Healthy,
             actor_state: Some(RouteActorState::Closed),
+            current_harness: None,
         };
         assert!(
             mismatched_authoritative_actor_can_be_replaced(
@@ -303,6 +312,7 @@ mod tests {
         let unreachable = SupervisorRuntime {
             health: SupervisorHealth::Unreachable,
             actor_state: None,
+            current_harness: None,
         };
         assert!(
             mismatched_authoritative_actor_can_be_replaced(&unreachable, RouteActorState::Ready),
@@ -430,13 +440,14 @@ mod tests {
         let command = "agent-doc session restart-supervisor doc.md";
 
         for state in [RouteActorState::Busy, RouteActorState::Starting] {
-            let hint = defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
-                supervisor_health: SupervisorHealth::Healthy,
-                actor_state: state,
-                queue_paused: false,
-                restart_in_flight: true,
-                recovery_command: command,
-            });
+            let hint =
+                defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
+                    supervisor_health: SupervisorHealth::Healthy,
+                    actor_state: state,
+                    queue_paused: false,
+                    restart_in_flight: true,
+                    recovery_command: command,
+                });
             assert!(
                 hint.contains("already in flight"),
                 "expected wait-for-boundary guidance, got: {hint}"
@@ -489,12 +500,7 @@ mod tests {
             );
         }
         // Reasons that mean a real turn is running — the operator IS blocked.
-        for reason in [
-            "auto_trigger_inject",
-            "dispatch_submit",
-            "prompt_ready",
-            "",
-        ] {
+        for reason in ["auto_trigger_inject", "dispatch_submit", "prompt_ready", ""] {
             assert!(
                 !actor_busy_is_self_induced_restart(reason),
                 "{reason} must not be mistaken for a self-induced restart"

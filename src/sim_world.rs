@@ -3480,11 +3480,10 @@ struct Coverage {
     /// active `exchange` area auto-resolved operator-wins with NO ack noise, while
     /// the identical conflict INSIDE the active area raised an ack.
     document_cell_merge_scope_gated_acks: usize,
-    /// `#actorswitchdefer`: a `route` harness-switch (e.g. codex→opencode) found a
-    /// healthy old-harness authoritative actor and DEFERRED to the boundary restart
-    /// (`mismatched_authoritative_actor_can_be_replaced == false`) instead of
-    /// replacing the live pane.
-    actor_switch_route_defers: usize,
+    /// `#harnesshotrebind`: a route harness-switch found a healthy old-harness
+    /// authority and accepted a non-dispatchable boundary handoff instead of
+    /// replacing or injecting the live pane.
+    actor_switch_route_handoffs_accepted: usize,
     /// `#actorswitchdefer`: the supervisor idle-watch detected the frontmatter
     /// harness change (`harness_change_detected`).
     actor_switch_changes_detected: usize,
@@ -3494,10 +3493,9 @@ struct Coverage {
     /// `#actorswitchdefer`: the supervisor respawned the new harness fresh
     /// (`agent_restart_performed`), completing the deferred switch.
     actor_switch_restarts_performed: usize,
-    /// `#actorswitchdefer`: a paused/stuck supervisor could not reach the restart
-    /// boundary, so the idle-watch held the deferred switch pending (no silent drop)
-    /// and the route bail carried the `restart-supervisor` recovery suffix.
-    actor_switch_defer_bail_recoveries: usize,
+    /// `#harnesshotrebind`: a paused supervisor held an accepted handoff pending
+    /// with queue resume — not manual restart — as the exact prerequisite.
+    actor_switch_queue_resume_holds: usize,
     /// `#actorswitchdefer` Part B: route bailed EXPLICITLY because
     /// `agent_change_restart` was disabled (the defer would never self-heal).
     actor_switch_restart_disabled_bails: usize,
@@ -3680,13 +3678,13 @@ impl Coverage {
         self.document_cell_merge_operator_wins += other.document_cell_merge_operator_wins;
         self.document_cell_merge_delete_acks += other.document_cell_merge_delete_acks;
         self.document_cell_merge_scope_gated_acks += other.document_cell_merge_scope_gated_acks;
-        self.actor_switch_route_defers += other.actor_switch_route_defers;
+        self.actor_switch_route_handoffs_accepted += other.actor_switch_route_handoffs_accepted;
         self.actor_switch_changes_detected += other.actor_switch_changes_detected;
         self.actor_switch_restarts_triggered += other.actor_switch_restarts_triggered;
         self.actor_switch_restarts_performed += other.actor_switch_restarts_performed;
         self.actor_harness_record_writebacks += other.actor_harness_record_writebacks;
         self.actor_switch_post_restart_dispatches += other.actor_switch_post_restart_dispatches;
-        self.actor_switch_defer_bail_recoveries += other.actor_switch_defer_bail_recoveries;
+        self.actor_switch_queue_resume_holds += other.actor_switch_queue_resume_holds;
         self.actor_switch_restart_disabled_bails += other.actor_switch_restart_disabled_bails;
         self.supervisor_deaths += other.supervisor_deaths;
         self.dead_supervisor_cold_starts += other.dead_supervisor_cold_starts;
@@ -4779,8 +4777,8 @@ fn route_sim_harness_switch_persists_record_so_post_restart_dispatch_does_not_de
         "a dispatch after the completed switch must be ACCEPTED"
     );
     assert_eq!(
-        world.coverage.actor_switch_route_defers, 0,
-        "route must not defer to a boundary restart that already ran"
+        world.coverage.actor_switch_route_handoffs_accepted, 0,
+        "route must not queue a handoff after the boundary restart already ran"
     );
     let ops_log = world.ops_log.join("\n");
     assert!(
@@ -4827,14 +4825,14 @@ fn route_sim_harness_switch_persists_record_so_post_restart_dispatch_does_not_de
     let stale_log = stale.ops_log.join("\n");
     assert!(
         stale_log.contains(
-            "route_authoritative_actor_harness_mismatch_deferred stored_harness=codex expected_harness=claude-code"
+            "route_harness_switch_handoff_accepted stored_harness=codex expected_harness=claude-code"
         ),
-        "the control must reproduce the exact reported defer marker:\n{stale_log}"
+        "the control must preserve the stale-record handoff marker:\n{stale_log}"
     );
 }
 
 #[test]
-fn route_sim_harness_switch_defers_then_idle_watch_drives_fresh_restart() {
+fn route_sim_harness_switch_accepts_handoff_then_idle_watch_drives_fresh_restart() {
     // `#actorswitchdefer` Part B: the operator switched the doc frontmatter
     // `agent: codex → opencode` while a HEALTHY codex authoritative actor owns the
     // live pane (the sampleportal.md report). Route must DEFER (not replace
@@ -4854,19 +4852,20 @@ fn route_sim_harness_switch_defers_then_idle_watch_drives_fresh_restart() {
         })
         .unwrap();
 
-    // (a) Route DEFERS instead of replacing the live pane.
-    let before_defers = world.coverage.actor_switch_route_defers;
+    // (a) Route accepts a boundary handoff instead of replacing or injecting the
+    // live old-harness pane.
+    let before_handoffs = world.coverage.actor_switch_route_handoffs_accepted;
     world
         .apply(SimCommand::DispatchRouteAfterHarnessSwitch)
         .unwrap();
     assert_eq!(
-        world.coverage.actor_switch_route_defers,
-        before_defers + 1,
-        "a healthy old-harness actor must DEFER, not be replaced"
+        world.coverage.actor_switch_route_handoffs_accepted,
+        before_handoffs + 1,
+        "a healthy old-harness actor must accept a safe handoff, not be replaced"
     );
     assert_eq!(
         world.coverage.route_dispatch_acceptances, 0,
-        "a deferred harness switch must NOT accept a dispatch into the old pane"
+        "an accepted handoff must NOT accept a prompt dispatch into the old pane"
     );
     assert_eq!(
         world.coverage.actor_switch_restart_disabled_bails, 0,
@@ -4874,10 +4873,11 @@ fn route_sim_harness_switch_defers_then_idle_watch_drives_fresh_restart() {
     );
     let ops_log = world.ops_log.join("\n");
     assert!(
-        ops_log.contains("route_authoritative_actor_harness_mismatch_deferred")
-            && ops_log.contains("action=defer_to_boundary_restart")
-            && ops_log.contains("recovery=agent-doc_session_restart-supervisor"),
-        "route defer must log the boundary-restart defer + recovery hint:\n{ops_log}"
+        ops_log.contains("route_harness_switch_handoff_accepted")
+            && ops_log.contains("action=accepted_boundary_handoff")
+            && ops_log.contains("dispatch_old_harness=false")
+            && ops_log.contains("auto_trigger=new_harness"),
+        "route must log the accepted non-dispatchable boundary handoff:\n{ops_log}"
     );
 
     // (b) The supervisor idle-watch drives the restart sequence. At a quiet
@@ -4938,13 +4938,12 @@ fn route_sim_harness_switch_defers_then_idle_watch_drives_fresh_restart() {
 }
 
 #[test]
-fn route_sim_harness_switch_paused_supervisor_holds_pending_no_silent_drop() {
+fn route_sim_harness_switch_paused_supervisor_holds_for_resume_no_restart() {
     // `#actorswitchdefer` Part B regression: this is the dead-end the operator hit —
     // the codex→opencode switch deferred, but the supervisor was PAUSED (stale
     // #rt83/#qflood pause), so the idle-watch could not reach the restart boundary.
-    // The defer must NOT be a silent drop: the route bail carries the
-    // `restart-supervisor` recovery suffix, and the idle-watch DETECTS the change but
-    // HOLDS the switch pending (never triggers a restart into the paused supervisor).
+    // The accepted handoff must NOT be a silent drop: route records queue resume as
+    // the prerequisite, and the idle-watch detects the change but holds it pending.
     let mut world = SimWorld::new(7_102);
     world.apply(SimCommand::BindRouteOwner).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
@@ -4962,23 +4961,24 @@ fn route_sim_harness_switch_paused_supervisor_holds_pending_no_silent_drop() {
         })
         .unwrap();
 
-    // Route still DEFERS (healthy old-harness actor) AND carries the recovery suffix.
+    // Route accepts the handoff and names queue resume as the exact prerequisite.
     world
         .apply(SimCommand::DispatchRouteAfterHarnessSwitch)
         .unwrap();
     assert_eq!(
-        world.coverage.actor_switch_route_defers, 1,
-        "a paused supervisor still defers a healthy old-harness actor"
+        world.coverage.actor_switch_route_handoffs_accepted, 1,
+        "a paused supervisor must retain the accepted live-actor handoff"
     );
     assert_eq!(
-        world.coverage.actor_switch_defer_bail_recoveries, 1,
-        "the paused/stuck defer bail must carry the restart-supervisor recovery suffix"
+        world.coverage.actor_switch_queue_resume_holds, 1,
+        "the paused handoff must be held for queue resume"
     );
     let ops_log = world.ops_log.join("\n");
     assert!(
         ops_log.contains("queue_paused=true")
-            && ops_log.contains("recovery=agent-doc_session_restart-supervisor"),
-        "the paused defer bail must surface the recovery command:\n{ops_log}"
+            && ops_log.contains("prerequisite=resume_queue_if_paused")
+            && !ops_log.contains("restart-supervisor"),
+        "the paused handoff must require resume without prescribing restart:\n{ops_log}"
     );
 
     // The idle-watch ticks repeatedly while paused. It must DETECT the change every
@@ -5004,8 +5004,8 @@ fn route_sim_harness_switch_paused_supervisor_holds_pending_no_silent_drop() {
     // The pending switch is still present in the model — nothing dropped it.
     assert_eq!(world.route.queue_control, QueueControlState::Paused);
 
-    // Operator runs `restart-supervisor` (resume): the boundary reopens and the next
-    // tick drives the held switch through to a fresh restart — the dead-end recovers.
+    // Operator resumes the queue: the boundary reopens and the next tick drives the
+    // held switch through to a fresh restart — no manual supervisor restart.
     world.apply(SimCommand::AdminResumeQueue).unwrap();
     world.apply(SimCommand::SupervisorReady).unwrap();
     world
@@ -5053,16 +5053,16 @@ fn route_sim_harness_switch_disabled_restart_bails_explicitly_no_silent_proceed(
         "a disabled agent_change_restart must take the explicit disabled-bail path"
     );
     assert_eq!(
-        world.coverage.actor_switch_route_defers, 1,
-        "the route still recognizes this as a deferred (not replaced) switch"
+        world.coverage.actor_switch_route_handoffs_accepted, 0,
+        "a disabled automatic switch must not claim an accepted handoff"
     );
     assert_eq!(
         world.coverage.route_dispatch_acceptances, 0,
         "the disabled bail must NOT silently proceed with a dispatch into the old pane"
     );
     assert_eq!(
-        world.coverage.actor_switch_defer_bail_recoveries, 0,
-        "the disabled bail must NOT hand back the self-heal restart-supervisor suffix"
+        world.coverage.actor_switch_queue_resume_holds, 0,
+        "the disabled bail must not claim a queue-resume hold"
     );
     let ops_log = world.ops_log.join("\n");
     assert!(

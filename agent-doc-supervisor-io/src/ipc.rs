@@ -143,6 +143,7 @@ pub struct SupervisorIpcStateSnapshot {
     pub actor_session_id: Option<String>,
     pub actor_pane_id: Option<String>,
     pub actor_generation: Option<u64>,
+    pub current_harness: String,
     pub editor_sync: Option<serde_json::Value>,
     pub restart_count: u32,
     pub cwd_source: &'static str,
@@ -158,6 +159,7 @@ pub trait SupervisorIpcSnapshotState {
     fn actor_session_id(&self) -> Option<String>;
     fn actor_pane_id(&self) -> Option<String>;
     fn actor_generation(&self) -> Option<u64>;
+    fn current_harness(&self) -> String;
     fn actor_file(&self) -> Option<String>;
     /// Lazily current-authority facts supplied by the runtime layer that owns
     /// the editor/controller dependency. Keeping this seam on the state
@@ -182,6 +184,7 @@ where
         actor_session_id: state.actor_session_id(),
         actor_pane_id: state.actor_pane_id(),
         actor_generation: state.actor_generation(),
+        current_harness: state.current_harness(),
         editor_sync,
         restart_count: state.restart_count(),
         cwd_source: state.cwd_source(),
@@ -383,6 +386,7 @@ where
                 "actor_session_id": snapshot.actor_session_id,
                 "actor_pane_id": snapshot.actor_pane_id,
                 "actor_generation": snapshot.actor_generation,
+                "current_harness": snapshot.current_harness,
                 "editor_sync": snapshot.editor_sync,
                 "restart_count": snapshot.restart_count,
                 "cwd_source": snapshot.cwd_source,

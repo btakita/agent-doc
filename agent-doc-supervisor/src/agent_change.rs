@@ -14,6 +14,49 @@ pub enum AgentChangeRestartAction {
     WaitForBoundary,
 }
 
+/// Route-time policy for an explicit frontmatter harness change while the old
+/// harness still owns a healthy live actor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentChangeRouteAction {
+    /// Accept the route as a pending handoff. The existing idle-watch boundary
+    /// restart owns the eventual fresh spawn and document auto-trigger.
+    AcceptBoundaryHandoff,
+    /// Preserve the handoff, but require the operator-owned queue pause to be
+    /// released before the boundary can run.
+    HoldForQueueResume,
+    /// The automatic handoff is disabled, so accepting it would silently lose
+    /// the requested harness change.
+    RejectRestartDisabled,
+}
+
+impl AgentChangeRouteAction {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::AcceptBoundaryHandoff => "accept_boundary_handoff",
+            Self::HoldForQueueResume => "hold_for_queue_resume",
+            Self::RejectRestartDisabled => "reject_restart_disabled",
+        }
+    }
+}
+
+/// Decide how route should surface a live-authority harness mismatch.
+///
+/// Stale/unhealthy/closed actors are filtered by the route runtime replacement
+/// policy before this function is called. This boundary owns only the healthy
+/// live actor case, where route must never inject the old harness.
+pub const fn agent_change_route_decision(
+    restart_enabled: bool,
+    queue_paused: bool,
+) -> AgentChangeRouteAction {
+    if !restart_enabled {
+        return AgentChangeRouteAction::RejectRestartDisabled;
+    }
+    if queue_paused {
+        return AgentChangeRouteAction::HoldForQueueResume;
+    }
+    AgentChangeRouteAction::AcceptBoundaryHandoff
+}
+
 pub fn agent_change_restart_decision(
     harness_changed: bool,
     knob_on: bool,
@@ -60,6 +103,28 @@ mod tests {
         assert_eq!(
             agent_change_restart_decision(true, true, false, false),
             A::WaitForBoundary
+        );
+    }
+
+    #[test]
+    fn live_route_harness_change_is_accepted_or_held_without_manual_restart() {
+        use AgentChangeRouteAction as A;
+
+        assert_eq!(
+            agent_change_route_decision(true, false),
+            A::AcceptBoundaryHandoff
+        );
+        assert_eq!(
+            agent_change_route_decision(true, true),
+            A::HoldForQueueResume
+        );
+        assert_eq!(
+            agent_change_route_decision(false, false),
+            A::RejectRestartDisabled
+        );
+        assert_eq!(
+            agent_change_route_decision(false, true),
+            A::RejectRestartDisabled
         );
     }
 

@@ -25,10 +25,10 @@ use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
 use tmux_router::Tmux;
 
 use crate::authoritative_actor::{
-    AuthoritativeActorDispatchTarget, RouteDispatchAuthorization, actor_dispatch_state,
-    authoritative_actor_dispatch_recovery_hint, authorize_controller_dispatch,
-    current_generation_ready_prompt_proven, load_authoritative_actor_binding,
-    promote_starting_authoritative_actor_if_dispatch_ready,
+    AuthoritativeActorDispatchTarget, PendingHarnessSwitch, RouteDispatchAuthorization,
+    actor_dispatch_state, authoritative_actor_dispatch_recovery_hint,
+    authorize_controller_dispatch, current_generation_ready_prompt_proven,
+    load_authoritative_actor_binding, promote_starting_authoritative_actor_if_dispatch_ready,
     recover_starting_timeout_blocked_actor_if_dispatch_ready, route_dispatch_deduped_pane,
     wait_for_authoritative_actor_ready,
 };
@@ -88,6 +88,66 @@ fn detect_active_queue_continuation(
     agent_doc_queue_io::queue_continuation::detect_for_content(file, &content)
 }
 
+/// Accept an explicit frontmatter harness change without dispatching into the
+/// still-live old harness. The supervisor idle watch owns the safe-boundary
+/// fresh spawn and its restart loop auto-triggers the document in the new
+/// harness, so route only records/coalesces the handoff here.
+fn accept_pending_harness_switch(
+    tmux: &Tmux,
+    file: &Path,
+    actor: &AuthoritativeActorDispatchTarget,
+    pending: &PendingHarnessSwitch,
+) -> Result<String> {
+    let dispatch_pane = actor.record.pane_id.clone();
+    if let Err(err) = tmux.select_pane(&dispatch_pane) {
+        eprintln!(
+            "[route] warning: failed to focus pending harness handoff pane {}: {}",
+            dispatch_pane, err
+        );
+    }
+    let action = if pending.queue_paused {
+        "accepted_pending_queue_resume"
+    } else if pending.restart_in_flight {
+        "coalesced_restart_in_flight"
+    } else {
+        "accepted_boundary_handoff"
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "route_harness_switch_handoff_accepted file={} pane={} generation={} old_harness={} new_harness={} actor_state={} queue_paused={} restart_in_flight={} action={} dispatch_old_harness=false auto_trigger=new_harness",
+            file.display(),
+            dispatch_pane,
+            actor.record.generation,
+            pending.previous_harness,
+            pending.target_harness,
+            actor.actor_state().as_str(),
+            pending.queue_paused,
+            pending.restart_in_flight,
+            action,
+        ),
+    );
+    let prerequisite = if pending.queue_paused {
+        " Resume the agent-doc queue to release the handoff; no supervisor restart is required."
+    } else if pending.restart_in_flight {
+        " The fresh harness restart is already in flight and this request was coalesced."
+    } else {
+        " The supervisor will preserve any active turn, switch at the next safe boundary, and auto-trigger this document in the new harness."
+    };
+    eprintln!(
+        "[route] accepted live harness handoff for {} on pane {} ({} -> {}).{} {}",
+        file.display(),
+        dispatch_pane,
+        pending.previous_harness,
+        pending.target_harness,
+        prerequisite,
+        agent_doc_flow::outcome::user_outcome_fields(
+            agent_doc_flow::outcome::UserFacingOutcomeKind::QueuedBehindOwner
+        ),
+    );
+    Ok(dispatch_pane)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn route_via_authoritative_actor(
     tmux: &Tmux,
@@ -107,6 +167,9 @@ pub fn route_via_authoritative_actor(
     let mut dispatch_pane = actor.record.pane_id.clone();
     let mut actor_state = actor.actor_state();
     let prompt_bearing_marker = prompt_context.map(|context| context.marker.as_str());
+    if let Some(pending) = actor.pending_harness_switch.as_ref() {
+        return accept_pending_harness_switch(tmux, file, &actor, pending);
+    }
     match drain_open_closeout_before_routed_dispatch(file, effects.closeout_drain_effects)? {
         RouteCloseoutDrainOutcome::NoOpenCycle => {}
         RouteCloseoutDrainOutcome::Recovered(outcome) => {
@@ -121,6 +184,9 @@ pub fn route_via_authoritative_actor(
                 actor = refreshed;
                 dispatch_pane = actor.record.pane_id.clone();
                 actor_state = actor.actor_state();
+                if let Some(pending) = actor.pending_harness_switch.as_ref() {
+                    return accept_pending_harness_switch(tmux, file, &actor, pending);
+                }
             }
         }
         RouteCloseoutDrainOutcome::Blocked(reason) => {
@@ -249,6 +315,9 @@ pub fn route_via_authoritative_actor(
         actor = refreshed;
         dispatch_pane = actor.record.pane_id.clone();
         actor_state = actor.actor_state();
+        if let Some(pending) = actor.pending_harness_switch.as_ref() {
+            return accept_pending_harness_switch(tmux, file, &actor, pending);
+        }
     }
     let has_existing_inactive_queue_fallback = if dispatch_only
         && actor_state == agent_doc_sqlite::state_store::ActorState::Busy
@@ -355,6 +424,9 @@ pub fn route_via_authoritative_actor(
             actor = refreshed;
             dispatch_pane = actor.record.pane_id.clone();
             actor_state = actor.actor_state();
+            if let Some(pending) = actor.pending_harness_switch.as_ref() {
+                return accept_pending_harness_switch(tmux, file, &actor, pending);
+            }
         } else {
             waited_and_timed_out = true;
         }
@@ -441,6 +513,7 @@ pub fn route_via_authoritative_actor(
         let mut refreshed = AuthoritativeActorDispatchTarget {
             record: refreshed_record,
             runtime: refreshed_runtime,
+            pending_harness_switch: None,
         };
         if refreshed.actor_state() == agent_doc_sqlite::state_store::ActorState::Ready {
             agent_doc_ops_log_io::log_op(
@@ -455,6 +528,9 @@ pub fn route_via_authoritative_actor(
             actor = refreshed;
             actor_state = actor.actor_state();
             dispatch_pane = actor.record.pane_id.clone();
+            if let Some(pending) = actor.pending_harness_switch.as_ref() {
+                return accept_pending_harness_switch(tmux, file, &actor, pending);
+            }
         } else if let Some(after_wait) = wait_for_authoritative_actor_ready(
             tmux,
             file,
@@ -476,6 +552,9 @@ pub fn route_via_authoritative_actor(
             actor = after_wait;
             actor_state = actor.actor_state();
             dispatch_pane = actor.record.pane_id.clone();
+            if let Some(pending) = actor.pending_harness_switch.as_ref() {
+                return accept_pending_harness_switch(tmux, file, &actor, pending);
+            }
         } else {
             // Bind the unused refreshed target back so the diagnostic log captures
             // the post-rescue facts even when the wait still failed.

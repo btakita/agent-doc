@@ -23,19 +23,32 @@ use agent_doc_controller_io::starting_actor_timeout::{
 use agent_doc_harness::HarnessConfig;
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_session_registry_io::dispatch_registry::registry_base_dir_for_dispatch;
+use agent_doc_supervisor::agent_change::{AgentChangeRouteAction, agent_change_route_decision};
 use agent_doc_supervisor::route_runtime::{
-    DeferToBoundaryRestartRecoveryFacts, RouteActorState, SupervisorHealth, SupervisorRuntime,
+    RouteActorState, SupervisorHealth, SupervisorRuntime,
     authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible,
-    defer_to_boundary_restart_recovery_hint, effective_authoritative_actor_state,
+    effective_authoritative_actor_state,
 };
 use tmux_router::Tmux;
 
 use crate::supervisor_runtime::{query_supervisor_runtime, restart_via_supervisor};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingHarnessSwitch {
+    pub previous_harness: String,
+    pub target_harness: String,
+    pub queue_paused: bool,
+    pub restart_in_flight: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthoritativeActorDispatchTarget {
     pub record: agent_doc_sqlite::state_store::ActorRecord,
     pub runtime: SupervisorRuntime,
+    /// An explicit frontmatter harness change is waiting for the live
+    /// supervisor's safe boundary. A target carrying this marker may be focused
+    /// but must never receive prompt input from route.
+    pub pending_harness_switch: Option<PendingHarnessSwitch>,
 }
 
 impl AuthoritativeActorDispatchTarget {
@@ -44,6 +57,10 @@ impl AuthoritativeActorDispatchTarget {
             route_actor_state_from_sqlite(self.record.state),
             self.runtime.actor_state,
         ))
+    }
+
+    pub const fn prompt_dispatch_allowed(&self) -> bool {
+        self.pending_harness_switch.is_none()
     }
 }
 
@@ -224,7 +241,7 @@ pub fn load_authoritative_actor_binding(
     }
 
     let base_dir = registry_base_dir_for_dispatch(file_path);
-    let Some(record) =
+    let Some(mut record) =
         agent_doc_controller_io::project_controller::authoritative_actor_binding(&base_dir, file)?
     else {
         return Ok(None);
@@ -253,51 +270,105 @@ pub fn load_authoritative_actor_binding(
         && record_harness != expected_harness
     {
         let runtime = query_supervisor_runtime(file, session_id);
-        let effective_state = effective_authoritative_actor_state(
-            route_actor_state_from_sqlite(record.state),
-            runtime.actor_state,
-        );
-        let frontmatter_harness_changed =
-            document_declares_expected_harness(file, &expected_harness);
-        if agent_doc_supervisor::route_runtime::mismatched_authoritative_actor_can_be_replaced(
-            &runtime,
-            effective_state,
-        ) {
+        let runtime_harness = runtime
+            .current_harness
+            .as_deref()
+            .map(agent_doc_harness::normalize_harness_name);
+        if runtime_harness.as_deref() == Some(expected_harness.as_str()) {
+            // The live supervisor already completed the handoff; only the
+            // persisted actor identity lagged. Repair that projection and keep
+            // routing normally instead of queuing a restart that can never fire
+            // (the runtime already matches frontmatter).
+            agent_doc_session_actor_io::set_record_harness_direct(
+                file,
+                session_id,
+                &record.pane_id,
+                &expected_harness,
+            )?;
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_authoritative_actor_harness_mismatch_stale file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} frontmatter_harness_changed={}",
+                    "route_authoritative_actor_harness_runtime_reconciled file={} pane={} stored_harness={} runtime_harness={} expected_harness={} generation={} action=repair_record_and_dispatch",
                     file.display(),
                     record.pane_id,
                     record.harness,
+                    runtime_harness.as_deref().unwrap_or("unknown"),
                     expected_harness,
                     record.generation,
-                    runtime.health.label(),
-                    effective_state.as_str(),
-                    frontmatter_harness_changed
                 ),
             );
-            return Ok(None);
-        }
-        if frontmatter_harness_changed {
-            let queue_paused =
-                agent_doc_queue_io::controller_pause::document_queue_controller_paused(file);
-            // `#actorswitchdefer` Part B: the route defer asserts "the supervisor
-            // idle-watch will restart the harness at the next idle boundary." That is
-            // only true while `agent_change_restart` is enabled — the idle-watch gates
-            // the restart on `agent_change_restart_decision` (`#agentreloadrestart`),
-            // which returns `None` (never `Restart`) when the knob is off. With the knob
-            // disabled the defer would NEVER self-heal: route must bail EXPLICITLY with
-            // that fact rather than hand the operator a `restart-supervisor` hint that
-            // will not switch harnesses. Reverting `agent:` or re-enabling the knob are
-            // the only recovery paths in that state.
-            let agent_change_restart_enabled =
-                agent_doc_supervisor_io::config::agent_change_restart_enabled(file);
-            if !agent_change_restart_enabled {
+            record.harness = expected_harness.clone();
+        } else {
+            let effective_state = effective_authoritative_actor_state(
+                route_actor_state_from_sqlite(record.state),
+                runtime.actor_state,
+            );
+            let frontmatter_harness_changed =
+                document_declares_expected_harness(file, &expected_harness);
+            if agent_doc_supervisor::route_runtime::mismatched_authoritative_actor_can_be_replaced(
+                &runtime,
+                effective_state,
+            ) {
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "route_authoritative_actor_harness_mismatch_deferred file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} queue_paused={} frontmatter_harness_changed=true agent_change_restart=disabled action=bail_restart_disabled",
+                        "route_authoritative_actor_harness_mismatch_stale file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} frontmatter_harness_changed={}",
+                        file.display(),
+                        record.pane_id,
+                        record.harness,
+                        expected_harness,
+                        record.generation,
+                        runtime.health.label(),
+                        effective_state.as_str(),
+                        frontmatter_harness_changed
+                    ),
+                );
+                return Ok(None);
+            }
+            if frontmatter_harness_changed {
+                let queue_paused =
+                    agent_doc_queue_io::controller_pause::document_queue_controller_paused(file);
+                let agent_change_restart_enabled =
+                    agent_doc_supervisor_io::config::agent_change_restart_enabled(file);
+                let route_action =
+                    agent_change_route_decision(agent_change_restart_enabled, queue_paused);
+                if route_action == AgentChangeRouteAction::RejectRestartDisabled {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "route_authoritative_actor_harness_mismatch_deferred file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} queue_paused={} frontmatter_harness_changed=true agent_change_restart=disabled action=bail_restart_disabled",
+                            file.display(),
+                            record.pane_id,
+                            record.harness,
+                            expected_harness,
+                            record.generation,
+                            runtime.health.label(),
+                            effective_state.as_str(),
+                            queue_paused,
+                        ),
+                    );
+                    anyhow::bail!(
+                        "authoritative actor record for {} is running harness {}, but frontmatter now resolves to {}; agent_change_restart is disabled; Run Agent Doc will not switch harnesses until it is re-enabled or agent: reverts to {}",
+                        file.display(),
+                        record.harness,
+                        expected_harness,
+                        record.harness,
+                    );
+                }
+
+                // `#harnesshotrebind`: a healthy old-harness actor remains the live
+                // authority until its current turn reaches a safe boundary. Preserve
+                // that authority, but return a typed non-dispatchable target so route
+                // can report accepted/coalesced handoff instead of failing with a
+                // manual-restart instruction or injecting the old harness.
+                let restart_in_flight =
+                    agent_doc_supervisor::route_runtime::actor_busy_is_self_induced_restart(
+                        &record.last_transition.reason,
+                    );
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_authoritative_actor_harness_handoff file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} queue_paused={} restart_in_flight={} frontmatter_harness_changed=true action={}",
                         file.display(),
                         record.pane_id,
                         record.harness,
@@ -306,58 +377,28 @@ pub fn load_authoritative_actor_binding(
                         runtime.health.label(),
                         effective_state.as_str(),
                         queue_paused,
+                        restart_in_flight,
+                        route_action.label(),
                     ),
                 );
-                anyhow::bail!(
-                    "authoritative actor record for {} is running harness {}, but frontmatter now resolves to {}; agent_change_restart is disabled; Run Agent Doc will not switch harnesses until it is re-enabled or agent: reverts to {}",
-                    file.display(),
-                    record.harness,
-                    expected_harness,
-                    record.harness,
-                );
+                return Ok(Some(AuthoritativeActorDispatchTarget {
+                    pending_harness_switch: Some(PendingHarnessSwitch {
+                        previous_harness: record.harness.clone(),
+                        target_harness: expected_harness,
+                        queue_paused,
+                        restart_in_flight,
+                    }),
+                    record,
+                    runtime,
+                }));
             }
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_authoritative_actor_harness_mismatch_deferred file={} pane={} stored_harness={} expected_harness={} generation={} supervisor_health={} actor_state={} queue_paused={} frontmatter_harness_changed=true action=defer_to_boundary_restart",
-                    file.display(),
-                    record.pane_id,
-                    record.harness,
-                    expected_harness,
-                    record.generation,
-                    runtime.health.label(),
-                    effective_state.as_str(),
-                    queue_paused,
-                ),
-            );
-            let recovery_cmd = format!("agent-doc session restart-supervisor {}", file.display());
-            // `#actorswitchdeferbusyself`: a harness switch drives the actor busy while
-            // it respawns. Read the reason off the last transition so a self-induced
-            // busy window does not masquerade as an operator-blocked pane.
-            let restart_in_flight = agent_doc_supervisor::route_runtime::
-                actor_busy_is_self_induced_restart(&record.last_transition.reason);
-            let recovery_hint =
-                defer_to_boundary_restart_recovery_hint(DeferToBoundaryRestartRecoveryFacts {
-                    supervisor_health: runtime.health,
-                    actor_state: effective_state,
-                    queue_paused,
-                    restart_in_flight,
-                    recovery_command: &recovery_cmd,
-                });
             anyhow::bail!(
-                "authoritative actor record for {} is running harness {}, but frontmatter now resolves to {}; deferring to boundary agent restart instead of replacing live pane{}",
+                "authoritative actor record for {} is bound to harness {}, not {}",
                 file.display(),
                 record.harness,
-                expected_harness,
-                recovery_hint,
+                expected_harness
             );
         }
-        anyhow::bail!(
-            "authoritative actor record for {} is bound to harness {}, not {}",
-            file.display(),
-            record.harness,
-            expected_harness
-        );
     }
     if enforce_capability_proof {
         // `#capproofbg`: dispatch to the authoritative actor immediately while the
@@ -400,7 +441,11 @@ pub fn load_authoritative_actor_binding(
     let (record, runtime) = promote_starting_authoritative_actor_if_dispatch_ready(
         tmux, file, file_path, record, runtime, harness,
     );
-    Ok(Some(AuthoritativeActorDispatchTarget { record, runtime }))
+    Ok(Some(AuthoritativeActorDispatchTarget {
+        record,
+        runtime,
+        pending_harness_switch: None,
+    }))
 }
 
 fn document_declares_expected_harness(file: &Path, expected_harness: &str) -> bool {
@@ -796,6 +841,7 @@ pub fn recover_starting_timeout_blocked_actor_if_dispatch_ready(
             Some(AuthoritativeActorDispatchTarget {
                 record: updated,
                 runtime,
+                pending_harness_switch: None,
             })
         }
         Err(err) => {
@@ -1018,7 +1064,10 @@ pub fn load_authoritative_actor_dispatch_target(
         respect_tracked_clear_restart,
         enforce_capability_proof,
     )?
-    .filter(|target| supervisor_authoritative_actor_dispatch_target_eligible(&target.runtime)))
+    .filter(|target| {
+        target.prompt_dispatch_allowed()
+            && supervisor_authoritative_actor_dispatch_target_eligible(&target.runtime)
+    }))
 }
 
 pub fn load_authoritative_actor_for_registered_pane(
@@ -1047,6 +1096,7 @@ pub fn load_authoritative_actor_for_registered_pane(
     Ok(Some(AuthoritativeActorDispatchTarget {
         record,
         runtime: query_supervisor_runtime(file, session_id),
+        pending_harness_switch: None,
     }))
 }
 
@@ -1185,8 +1235,25 @@ mod tests {
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::NoSocket,
                 actor_state: None,
+                current_harness: None,
             },
+            pending_harness_switch: None,
         }
+    }
+
+    #[test]
+    fn pending_harness_switch_target_never_allows_prompt_dispatch() {
+        let mut actor = test_degraded_actor("%1");
+        assert!(actor.prompt_dispatch_allowed());
+
+        actor.pending_harness_switch = Some(PendingHarnessSwitch {
+            previous_harness: "claude-code".to_string(),
+            target_harness: "codex".to_string(),
+            queue_paused: false,
+            restart_in_flight: false,
+        });
+
+        assert!(!actor.prompt_dispatch_allowed());
     }
 
     #[test]

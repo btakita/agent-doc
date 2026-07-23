@@ -2,7 +2,7 @@
 name: supervisor
 status: living
 date: 2026-04-13
-updated: 2026-07-14
+updated: 2026-07-22
 ---
 
 # agent-doc Supervisor Spec
@@ -205,7 +205,7 @@ Protocol: length-prefixed JSON (same frame format as `ipc_socket.rs`, so the exi
 |--------|---------|----------|-------|
 | `restart` | `{ "mode": "fresh" \| "continue" }` | `{ "ok": true, "pid": <u32> }` | Kills current claude, relaunches |
 | `inject` | `{ "bytes": "<base64>" }` | `{ "ok": true, "n": <usize> }` | Write bytes to pty master |
-| `state` | — | `{ "running": bool, "pid": u32?, "restart_count": u32, "state": "...", "actor_state": "..."? }` | Includes both supervisor health and the current actor lifecycle state when available |
+| `state` | — | `{ "running": bool, "pid": u32?, "restart_count": u32, "state": "...", "actor_state": "..."?, "current_harness": "..." }` | Includes supervisor health, the current actor lifecycle state, and the live child harness identity |
 | `pid` | — | `{ "pid": u32? }` | Convenience shortcut |
 | `stop` | `{ "graceful": bool }` | `{ "ok": true }` | Shuts down supervisor + child |
 
@@ -230,6 +230,15 @@ generation:
 - final supervisor exit moves it to `closed`
 - IPC or auto-trigger dispatch writes also mark the actor `busy` before bytes
   are injected into the child pty
+- the IPC `state.current_harness` projection changes immediately when an
+  in-loop frontmatter `agent:` handoff spawns the replacement child
+- route accepts a live harness mismatch as a boundary handoff and sends no
+  prompt bytes to the old child; idle watch preserves an active turn, switches
+  at the first safe idle boundary, and auto-triggers the document on the fresh
+  child exactly once
+- queue pause holds that accepted handoff until resume, while disabled
+  `agent_change_restart` remains an explicit rejection rather than an implicit
+  manual-restart recovery path
 
 Those updates must fail closed when the supervising pane/session no longer owns
 the authoritative generation.

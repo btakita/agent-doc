@@ -9668,6 +9668,17 @@ fn test_agent_doc_supervisor_owns_route_runtime_policy() {
             "agent-doc-supervisor must own route runtime policy: {required}"
         );
     }
+    let agent_change =
+        fs::read_to_string(manifest_dir.join("agent-doc-supervisor/src/agent_change.rs")).unwrap();
+    for required in [
+        "pub enum AgentChangeRouteAction",
+        "pub const fn agent_change_route_decision",
+    ] {
+        assert!(
+            agent_change.contains(required),
+            "agent-doc-supervisor must own harness handoff route policy: {required}"
+        );
+    }
 
     let route = fs::read_to_string(manifest_dir.join("agent-doc-route-io/tests/route.rs")).unwrap();
     let route_authoritative_actor =
@@ -9691,9 +9702,10 @@ fn test_agent_doc_supervisor_owns_route_runtime_policy() {
         route.contains("supervisor_authoritative_actor_dispatch_target_eligible")
             && route_authoritative_actor.contains("use agent_doc_supervisor::route_runtime::{")
             && route_authoritative_actor.contains("effective_authoritative_actor_state")
-            && route_authoritative_actor.contains("DeferToBoundaryRestartRecoveryFacts")
+            && route_authoritative_actor.contains("use agent_doc_supervisor::agent_change::{")
+            && route_authoritative_actor.contains("AgentChangeRouteAction")
             && route.contains("supervisor_authoritative_actor_dispatch_target_eligible")
-            && route_authoritative_actor.contains("defer_to_boundary_restart_recovery_hint("),
+            && route_authoritative_actor.contains("agent_change_route_decision("),
         "route should call focused supervisor route runtime policy directly"
     );
 }

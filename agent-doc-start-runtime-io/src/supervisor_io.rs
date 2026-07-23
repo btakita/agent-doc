@@ -156,6 +156,10 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcSnapshotState for SupervisorShar
             .map(|runtime| runtime.generation)
     }
 
+    fn current_harness(&self) -> String {
+        SupervisorShared::current_harness(self)
+    }
+
     fn actor_file(&self) -> Option<String> {
         self.actor_runtime
             .as_ref()

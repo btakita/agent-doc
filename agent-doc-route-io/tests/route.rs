@@ -474,7 +474,9 @@ pub(crate) fn test_degraded_actor(pane_id: &str) -> AuthoritativeActorDispatchTa
         runtime: SupervisorRuntime {
             health: SupervisorHealth::NoSocket,
             actor_state: None,
+            current_harness: None,
         },
+        pending_harness_switch: None,
     }
 }
 // #route-busy-vs-starting-wording: the FailClosed wait context distinguishes a
@@ -3325,7 +3327,9 @@ mod tests {
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
                 actor_state: Some(RouteActorState::Starting),
+                current_harness: None,
             },
+            pending_harness_switch: None,
         };
         assert_eq!(
             blocked_actor.actor_state(),
@@ -3349,7 +3353,9 @@ mod tests {
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
                 actor_state: Some(RouteActorState::Ready),
+                current_harness: None,
             },
+            pending_harness_switch: None,
         };
         assert_eq!(
             ready_actor.actor_state(),
@@ -3367,7 +3373,9 @@ mod tests {
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
                 actor_state: Some(RouteActorState::Starting),
+                current_harness: None,
             },
+            pending_harness_switch: None,
         };
 
         assert!(
@@ -3406,7 +3414,9 @@ mod tests {
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
                 actor_state: Some(RouteActorState::Ready),
+                current_harness: None,
             },
+            pending_harness_switch: None,
         };
         assert!(supervisor_authoritative_actor_dispatch_target_eligible(
             &healthy.runtime
@@ -3417,7 +3427,9 @@ mod tests {
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::NoSocket,
                 actor_state: None,
+                current_harness: None,
             },
+            pending_harness_switch: None,
         };
         assert!(!supervisor_authoritative_actor_dispatch_target_eligible(
             &degraded.runtime
@@ -3428,7 +3440,9 @@ mod tests {
             runtime: SupervisorRuntime {
                 health: SupervisorHealth::Healthy,
                 actor_state: None,
+                current_harness: None,
             },
+            pending_harness_switch: None,
         };
         assert!(!supervisor_authoritative_actor_dispatch_target_eligible(
             &no_state.runtime

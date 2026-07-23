@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.17
+
+_JetBrains plugin 0.2.286._
+
+- **Live frontmatter harness changes are accepted as safe-boundary handoffs (`#harnesshotrebind`).** `Run Agent Doc` never injects the pending reopen into the previous harness and no longer asks the operator to restart a healthy supervisor. The supervisor preserves an active turn, replaces the child at its first idle boundary, and auto-triggers the owning document on the new harness; paused queues hold for resume, repeated routes coalesce, and an explicitly disabled switch policy remains fail-closed.
+- **Supervisor state exposes the live harness identity.** Route reconciles a stale actor-record harness after a completed in-loop switch instead of scheduling a second handoff, with focused policy, IPC snapshot, route, and SimWorld regressions covering ready, active-turn, paused, disabled, in-flight, and stale-record cases.
+
 ## 0.35.16
 
 _JetBrains plugin 0.2.286._

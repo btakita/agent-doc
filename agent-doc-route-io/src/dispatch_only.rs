@@ -36,11 +36,11 @@ use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
     BusyPaneAutoFixOutcome, DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyReopenDelivery,
     DispatchOnlyStartingPaneActorReadyFacts, DispatchOnlyStartingPaneDraftMessageFacts,
-    DispatchOnlyStartingPaneNotReadyMessageFacts,
-    RoutedReopenGuardReason, StartingPaneBlocker, dispatch_only_blocked_guard_reason,
-    dispatch_only_blocker_recovery_hint, dispatch_only_should_print_unproven_progress,
-    dispatch_only_starting_pane_actor_settled, dispatch_only_starting_pane_draft_message,
-    dispatch_only_starting_pane_not_ready_message, prompt_ready_barrier_failed_event,
+    DispatchOnlyStartingPaneNotReadyMessageFacts, RoutedReopenGuardReason, StartingPaneBlocker,
+    dispatch_only_blocked_guard_reason, dispatch_only_blocker_recovery_hint,
+    dispatch_only_should_print_unproven_progress, dispatch_only_starting_pane_actor_settled,
+    dispatch_only_starting_pane_draft_message, dispatch_only_starting_pane_not_ready_message,
+    prompt_ready_barrier_failed_event,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_supervisor::route_runtime::authoritative_actor_dispatch_target_eligible as supervisor_authoritative_actor_dispatch_target_eligible;
@@ -92,6 +92,9 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
             return false;
         }
     };
+    if !actor.prompt_dispatch_allowed() {
+        return false;
+    }
     let prompt_ready = current_generation_ready_prompt_proven(tmux, &actor, harness);
     let recognized_blocker = agent_doc_tmux_io::capture_pane(tmux, dispatch_pane)
         .ok()

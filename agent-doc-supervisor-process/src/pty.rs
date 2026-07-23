@@ -13,11 +13,11 @@
 //!    tty, setting CWD and env deterministically from caller-supplied config.
 //!    The slave handle is dropped after spawn, per portable-pty convention, so
 //!    the child owns the only reference and EOFs cleanly on exit.
-//! 3. **Optionally start stdin→master and master→stdout forwarding threads**
-//!    (`forward_stdio`). Callers that want full bidirectional I/O (i.e., real
-//!    supervisor runs from `start.rs`) call this after `spawn`. Integration
-//!    tests that drive the child programmatically skip it and wait on `wait()`
-//!    directly.
+//! 3. **Expose reader/writer handles for the supervisor I/O threads.** The
+//!    production runtime wires those handles through `io_threads`, whose Unix
+//!    stdin forwarder uses `poll()` plus a stop pipe so it can release stdin
+//!    before a restart/quit prompt. This module deliberately does not own a
+//!    second blocking stdin-forwarding implementation.
 //!
 //! ## Scope boundary
 //!
@@ -48,7 +48,6 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::thread::{self, JoinHandle};
 
 use agent_doc_supervisor::terminal_filter::{
     TerminalFilter, TerminalFilterAction, TerminalFilterConfig, TerminalFilterTrace,
@@ -173,10 +172,10 @@ impl PtySpawnConfig {
 
 /// A running child process under a pty owned by the supervisor.
 ///
-/// Holds the master side of the pty, the child handle, and any I/O
-/// forwarding threads started via [`PtySession::forward_stdio`]. Drop order:
-/// threads finish when the master/child closes, then the master and child
-/// handles drop.
+/// Holds the master side of the pty and the child handle. I/O forwarding is
+/// owned by `io_threads`; keeping it outside this type ensures the runtime has
+/// one interruptible stdin path instead of a second `stdin.lock()` path that
+/// can block restart/quit prompt reads (`#af88` E).
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     /// The child handle. `Some` until [`take_child`](Self::take_child) hands it
@@ -185,18 +184,14 @@ pub struct PtySession {
     /// default out-of-process host path this stays `Some` and [`wait`](Self::wait)
     /// reaps it inline.
     child: Option<Box<dyn Child + Send + Sync>>,
-    #[allow(dead_code)] // used by forward_stdio (test path)
-    io_threads: Vec<JoinHandle<()>>,
 }
 
 impl PtySession {
     /// Allocate a pty pair and spawn the child process.
     ///
-    /// On success, the child is running and the caller can either:
-    /// - Call [`forward_stdio`](Self::forward_stdio) to wire stdin/stdout to
-    ///   the pty (real supervisor runs).
-    /// - Call [`wait`](Self::wait) directly (integration tests driving
-    ///   programmatic children).
+    /// On success, the child is running. Production callers pass the exposed
+    /// reader/writer handles to `io_threads`; integration tests that drive the
+    /// child programmatically may call [`wait`](Self::wait) directly.
     pub fn spawn(cfg: PtySpawnConfig) -> Result<Self> {
         let pty_system = NativePtySystem::default();
         let pair = pty_system
@@ -226,101 +221,7 @@ impl PtySession {
         Ok(Self {
             master: pair.master,
             child: Some(child),
-            io_threads: Vec::new(),
         })
-    }
-
-    /// Start the two I/O forwarding threads (stdin→master, master→stdout).
-    ///
-    /// Call at most once per session. Subsequent calls return an error
-    /// because the writer can only be taken once from the master.
-    #[allow(dead_code)] // used by tests; start.rs does I/O manually for shared inject writer
-    pub fn forward_stdio(&mut self) -> Result<()> {
-        if !self.io_threads.is_empty() {
-            anyhow::bail!("forward_stdio called twice on the same PtySession");
-        }
-
-        let mut reader = self
-            .master
-            .try_clone_reader()
-            .context("try_clone_reader: failed to clone pty reader for master→stdout thread")?;
-        let mut writer = self
-            .master
-            .take_writer()
-            .context("take_writer: failed to take pty writer for stdin→master thread")?;
-
-        let out_thread = thread::Builder::new()
-            .name("pty->stdout".into())
-            .spawn(move || {
-                let mut buf = [0u8; 8192];
-                let stdout = std::io::stdout();
-                loop {
-                    match reader.read(&mut buf) {
-                        Ok(0) => break, // child closed slave
-                        Ok(n) => {
-                            let mut lock = stdout.lock();
-                            if let Err(e) = lock.write_all(&buf[..n]) {
-                                eprintln!("[supervisor::pty] stdout write error: {e}");
-                                break;
-                            }
-                            if let Err(e) = lock.flush() {
-                                eprintln!("[supervisor::pty] stdout flush error: {e}");
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("[supervisor::pty] master read error: {e}");
-                            break;
-                        }
-                    }
-                }
-            })
-            .context("spawn pty->stdout thread")?;
-
-        let in_thread = thread::Builder::new()
-            .name("stdin->pty".into())
-            .spawn(move || {
-                let mut buf = [0u8; 4096];
-                let stdin = std::io::stdin();
-                loop {
-                    let mut lock = stdin.lock();
-                    match lock.read(&mut buf) {
-                        Ok(0) => break, // parent stdin closed
-                        Ok(n) => {
-                            if agent_doc_tmux_commands::input_diag::verbose_enabled() {
-                                agent_doc_tmux_io::input_diag::log_byte_events(
-                                    agent_doc_tmux_io::input_diag::InputDiagSink::new(
-                                        None,
-                                        noop_ops_log,
-                                    ),
-                                    "supervisor.forward_stdio",
-                                    "child_pty",
-                                    "raw_forward",
-                                    &buf[..n],
-                                    None,
-                                );
-                            }
-                            if let Err(e) = writer.write_all(&buf[..n]) {
-                                eprintln!("[supervisor::pty] pty write error: {e}");
-                                break;
-                            }
-                            if let Err(e) = writer.flush() {
-                                eprintln!("[supervisor::pty] pty flush error: {e}");
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("[supervisor::pty] stdin read error: {e}");
-                            break;
-                        }
-                    }
-                }
-            })
-            .context("spawn stdin->pty thread")?;
-
-        self.io_threads.push(out_thread);
-        self.io_threads.push(in_thread);
-        Ok(())
     }
 
     /// Resize the pty. Called by `resize.rs` on SIGWINCH (Unix) or
@@ -395,9 +296,9 @@ impl PtySession {
         Ok(ResizeHandle)
     }
 
-    /// Take the pty writer handle for external use (e.g., shared IPC inject
-    /// writer). After calling this, [`forward_stdio`](Self::forward_stdio)
-    /// will fail because the writer has already been consumed.
+    /// Take the pty writer handle for external use (e.g., the interruptible
+    /// stdin forwarder and shared IPC inject writer). The writer can only be
+    /// consumed once from the master.
     pub fn take_writer(&self) -> Result<Box<dyn Write + Send>> {
         self.master
             .take_writer()
@@ -455,7 +356,6 @@ impl PtySession {
         Ok(Self {
             master: Box::new(master),
             child: Some(Box::new(RawPidChild::new(child_pid))),
-            io_threads: Vec::new(),
         })
     }
 }

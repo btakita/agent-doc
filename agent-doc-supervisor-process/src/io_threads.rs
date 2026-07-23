@@ -370,7 +370,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn writer_thread_exits_on_stop_signal() {
+    fn writer_thread_releases_stdin_for_restart_prompt_on_stop_signal() {
         let mut pty_fds = [0i32; 2];
         unsafe { libc::pipe(pty_fds.as_mut_ptr()) };
         let pty_write_fd = pty_fds[1];
@@ -411,7 +411,13 @@ mod tests {
 
         stop_flag.store(true, Ordering::Relaxed);
         stop.signal();
-        let result = handle.join();
+        let (joined_tx, joined_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = joined_tx.send(handle.join());
+        });
+        let result = joined_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("stop pipe must interrupt the raw-fd stdin poll before a restart prompt");
         assert!(
             result.is_ok(),
             "writer thread should exit cleanly on stop signal"

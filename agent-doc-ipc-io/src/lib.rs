@@ -214,15 +214,23 @@ fn try_connect_with_timeout_for_pid(
 ) -> Result<interprocess::local_socket::Stream> {
     let path = socket_path_for_pid(project_root, pid);
     let path_for_thread = path.clone();
+    run_connect_with_timeout(&path, connect_timeout, move || {
+        let name = path_for_thread.to_fs_name::<GenericFilePath>()?;
+        interprocess::local_socket::ConnectOptions::new()
+            .name(name)
+            .connect_sync()
+            .context("failed to connect to IPC socket")
+    })
+}
+
+fn run_connect_with_timeout<T, F>(path: &Path, connect_timeout: Duration, connect: F) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let result = (|| {
-            let name = path_for_thread.to_fs_name::<GenericFilePath>()?;
-            interprocess::local_socket::ConnectOptions::new()
-                .name(name)
-                .connect_sync()
-                .context("failed to connect to IPC socket")
-        })();
+        let result = connect();
         // Receiver may already have timed out and dropped rx; that is fine, the
         // orphaned connect result is simply discarded.
         let _ = tx.send(result);
@@ -648,6 +656,23 @@ pub fn start_listener_with_logger<F>(
 where
     F: Fn(&str) -> Option<String> + Send + Sync + 'static,
 {
+    start_listener_with_logger_and_read_timeout(
+        project_root,
+        handler,
+        ops_logger,
+        Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS),
+    )
+}
+
+fn start_listener_with_logger_and_read_timeout<F>(
+    project_root: &Path,
+    handler: F,
+    ops_logger: OpsLogger,
+    listener_read_timeout: Duration,
+) -> Result<()>
+where
+    F: Fn(&str) -> Option<String> + Send + Sync + 'static,
+{
     let sock_path = socket_path(project_root);
 
     // Clean up stale socket
@@ -696,9 +721,7 @@ where
                 // halves borrow the stream; a recv timeout surfaces as an error on
                 // `read_line`, which the `.unwrap_or(0)` below treats as EOF and
                 // exits the handler cleanly (releasing the inflight slot).
-                if let Err(e) = stream
-                    .set_recv_timeout(Some(Duration::from_secs(IPC_LISTENER_READ_TIMEOUT_SECS)))
-                {
+                if let Err(e) = stream.set_recv_timeout(Some(listener_read_timeout)) {
                     ops_logger(
                         &root_buf,
                         &format!("ipc_listener_set_recv_timeout_failed error={e}"),
@@ -839,8 +862,74 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read as _;
     use std::thread;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn connect_watchdog_returns_before_a_wedged_connect_finishes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("wedged-connect.sock");
+        let started = Instant::now();
+        let err = run_connect_with_timeout(&path, Duration::from_millis(100), || {
+            thread::sleep(Duration::from_secs(1));
+            Ok(())
+        })
+        .expect_err("a connect attempt beyond its deadline must fail closed");
+
+        assert!(
+            err.to_string().contains("IPC connect timeout (100ms)"),
+            "unexpected timeout error: {err:#}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "watchdog waited for the wedged connect worker to finish"
+        );
+    }
+
+    #[test]
+    fn half_open_listener_connection_closes_after_read_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+
+        let root_clone = root.clone();
+        let server = thread::spawn(move || {
+            start_listener_with_logger_and_read_timeout(
+                &root_clone,
+                |_| panic!("a half-open client must not reach the message handler"),
+                noop_ops_logger,
+                Duration::from_millis(100),
+            )
+            .ok()
+        });
+        thread::sleep(Duration::from_millis(100));
+
+        let stream = try_connect_with_timeout_for_pid(
+            &root,
+            u64::from(std::process::id()),
+            Duration::from_secs(1),
+        )
+        .expect("connect to test listener");
+        stream
+            .set_recv_timeout(Some(Duration::from_secs(2)))
+            .expect("set client-side test backstop");
+        let (mut reader, writer) = stream.split();
+        let started = Instant::now();
+        let mut byte = [0u8; 1];
+        let read = reader
+            .read(&mut byte)
+            .expect("listener should close the half-open connection cleanly");
+        assert_eq!(read, 0, "listener should close without a response body");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "listener did not enforce its per-connection read timeout"
+        );
+
+        drop(writer);
+        let _ = std::fs::remove_file(socket_path(&root));
+        drop(server);
+    }
 
     /// `#editorendpointzero`: discovery must find a live listener that the
     /// reliable-sync registration record knows nothing about, and must reap a

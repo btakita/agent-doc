@@ -6,6 +6,11 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.15
+
+- **Supervisor stdin forwarding now has one interruptible implementation (`#af88`).** The obsolete `PtySession::forward_stdio` path that held `stdin.lock()` across a blocking read is removed. Production forwarding remains in `io_threads`: Unix polls raw stdin beside a stop pipe, joins promptly on child exit, and releases stdin before restart/quit prompts.
+- **IPC wedge defenses are pinned end to end.** Deterministic regressions now prove that the connect watchdog returns before a wedged `connect_sync` worker and that a listener closes a half-open connection after its per-connection read deadline. These lock in the existing caller-side connect bound and listener-side fd/thread backstop.
+
 ## 0.35.14
 
 - **A newer durable response capture now supersedes prior-cycle deferred CRDT/CAS lineage.** Recovery first proves exact current authority/disk equality, retires journal entries whose targets do not contain the active capture, and then submits the response cell from that one current base. It no longer replays stale queue/backlog branches or malformed `-->` scaffolding into the newer response.

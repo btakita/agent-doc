@@ -134,6 +134,11 @@ a closed actor record is replaceable through the stale-authority path.
 ### Pty lifecycle
 - Pty is allocated before claude spawns and destroyed after claude exits + IPC socket closes.
 - SIGWINCH on the tmux pane → forwarded to the pty master so claude sees resize.
+- `pty.rs` owns allocation and exposes the master reader/writer handles; it does
+  not start an alternate stdin reader. On Unix, `io_threads.rs` owns the sole
+  stdin→pty path and polls both raw stdin and a stop pipe, allowing child exit
+  to join the forwarder before the supervisor reads a restart/quit prompt
+  (`#af88`).
 - Filtered child output is also fed into an `alacritty_terminal` screen model
   owned by the supervisor. Readiness, help-screen, and protected-prompt checks
   prefer that current viewport text and only fall back to the byte ring when the
@@ -604,7 +609,8 @@ src/agent-doc/
   src/
     supervisor/
       mod.rs          # public entry: run(file, opts)
-      pty.rs          # pty allocation + I/O forwarding threads (portable-pty)
+      pty.rs          # pty allocation + reader/writer handles (portable-pty)
+      io_threads.rs   # interruptible stdin forwarding + pty output forwarding
       ipc.rs          # Unix socket accept loop + protocol
       state.rs        # crash classifier + ring buffer + state machine
       cwd.rs          # CWD resolution logic

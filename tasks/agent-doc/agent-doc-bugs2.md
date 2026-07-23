@@ -264,14 +264,25 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_visible_write patch_id=151bfee5-9431-4003-bba9-243d34d213a0 invariant=live_prompt_drift_after_preflight recovery=visible_repair_required snap_source=lazily_visible_write_event candidate_len=68130 candidate_hash=78175b9f8c6645c683b98bde1f832e2416914b50516a4776c650e928b660648b content_ours_len=68416 content_ours_hash=d75457f1e36d206b3e23df18cc7236a6f82615205f719c08a0284371397b30c9 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1784772615948
 ```
-<!-- agent:boundary:6b2b327b -->
+
+### Re: #jbnativehotreload — gpt-5
+
+Yes. Safe native hot reloading works again on Linux once JetBrains plugin 0.2.289 is active.
+
+The long-term design removes SQLite ownership from the reloadable cdylib: the controller now owns the durable reliable-sync outbox, while each native generation is a stateless sender. Reload quiesces CRDT replicas and IPC listeners, drains guarded JNA calls on the old generation-owned worker, terminates that worker so Rust TLS destructors run, closes the JNA handle, and proves the old mapping is absent before loading a replacement. Any failed drain, ABI check, or unmap fails closed with “restart required”; it never maps two generations concurrently.
+
+Released and installed as agent-doc 0.35.19 / `v0.35.19`, commit `55b3ee991`, with JetBrains plugin 0.2.289 installed into four local IDE installations. The real-process Linux regression cycles active replicas/listeners and controller-backed SQLite traffic across two cdylib generations, verifies `PRAGMA quick_check`, one DB/WAL/SHM inode generation, zero deleted DB descriptors, and no deleted native mappings. The full repository gate passed all 7,902 tests plus model checks, and the JetBrains plugin tests/build passed. CI was in progress at the single required status check.
+
+Because the running IDE still has the previous package generation loaded, restart it once to activate plugin 0.2.289. Native library upgrades after that use the safe hot-reload path; Kotlin/plugin package upgrades still intentionally require an IDE restart.
+<!-- agent:boundary:dca1acff -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~Recycling the supervisors terminated the sessions and did not restart.~~
-- ~~do [#harnesshotrebind]~~
-- do [#fmgc]
+- do [#jbnativehotreload]
+- Sync Tmux Layout on equityfundingsource.md: `Sync failed through the project controller; see IDE log for details.`
+- do [#selectedturnsteering]
+- ⏭️ do [#fmgc]
 - 📌 do [#boundaryaccum1]
 - 📌 do [#qactsync]
 - 📌 do [#ftimmediate]

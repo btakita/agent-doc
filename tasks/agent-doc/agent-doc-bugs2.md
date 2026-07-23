@@ -124,7 +124,7 @@ Pass only if `compact_crdt_relay_acknowledged ... wait_ms=` is materially below 
 This remains an operator/live-editor verification. The current session registered JetBrains plugin `0.2.283`, which supersedes the item's `0.2.276` pin; use the current plugin rather than downgrading. In one live document, delete several queue items, edit a post-boundary prompt, and run **Compact Exchange**.
 
 Pass only if the queue deletions and prompt edit both survive, compaction commits, and the same attempt records `compact_rebased_authoritative_siblings` without `compact_dropped_non_exchange_item`. If it fails, preserve the attempt and ops-log markers for diagnosis. This pane cannot perform the required editor-authority interaction without invalidating the proof.
-<!-- agent:boundary:80148bb1 -->
+<!-- agent:boundary:1d3d46f1 -->
 <!-- /agent:exchange -->
 ## Queue
 

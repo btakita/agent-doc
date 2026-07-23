@@ -31,7 +31,23 @@ queue: stop
 
 Compacted content:
 - Archived 19 response topic(s): Acadian take-home implementation plan; private repo + submodule; MAG7 return viewer implemented; 16 more
-<!-- agent:boundary:1eb1f300 -->
+Please add async fastapi handlers. Everything is synchronous which is not good far handling multiple users.
+
+### Re: async FastAPI handlers — gpt-5
+
+Implemented and committed the explicit async request path.
+
+- Converted the FastAPI dependency and all three handlers (`/returns`, `/symbols`, and `/health`) to `async def`.
+- Kept the synchronous, independently testable service boundary, but `/returns` now awaits FastAPI's `run_in_threadpool` around the yfinance/pandas pipeline so blocking work never runs on the event-loop thread.
+- Added a deterministic async-client regression test proving that two `/returns` requests can enter the blocking fetch path concurrently, plus assertions that every handler and dependency is a coroutine function.
+- Updated `SPEC.md` and `README.md`, including the verified test counts.
+
+One nuance: FastAPI already dispatches ordinary synchronous route functions through a worker pool. This change makes the async boundary explicit while preserving that essential offload instead of accidentally calling synchronous yfinance/pandas code directly from an async handler.
+
+Verification passed: `make check` (35 backend tests, mypy, 93 frontend tests, TypeScript typecheck, production build) and `git diff --check`. The required `gh run list --workflow CI --limit 1` check reported that this repo has no workflow named `CI`.
+
+Commits: `a2892ad` (`feat: make API handlers async`), `018deda` (automatic tsift navigation refresh), and superproject pointer `303ccfe40`.
+<!-- agent:boundary:0185b17d -->
 <!-- /agent:exchange -->
 
 ## Queue

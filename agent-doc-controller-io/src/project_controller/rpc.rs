@@ -12791,47 +12791,47 @@ fn cold_start_supervisor_replacement(work: &SupervisorReplacementWork) -> Result
             .and_then(|content| agent_doc_harness::document_harness_from_content(&content))
             .map(|name| agent_doc_harness::HarnessConfig::from_agent_name(&name).binary)
             .unwrap_or_else(|| agent_doc_harness::HarnessConfig::claude().binary);
-        match supervisor_replacement_pane_start_decision(
-            pane_alive,
-            current_command.as_deref(),
-            Some(document_harness.as_str()),
+        if matches!(
+            supervisor_replacement_pane_start_decision(
+                pane_alive,
+                current_command.as_deref(),
+                Some(document_harness.as_str()),
+            ),
+            SupervisorReplacementPaneStartDecision::RestartLiveHarness
         ) {
-            SupervisorReplacementPaneStartDecision::RestartLiveHarness => {
-                // Quit the document's own harness so the pane falls back to its
-                // shell, then take the normal preserve-existing start path below.
-                // Bounded and fail-closed: if the pane does not become a shell we
-                // refuse exactly as before rather than typing into a live agent.
+            // Quit the document's own harness so the pane falls back to its
+            // shell, then take the normal preserve-existing start path below.
+            // Bounded and fail-closed: if the pane does not become a shell we
+            // refuse exactly as before rather than typing into a live agent.
+            agent_doc_ops_log_io::log_op(
+                &work.file,
+                &format!(
+                    "controller_supervisor_replacement_quitting_live_harness harness={} session={} pane={} generation={} receipt_id={}",
+                    document_harness,
+                    work.session_id,
+                    work.pane_id,
+                    work.generation,
+                    work.operator_receipt_id,
+                ),
+            );
+            if !quit_live_harness_pane_to_shell(&tmux, &work.pane_id, &document_harness) {
                 agent_doc_ops_log_io::log_op(
                     &work.file,
                     &format!(
-                        "controller_supervisor_replacement_quitting_live_harness harness={} session={} pane={} generation={} receipt_id={}",
-                        document_harness,
+                        "controller_supervisor_replacement_preserve_pane_blocked mode={} session={} pane={} generation={} receipt_id={} reason=live_harness_quit_timeout harness={} (a mid-turn harness that ignores the quit keys reports here; see #restartbusyquit)",
+                        work.mode,
                         work.session_id,
                         work.pane_id,
                         work.generation,
                         work.operator_receipt_id,
+                        document_harness,
                     ),
                 );
-                if !quit_live_harness_pane_to_shell(&tmux, &work.pane_id, &document_harness) {
-                    agent_doc_ops_log_io::log_op(
-                        &work.file,
-                        &format!(
-                            "controller_supervisor_replacement_preserve_pane_blocked mode={} session={} pane={} generation={} receipt_id={} reason=live_harness_quit_timeout harness={} (a mid-turn harness that ignores the quit keys reports here; see #restartbusyquit)",
-                            work.mode,
-                            work.session_id,
-                            work.pane_id,
-                            work.generation,
-                            work.operator_receipt_id,
-                            document_harness,
-                        ),
-                    );
-                    anyhow::bail!(
-                        "the {document_harness} session in pane {} did not exit to a shell, so the replacement supervisor was not started; quit it manually and retry",
-                        work.pane_id
-                    );
-                }
+                anyhow::bail!(
+                    "the {document_harness} session in pane {} did not exit to a shell, so the replacement supervisor was not started; quit it manually and retry",
+                    work.pane_id
+                );
             }
-            _ => {}
         }
         match supervisor_replacement_pane_start_decision(
             pane_alive,

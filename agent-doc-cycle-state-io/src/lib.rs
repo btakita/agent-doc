@@ -710,11 +710,21 @@ pub fn apply_closeout_projection_to_cycle_state(
     if (changed || state.last_event == "synthetic_state") && !preserve_noop_commit_event {
         state.last_event = projection.event_label(projected_phase);
     }
-    if state.capture_id.is_none() {
+    // The content-bearing capture fact can be appended after the turn-intent
+    // checkpoint (for example when a retry differs only by terminal newline).
+    // While the cycle is still open, the newest same-cycle ledger capture is
+    // authoritative. Keeping the checkpoint's older hash strands recovery:
+    // the projected body and cycle identity can no longer match each other.
+    if state.phase.is_open() && projection.capture_id.is_some() {
         state.capture_id = projection.capture_id.clone();
-    }
-    if state.response_sha256.is_none() {
         state.response_sha256 = projection.response_sha256.clone();
+    } else {
+        if state.capture_id.is_none() {
+            state.capture_id = projection.capture_id.clone();
+        }
+        if state.response_sha256.is_none() {
+            state.response_sha256 = projection.response_sha256.clone();
+        }
     }
     state.tracked_work_maintenance_required_at_preflight =
         projection.tracked_work_maintenance_required;
@@ -2599,7 +2609,7 @@ mod tests {
         // The consecutive-tick debounce is a second, independent gate on top of
         // the deadline — a stale observation cannot abandon a live turn on a
         // single transiently-misread boundary poll.
-        assert!(STALLED_CYCLE_RESOLVE_CONFIRM_TICKS > 0);
+        const { assert!(STALLED_CYCLE_RESOLVE_CONFIRM_TICKS > 0) };
     }
 
     #[test]
@@ -3207,6 +3217,68 @@ mod tests {
         assert_eq!(projected.snapshot_hash.as_deref(), Some("snapshot-sha"));
         assert_eq!(projected.baseline_content.as_deref(), Some("body"));
         assert_eq!(projected.response_body, "### Re: topic - gpt-5\n\nDone.\n");
+    }
+
+    #[test]
+    fn open_cycle_adopts_newest_same_cycle_capture_identity() {
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+        let started = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        mark_response_captured(
+            &doc,
+            "response_captured",
+            Some("snap"),
+            Some("body"),
+            "old-response-sha",
+            None,
+        )
+        .unwrap();
+        append_response_captured_body(
+            &doc,
+            CapturedResponseFactInput {
+                cycle_id: &started.cycle_id,
+                capture_id: &started.cycle_id,
+                response_sha256: "old-response-sha",
+                response_body: "### Re: topic - gpt-5\n\nDone.\n",
+                intent_body: None,
+                file_hash: Some("file-sha"),
+                snapshot_hash: Some("snapshot-sha"),
+                baseline_content: Some("body"),
+            },
+        )
+        .unwrap();
+        mark_write_applied(&doc, "write_template", Some("new"), Some("new")).unwrap();
+
+        append_response_captured_body(
+            &doc,
+            CapturedResponseFactInput {
+                cycle_id: &started.cycle_id,
+                capture_id: &started.cycle_id,
+                response_sha256: "new-response-sha",
+                response_body: "### Re: topic - gpt-5\n\nCorrected.\n",
+                intent_body: None,
+                file_hash: Some("file-sha"),
+                snapshot_hash: Some("snapshot-sha"),
+                baseline_content: Some("body"),
+            },
+        )
+        .unwrap();
+
+        let loaded = load_with_closeout_projection(&doc)
+            .unwrap()
+            .expect("open cycle should load");
+        assert_eq!(loaded.phase, CyclePhase::WriteApplied);
+        assert_eq!(
+            loaded.capture_id.as_deref(),
+            Some(started.cycle_id.as_str())
+        );
+        assert_eq!(loaded.response_sha256.as_deref(), Some("new-response-sha"));
+        let projected = load_projected_captured_response(&doc, &started.cycle_id)
+            .unwrap()
+            .expect("newest capture projection");
+        assert_eq!(projected.response_sha256, "new-response-sha");
+        assert!(projected.response_body.contains("Corrected."));
     }
 
     #[test]
@@ -3904,7 +3976,6 @@ mod tests {
         assert_eq!(captured.to_pipeline().run_id, pipeline.run_id);
     }
 }
-
 
 #[cfg(test)]
 mod project_root_symmetry_tests {

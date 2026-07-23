@@ -1329,17 +1329,46 @@ pub fn settle_retained_captured_projection_through_authority(
             captured_response,
             &canonical,
         );
-    if canonical != pending.target_content && !response_already_materialized {
-        let Some(rebased_target) = deferred_document_write_reconnect_content(path, &canonical)?
-        else {
-            return Ok(false);
-        };
-        if !agent_doc_turn::response_replay::response_materialized_in_content(
+    let pending_journal = pending_document_write_journal(path);
+    let has_superseded_capture_lineage = pending_journal.iter().any(|intent| {
+        !agent_doc_turn::response_replay::response_materialized_in_content(
             captured_response,
-            &rebased_target,
-        ) {
+            &intent.target_content,
+        )
+    });
+    if has_superseded_capture_lineage {
+        // A prior cycle can leave a deferred reconnect target in front of this
+        // durable capture. Replaying the whole journal would merge that stale
+        // branch into the new response and can resurrect deleted queue state or
+        // malformed scaffolding. Exact current authority/disk equality proves
+        // that the older lineage has been superseded; retire it before the new
+        // capture submits its own single-base CAS.
+        let disk = resolve_disk_current_document_content(path, source)?;
+        if disk != canonical {
             return Ok(false);
         }
+        validate_canonical_document_target(path, &canonical, source)?;
+        clear_all_deferred_document_write_intents(path, source)?;
+        agent_doc_ops_log_io::log_op(
+            path,
+            &format!(
+                "retained_captured_prior_lineage_superseded file={} prior_intent_count={} canonical_hash={} canonical_disk_exact=true active_capture_materialized={}",
+                path.display(),
+                pending_journal.len(),
+                agent_doc_hash::content_hash(&canonical),
+                response_already_materialized,
+            ),
+        );
+    }
+    if canonical != pending.target_content
+        && !response_already_materialized
+        && !has_superseded_capture_lineage
+        && let Some(rebased_target) = deferred_document_write_reconnect_content(path, &canonical)?
+        && agent_doc_turn::response_replay::response_materialized_in_content(
+            captured_response,
+            &rebased_target,
+        )
+    {
         if rebased_target != canonical {
             let Some(relay_write) = apply_canonical_replace_if_attached(
                 path,
@@ -4179,7 +4208,7 @@ fn query_live_editor_authority(
     }
     #[cfg(test)]
     {
-        return agent_doc_crdt_relay_io::current_text_for_file(file);
+        agent_doc_crdt_relay_io::current_text_for_file(file)
     }
     #[cfg(not(test))]
     match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
@@ -6454,7 +6483,6 @@ mod tests {
         assert!(!log.contains("did not settle within"), "{log}");
     }
 
-    #[test]
     /// `#deliveryackcut`: a stalled ACK reconciles the replica cache against
     /// process liveness on the path a real zombie actually reaches.
     ///
@@ -8066,6 +8094,75 @@ mod tests {
         );
         assert!(pending_document_write(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), replayed_target);
+    }
+
+    #[test]
+    fn retained_capture_supersedes_prior_cycle_reconnect_target() {
+        let prior_cut = concat!(
+            "# Session\n\n",
+            "<!-- agent:queue -->\n- prior head\n<!-- /agent:queue -->\n\n",
+            "<!-- agent:exchange -->\nPlease investigate.\n<!-- /agent:exchange -->\n",
+        );
+        let stale_prior_target = format!(
+            "{}\n-->\n",
+            prior_cut.replace("- prior head\n", "- stale prior head\n")
+        );
+        let current_cut = prior_cut.replace("- prior head\n", "- operator-owned current head\n");
+        let captured_response = "### Re: investigate\n\nRecovered the current response.\n";
+        let replayed_target =
+            agent_doc_turn::response_replay::materialize_response_in_current_exchange(
+                &current_cut,
+                captured_response,
+            )
+            .expect("response cell should materialize over the current authority cut");
+        let (_dir, file, _canonical) = temp_doc(&current_cut);
+        let identity = "test-retained-capture-prior-cycle-reconnect-target";
+        seed_reliable_sync_open(&file, identity);
+        let (_client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        ensure_deferred_document_write_intent(
+            &file,
+            &stale_prior_target,
+            prior_cut,
+            "post_commit_reposition",
+            DocumentWriteDeferredReason::ExtendPendingEditorReconnectTarget,
+        )
+        .expect("the prior cycle reconnect target should be retained");
+        ensure_deferred_document_write_intent(
+            &file,
+            &replayed_target,
+            &current_cut,
+            "retained_captured_response_cell_replay",
+            DocumentWriteDeferredReason::EditorDeliveryWorkerStale,
+        )
+        .expect("the active capture retry should follow the prior-cycle target");
+        assert_eq!(pending_document_write_journal(&file).len(), 2);
+
+        let ack = ack_crdt_deliveries(file.clone(), identity, 1, std::time::Duration::ZERO);
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "retained_capture_prior_cycle_reconnect_target_test",
+            )
+            .unwrap(),
+            "the newer durable capture should supersede the stale prior-cycle reconnect target"
+        );
+        ack.join().unwrap();
+        assert_eq!(
+            try_resolve_current_document_content(
+                &file,
+                "retained_capture_prior_cycle_reconnect_target_current",
+            )
+            .unwrap(),
+            replayed_target,
+        );
+        assert!(pending_document_write(&file).is_none());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), replayed_target);
+        assert!(replayed_target.contains("operator-owned current head"));
+        assert!(!replayed_target.contains("stale prior head"));
     }
 
     #[test]

@@ -6,6 +6,11 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.14
+
+- **A newer durable response capture now supersedes prior-cycle deferred CRDT/CAS lineage.** Recovery first proves exact current authority/disk equality, retires journal entries whose targets do not contain the active capture, and then submits the response cell from that one current base. It no longer replays stale queue/backlog branches or malformed `-->` scaffolding into the newer response.
+- **Open-cycle capture identity stays coherent with the content-bearing state ledger.** If a retry appends a newer same-cycle capture fact after the turn-intent checkpoint, the cycle projection adopts that capture/hash while it remains open, so `session-check` cannot wedge on a projected-body/checkpoint-hash mismatch.
+
 ## 0.35.13
 
 _JetBrains plugin 0.2.285._

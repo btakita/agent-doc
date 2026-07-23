@@ -274,7 +274,13 @@ The long-term design removes SQLite ownership from the reloadable cdylib: the co
 Released and installed as agent-doc 0.35.19 / `v0.35.19`, commit `55b3ee991`, with JetBrains plugin 0.2.289 installed into four local IDE installations. The real-process Linux regression cycles active replicas/listeners and controller-backed SQLite traffic across two cdylib generations, verifies `PRAGMA quick_check`, one DB/WAL/SHM inode generation, zero deleted DB descriptors, and no deleted native mappings. The full repository gate passed all 7,902 tests plus model checks, and the JetBrains plugin tests/build passed. CI was in progress at the single required status check.
 
 Because the running IDE still has the previous package generation loaded, restart it once to activate plugin 0.2.289. Native library upgrades after that use the safe hot-reload path; Kotlin/plugin package upgrades still intentionally require an IDE restart.
-<!-- agent:boundary:dca1acff -->
+
+### Re: Sync Tmux Layout on equityfundingsource.md — gpt-5
+
+Synced successfully.
+
+The queued IDE failure came from the Project Controller socket being absent at the time of the original request (`.agent-doc/controller.sock: No such file or directory`). The controller is healthy now, so I replayed the exact visible layout through `agent-doc sync`: `agent-doc-bugs2.md` is pane `%37`, `equityfundingsource.md` is pane `%40`, they are in two columns in tmux window `0:agent-doc`, and `%40` is selected. Sync exited successfully after doctor repair; its final reconcile reported the layout already correct and all three registered sessions with live panes.
+<!-- agent:boundary:660d037b -->
 <!-- /agent:exchange -->
 ## Queue
 

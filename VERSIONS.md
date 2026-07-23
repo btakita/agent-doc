@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.13
+
+_JetBrains plugin 0.2.285._
+
+- **Missing controller replicas now recover even when JetBrains retains a local forwarder.** `ack_recovery_force_refresh` unconditionally replaces and registers the document replica from the exact visible editor cut; a plugin-local cache can no longer suppress recovery after controller recycle.
+- **Standalone orphan HTML-comment terminators have a narrow binary-owned repair lane.** Canonical validation still rejects bare `-->` lines, while template normalization removes only standalone orphan lines outside balanced comments, blockquotes, and code fences. This lets malformed editor authority register as repair-required and makes the `#dbj7` empty-comment artifact recoverable without force-disk.
+
 ## 0.35.12
 
 - **CRDT writes now carry one captured CAS base through the serialized writer.** Stream, inline, recovery, and compare-if-current writes no longer pre-apply a whole-document CRDT target and then submit it again through the disk-projection path. One queued mutation rebases over a newer editor cut, waits for delivery plus the native editor save, and fails closed if a detached disk replica changed.

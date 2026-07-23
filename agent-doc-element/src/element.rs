@@ -1170,8 +1170,26 @@ fn standalone_orphan_comment_terminator_reason(
     code_ranges: &[(usize, usize)],
     quoted_ranges: &[(usize, usize)],
 ) -> Option<String> {
+    let (line_start, _) =
+        standalone_orphan_comment_terminator_ranges(doc, code_ranges, quoted_ranges)
+            .into_iter()
+            .next()?;
+    let line = doc[..line_start]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1;
+    Some(format!("orphan_html_comment_terminator:line{line}"))
+}
+
+fn standalone_orphan_comment_terminator_ranges(
+    doc: &str,
+    code_ranges: &[(usize, usize)],
+    quoted_ranges: &[(usize, usize)],
+) -> Vec<(usize, usize)> {
     let mut cursor = 0usize;
     let mut comment_open = false;
+    let mut ranges = Vec::new();
     while cursor < doc.len() {
         let opener = doc[cursor..].find("<!--").map(|offset| cursor + offset);
         let closer = doc[cursor..].find("-->").map(|offset| cursor + offset);
@@ -1202,15 +1220,38 @@ fn standalone_orphan_comment_terminator_reason(
             .find('\n')
             .map_or(doc.len(), |relative| marker_start + relative);
         if doc[line_start..line_end].trim() == "-->" {
-            let line = doc[..line_start]
-                .bytes()
-                .filter(|byte| *byte == b'\n')
-                .count()
-                + 1;
-            return Some(format!("orphan_html_comment_terminator:line{line}"));
+            let remove_end = if line_end < doc.len() {
+                line_end + 1
+            } else {
+                line_end
+            };
+            ranges.push((line_start, remove_end));
         }
     }
-    None
+    ranges
+}
+
+/// Remove only standalone orphan `-->` lines outside fenced code, blockquotes,
+/// and balanced HTML comments. This is the narrow recovery counterpart to the
+/// structural gate: malformed editor authority can be classified as
+/// repair-required, registered, and then normalized without accepting the
+/// orphan terminator as a valid steady state.
+pub fn repair_standalone_orphan_comment_terminators(doc: &str) -> Option<String> {
+    let code_ranges = find_code_ranges(doc);
+    let quoted_ranges = find_quoted_ranges(doc);
+    let ranges = standalone_orphan_comment_terminator_ranges(doc, &code_ranges, &quoted_ranges);
+    if ranges.is_empty() {
+        return None;
+    }
+
+    let mut repaired = String::with_capacity(doc.len());
+    let mut cursor = 0usize;
+    for (start, end) in ranges {
+        repaired.push_str(&doc[cursor..start]);
+        cursor = end;
+    }
+    repaired.push_str(&doc[cursor..]);
+    Some(repaired)
 }
 
 /// Detect structural corruption that must never be adopted as a snapshot base
@@ -2832,6 +2873,29 @@ Fix applied to skip non-agent <!-- sequences.
             "```md\n-->\n```\n",
         );
         assert_eq!(structural_corruption_reason(doc), None);
+    }
+
+    #[test]
+    fn orphan_comment_terminator_repair_is_narrow_and_clears_the_gate() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "> 📌 do [#dbj7]\n\n",
+            "### Re: #dbj7 — gpt-5\n\n",
+            "Response body.\n\n",
+            " -->\n",
+            "<!-- balanced\n-->\n",
+            "> -->\n",
+            "```md\n-->\n```\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let repaired = repair_standalone_orphan_comment_terminators(doc)
+            .expect("the standalone orphan must be repairable");
+
+        assert!(!repaired.contains("\n -->\n"));
+        assert!(repaired.contains("<!-- balanced\n-->\n"));
+        assert!(repaired.contains("> -->\n"));
+        assert!(repaired.contains("```md\n-->\n```\n"));
+        assert_eq!(structural_corruption_reason(&repaired), None);
     }
 
     #[test]

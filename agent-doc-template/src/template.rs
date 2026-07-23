@@ -336,6 +336,9 @@ pub use tail_repair::*;
 /// write path. Safe duplicate exchange-close scaffolds are dropped; ambiguous
 /// mixed user text remains an error so the editor can refuse the visible write.
 pub fn normalize_editor_visible_template_structure(doc: &str) -> Result<String> {
+    let orphan_repaired =
+        agent_doc_element::element::repair_standalone_orphan_comment_terminators(doc);
+    let doc = orphan_repaired.as_deref().unwrap_or(doc);
     if let Some(reason) = agent_doc_element::element::malformed_agent_comment_reason(doc) {
         anyhow::bail!("template structural corruption guard failed: {reason}");
     }
@@ -1976,10 +1979,8 @@ mod tests {
         let configs = std::collections::HashMap::new();
         let max_lines = std::collections::HashMap::new();
 
-        let once =
-            apply_patches_pure(doc, &patches, "", None, &configs, &max_lines).unwrap();
-        let twice =
-            apply_patches_pure(&once, &patches, "", None, &configs, &max_lines).unwrap();
+        let once = apply_patches_pure(doc, &patches, "", None, &configs, &max_lines).unwrap();
+        let twice = apply_patches_pure(&once, &patches, "", None, &configs, &max_lines).unwrap();
 
         // Whatever the append semantics are, a retry must never leave marker
         // debris — that is the corruption signature, not a duplicated body.
@@ -4091,6 +4092,29 @@ Existing answer.
             "ordinary scratch comment body must stay intact:\n{repaired}"
         );
     }
+
+    #[test]
+    fn normalize_editor_visible_template_structure_repairs_dbj7_orphan_terminator() {
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "> 📌 do [#dbj7]\n\n",
+            "### Re: #dbj7 — gpt-5\n\n",
+            "Response body.\n\n",
+            " -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let repaired = normalize_editor_visible_template_structure(doc)
+            .expect("standalone orphan terminator must be a repairable editor projection");
+
+        assert!(!repaired.contains("\n -->\n"));
+        assert!(repaired.contains("Response body."));
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&repaired),
+            None
+        );
+    }
+
     #[test]
     fn normalize_removes_duplicate_answered_prompt_tail_after_boundary() {
         let prompt = "The content of the html comment below this agent:exchange element was deleted after the last agent-doc turn. Should we diff line by line?";

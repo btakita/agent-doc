@@ -202,7 +202,15 @@ pub fn normalize_template_structure_or_fail_preserving(
     file: &Path,
     preserve_doc: Option<&str>,
 ) -> Result<String> {
-    let lifted = lift_pending_from_exchange_safe(content, file);
+    let orphan_repaired =
+        agent_doc_element::element::repair_standalone_orphan_comment_terminators(content);
+    if orphan_repaired.is_some() {
+        eprintln!(
+            "[write] normalize_template_structure: removed standalone orphan HTML comment terminator"
+        );
+    }
+    let repairable_content = orphan_repaired.as_deref().unwrap_or(content);
+    let lifted = lift_pending_from_exchange_safe(repairable_content, file);
     let deduped_openers = {
         let mut result = lifted;
         while let Some(merged) = agent_doc_template::repair_duplicate_exchange_opener(&result)? {
@@ -599,6 +607,29 @@ mod tests {
 
         assert!(probe.contains("### Re: do [#x]"));
         assert!(!probe.contains("ignored because exchange patch is selected"));
+    }
+
+    #[test]
+    fn normalize_template_structure_repairs_dbj7_orphan_comment_terminator() {
+        let temp = TempDir::new().unwrap();
+        let file = temp.path().join("doc.md");
+        let doc = concat!(
+            "<!-- agent:exchange -->\n",
+            "> 📌 do [#dbj7]\n\n",
+            "### Re: #dbj7 — gpt-5\n\n",
+            "Response body.\n\n",
+            " -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        let normalized = normalize_template_structure_or_fail(doc, &file).unwrap();
+
+        assert!(!normalized.contains("\n -->\n"));
+        assert!(normalized.contains("Response body."));
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&normalized),
+            None
+        );
     }
 
     #[test]

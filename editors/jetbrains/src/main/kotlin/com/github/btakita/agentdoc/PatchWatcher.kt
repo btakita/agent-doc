@@ -449,27 +449,18 @@ class PatchWatcher(private val project: Project) : Disposable {
                 when (CrdtReplicaEventReason.fromToken(reasonToken)) {
                     CrdtReplicaEventReason.RequestFullState ->
                         CrdtReplicaManager.requestTextAdopt(project, file)
-                    // #ensurereregister: the binary sends this reason precisely when
-                    // it observed `editor_attached_model_missing` — this editor holds
-                    // the document but has NO CRDT replica behind it. A drain cannot
-                    // fix that: there is no replica to drain INTO, so the urgent-drain
-                    // path below is a no-op and the wedge persisted until the operator
-                    // ran `admin reload-lib` (which clears it only because
-                    // `ReloadLibrary` calls forceRefreshOpenDocumentReplicas) or closed
-                    // and reopened the tab. Re-establish the replica for this one file
-                    // instead, which is the same repair scoped to the document that
-                    // actually needs it.
-                    // Scoped strictly to the no-replica case: with a replica present
-                    // this stays a pure drain, so live editor authority is never
-                    // replaced (CrdtReplicaAckFrontierTest pins that).
-                    CrdtReplicaEventReason.AckRecoveryForceRefresh ->
-                        if (!CrdtReplicaManager.hasOpenDocumentReplica(file)) {
-                            CrdtReplicaManager.forceRefreshOpenDocumentReplica(
-                                project,
-                                file,
-                                "ack-recovery-missing-replica",
-                            )
-                        }
+                // #ensurereregister: this reason means the controller has no CRDT
+                // member for an attached editor. The plugin's local forwarder cache
+                // is not proof of controller membership: it survives controller
+                // recycle. Always replace/register from the exact visible editor
+                // cut, matching ReloadLibrary's recovery without refreshing every
+                // open document.
+                CrdtReplicaEventReason.AckRecoveryForceRefresh ->
+                    CrdtReplicaManager.forceRefreshOpenDocumentReplica(
+                        project,
+                        file,
+                        "ack-recovery-missing-controller-replica",
+                    )
                     else -> Unit
                 }
                 // #crdtpushdrain: every controller-published frontier drains urgently.

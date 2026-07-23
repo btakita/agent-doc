@@ -39,12 +39,28 @@ done
 Compacted content:
 - Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #missingreplicarebuild and #authoritydescentstd
 - Prior summary/context: prior compacted content: Archived 15 response topic(s): finish the open items; `#boundarystableid` and `#writestdinha...
-<!-- agent:boundary:99e2e059 -->
+
+### Re: #patchretryidem — gpt-5
+
+Resolved and released in `agent-doc` v0.35.10 as commit `02f4844b6`.
+
+The reported splice was not in patch application. The retained post-CAS retry constructor had already been corrected after this item was narrowed, in `6e6830a8d`: retries now compose one semantic response cell over the original content-bearing merge base and canonicalize that target instead of concatenating a whole response tail onto an already-materialized document.
+
+I pinned the exact artifact shape with a production-path regression: the second attempt already contains the quoted `> **Queue prompt:**` block and response, a concurrent operator append remains outside the exchange, and repeated construction must keep one queue prompt, response heading, boundary, exchange terminator, and no bare `-->` debris. The closeout specification and version history now state that invariant.
+
+Verification completed:
+
+- focused regression and the full `agent-doc-document-realtime-io` package tests passed;
+- `make check` passed (clippy, full Rust tests, simulation, version sync, Lean, and TLA+);
+- both the fast local install and the one-time fat-LTO release-parity install passed, including native library and all four detected JetBrains installations;
+- `main` and tag `v0.35.10` were pushed; CI run `29971032089` was in progress at the required single status check, and CI owns GitHub Release/PyPI publication;
+- the project controller is marked to recycle onto the installed generation at its next idle boundary.
+<!-- agent:boundary:6b0d3636 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ 📌 do [#patchretryidem]
+- 📌 do [#patchretryidem]
 - 📌 do [#hvw0]
 - 📌 do [#bbpe]
 - 📌 do [#dbj7]

@@ -161,7 +161,15 @@ JetBrains missing-replica recovery now unconditionally re-registers the exact vi
 The leaked standalone `-->` after `#dbj7` is now structurally detected and has a narrow normalization lane that removes only orphan terminator lines outside balanced HTML comments, blockquotes, and fenced code. The live editor buffer was first saved through the typed editor-owned save operation, preserving its unsaved queue-item deletion; this response write then removed the orphan and appended this result through the normal CRDT/CAS path.
 
 Verification passed: focused Rust and JetBrains regressions, `cargo fmt --all`, `git diff --check`, and full `make check`. Released as agent-doc `0.35.13` (`1e53f9eda`), following the core CAS fix in `0.35.12` (`ce07ad77d`); the superproject gitlink is `3ad4e822e`. The single post-push CI snapshot was in progress.
-<!-- agent:boundary:078c0c27 -->
+
+### Re: #r4gq — gpt-5
+
+The live verification is not satisfied yet. This cycle was entered through the normal Codex agent-doc/queue path, not the JetBrains Run Agent Doc action, so it does not exercise the busy-pane dispatch shortcut or prove the expected fast UI return.
+
+A bounded check of .agent-doc/logs/ops.log found no actual route_dispatch_start_queued_behind_active_turn event for this busy case. The accepted_without_dispatch_start_proof matches are historical failure text embedded in document snapshots and prior backlog evidence, not a contemporaneous route event from this invocation.
+
+Leave #r4gq open. The remaining operator proof is to invoke JetBrains Run Agent Doc while the Codex pane is visibly mid-turn, confirm the action returns immediately with the prompt queued behind the active turn, and correlate that click timestamp with route_dispatch_start_queued_behind_active_turn and no new accepted_without_dispatch_start_proof event.
+<!-- agent:boundary:f3a851ca -->
 <!-- /agent:exchange -->
 ## Queue
 

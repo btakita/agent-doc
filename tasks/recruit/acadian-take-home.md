@@ -158,12 +158,49 @@ Prepared the verified date-control and commit-on-settle work for push.
 The submodule and superproject `main` branches will be pushed immediately after this binary-owned document closeout returns. This ordering ensures the agent-doc response commit is included in the superproject push rather than leaving the session document one commit behind.
 
 Confidence is high and no implementation escalation is needed. The separate preflight warning about a stale locally built `agent-doc` binary reflects newer unrelated source edits in `src/agent-doc`; those shared changes were preserved and were not included in these commits.
-<!-- agent:boundary:02e694ca -->
+
+### Re: remove the intermediate graph render — gpt-5
+
+> **Queue prompt:** There is still jank when selecting a date range using the slider. After the selection, an intermediate state is show with the graphs then the final state is shown. Please remove the intermediate state from being rendered.
+
+Fixed the remaining render jank.
+
+The previous change stopped intermediate **requests**, but one stale graph frame could still paint after release: the committed range changed during render, while `useReturns` did not set `loading` until its post-paint effect ran. The existing refresh styling then deliberately rendered the stale graphs at reduced opacity until the final response arrived.
+
+The refresh boundary is now atomic from the user's perspective:
+
+- `useReturns` keys each committed range/retry and reports it pending synchronously, before the effect starts.
+- The stale result grid remains mounted so the page keeps exactly the same geometry, but it becomes `visibility: hidden` and `aria-hidden` immediately on release.
+- The ambient loading indicator remains visible during debounce and fetch.
+- The grid is revealed only after the response for that exact request key has resolved.
+
+Changed paths:
+
+- `frontend/src/hooks/useReturns.ts` and new `useReturns.test.ts`
+- `frontend/src/App.tsx` and `App.test.tsx`
+- `frontend/src/lib/viewState.ts`
+- `frontend/src/styles.css`
+- `SPEC.md` and `README.md`
+
+Verification passed:
+
+- Targeted request-identity and app-render regression tests.
+- TypeScript typecheck.
+- Live Chromium hit-tested pointer drag: no requests while dragging; on release the stale grid was synchronously `visibility:hidden`, `aria-hidden`, and marked refreshing before the debounce issued a request; it stayed hidden through the request and reappeared only with the final payload. Exactly one final-range request fired.
+- Full `make check` (backend tests and mypy; frontend tests, typecheck, and production build).
+- `git diff --check`.
+- The required GitHub check again found no workflow named `CI` in this repository.
+
+Committed the application change as `5e9b547` (`fix: hide stale graphs during range refresh`) and the isolated superproject gitlink as `772d38e83` (`fix: hide stale MAG7 refresh state`). The submodule and superproject branches will be pushed immediately after this binary-owned response commit, so the session closeout is included in the superproject push.
+
+Confidence is high; no escalation or follow-up work is needed. The separate stale local `agent-doc` build warning still belongs to unrelated shared work in `src/agent-doc` and was not included.
+<!-- agent:boundary:e9841cfd -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
+- There is still jank when selecting a date range using the slider. After the selection, an intermediate state is show with the graphs then the final state is shown. Please remove the intermediate state from being rendered.
 <!-- /agent:queue -->
 
 ## Backlog

@@ -141,13 +141,29 @@ Verification passed:
 The submodule working tree still contains the earlier enabled-date-controls fix together with this implementation. I did not create a repository commit or push because this prompt did not request one; the agent-doc response itself is committed through the normal session boundary.
 
 Confidence is high. No escalation or follow-up work is needed. The live editor registration also confirmed plugin 0.2.286, so the prior stale-plugin warning is resolved.
-<!-- agent:boundary:48af0491 -->
+
+### Re: commit and push the interaction fixes — gpt-5
+
+> **Queue prompt:**
+>
+> do [#commitpushexisting]
+
+
+Prepared the verified date-control and commit-on-settle work for push.
+
+- Committed the complete `src/mag7-viewer` change set as `6013d0f` (`fix: fetch returns after range selection settles`). The commit contains exactly the nine intended application, test, specification, and README paths.
+- Committed only the `src/mag7-viewer` gitlink in the superproject as `b1a6171c1` (`fix: settle MAG7 date range requests`). The active session document and all unrelated shared-work changes were excluded from that manual commit.
+- Verification remains green from the immediately preceding implementation cycle: targeted reducer tests, TypeScript typecheck, live Chromium pointer and keyboard request-boundary checks, full `make check`, and `git diff --check`.
+
+The submodule and superproject `main` branches will be pushed immediately after this binary-owned document closeout returns. This ordering ensures the agent-doc response commit is included in the superproject push rather than leaving the session document one commit behind.
+
+Confidence is high and no implementation escalation is needed. The separate preflight warning about a stale locally built `agent-doc` binary reflects newer unrelated source edits in `src/agent-doc`; those shared changes were preserved and were not included in these commits.
+<!-- agent:boundary:02e694ca -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- commit + push the existing bug fix as well.
+<!-- agent:queue preset="#spec-test-commit-push" priority -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -171,4 +187,5 @@ Confidence is high. No escalation or follow-up work is needed. The live editor r
 - 2026-07-20 [#backendsilentlydrops] Backend silently drops a requested ticker when yfinance returns no data for it (MSFT absent on the trailing-6-month range, present on a shorter range). Report unavailable symbols in the response payload instead of omitting them.
 - 2026-07-20 [#proposeablequickly] Propose a UX to be able to quickly select a diffrent date range via mouse while over the chart or range slider. Perhaps a slider?
 - 2026-07-23 [#fetchonsettle] Implement commit-on-settle fetching for the master range slider, with draft UI state, committed query state, specs, tests, and live browser verification
+- 2026-07-23 [#commitpushexisting] commit + push the existing bug fix as well.
 <!-- /agent:done -->

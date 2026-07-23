@@ -79,7 +79,33 @@ Retried the guarded document closeout.
 - No implementation files changed during this retry. The date-selector fix remains in the `src/mag7-viewer` working tree.
 - Verification remains the completed `make check` run: 35 backend tests, mypy, 94 frontend tests, TypeScript typecheck, production build, and clean `git diff --check`.
 - Confidence is high. No escalation or follow-up work is needed.
-<!-- agent:boundary:f21b163b -->
+If we opportunistically load the return when the drag starts, then I continue to drag, there is a glitch where I see an older dragged result which is then replaced by the final resting result. Should we not being loading until the drag is complete or opportunistically start loading with debounce? If this were a large dataset, I would say we don't want to load until the slide has settled.
+
+What are your thoughts?
+
+### Re: fetch after the slider settles — gpt-5
+
+I agree with your instinct: for this interaction, especially if the dataset or computation becomes expensive, the application should fetch only after the user has committed the range.
+
+The current implementation uses one `range` for both the visible slider position and `useReturns`, with a 300 ms debounce. That reduces request volume, but it does not mean “drag complete.” If the pointer pauses for more than 300 ms while still held down, the intermediate request starts. If it finishes before the next movement, that intermediate payload is legitimately rendered; aborting later requests cannot undo that already-visible frame. That is the flash you are seeing.
+
+I recommend splitting the state:
+
+- `draftRange`: updated continuously while dragging, so the handles and selected track remain responsive.
+- `committedRange`: updated on interaction completion and used as the input to `useReturns`.
+- Pointer interaction commits on release (with the corresponding cancel/lost-capture safeguards); keyboard adjustment commits after the key sequence settles or on keyup/blur.
+- Preset buttons and completed date-field edits can commit immediately.
+
+While dragging, keep showing the data for the last committed range. On release, fetch the new range and preserve/dim the prior chart with an “Updating returns” state until the replacement is ready. Keep the `AbortController` or a latest-request token as a correctness guard for genuinely rapid committed changes, but do not use debounce as the primary definition of completion.
+
+I would not opportunistically prefetch intermediate drag positions unless we later have a strong cache or prediction reason. If we ever do prefetch, its result should remain hidden and only be promoted when it exactly matches the committed range.
+
+So my recommendation is: **commit-on-settle for fetching, continuous updates only for the slider UI**. A small debounce can still help coalesce keyboard repeats, but mouse/pointer release should be the decisive boundary.
+
+No files were changed and no tests were run because this turn asked for design judgment rather than implementation. I inspected the current `App`, `MasterRangeSlider`, and `useReturns` flow; confidence is high, and no escalation is needed.
+
+If your last message meant that you restarted the IDE, thank you—the closeout check will use the refreshed editor registration. The package itself still needs to report 0.2.286 for the earlier version warning to clear.
+<!-- agent:boundary:451131cb -->
 <!-- /agent:exchange -->
 
 ## Queue

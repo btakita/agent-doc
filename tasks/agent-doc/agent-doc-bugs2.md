@@ -109,7 +109,6 @@ Success requires all three observations in the same attempt: the Claude turn con
 > 📌 do [#dbj7]
 
 
- -->
 
 ### Re: realtime steering residue after #dbj7 — gpt-5
 
@@ -137,14 +136,6 @@ Pass only if the queue deletions and prompt edit both survive, compaction commit
 This remains an operator/live-IntelliJ verification. The session has registered JetBrains plugin `0.2.283`, superseding the item's old `0.2.247` pin, so verify with the current plugin after an IDE restart if that bytecode is not already active. Open `tasks/professional/equityfundingsource.md`, reproduce the dim **Summarize recent commits** suggestion, and invoke **Run Agent Doc**.
 
 Pass only if dispatch completes without a protected-input refusal and without a long UI freeze. If it fails, capture the route attempt and editor/ops-log markers together. This pane cannot reproduce or certify the host IDE suggestion state itself.
-A response is this document was an empty closing html comment tag.
-```
->
-> 📌 do [#dbj7]
-
-
- -->
-```
 ### Re: [#vscsaveproj]
 
 > **Queue prompt:**
@@ -161,12 +152,20 @@ Implemented and released the VS Code save-document observability parity fix.
 - Released agent-doc 0.35.11, JetBrains plugin 0.2.284, and VS Code extension metadata 0.2.55. Code commit: `963e805d2`; superproject gitlink commit: `a87a551bf`; tag `v0.35.11` is pushed.
 - Verification passed: targeted Rust FFI test, complete VS Code npm suite, JetBrains Gradle tests, full `make check`, `git diff --check`, `make install`, and the one-time `make install-full`. The installed binary reports 0.35.11 and the JetBrains package was installed to all four detected IDEs.
 - Required post-push snapshots: CI run 29973658043 and Release run 29973658228 were both in progress; per repository policy I did not poll them.
-<!-- agent:boundary:7d71b8ed -->
+### Re: CRDT/CAS race and #dbj7 — gpt-5
+
+Fixed and released. The CRDT/CAS write path now captures one base, performs one serialized relay submission, rebases over newer editor authority, and refines post-commit retries only to the exact retained response target. This removes the former pre-apply-plus-second-whole-document race across stream, inline, recovery, and compare-if-current writes.
+
+JetBrains missing-replica recovery now unconditionally re-registers the exact visible editor cut when the controller reports missing membership; a plugin-local forwarder cache can no longer suppress recovery after controller recycle.
+
+The leaked standalone `-->` after `#dbj7` is now structurally detected and has a narrow normalization lane that removes only orphan terminator lines outside balanced HTML comments, blockquotes, and fenced code. The live editor buffer was first saved through the typed editor-owned save operation, preserving its unsaved queue-item deletion; this response write then removed the orphan and appended this result through the normal CRDT/CAS path.
+
+Verification passed: focused Rust and JetBrains regressions, `cargo fmt --all`, `git diff --check`, and full `make check`. Released as agent-doc `0.35.13` (`1e53f9eda`), following the core CAS fix in `0.35.12` (`ce07ad77d`); the superproject gitlink is `3ad4e822e`. The single post-push CI snapshot was in progress.
+<!-- agent:boundary:078c0c27 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~📌 do [#vscsaveproj]~~
 - 📌 do [#r4gq]
 - 📌 do [#af88]
 - 📌 do [#claimnewpane]

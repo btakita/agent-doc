@@ -229,7 +229,15 @@ Verification passed:
 Committed and pushed the application change as `b04e1d7` (`fix: eliminate range refresh graph jank`). Committed the isolated superproject gitlink as `7420699aa` (`fix: eliminate MAG7 range refresh jank`); the superproject branch will be pushed immediately after this binary-owned document closeout so this response commit is included as well.
 
 Confidence is high. No escalation or follow-up work is needed.
-<!-- agent:boundary:6147d1cf -->
+
+### Re: final range-refresh closeout — gpt-5
+
+The range-refresh fix is complete and the binary-owned closeout has now been re-established after the Stop hook detected the later console summary as uncrossed assistant text.
+
+The implemented behavior remains unchanged: existing graphs stay visible during loading, ticker-card zoom state resets before paint when the final response arrives, and the browser shows no intermediate old-index graph frame. Application commit `b04e1d7`, superproject gitlink commit `7420699aa`, and the prior detailed verification record remain authoritative; both repositories are pushed and clean for the scoped paths.
+
+No additional implementation changes or follow-up work were needed during this closeout repair.
+<!-- agent:boundary:13d6a26f -->
 <!-- /agent:exchange -->
 
 ## Queue

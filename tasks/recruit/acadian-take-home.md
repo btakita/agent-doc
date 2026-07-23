@@ -105,12 +105,49 @@ So my recommendation is: **commit-on-settle for fetching, continuous updates onl
 No files were changed and no tests were run because this turn asked for design judgment rather than implementation. I inspected the current `App`, `MasterRangeSlider`, and `useReturns` flow; confidence is high, and no escalation is needed.
 
 If your last message meant that you restarted the IDE, thank you—the closeout check will use the refreshed editor registration. The package itself still needs to report 0.2.286 for the earlier version warning to clear.
-<!-- agent:boundary:451131cb -->
+❯ 🚧 Please go with your recommendation. 0.2.286 is running.
+
+### Re: fetch on slider commit — gpt-5
+
+Implemented the commit-on-settle behavior.
+
+The master slider now has two explicit states:
+
+- A **draft range** updates continuously as the handles move, so the slider remains responsive.
+- A **committed range** drives `useReturns` and changes only when the interaction finishes.
+
+Pointer release, pointer cancellation/lost capture, keyboard keyup, and blur commit the slider range. Preset chips and date fields commit immediately. The existing 300 ms debounce and `AbortController` remain after that boundary to coalesce rapid committed changes and protect against stale in-flight responses.
+
+This prevents an intermediate drag pause from starting a request or rendering an older dragged result. During the drag, the chart continues to show the last committed dataset; release starts one refresh for the final range.
+
+Implementation and contract changes:
+
+- `frontend/src/App.tsx` now coordinates draft and committed ranges.
+- `frontend/src/components/MasterRangeSlider.tsx` separates preview and commit callbacks.
+- `frontend/src/components/DateRangePicker.tsx` uses the shared range type and commits immediately.
+- `frontend/src/lib/rangeSelection.ts` contains the pure state transition logic, with three regression tests in `rangeSelection.test.ts`.
+- `frontend/src/hooks/useReturns.ts`, `frontend/src/App.test.tsx`, `SPEC.md`, and `README.md` were updated to match the settled-fetch contract.
+
+Verification passed:
+
+- Targeted range-selection regression tests.
+- TypeScript typecheck.
+- Live Chromium pointer test using actual hit-testing: two separate 650 ms pauses during an active drag changed the displayed draft dates but fired zero `/api/returns` requests; release fired exactly one request for the final range.
+- Live Chromium keyboard test: holding an arrow changed the draft range with zero requests; keyup produced exactly one final-range request.
+- Full `make check` (backend tests and mypy; frontend tests, typecheck, and production build).
+- `git diff --check`.
+- The required GitHub check found no workflow named `CI` in this repository.
+
+The submodule working tree still contains the earlier enabled-date-controls fix together with this implementation. I did not create a repository commit or push because this prompt did not request one; the agent-doc response itself is committed through the normal session boundary.
+
+Confidence is high. No escalation or follow-up work is needed. The live editor registration also confirmed plugin 0.2.286, so the prior stale-plugin warning is resolved.
+<!-- agent:boundary:48af0491 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push" priority -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- commit + push the existing bug fix as well.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -133,4 +170,5 @@ If your last message meant that you restarted the IDE, thank you—the closeout 
 - 2026-07-18 [#acad5] Submission: README (setup/run/assumptions), final make check, create + push public GitHub repo, clean-clone sanity test (plan: tasks/recruit/acadian/plan.md)
 - 2026-07-20 [#backendsilentlydrops] Backend silently drops a requested ticker when yfinance returns no data for it (MSFT absent on the trailing-6-month range, present on a shorter range). Report unavailable symbols in the response payload instead of omitting them.
 - 2026-07-20 [#proposeablequickly] Propose a UX to be able to quickly select a diffrent date range via mouse while over the chart or range slider. Perhaps a slider?
+- 2026-07-23 [#fetchonsettle] Implement commit-on-settle fetching for the master range slider, with draft UI state, committed query state, specs, tests, and live browser verification
 <!-- /agent:done -->

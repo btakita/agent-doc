@@ -284,7 +284,7 @@ The queued IDE failure came from the Project Controller socket being absent at t
 ### Re: Sync Tmux Layout on equityfundingsource.md — gpt-5
 
 Completed successfully. The original IDE request failed because `.agent-doc/controller.sock` did not exist at that moment. With the controller healthy, I replayed the exact layout through `agent-doc sync`: pane `%37` (`agent-doc-bugs2.md`) and pane `%40` (`equityfundingsource.md`) are in two columns in `0:agent-doc`, with `%40` focused. The sync exited 0 after doctor repair and final reconciliation reported the layout already correct.
-<!-- agent:boundary:96a798f8 -->
+<!-- agent:boundary:93003e66 -->
 <!-- /agent:exchange -->
 ## Queue
 

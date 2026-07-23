@@ -169,13 +169,18 @@ The live verification is not satisfied yet. This cycle was entered through the n
 A bounded check of .agent-doc/logs/ops.log found no actual route_dispatch_start_queued_behind_active_turn event for this busy case. The accepted_without_dispatch_start_proof matches are historical failure text embedded in document snapshots and prior backlog evidence, not a contemporaneous route event from this invocation.
 
 Leave #r4gq open. The remaining operator proof is to invoke JetBrains Run Agent Doc while the Codex pane is visibly mid-turn, confirm the action returns immediately with the prompt queued behind the active turn, and correlate that click timestamp with route_dispatch_start_queued_behind_active_turn and no new accepted_without_dispatch_start_proof event.
-<!-- agent:boundary:b13c7150 -->
+
+### Re: #r4gq — gpt-5
+
+The JetBrains busy-pane dispatch proof remains operator-gated. This invocation did not exercise the JetBrains Run Agent Doc action, and the operations log has no contemporaneous route_dispatch_start_queued_behind_active_turn event, so the item is gated rather than marked complete.
+
+To resolve it, invoke JetBrains Run Agent Doc while Codex is visibly mid-turn, verify the action returns immediately with a queued-behind-active-turn outcome, and confirm the corresponding success marker appears with no new accepted_without_dispatch_start_proof event.
+<!-- agent:boundary:106d089a -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#fmgc]
-- ⏭️ 📌 do [#r4gq]
+- 📌 do [#r4gq]
 - 📌 do [#af88]
 - 📌 do [#claimnewpane]
 - 📌 do [#boundaryaccum1]

@@ -55,6 +55,13 @@ Verification completed:
 - both the fast local install and the one-time fat-LTO release-parity install passed, including native library and all four detected JetBrains installations;
 - `main` and tag `v0.35.10` were pushed; CI run `29971032089` was in progress at the required single status check, and CI owns GitHub Release/PyPI publication;
 - the project controller is marked to recycle onto the installed generation at its next idle boundary.
+- Required post-push snapshots: CI run 29973658043 and Release run 29973658228 were both in progress; per repository policy I did not poll them.
+- Verification passed: targeted Rust FFI test, complete VS Code npm suite, JetBrains Gradle tests, full `make check`, `git diff --check`, `make install`, and the one-time `make install-full`. The installed binary reports 0.35.11 and the JetBrains package was installed to all four detected IDEs.
+- Released agent-doc 0.35.11, JetBrains plugin 0.2.284, and VS Code extension metadata 0.2.55. Code commit: `963e805d2`; superproject gitlink commit: `a87a551bf`; tag `v0.35.11` is pushed.
+- Added VS Code behavioral/order and fail-closed tests, JetBrains/native-source contract coverage, and updated editor/root specifications.
+- Migrated JetBrains save outcome reporting from its Kotlin-built ops-log line to the same native FFI export.
+- Routed VS Code's typed `SaveDocument` socket intent through a testable adapter that records `missing_file`, `missing_document`, `saved`, and `failed`; a successful receipt is emitted only after `TextDocument.save()` completes and carries the post-save document content.
+- Added the shared Rust FFI export `agent_doc_record_editor_surface_event`, with validated inputs, project-relative document identity, the common `editor_surface_event` schema, and an FFI regression test.
 
 ### Re: #hvw0 — gpt-5
 
@@ -130,20 +137,36 @@ Pass only if the queue deletions and prompt edit both survive, compaction commit
 This remains an operator/live-IntelliJ verification. The session has registered JetBrains plugin `0.2.283`, superseding the item's old `0.2.247` pin, so verify with the current plugin after an IDE restart if that bytecode is not already active. Open `tasks/professional/equityfundingsource.md`, reproduce the dim **Summarize recent commits** suggestion, and invoke **Run Agent Doc**.
 
 Pass only if dispatch completes without a protected-input refusal and without a long UI freeze. If it fails, capture the route attempt and editor/ops-log markers together. This pane cannot reproduce or certify the host IDE suggestion state itself.
-<!-- agent:boundary:826a97af -->
+A response is this document was an empty closing html comment tag.
+```
+>
+> 📌 do [#dbj7]
+
+
+ -->
+```
+### Re: [#vscsaveproj]
+
+> **Queue prompt:**
+>
+> 📌 do [#vscsaveproj]
+
+
+Implemented and released the VS Code save-document observability parity fix.
+
+- Added the shared Rust FFI export `agent_doc_record_editor_surface_event`, with validated inputs, project-relative document identity, the common `editor_surface_event` schema, and an FFI regression test.
+- Routed VS Code's typed `SaveDocument` socket intent through a testable adapter that records `missing_file`, `missing_document`, `saved`, and `failed`; a successful receipt is emitted only after `TextDocument.save()` completes and carries the post-save document content.
+- Migrated JetBrains save outcome reporting from its Kotlin-built ops-log line to the same native FFI export.
+- Added VS Code behavioral/order and fail-closed tests, JetBrains/native-source contract coverage, and updated editor/root specifications.
+- Released agent-doc 0.35.11, JetBrains plugin 0.2.284, and VS Code extension metadata 0.2.55. Code commit: `963e805d2`; superproject gitlink commit: `a87a551bf`; tag `v0.35.11` is pushed.
+- Verification passed: targeted Rust FFI test, complete VS Code npm suite, JetBrains Gradle tests, full `make check`, `git diff --check`, `make install`, and the one-time `make install-full`. The installed binary reports 0.35.11 and the JetBrains package was installed to all four detected IDEs.
+- Required post-push snapshots: CI run 29973658043 and Release run 29973658228 were both in progress; per repository policy I did not poll them.
+<!-- agent:boundary:7d71b8ed -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#8ybz]~~
-- ~~📌 do [#patchretryidem]~~
-- ~~📌 do [#hvw0]~~
-- ~~📌 do [#bbpe]~~
-- ~~📌 do [#dbj7]~~
-- ~~📌 do [#crdtpushdrainverify]~~
-- ~~📌 do [#compactindcellsverify]~~
-- 📌 do [#zqv8]
-- 📌 do [#vscsaveproj]
+- ~~📌 do [#vscsaveproj]~~
 - 📌 do [#r4gq]
 - 📌 do [#af88]
 - 📌 do [#claimnewpane]
@@ -163,10 +186,8 @@ Pass only if dispatch completes without a protected-input refusal and without a 
 - 📌 do [#nsfz]
 - 📌 do [#suprestassoc-live]
 - 📌 do [#jbedtledgerverify]
-- ~~📌 do [#fmgc]~~
 - 📌 do [#0dsr]
 - 📌 do [#30p6]
-- ~~📌 do [#capturebacklogatomic]~~
 - 📌 do [#opcapturelazily]
 - 📌 do [#jbtsiftnosub2verify]
 - 📌 do [#sidecarstate]
@@ -213,7 +234,6 @@ This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack wa
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
 - [ ] [#ipcpostcommitinv] [focused-cycle] #agent-doc-bug IPC root-cause C: structural invariants enforced on wrong write path. #boundaryaccum root fix landed (git.rs unconditional snapshot collapse) but needs a POST-COMMIT verification gate that fails loudly/self-heals if HEAD carries more than one boundary or a duplicated scaffold. Reuse ipc_corruption.rs detect_duplicated_scaffold. Touches git.rs, ipc_corruption.rs, flow/closeout.rs. Plan: tasks/agent-doc/plan-boundary-accumulation-committed-blob.md.
-- [ ] [#vscsaveproj] [focused-cycle] #agent-doc-bug VS Code save_document observability parity — ROUTE CORRECTED 2026-07-19. processSaveDocumentSignal (editors/vscode/src/extension.ts) only writes to outputChannel; JB records missing_file/missing_document/saved/failed. BUT there is NO shared FFI export for surface ops: JB's recordEditorSurfaceOps (PatchWatcher.kt:1031) builds the line in Kotlin via buildEditorSurfaceOpsLogLine + appendOpsLog. Duplicating that builder in TypeScript would violate the FFI-first rule and guarantee drift between two editors emitting the same event. Correct route: add a surface-op export to ffi.rs (the shared C ABI both editors already use — VS Code has the READ side via stateSubscribe/GraphView but no write side), call it from processSaveDocumentSignal, then migrate JB off its Kotlin-local builder so one implementation serves both. Then the behavioral test (open doc -> signal -> save -> ack-content). Scope is Rust FFI + TS + JB migration, not a TS-only patch.
 - [ ] [#r4gq] [operator-verify] Live JB Run Agent Doc dispatch-hang proof (#kjw0 fix, shipped 0.34.66 build): after the recycled build is running, trigger Run Agent Doc into a BUSY codex pane (mid-turn, 'esc to interrupt' visible) and confirm it returns FAST with a queued-behind-active-turn outcome (pane shows queued status) instead of hanging ~21s then a dispatch-start-unproven notification. Grep ops.log for route_dispatch_start_queued_behind_active_turn (present on success) and confirm accepted_without_dispatch_start_proof is ABSENT for the busy case. Root cause: route injected the trigger into a mid-turn pane; codex queued it behind the active turn so the UserPromptSubmit hook could not advance within the 10s proof budget, and the direct-pane path paid TWO 10s waits (initial + late-resubmit) then filed a false bug. Fix: short_circuit_dispatch_start_when_pane_busy in route/dispatch.rs detects busy_proof_line and returns RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn (accepted, not fail-closed).
 - [ ] [#af88] [focused-cycle] #agent-doc-bug IPC wedge hardening follow-ups from the 2026-07-01 audit (wedges C + A FIXED this cycle: supervisor IPC listener now spawns per-connection threads so a half-open client cannot freeze all supervisor dispatch; editor IPC send now has set_send_timeout). Remaining: (E) pty.rs stdin.lock() held across the blocking read — evaluate a raw-fd read that preserves the restart/quit-prompt stdin coexistence in start.rs; (B/D) editor IPC listener per-connection read_line has no timeout (thread/fd leak under a persistent half-open client) — add a bounded backstop; (F) connect_sync has no connect timeout (mitigated today by the 3s wait_for_controller deadline loop). Also decide the AGENTS.md 'No async' convention nuance for the server-scale roadmap.
 - [ ] [#claimnewpane] [focused-cycle] #agent-doc-feature Claim for Tmux Pane should open a new document in a fresh pane in the SAME tmux session (never replace the current pane or move the window to another session). Plan: tasks/agent-doc/plan-claim-new-pane-same-session.md

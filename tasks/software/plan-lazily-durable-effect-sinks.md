@@ -272,13 +272,14 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
    release→bool). Shared `run_closeout_owner_*` cores extracted; bespoke verbs +
    command-plane services both call them. Vocabulary in cycle-state-io. clippy
    clean; nextest 272 passed.
-4. **Read-only inspection sites from the live projection.** Chokepoint:
-   `load_document_projection` (`cycle-state-io/src/lib.rs` ≈ L700) — migrating it
-   covers `load` / `load_with_closeout_projection` / `load_closeout_projection` /
-   `load_document_disk_write`. Controller-internal callers must NOT self-RPC
-   (`commit_barrier_for_closeout` already converted; `persist_session_actor_closeout`
-   is client-called so safe). Leave `load_recent_captured_response_checkpoints`
-   (legitimate bounded history read).
+4. **DONE — `3d29324d0`** Read-only inspection from the live projection. The
+   `load_document_projection` chokepoint (covers `load` /
+   `load_with_closeout_projection` / `load_closeout_projection` /
+   `load_document_disk_write`) prefers the controller's live in-memory projection
+   when a controller is live, replaying cold state.db only for the actorless
+   boundary. New read-only `document_state_projection` verb. No production
+   controller-internal caller self-RPCs (verified). clippy clean; nextest 272
+   passed.
 5. **Remove the per-consume `flock`** — `agent-doc-queue-io/src/queue_consume.rs:49`
    `acquire_doc_lock` (6 sites: 212/376/576/648/734/815) +
    `agent-doc-write-runtime-io/src/lib.rs:2478`. Replace with actor-owned dedup.

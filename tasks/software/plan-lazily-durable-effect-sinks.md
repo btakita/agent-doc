@@ -138,6 +138,22 @@ The agent harness should flag a design that combines a hot-path transition with
 hydration or actorless bootstrap. This is an architecture-review prompt, not a
 generic AST linter or a runtime daemon.
 
+**Status — largely present where tractable; one item blocked.**
+- Compile-fail `Ephemeral`↔`Durable`: DONE in lazily — `presence.rs:16`
+  (`compile_fail` doctest: a durable sink generic over `Durable` rejects an
+  `EphemeralValue`).
+- Property laws: DONE in lazily — `tests/relay_spill.rs` covers ordered-history
+  replay every unacked epoch (`spill_lossless`) + monotone/idempotent ack
+  (`spill_replay_idempotent`); `tests/relay_core.rs` covers projection batch-
+  coalesce to the settled value.
+- Architecture-review prompt: DONE — the agent-doc `AGENTS.md` carries the
+  `#lzdurablesink` review prompt.
+- Architecture TEST (fail if hot-path actor modules import persistence query/CAS/
+  flock): **BLOCKED** on Phase 2 hot-path cleanliness — `mark_committed` is still
+  local and the `mark_*` actorless fallbacks still touch `state.db`, so the
+  boundary isn't clean enough to enforce yet. Add this once `mark_committed` and
+  queue-consume (todo 5) are fully on the authority.
+
 ## Phase 4: promote only proven common structure
 
 After agent-doc and one unrelated application use the same shape, review the
@@ -157,9 +173,16 @@ A plausible promoted helper is a small policy/acknowledgement vocabulary around
 an existing effect. A generic ORM, repository layer, “durable cell” graph node,
 or built-in SQLite sink is out of scope.
 
-**Second-consumer candidates (Phase 4 gate):** `src/freehold` or
-`src/community-pulse` — pick whichever first adopts the
-`CommandSubmit → authority → sink → CausalReceipt` shape for one of its own
+**Second-consumer (Phase 4 gate): DONE — `community-pulse` `1d3a197`.** It adopts
+the `CommandSubmit → authority → sink → CausalReceipt` shape for the attention-
+budget transition (`set_budget`): the engine is the authority (clamps the budget
+from live state), the SQLite `settings` upsert is the write-only sink, and the
+terminal `CausalReceipt` is the monotone ack. In-process (no socket — community-
+pulse is single-process); the contract is the shape, which is what the gate
+needs. 3 tests green (applied round-trip + sink fired, authority clamps,
+malformed payload fails closed). The two consumers (agent-doc closeout +
+community-pulse budget) now share the shape → the Phase 4 promotion review is
+unblocked.
 durable transitions. Either satisfies the "one unrelated application" entry
 condition; only after it (plus agent-doc) both pass Phase 3 enforcement does the
 promotion review begin.
@@ -305,12 +328,20 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
 
 ### Resume hint
 
-Todos 1–4 + 6 are done and `make check` is green on `main`. The command-plane
+Todos 1–4 + 6 are done; `make check` green on agent-doc `main`. The command-plane
 authority is live for closeout: `mark_write_applied`/`mark_response_captured`/
 `mark_abandoned` + owner claim/release route through it; `load*` reads the live
-projection; the self-RPC guard + stale-socket fallback are in place. Two
-follow-ups remain: (a) migrate `mark_committed` onto the command plane once its
-recovery commit-ordering/label is pinned (it stays local today), and (b) todo
-(5) — route queue consume through the authority, then drop the per-consume
-`flock`. After Phase 2 is fully uniform, Phase 3 (cheap enforcement) and the
-Phase 4 second consumer (freehold or community-pulse).
+projection; the self-RPC guard + stale-socket fallback are in place. **Phase 4
+second consumer DONE** — `community-pulse` `1d3a197` adopts the shape for
+`set_budget`; the two consumers now share it, unblocking the Phase 4 promotion
+review. Phase 3 enforcement is largely present in lazily (compile-fail +
+property laws); its agent-doc architecture TEST is blocked on Phase 2 cleanliness.
+
+Two follow-ups remain: (a) migrate `mark_committed` onto the command plane —
+live-debug confirmed the recovery issues multiple commits whose refresh/label
+ordering diverges from the local path, but a test-support controller-lifecycle
+quirk resisted pinning; needs a focused recovery-flow trace; and (b) todo (5) —
+route queue consume through the authority, then drop the per-consume `flock`.
+Once those land, add the Phase 3 architecture test, then run the Phase 4
+promotion review (extract a small policy/ack vocabulary to lazily only if the
+six criteria hold).

@@ -9293,7 +9293,8 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
         "agent_doc_turn::response_text::{",
         "response_prompt_target_from_re_heading",
         "summarize_response_for_hook",
-        "capture-agent-doc-closeout",
+        "agent_doc_closeout_events(",
+        "MemoryStore::open_or_create",
         "fn git_head(",
     ] {
         assert!(
@@ -9301,6 +9302,10 @@ fn test_agent_doc_memory_owns_semantic_memory_ranking_policy() {
             "agent-doc-memory-io must own tsift-memory closeout adapter: {required}"
         );
     }
+    assert!(
+        !memory_io_closeout.contains("Command::new(\"tsift\")"),
+        "agent-doc post-commit closeout must use tsift-memory directly instead of spawning the heavy tsift CLI"
+    );
     let orchestration_lib =
         fs::read_to_string(manifest_dir.join("agent-doc-orchestration/src/lib.rs")).unwrap();
     for forbidden in [

@@ -71,6 +71,16 @@ Verification evidence:
 - The landed SQLite regressions cover `live_peer_minimum_controls_delete_below_watermark`, `crashed_peer_eviction_unpins_watermark_but_missing_live_ack_pins_zero`, and `count_cap_retention_remains_active_as_watermark_backstop`.
 - The controller regression `state_subscribe_records_only_the_previously_applied_live_peer_cursor` covers apply-then-ACK wiring and exact live-registration retention input.
 - `gh run list --workflow CI --limit 1` reports the latest `main` CI run `30054083681` completed successfully.
+- Added the `#lazily-hot-path` rule to `src/agent-doc/AGENTS.md` so future ownership/CAS/lease/dedup work must use actor state and may not independently reload SQLite at the decision seam.
+- Added the `#lazily-hot-path` rule to `src/agent-doc/AGENTS.md` so future ownership/CAS/lease/dedup work must use actor state and may not independently reload SQLite at the decision seam.
+- `ResponseCaptured` now durably stores the sanitized typed closeout mutation plan. Recovery replays the normal write path with backlog edits, done/gate/review changes, and queue completion intent intact, while excluding runtime authority such as `force_disk`, lint overrides, and sibling commits.
+- State-fact producers route through the live actor. SQLite is only the actor-emitted durable fact sink and cold-start hydration path; a post-connect actor failure fails closed instead of bypassing the actor. `flock` remains only at controller bootstrap/explicitly actorless compatibility boundaries.
+- Foreground finalize claims ownership before `ResponseCaptured`, so captured-finalize recovery cannot race it and commit an incomplete response. Nested strict-write recovery reuses the outer local actor capability instead of competing with itself.
+- Closeout claim, refresh, takeover, and exact release are now serialized transitions against the live Lazily document projection. The controller checks typed PID liveness for dead-owner takeover while holding the actor-memory transition boundary.
+- `ResponseCaptured` now durably stores the sanitized typed closeout mutation plan. Recovery replays the normal write path with backlog edits, done/gate/review changes, and queue completion intent intact, while excluding runtime authority such as `force_disk`, lint overrides, and sibling commits.
+- State-fact producers route through the live actor. SQLite is only the actor-emitted durable fact sink and cold-start hydration path; a post-connect actor failure fails closed instead of bypassing the actor. `flock` remains only at controller bootstrap/explicitly actorless compatibility boundaries.
+- Foreground finalize claims ownership before `ResponseCaptured`, so captured-finalize recovery cannot race it and commit an incomplete response. Nested strict-write recovery reuses the outer local actor capability instead of competing with itself.
+- Closeout claim, refresh, takeover, and exact release are now serialized transitions against the live Lazily document projection. The controller checks typed PID liveness for dead-owner takeover while holding the actor-memory transition boundary.
 
 Confidence: high. No escalation was needed. No additional backlog follow-up is needed because the distinct installed-plugin/live-ledger observation is already tracked as `#fmgcverify`; this code-complete item is closed.
 
@@ -89,12 +99,38 @@ Commands/checks: live registration and controller/supervisor inspection; SQLite 
 Verification: controller returned a valid snapshot at document version `1589` and recorded the sentinel; two real editor selection cycles did not move it, while the state-event high-water reached `1590`.
 
 Confidence: high. Escalation: none—the remaining work is an actionable editor-plugin code failure, not an external operator gate.
-<!-- agent:boundary:58fb7ea7 -->
+### Re: Lazily state on the closeout hot path — gpt-5.6-sol
+
+You were right: the `flock`/SQLite ownership seam was the wrong architecture. It existed because closeout recovery had been treated as an independent cross-process repair path that reloaded a cold projection and arbitrated beside the live actor. That made SQLite and a filesystem lock decision authorities, which is exactly what Lazily state is meant to prevent.
+
+Fixed in agent-doc commit `2bf8988a0` (`fix: serialize closeout through Lazily actor`):
+
+- Closeout claim, refresh, takeover, and exact release are now serialized transitions against the live Lazily document projection. The controller checks typed PID liveness for dead-owner takeover while holding the actor-memory transition boundary.
+- Foreground finalize claims ownership before `ResponseCaptured`, so captured-finalize recovery cannot race it and commit an incomplete response. Nested strict-write recovery reuses the outer local actor capability instead of competing with itself.
+- State-fact producers route through the live actor. SQLite is only the actor-emitted durable fact sink and cold-start hydration path; a post-connect actor failure fails closed instead of bypassing the actor. `flock` remains only at controller bootstrap/explicitly actorless compatibility boundaries.
+- `ResponseCaptured` now durably stores the sanitized typed closeout mutation plan. Recovery replays the normal write path with backlog edits, done/gate/review changes, and queue completion intent intact, while excluding runtime authority such as `force_disk`, lint overrides, and sibling commits.
+- Added the `#lazily-hot-path` rule to `src/agent-doc/AGENTS.md` so future ownership/CAS/lease/dedup work must use actor state and may not independently reload SQLite at the decision seam.
+
+Regression coverage includes actor CAS/release ordering, exact-once captured response recovery with a backlog edit, safe mutation-plan reconstruction, legacy-capture compatibility, and the full repair suite. `make check` passed across the 7,883-test workspace run; `make install-full` succeeded and recycled the installed controller/editor integration. The latest main CI run is green.
+
+### Re: Lazily state on the closeout hot path — gpt-5.6-sol
+
+You were right: the `flock`/SQLite ownership seam was the wrong architecture. It existed because closeout recovery had been treated as an independent cross-process repair path that reloaded a cold projection and arbitrated beside the live actor. That made SQLite and a filesystem lock decision authorities, which is exactly what Lazily state is meant to prevent.
+
+Fixed in agent-doc commit `2bf8988a0` (`fix: serialize closeout through Lazily actor`):
+
+- Closeout claim, refresh, takeover, and exact release are now serialized transitions against the live Lazily document projection. The controller checks typed PID liveness for dead-owner takeover while holding the actor-memory transition boundary.
+- Foreground finalize claims ownership before `ResponseCaptured`, so captured-finalize recovery cannot race it and commit an incomplete response. Nested strict-write recovery reuses the outer local actor capability instead of competing with itself.
+- State-fact producers route through the live actor. SQLite is only the actor-emitted durable fact sink and cold-start hydration path; a post-connect actor failure fails closed instead of bypassing the actor. `flock` remains only at controller bootstrap/explicitly actorless compatibility boundaries.
+- `ResponseCaptured` now durably stores the sanitized typed closeout mutation plan. Recovery replays the normal write path with backlog edits, done/gate/review changes, and queue completion intent intact, while excluding runtime authority such as `force_disk`, lint overrides, and sibling commits.
+- Added the `#lazily-hot-path` rule to `src/agent-doc/AGENTS.md` so future ownership/CAS/lease/dedup work must use actor state and may not independently reload SQLite at the decision seam.
+
+Regression coverage includes actor CAS/release ordering, exact-once captured response recovery with a backlog edit, safe mutation-plan reconstruction, legacy-capture compatibility, and the full repair suite. `make check` passed across the 7,883-test workspace run; `make install-full` succeeded and recycled the installed controller/editor integration. The latest main CI run is green.
+<!-- agent:boundary:d5b01b9d -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#retentionwatermarklive]~~
 - ⏭️ do [#fmgcverify]
 - 📌 do [#qactsync]
 - 📌 do [#ftimmediate]

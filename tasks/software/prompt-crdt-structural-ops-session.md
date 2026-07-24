@@ -56,3 +56,23 @@ The agent-doc durable-sink plan (`tasks/software/plan-lazily-durable-effect-sink
 
 ## Start here
 Phase A: read `agent-doc-merge/src/exchange_seqcrdt.rs` (the template), then `agent-doc-queue/src/queue_consume.rs:117` (`IpcNodeOp` + `queue_consume_node_ops`), then build `QueueCrdt` + convergence tests.
+
+<!-- agent:exchange -->
+### Re: Phase A — QueueCrdt substrate DONE — glm-5-2
+
+Phase A landed. `QueueCrdt` lives in `agent-doc-merge/src/queue_seqcrdt.rs` (registered in `lib.rs`), mirroring `ExchangeCrdt`: a `lazily::SeqCrdt<String, QueueNode>` keyed by the durable queue `node_key` from `agent_doc_markdown_ast::mutations::item_nodes`.
+
+**Ops:**
+- `strike(node_key)` → `SeqCrdt::remove` (tombstone = consume/strike/prune/ack).
+- `mark_done(node_key)` → `SeqCrdt::set_value` (completed `- ~~text~~` state, read-modify-write preserving text).
+- Plus `from_nodes`/`from_inner`/`nodes`/`ids`/`contains`/`get`/`push_back`/`fork`/`merge`/`render`.
+
+**Why tombstone-wins holds for free:** `SeqCrdt` keeps `deleted` and `value` as independent LWW registers, and `order`/`values`/`contains`/`get` all filter deleted entries. So a strike makes the node observationally vanish no matter what a concurrent (or even later) `mark_done` writes to its value — the convergence law the plan specifies, with no bespoke deletion guard.
+
+**Verification:** 11 convergence-law tests pass (commutative/idempotent merge; concurrent strike + mark_done converge both merge orders; tombstone wins even when mark_done happens later; fork→diverge→merge; idempotent local apply; duplicate-key collapse; byte-stable item-only round-trip; completed source loads as `done` not tombstone). `make install && make check` green (clippy + nextest + sim-medium + version-sync + lean + tla). Nothing in the hot path changed — the 6 `flock` sites are untouched.
+
+**Committed + pushed to `main`** (`#crdtstructops`): submodule `agent-doc` `94c2676d3` + superproject `aa422afee`; plan file marks Phase A DONE.
+
+Next: Phase B — extend `IpcNodeOp` to cover all 6 sites' op types (most reduce to `strike(node_key)`; add `mark_done`).
+<!-- agent:boundary:958e202d -->
+<!-- /agent:exchange -->

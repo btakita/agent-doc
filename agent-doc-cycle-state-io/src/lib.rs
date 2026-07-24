@@ -362,9 +362,20 @@ pub fn load(file: &Path) -> Result<Option<CycleState>> {
     let Some(document) = load_document_projection(file)? else {
         return Ok(None);
     };
+    reconstruct_cycle_state(&document)
+}
+
+/// Reconstruct the authoritative `CycleState` from a document projection: the
+/// last `turn_intent_checkpoint` rebased onto the closeout phase projection.
+/// Pure (no I/O), so it is shared by the SQLite cold-start [`load`] and by the
+/// controller's live in-memory read (`#lzdurablesink` — a client transition no
+/// longer replays `state.db`, the actor reconstructs from its own projection).
+pub fn reconstruct_cycle_state(
+    document: &agent_doc_state_backbone::DocumentStateProjection,
+) -> Result<Option<CycleState>> {
     let projection = ProjectedCloseoutState::from(document.closeout.clone());
 
-    let mut state = if let Some(checkpoint) = document.closeout.turn_intent_checkpoint {
+    let mut state = if let Some(checkpoint) = &document.closeout.turn_intent_checkpoint {
         let actual_sha256 = agent_doc_hash::content_hash(&checkpoint.state_json);
         anyhow::ensure!(
             actual_sha256 == checkpoint.state_sha256,

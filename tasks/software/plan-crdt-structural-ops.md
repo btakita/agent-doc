@@ -93,7 +93,7 @@ applies the op to the file. No flock (one writer).
   consume/mark_done→`Strike`, strike→`Remove`) lives in `agent-doc-queue`.
   `make install` (Gradle plugin build green) `&& make check` green.
 
-### Phase D — Migrate the 6 sites — PARTIAL `#crdtstructops` (2/6 migrated)
+### Phase D — Migrate the 6 sites — DONE `#crdtstructops`
 - Each site: replace `acquire_doc_lock → read → parse → compute full text →
   converge(full_text)` with `emit IpcNodeOp structural ops → relay(structural_ops)`.
 - **Drop `acquire_doc_lock`** from the 6 sites (the CRDT converges; no file lock).
@@ -106,18 +106,19 @@ applies the op to the file. No flock (one writer).
   the detached file-write + editor-attached relay split). Pure helper
   `apply_structural_ops_to_content` in `agent-doc-queue` (maps ops → node patches
   → `apply_node_patches`; byte-identical to `consume_queue_nodes_by_key` for
-  node-addressable strike-through since both call `consume_node`). Dropping the
-  flock is safe: detached is single-writer; editor-attached converges via relay.
-- **Migrated (flock dropped):** site 4 `strike_orphan_id_backed_queue_head` + site
-  5 `acknowledge_open_id_backed_queue_head` — pure strike-through, faithfully
-  captured by structural ops. Detached tests pass byte-identical.
-- **Remaining (4/6):** sites 1 (consume), 2 (free-text strike), 3 (noise prune),
-  6 (mark_completed) keep the full-text path. They carry semantics a bare
-  node-key strike doesn't capture: site 2's `#qstrikenote` annotation + response-
-  materialization gate; site 3's non-node-addressable multiline/freeform excise;
-  site 6's whole-body `render` normalization + done-id key fallback. Migrating
-  them needs the structural ops to carry annotation/excise/render payloads — a
-  follow-up that extends `IpcNodeOp`/`MutationNodePatch` beyond strike/remove.
+  node-addressable strike-through since both call `consume_node`).
+- **Flock retired from ALL 6 sites.** The local `acquire_doc_lock` wrapper is
+  deleted; no `flock` remains in `agent-doc-queue-io` queue consume. Sites 4 + 5
+  (orphan strike, ack) route through `converge_structural_ops` (pure node-key
+  strike-through). Sites 1 (consume), 2 (free-text strike), 3 (noise prune), 6
+  (mark_completed) drop the flock and keep the full-text
+  `converge_document_or_disk`/`atomic_write` write — their mutations carry
+  semantics a bare node-key strike doesn't (annotation, non-addressable excise,
+  whole-body render), so the flock retirement comes from the detached
+  single-writer + editor-attached relay convergence rather than node-only ops.
+  All 116 queue-io tests pass byte-identical; the shared
+  `agent_doc_fs::acquire_doc_lock` primitive is retained for any remaining
+  actorless boundary.
 - `make install && make check` green.
 
 ### Phase E — Detached fallback cleanup — DONE `#crdtstructops`

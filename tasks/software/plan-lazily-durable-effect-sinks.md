@@ -302,18 +302,23 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
    `ControllerCommandTransport: lazily::CommandTransport` over the one-line socket
    + `submit_closeout_advance_command`. `#[allow(dead_code)]` dropped; clippy
    `--all-targets` clean; nextest 219 passed (3 new dispatch tests). Pushed to `main`.
-2. **DONE — `2047beab6` + `9bef9a98e` + `8e7f711ce`** Migrate the `mark_*`
-   clients to submit `closeout_advance` commands — at the chokepoint. The
-   closeout command-plane vocabulary moved down to `agent-doc-cycle-state-io`
+2. **DONE — `2047beab6` + `9bef9a98e` + `8e7f711ce` + `af6f61a69`** Migrate the
+   `mark_*` clients to submit `closeout_advance` commands — at the chokepoint.
+   The closeout command-plane vocabulary moved down to `agent-doc-cycle-state-io`
    (+lazily ipc dep); `controller-io` re-exports + keeps `decode_closeout_advance_payload`.
-   **Routed through the command plane:** `mark_write_applied`,
-   `mark_response_captured`, `mark_abandoned` (dual-path: controller live →
-   submit; no controller → local fallback). **`mark_committed` stays local for
-   now** — it is the complex case (diverse labels + an idempotency refresh on an
-   already-committed cycle); routing it through the command plane changes the
-   recovery commit ordering/label (`capture_committed` vs `commit_success`).
-   Migrate once that recovery-flow ordering is pinned. The `event_label` payload
-   field + `service_closeout_advance` are ready for it.
+   **All four transitions route through the command plane** (dual-path: controller
+   live → submit; no controller → local fallback), including `mark_committed`,
+   whose label rides the `event_label` payload field so diagnostic commit labels
+   (`capture_committed`, `repair_applied`, …) survive verbatim.
+
+   **Key dogfooding gotcha (resolved):** the controller runs the *installed*
+   `agent-doc` binary (spawned detached), and `make check` does not reinstall
+   first. An earlier "regression" in `mark_committed` was a stale installed
+   binary, not a logic bug — there was no write-bypass prerequisite. With a fresh
+   `make install`, the session-check recovery test passes and `make check` is
+   green. Rule: after any controller/command-plane code change, `make install`
+   before `make check` (or before trusting an integration test that spawns the
+   controller).
 3. **DONE — `e0978409f`** Migrate `closeout_owner_claim`/`release` onto the
    command plane. They are coordination CAS ops whose authority result is the
    typed outcome (`CloseoutOwnerClaimOutcome`: Acquired/HeldByOther/CycleSuperseded;
@@ -348,22 +353,24 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
    the queue-consume surface, not a quick fix. + the
    `agent-doc-write-runtime-io/src/lib.rs:2478` site.
 
-### Shared prerequisite for the remaining follow-ups (mark_committed + todo 5)
+   **Scope (reassessed):** the flock guards a document *file* read-parse-write
+   (TOCTOU on parsed offsets), and the controller today owns *state* (the closeout
+   projection), not document-file edits. Dropping the flock means the controller
+   must serialize per-document consumes — either a per-document in-memory lock
+   verb with lease semantics, or projecting document-queue state. That is a real
+   architectural migration across 6 hot-path sites, the last piece before Phase 2
+   is fully uniform. (The earlier "write-bypass prerequisite" framing was a red
+   herring — `mark_committed`'s divergence was a stale installed binary, now
+   resolved; there is no such prerequisite blocking this.)
+ 6. **DONE — `8e7f711ce`** Full `make check` green (clippy `--all-targets` +
+    nextest + `sim-medium` + `version-sync` + `lean` + `tla`). (Pre-existing flake
+    note: the `crdt_checkpoint_*` pair can fail under `cargo test --lib` from
+    cross-test leakage, `#wsflake2`, but passes under nextest isolation.)
 
-Both remaining items are gated on **every closeout/queue write routing through
-the controller's in-memory projection** (so the live projection never lags
-`state.db`). `mark_committed`'s command-plane migration was live-debugged: the
-session-check recovery diverges because the controller's in-memory sees a
-different cycle phase than `state.db` at a given commit, so the command-plane
-decide no-ops/refreshes where the local path transitions. `append_state_fact`
-*does* route through the controller when its socket exists, so the bypass is
-indirect and not yet isolated. Until that prerequisite is met, `mark_committed`
-stays local and the per-consume `flock` stays — both keep `make check` green.
-This is a focused migration with its own scope, not a bounded tweak.
-6. **DONE — `8e7f711ce`** Full `make check` green (clippy `--all-targets` +
-   nextest + `sim-medium` + `version-sync` + `lean` + `tla`). (Pre-existing flake
-   note: the `crdt_checkpoint_*` pair can fail under `cargo test --lib` from
-   cross-test leakage, `#wsflake2`, but passes under nextest isolation.)
+   **Dogfooding rule (from the `mark_committed` resolution):** `make install`
+   before `make check` whenever controller/command-plane code changed — the
+   integration tests spawn the *installed* binary as the controller.
+
 
 ### Resume hint
 
@@ -376,13 +383,18 @@ second consumer DONE** — `community-pulse` `1d3a197` adopts the shape for
 review. Phase 3 enforcement is largely present in lazily (compile-fail +
 property laws); its agent-doc architecture TEST is blocked on Phase 2 cleanliness.
 
-Two follow-ups remain, **both gated on the same prerequisite** (route every
-closeout/queue write through the controller's in-memory projection): (a) migrate
-`mark_committed` onto the command plane — live-debugged; the recovery diverges
-because the live projection lags `state.db`; the bypass is indirect and not yet
-isolated; and (b) todo (5) — route queue consume through the authority, then drop
-the per-consume `flock`. That prerequisite is a focused migration with its own
-scope. Once it lands, add the Phase 3 architecture test.
+**Follow-up A DONE — `af6f61a69`:** `mark_committed` is on the command plane
+(all four transitions now route through it). The earlier blocker was a stale
+*installed* binary (the controller runs the installed `agent-doc`; `make check`
+doesn't reinstall) — not a write-bypass prerequisite. Rule: `make install` before
+`make check` after controller/command-plane changes.
+
+**One follow-up remains — todo (5):** route queue consume through the authority,
+then drop the per-consume `flock` (6 sites). Reassessed scope: the flock guards a
+document-*file* read-parse-write; the controller owns *state*, not document-file
+edits, so this is a real architectural migration (per-document consume
+serialization / projecting document-queue state), the last piece before Phase 2
+is fully uniform. Once it lands, add the Phase 3 architecture test.
 
 **Phase 4 promotion review: DEFER** (recorded above) — two consumers share the
 shape but criterion 5 (net code reduction) isn't met yet; re-review after a third

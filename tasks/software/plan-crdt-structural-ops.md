@@ -46,13 +46,19 @@ applies the op to the file. No flock (one writer).
 
 ## Phases
 
-### Phase A — Substrate (additive, low-risk, no hot-path change)
+### Phase A — Substrate (additive, low-risk, no hot-path change) — DONE `#crdtstructops`
 - `QueueCrdt` (`SeqCrdt` over queue nodes, mirroring `ExchangeCrdt`): parse queue
   nodes → replica; `strike`/`mark_done` ops; `fork`/`merge`/`render`.
 - Convergence laws tested in isolation (commutative/idempotent merge; concurrent
   strike + mark-done converge; tombstone wins over mark-done).
 - **Done when**: `QueueCrdt` exists with passing convergence tests, not wired into
   any hot path.
+- **Landed:** `agent-doc-merge/src/queue_seqcrdt.rs` (`QueueCrdt` +
+  `QueueNode`, registered in `lib.rs`). `strike`→`SeqCrdt::remove` (tombstone),
+  `mark_done`→`SeqCrdt::set_value` (completed state). Tombstone-wins holds for
+  every interleaving because `deleted` and `value` are independent LWW registers
+  and reads filter deleted entries. 11 convergence tests pass; nothing in the hot
+  path changed. `make install && make check` green.
 
 ### Phase B — Vocabulary
 - Extend `IpcNodeOp` to cover all 6 sites' op types (consume/strike, mark_done,

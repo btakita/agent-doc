@@ -264,11 +264,14 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
    caller's free-text label to `CommitObservation` on the wire. clippy clean;
    nextest green incl. live-socket tests proving all four transitions route
    through the command plane end-to-end; 254 caller-crate tests green.
-3. **Migrate `closeout_owner_claim`/`release` onto the command plane** — add
-   `build_closeout_owner_claim_submit` + `service_closeout_owner_claim` paralleling
-   `closeout_advance`; the existing bespoke handlers are
-   `handle_closeout_owner_claim` `rpc.rs:9781` / `handle_closeout_owner_release`
-   (decide via `decide_owner_claim` on the projection's `closeout`).
+3. **DONE — `e0978409f`** Migrate `closeout_owner_claim`/`release` onto the
+   command plane. They are coordination CAS ops whose authority result is the
+   typed outcome (`CloseoutOwnerClaimOutcome`: Acquired/HeldByOther/CycleSuperseded;
+   release bool), not a coarse Applied/Rejected receipt — so the dispatch returns
+   the command's typed result (advance→receipt unchanged, claim→outcome,
+   release→bool). Shared `run_closeout_owner_*` cores extracted; bespoke verbs +
+   command-plane services both call them. Vocabulary in cycle-state-io. clippy
+   clean; nextest 272 passed.
 4. **Read-only inspection sites from the live projection.** Chokepoint:
    `load_document_projection` (`cycle-state-io/src/lib.rs` ≈ L700) — migrating it
    covers `load` / `load_with_closeout_projection` / `load_closeout_projection` /

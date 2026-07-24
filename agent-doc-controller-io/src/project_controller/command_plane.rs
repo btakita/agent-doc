@@ -130,14 +130,41 @@ pub const CLOSEOUT_ADVANCE_NAME: &str = "closeout_advance";
 /// Fully-qualified payload schema id for the closeout phase advance request.
 pub const CLOSEOUT_ADVANCE_PAYLOAD_TYPE: &str = "agent-doc.closeout_advance.v1";
 
-/// Which closeout phase transition a `closeout_advance` command requests. The
-/// controller authority runs the pure `CyclePhaseMachine` over these.
+/// Which closeout phase transition a `closeout_advance` command requests. This
+/// enum **is** the event label — no free-text label crosses the command
+/// boundary. The controller authority runs the pure `CyclePhaseMachine` over the
+/// transition; the legacy `last_event` vocabulary is derived from it (plus the
+/// committed observation / abandon reason) by
+/// [`CloseoutAdvancePayload::last_event_label`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CloseoutPhaseEvent {
     WriteApplied,
     ResponseCaptured,
-    Committed,
+    /// Carries the closed commit-observation vocabulary — the only labels that
+    /// are behaviorally significant (stable / no-op commit idempotency).
+    Committed(CommitObservation),
     Abandoned,
+}
+
+/// The closed commit-observation vocabulary — the labels
+/// `is_stable_commit_event` / `is_noop_commit_event` recognize. Anything else a
+/// caller might have stamped is a diagnostic tag that does not belong on the
+/// command plane.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CommitObservation {
+    Commit,
+    CommitSuccess,
+    CommitAlreadyCurrent,
+}
+
+impl CommitObservation {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CommitObservation::Commit => "commit",
+            CommitObservation::CommitSuccess => "commit_success",
+            CommitObservation::CommitAlreadyCurrent => "commit_already_current",
+        }
+    }
 }
 
 /// Payload body for `agent-doc.closeout_advance.v1`. A client asks the controller
@@ -149,8 +176,11 @@ pub enum CloseoutPhaseEvent {
 /// the command plane. lazily treats this body as opaque bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CloseoutAdvancePayload {
+    /// The typed transition (and label). See [`CloseoutPhaseEvent`].
     pub event: CloseoutPhaseEvent,
-    pub event_label: String,
+    /// Present only when `event == Abandoned`. An abandonment reason is
+    /// inherently descriptive, so it is a named `reason` field — not a label.
+    pub reason: Option<String>,
     pub snapshot_content: Option<String>,
     pub file_content: Option<String>,
     pub response_sha256: Option<String>,
@@ -158,6 +188,21 @@ pub struct CloseoutAdvancePayload {
 }
 
 impl CloseoutAdvancePayload {
+    /// The legacy `last_event` string to stamp into `CycleState`, derived purely
+    /// from the typed event (+ abandon reason). No free-text label crosses the
+    /// command boundary.
+    pub fn last_event_label(&self) -> String {
+        match self.event {
+            CloseoutPhaseEvent::WriteApplied => "write_applied".to_string(),
+            CloseoutPhaseEvent::ResponseCaptured => "response_captured".to_string(),
+            CloseoutPhaseEvent::Committed(obs) => obs.as_str().to_string(),
+            CloseoutPhaseEvent::Abandoned => self
+                .reason
+                .clone()
+                .unwrap_or_else(|| "abandoned".to_string()),
+        }
+    }
+
     /// Serialize to the inline command payload bytes.
     pub fn encode(&self) -> Result<Vec<u8>> {
         serde_json::to_vec(self).context("encode closeout_advance command payload")
@@ -339,7 +384,7 @@ mod tests {
     fn closeout_advance_payload_roundtrips_and_validates_type() {
         let payload = CloseoutAdvancePayload {
             event: CloseoutPhaseEvent::WriteApplied,
-            event_label: "write_applied".to_string(),
+            reason: None,
             snapshot_content: Some("snap".to_string()),
             file_content: Some("body".to_string()),
             response_sha256: None,
@@ -359,8 +404,50 @@ mod tests {
         assert_eq!(submit.policy.dedupe, DedupePolicy::SameIdempotencyKey);
         let decoded = CloseoutAdvancePayload::decode(&submit).unwrap();
         assert_eq!(decoded.event, CloseoutPhaseEvent::WriteApplied);
-        assert_eq!(decoded.event_label, "write_applied");
         assert_eq!(decoded.file_content.as_deref(), Some("body"));
+    }
+
+    #[test]
+    fn closeout_advance_last_event_label_is_derived_from_the_typed_event() {
+        // No free-text label crosses the boundary: last_event derives from the enum.
+        let write = CloseoutAdvancePayload {
+            event: CloseoutPhaseEvent::WriteApplied,
+            reason: None,
+            snapshot_content: None,
+            file_content: None,
+            response_sha256: None,
+            cycle_id_hint: None,
+        };
+        assert_eq!(write.last_event_label(), "write_applied");
+
+        // The closed commit-observation vocabulary is the only behaviorally
+        // significant label set, carried typed on the Committed variant.
+        for (obs, label) in [
+            (CommitObservation::Commit, "commit"),
+            (CommitObservation::CommitSuccess, "commit_success"),
+            (CommitObservation::CommitAlreadyCurrent, "commit_already_current"),
+        ] {
+            let committed = CloseoutAdvancePayload {
+                event: CloseoutPhaseEvent::Committed(obs),
+                reason: None,
+                snapshot_content: None,
+                file_content: None,
+                response_sha256: None,
+                cycle_id_hint: None,
+            };
+            assert_eq!(committed.last_event_label(), label);
+        }
+
+        // An abandon reason is a named field, not a label.
+        let abandoned = CloseoutAdvancePayload {
+            event: CloseoutPhaseEvent::Abandoned,
+            reason: Some("stalled_preflight".to_string()),
+            snapshot_content: None,
+            file_content: None,
+            response_sha256: None,
+            cycle_id_hint: None,
+        };
+        assert_eq!(abandoned.last_event_label(), "stalled_preflight");
     }
 
     #[test]
@@ -372,7 +459,7 @@ mod tests {
             1,
             CloseoutAdvancePayload {
                 event: CloseoutPhaseEvent::WriteApplied,
-                event_label: "write_applied".to_string(),
+                reason: None,
                 snapshot_content: None,
                 file_content: None,
                 response_sha256: None,
@@ -397,7 +484,7 @@ mod tests {
             3,
             CloseoutAdvancePayload {
                 event: CloseoutPhaseEvent::WriteApplied,
-                event_label: "write_applied".to_string(),
+                reason: None,
                 snapshot_content: None,
                 file_content: Some("body".to_string()),
                 response_sha256: None,
@@ -426,8 +513,8 @@ mod tests {
             "doc:cycle:committed:body",
             4,
             CloseoutAdvancePayload {
-                event: CloseoutPhaseEvent::Committed,
-                event_label: "committed".to_string(),
+                event: CloseoutPhaseEvent::Committed(CommitObservation::CommitSuccess),
+                reason: None,
                 snapshot_content: None,
                 file_content: None,
                 response_sha256: None,

@@ -54,6 +54,11 @@ ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/
 
 ### Re: #retentionwatermarklive — gpt-5
 
+> **Queue prompt:**
+>
+> do [#retentionwatermarklive]
+
+
 Completed. The requested implementation had already landed on `origin/main` while this local submodule remained behind with unrelated in-progress edits, so I validated the pushed implementation without rebasing or overwriting that shared dirty worktree.
 
 Changed paths in the landed work include `agent-doc-sqlite/src/state_store.rs`, `agent-doc-controller-io/src/project_controller/rpc.rs`, `specs/13-state-backbone.md`, and `VERSIONS.md`. Commit `628f01d32` (`feat: retain state events by live peer watermark`) follows the durable per-peer ACK substrate in `2ca2a4d85` and is contained by tags `v0.35.23` and `v0.35.24`.
@@ -68,12 +73,12 @@ Verification evidence:
 - `gh run list --workflow CI --limit 1` reports the latest `main` CI run `30054083681` completed successfully.
 
 Confidence: high. No escalation was needed. No additional backlog follow-up is needed because the distinct installed-plugin/live-ledger observation is already tracked as `#fmgcverify`; this code-complete item is closed.
-<!-- agent:boundary:722236bd -->
+<!-- agent:boundary:27199657 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ do [#retentionwatermarklive]
+- ~~⏭️ do [#retentionwatermarklive]~~
 - do [#fmgcverify]
 - 📌 do [#qactsync]
 - 📌 do [#ftimmediate]
@@ -144,7 +149,6 @@ This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack wa
 - [ ] [#crdtauth6] [operator-verify] CRDT authority live proof: verify the existing JB DocumentListener -> CrdtReplicaForwarder.forwardLocalDelta path, Kotlin Unix-socket ReplicaTransport, VS Code koffi replica seam, and Rust fan-out stay connected in a live editor session. This is proof/parity work only; operator-visible text is already authoritative and must not wait on this item. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
-- [ ] [#retentionwatermarklive] [focused-cycle] Switch state-event retention to MIN(acked_version) across LIVE PID-scoped peers, with deterministic crashed-IDE liveness eviction; keep count caps as a backstop. Depends on #fmgc durable per-peer ack collection.
 - [ ] [#fmgcverify] [operator-verify] After restarting JetBrains onto plugin 0.2.291, confirm the live registration is current and state_event_peer_acks advances for the document after two Project Controller state subscriptions.
 <!-- /agent:backlog -->
 

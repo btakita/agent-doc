@@ -215,6 +215,13 @@ pub struct CloseoutAdvancePayload {
     pub document_path: String,
     /// The typed transition (and label). See [`CloseoutPhaseEvent`].
     pub event: CloseoutPhaseEvent,
+    /// The caller's exact `last_event` label to stamp into `CycleState`. The
+    /// typed [`CloseoutPhaseEvent`] drives the phase-machine semantics; this
+    /// preserves diagnostic commit labels (e.g. `capture_committed`,
+    /// `repair_applied`) that the closed [`CommitObservation`] vocabulary does
+    /// not name. When `None`, the label derives from the typed event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_label: Option<String>,
     /// Present only when `event == Abandoned`. An abandonment reason is
     /// inherently descriptive, so it is a named `reason` field — not a label.
     pub reason: Option<String>,
@@ -225,10 +232,13 @@ pub struct CloseoutAdvancePayload {
 }
 
 impl CloseoutAdvancePayload {
-    /// The legacy `last_event` string to stamp into `CycleState`, derived purely
-    /// from the typed event (+ abandon reason). No free-text label crosses the
-    /// command boundary.
+    /// The legacy `last_event` string to stamp into `CycleState`. If the caller
+    /// supplied an explicit [`CloseoutAdvancePayload::event_label`], use it
+    /// verbatim; otherwise derive it from the typed event (+ abandon reason).
     pub fn last_event_label(&self) -> String {
+        if let Some(label) = &self.event_label {
+            return label.clone();
+        }
         match self.event {
             CloseoutPhaseEvent::WriteApplied => "write_applied".to_string(),
             CloseoutPhaseEvent::ResponseCaptured => "response_captured".to_string(),

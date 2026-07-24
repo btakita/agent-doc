@@ -60,6 +60,27 @@ use std::path::Path;
 pub mod command_plane;
 pub mod pipeline_frontmatter;
 
+thread_local! {
+    /// Whether the current thread is serving a project-controller request
+    /// in-process. Client helpers (`load_document_projection`, the `mark_*`
+    /// command-plane path) consult this to avoid self-RPC: when set they use the
+    /// local path instead of round-tripping to the controller socket, which
+    /// would deadlock the single-request serve loop (`#lazily-hot-path`:
+    /// controller-internal callers must not self-RPC). Set by the controller's
+    /// serve entry point.
+    static IN_CONTROLLER_REQUEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Mark whether the current thread is handling a project-controller request
+/// in-process. Set `true` for the lifetime of the controller serve loop.
+pub fn set_in_controller_request(value: bool) {
+    IN_CONTROLLER_REQUEST.with(|flag| flag.set(value));
+}
+
+pub(crate) fn in_controller_request() -> bool {
+    IN_CONTROLLER_REQUEST.with(|flag| flag.get())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BacklogTargetRequirement {
     pub path: String,
@@ -662,7 +683,7 @@ fn load_document_projection(
     // authority) when a controller is live; replay cold `state.db` only for the
     // actorless/bootstrap boundary. Read-only — no fact is emitted.
     let controller_socket = agent_doc_controller::paths::socket_path(&project_root);
-    if controller_socket.exists() {
+    if controller_socket.exists() && !in_controller_request() {
         let request = serde_json::json!({
             "command": "document_state_projection",
             "file": canonical,
@@ -690,8 +711,12 @@ fn load_document_projection(
                 }
                 return Ok(envelope.data);
             }
-            Err(agent_doc_state_wire::ActorRequestError::Connect(_))
-                if !controller_socket.exists() => {}
+            Err(agent_doc_state_wire::ActorRequestError::Connect(_)) => {
+                // The socket file may be stale (controller exited/crashed) or
+                // absent (cold start). Fall back to `state.db` rather than
+                // erroring — a read must not fail just because the live
+                // controller is momentarily unreachable.
+            }
             Err(err) => {
                 return Err(err)
                     .context("query live document_state_projection through the Lazily controller");
@@ -1320,6 +1345,7 @@ pub fn mark_write_applied(
         file,
         command_plane::CloseoutPhaseEvent::WriteApplied,
         None,
+        None,
         snapshot_content,
         file_content,
         None,
@@ -1387,6 +1413,7 @@ pub fn mark_response_captured(
     if submit_closeout_advance_via_socket(
         file,
         command_plane::CloseoutPhaseEvent::ResponseCaptured,
+        None,
         None,
         snapshot_content,
         file_content,
@@ -2042,27 +2069,13 @@ pub fn mark_committed(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
-    // `#lazily-hot-path`: submit over the command plane when a controller is
-    // live. The command plane carries a typed CommitObservation; the caller's
-    // free-text `event` is canonicalized (non-canonical diagnostic labels map to
-    // CommitSuccess). The actorless fallback below preserves the free-text label.
-    let observation = command_plane::commit_observation_from_event_label(event);
-    if submit_closeout_advance_via_socket(
-        file,
-        command_plane::CloseoutPhaseEvent::Committed(observation),
-        None,
-        snapshot_content,
-        file_content,
-        None,
-        None,
-    )? {
-        let state = load(file)?.context(
-            "closeout_advance Committed applied through the command plane but no cycle state was \
-             read back",
-        )?;
-        append_phase_event_to_session_log(file, &state, file_content);
-        return Ok(state);
-    }
+    // NOTE: `mark_committed` stays on the local path for now (the other three
+    // transitions route through the command plane). It is the complex case — a
+    // diverse label set plus an idempotency refresh on an already-committed
+    // cycle — and routing it through the command plane changes the recovery
+    // commit ordering/label (`capture_committed` vs `commit_success`). Migrate it
+    // once that recovery-flow ordering is pinned. The `event_label` payload field
+    // + `service_closeout_advance` remain ready for it (`#lzdurablesink`).
     let decision = decide_committed(load(file)?, file, event, snapshot_content, file_content);
     if decision.checkpoint {
         save(file, &decision.state)?;
@@ -2135,6 +2148,7 @@ pub fn mark_abandoned(
     if submit_closeout_advance_via_socket(
         file,
         command_plane::CloseoutPhaseEvent::Abandoned,
+        None,
         Some(event),
         snapshot_content,
         file_content,
@@ -2669,9 +2683,11 @@ fn append_state_fact(
 ///   start); the caller must use the local `load→decide→save→append` fallback.
 /// - `Err(_)` — the controller was live but the transport/decode failed or the
 ///   terminal receipt was `rejected` (fail closed; never silently fall back).
+#[allow(clippy::too_many_arguments)]
 fn submit_closeout_advance_via_socket(
     file: &Path,
     event: command_plane::CloseoutPhaseEvent,
+    event_label: Option<&str>,
     reason: Option<&str>,
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
@@ -2690,6 +2706,7 @@ fn submit_closeout_advance_via_socket(
     let payload = CloseoutAdvancePayload {
         document_path: canonical.to_string_lossy().to_string(),
         event,
+        event_label: event_label.map(str::to_string),
         reason: reason.map(str::to_string),
         snapshot_content: snapshot_content.map(str::to_string),
         file_content: file_content.map(str::to_string),

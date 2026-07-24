@@ -384,6 +384,7 @@ mod tests {
         let payload = CloseoutAdvancePayload {
             document_path: "/tmp/doc.md".to_string(),
             event: CloseoutPhaseEvent::WriteApplied,
+            event_label: None,
             reason: None,
             snapshot_content: Some("snap".to_string()),
             file_content: Some("body".to_string()),
@@ -413,6 +414,7 @@ mod tests {
         let write = CloseoutAdvancePayload {
             document_path: "/tmp/doc.md".to_string(),
             event: CloseoutPhaseEvent::WriteApplied,
+            event_label: None,
             reason: None,
             snapshot_content: None,
             file_content: None,
@@ -431,6 +433,7 @@ mod tests {
             let committed = CloseoutAdvancePayload {
                 document_path: "/tmp/doc.md".to_string(),
                 event: CloseoutPhaseEvent::Committed(obs),
+                event_label: None,
                 reason: None,
                 snapshot_content: None,
                 file_content: None,
@@ -444,6 +447,7 @@ mod tests {
         let abandoned = CloseoutAdvancePayload {
             document_path: "/tmp/doc.md".to_string(),
             event: CloseoutPhaseEvent::Abandoned,
+            event_label: None,
             reason: Some("stalled_preflight".to_string()),
             snapshot_content: None,
             file_content: None,
@@ -463,6 +467,7 @@ mod tests {
             CloseoutAdvancePayload {
                 document_path: "/tmp/doc.md".to_string(),
                 event: CloseoutPhaseEvent::WriteApplied,
+                event_label: None,
                 reason: None,
                 snapshot_content: None,
                 file_content: None,
@@ -489,6 +494,7 @@ mod tests {
             CloseoutAdvancePayload {
                 document_path: "/tmp/doc.md".to_string(),
                 event: CloseoutPhaseEvent::WriteApplied,
+                event_label: None,
                 reason: None,
                 snapshot_content: None,
                 file_content: Some("body".to_string()),
@@ -520,6 +526,7 @@ mod tests {
             CloseoutAdvancePayload {
                 document_path: "/tmp/doc.md".to_string(),
                 event: CloseoutPhaseEvent::Committed(CommitObservation::CommitSuccess),
+                event_label: None,
                 reason: None,
                 snapshot_content: None,
                 file_content: None,

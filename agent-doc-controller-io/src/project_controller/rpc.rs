@@ -7197,6 +7197,7 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
     let thread_stop = Arc::clone(&should_stop);
     let actor_root = project_root.to_path_buf();
     let thread = std::thread::spawn(move || {
+        agent_doc_cycle_state_io::set_in_controller_request(true);
         while !thread_stop.load(Ordering::SeqCst) && actor_root.is_dir() {
             match listener.accept() {
                 Ok(stream) => {
@@ -7278,6 +7279,12 @@ pub(crate) fn serve_with_options(
     // owner. Everything that keys off `hub_registry()` needs to distinguish "the
     // replica has not registered yet" (worth waiting on, only meaningful here)
     // from "the hub lives in another process" (waiting can never help).
+    // `#lazily-hot-path`: this process is now the project controller. Mark the
+    // serve thread so client helpers it invokes during request handling
+    // (load_document_projection, mark_*) use the local path instead of
+    // self-RPCing the socket they are currently serving (which would deadlock
+    // the single-request serve loop).
+    agent_doc_cycle_state_io::set_in_controller_request(true);
     agent_doc_crdt_relay_io::mark_process_as_relay_hub_owner();
     // Detached startup races with short-lived callers (especially TempDir-backed
     // tests). Capture the caller's directory incarnation before any bootstrap
@@ -15323,6 +15330,7 @@ mod tests {
             CloseoutAdvancePayload {
                 document_path: doc.to_string_lossy().to_string(),
                 event: CloseoutPhaseEvent::WriteApplied,
+                event_label: None,
                 reason: None,
                 snapshot_content: None,
                 file_content: Some("body".to_string()),
@@ -15450,6 +15458,7 @@ mod tests {
             CloseoutAdvancePayload {
                 document_path: doc.to_string_lossy().to_string(),
                 event: CloseoutPhaseEvent::WriteApplied,
+                event_label: None,
                 reason: None,
                 snapshot_content: None,
                 file_content: Some("body".to_string()),
@@ -15498,6 +15507,7 @@ mod tests {
                 CloseoutAdvancePayload {
                     document_path: doc.to_string_lossy().to_string(),
                     event,
+                    event_label: None,
                     reason: reason.map(str::to_string),
                     snapshot_content: None,
                     file_content: Some("body".to_string()),
@@ -15539,6 +15549,7 @@ mod tests {
             CloseoutAdvancePayload {
                 document_path: doc2.to_string_lossy().to_string(),
                 event: CloseoutPhaseEvent::Abandoned,
+                event_label: None,
                 reason: Some("stalled_preflight".to_string()),
                 snapshot_content: None,
                 file_content: None,
@@ -16413,14 +16424,16 @@ mod tests {
         // label is stamped back as last_event.
         assert_eq!(committed.last_event, "commit_success");
 
-        // A non-canonical commit label canonicalizes to commit_success on the wire.
+        // `mark_committed` stays on the local path (see cycle-state-io): a
+        // re-commit on an already-committed cycle refreshes and keeps the stable
+        // label, so "repair_applied" folds onto the existing "commit_success".
         let refreshed =
             agent_doc_cycle_state_io::mark_committed(&doc, "repair_applied", None, Some("body\n"))
-                .expect("mark_committed (non-canonical) through the command plane");
+                .expect("mark_committed (re-commit)");
         assert_eq!(refreshed.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(
             refreshed.last_event, "commit_success",
-            "non-canonical commit labels canonicalize on the command plane"
+            "re-commit refreshes onto the existing stable commit label"
         );
 
         // Abandon on a fresh open cycle: the descriptive reason round-trips as last_event.

@@ -60,10 +60,21 @@ applies the op to the file. No flock (one writer).
   and reads filter deleted entries. 11 convergence tests pass; nothing in the hot
   path changed. `make install && make check` green.
 
-### Phase B — Vocabulary
+### Phase B — Vocabulary — DONE `#crdtstructops`
 - Extend `IpcNodeOp` to cover all 6 sites' op types (consume/strike, mark_done,
   ack, prune). Most reduce to `strike(node_key)`; `mark_done` is the addition.
 - Map each of the 6 sites' mutations to `IpcNodeOp` sequences.
+- **Landed:** `agent-doc-queue/src/queue_consume.rs`. Added `NodeOpKind`
+  (`Consume`/`MarkDone`/`Strike`) + `IpcNodeOp::{mark_done, strike, node_key,
+  kind, is_tombstone}` + `OP_CONSUME`/`OP_MARK_DONE`/`OP_STRIKE` labels. Site
+  mapping fns: `free_text_strike_node_ops`, `noise_prune_node_ops`,
+  `id_backed_strike_node_ops`, `mark_done_node_ops_for_done_ids` (parallel to the
+  existing `queue_consume_node_ops`). Vocabulary resolves the plan's "strike =
+  tombstone" label against actual code behavior: all 6 sites' node-addressable
+  mutations are strike-through/keep (`mark_done` effect); the noise
+  multiline/freeform excise is the only true removal but is not node-addressable,
+  so it stays in the full-text path until a non-item structural op exists. 6 new
+  tests; `make install && make check` green.
 
 ### Phase C — Editor structural-op handler
 - `PatchWatcher` (IntelliJ) + the FFI/transport gain a structural-op intent type:

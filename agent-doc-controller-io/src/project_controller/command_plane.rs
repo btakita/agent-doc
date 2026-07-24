@@ -131,8 +131,11 @@ pub fn supervisor_recycle_receipt(
 // without depending on the controller runtime. Re-export here so existing
 // `command_plane::`-qualified usages resolve unchanged.
 pub use agent_doc_cycle_state_io::command_plane::{
-    build_closeout_advance_submit, CloseoutAdvancePayload, CloseoutPhaseEvent,
-    CLOSEOUT_ADVANCE_NAME, CLOSEOUT_ADVANCE_PAYLOAD_TYPE, CommitObservation,
+    build_closeout_advance_submit, build_closeout_owner_claim_submit,
+    build_closeout_owner_release_submit, CloseoutAdvancePayload, CloseoutOwnerClaimPayload,
+    CloseoutOwnerReleasePayload, CloseoutPhaseEvent, CLOSEOUT_ADVANCE_NAME,
+    CLOSEOUT_ADVANCE_PAYLOAD_TYPE, CLOSEOUT_OWNER_CLAIM_NAME, CLOSEOUT_OWNER_CLAIM_PAYLOAD_TYPE,
+    CLOSEOUT_OWNER_RELEASE_NAME, CLOSEOUT_OWNER_RELEASE_PAYLOAD_TYPE, CommitObservation,
 };
 
 /// Decode a [`CloseoutAdvancePayload`] from a [`CommandSubmit`]'s inline
@@ -142,15 +145,36 @@ pub use agent_doc_cycle_state_io::command_plane::{
 pub fn decode_closeout_advance_payload(
     submit: &CommandSubmit,
 ) -> Result<CloseoutAdvancePayload> {
+    decode_typed_payload::<CloseoutAdvancePayload>(submit, CLOSEOUT_ADVANCE_PAYLOAD_TYPE)
+}
+
+/// Decode a [`CloseoutOwnerClaimPayload`] from a [`CommandSubmit`]'s inline payload.
+pub fn decode_closeout_owner_claim_payload(
+    submit: &CommandSubmit,
+) -> Result<CloseoutOwnerClaimPayload> {
+    decode_typed_payload::<CloseoutOwnerClaimPayload>(submit, CLOSEOUT_OWNER_CLAIM_PAYLOAD_TYPE)
+}
+
+/// Decode a [`CloseoutOwnerReleasePayload`] from a [`CommandSubmit`]'s inline payload.
+pub fn decode_closeout_owner_release_payload(
+    submit: &CommandSubmit,
+) -> Result<CloseoutOwnerReleasePayload> {
+    decode_typed_payload::<CloseoutOwnerReleasePayload>(submit, CLOSEOUT_OWNER_RELEASE_PAYLOAD_TYPE)
+}
+
+fn decode_typed_payload<T: for<'de> serde::Deserialize<'de>>(
+    submit: &CommandSubmit,
+    expected_payload_type: &str,
+) -> Result<T> {
     anyhow::ensure!(
-        submit.payload_type == CLOSEOUT_ADVANCE_PAYLOAD_TYPE,
-        "unexpected command payload_type {:?} (want {CLOSEOUT_ADVANCE_PAYLOAD_TYPE})",
+        submit.payload_type == expected_payload_type,
+        "unexpected command payload_type {:?} (want {expected_payload_type})",
         submit.payload_type,
     );
     let IpcValue::Inline(bytes) = &submit.payload else {
-        anyhow::bail!("closeout_advance command payload must be inline bytes");
+        anyhow::bail!("command payload must be inline bytes");
     };
-    serde_json::from_slice(bytes).context("decode closeout_advance command payload")
+    serde_json::from_slice(bytes).context("decode command-plane payload")
 }
 
 /// The controller's terminal receipt for a serviced closeout-advance command:

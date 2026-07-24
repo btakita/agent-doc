@@ -15,9 +15,7 @@
 
 use anyhow::{Context, Result};
 use lazily::{CommandPolicy, CommandSubmit, DedupePolicy, IpcValue};
-use serde::{Deserialize, Serialize};
-
-/// Domain namespace owning agent-doc command payloads. lazily never decodes these.
+use serde::{Deserialize, Serialize};/// Domain namespace owning agent-doc command payloads. lazily never decodes these.
 /// NOTE: must match `agent-doc-controller-io`'s `command_plane::NAMESPACE` — the
 /// controller dispatch refuses a foreign namespace; the integration test guards it.
 pub const NAMESPACE: &str = "agent-doc";
@@ -35,6 +33,118 @@ pub const REQUIRED_FEATURE_RECEIPTS: &str = "causal-receipts";
 /// Content hash tag for a payload body (`sha256:…`), used for command dedupe/proof.
 fn payload_hash(bytes: &[u8]) -> String {
     format!("sha256:{}", agent_doc_hash::bytes_hash(bytes))
+}
+
+/// Command name within the namespace for a closeout owner claim.
+pub const CLOSEOUT_OWNER_CLAIM_NAME: &str = "closeout_owner_claim";
+/// Fully-qualified payload schema id for a closeout owner claim.
+pub const CLOSEOUT_OWNER_CLAIM_PAYLOAD_TYPE: &str = "agent-doc.closeout_owner_claim.v1";
+/// Command name within the namespace for a closeout owner release.
+pub const CLOSEOUT_OWNER_RELEASE_NAME: &str = "closeout_owner_release";
+/// Fully-qualified payload schema id for a closeout owner release.
+pub const CLOSEOUT_OWNER_RELEASE_PAYLOAD_TYPE: &str = "agent-doc.closeout_owner_release.v1";
+
+/// Payload body for `agent-doc.closeout_owner_claim.v1`. A client asks the
+/// controller authority to claim (or refresh) closeout ownership; the controller
+/// decides the CAS from its live Lazily projection (`decide_owner_claim`), emits
+/// the `CloseoutOwnerClaimed` fact when acquired, and returns the typed
+/// [`CloseoutOwnerClaimOutcome`] — the authority result for this coordination
+/// op (Acquired / HeldByOther / CycleSuperseded), not a coarse Applied/Rejected
+/// receipt. lazily treats this body as opaque bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloseoutOwnerClaimPayload {
+    /// Canonical path of the document whose closeout ownership is claimed.
+    pub document_path: String,
+    /// The claim request (expected cycle, owner id/pid/role, lease, takeover).
+    #[serde(flatten)]
+    pub request: agent_doc_state_backbone::CloseoutOwnerClaimRequest,
+}
+
+/// Payload body for `agent-doc.closeout_owner_release.v1`. A client asks the
+/// controller authority to release a held closeout ownership; the controller
+/// decides from its live projection whether the caller still owns the cycle,
+/// emits `CloseoutOwnerReleased` when it does, and returns a `bool`
+/// (released / not-owner). lazily treats this body as opaque bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloseoutOwnerReleasePayload {
+    /// Canonical path of the document whose closeout ownership is released.
+    pub document_path: String,
+    pub cycle_id: String,
+    pub owner_id: String,
+    pub reason: String,
+    pub released_secs: u64,
+}
+
+fn build_domain_submit(
+    command_id: String,
+    name: &str,
+    payload_type: &str,
+    idempotency_key: String,
+    authority_generation: u64,
+    bytes: Vec<u8>,
+) -> Result<CommandSubmit> {
+    let payload_hash = payload_hash(&bytes);
+    Ok(CommandSubmit {
+        causation_id: command_id.clone(),
+        command_id,
+        source: "cycle_state".to_string(),
+        target: CONTROLLER_TARGET.to_string(),
+        namespace: NAMESPACE.to_string(),
+        name: name.to_string(),
+        authority_generation,
+        idempotency_key,
+        deadline_ms: 0,
+        policy: CommandPolicy {
+            // Ownership CAS dedupes by command id; a duplicate claim/release for
+            // the same owner+cycle folds onto the same command.
+            dedupe: DedupePolicy::SameCommandId,
+            supersede: false,
+            cancel_on_preempt: false,
+        },
+        payload_type: payload_type.to_string(),
+        payload_hash,
+        payload: IpcValue::Inline(bytes),
+        required_features: vec![REQUIRED_FEATURE_RECEIPTS.to_string()],
+    })
+}
+
+/// Build the `CommandSubmit` for a closeout owner claim. `command_id` /
+/// `idempotency_key` must be stable + replay-safe (derive from owner+cycle).
+pub fn build_closeout_owner_claim_submit(
+    command_id: impl Into<String>,
+    idempotency_key: impl Into<String>,
+    authority_generation: u64,
+    payload: CloseoutOwnerClaimPayload,
+) -> Result<CommandSubmit> {
+    let command_id = command_id.into();
+    let bytes = serde_json::to_vec(&payload).context("encode closeout_owner_claim payload")?;
+    build_domain_submit(
+        command_id,
+        CLOSEOUT_OWNER_CLAIM_NAME,
+        CLOSEOUT_OWNER_CLAIM_PAYLOAD_TYPE,
+        idempotency_key.into(),
+        authority_generation,
+        bytes,
+    )
+}
+
+/// Build the `CommandSubmit` for a closeout owner release.
+pub fn build_closeout_owner_release_submit(
+    command_id: impl Into<String>,
+    idempotency_key: impl Into<String>,
+    authority_generation: u64,
+    payload: CloseoutOwnerReleasePayload,
+) -> Result<CommandSubmit> {
+    let command_id = command_id.into();
+    let bytes = serde_json::to_vec(&payload).context("encode closeout_owner_release payload")?;
+    build_domain_submit(
+        command_id,
+        CLOSEOUT_OWNER_RELEASE_NAME,
+        CLOSEOUT_OWNER_RELEASE_PAYLOAD_TYPE,
+        idempotency_key.into(),
+        authority_generation,
+        bytes,
+    )
 }
 
 /// Which closeout phase transition a `closeout_advance` command requests. This

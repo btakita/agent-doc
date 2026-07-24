@@ -2747,7 +2747,8 @@ pub fn new_closeout_owner_id(role: &str) -> String {
     format!("{role}-{}-{nonce}", std::process::id())
 }
 
-/// Claim or refresh closeout ownership through the Lazily document actor.
+/// Claim or refresh closeout ownership through the Lazily document actor over
+/// the command plane (`#lzdurablesink`).
 ///
 /// The controller serializes the projection decision and fact append. SQLite is
 /// only the actor's persistence substrate and is never read by this client.
@@ -2755,30 +2756,43 @@ pub fn claim_closeout_owner_for_file(
     file: &Path,
     request: CloseoutOwnerClaimRequest,
 ) -> Result<CloseoutOwnerClaimOutcome> {
+    use super::command_plane::{
+        build_closeout_owner_claim_submit, CloseoutOwnerClaimPayload,
+    };
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     #[cfg(feature = "test-support")]
     ensure_state_actor_for_tests(&project_root)?;
     #[cfg(not(feature = "test-support"))]
     ensure_controller_running(&project_root, LaunchMode::Lazy)?;
-    request_controller(
-        &project_root,
-        ControllerRequest {
-            command: "closeout_owner_claim".to_string(),
-            file: Some(file.to_path_buf()),
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: None,
-            caller: Some("closeout".to_string()),
-            reason: None,
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: Some(serde_json::to_string(&request)?),
+    let document_path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    // A per-call nonce keeps each claim a distinct command (a lease refresh must
+    // not dedupe onto a prior command); the CAS idempotency lives in
+    // `decide_owner_claim`.
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let command_id = format!(
+        "closeout-owner-claim:{}:{}:{nonce}",
+        request.expected_cycle_id.as_deref().unwrap_or("current"),
+        request.owner_id
+    );
+    let submit = build_closeout_owner_claim_submit(
+        &command_id,
+        &command_id,
+        0,
+        CloseoutOwnerClaimPayload {
+            document_path,
+            request,
         },
-    )
+    )?;
+    let submit_json = serde_json::to_string(&submit)?;
+    request_controller(&project_root, ControllerRequest::command_plane_submit(submit_json))
 }
 
 pub fn release_closeout_owner_for_file(
@@ -2787,32 +2801,33 @@ pub fn release_closeout_owner_for_file(
     owner_id: &str,
     reason: &str,
 ) -> Result<bool> {
+    use super::command_plane::{
+        build_closeout_owner_release_submit, CloseoutOwnerReleasePayload,
+    };
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     ensure_controller_running(&project_root, LaunchMode::Lazy)?;
-    request_controller(
-        &project_root,
-        ControllerRequest {
-            command: "closeout_owner_release".to_string(),
-            file: Some(file.to_path_buf()),
-            session_id: None,
-            pane_id: None,
-            window_id: None,
-            generation: None,
-            state: None,
-            caller: Some("closeout".to_string()),
-            reason: Some(reason.to_string()),
-            supervisor_pid: None,
-            supervisor_socket: None,
-            command_kind: None,
-            diagnostic_payload: Some(serde_json::to_string(&CloseoutOwnerReleaseRequest {
-                cycle_id: cycle_id.to_string(),
-                owner_id: owner_id.to_string(),
-                reason: reason.to_string(),
-                released_secs: timestamp_secs(),
-            })?),
+    let document_path = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf())
+        .to_string_lossy()
+        .to_string();
+    let released_secs = timestamp_secs();
+    let command_id = format!("closeout-owner-release:{cycle_id}:{owner_id}:{released_secs}");
+    let submit = build_closeout_owner_release_submit(
+        &command_id,
+        &command_id,
+        0,
+        CloseoutOwnerReleasePayload {
+            document_path,
+            cycle_id: cycle_id.to_string(),
+            owner_id: owner_id.to_string(),
+            reason: reason.to_string(),
+            released_secs,
         },
-    )
+    )?;
+    let submit_json = serde_json::to_string(&submit)?;
+    request_controller(&project_root, ControllerRequest::command_plane_submit(submit_json))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9807,16 +9822,19 @@ pub(crate) fn handle_state_event_append(
     append_apply_state_event(bootstrap, runtime, event)
 }
 
-pub(crate) fn handle_closeout_owner_claim(
+/// Shared core of closeout owner claim: decide the CAS from the live
+/// in-memory projection (`decide_owner_claim`), emit the `CloseoutOwnerClaimed`
+/// fact when acquired, and update the supervisor-recycle graph. Pure authority
+/// logic reused by the bespoke `closeout_owner_claim` verb and the command-plane
+/// `service_closeout_owner_claim` (`#lzdurablesink`).
+fn run_closeout_owner_claim(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
-    request: ControllerRequest,
-) -> Result<CloseoutOwnerClaimOutcome> {
-    let file = request_file(&request)?;
-    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
-    let claim: CloseoutOwnerClaimRequest =
-        serde_json::from_str(&payload_json).context("parse closeout owner claim")?;
-    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    file: &Path,
+    claim: agent_doc_state_backbone::CloseoutOwnerClaimRequest,
+) -> Result<agent_doc_state_backbone::CloseoutOwnerClaimOutcome> {
+    use agent_doc_state_backbone::{CloseoutOwnerClaimOutcome, StateFact};
+    let document_hash = agent_doc_hash::document_id_for_path(file);
 
     let (outcome, recycle) = {
         let mut memory = runtime.memory.lock();
@@ -9840,7 +9858,7 @@ pub(crate) fn handle_closeout_owner_claim(
                     owner.owner_id,
                     closeout_owner_event_nonce()
                 ),
-                agent_doc_state_backbone::StateFact::CloseoutOwnerClaimed {
+                StateFact::CloseoutOwnerClaimed {
                     document_hash: document_hash.clone(),
                     cycle_id: owner.cycle_id.clone(),
                     owner_id: owner.owner_id.clone(),
@@ -9861,7 +9879,7 @@ pub(crate) fn handle_closeout_owner_claim(
     runtime.supervisor_recycle_waiters.notify_all();
 
     agent_doc_ops_log_io::log_op(
-        &file,
+        file,
         &format!(
             "closeout_owner_actor_claim file={} owner_id={} expected_cycle={} outcome={outcome:?}",
             file.display(),
@@ -9872,16 +9890,18 @@ pub(crate) fn handle_closeout_owner_claim(
     Ok(outcome)
 }
 
-pub(crate) fn handle_closeout_owner_release(
+/// Shared core of closeout owner release: decide from the live projection
+/// whether the caller still owns the cycle, emit `CloseoutOwnerReleased` when it
+/// does, and update the supervisor-recycle graph. Reused by the bespoke verb
+/// and the command-plane service.
+fn run_closeout_owner_release(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
-    request: ControllerRequest,
+    file: &Path,
+    release: CloseoutOwnerReleaseRequest,
 ) -> Result<bool> {
-    let file = request_file(&request)?;
-    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
-    let release: CloseoutOwnerReleaseRequest =
-        serde_json::from_str(&payload_json).context("parse closeout owner release")?;
-    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    use agent_doc_state_backbone::StateFact;
+    let document_hash = agent_doc_hash::document_id_for_path(file);
 
     let (released, recycle) = {
         let mut memory = runtime.memory.lock();
@@ -9901,7 +9921,7 @@ pub(crate) fn handle_closeout_owner_release(
                     release.owner_id,
                     closeout_owner_event_nonce()
                 ),
-                agent_doc_state_backbone::StateFact::CloseoutOwnerReleased {
+                StateFact::CloseoutOwnerReleased {
                     document_hash: document_hash.clone(),
                     cycle_id: release.cycle_id.clone(),
                     owner_id: release.owner_id.clone(),
@@ -9921,6 +9941,69 @@ pub(crate) fn handle_closeout_owner_release(
     runtime.supervisor_recycle_graph.set(recycle);
     runtime.supervisor_recycle_waiters.notify_all();
     Ok(released)
+}
+
+pub(crate) fn handle_closeout_owner_claim(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::CloseoutOwnerClaimOutcome> {
+    let file = request_file(&request)?;
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let claim: agent_doc_state_backbone::CloseoutOwnerClaimRequest =
+        serde_json::from_str(&payload_json).context("parse closeout owner claim")?;
+    run_closeout_owner_claim(bootstrap, runtime, &file, claim)
+}
+
+/// Command-plane service for a `closeout_owner_claim` (`#lzdurablesink`). Decodes
+/// the [`lazily::CommandSubmit`], runs the shared claim core from the live
+/// projection, and returns the typed outcome — the authority result for this
+/// coordination CAS (Acquired / HeldByOther / CycleSuperseded).
+fn service_closeout_owner_claim(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    submit: &lazily::CommandSubmit,
+) -> Result<agent_doc_state_backbone::CloseoutOwnerClaimOutcome> {
+    use super::command_plane::decode_closeout_owner_claim_payload;
+    let payload = decode_closeout_owner_claim_payload(submit)?;
+    let file = std::path::PathBuf::from(&payload.document_path);
+    run_closeout_owner_claim(bootstrap, runtime, &file, payload.request)
+}
+
+pub(crate) fn handle_closeout_owner_release(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<bool> {
+    let file = request_file(&request)?;
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let release: CloseoutOwnerReleaseRequest =
+        serde_json::from_str(&payload_json).context("parse closeout owner release")?;
+    run_closeout_owner_release(bootstrap, runtime, &file, release)
+}
+
+/// Command-plane service for a `closeout_owner_release`. Decodes the submit and
+/// runs the shared release core from the live projection; returns whether the
+/// caller still owned (and so released) the cycle.
+fn service_closeout_owner_release(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    submit: &lazily::CommandSubmit,
+) -> Result<bool> {
+    use super::command_plane::decode_closeout_owner_release_payload;
+    let payload = decode_closeout_owner_release_payload(submit)?;
+    let file = std::path::PathBuf::from(&payload.document_path);
+    run_closeout_owner_release(
+        bootstrap,
+        runtime,
+        &file,
+        CloseoutOwnerReleaseRequest {
+            cycle_id: payload.cycle_id,
+            owner_id: payload.owner_id,
+            reason: payload.reason,
+            released_secs: payload.released_secs,
+        },
+    )
 }
 
 fn route_submit_event_id(kind: &str, document_hash: &str, submit_epoch: u64) -> String {
@@ -10528,7 +10611,7 @@ fn handle_command_plane_submit(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     request: ControllerRequest,
-) -> Result<lazily::CausalReceipt> {
+) -> Result<serde_json::Value> {
     use super::command_plane::NAMESPACE;
     // The `CommandSubmit` envelope rides `diagnostic_payload` — the same channel
     // `closeout_owner_claim`/`release` use for serialized structured payloads —
@@ -10546,34 +10629,61 @@ fn handle_command_plane_submit(
             submit.namespace
         );
     }
-    Ok(dispatch_command_plane_submit(bootstrap, runtime, &submit))
+    dispatch_command_plane_submit(bootstrap, runtime, &submit)
 }
 
 /// Route a command-plane submit to its domain service by `(namespace, name)`.
-/// Every command resolves to a terminal [`lazily::CausalReceipt`]: an unknown
-/// name fails closed as a `rejected` receipt (with the command id) so the client
-/// resolves instead of hanging on a non-terminal ACK. Routed commands today:
-/// - `agent-doc/closeout_advance` → [`service_closeout_advance`].
+/// The response is the command's authority result, serialized as JSON:
+/// - `closeout_advance` → a terminal [`lazily::CausalReceipt`] (transition
+///   authority; Applied/Rejected).
+/// - `closeout_owner_claim` → the typed `CloseoutOwnerClaimOutcome`
+///   (coordination CAS result: Acquired/HeldByOther/CycleSuperseded).
+/// - `closeout_owner_release` → `bool` (released / not-owner).
+///
+/// An unknown name fails closed as a terminal `rejected` receipt (with the
+/// command id) so the client resolves instead of hanging on a non-terminal ACK.
 fn dispatch_command_plane_submit(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
     submit: &lazily::CommandSubmit,
-) -> lazily::CausalReceipt {
-    use super::command_plane::{CLOSEOUT_ADVANCE_NAME, CONTROLLER_TARGET, NAMESPACE};
-    match (submit.namespace.as_str(), submit.name.as_str()) {
-        (NAMESPACE, CLOSEOUT_ADVANCE_NAME) => {
-            service_closeout_advance(bootstrap, runtime, submit)
-        }
-        (_ns, name) => lazily::CausalReceipt::rejected(
-            format!("{}:rcpt", submit.command_id),
-            &submit.command_id,
-            CONTROLLER_TARGET,
-            submit.authority_generation,
-        )
-        .with_reason(format!(
-            "command_plane_submit: unknown command name {name:?} in namespace {:?}",
-            submit.namespace
-        )),
+) -> Result<serde_json::Value> {
+    use super::command_plane::{
+        CLOSEOUT_ADVANCE_NAME, CLOSEOUT_OWNER_CLAIM_NAME, CLOSEOUT_OWNER_RELEASE_NAME,
+        CONTROLLER_TARGET, NAMESPACE,
+    };
+    let (ns, name) = (submit.namespace.as_str(), submit.name.as_str());
+    // Compare by `==` (not const patterns): a `&str` const is not a structural
+    // pattern, so matching on the const identifier would bind instead of compare.
+    if ns == NAMESPACE && name == CLOSEOUT_ADVANCE_NAME {
+        Ok(serde_json::to_value(service_closeout_advance(
+            bootstrap,
+            runtime,
+            submit,
+        ))?)
+    } else if ns == NAMESPACE && name == CLOSEOUT_OWNER_CLAIM_NAME {
+        Ok(serde_json::to_value(service_closeout_owner_claim(
+            bootstrap,
+            runtime,
+            submit,
+        )?)?)
+    } else if ns == NAMESPACE && name == CLOSEOUT_OWNER_RELEASE_NAME {
+        Ok(serde_json::to_value(service_closeout_owner_release(
+            bootstrap,
+            runtime,
+            submit,
+        )?)?)
+    } else {
+        Ok(serde_json::to_value(
+            lazily::CausalReceipt::rejected(
+                format!("{}:rcpt", submit.command_id),
+                &submit.command_id,
+                CONTROLLER_TARGET,
+                submit.authority_generation,
+            )
+            .with_reason(format!(
+                "command_plane_submit: unknown command name {name:?} in namespace {ns:?}"
+            )),
+        )?)
     }
 }
 
@@ -16309,6 +16419,114 @@ mod tests {
         let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn closeout_owner_claim_and_release_route_through_command_plane_dispatch() {
+        // `#lzdurablesink` todo (3): the command-plane dispatch routes
+        // closeout_owner_claim / closeout_owner_release and returns the typed CAS
+        // result (Acquired / HeldByOther), not a coarse receipt — the authority
+        // result for a coordination op is preserved. The live-socket transport is
+        // already proven by the mark_write_applied integration test, so this
+        // exercises the dispatch + service in-process (mirroring the CAS test).
+        use super::command_plane::{
+            build_closeout_owner_claim_submit, build_closeout_owner_release_submit,
+            CloseoutOwnerClaimPayload, CloseoutOwnerReleasePayload,
+        };
+        use agent_doc_state_backbone::{CloseoutOwnerClaimOutcome, CloseoutOwnerClaimRequest};
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("tasks/owner-cp.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body\n").unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n"))
+            .unwrap();
+
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        let bootstrap = runtime.bootstrap_snapshot().unwrap();
+
+        let claim_submit = |owner_id: &str| {
+            build_closeout_owner_claim_submit(
+                format!("closeout-owner-claim:{owner_id}"),
+                format!("closeout-owner-claim:{owner_id}"),
+                0,
+                CloseoutOwnerClaimPayload {
+                    document_path: doc.to_string_lossy().to_string(),
+                    request: CloseoutOwnerClaimRequest {
+                        expected_cycle_id: Some(cycle.cycle_id.clone()),
+                        owner_id: owner_id.to_string(),
+                        owner_pid: std::process::id(),
+                        role: "test_closeout".to_string(),
+                        now_secs: 10,
+                        lease_secs: 30,
+                        allow_dead_owner_takeover: true,
+                    },
+                },
+            )
+            .unwrap()
+        };
+
+        let first =
+            serde_json::from_value::<CloseoutOwnerClaimOutcome>(dispatch_command_plane_submit(
+                &bootstrap,
+                runtime.as_ref(),
+                &claim_submit("owner-1"),
+            )
+            .unwrap())
+            .unwrap();
+        assert!(matches!(
+            first,
+            CloseoutOwnerClaimOutcome::Acquired(ref p) if p.owner_id == "owner-1"
+        ));
+        let second =
+            serde_json::from_value::<CloseoutOwnerClaimOutcome>(dispatch_command_plane_submit(
+                &bootstrap,
+                runtime.as_ref(),
+                &claim_submit("owner-2"),
+            )
+            .unwrap())
+            .unwrap();
+        assert!(matches!(
+            second,
+            CloseoutOwnerClaimOutcome::HeldByOther(ref p) if p.owner_id == "owner-1"
+        ));
+
+        // Release owner-1 over the command plane, then owner-2 can claim.
+        let release = build_closeout_owner_release_submit(
+            "closeout-owner-release",
+            "closeout-owner-release",
+            0,
+            CloseoutOwnerReleasePayload {
+                document_path: doc.to_string_lossy().to_string(),
+                cycle_id: cycle.cycle_id.clone(),
+                owner_id: "owner-1".to_string(),
+                reason: "finished".to_string(),
+                released_secs: 11,
+            },
+        )
+        .unwrap();
+        let released: bool =
+            serde_json::from_value::<bool>(dispatch_command_plane_submit(
+                &bootstrap,
+                runtime.as_ref(),
+                &release,
+            )
+            .unwrap())
+            .unwrap();
+        assert!(released);
+        let reclaimed =
+            serde_json::from_value::<CloseoutOwnerClaimOutcome>(dispatch_command_plane_submit(
+                &bootstrap,
+                runtime.as_ref(),
+                &claim_submit("owner-2"),
+            )
+            .unwrap())
+            .unwrap();
+        assert!(matches!(
+            reclaimed,
+            CloseoutOwnerClaimOutcome::Acquired(ref p) if p.owner_id == "owner-2"
+        ));
     }
 
     #[test]

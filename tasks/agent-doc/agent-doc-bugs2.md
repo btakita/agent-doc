@@ -51,14 +51,31 @@ Affected component: editor IPC / writeback
 
 ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_visible_write patch_id=151bfee5-9431-4003-bba9-243d34d213a0 invariant=live_prompt_drift_after_preflight recovery=visible_repair_required snap_source=lazily_visible_write_event candidate_len=68130 candidate_hash=78175b9f8c6645c683b98bde1f832e2416914b50516a4776c650e928b660648b content_ours_len=68416 content_ours_hash=d75457f1e36d206b3e23df18cc7236a6f82615205f719c08a0284371397b30c9 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1784772615948
 ```
-<!-- agent:boundary:0338c640 -->
+
+### Re: #retentionwatermarklive — gpt-5
+
+Completed. The requested implementation had already landed on `origin/main` while this local submodule remained behind with unrelated in-progress edits, so I validated the pushed implementation without rebasing or overwriting that shared dirty worktree.
+
+Changed paths in the landed work include `agent-doc-sqlite/src/state_store.rs`, `agent-doc-controller-io/src/project_controller/rpc.rs`, `specs/13-state-backbone.md`, and `VERSIONS.md`. Commit `628f01d32` (`feat: retain state events by live peer watermark`) follows the durable per-peer ACK substrate in `2ca2a4d85` and is contained by tags `v0.35.23` and `v0.35.24`.
+
+The implemented rule is fail-safe and PID-scoped: the controller supplies the exact live `(pid, editor_id)` registrations; an unacknowledged live peer contributes zero and pins deletion; stale ACK rows for crashed or replaced registrations are evicted in the same transaction; rows strictly below `MIN(acked_version)` are deleted while the minimum row remains as the monotonic version anchor; no-live-peer state performs no watermark deletion; and the existing fact-specific count caps remain active as a storage backstop.
+
+Verification evidence:
+
+- `agent-doc --version` reports `0.35.24`, which contains the landed commit.
+- The landed SQLite regressions cover `live_peer_minimum_controls_delete_below_watermark`, `crashed_peer_eviction_unpins_watermark_but_missing_live_ack_pins_zero`, and `count_cap_retention_remains_active_as_watermark_backstop`.
+- The controller regression `state_subscribe_records_only_the_previously_applied_live_peer_cursor` covers apply-then-ACK wiring and exact live-registration retention input.
+- `gh run list --workflow CI --limit 1` reports the latest `main` CI run `30054083681` completed successfully.
+
+Confidence: high. No escalation was needed. No additional backlog follow-up is needed because the distinct installed-plugin/live-ledger observation is already tracked as `#fmgcverify`; this code-complete item is closed.
+<!-- agent:boundary:722236bd -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ⏭️ do [#retentionwatermarklive]
 - do [#fmgcverify]
-- ⏭️ 📌 do [#qactsync]
+- 📌 do [#qactsync]
 - 📌 do [#ftimmediate]
 - 📌 do [#qeditrace]
 - 📌 do [#jbcompactcommit]

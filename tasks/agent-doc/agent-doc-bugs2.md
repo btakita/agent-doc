@@ -73,13 +73,29 @@ Verification evidence:
 - `gh run list --workflow CI --limit 1` reports the latest `main` CI run `30054083681` completed successfully.
 
 Confidence: high. No escalation was needed. No additional backlog follow-up is needed because the distinct installed-plugin/live-ledger observation is already tracked as `#fmgcverify`; this code-complete item is closed.
-<!-- agent:boundary:27199657 -->
+
+### Re: #fmgcverify — gpt-5
+
+Live verification failed, so `#fmgcverify` stays open with a narrowed fix-and-retest action.
+
+The live JetBrains registration is exact and current: plugin `0.2.292`, PID `2968236`, peer `jetbrains-2968236-4c1e1bf1-44bf-4aec-95ee-aabffb792418`. The controller and supervisor are also current. A controlled Project Controller subscription for that exact peer successfully persisted an intentional safe ACK sentinel at version `1`, proving that the controller protocol and database write path work. After two genuine JetBrains selection-driven subscriptions, the peer row remained at `acked_version=1` while the document state-event high-water advanced to `1590`.
+
+This isolates the failure to the editor apply/report path: the plugin is making projection calls but is not advancing its nonzero apply-then-ACK cursor. The next action is to instrument and fix `StateProjectionBridge`/`CpRouteClient` around pending, applied, recorded, and returned document versions, reinstall/restart the plugin, and rerun this live proof. The version-1 sentinel is intentional and safe; it should remain as the baseline until the fixed plugin advances it.
+
+Changed paths: none outside the session document.
+
+Commands/checks: live registration and controller/supervisor inspection; SQLite peer-ACK and state-event queries; exact-peer controller-socket subscriptions; installed plugin bytecode inspection; real JetBrains file-selection changes.
+
+Verification: controller returned a valid snapshot at document version `1589` and recorded the sentinel; two real editor selection cycles did not move it, while the state-event high-water reached `1590`.
+
+Confidence: high. Escalation: none—the remaining work is an actionable editor-plugin code failure, not an external operator gate.
+<!-- agent:boundary:58fb7ea7 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~⏭️ do [#retentionwatermarklive]~~
-- do [#fmgcverify]
+- ~~do [#retentionwatermarklive]~~
+- ⏭️ do [#fmgcverify]
 - 📌 do [#qactsync]
 - 📌 do [#ftimmediate]
 - 📌 do [#qeditrace]

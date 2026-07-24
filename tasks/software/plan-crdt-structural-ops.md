@@ -76,12 +76,22 @@ applies the op to the file. No flock (one writer).
   so it stays in the full-text path until a non-item structural op exists. 6 new
   tests; `make install && make check` green.
 
-### Phase C — Editor structural-op handler
+### Phase C — Editor structural-op handler — DONE `#crdtstructops`
 - `PatchWatcher` (IntelliJ) + the FFI/transport gain a structural-op intent type:
   apply `strike(node_key)` / `mark_done(node_key)` to the `Document` (via the
   markdown-ast node-key → line range map) + publish a receipt.
 - The detached path (no editor) applies the op to the file directly (controller is
   the single writer).
+- **Landed:** `EditorIntent::ApplyStructuralOp` ("apply_structural_op") in
+  `agent-doc-ipc-protocol` + mirrored in the JetBrains (`PatchWatcher.kt`) and VS
+  Code (`editorIntent.ts` + `extension.ts`) intent enums. The editor handlers
+  ride the existing proven node-patch apply path: the binary sends only
+  `node_patches` (no canonical content) and `applyPatch`/`applyNodePatches`
+  applies them, reusing `agent_doc_apply_node_patches` and the existing
+  `patch_id`-keyed receipt — no new editor apply primitive needed. The
+  `IpcNodeOp → MutationNodePatch` bridge (`ipc_node_ops_to_node_patches`,
+  consume/mark_done→`Strike`, strike→`Remove`) lives in `agent-doc-queue`.
+  `make install` (Gradle plugin build green) `&& make check` green.
 
 ### Phase D — Migrate the 6 sites
 - Each site: replace `acquire_doc_lock → read → parse → compute full text →

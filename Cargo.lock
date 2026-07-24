@@ -978,6 +978,7 @@ dependencies = [
  "agent-doc-hash",
  "anyhow",
  "filetime",
+ "fs2",
  "parking_lot",
  "tempfile",
 ]

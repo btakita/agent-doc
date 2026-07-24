@@ -201,9 +201,7 @@
 //! - `splice_pending_warns_when_target_missing_pending`: target has no pending component → target unchanged.
 
 use anyhow::{Context, Result};
-use fs2::FileExt;
 use std::cell::RefCell;
-use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::Path;
 
@@ -2476,19 +2474,8 @@ pub(crate) use ipc::*;
 // ---------------------------------------------------------------------------
 
 fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
-    let lock_path = agent_doc_fs::state_lock_path_for(path)?;
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open doc lock {}", lock_path.display()))?;
-    file.lock_exclusive()
-        .with_context(|| format!("failed to acquire doc lock on {}", lock_path.display()))?;
-    Ok(file)
+    // Delegate to the single shared file-TOCTOU lock primitive in `agent-doc-fs`.
+    agent_doc_fs::acquire_doc_lock(path)
 }
 
 fn capture_locked_undo_checkpoint(path: &Path) -> Result<(std::fs::File, String)> {

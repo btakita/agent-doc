@@ -1,9 +1,7 @@
 //! Extracted from `write.rs` (large-module split). See parent module for context.
 
 use anyhow::{Context, Result};
-use fs2::FileExt;
 use std::fmt::Display;
-use std::fs::OpenOptions;
 use std::path::Path;
 
 use crate::queue_consumption_proof::{
@@ -47,19 +45,9 @@ pub trait QueueConsumeWriteEffects {
 }
 
 fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
-    let lock_path = agent_doc_fs::state_lock_path_for(path)?;
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open doc lock {}", lock_path.display()))?;
-    file.lock_exclusive()
-        .with_context(|| format!("failed to acquire doc lock on {}", lock_path.display()))?;
-    Ok(file)
+    // Delegate to the single shared file-TOCTOU lock primitive in `agent-doc-fs`
+    // (`#lzdurablesink` — the file-level edit boundary; see its doc comment).
+    agent_doc_fs::acquire_doc_lock(path)
 }
 
 fn log_snapshot_recovery_warning(file: &Path, context: &str, detail: impl Display) {

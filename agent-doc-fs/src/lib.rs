@@ -64,6 +64,33 @@ pub fn state_lock_path_for(doc: &Path) -> Result<PathBuf> {
     hashed_state_path(doc, LOCK_DIR, "lock")
 }
 
+/// Acquire an exclusive `flock` on the document's state lock file, holding it
+/// for a document-file read-parse-write cycle to prevent concurrent edits from
+/// invalidating parsed offsets (TOCTOU). The returned `File` releases the lock on
+/// drop (kernel cleans up the fd on process death — no lease/TTL needed).
+///
+/// `#lzdurablesink`: this is the file-level edit TOCTOU boundary, NOT a closeout-
+/// authority arbitration. `#lazily-hot-path` scopes its flock ban to closeout
+/// transitions; queue-consume document edits legitimately use flock here. The
+/// single shared definition (previously duplicated in queue-io + write-runtime-io).
+pub fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
+    use fs2::FileExt;
+    use std::fs::OpenOptions;
+    let lock_path = state_lock_path_for(path)?;
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("failed to open doc lock {}", lock_path.display()))?;
+    file.lock_exclusive()
+        .with_context(|| format!("failed to acquire doc lock on {}", lock_path.display()))?;
+    Ok(file)
+}
+
 /// Compute `<project_root>/.agent-doc/starting` for a document.
 ///
 /// Returns `None` when `doc` cannot be canonicalized or a root/fallback parent

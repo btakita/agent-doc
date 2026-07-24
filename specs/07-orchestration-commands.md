@@ -285,6 +285,16 @@ boolean-serialized forms such as `priority=true` / `go=true` and the malformed
 `preset="#name"=true` suffix back to `priority` / `go` and `preset="#name"` in
 both the visible document and snapshot before continuing queue maintenance.
 
+Queue maintenance binds the marker gesture and `queue:` frontmatter
+bidirectionally (`#qactsync`). It compares the current editor-authoritative
+document with the stable pre-turn baseline: when exactly one representation
+changed, that operator edit wins and is projected to the other representation.
+An explicit marker token also wins when no baseline is available, so a fresh
+`go`/`start` gesture can activate a document whose durable frontmatter still
+reads `queue: stop`. If both representations changed incompatibly in one
+window, canonical frontmatter wins deterministically and the conflict is
+logged. A second convergence pass over the synchronized document is a no-op.
+
 The route/dispatch path honors marker-side control identically to preflight: an
 inactive document (no `queue: start` / `queue_active: true`) whose `agent:queue`
 opening tag carries `go`/`start` is recognized as an activatable head, so

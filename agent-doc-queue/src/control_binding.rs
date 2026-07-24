@@ -14,28 +14,21 @@ pub fn explicit_queue_go_mode(
     attrs: &HashMap<String, String>,
     frontmatter_queue: Option<&str>,
 ) -> bool {
-    // Stop is the safety-dominant control. A stale `go` token in the marker
-    // must not override an operator-authored `queue: stop` recovered from the
-    // editor op stream (and vice versa).
-    !explicit_queue_stop_mode(attrs, frontmatter_queue)
-        && (attrs.contains_key("go")
-            || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("go")))
+    resolved_queue_binding(attrs, frontmatter_queue) == Some(QueueBindingMode::Go)
 }
 
 pub fn explicit_queue_start_mode(
     attrs: &HashMap<String, String>,
     frontmatter_queue: Option<&str>,
 ) -> bool {
-    attrs.contains_key("start")
-        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("start"))
+    resolved_queue_binding(attrs, frontmatter_queue) == Some(QueueBindingMode::Start)
 }
 
 pub fn explicit_queue_stop_mode(
     attrs: &HashMap<String, String>,
     frontmatter_queue: Option<&str>,
 ) -> bool {
-    attrs.contains_key("stop")
-        || frontmatter_queue.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("stop"))
+    resolved_queue_binding(attrs, frontmatter_queue) == Some(QueueBindingMode::Stop)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +75,20 @@ impl QueueBindingMode {
             Self::Stop => None,
         }
     }
+}
+
+fn resolved_queue_binding(
+    attrs: &HashMap<String, String>,
+    frontmatter_queue: Option<&str>,
+) -> Option<QueueBindingMode> {
+    // The marker is the operator's ephemeral gesture surface. Let an explicit
+    // marker token override a stale frontmatter projection; convergence will
+    // then copy that gesture into the canonical `queue:` field. Without this
+    // precedence, `<!-- agent:queue go -->` beside `queue: stop` is read as
+    // stopped before convergence can observe and persist the marker edit,
+    // producing the go-marker churn that #qactsync removes.
+    QueueBindingMode::from_marker(attrs)
+        .or_else(|| QueueBindingMode::from_frontmatter(frontmatter_queue))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -140,12 +147,6 @@ fn queue_binding_target(
         return None;
     }
 
-    if current.marker_mode == Some(QueueBindingMode::Stop)
-        || current.frontmatter_mode == Some(QueueBindingMode::Stop)
-    {
-        return Some(QueueBindingMode::Stop);
-    }
-
     let marker_changed = previous.is_some_and(|prev| current.marker_mode != prev.marker_mode);
     let frontmatter_changed = previous.is_some_and(|prev| {
         current.frontmatter_mode != prev.frontmatter_mode
@@ -171,10 +172,30 @@ fn queue_binding_target(
             .or(Some(QueueBindingMode::Stop));
     }
     if marker_changed && frontmatter_changed {
-        return current
+        let marker_target = current.marker_mode.unwrap_or(QueueBindingMode::Stop);
+        let frontmatter_target = current
             .frontmatter_mode
-            .or(current.marker_mode)
-            .or(Some(QueueBindingMode::Stop));
+            .or_else(|| {
+                current.legacy_queue_active.map(|active| {
+                    if active {
+                        QueueBindingMode::Start
+                    } else {
+                        QueueBindingMode::Stop
+                    }
+                })
+            })
+            .unwrap_or(QueueBindingMode::Stop);
+        if marker_target != frontmatter_target {
+            // A genuine two-sided edit has no lossless winner. Frontmatter is
+            // the canonical durable representation, so it wins deterministically
+            // and the conflict is visible instead of becoming silent churn.
+            eprintln!(
+                "[queue] warning: conflicting queue activation edits \
+                 marker={marker_target:?} frontmatter={frontmatter_target:?}; \
+                 choosing canonical frontmatter control (#qactsync)"
+            );
+        }
+        return Some(frontmatter_target);
     }
     if let Some(marker_mode) = current.marker_mode {
         return Some(marker_mode);
@@ -303,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_dominates_conflicting_go_without_snapshot() {
+    fn marker_gesture_overrides_stale_frontmatter_without_snapshot() {
         let content = concat!(
             "---\n",
             "agent_doc_session: test\n",
@@ -317,11 +338,60 @@ mod tests {
         let (updated, changed) = converge_queue_control_binding_content(content, None).unwrap();
 
         assert!(changed);
-        assert!(updated.contains("queue: stop\n"));
-        assert!(updated.contains("<!-- agent:queue -->"));
+        assert!(updated.contains("queue: go\n"));
+        assert!(updated.contains("<!-- agent:queue go -->"));
         let components = agent_doc_element::element::parse(&updated).unwrap();
         let queue = components.iter().find(|c| c.name == "queue").unwrap();
-        assert!(!explicit_queue_go_mode(&queue.attrs, Some("stop")));
+        assert!(explicit_queue_go_mode(&queue.attrs, Some("go")));
+    }
+
+    #[test]
+    fn marker_change_away_from_stop_wins_over_stale_frontmatter() {
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue: stop\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#work]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let content = snapshot.replacen("<!-- agent:queue -->", "<!-- agent:queue start -->", 1);
+
+        let (updated, changed) =
+            converge_queue_control_binding_content(&content, Some(snapshot)).unwrap();
+
+        assert!(changed);
+        assert!(updated.contains("queue: start\n"));
+        assert!(updated.contains("<!-- agent:queue start -->"));
+    }
+
+    #[test]
+    fn simultaneous_conflict_uses_canonical_frontmatter_and_reaches_fixed_point() {
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue: start\n",
+            "---\n\n",
+            "<!-- agent:queue start -->\n",
+            "- do [#work]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let content = snapshot
+            .replacen("queue: start", "queue: stop", 1)
+            .replacen("<!-- agent:queue start -->", "<!-- agent:queue go -->", 1);
+
+        let (updated, changed) =
+            converge_queue_control_binding_content(&content, Some(snapshot)).unwrap();
+
+        assert!(changed);
+        assert!(updated.contains("queue: stop\n"));
+        assert!(updated.contains("<!-- agent:queue -->"));
+
+        let (fixed_point, changed_again) =
+            converge_queue_control_binding_content(&updated, Some(snapshot)).unwrap();
+        assert!(!changed_again);
+        assert_eq!(fixed_point, updated);
     }
 
     /// `#qstartinert`: a steady-state frontmatter `queue: start` with a bare

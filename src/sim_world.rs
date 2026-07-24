@@ -149,6 +149,179 @@ mod orphan_drain_model {
     }
 }
 
+/// `#qactsync` model: marker gestures and canonical frontmatter controls
+/// converge bidirectionally, and every settled state is a fixed point.
+mod queue_activation_binding_model {
+    use agent_doc_frontmatter::frontmatter;
+    use agent_doc_queue::control_binding::{
+        converge_queue_control_binding_content, explicit_queue_go_mode, explicit_queue_start_mode,
+        explicit_queue_stop_mode,
+    };
+
+    #[derive(Clone, Copy, Debug)]
+    enum Action {
+        MarkerStarts,
+        MarkerGoes,
+        MarkerStops,
+        FrontmatterStarts,
+        FrontmatterStops,
+        ConflictingTwoSidedEdit,
+    }
+
+    const ACTIONS: [Action; 6] = [
+        Action::MarkerStarts,
+        Action::MarkerGoes,
+        Action::MarkerStops,
+        Action::FrontmatterStarts,
+        Action::FrontmatterStops,
+        Action::ConflictingTwoSidedEdit,
+    ];
+
+    #[derive(Clone, Debug)]
+    struct World {
+        content: String,
+    }
+
+    impl Default for World {
+        fn default() -> Self {
+            Self {
+                content: stopped_document(),
+            }
+        }
+    }
+
+    impl World {
+        fn step(&mut self, action: Action) {
+            let (snapshot, edited) = match action {
+                Action::MarkerStarts => {
+                    let snapshot = self.content.clone();
+                    let edited = set_marker_control(&snapshot, Some("start"));
+                    (snapshot, edited)
+                }
+                Action::MarkerGoes => {
+                    let snapshot = self.content.clone();
+                    let edited = set_marker_control(&snapshot, Some("go"));
+                    (snapshot, edited)
+                }
+                Action::MarkerStops => {
+                    let snapshot = self.content.clone();
+                    let edited = set_marker_control(&snapshot, None);
+                    (snapshot, edited)
+                }
+                Action::FrontmatterStarts => {
+                    let snapshot = self.content.clone();
+                    let edited = frontmatter::merge_queue_control(&snapshot, "start").unwrap();
+                    (snapshot, edited)
+                }
+                Action::FrontmatterStops => {
+                    let snapshot = self.content.clone();
+                    let edited = frontmatter::merge_queue_control(&snapshot, "stop").unwrap();
+                    (snapshot, edited)
+                }
+                Action::ConflictingTwoSidedEdit => {
+                    let snapshot = started_document();
+                    let marker_edited = set_marker_control(&snapshot, Some("go"));
+                    let edited = frontmatter::merge_queue_control(&marker_edited, "stop").unwrap();
+                    (snapshot, edited)
+                }
+            };
+
+            let (settled, _) =
+                converge_queue_control_binding_content(&edited, Some(&snapshot)).unwrap();
+            assert_synced(&settled);
+
+            let (fixed_point, changed_again) =
+                converge_queue_control_binding_content(&settled, Some(&snapshot)).unwrap();
+            assert!(
+                !changed_again,
+                "settled queue control must be a fixed point"
+            );
+            assert_eq!(fixed_point, settled);
+            self.content = settled;
+        }
+    }
+
+    fn stopped_document() -> String {
+        concat!(
+            "---\n",
+            "agent_doc_session: sample\n",
+            "queue: stop\n",
+            "---\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#sample]\n",
+            "<!-- /agent:queue -->\n",
+        )
+        .to_string()
+    }
+
+    fn started_document() -> String {
+        stopped_document()
+            .replacen("queue: stop", "queue: start", 1)
+            .replacen("<!-- agent:queue -->", "<!-- agent:queue start -->", 1)
+    }
+
+    fn set_marker_control(content: &str, control: Option<&str>) -> String {
+        let components = agent_doc_element::element::parse(content).unwrap();
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let raw_tag = &content[queue.open_start..queue.open_end];
+        let new_tag = agent_doc_queue::document_queue::set_control_in_tag(raw_tag, control);
+        let mut updated = String::with_capacity(content.len());
+        updated.push_str(&content[..queue.open_start]);
+        updated.push_str(&new_tag);
+        updated.push_str(&content[queue.open_end..]);
+        updated
+    }
+
+    fn assert_synced(content: &str) {
+        let (fm, _) = frontmatter::parse(content).unwrap();
+        let components = agent_doc_element::element::parse(content).unwrap();
+        let queue = components
+            .iter()
+            .find(|component| component.name == "queue")
+            .unwrap();
+        let controls = [
+            explicit_queue_start_mode(&queue.attrs, fm.queue.as_deref()),
+            explicit_queue_go_mode(&queue.attrs, fm.queue.as_deref()),
+            explicit_queue_stop_mode(&queue.attrs, fm.queue.as_deref()),
+        ];
+        assert_eq!(
+            controls.into_iter().filter(|active| *active).count(),
+            1,
+            "queue marker and frontmatter must resolve to one control: {content}"
+        );
+    }
+
+    fn explore(world: World, depth: usize) {
+        if depth == 0 {
+            return;
+        }
+        for action in ACTIONS {
+            let mut next = world.clone();
+            next.step(action);
+            explore(next, depth - 1);
+        }
+    }
+
+    #[test]
+    fn both_edit_directions_and_conflicts_converge() {
+        let mut world = World::default();
+        world.step(Action::MarkerStarts);
+        world.step(Action::FrontmatterStops);
+        world.step(Action::MarkerGoes);
+        world.step(Action::MarkerStops);
+        world.step(Action::FrontmatterStarts);
+        world.step(Action::ConflictingTwoSidedEdit);
+    }
+
+    #[test]
+    fn bounded_sequences_never_reintroduce_activation_churn() {
+        explore(World::default(), 5);
+    }
+}
+
 /// Retained-response retry model: the original editor cut remains the merge
 /// base while response delivery, editor prompt edits, replica acceptance, and
 /// controller restart can interleave. A durable queue id is a singleton across

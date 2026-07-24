@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.26
+
+_JetBrains plugin 0.2.292; VS Code extension 0.2.56._
+
+- **Queue activation edits now converge bidirectionally without go-marker churn (`#qactsync`).** A fresh `start` / `go` marker gesture overrides stale `queue:` frontmatter long enough to become the canonical durable value, while stable-snapshot provenance lets a one-sided marker or frontmatter edit win in either direction. Genuine simultaneous conflicts resolve deterministically to canonical frontmatter with a visible diagnostic, and production-backed SimWorld coverage proves both edit directions, conflicts, bounded sequences, and fixed-point convergence.
+
 ## 0.35.25
 
 _JetBrains plugin 0.2.292; VS Code extension 0.2.56._

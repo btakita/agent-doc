@@ -2069,13 +2069,24 @@ pub fn mark_committed(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
-    // NOTE: `mark_committed` stays on the local path for now (the other three
-    // transitions route through the command plane). It is the complex case — a
-    // diverse label set plus an idempotency refresh on an already-committed
-    // cycle — and routing it through the command plane changes the recovery
-    // commit ordering/label (`capture_committed` vs `commit_success`). Migrate it
-    // once that recovery-flow ordering is pinned. The `event_label` payload field
-    // + `service_closeout_advance` remain ready for it (`#lzdurablesink`).
+    let observation = command_plane::commit_observation_from_event_label(event);
+    if submit_closeout_advance_via_socket(
+        file,
+        command_plane::CloseoutPhaseEvent::Committed(observation),
+        Some(event),
+        None,
+        snapshot_content,
+        file_content,
+        None,
+        None,
+    )? {
+        let state = load(file)?.context(
+            "closeout_advance Committed applied through the command plane but no cycle state was \
+             read back",
+        )?;
+        append_phase_event_to_session_log(file, &state, file_content);
+        return Ok(state);
+    }
     let decision = decide_committed(load(file)?, file, event, snapshot_content, file_content);
     if decision.checkpoint {
         save(file, &decision.state)?;

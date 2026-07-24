@@ -16424,12 +16424,13 @@ mod tests {
         // label is stamped back as last_event.
         assert_eq!(committed.last_event, "commit_success");
 
-        // `mark_committed` stays on the local path (see cycle-state-io): a
-        // re-commit on an already-committed cycle refreshes and keeps the stable
-        // label, so "repair_applied" folds onto the existing "commit_success".
+        // `mark_committed` routes through the command plane (the caller's label
+        // rides the event_label payload field). A re-commit on an already-
+        // committed cycle refreshes and keeps the stable label, so "repair_applied"
+        // folds onto the existing "commit_success".
         let refreshed =
             agent_doc_cycle_state_io::mark_committed(&doc, "repair_applied", None, Some("body\n"))
-                .expect("mark_committed (re-commit)");
+                .expect("mark_committed (re-commit) through the command plane");
         assert_eq!(refreshed.phase, agent_doc_turn::CyclePhase::Committed);
         assert_eq!(
             refreshed.last_event, "commit_success",

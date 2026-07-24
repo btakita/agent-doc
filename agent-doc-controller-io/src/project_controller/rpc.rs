@@ -8582,6 +8582,35 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "command_plane_submit" => {
+            // #af88 B enforcement: a command-plane submit persists facts (the
+            // durable sink), so refuse it when the caller proves this controller
+            // is serving a stale binary. Reuse `controller_binary_stale` so the
+            // client's existing one-retry reconnect loop promotes the fresh
+            // binary — same rule as `dispatch` / Compact Exchange.
+            if let Some(client_version) =
+                stale_mutating_client_binary(client_binary_version.as_deref())
+            {
+                agent_doc_ops_log_io::log_op(
+                    &bootstrap_snapshot.project_root,
+                    &format!(
+                        "command_plane_submit_refused_client_binary_mismatch controller_version={} client_version={}",
+                        identity_version(),
+                        client_version
+                    ),
+                );
+                anyhow::bail!(
+                    "command_plane_submit refused: controller_binary_stale (running controller binary {} differs from caller {}; reconnect to promote the fresh binary)",
+                    identity_version(),
+                    client_version
+                );
+            }
+            controller_envelope(handle_command_plane_submit(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
+        },
         "queue_context_clear_started" => controller_envelope(handle_queue_context_clear_started(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -10488,23 +10517,79 @@ fn append_apply_state_event(
     Ok(inserted)
 }
 
+/// Controller authority for a `command_plane_submit` request: route the lazily
+/// [`CommandSubmit`] envelope by `(namespace, name)` to the domain service, run
+/// the transition from the live Lazily projection, and return the terminal
+/// [`lazily::CausalReceipt`]. This is the server half of the live
+/// `CommandTransport` (`#lzdurablesink`, `command-plane-v1`): the wire contract
+/// is `CommandSubmit` → terminal `CausalReceipt`, never a transport ACK.
+/// Counterpart to [`super::command_plane::ControllerCommandTransport`].
+fn handle_command_plane_submit(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<lazily::CausalReceipt> {
+    use super::command_plane::NAMESPACE;
+    // The `CommandSubmit` envelope rides `diagnostic_payload` — the same channel
+    // `closeout_owner_claim`/`release` use for serialized structured payloads —
+    // so the shared `ControllerRequest` shape is unchanged.
+    let submit_json = request.diagnostic_payload.ok_or_else(|| {
+        anyhow::anyhow!("command_plane_submit requires a CommandSubmit envelope in diagnostic_payload")
+    })?;
+    let submit: lazily::CommandSubmit =
+        serde_json::from_str(&submit_json).context("decode command_plane_submit CommandSubmit")?;
+    // The controller is the `agent-doc` namespace authority; refuse a foreign
+    // namespace rather than silently routing an unknown payload schema.
+    if submit.namespace != NAMESPACE {
+        anyhow::bail!(
+            "command_plane_submit refuses foreign namespace {:?} (want {NAMESPACE:?})",
+            submit.namespace
+        );
+    }
+    Ok(dispatch_command_plane_submit(bootstrap, runtime, &submit))
+}
+
+/// Route a command-plane submit to its domain service by `(namespace, name)`.
+/// Every command resolves to a terminal [`lazily::CausalReceipt`]: an unknown
+/// name fails closed as a `rejected` receipt (with the command id) so the client
+/// resolves instead of hanging on a non-terminal ACK. Routed commands today:
+/// - `agent-doc/closeout_advance` → [`service_closeout_advance`].
+fn dispatch_command_plane_submit(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    submit: &lazily::CommandSubmit,
+) -> lazily::CausalReceipt {
+    use super::command_plane::{CLOSEOUT_ADVANCE_NAME, CONTROLLER_TARGET, NAMESPACE};
+    match (submit.namespace.as_str(), submit.name.as_str()) {
+        (NAMESPACE, CLOSEOUT_ADVANCE_NAME) => {
+            service_closeout_advance(bootstrap, runtime, submit)
+        }
+        (_ns, name) => lazily::CausalReceipt::rejected(
+            format!("{}:rcpt", submit.command_id),
+            &submit.command_id,
+            CONTROLLER_TARGET,
+            submit.authority_generation,
+        )
+        .with_reason(format!(
+            "command_plane_submit: unknown command name {name:?} in namespace {:?}",
+            submit.namespace
+        )),
+    }
+}
+
 /// Authority-side service for a `closeout_advance` command (`#lzdurablesink`).
 /// Decodes the [`lazily::CommandSubmit`], decides the phase transition from the
 /// live Lazily projection (no `state.db` replay), emits the phase fact(s) as the
 /// durable sink via [`append_apply_state_event`], and returns the terminal
 /// [`lazily::CausalReceipt`] — the command's terminal authority, never a
 /// transport ACK. Counterpart to
-/// [`super::command_plane::build_closeout_advance_submit`]; the live
-/// `CommandTransport` wiring is the cross-cutting follow-up.
+/// [`super::command_plane::build_closeout_advance_submit`]; reachable from a
+/// client through [`handle_command_plane_submit`] / the live
+/// [`super::command_plane::ControllerCommandTransport`].
 ///
 /// Every command resolves to a receipt: a decode failure, an unrouted event, or
 /// a sink error is a `rejected` receipt (fail closed); an applied transition (or
 /// an idempotent no-op at the requested phase) is `applied`.
-//
-// Foundation-only until the live CommandTransport dispatch wires this in (the
-// same follow-up that `supervisor_recycle` awaits); exercised by the in-process
-// authority test today.
-#[allow(dead_code)]
 pub(crate) fn service_closeout_advance(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -10521,7 +10606,6 @@ pub(crate) fn service_closeout_advance(
     )
 }
 
-#[allow(dead_code)]
 fn closeout_advance_outcome(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -15080,6 +15164,134 @@ mod tests {
         );
         assert!(!outcome.graceful, "force skips the graceful shutdown RPC");
         assert!(outcome.force);
+    }
+
+    #[test]
+    fn command_plane_submit_dispatch_reaches_closeout_authority_and_returns_receipt() {
+        // `#lzdurablesink` live transport (server half): a `command_plane_submit`
+        // controller request carries a `CommandSubmit` envelope, the dispatch
+        // routes it by `(namespace, name)` to `service_closeout_advance`, the
+        // authority decides from the live Lazily projection, sinks the fact, and
+        // the terminal `CausalReceipt` (applied) comes back in the response
+        // envelope — never a transport ACK. This is the in-process proof that
+        // `service_closeout_advance` is now reachable from a client request.
+        use super::command_plane::{
+            build_closeout_advance_submit, CloseoutAdvancePayload, CloseoutPhaseEvent,
+        };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/dispatch.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+
+        let submit = build_closeout_advance_submit(
+            "cmd-dispatch-1",
+            "cycle_state",
+            "doc:cycle:write_applied:body",
+            1,
+            CloseoutAdvancePayload {
+                document_path: doc.to_string_lossy().to_string(),
+                event: CloseoutPhaseEvent::WriteApplied,
+                reason: None,
+                snapshot_content: None,
+                file_content: Some("body".to_string()),
+                response_sha256: None,
+                cycle_id_hint: None,
+            },
+        )
+        .unwrap();
+
+        // Frame the submit exactly as the live `ControllerCommandTransport` does:
+        // serialized into the request's `diagnostic_payload`.
+        let request =
+            ControllerRequest::command_plane_submit(serde_json::to_string(&submit).unwrap());
+        let line = serde_json::to_string(&request).unwrap();
+        let mut should_stop = false;
+        let response = handle_request_locked(&line, &runtime, &mut should_stop).unwrap();
+
+        let envelope: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(envelope["ok"], true, "envelope should be ok: {envelope}");
+        let receipt: lazily::CausalReceipt =
+            serde_json::from_value(envelope["data"].clone()).unwrap();
+        assert_eq!(receipt.outcome, lazily::ReceiptOutcome::Applied);
+        assert_eq!(receipt.causation_id, submit.command_id);
+
+        // The durable sink fired through the dispatched authority path: the live
+        // projection now observes WriteApplied.
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let phase = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .and_then(|d| d.closeout.phase);
+        assert_eq!(phase, Some(agent_doc_turn::CyclePhase::WriteApplied));
+    }
+
+    #[test]
+    fn command_plane_submit_unknown_name_fails_closed_as_rejected_receipt() {
+        // Every command resolves to a terminal receipt: an unknown command name
+        // fails closed as a `rejected` receipt (with the command id) so the client
+        // resolves instead of hanging on a non-terminal ACK.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+
+        let mut submit = super::command_plane::build_supervisor_recycle_submit(
+            "cmd-unknown-1",
+            "cycle_state",
+            "root:unknown",
+            "x",
+            1,
+        )
+        .unwrap();
+        // Same namespace, but a name no service is wired to yet.
+        submit.name = "nonexistent_op".to_string();
+        let request =
+            ControllerRequest::command_plane_submit(serde_json::to_string(&submit).unwrap());
+        let line = serde_json::to_string(&request).unwrap();
+        let mut should_stop = false;
+        let response = handle_request_locked(&line, &runtime, &mut should_stop).unwrap();
+
+        let envelope: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(envelope["ok"], true, "envelope should be ok: {envelope}");
+        let receipt: lazily::CausalReceipt =
+            serde_json::from_value(envelope["data"].clone()).unwrap();
+        assert_eq!(receipt.outcome, lazily::ReceiptOutcome::Rejected);
+        assert_eq!(receipt.causation_id, submit.command_id);
+        assert!(receipt.reason.as_deref().unwrap().contains("nonexistent_op"));
+    }
+
+    #[test]
+    fn command_plane_submit_foreign_namespace_refused() {
+        // The controller is the `agent-doc` namespace authority; a foreign
+        // namespace is refused at the envelope boundary (envelope error), not
+        // routed to a domain service.
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+
+        let mut submit = super::command_plane::build_supervisor_recycle_submit(
+            "cmd-foreign-1",
+            "cycle_state",
+            "root:foreign",
+            "x",
+            1,
+        )
+        .unwrap();
+        submit.namespace = "not-agent-doc".to_string();
+        let request =
+            ControllerRequest::command_plane_submit(serde_json::to_string(&submit).unwrap());
+        let line = serde_json::to_string(&request).unwrap();
+        let mut should_stop = false;
+        let response = handle_request_locked(&line, &runtime, &mut should_stop).unwrap();
+
+        let envelope: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(envelope["ok"], false, "foreign namespace must be refused: {envelope}");
+        assert!(envelope["error"]
+            .as_str()
+            .unwrap()
+            .contains("foreign namespace"));
     }
 
     #[test]

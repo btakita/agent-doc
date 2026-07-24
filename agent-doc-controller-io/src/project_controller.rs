@@ -1135,6 +1135,32 @@ pub(crate) struct ControllerRequest {
     diagnostic_payload: Option<String>,
 }
 
+impl ControllerRequest {
+    /// Build a `command_plane_submit` request carrying a lazily [`CommandSubmit`]
+    /// envelope (serialized as JSON in `diagnostic_payload`, the same channel
+    /// `closeout_owner_claim`/`release` already use for structured payloads). The
+    /// controller routes it by `(namespace, name)` to the domain authority and
+    /// returns the terminal [`lazily::CausalReceipt`] — the command-plane's
+    /// terminal authority, never a transport ACK.
+    pub(crate) fn command_plane_submit(submit_json: String) -> Self {
+        Self {
+            command: "command_plane_submit".to_string(),
+            diagnostic_payload: Some(submit_json),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ControllerEnvelope<T> {
     ok: bool,

@@ -292,6 +292,94 @@ pub fn closeout_advance_receipt(
     }
 }
 
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
+
+/// Synchronous command-plane transport over the project-controller socket
+/// (`command-plane-v1`, `#lzdurablesink`).
+///
+/// The controller socket is one-line-in / one-line-out, so a `CommandSubmit`
+/// round-trips synchronously: [`CommandTransport::send`] frames the submit as a
+/// `command_plane_submit` controller request, awaits the response, and stashes
+/// the terminal [`CausalReceipt`] the controller's authority emitted. The lazily
+/// envelope (`CommandSubmit` → terminal `CausalReceipt`, never a transport ACK)
+/// stays the wire contract; this reuses the controller's existing NDJSON
+/// request/response transport rather than introducing a second socket.
+///
+/// The transport owns the receipts it round-trips, so it cannot fold them into a
+/// [`lazily::CommandRpcClient`] projection by itself (the client owns the
+/// transport). Use [`ControllerCommandTransport::take_receipt`] after a `send`,
+/// or the [`submit_closeout_advance_command`] helper, which resolves the call.
+pub struct ControllerCommandTransport {
+    project_root: PathBuf,
+    pending_receipts: VecDeque<CausalReceipt>,
+}
+
+impl ControllerCommandTransport {
+    /// Connect a transport to the controller owning `project_root`.
+    pub fn new(project_root: impl Into<PathBuf>) -> Self {
+        Self {
+            project_root: project_root.into(),
+            pending_receipts: VecDeque::new(),
+        }
+    }
+
+    /// Synchronous round-trip for one submit; returns the terminal receipt the
+    /// controller authority emitted. A transport/decode failure (or a stale
+    /// controller binary) is an `Err`; an authority `rejected` receipt is `Ok` —
+    /// the transport succeeded, the authority's decision is in the receipt.
+    fn round_trip_submit(&self, submit: &lazily::CommandSubmit) -> Result<CausalReceipt> {
+        let submit_json = serde_json::to_string(submit).context("encode command_plane_submit")?;
+        let request = super::ControllerRequest::command_plane_submit(submit_json);
+        let receipt: CausalReceipt = super::rpc::request_controller(&self.project_root, request)?;
+        Ok(receipt)
+    }
+
+    /// Take the terminal receipt stashed by the most recent `send` of a submit.
+    pub fn take_receipt(&mut self) -> Option<CausalReceipt> {
+        self.pending_receipts.pop_front()
+    }
+}
+
+impl lazily::CommandTransport for ControllerCommandTransport {
+    type Error = anyhow::Error;
+    fn send(&mut self, message: &lazily::CommandMessage) -> Result<(), Self::Error> {
+        let submit = match message {
+            lazily::CommandMessage::CommandSubmit(submit) => submit.as_ref(),
+            // Cancel/events/projection are inbound-only (events/projection) or
+            // out-of-scope (cancel) on the synchronous request/response socket;
+            // nothing to write.
+            _ => return Ok(()),
+        };
+        let receipt = self.round_trip_submit(submit)?;
+        self.pending_receipts.push_back(receipt);
+        Ok(())
+    }
+}
+
+/// Submit a `closeout_advance` command over the live controller socket and
+/// resolve the terminal [`CausalReceipt`]. This is the synchronous client entry
+/// point for the durable closeout sink (`#lzdurablesink`): the controller
+/// authority decides from its live Lazily projection, persists the phase fact(s),
+/// and acknowledges with the receipt — never a transport ACK.
+///
+/// Returns the receipt regardless of outcome (`Applied` or `Rejected`); only a
+/// transport/decode failure (or a stale controller binary) is an `Err`. Pass the
+/// `CommandSubmit` built by [`build_closeout_advance_submit`].
+pub fn submit_closeout_advance_command(
+    project_root: &Path,
+    submit: lazily::CommandSubmit,
+) -> Result<CausalReceipt> {
+    let mut transport = ControllerCommandTransport::new(project_root);
+    lazily::CommandTransport::send(
+        &mut transport,
+        &lazily::CommandMessage::CommandSubmit(Box::new(submit)),
+    )?;
+    transport
+        .take_receipt()
+        .ok_or_else(|| anyhow::anyhow!("command_plane_submit produced no terminal receipt"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -120,10 +120,24 @@ applies the op to the file. No flock (one writer).
   follow-up that extends `IpcNodeOp`/`MutationNodePatch` beyond strike/remove.
 - `make install && make check` green.
 
-### Phase E — Detached fallback cleanup
+### Phase E — Detached fallback cleanup — DONE `#crdtstructops`
 - Controller applies structural ops to the file as the single detached writer
   (no flock — one writer). The `QueueCrdt` replica in the controller is the
   authority when no editor holds the buffer.
+- **Landed:** the detached single-writer renderer is
+  `apply_structural_ops_to_content` (Phase D) — it applies node patches directly
+  to the file content with no flock (the migrated sites 4/5 already drop the
+  flock). The controller-side `QueueCrdt` replica authority is
+  `QueueCrdt::apply_ops(&[QueueOp], now)` + `QueueOp`/`QueueOpKind` (MarkDone /
+  Strike) in `agent-doc-merge`: a detached writer folds a cycle's structural ops
+  into its replica so the CRDT — not a kernel lock — is the convergence
+  authority, then renders. For a single detached writer the direct renderer is
+  correct each cycle (re-read + apply); the replica authority matters for
+  multi-replica convergence (editor-attached), which the Phase D relay path
+  owns. Tests prove `apply_ops` converges mark_done + strike and is a safe no-op
+  on unknown keys. Full detached cleanup for sites 1/2/3/6 tracks Phase D
+  completion (they still hold the flock for their full-text computation).
+- `make install && make check` green.
 
 ## Scope / risk
 

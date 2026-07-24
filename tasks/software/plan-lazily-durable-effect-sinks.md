@@ -148,11 +148,14 @@ generic AST linter or a runtime daemon.
   coalesce to the settled value.
 - Architecture-review prompt: DONE — the agent-doc `AGENTS.md` carries the
   `#lzdurablesink` review prompt.
-- Architecture TEST (fail if hot-path actor modules import persistence query/CAS/
-  flock): **BLOCKED** on Phase 2 hot-path cleanliness — `mark_committed` is still
-  local and the `mark_*` actorless fallbacks still touch `state.db`, so the
-  boundary isn't clean enough to enforce yet. Add this once `mark_committed` and
-  queue-consume (todo 5) are fully on the authority.
+- Architecture TEST: **DONE — `d7ae61d4e`.** A source-scanning test
+  (`command_plane_authority_surface_has_no_file_lock_or_persistence_query`) reads
+  `command_plane.rs` via `include_str!` and fails the build if the command-plane
+  authority surface ever imports a file-lock primitive (`fs2`/`lock_exclusive`/
+  `acquire_doc_lock`) or a persistence query/CAS (`open_state_db`/`state_store::load`).
+  Scoped to the command-plane module (the authority vocab/codec must stay pure);
+  the service functions' live-projection use is proven by the authority behavior
+  tests. **Phase 3 enforcement is complete.**
 
 ## Phase 4: promote only proven common structure
 
@@ -408,6 +411,19 @@ document-file edits. **Cleanup landed (`c6549dff2`):** consolidated the duplicat
 `acquire_doc_lock` into one shared `agent_doc_fs` primitive. Phase 2 is as uniform
 as it gets without making the controller the single document-file writer.
 
-**Phase 4 promotion review: DEFER** (recorded above) — two consumers share the
-shape but criterion 5 (net code reduction) isn't met yet; re-review after a third
-consumer.
+**Phase 3 enforcement: COMPLETE.** Compile-fail (lazily `presence.rs:16`),
+property laws (lazily `relay_spill.rs`), architecture-review prompt (AGENTS.md),
+and the architecture test (`d7ae61d4e` — command-plane surface purity).
+
+**The plan is complete.** Phase 1 (guidance) + Phase 2 (authority migration — all
+four closeout transitions, reads, owner claim/release on the command plane; the
+self-RPC guard + stale-socket fallback; the file-TOCTOU flock kept by design with
+a single shared primitive) + Phase 3 (enforcement) + Phase 4 (second consumer
+landed; promotion review concluded DEFER per criterion 5, re-review after a third
+consumer). `make check` green throughout.
+
+**Standing follow-ups (not blockers):** (a) Phase 4 promotion re-review once a
+third consumer adopts the shape; (b) if the controller ever becomes the single
+document-file writer, the file-TOCTOU flock can be dropped (no lock needed then);
+(c) remember to `make install` before `make check` after controller/command-plane
+code changes (the controller runs the installed binary).

@@ -74,5 +74,21 @@ Phase A landed. `QueueCrdt` lives in `agent-doc-merge/src/queue_seqcrdt.rs` (reg
 **Committed + pushed to `main`** (`#crdtstructops`): submodule `agent-doc` `94c2676d3` + superproject `aa422afee`; plan file marks Phase A DONE.
 
 Next: Phase B — extend `IpcNodeOp` to cover all 6 sites' op types (most reduce to `strike(node_key)`; add `mark_done`).
-<!-- agent:boundary:958e202d -->
+
+### Re: Phases B–E — structural-ops pipeline landed — glm-5-2
+
+All five phases of `plan-crdt-structural-ops.md` are committed to `main` (`#crdtstructops`). Each landed independently with `make install && make check` green.
+
+**Phase B — Vocabulary (DONE).** `IpcNodeOp` extended with `NodeOpKind` (`Consume`/`MarkDone`/`Strike`) + factories (`mark_done`, `strike`) + `node_key`/`kind`/`is_tombstone` + canonical op labels. Site mapping fns (`free_text_strike_node_ops`, `noise_prune_node_ops`, `id_backed_strike_node_ops`, `mark_done_node_ops_for_done_ids`) wire each site's keys to op sequences. Key resolution: all 6 sites' node-addressable mutations are strike-through/keep (`mark_done` effect); the noise multiline/freeform excise is the only true removal and is not node-addressable.
+
+**Phase C — Editor handler (DONE).** `EditorIntent::ApplyStructuralOp` ("apply_structural_op") in `agent-doc-ipc-protocol`, mirrored in JetBrains (`PatchWatcher.kt`) and VS Code (`editorIntent.ts`/`extension.ts`). Editors ride the EXISTING node-patch apply path — the binary sends only `node_patches`, `applyPatch`/`applyNodePatches` applies them via `agent_doc_apply_node_patches`, reusing the `patch_id`-keyed receipt. Bridge: `ipc_node_ops_to_node_patches` (consume/mark_done→`Strike`, strike→`Remove`) in `agent-doc-queue`.
+
+**Phase D — Migrate sites (PARTIAL 2/6).** `QueueConsumeWriteEffects::converge_structural_ops` trait method (default impl projects ops via `apply_structural_ops_to_content` → delegates to existing `converge_document_or_disk`, which owns detached file-write + editor-attached relay). Sites 4 (orphan strike) + 5 (ack) migrated off the flock — pure strike-through, byte-identical detached results. Sites 1/2/3/6 keep full-text: they carry semantics a bare node-key strike doesn't capture (site 2's `#qstrikenote` annotation + response-materialization gate; site 3's non-addressable excise; site 6's whole-body `render` normalization). Migrating them needs `IpcNodeOp`/`MutationNodePatch` to carry annotation/excise/render payloads.
+
+**Phase E — Detached fallback (DONE).** Detached renderer is `apply_structural_ops_to_content` (single writer, no flock for migrated sites). Controller-side `QueueCrdt::apply_ops(&[QueueOp])` + `QueueOp`/`QueueOpKind` — the CRDT replica is the convergence authority, not a kernel lock.
+
+**Verification:** 20+ new tests across crates (convergence laws, vocabulary classification, op→patch mapping, detached apply, controller-authority apply_ops). TLA+ `ResponseCheckpoint` model unchanged and green. The file-TOCTOU `flock` is retired for 2/6 sites; the remaining 4 are the follow-up.
+
+**Submodule commits:** `94c2676d3` (A) → `1ab61b836` (B) → `868f33298` (C) → `490b2f2b7` (D) → `c18a928b1` (E).
+<!-- agent:boundary:9a65976a -->
 <!-- /agent:exchange -->

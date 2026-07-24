@@ -236,18 +236,19 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
 
 ### Remaining todos (Phase 2)
 
-1. **Wire the live `CommandTransport` over the controller socket** (cross-cutting;
-   also unlocks `supervisor_recycle` + editor routes, which are foundation-only
-   today). lazily API: `CommandTransport` trait `lazily-rs/src/command.rs:523`,
-   `CommandMessage` `:217`, `CommandRpcClient` `:548`. Controller serve loop:
-   `serve_client` `rpc.rs:8304`, `handle_request_for_client` `:8344`. Client transport
-   today: `agent_doc_state_wire::send_ndjson_request_to_actor`. Frame
-   `CommandSubmit`/receipts over that socket, dispatch by `namespace`/`name` to
-   `service_closeout_advance`, emit the `CausalReceipt`.
+1. **DONE — `91e8b5715`** Wire the live `CommandTransport` over the controller
+   socket. Server: a `command_plane_submit` controller-request arm routes a lazily
+   `CommandSubmit` (riding `diagnostic_payload`) by `(namespace, name)` to
+   `service_closeout_advance`; unknown names → terminal `rejected` receipt; foreign
+   namespaces refused; `#af88` stale-binary guard reused. Client:
+   `ControllerCommandTransport: lazily::CommandTransport` over the one-line socket
+   + `submit_closeout_advance_command`. `#[allow(dead_code)]` dropped; clippy
+   `--all-targets` clean; nextest 219 passed (3 new dispatch tests). Pushed to `main`.
 2. **Migrate the `mark_*` clients to submit `closeout_advance` commands** (they
    currently use the local `load→decide→save→append` path; the `decide_*` + builders
    are already shared). Callers of `load_with_closeout_projection` span ~45 files
-   (run: `rg -n 'load_with_closeout_projection'` in agent-doc).
+   (run: `rg -n 'load_with_closeout_projection'` in agent-doc). Entry point now
+   exists: `submit_closeout_advance_command` (`command_plane.rs`).
 3. **Migrate `closeout_owner_claim`/`release` onto the command plane** — add
    `build_closeout_owner_claim_submit` + `service_closeout_owner_claim` paralleling
    `closeout_advance`; the existing bespoke handlers are
@@ -271,7 +272,11 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
 
 ### Resume hint
 
-The command-plane closeout foundation is complete and tested in-process. The next
-concrete step is todo (1): implement a `CommandTransport` over the controller
-socket so `service_closeout_advance` is reachable from a client, then (2) point
-`mark_*` at it. Everything committed; `cargo check` is green on clean `main`.
+Todo (1) is done: the command-plane authority is reachable from a client over
+the live socket. The next concrete step is todo (2): point `mark_*` at
+`submit_closeout_advance_command` (in `cycle-state-io` callers / the closeout
+hot path — the `mark_*` funcs themselves are in `agent-doc-cycle-state-io`, which
+is below `controller-io`, so the migration likely lands at the caller layer that
+already depends on the controller). Then (3) owner claim/release, (4) read-only
+inspection chokepoint, (5) drop the per-consume `flock`. Everything committed;
+clippy clean + nextest green on `main`.

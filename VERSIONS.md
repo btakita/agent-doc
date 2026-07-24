@@ -6,6 +6,14 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.25
+
+_JetBrains plugin 0.2.292; VS Code extension 0.2.56._
+
+- **Closeout ownership and mutation capture now stay on the live Lazily actor path (`#lazily-hot-path`).** Foreground finalize, retained recovery, and repair use typed actor transitions for claim/heartbeat/release instead of independently arbitrating through SQLite and `flock`; the transactional store remains the actor-emitted restart projection, and captured tracked-work mutations replay from the same durable response intent.
+- **Binary installation and MCP upgrades are monotonic.** An older checkout cannot overwrite a newer installed `agent-doc` unless the operator explicitly sets `AGENT_DOC_ALLOW_DOWNGRADE=1`. A long-lived MCP server detects a replaced executable by inode and `execve`s the installed binary while replaying the in-flight stateful request over the same stdio transport, so upgrades no longer strand a live session on stale closeout logic.
+- **Strict closeout canonicalizes harmless response-heading drift before capture.** A descriptive leading heading such as `### Plan:` becomes a canonical `### Re:` heading, and body-only prose receives a small response heading; valid headings remain byte-stable while empty or non-exchange patchbacks still fail the existing structural guards.
+
 ## 0.35.24
 
 _JetBrains plugin 0.2.292; VS Code extension 0.2.56._

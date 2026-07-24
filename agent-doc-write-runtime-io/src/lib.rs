@@ -734,6 +734,18 @@ fn read_response_input() -> Result<String> {
     }
 }
 
+fn read_response_input_for_closeout(strict_closeout: bool) -> Result<String> {
+    let response = read_response_input()?;
+    if !strict_closeout {
+        return Ok(response);
+    }
+    Ok(
+        agent_doc_template::response_materialization::canonicalize_strict_closeout_response_heading(
+            &response,
+        ),
+    )
+}
+
 fn log_resolved_backlog_prompt_cleanup(file: &Path, removed_total: usize) {
     agent_doc_ops_log_io::log_op(
         file,
@@ -858,7 +870,7 @@ fn guard_no_baseline_replay_after_committed_cycle_inner(
 
     // Read the incoming response now and re-stash it so the downstream write path
     // (which calls `read_response_input` once for the resolved mode) still sees it.
-    let response = read_response_input()?;
+    let response = read_response_input_for_closeout(commit_mode == CommitMode::Required)?;
     RESPONSE_STDIN_OVERRIDE.with(|slot| {
         slot.borrow_mut().replace(response.clone());
     });
@@ -1468,7 +1480,7 @@ fn run_command_inner(
     ) {
         Ok(mode) => mode,
         Err(err) if options.is_ipc && error_requests_retry_without_disk(&err) => {
-            let response = read_response_input()?;
+            let response = read_response_input_for_closeout(commit_mode == CommitMode::Required)?;
             let retention_baseline = read_document_baseline(file).unwrap_or(None);
             if !response.trim().is_empty()
                 && let Err(retain_err) = retain_ipc_patch_for_editor_authority_retry(

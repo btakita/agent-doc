@@ -168,6 +168,73 @@ pub fn response_text_has_heading(text: &str) -> bool {
     })
 }
 
+/// Canonicalize a semantically complete strict-closeout response before it is
+/// captured. Agents often use a descriptive leading heading such as
+/// `### Plan:`; requiring a retry solely to rename that heading creates a new
+/// closeout attempt without adding response information.
+///
+/// Existing `Re:` headings are preserved byte-for-byte. A leading Markdown
+/// heading in `patch:exchange` (or unmatched response text) is relabeled, while
+/// body-only prose receives a small canonical heading. Empty response shells and
+/// non-exchange patchbacks are left untouched so the ordinary strict validators
+/// still reject them.
+pub fn canonicalize_strict_closeout_response_heading(response: &str) -> String {
+    if response.trim().is_empty() || response_text_has_heading(response) {
+        return response.to_string();
+    }
+
+    let exchange_open = "<!-- patch:exchange";
+    let any_patch_open = "<!-- patch:";
+    if let Some(open_start) = response.find(exchange_open) {
+        let Some(marker_end_rel) = response[open_start..].find("-->") else {
+            return response.to_string();
+        };
+        let body_start = open_start + marker_end_rel + 3;
+        let body_end = response[body_start..]
+            .find("<!-- /patch:exchange -->")
+            .map(|offset| body_start + offset)
+            .unwrap_or(response.len());
+        return canonicalize_response_region(response, body_start, body_end);
+    }
+    if response.contains(any_patch_open) {
+        return response.to_string();
+    }
+    canonicalize_response_region(response, 0, response.len())
+}
+
+fn canonicalize_response_region(response: &str, start: usize, end: usize) -> String {
+    let region = &response[start..end];
+    let Some(non_whitespace) = region.find(|character: char| !character.is_whitespace()) else {
+        return response.to_string();
+    };
+    let content_start = start + non_whitespace;
+    let line_end = response[content_start..end]
+        .find('\n')
+        .map(|offset| content_start + offset)
+        .unwrap_or(end);
+    let first_line = response[content_start..line_end].trim_end_matches('\r');
+
+    let replacement = markdown_heading_title(first_line)
+        .map(|title| format!("### Re: {title}"))
+        .unwrap_or_else(|| format!("### Re: Response\n\n{first_line}"));
+
+    let mut canonical = String::with_capacity(response.len() + replacement.len());
+    canonical.push_str(&response[..content_start]);
+    canonical.push_str(&replacement);
+    canonical.push_str(&response[line_end..]);
+    canonical
+}
+
+fn markdown_heading_title(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let hashes = trimmed.bytes().take_while(|byte| *byte == b'#').count();
+    if !(1..=6).contains(&hashes) || trimmed.as_bytes().get(hashes) != Some(&b' ') {
+        return None;
+    }
+    let title = trimmed[hashes + 1..].trim();
+    (!title.is_empty()).then_some(title)
+}
+
 /// Extract `### Re:` response headings from a slice of template patch blocks.
 ///
 /// Used by late-fallback gates to decide whether an "already committed"
@@ -430,6 +497,49 @@ mod tests {
     fn strict_template_response_heading_accepts_unmatched_heading() {
         ensure_strict_template_response_heading(&[], "### Re: queue head - gpt-5\n\nAnswered.\n")
             .unwrap();
+    }
+
+    #[test]
+    fn strict_closeout_canonicalizes_descriptive_exchange_heading() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Plan: durable effects\n\n",
+            "Use an effect sink.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let canonical = canonicalize_strict_closeout_response_heading(response);
+
+        assert!(canonical.contains("### Re: Plan: durable effects"));
+        assert!(!canonical.contains("### Plan:"));
+        assert!(canonical.contains("Use an effect sink."));
+    }
+
+    #[test]
+    fn strict_closeout_adds_heading_to_body_without_losing_prose() {
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "Implemented and verified.\n",
+            "<!-- /patch:exchange -->\n",
+        );
+
+        let canonical = canonicalize_strict_closeout_response_heading(response);
+
+        assert!(canonical.contains("### Re: Response\n\nImplemented and verified."));
+    }
+
+    #[test]
+    fn strict_closeout_preserves_valid_and_empty_responses() {
+        let valid = "<!-- patch:exchange -->\n### Re: Done\n\nBody\n<!-- /patch:exchange -->\n";
+        let empty = "<!-- patch:exchange -->\n\n<!-- /patch:exchange -->\n";
+        let wrong_patch = "<!-- patch:status -->\n### Plan: status\n<!-- /patch:status -->\n";
+
+        assert_eq!(canonicalize_strict_closeout_response_heading(valid), valid);
+        assert_eq!(canonicalize_strict_closeout_response_heading(empty), empty);
+        assert_eq!(
+            canonicalize_strict_closeout_response_heading(wrong_patch),
+            wrong_patch
+        );
     }
 
     #[test]

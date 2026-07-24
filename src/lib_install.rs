@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static BINARY_INSTALL_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -97,7 +98,7 @@ pub fn default_binary_target_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".cargo").join("bin"))
 }
 
-fn platform_binary_name() -> &'static str {
+pub(crate) fn platform_binary_name() -> &'static str {
     #[cfg(windows)]
     {
         "agent-doc.exe"
@@ -106,6 +107,75 @@ fn platform_binary_name() -> &'static str {
     {
         "agent-doc"
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ReleaseVersion {
+    major: u64,
+    minor: u64,
+    patch: u64,
+}
+
+impl std::fmt::Display for ReleaseVersion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
+
+fn parse_release_version(output: &str) -> Option<ReleaseVersion> {
+    output.split_whitespace().find_map(|token| {
+        let core = token
+            .trim_start_matches('v')
+            .split(['-', '+'])
+            .next()
+            .unwrap_or(token);
+        let mut parts = core.split('.');
+        let version = ReleaseVersion {
+            major: parts.next()?.parse().ok()?,
+            minor: parts.next()?.parse().ok()?,
+            patch: parts.next()?.parse().ok()?,
+        };
+        parts.next().is_none().then_some(version)
+    })
+}
+
+fn installed_binary_version(destination: &Path) -> Option<ReleaseVersion> {
+    if !destination.is_file() {
+        return None;
+    }
+    let output = Command::new(destination).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_release_version(&String::from_utf8_lossy(&output.stdout))
+        .or_else(|| parse_release_version(&String::from_utf8_lossy(&output.stderr)))
+}
+
+fn allow_binary_downgrade() -> bool {
+    std::env::var("AGENT_DOC_ALLOW_DOWNGRADE")
+        .map(|value| value.trim() == "1")
+        .unwrap_or(false)
+}
+
+fn ensure_binary_install_is_monotonic(source: &Path, destination: &Path) -> Result<()> {
+    if allow_binary_downgrade() {
+        return Ok(());
+    }
+    let Some(installed) = installed_binary_version(destination) else {
+        return Ok(());
+    };
+    let candidate = installed_binary_version(source)
+        .or_else(|| parse_release_version(env!("CARGO_PKG_VERSION")))
+        .context("agent-doc package version is not a release triplet")?;
+    if candidate >= installed {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "refusing to downgrade installed agent-doc from {installed} to {candidate}: \
+         an older binary can replay stale closeout logic against live Lazily/editor state. \
+         Build from the current checkout, or set AGENT_DOC_ALLOW_DOWNGRADE=1 for an \
+         intentional compatibility test"
+    );
 }
 
 /// Install an already-built agent-doc executable with a same-directory atomic
@@ -122,6 +192,7 @@ pub fn install_binary_atomic(source: &Path, target_dir: &Path) -> Result<PathBuf
     std::fs::create_dir_all(target_dir)
         .with_context(|| format!("create binary install directory {}", target_dir.display()))?;
     let destination = target_dir.join(platform_binary_name());
+    ensure_binary_install_is_monotonic(source, &destination)?;
     let sequence = BINARY_INSTALL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let temporary = target_dir.join(format!(
         ".{}.install-{}-{sequence}",
@@ -418,6 +489,38 @@ mod tests {
 
         assert!(error.to_string().contains("read built binary metadata"));
         assert_eq!(fs::read(destination).unwrap(), b"old complete binary");
+    }
+
+    #[test]
+    fn release_version_parser_accepts_cli_output_and_suffixes() {
+        assert_eq!(
+            parse_release_version("agent-doc 0.35.24\n"),
+            Some(ReleaseVersion {
+                major: 0,
+                minor: 35,
+                patch: 24,
+            })
+        );
+        assert_eq!(
+            parse_release_version("v1.2.3-rc.1"),
+            Some(ReleaseVersion {
+                major: 1,
+                minor: 2,
+                patch: 3,
+            })
+        );
+        assert_eq!(parse_release_version("agent-doc development"), None);
+    }
+
+    #[test]
+    fn release_version_order_rejects_only_downgrades() {
+        let older = parse_release_version("0.35.9").unwrap();
+        let current = parse_release_version("0.35.24").unwrap();
+        let newer = parse_release_version("0.36.0").unwrap();
+
+        assert!(older < current);
+        assert!(current >= current);
+        assert!(newer > current);
     }
 
     #[test]

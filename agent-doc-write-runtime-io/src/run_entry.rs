@@ -308,7 +308,7 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     }
     verify_pane_ownership(file)?;
 
-    let response = read_response_input()?;
+    let response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
         if recover_empty_response_if_configured(file, &flags)? {
@@ -516,7 +516,7 @@ pub(crate) fn run_template(
     verify_pane_ownership(file)?;
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
 
-    let mut response = read_response_input()?;
+    let mut response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
         if recover_empty_response_if_configured(file, &flags)? {
@@ -911,7 +911,7 @@ pub(crate) fn run_stream(
     // executing inside a tmux pane that owns a different document.
     agent_doc_sync_io::sync::log_cross_document_execution_context(file, "stream");
 
-    let mut response = read_response_input()?;
+    let mut response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
         if recover_empty_response_if_configured(file, &flags)? {
@@ -1738,7 +1738,7 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
     if !file.exists() {
         anyhow::bail!("file not found: {}", file.display());
     }
-    let mut response = read_response_input()?;
+    let mut response = read_response_input_for_closeout(flags.strict_closeout)?;
 
     if response.trim().is_empty() {
         if recover_empty_response_if_configured(file, &flags)? {

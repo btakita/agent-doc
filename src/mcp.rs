@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
+const MCP_REPLAY_REQUEST_ENV: &str = "AGENT_DOC_MCP_REPLAY_REQUEST";
+const MCP_REPLAY_REQUEST_MAX_BYTES: usize = 96 * 1024;
 
 pub fn serve(project_root: Option<&Path>) -> Result<()> {
     if let Some(root) = project_root {
@@ -14,17 +16,94 @@ pub fn serve(project_root: Option<&Path>) -> Result<()> {
 
     let stdin = io::stdin();
     let mut stdout = io::stdout();
+    if let Some(line) = std::env::var_os(MCP_REPLAY_REQUEST_ENV) {
+        // SAFETY: MCP serve is still single-threaded here; no worker has been
+        // started that could concurrently inspect or mutate the environment.
+        unsafe { std::env::remove_var(MCP_REPLAY_REQUEST_ENV) };
+        serve_line(&line.to_string_lossy(), &mut stdout)?;
+    }
     for line in stdin.lock().lines() {
         let line = line.context("failed to read MCP stdin")?;
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(response) = handle_message(&line) {
-            writeln!(stdout, "{}", response).context("failed to write MCP response")?;
-            stdout.flush().context("failed to flush MCP response")?;
-        }
+        serve_line(&line, &mut stdout)?;
     }
     Ok(())
+}
+
+fn serve_line(line: &str, stdout: &mut impl Write) -> Result<()> {
+    maybe_reexec_fresh_mcp_for_request(line);
+    if let Some(response) = handle_message(line) {
+        writeln!(stdout, "{}", response).context("failed to write MCP response")?;
+        stdout.flush().context("failed to flush MCP response")?;
+    }
+    Ok(())
+}
+
+fn maybe_reexec_fresh_mcp_for_request(line: &str) {
+    if line.len() > MCP_REPLAY_REQUEST_MAX_BYTES || !message_calls_mutating_tool(line) {
+        return;
+    }
+    let Ok(true) = mcp_binary_is_stale() else {
+        return;
+    };
+
+    #[cfg(all(unix, not(test)))]
+    {
+        use std::os::unix::process::CommandExt;
+
+        let current_exe = std::env::current_exe().ok();
+        let current_exe_launchable = current_exe
+            .as_ref()
+            .and_then(|path| std::fs::metadata(path).ok())
+            .map(|metadata| metadata.is_file())
+            .unwrap_or(false);
+        let resolved_fresh = crate::lib_install::default_binary_target_dir()
+            .ok()
+            .map(|dir| dir.join(crate::lib_install::platform_binary_name()));
+        let candidates = agent_doc_supervisor::reexec::build_reexec_candidates(
+            resolved_fresh,
+            current_exe,
+            current_exe_launchable,
+        );
+        let args: Vec<_> = std::env::args_os().skip(1).collect();
+
+        for (candidate, note) in candidates {
+            let error = Command::new(&candidate)
+                .args(&args)
+                .env(MCP_REPLAY_REQUEST_ENV, line)
+                .exec();
+            eprintln!(
+                "[mcp] fresh-binary exec handoff failed candidate={} note={} error={}",
+                candidate.display(),
+                note,
+                error
+            );
+        }
+    }
+}
+
+fn message_calls_mutating_tool(line: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    if value.get("method").and_then(Value::as_str) != Some("tools/call") {
+        return false;
+    }
+    matches!(
+        value
+            .get("params")
+            .and_then(Value::as_object)
+            .and_then(|params| params.get("name"))
+            .and_then(Value::as_str),
+        Some(
+            "agent_doc_admit"
+                | "agent_doc_preflight"
+                | "agent_doc_finalize"
+                | "agent_doc_session_check"
+        )
+    )
 }
 
 pub(crate) fn handle_message(line: &str) -> Option<Value> {
@@ -470,6 +549,7 @@ fn tool_plan(args: &Map<String, Value>) -> Result<Value> {
 }
 
 fn tool_session_check(args: &Map<String, Value>) -> Result<Value> {
+    ensure_mcp_binary_fresh_for_mutation()?;
     let file = required_path_arg(args, "file")?;
     let report = agent_doc_session_check_io::inspect_with_warnings(
         &file,
@@ -620,30 +700,65 @@ fn tool_finalize(args: &Map<String, Value>) -> Result<Value> {
 }
 
 fn ensure_mcp_binary_fresh_for_mutation() -> Result<()> {
-    if mcp_binary_stale_for_test() {
+    if mcp_binary_is_stale()? {
         bail!(stale_mcp_binary_message());
     }
+    Ok(())
+}
 
-    let exe = std::env::current_exe().context("failed to resolve running agent-doc MCP binary")?;
-    let launchable = std::fs::metadata(&exe)
-        .map(|metadata| metadata.is_file())
-        .unwrap_or(false);
-    if launchable {
-        return Ok(());
+fn mcp_binary_is_stale() -> Result<bool> {
+    if mcp_binary_stale_for_test() {
+        return Ok(true);
     }
 
-    bail!(
-        "{} running_exe={}",
-        stale_mcp_binary_message(),
-        exe.display()
-    );
+    let current =
+        std::env::current_exe().context("failed to resolve running agent-doc MCP binary")?;
+    let current_launchable = std::fs::metadata(&current)
+        .map(|metadata| metadata.is_file())
+        .unwrap_or(false);
+    if !current_launchable {
+        return Ok(true);
+    }
+
+    let Ok(target_dir) = crate::lib_install::default_binary_target_dir() else {
+        return Ok(false);
+    };
+    let installed = target_dir.join(crate::lib_install::platform_binary_name());
+    let same_install_path = current == installed
+        || matches!(
+            (current.canonicalize(), installed.canonicalize()),
+            (Ok(current), Ok(installed)) if current == installed
+        );
+    if !same_install_path {
+        return Ok(false);
+    }
+
+    Ok(binary_identity_is_stale(
+        agent_doc_fs::running_exe_inode_for_pid(std::process::id()),
+        agent_doc_fs::inode_of_path(&installed),
+        current_launchable,
+    ))
+}
+
+fn binary_identity_is_stale(
+    running_inode: Option<u64>,
+    installed_inode: Option<u64>,
+    current_launchable: bool,
+) -> bool {
+    if !current_launchable {
+        return true;
+    }
+    matches!(
+        (running_inode, installed_inode),
+        (Some(running), Some(installed)) if running != installed
+    )
 }
 
 fn stale_mcp_binary_message() -> &'static str {
     "stale agent-doc MCP server: the running MCP process maps an agent-doc binary \
-     that is no longer launchable, usually because `make install` or `cargo install` \
-     replaced it. Restart/recycle the MCP server, then retry the mutation; refusing \
-     to run stale admit/preflight/finalize logic against a live document."
+     superseded by `make install` or `cargo install`. Automatic exec handoff could \
+     not replay this request; retry it, or restart/recycle the MCP server. Refusing \
+     to run stale admit/preflight/finalize/session-check logic against a live document."
 }
 
 #[cfg(test)]
@@ -1015,6 +1130,47 @@ mod tests {
             agent_doc_cycle_state_io::load(&file).unwrap().is_none(),
             "stale MCP mutation guard must fire before opening a response cycle"
         );
+    }
+
+    #[test]
+    fn stale_handoff_classifies_every_stateful_session_tool() {
+        for name in [
+            "agent_doc_admit",
+            "agent_doc_preflight",
+            "agent_doc_finalize",
+            "agent_doc_session_check",
+        ] {
+            let line = json!({
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": { "name": name, "arguments": {} }
+            })
+            .to_string();
+            assert!(message_calls_mutating_tool(&line), "{name}");
+        }
+        for name in ["agent_doc_read", "agent_doc_plan"] {
+            let line = json!({
+                "jsonrpc": "2.0",
+                "id": 8,
+                "method": "tools/call",
+                "params": { "name": name, "arguments": {} }
+            })
+            .to_string();
+            assert!(!message_calls_mutating_tool(&line), "{name}");
+        }
+        assert!(!message_calls_mutating_tool("not json"));
+    }
+
+    #[test]
+    fn inode_identity_detects_replaced_running_binary() {
+        assert!(binary_identity_is_stale(Some(10), Some(11), true));
+        assert!(!binary_identity_is_stale(Some(10), Some(10), true));
+        assert!(
+            !binary_identity_is_stale(None, Some(11), true),
+            "platforms without a running-inode probe stay fail-open"
+        );
+        assert!(binary_identity_is_stale(Some(10), Some(10), false));
     }
 
     #[test]

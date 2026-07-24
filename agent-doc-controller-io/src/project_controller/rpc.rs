@@ -8587,6 +8587,12 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "document_state_projection" => {
+            // Read-only live-projection query (`#lazily-hot-path`): a client
+            // inspects the authoritative in-memory projection instead of
+            // replaying cold `state.db`. No fact is emitted.
+            controller_envelope(handle_document_state_projection(runtime.as_ref(), request))
+        }
         "closeout_owner_claim" => controller_envelope(handle_closeout_owner_claim(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -9820,6 +9826,20 @@ pub(crate) fn handle_state_event_append(
     let event: agent_doc_state_backbone::StateEvent =
         serde_json::from_str(&payload_json).context("parse state actor append payload")?;
     append_apply_state_event(bootstrap, runtime, event)
+}
+
+/// Read-only live-projection query (`#lazily-hot-path`): return the controller's
+/// authoritative in-memory [`DocumentStateProjection`] for the request file, so a
+/// client inspects live state instead of replaying cold `state.db`. Counterpart
+/// to `agent_doc_cycle_state_io::load_document_projection`, which prefers this
+/// verb when a controller is live and falls back to `state.db` otherwise.
+pub(crate) fn handle_document_state_projection(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
+    let file = request_file(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    runtime.document_state_projection(&document_hash)
 }
 
 /// Shared core of closeout owner claim: decide the CAS from the live

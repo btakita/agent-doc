@@ -657,10 +657,52 @@ fn load_document_projection(
     file: &Path,
 ) -> Result<Option<agent_doc_state_backbone::DocumentStateProjection>> {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    // `#lazily-hot-path`: prefer the controller's live in-memory projection (the
+    // authority) when a controller is live; replay cold `state.db` only for the
+    // actorless/bootstrap boundary. Read-only — no fact is emitted.
+    let controller_socket = agent_doc_controller::paths::socket_path(&project_root);
+    if controller_socket.exists() {
+        let request = serde_json::json!({
+            "command": "document_state_projection",
+            "file": canonical,
+        });
+        match agent_doc_state_wire::send_ndjson_request_to_actor(
+            &controller_socket,
+            &request,
+            std::time::Duration::from_secs(5),
+        ) {
+            Ok(raw) => {
+                #[derive(serde::Deserialize)]
+                #[allow(dead_code)]
+                struct ProjectionEnvelope {
+                    ok: bool,
+                    data: Option<agent_doc_state_backbone::DocumentStateProjection>,
+                    error: Option<String>,
+                }
+                let envelope: ProjectionEnvelope = serde_json::from_str(&raw)
+                    .context("decode document_state_projection response")?;
+                if !envelope.ok {
+                    anyhow::bail!(
+                        "document_state_projection rejected by controller: {}",
+                        envelope.error.as_deref().unwrap_or("unknown error")
+                    );
+                }
+                return Ok(envelope.data);
+            }
+            Err(agent_doc_state_wire::ActorRequestError::Connect(_))
+                if !controller_socket.exists() => {}
+            Err(err) => {
+                return Err(err)
+                    .context("query live document_state_projection through the Lazily controller");
+            }
+        }
+    }
+
+    // Actorless fallback: replay cold `state.db`.
     let Some(document_hash) = cycle_document_hash(file)? else {
         return Ok(None);
     };
-    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
     if !agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
         return Ok(None);
     }

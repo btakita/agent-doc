@@ -74,6 +74,22 @@ impl CommitObservation {
     }
 }
 
+/// Map a legacy free-text commit `event` label to the typed
+/// [`CommitObservation`] the command plane carries. The canonical labels map
+/// exactly; a non-canonical diagnostic label (e.g. `repair_applied`,
+/// `recover_apply`) canonicalizes to [`CommitObservation::CommitSuccess`] — the
+/// representative "committed with content changes" outcome — because the command
+/// plane carries typed events only (non-canonical labels do not belong on it).
+/// The actorless fallback still preserves the caller's free-text label.
+pub fn commit_observation_from_event_label(event: &str) -> CommitObservation {
+    match event {
+        "commit" => CommitObservation::Commit,
+        "commit_already_current" => CommitObservation::CommitAlreadyCurrent,
+        // "commit_success" and any non-canonical diagnostic label.
+        _ => CommitObservation::CommitSuccess,
+    }
+}
+
 /// Payload body for `agent-doc.closeout_advance.v1`. A client asks the controller
 /// authority to advance a document's closeout phase machine; the controller
 /// decides from its live Lazily projection, emits the phase fact(s) as the

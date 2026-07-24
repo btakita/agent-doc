@@ -16253,6 +16253,65 @@ mod tests {
     }
 
     #[test]
+    fn mark_committed_and_abandoned_route_through_command_plane_when_controller_live() {
+        // The remaining closeout transitions route through the command plane:
+        // write_applied → committed (the caller's free-text label canonicalizes
+        // to the typed CommitObservation on the wire), and abandoned (the
+        // descriptive reason rides the `reason` field; the authority stamps it
+        // back as last_event).
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        std::fs::create_dir_all(project_root.join("tasks")).unwrap();
+        let doc = project_root.join("tasks/live.md");
+        std::fs::write(&doc, "body\n").unwrap();
+
+        let server_root = project_root.clone();
+        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
+        wait_for_test_controller(&project_root);
+
+        agent_doc_cycle_state_io::mark_write_applied(&doc, "write_applied", None, Some("body\n"))
+            .expect("write_applied through the command plane");
+        let committed = agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "commit_success",
+            None,
+            Some("body\n"),
+        )
+        .expect("mark_committed through the command plane");
+        assert_eq!(committed.phase, agent_doc_turn::CyclePhase::Committed);
+        // The command plane carries the typed CommitObservation, so the canonical
+        // label is stamped back as last_event.
+        assert_eq!(committed.last_event, "commit_success");
+
+        // A non-canonical commit label canonicalizes to commit_success on the wire.
+        let refreshed =
+            agent_doc_cycle_state_io::mark_committed(&doc, "repair_applied", None, Some("body\n"))
+                .expect("mark_committed (non-canonical) through the command plane");
+        assert_eq!(refreshed.phase, agent_doc_turn::CyclePhase::Committed);
+        assert_eq!(
+            refreshed.last_event, "commit_success",
+            "non-canonical commit labels canonicalize on the command plane"
+        );
+
+        // Abandon on a fresh open cycle: the descriptive reason round-trips as last_event.
+        let doc2 = project_root.join("tasks/abandon.md");
+        std::fs::write(&doc2, "body\n").unwrap();
+        let abandoned = agent_doc_cycle_state_io::mark_abandoned(
+            &doc2,
+            "stalled_preflight",
+            None,
+            Some("body\n"),
+        )
+        .expect("mark_abandoned through the command plane");
+        assert_eq!(abandoned.phase, agent_doc_turn::CyclePhase::Abandoned);
+        assert_eq!(abandoned.last_event, "stalled_preflight");
+
+        let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        handle.join().unwrap();
+    }
+
+    #[test]
     fn detached_controller_exits_when_temp_project_root_is_removed() {
         let dir = tempfile::TempDir::new().unwrap();
         let project_root = dir.path().to_path_buf();

@@ -1339,6 +1339,25 @@ pub fn mark_response_captured(
     response_sha256: &str,
     cycle_id_hint: Option<&str>,
 ) -> Result<CycleState> {
+    // `#lazily-hot-path`: submit over the command plane when a controller is
+    // live (decide from the live projection); fall back to the local path for
+    // the actorless/bootstrap boundary.
+    if submit_closeout_advance_via_socket(
+        file,
+        command_plane::CloseoutPhaseEvent::ResponseCaptured,
+        None,
+        snapshot_content,
+        file_content,
+        Some(response_sha256),
+        cycle_id_hint,
+    )? {
+        let state = load(file)?.context(
+            "closeout_advance ResponseCaptured applied through the command plane but no cycle \
+             state was read back",
+        )?;
+        append_phase_event_to_session_log(file, &state, file_content);
+        return Ok(state);
+    }
     let (state, transitioned) = decide_response_captured(
         load(file)?,
         file,
@@ -1981,6 +2000,27 @@ pub fn mark_committed(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
+    // `#lazily-hot-path`: submit over the command plane when a controller is
+    // live. The command plane carries a typed CommitObservation; the caller's
+    // free-text `event` is canonicalized (non-canonical diagnostic labels map to
+    // CommitSuccess). The actorless fallback below preserves the free-text label.
+    let observation = command_plane::commit_observation_from_event_label(event);
+    if submit_closeout_advance_via_socket(
+        file,
+        command_plane::CloseoutPhaseEvent::Committed(observation),
+        None,
+        snapshot_content,
+        file_content,
+        None,
+        None,
+    )? {
+        let state = load(file)?.context(
+            "closeout_advance Committed applied through the command plane but no cycle state was \
+             read back",
+        )?;
+        append_phase_event_to_session_log(file, &state, file_content);
+        return Ok(state);
+    }
     let decision = decide_committed(load(file)?, file, event, snapshot_content, file_content);
     if decision.checkpoint {
         save(file, &decision.state)?;
@@ -2046,6 +2086,26 @@ pub fn mark_abandoned(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
+    // `#lazily-hot-path`: submit over the command plane when a controller is
+    // live. The abandon `event` is descriptive, so it rides the command-plane
+    // `reason` field (the typed event is `Abandoned`); the authority stamps it
+    // back as the cycle's `last_event`, matching the local path.
+    if submit_closeout_advance_via_socket(
+        file,
+        command_plane::CloseoutPhaseEvent::Abandoned,
+        Some(event),
+        snapshot_content,
+        file_content,
+        None,
+        None,
+    )? {
+        let state = load(file)?.context(
+            "closeout_advance Abandoned applied through the command plane but no cycle state was \
+             read back",
+        )?;
+        append_phase_event_to_session_log(file, &state, file_content);
+        return Ok(state);
+    }
     let decision = decide_abandoned(load(file)?, file, event, snapshot_content, file_content);
     if decision.checkpoint {
         save(file, &decision.state)?;

@@ -71,6 +71,35 @@ Interactive document sessions with AI agents.
 - **Oversized specs should split behind a stable index** — when a spec or instruction file grows past a clean single-purpose boundary, follow [runbooks/split-spec-files.md](runbooks/split-spec-files.md): keep the existing numbered entrypoint as an index, move normative detail into focused sibling files, update the top-level catalogs instead of growing another monolith, and keep that ownership rule aligned across managed Claude/Codex/OpenCode harness surfaces while leaving custom root instruction files opt-in unless they still match the generated baseline.
 - **FFI-first for editor integration (Shared Foundation pattern)** — when adding features that editors need (sync debounce, busy guards, IPC listeners, layout validation), implement in the FFI layer (`ffi.rs`) first, then call from editor plugins via JNA/FFI. Editor plugins should be thin event reporters — layout changed, file selected, etc. Business logic (debouncing, locking, socket listeners, idempotency checks) belongs in the shared FFI library, not duplicated across IntelliJ/VS Code plugins. **Ontology:** Both the FFI library and each editor plugin are **Systems** with their own **Perspectives**. Each exposes an **Interface** (C ABI, JNA bindings) — the defined boundary through which Systems communicate. The Shared Foundation pattern places shared logic at the broadest **Scope** (FFI library) so all consumer Systems access it through their Interfaces. **Test:** "Does this feature need to work in >1 editor?" → implement in FFI. Example: socket IPC listener lives in `ffi.rs` (`agent_doc_start_ipc_listener`), not in `PatchWatcher.kt`.
 
+## Durable effect sinks (`#lzdurablesink`)
+
+Durable storage is an **effect sink**, not a transition authority. This restates
+and sharpens `#lazily-hot-path` as the cross-family rule
+([`lazily-spec` § Durable Effect Sinks](https://github.com/lazily-hub/lazily-spec/blob/main/docs/durable-sinks.md);
+formal backstop `lazily-formal/LazilyFormal/DurableSink.lean`):
+
+- Live coordination — claims, heartbeats, phase changes, deduplication,
+  supersession, compare-and-swap — happens in Lazily state. A sink is **write-only
+  with respect to transition authority**. Loading and migration belong to a
+  separate startup hydrator, never the decision seam.
+- Persisting the **latest projection** = idempotent upsert of the settled epoch
+  from an `Effect` / `AsyncEffect` (a batch `A → B → C` persists only `C`).
+  Persisting **ordered history** (every accepted fact, lossless) = a
+  `TopicCell` / `Outbox` drain (append / replay-from-cursor / `ack_through`) — not
+  ordinary effects.
+- Success advances a monotone `durable_through(epoch)`; a sink failure stays in
+  live state as `pending` / `retrying` / `backpressured`. `Ephemeral`-plane values
+  must not enter a durable sink (reuse the `Durable` marker).
+
+**Architecture-review prompt (agent harness).** When a change combines a
+hot-path transition with a SQLite `SELECT`, storage compare-and-swap, or `flock`,
+ask — before implementing — whether the operation is really **cold hydration**
+(startup, before the runtime is live), **actorless bootstrap** (the compatibility
+boundary in `#lazily-hot-path`), or a genuine sink write routed through the live
+actor. A storage read/CAS/lock on the decision seam is the inversion this rule
+forbids; route the fact producer through the actor instead. This is a design
+review question, not a generic AST linter.
+
 ## Binary vs Agent Responsibility
 
 See [README.md](README.md) for the full responsibility table.

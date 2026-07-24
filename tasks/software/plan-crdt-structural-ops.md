@@ -107,15 +107,23 @@ applies the op to the file. No flock (one writer).
   `apply_structural_ops_to_content` in `agent-doc-queue` (maps ops → node patches
   → `apply_node_patches`; byte-identical to `consume_queue_nodes_by_key` for
   node-addressable strike-through since both call `consume_node`).
-- **Flock retired from ALL 6 sites.** The local `acquire_doc_lock` wrapper is
-  deleted; no `flock` remains in `agent-doc-queue-io` queue consume. Sites 4 + 5
-  (orphan strike, ack) route through `converge_structural_ops` (pure node-key
-  strike-through). Sites 1 (consume), 2 (free-text strike), 3 (noise prune), 6
-  (mark_completed) drop the flock and keep the full-text
-  `converge_document_or_disk`/`atomic_write` write — their mutations carry
-  semantics a bare node-key strike doesn't (annotation, non-addressable excise,
-  whole-body render), so the flock retirement comes from the detached
-  single-writer + editor-attached relay convergence rather than node-only ops.
+- **Flock retired from ALL 6 sites; 4/6 route through node-only structural ops.**
+  The local `acquire_doc_lock` wrapper is deleted; no `flock` remains in
+  `agent-doc-queue-io` queue consume. Node-only `converge_structural_ops` paths:
+  sites 4 + 5 (orphan strike, ack) — pure node-key strike-through; site 2
+  (free-text strike) — per-node `OP_REPLACE` ops derived from the
+  struck+annotated diff (`node_replace_ops_from_diff`, bullet-preserving), each
+  carrying the `#qstrikenote` annotation in the replaced span; site 6
+  (mark_completed) — `mark_done` ops when the done-id heads are AST-addressable
+  (non-AST/multiline and force-disk fall back to full-text render).
+  - **Sites 1 (consume) and 3 (noise prune) keep full-text** for fundamental
+    reasons: site 1 crosses into `exchange` (`embed_consumed_prompt_in_response`)
+    + frontmatter (drain), so it is not a queue-node-only mutation; site 3 has a
+    non-node-addressable multiline/freeform byte-range excise. Both still dropped
+    the flock (single-writer + relay convergence).
+  - Vocabulary extension: `IpcNodeOp` gained an optional `content` field +
+    `OP_REPLACE` (→ `MutationNodePatchOp::Replace`) so a node's mutation can
+    carry more than a bare strike (annotation).
   All 116 queue-io tests pass byte-identical; the shared
   `agent_doc_fs::acquire_doc_lock` primitive is retained for any remaining
   actorless boundary.
@@ -139,6 +147,20 @@ applies the op to the file. No flock (one writer).
   on unknown keys. Full detached cleanup for sites 1/2/3/6 tracks Phase D
   completion (they still hold the flock for their full-text computation).
 - `make install && make check` green.
+
+## SQLite off the hot path (`#lazily-hot-path`)
+
+A post-migration audit confirmed the closeout / queue-consume / converge / claims
+/ capture transition seams are sink-only + cold-hydration (the command plane is
+the authority). The one residual direct-SQLite read-modify-write on the run/queue
+hot path — the owner-pane wedge counter (`#recguard-wedge-escape` backstop that
+halts a proven dead-loop, `agent-doc-owner-pane-io`) — is now routed through the
+controller: `record`/`clear` send `record_owner_pane_wedge` /
+`clear_owner_pane_wedge` commands to the controller socket, which does the RMW
+server-side over its own `state.db`; the direct SQLite path survives only for the
+actorless/bootstrap boundary and transient-failure fallback (mirroring the
+durable-sink split). No client-side SQLite RMW remains on a run/queue decision
+seam.
 
 ## Scope / risk
 

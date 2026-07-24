@@ -1996,31 +1996,44 @@ fn append_phase_event_to_session_log(file: &Path, state: &CycleState, file_conte
         agent_doc_supervisor_io::startup_miss::append_session_log_event(file, session_id, &event);
 }
 
-fn save(file: &Path, state: &CycleState) -> Result<()> {
-    let Some(document_hash) = cycle_document_hash(file)? else {
-        return Ok(());
-    };
+/// Build the `turn_intent_checkpoint` fact purely from `(document_hash,
+/// checkpoint_sequence, state)`; `checkpoint_sequence` is the NEXT sequence
+/// (caller passes current+1). Pure: no I/O. Shared by [`save`] and the
+/// controller's in-process append+apply (`#lzdurablesink`), so the actor emits
+/// the identical idempotency-keyed checkpoint fact in either process.
+pub fn build_turn_intent_checkpoint_event(
+    document_hash: &str,
+    checkpoint_sequence: u64,
+    state: &CycleState,
+) -> Result<agent_doc_state_backbone::StateEvent> {
     let state_json = serde_json::to_string(state)?;
     let state_sha256 = agent_doc_hash::content_hash(&state_json);
-    let checkpoint_sequence = load_closeout_projection(file)?
-        .and_then(|projection| projection.turn_intent_checkpoint_sequence)
-        .unwrap_or(0)
-        .saturating_add(1);
     let event_id = format!(
         "turn-intent-checkpoint:{document_hash}:{}:{checkpoint_sequence}:{state_sha256}",
         state.cycle_id,
     );
-    append_state_fact(
-        file,
+    Ok(agent_doc_state_backbone::StateEvent::new(
         event_id,
         agent_doc_state_backbone::StateFact::TurnIntentCheckpointed {
-            document_hash,
+            document_hash: document_hash.to_string(),
             cycle_id: state.cycle_id.clone(),
             checkpoint_sequence,
             state_sha256,
             state_json,
         },
-    )?;
+    ))
+}
+
+fn save(file: &Path, state: &CycleState) -> Result<()> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(());
+    };
+    let checkpoint_sequence = load_closeout_projection(file)?
+        .and_then(|projection| projection.turn_intent_checkpoint_sequence)
+        .unwrap_or(0)
+        .saturating_add(1);
+    let event = build_turn_intent_checkpoint_event(&document_hash, checkpoint_sequence, state)?;
+    append_state_fact(file, event.event_id, event.fact)?;
     Ok(())
 }
 
@@ -2034,7 +2047,7 @@ pub fn age_current_cycle_for_tests(file: &Path, age_secs: u64) -> Result<()> {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum CloseoutProjectionEvent {
+pub enum CloseoutProjectionEvent {
     PreflightStarted,
     ResponseCaptured,
     WriteApplied,
@@ -2043,18 +2056,22 @@ enum CloseoutProjectionEvent {
     FalseStaleReactivated,
 }
 
-fn append_closeout_projection_event(
-    file: &Path,
+/// Build the closeout phase fact for `event` purely from `(document_hash,
+/// state)`, returning `None` when the event carries no emittable fact (e.g. a
+/// capture transition without a capture id). Pure: no I/O. Shared by the
+/// file-based [`append_closeout_projection_event`] and the controller's
+/// in-process append+apply (`#lzdurablesink`), so the actor emits the identical
+/// idempotency-keyed fact whether it runs in a client process or in the
+/// controller.
+pub fn build_closeout_projection_event(
+    document_hash: &str,
     state: &CycleState,
     event: CloseoutProjectionEvent,
-) -> Result<bool> {
-    let Some(document_hash) = cycle_document_hash(file)? else {
-        return Ok(false);
-    };
+) -> Option<agent_doc_state_backbone::StateEvent> {
     let fact = match event {
         CloseoutProjectionEvent::PreflightStarted => {
             agent_doc_state_backbone::StateFact::PreflightStarted {
-                document_hash: document_hash.clone(),
+                document_hash: document_hash.to_string(),
                 cycle_id: state.cycle_id.clone(),
                 session_id: None,
                 tracked_work_maintenance_required: state
@@ -2062,14 +2079,10 @@ fn append_closeout_projection_event(
             }
         }
         CloseoutProjectionEvent::ResponseCaptured => {
-            let Some(capture_id) = state.capture_id.clone() else {
-                return Ok(false);
-            };
-            let Some(response_sha256) = state.response_sha256.clone() else {
-                return Ok(false);
-            };
+            let capture_id = state.capture_id.clone()?;
+            let response_sha256 = state.response_sha256.clone()?;
             agent_doc_state_backbone::StateFact::ResponseCaptured {
-                document_hash: document_hash.clone(),
+                document_hash: document_hash.to_string(),
                 cycle_id: state.cycle_id.clone(),
                 capture_id,
                 response_sha256,
@@ -2083,7 +2096,7 @@ fn append_closeout_projection_event(
         }
         CloseoutProjectionEvent::WriteApplied => {
             agent_doc_state_backbone::StateFact::WriteApplied {
-                document_hash: document_hash.clone(),
+                document_hash: document_hash.to_string(),
                 cycle_id: state.cycle_id.clone(),
                 patch_id: None,
                 file_hash: state.file_hash.clone(),
@@ -2091,7 +2104,7 @@ fn append_closeout_projection_event(
             }
         }
         CloseoutProjectionEvent::Committed => agent_doc_state_backbone::StateFact::CommitObserved {
-            document_hash: document_hash.clone(),
+            document_hash: document_hash.to_string(),
             cycle_id: state.cycle_id.clone(),
             commit: state
                 .file_hash
@@ -2102,19 +2115,15 @@ fn append_closeout_projection_event(
             snapshot_hash: state.snapshot_hash.clone(),
         },
         CloseoutProjectionEvent::Abandoned => agent_doc_state_backbone::StateFact::CycleAbandoned {
-            document_hash: document_hash.clone(),
+            document_hash: document_hash.to_string(),
             cycle_id: state.cycle_id.clone(),
             reason: state.last_event.clone(),
         },
         CloseoutProjectionEvent::FalseStaleReactivated => {
-            let Some(capture_id) = state.capture_id.clone() else {
-                return Ok(false);
-            };
-            let Some(response_sha256) = state.response_sha256.clone() else {
-                return Ok(false);
-            };
+            let capture_id = state.capture_id.clone()?;
+            let response_sha256 = state.response_sha256.clone()?;
             agent_doc_state_backbone::StateFact::FalseStaleCaptureReactivated {
-                document_hash: document_hash.clone(),
+                document_hash: document_hash.to_string(),
                 cycle_id: state.cycle_id.clone(),
                 capture_id,
                 response_sha256,
@@ -2122,8 +2131,22 @@ fn append_closeout_projection_event(
             }
         }
     };
-    let event_id = closeout_projection_event_id(&document_hash, state, event);
-    append_state_fact(file, event_id, fact)
+    let event_id = closeout_projection_event_id(document_hash, state, event);
+    Some(agent_doc_state_backbone::StateEvent::new(event_id, fact))
+}
+
+fn append_closeout_projection_event(
+    file: &Path,
+    state: &CycleState,
+    event: CloseoutProjectionEvent,
+) -> Result<bool> {
+    let Some(document_hash) = cycle_document_hash(file)? else {
+        return Ok(false);
+    };
+    let Some(state_event) = build_closeout_projection_event(&document_hash, state, event) else {
+        return Ok(false);
+    };
+    append_state_fact(file, state_event.event_id, state_event.fact)
 }
 
 pub struct CapturedResponseFactInput<'a> {

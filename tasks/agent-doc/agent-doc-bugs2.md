@@ -39,7 +39,19 @@ done
 Compacted content:
 - Archived 28 response topic(s): #patchretryidem; #hvw0; #bbpe; 25 more
 - Prior summary/context: prior compacted content: Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #missingrep...
-<!-- agent:boundary:248be295 -->
+
+### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
+
+```text
+**IPC proof issue dogfood log**
+Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
+This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
+Issue class: `ipc_proof_insufficient`
+Affected component: editor IPC / writeback
+
+ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_visible_write patch_id=151bfee5-9431-4003-bba9-243d34d213a0 invariant=live_prompt_drift_after_preflight recovery=visible_repair_required snap_source=lazily_visible_write_event candidate_len=68130 candidate_hash=78175b9f8c6645c683b98bde1f832e2416914b50516a4776c650e928b660648b content_ours_len=68416 content_ours_hash=d75457f1e36d206b3e23df18cc7236a6f82615205f719c08a0284371397b30c9 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1784772615948
+```
+<!-- agent:boundary:0338c640 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -344,24 +344,32 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
 - `agent_doc_cycle_state_io::set_in_controller_request(bool)` — thread-local
   guard against self-RPC for any client helper invoked during controller request
   handling. Reuse it when migrating more hot-path calls (todo 5).
-5. **Gated on a prerequisite (not a standalone flock removal).** The per-consume
-   `flock` (`agent-doc-queue-io/src/queue_consume.rs:49` `acquire_doc_lock`, 6 sites)
-   guards a **document read-parse-write TOCTOU** ("prevent concurrent edits from
-   invalidating parsed offsets"), not the closeout transition. Dropping it safely
-   requires routing queue consume through the command-plane authority first (so
-   the controller owns document-edit serialization / dedup) — a real migration of
-   the queue-consume surface, not a quick fix. + the
-   `agent-doc-write-runtime-io/src/lib.rs:2478` site.
+5. **DEFERRED by design — the flock is the correct primitive here.** The per-
+   consume `flock` (`agent-doc-queue-io/src/queue_consume.rs:49` `acquire_doc_lock`,
+   6 sites + `agent-doc-write-runtime-io/src/lib.rs:2478`) guards a **document-file
+   read-parse-write TOCTOU** ("prevent concurrent edits from invalidating parsed
+   offsets"). It is NOT a closeout-authority arbitration, so the `#lazily-hot-path`
+   rule (which scopes to "flock … never document closeout") does not forbid it.
 
-   **Scope (reassessed):** the flock guards a document *file* read-parse-write
-   (TOCTOU on parsed offsets), and the controller today owns *state* (the closeout
-   projection), not document-file edits. Dropping the flock means the controller
-   must serialize per-document consumes — either a per-document in-memory lock
-   verb with lease semantics, or projecting document-queue state. That is a real
-   architectural migration across 6 hot-path sites, the last piece before Phase 2
-   is fully uniform. (The earlier "write-bypass prerequisite" framing was a red
-   herring — `mark_committed`'s divergence was a stale installed binary, now
-   resolved; there is no such prerequisite blocking this.)
+   A controller-held replacement lock was designed and rejected on engineering
+   merits:
+   - **Crash recovery regression** — `flock` auto-releases on process death (kernel
+     fd cleanup); a lease-based controller lock holds until TTL, blocking other
+     consumers after a crash.
+   - **Controller serialization** — `queue_consume.rs:365-370` explicitly warns
+     "Never hold the document lock across that bounded RPC: a slow/unavailable
+     controller would otherwise serialize every preflight/commit contender behind
+     the timeout." Routing the lock through the controller is exactly that.
+   - **Reimplements a correct kernel primitive** with lease/TTL/RPC complexity for
+     no benefit.
+
+   **Decision: keep the flock for document-file edit TOCTOU.** Revisit only if the
+   controller becomes the single document-file writer (projecting document-queue
+   state), at which point no lock is needed.
+   **Cleanup DONE — `c6549dff2`:** consolidated the duplicate `acquire_doc_lock`
+   definitions (queue-io + write-runtime-io) into one shared
+   `agent_doc_fs::acquire_doc_lock`, with the design decision documented in its
+   doc comment. Behavior-preserving; `make check` green.
  6. **DONE — `8e7f711ce`** Full `make check` green (clippy `--all-targets` +
     nextest + `sim-medium` + `version-sync` + `lean` + `tla`). (Pre-existing flake
     note: the `crdt_checkpoint_*` pair can fail under `cargo test --lib` from
@@ -390,11 +398,15 @@ doesn't reinstall) — not a write-bypass prerequisite. Rule: `make install` bef
 `make check` after controller/command-plane changes.
 
 **One follow-up remains — todo (5):** route queue consume through the authority,
-then drop the per-consume `flock` (6 sites). Reassessed scope: the flock guards a
-document-*file* read-parse-write; the controller owns *state*, not document-file
-edits, so this is a real architectural migration (per-document consume
-serialization / projecting document-queue state), the last piece before Phase 2
-is fully uniform. Once it lands, add the Phase 3 architecture test.
+then drop the per-consume `flock` (6 sites). **Design driven + DECISION: keep the
+flock** — it is the correct primitive for document-file edit TOCTOU (kernel-
+enforced, auto-release on crash). A controller-held replacement was designed and
+rejected: it regresses crash recovery (lease holds after death; flock releases)
+and serializes consumes behind the controller (`queue_consume.rs:365-370` warns
+against exactly that). `#lazily-hot-path` scopes its flock ban to closeout, not
+document-file edits. **Cleanup landed (`c6549dff2`):** consolidated the duplicate
+`acquire_doc_lock` into one shared `agent_doc_fs` primitive. Phase 2 is as uniform
+as it gets without making the controller the single document-file writer.
 
 **Phase 4 promotion review: DEFER** (recorded above) — two consumers share the
 shape but criterion 5 (net code reduction) isn't met yet; re-review after a third

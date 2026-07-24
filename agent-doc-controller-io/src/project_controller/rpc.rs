@@ -8600,6 +8600,16 @@ pub(crate) fn handle_request_locked(
             // replaying cold `state.db`. No fact is emitted.
             controller_envelope(handle_document_state_projection(runtime.as_ref(), request))
         }
+        "record_owner_pane_wedge" => controller_envelope(handle_record_owner_pane_wedge(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "clear_owner_pane_wedge" => controller_envelope(handle_clear_owner_pane_wedge(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "closeout_owner_claim" => controller_envelope(handle_closeout_owner_claim(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -10007,6 +10017,78 @@ pub(crate) fn handle_closeout_owner_release(
     let release: CloseoutOwnerReleaseRequest =
         serde_json::from_str(&payload_json).context("parse closeout owner release")?;
     run_closeout_owner_release(bootstrap, runtime, &file, release)
+}
+
+/// Owner-pane wedge counter RMW (`#lazily-hot-path`): the controller is the
+/// SQLite authority for this runtime state, so the read-modify-write runs
+/// server-side here. The client (`agent_doc_owner_pane_io::record`) calls this
+/// when a controller is live and falls back to its own direct SQLite path only
+/// for the actorless/bootstrap boundary. See `#recguard-wedge-escape`.
+#[derive(Debug, Deserialize)]
+struct OwnerPaneWedgePayload {
+    document_hash: String,
+    #[allow(dead_code)]
+    head: String,
+}
+
+pub(crate) fn handle_record_owner_pane_wedge(
+    bootstrap: &ControllerBootstrap,
+    _runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<u32> {
+    use agent_doc_turn::owner_pane_recursion::{OwnerPaneWedgeRecord, record_owner_pane_wedge_fire};
+    const OWNER_PANE_WEDGE_STATE_KIND: &str = "owner_pane_wedge";
+    let canonical_path = request_file(&request)?;
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: OwnerPaneWedgePayload =
+        serde_json::from_str(&payload_json).context("parse owner_pane_wedge payload")?;
+    let mut conn = agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root)?;
+    let tx = conn.transaction()?;
+    let prior = agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
+        &tx,
+        &payload.document_hash,
+        OWNER_PANE_WEDGE_STATE_KIND,
+    )?
+    .and_then(|state| serde_json::from_str::<OwnerPaneWedgeRecord>(&state.payload_json).ok());
+    let record = record_owner_pane_wedge_fire(prior.as_ref(), &payload.head);
+    let count = record.count;
+    agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
+        &tx,
+        &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
+            document_hash: payload.document_hash,
+            state_kind: OWNER_PANE_WEDGE_STATE_KIND.to_string(),
+            canonical_path: canonical_path.to_string_lossy().into_owned(),
+            payload_json: serde_json::to_string(&record)?,
+            updated_at_ms: controller_now_ms(),
+        },
+    )?;
+    tx.commit()?;
+    Ok(count)
+}
+
+pub(crate) fn handle_clear_owner_pane_wedge(
+    bootstrap: &ControllerBootstrap,
+    _runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<bool> {
+    const OWNER_PANE_WEDGE_STATE_KIND: &str = "owner_pane_wedge";
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: OwnerPaneWedgePayload =
+        serde_json::from_str(&payload_json).context("parse owner_pane_wedge payload")?;
+    let conn = agent_doc_sqlite::state_store::open_state_db(&bootstrap.project_root)?;
+    agent_doc_sqlite::state_store::clear_document_runtime_state_in_db(
+        &conn,
+        &payload.document_hash,
+        OWNER_PANE_WEDGE_STATE_KIND,
+    )?;
+    Ok(true)
+}
+
+fn controller_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Command-plane service for a `closeout_owner_release`. Decodes the submit and

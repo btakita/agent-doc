@@ -22,14 +22,19 @@
 //! A different head (the queue advanced) resets the counter, so a healthy loop
 //! that occasionally self-invokes never escalates.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::Path;
+use std::time::Duration;
 
 #[cfg(test)]
 use agent_doc_turn::owner_pane_recursion::owner_pane_wedge_threshold_reached;
 use agent_doc_turn::owner_pane_recursion::{OwnerPaneWedgeRecord, record_owner_pane_wedge_fire};
 
 const OWNER_PANE_WEDGE_STATE_KIND: &str = "owner_pane_wedge";
+/// The controller command name for the wedge RMW (mirrored in the controller
+/// dispatch table).
+const RECORD_CMD: &str = "record_owner_pane_wedge";
+const CLEAR_CMD: &str = "clear_owner_pane_wedge";
 
 fn state_identity(file: &Path) -> Result<Option<(std::path::PathBuf, String, String)>> {
     let canonical = std::fs::canonicalize(file)?;
@@ -47,19 +52,94 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// A controller-envelope response (`{ ok, data | error }`).
+#[derive(serde::Deserialize)]
+#[allow(dead_code)]
+struct ControllerEnvelope {
+    ok: bool,
+    data: Option<serde_json::Value>,
+    error: Option<String>,
+}
+
+/// Send a controller command, returning the parsed envelope. Returns `None`
+/// when no controller socket exists (actorless/bootstrap boundary) so the
+/// caller falls back to the direct SQLite path.
+fn try_controller_envelope(
+    root: &Path,
+    command: &str,
+    canonical_path: &str,
+    document_hash: &str,
+    head: Option<&str>,
+) -> Result<Option<ControllerEnvelope>> {
+    let socket = agent_doc_controller::paths::socket_path(root);
+    if !socket.exists() {
+        return Ok(None);
+    }
+    let payload = serde_json::json!({
+        "document_hash": document_hash,
+        "head": head.unwrap_or(""),
+    });
+    let request = serde_json::json!({
+        "command": command,
+        "file": canonical_path,
+        "diagnostic_payload": serde_json::to_string(&payload)?,
+    });
+    let raw = agent_doc_state_wire::send_ndjson_request_to_actor(
+        &socket,
+        &request,
+        Duration::from_secs(5),
+    )
+    .context("submit owner-pane wedge command through the Lazily controller")?;
+    let envelope: ControllerEnvelope = serde_json::from_str(&raw)
+        .context("decode owner-pane wedge controller response")?;
+    Ok(Some(envelope))
+}
+
 /// Record one owner-pane self-invocation guard fire for `head` and return the
 /// new consecutive count. A new head resets the count to 1. Best-effort: if the
 /// project root or ledger is unavailable the call still reports `1` so the
 /// caller falls through to the normal fail-closed diagnostic.
+///
+/// `#lazily-hot-path`: the read-modify-write is arbitrated by the live
+/// controller (the SQLite authority) when one is running; the controller does
+/// the RMW server-side over its own `state.db`. The direct SQLite path runs only
+/// for the actorless/bootstrap boundary (no controller socket), mirroring the
+/// durable-sink command-plane split.
 pub fn record(file: &Path, head: &str) -> Result<u32> {
     let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
         return Ok(1);
     };
-    let mut conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    if let Some(envelope) = try_controller_envelope(
+        &root,
+        RECORD_CMD,
+        &canonical_path,
+        &document_hash,
+        Some(head),
+    )? && envelope.ok
+    {
+        let count = envelope
+            .data
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as u32;
+        return Ok(count);
+    }
+    // Controller absent or rejected — fall through to the direct SQLite path so
+    // the actorless boundary and a transient controller error never disable the
+    // wedge backstop.
+    record_via_sqlite(&root, &document_hash, &canonical_path, head)
+}
+
+fn record_via_sqlite(
+    root: &Path,
+    document_hash: &str,
+    canonical_path: &str,
+    head: &str,
+) -> Result<u32> {
+    let mut conn = agent_doc_sqlite::state_store::open_state_db(root)?;
     let tx = conn.transaction()?;
     let prior = agent_doc_sqlite::state_store::load_document_runtime_state_from_db(
         &tx,
-        &document_hash,
+        document_hash,
         OWNER_PANE_WEDGE_STATE_KIND,
     )?
     .and_then(|state| serde_json::from_str::<OwnerPaneWedgeRecord>(&state.payload_json).ok());
@@ -68,9 +148,9 @@ pub fn record(file: &Path, head: &str) -> Result<u32> {
     agent_doc_sqlite::state_store::upsert_document_runtime_state_in_db(
         &tx,
         &agent_doc_sqlite::state_store::DocumentRuntimeStateRecord {
-            document_hash,
+            document_hash: document_hash.to_string(),
             state_kind: OWNER_PANE_WEDGE_STATE_KIND.to_string(),
-            canonical_path,
+            canonical_path: canonical_path.to_string(),
             payload_json: serde_json::to_string(&record)?,
             updated_at_ms: now_ms(),
         },
@@ -80,14 +160,27 @@ pub fn record(file: &Path, head: &str) -> Result<u32> {
 }
 
 /// Clear the wedge counter (after a halt, or once the head advances).
+///
+/// Routes through the controller when live (same `#lazily-hot-path` split as
+/// [`record`]); falls back to direct SQLite for the actorless boundary.
 pub fn clear(file: &Path) -> Result<()> {
-    let Some((root, document_hash, _)) = state_identity(file)? else {
+    let Some((root, document_hash, canonical_path)) = state_identity(file)? else {
         return Ok(());
     };
-    let conn = agent_doc_sqlite::state_store::open_state_db(&root)?;
+    if let Some(envelope) =
+        try_controller_envelope(&root, CLEAR_CMD, &canonical_path, &document_hash, None)?
+        && envelope.ok
+    {
+        return Ok(());
+    }
+    clear_via_sqlite(&root, &document_hash)
+}
+
+fn clear_via_sqlite(root: &Path, document_hash: &str) -> Result<()> {
+    let conn = agent_doc_sqlite::state_store::open_state_db(root)?;
     agent_doc_sqlite::state_store::clear_document_runtime_state_in_db(
         &conn,
-        &document_hash,
+        document_hash,
         OWNER_PANE_WEDGE_STATE_KIND,
     )?;
     Ok(())

@@ -93,13 +93,32 @@ applies the op to the file. No flock (one writer).
   consume/mark_done→`Strike`, strike→`Remove`) lives in `agent-doc-queue`.
   `make install` (Gradle plugin build green) `&& make check` green.
 
-### Phase D — Migrate the 6 sites
+### Phase D — Migrate the 6 sites — PARTIAL `#crdtstructops` (2/6 migrated)
 - Each site: replace `acquire_doc_lock → read → parse → compute full text →
   converge(full_text)` with `emit IpcNodeOp structural ops → relay(structural_ops)`.
 - **Drop `acquire_doc_lock`** from the 6 sites (the CRDT converges; no file lock).
 - The `QueueConsumeWriteEffects::converge_document_or_disk` gains a
   `converge_structural_ops(ops)` method; the editor-attached impl routes through
   the CRDT relay, the detached impl applies to the file.
+- **Landed (infrastructure):** `QueueConsumeWriteEffects::converge_structural_ops`
+  trait method (default impl projects ops via `apply_structural_ops_to_content`
+  then delegates to the existing `converge_document_or_disk`, which already owns
+  the detached file-write + editor-attached relay split). Pure helper
+  `apply_structural_ops_to_content` in `agent-doc-queue` (maps ops → node patches
+  → `apply_node_patches`; byte-identical to `consume_queue_nodes_by_key` for
+  node-addressable strike-through since both call `consume_node`). Dropping the
+  flock is safe: detached is single-writer; editor-attached converges via relay.
+- **Migrated (flock dropped):** site 4 `strike_orphan_id_backed_queue_head` + site
+  5 `acknowledge_open_id_backed_queue_head` — pure strike-through, faithfully
+  captured by structural ops. Detached tests pass byte-identical.
+- **Remaining (4/6):** sites 1 (consume), 2 (free-text strike), 3 (noise prune),
+  6 (mark_completed) keep the full-text path. They carry semantics a bare
+  node-key strike doesn't capture: site 2's `#qstrikenote` annotation + response-
+  materialization gate; site 3's non-node-addressable multiline/freeform excise;
+  site 6's whole-body `render` normalization + done-id key fallback. Migrating
+  them needs the structural ops to carry annotation/excise/render payloads — a
+  follow-up that extends `IpcNodeOp`/`MutationNodePatch` beyond strike/remove.
+- `make install && make check` green.
 
 ### Phase E — Detached fallback cleanup
 - Controller applies structural ops to the file as the single detached writer

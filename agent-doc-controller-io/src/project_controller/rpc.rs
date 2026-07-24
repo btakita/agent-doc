@@ -15302,6 +15302,36 @@ mod tests {
         assert!(outcome.force);
     }
 
+    /// `#lzdurablesink` Phase 3 architecture enforcement: the command-plane
+    /// authority surface (`command_plane.rs`) must stay pure — no file-lock
+    /// primitives and no persistence query/CAS. The authority decides from the
+    /// live Lazily projection and sinks via `append_apply_state_event`; it must
+    /// never hold a file lock or replay storage to arbitrate a transition
+    /// (`#lazily-hot-path`). The legitimate file-TOCTOU flock lives in
+    /// `agent_doc_fs::acquire_doc_lock`, not here. This test reads the module's
+    /// own source so a future regression (an import of `fs2`, a `lock_exclusive`
+    /// call, a `state_store` query) fails the build.
+    #[test]
+    fn command_plane_authority_surface_has_no_file_lock_or_persistence_query() {
+        let source = include_str!("command_plane.rs");
+        for forbidden in [
+            "lock_exclusive(",
+            "acquire_doc_lock(",
+            "fs2::",
+            "use fs2",
+            "open_state_db(",
+            "state_store::load",
+            "load_state_events",
+            ".flock(",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "command_plane.rs must not reference `{forbidden}` — the command-plane \
+                 authority surface stays free of file-lock and persistence-query primitives"
+            );
+        }
+    }
+
     #[test]
     fn command_plane_submit_dispatch_reaches_closeout_authority_and_returns_receipt() {
         // `#lzdurablesink` live transport (server half): a `command_plane_submit`

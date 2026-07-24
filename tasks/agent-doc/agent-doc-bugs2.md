@@ -168,14 +168,15 @@ The cause was split authority during the unsynchronized window: `explicit_queue_
 Added unit and production-backed SimWorld coverage for marker-to-frontmatter, frontmatter-to-marker, two-sided conflicts, bounded edit sequences, and second-pass no-ops. `make check` and `make tmux-ci` pass. Commit `89abf3e8c` is on `main`; v0.35.26 is installed, PyPI-published, tagged, and available from the GitHub release. Controller and route-owned supervisor recycling is scheduled at safe idle boundaries.
 
 The only remaining step is the required human live-editor eyeball, recorded as non-blocking `#qactsync-live` `[operator-verify]` work.
-<!-- agent:boundary:1b492d3b -->
+<!-- agent:boundary:ade8272b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#qactsync-live]
 - ~~do [#fmgcverify]~~
-- ~~⏭️ 📌 do [#qactsync]~~
-- 📌 do [#ftimmediate]
+- ~~📌 do [#qactsync]~~
+- ⏭️ 📌 do [#ftimmediate]
 - 📌 do [#qeditrace]
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]

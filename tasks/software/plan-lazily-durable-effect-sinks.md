@@ -157,6 +157,13 @@ A plausible promoted helper is a small policy/acknowledgement vocabulary around
 an existing effect. A generic ORM, repository layer, “durable cell” graph node,
 or built-in SQLite sink is out of scope.
 
+**Second-consumer candidates (Phase 4 gate):** `src/freehold` or
+`src/community-pulse` — pick whichever first adopts the
+`CommandSubmit → authority → sink → CausalReceipt` shape for one of its own
+durable transitions. Either satisfies the "one unrelated application" entry
+condition; only after it (plus agent-doc) both pass Phase 3 enforcement does the
+promotion review begin.
+
 ## Proof matrix
 
 | Claim | Required proof |
@@ -244,11 +251,19 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
    `ControllerCommandTransport: lazily::CommandTransport` over the one-line socket
    + `submit_closeout_advance_command`. `#[allow(dead_code)]` dropped; clippy
    `--all-targets` clean; nextest 219 passed (3 new dispatch tests). Pushed to `main`.
-2. **Migrate the `mark_*` clients to submit `closeout_advance` commands** (they
-   currently use the local `load→decide→save→append` path; the `decide_*` + builders
-   are already shared). Callers of `load_with_closeout_projection` span ~45 files
-   (run: `rg -n 'load_with_closeout_projection'` in agent-doc). Entry point now
-   exists: `submit_closeout_advance_command` (`command_plane.rs`).
+2. **DONE — `2047beab6` + `9bef9a98e`** Migrate the `mark_*` clients to submit
+   `closeout_advance` commands — at the chokepoint, not 40 call sites. The
+   closeout command-plane vocabulary (`CloseoutAdvancePayload` /
+   `CloseoutPhaseEvent` / `CommitObservation` + `build_closeout_advance_submit`)
+   moved down to `agent-doc-cycle-state-io` (closeout-domain owner, +lazily ipc
+   dep); `controller-io` re-exports + keeps `decode_closeout_advance_payload`.
+   All four `mark_*` are now dual-path: controller live → submit `closeout_advance`
+   (decide from the live projection, the `#lazily-hot-path` fix); no controller →
+   local `load→decide→save→append` fallback (actorless/bootstrap, so the 50
+   cycle-state-io tests + cold start are untouched). `committed` canonicalizes the
+   caller's free-text label to `CommitObservation` on the wire. clippy clean;
+   nextest green incl. live-socket tests proving all four transitions route
+   through the command plane end-to-end; 254 caller-crate tests green.
 3. **Migrate `closeout_owner_claim`/`release` onto the command plane** — add
    `build_closeout_owner_claim_submit` + `service_closeout_owner_claim` paralleling
    `closeout_advance`; the existing bespoke handlers are
@@ -273,10 +288,9 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
 ### Resume hint
 
 Todo (1) is done: the command-plane authority is reachable from a client over
-the live socket. The next concrete step is todo (2): point `mark_*` at
-`submit_closeout_advance_command` (in `cycle-state-io` callers / the closeout
-hot path — the `mark_*` funcs themselves are in `agent-doc-cycle-state-io`, which
-is below `controller-io`, so the migration likely lands at the caller layer that
-already depends on the controller). Then (3) owner claim/release, (4) read-only
-inspection chokepoint, (5) drop the per-consume `flock`. Everything committed;
-clippy clean + nextest green on `main`.
+the live socket. Todo (2) is done: all four `mark_*` variants submit
+`closeout_advance` at the chokepoint when a controller is live (dual-path actorless
+fallback). The next concrete step is todo (3): migrate `closeout_owner_claim`/
+`release` onto the command plane (paralleling `closeout_advance`), then (4) the
+read-only inspection chokepoint, (5) drop the per-consume `flock`. Everything
+committed; clippy clean + nextest green on `main`.

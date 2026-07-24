@@ -428,6 +428,7 @@ pub struct ProjectedCapturedResponse {
     pub response_sha256: String,
     pub response_body: String,
     pub intent_body: Option<String>,
+    pub mutation_plan_json: Option<String>,
     pub file_hash: Option<String>,
     pub snapshot_hash: Option<String>,
     pub baseline_content: Option<String>,
@@ -516,6 +517,7 @@ impl From<agent_doc_state_backbone::CloseoutProjection> for ProjectedCloseoutSta
                     response_sha256: capture.response_sha256,
                     response_body: capture.response_body,
                     intent_body: capture.intent_body,
+                    mutation_plan_json: capture.mutation_plan_json,
                     file_hash: capture.file_hash,
                     snapshot_hash: capture.snapshot_hash,
                     baseline_content: capture.baseline_content,
@@ -2062,6 +2064,7 @@ fn append_closeout_projection_event(
                 response_sha256,
                 response_body: None,
                 intent_body: None,
+                mutation_plan_json: None,
                 file_hash: None,
                 snapshot_hash: None,
                 baseline_content: None,
@@ -2118,6 +2121,7 @@ pub struct CapturedResponseFactInput<'a> {
     pub response_sha256: &'a str,
     pub response_body: &'a str,
     pub intent_body: Option<&'a str>,
+    pub mutation_plan_json: Option<&'a str>,
     pub file_hash: Option<&'a str>,
     pub snapshot_hash: Option<&'a str>,
     pub baseline_content: Option<&'a str>,
@@ -2133,6 +2137,7 @@ pub fn append_response_captured_body(
         response_sha256,
         response_body,
         intent_body,
+        mutation_plan_json,
         file_hash,
         snapshot_hash,
         baseline_content,
@@ -2141,11 +2146,12 @@ pub fn append_response_captured_body(
         return Ok(false);
     };
     let projection_hash = agent_doc_hash::content_hash(&format!(
-        "file={:?}\nsnapshot={:?}\nbaseline={:?}\nintent={:?}",
+        "file={:?}\nsnapshot={:?}\nbaseline={:?}\nintent={:?}\nmutation_plan={:?}",
         file_hash,
         snapshot_hash,
         baseline_content,
         intent_body.map(agent_doc_hash::content_hash),
+        mutation_plan_json.map(agent_doc_hash::content_hash),
     ));
     let event_id = format!(
         "closeout-response-captured-body:v3:{document_hash}:{cycle_id}:{capture_id}:{response_sha256}:{projection_hash}"
@@ -2160,6 +2166,7 @@ pub fn append_response_captured_body(
             response_sha256: response_sha256.to_string(),
             response_body: Some(response_body.to_string()),
             intent_body: intent_body.map(str::to_string),
+            mutation_plan_json: mutation_plan_json.map(str::to_string),
             file_hash: file_hash.map(str::to_string),
             snapshot_hash: snapshot_hash.map(str::to_string),
             baseline_content: baseline_content.map(str::to_string),
@@ -2316,8 +2323,50 @@ fn append_state_fact(
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
     let fact_label = fact.label();
     let event = agent_doc_state_backbone::StateEvent::new(event_id, fact);
-    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
     let payload_json = serde_json::to_string(&event).context("serialize closeout state event")?;
+    let controller_socket = agent_doc_controller::paths::socket_path(&project_root);
+    #[derive(serde::Deserialize)]
+    struct ActorAppendEnvelope {
+        ok: bool,
+        data: Option<bool>,
+        error: Option<String>,
+    }
+
+    let request = serde_json::json!({
+        "command": "state_event_append",
+        "file": canonical,
+        "caller": "cycle_state",
+        "diagnostic_payload": payload_json.clone(),
+    });
+    match agent_doc_state_wire::send_ndjson_request_to_actor(
+        &controller_socket,
+        &request,
+        std::time::Duration::from_secs(5),
+    ) {
+        Ok(raw) => {
+            let envelope: ActorAppendEnvelope =
+                serde_json::from_str(&raw).context("decode Lazily state append response")?;
+            if !envelope.ok {
+                anyhow::bail!(
+                    "Lazily state actor rejected closeout fact append: {}",
+                    envelope.error.as_deref().unwrap_or("unknown error")
+                );
+            }
+            return envelope
+                .data
+                .context("Lazily state actor returned no append result");
+        }
+        Err(agent_doc_state_wire::ActorRequestError::Connect(_)) if !controller_socket.exists() => {
+        }
+        Err(err) => {
+            return Err(err).context("append closeout state event through Lazily document actor");
+        }
+    }
+
+    // Cold-start compatibility: before a project controller exists, seed the
+    // durable ledger so the actor can hydrate it on launch. Once the actor socket
+    // exists, failures above fail closed instead of bypassing actor authority.
+    let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
     agent_doc_sqlite::state_store::insert_state_event_in_db(
         &conn,
         &agent_doc_sqlite::state_store::StateEventInsert {
@@ -3200,6 +3249,7 @@ mod tests {
                 response_sha256: "response-sha",
                 response_body: "### Re: topic - gpt-5\n\nDone.\n",
                 intent_body: None,
+                mutation_plan_json: None,
                 file_hash: Some("file-sha"),
                 snapshot_hash: Some("snapshot-sha"),
                 baseline_content: Some("body"),
@@ -3301,6 +3351,7 @@ mod tests {
                     response_sha256,
                     response_body,
                     intent_body: None,
+                    mutation_plan_json: None,
                     file_hash: Some(response_sha256),
                     snapshot_hash: None,
                     baseline_content: Some(baseline),
@@ -3719,6 +3770,7 @@ mod tests {
                 response_sha256: "response-sha",
                 response_body: "response body",
                 intent_body: None,
+                mutation_plan_json: None,
                 file_hash: captured.file_hash.as_deref(),
                 snapshot_hash: captured.snapshot_hash.as_deref(),
                 baseline_content: Some("body"),
@@ -4008,6 +4060,7 @@ mod project_root_symmetry_tests {
                 response_sha256: "abc",
                 response_body: "captured body",
                 intent_body: Some("captured body"),
+                mutation_plan_json: None,
                 file_hash: None,
                 snapshot_hash: None,
                 baseline_content: None,

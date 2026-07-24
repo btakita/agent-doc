@@ -293,6 +293,7 @@ version = "0.35.24"
 dependencies = [
  "agent-doc-capture-io",
  "agent-doc-commit-io",
+ "agent-doc-controller-io",
  "agent-doc-cycle-state-io",
  "agent-doc-document-realtime-io",
  "agent-doc-flow-io",
@@ -575,6 +576,7 @@ dependencies = [
 name = "agent-doc-cycle-state-io"
 version = "0.35.24"
 dependencies = [
+ "agent-doc-controller",
  "agent-doc-document",
  "agent-doc-element-backlog",
  "agent-doc-frontmatter",
@@ -585,6 +587,7 @@ dependencies = [
  "agent-doc-queue",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
+ "agent-doc-state-wire",
  "agent-doc-supervisor-io",
  "agent-doc-turn",
  "anyhow",
@@ -1627,6 +1630,7 @@ version = "0.35.24"
 dependencies = [
  "agent-doc-capture-io",
  "agent-doc-closeout-runtime-io",
+ "agent-doc-controller-io",
  "agent-doc-crdt-relay-io",
  "agent-doc-cycle-state-io",
  "agent-doc-diff-io",
@@ -2220,7 +2224,9 @@ version = "0.35.24"
 dependencies = [
  "agent-doc-state-backbone",
  "agent-doc-turn",
+ "anyhow",
  "base64 0.22.1",
+ "interprocess",
  "lazily 0.48.1",
  "serde",
  "serde_json",
@@ -2676,6 +2682,7 @@ name = "agent-doc-write-command-io"
 version = "0.35.24"
 dependencies = [
  "agent-doc-frontmatter",
+ "serde",
 ]
 
 [[package]]

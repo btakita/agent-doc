@@ -23,6 +23,7 @@ test-support = [
 agent-doc-commit-io = { path = "../agent-doc-commit-io", version = "0.35.24" }
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.24" }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.24" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.24" }
 agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.24" }
 agent-doc-flow-io = { path = "../agent-doc-flow-io", version = "0.35.24" }
 agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.24" }

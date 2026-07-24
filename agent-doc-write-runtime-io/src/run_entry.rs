@@ -334,10 +334,11 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     // Save response to pending store (survives context compaction)
-    agent_doc_repair_io::pending::save_pending_with_current_content(
+    agent_doc_repair_io::pending::save_pending_with_current_content_and_plan(
         file,
         &response,
         &current_content,
+        flags.mutation_plan_json.as_deref(),
     )?;
 
     // Acquire advisory lock BEFORE reading document state.
@@ -612,10 +613,11 @@ pub(crate) fn run_template(
     agent_doc_session_check_io::prewrite_pending_done_check(file, &response, &pending_flags)?;
 
     // Save response to pending store (survives context compaction)
-    agent_doc_repair_io::pending::save_pending_with_current_content(
+    agent_doc_repair_io::pending::save_pending_with_current_content_and_plan(
         file,
         &response,
         &current_content,
+        flags.mutation_plan_json.as_deref(),
     )?;
 
     // Acquire advisory lock BEFORE reading document state.
@@ -1052,10 +1054,11 @@ pub(crate) fn run_stream(
     }
 
     // Save response to pending store (survives context compaction)
-    agent_doc_repair_io::pending::save_pending_with_current_content(
+    agent_doc_repair_io::pending::save_pending_with_current_content_and_plan(
         file,
         &response,
         &current_content,
+        flags.mutation_plan_json.as_deref(),
     )?;
 
     if try_add_response_cell_via_realtime_backbone(
@@ -1813,10 +1816,11 @@ pub(crate) fn run_ipc(file: &Path, baseline: Option<&str>, flags: WriteFlags) ->
     let unmatched = normalized.unmatched;
 
     // Save response to pending store (survives context compaction)
-    agent_doc_repair_io::pending::save_pending_with_current_content(
+    agent_doc_repair_io::pending::save_pending_with_current_content_and_plan(
         file,
         &response,
         &current_content,
+        flags.mutation_plan_json.as_deref(),
     )?;
 
     // Enforcement: reject tracked-work full-replacement blocks unless allowed.

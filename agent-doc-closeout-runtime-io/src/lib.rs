@@ -11,6 +11,77 @@ pub struct RuntimeRepairIoEffects;
 
 pub static REPAIR_IO_EFFECTS: RuntimeRepairIoEffects = RuntimeRepairIoEffects;
 
+struct RecoveryCloseoutOwnerGuard {
+    file: std::path::PathBuf,
+    cycle_id: String,
+    owner_id: String,
+}
+
+impl Drop for RecoveryCloseoutOwnerGuard {
+    fn drop(&mut self) {
+        if let Err(err) =
+            agent_doc_controller_io::project_controller::release_closeout_owner_for_file(
+                &self.file,
+                &self.cycle_id,
+                &self.owner_id,
+                "session_check_recovery_finished",
+            )
+        {
+            agent_doc_ops_log_io::log_op(
+                &self.file,
+                &format!(
+                    "closeout_owner_release_failed file={} cycle_id={} owner_id={} err={err}",
+                    self.file.display(),
+                    self.cycle_id,
+                    self.owner_id,
+                ),
+            );
+        }
+    }
+}
+
+fn current_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn try_claim_recovery_closeout_owner(
+    file: &std::path::Path,
+    cycle_id: &str,
+) -> anyhow::Result<Result<RecoveryCloseoutOwnerGuard, String>> {
+    use agent_doc_controller_io::project_controller as controller;
+
+    let now_secs = current_epoch_secs();
+    let owner_id = controller::new_closeout_owner_id("session-check-recovery");
+    match controller::claim_closeout_owner_for_file(
+        file,
+        controller::CloseoutOwnerClaimRequest {
+            expected_cycle_id: Some(cycle_id.to_string()),
+            owner_id: owner_id.clone(),
+            owner_pid: std::process::id(),
+            role: "session_check_recovery".to_string(),
+            now_secs,
+            lease_secs: controller::CLOSEOUT_OWNER_LEASE_SECS,
+            allow_dead_owner_takeover: true,
+        },
+    )? {
+        controller::CloseoutOwnerClaimOutcome::Acquired(_) => Ok(Ok(RecoveryCloseoutOwnerGuard {
+            file: file.to_path_buf(),
+            cycle_id: cycle_id.to_string(),
+            owner_id,
+        })),
+        controller::CloseoutOwnerClaimOutcome::HeldByOther(owner) => Ok(Err(format!(
+            "foreground closeout owner {} pid={} role={} remains active until {}",
+            owner.owner_id, owner.owner_pid, owner.role, owner.expires_secs
+        ))),
+        controller::CloseoutOwnerClaimOutcome::CycleSuperseded => {
+            Ok(Err("captured closeout cycle was superseded".to_string()))
+        }
+    }
+}
+
 impl agent_doc_repair_io::RepairIoEffects for RuntimeRepairIoEffects {
     fn atomic_write_if_current(
         &self,
@@ -266,6 +337,10 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
         ) {
             return Ok(Outcome::NotApplicable);
         }
+        let _closeout_owner = match try_claim_recovery_closeout_owner(file, &state.cycle_id)? {
+            Ok(owner) => owner,
+            Err(reason) => return Ok(Outcome::Retained { reason }),
+        };
         let (Some(capture_id), Some(response_sha256)) =
             (state.capture_id.clone(), state.response_sha256.clone())
         else {

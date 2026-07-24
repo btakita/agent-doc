@@ -23,11 +23,87 @@
 
 pub mod lazily_convert;
 
-use std::collections::{BTreeMap, BTreeSet};
-
 use agent_doc_state_backbone::{DocumentStateProjection, EventLedger, StateOwner};
+use anyhow::Context;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use interprocess::local_socket::{GenericFilePath, ToFsName, traits::Stream as _};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
+use std::time::Duration;
+
+#[derive(Debug)]
+pub enum ActorRequestError {
+    Connect(anyhow::Error),
+    Protocol(anyhow::Error),
+}
+
+impl std::fmt::Display for ActorRequestError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Connect(err) => write!(formatter, "connect to Lazily actor: {err:#}"),
+            Self::Protocol(err) => write!(formatter, "exchange with Lazily actor: {err:#}"),
+        }
+    }
+}
+
+impl std::error::Error for ActorRequestError {}
+
+/// Send one state-wire NDJSON request to an explicitly addressed Lazily actor.
+///
+/// Protocol envelopes remain owned by the caller. Keeping this transport below
+/// controller I/O lets state producers update a live actor without introducing
+/// a dependency cycle back to the controller runtime.
+pub fn send_ndjson_request_to_actor(
+    socket_path: &Path,
+    message: &serde_json::Value,
+    response_timeout: Duration,
+) -> Result<String, ActorRequestError> {
+    let name = socket_path
+        .to_fs_name::<GenericFilePath>()
+        .map_err(|err| ActorRequestError::Protocol(err.into()))?;
+    let stream = interprocess::local_socket::ConnectOptions::new()
+        .name(name)
+        .connect_sync()
+        .with_context(|| {
+            format!(
+                "failed to connect to Lazily actor socket {}",
+                socket_path.display()
+            )
+        })
+        .map_err(ActorRequestError::Connect)?;
+    stream
+        .set_recv_timeout(Some(response_timeout))
+        .context("failed to set Lazily actor response timeout")
+        .map_err(ActorRequestError::Protocol)?;
+    let (reader_half, mut writer_half) = stream.split();
+    let mut raw = serde_json::to_string(message)
+        .context("serialize Lazily actor request")
+        .map_err(ActorRequestError::Protocol)?;
+    raw.push('\n');
+    writer_half
+        .write_all(raw.as_bytes())
+        .context("write Lazily actor request")
+        .map_err(ActorRequestError::Protocol)?;
+    writer_half
+        .flush()
+        .context("flush Lazily actor request")
+        .map_err(ActorRequestError::Protocol)?;
+
+    let mut reader = BufReader::new(reader_half);
+    let mut response = String::new();
+    let read = reader
+        .read_line(&mut response)
+        .context("read Lazily actor response")
+        .map_err(ActorRequestError::Protocol)?;
+    if read == 0 {
+        return Err(ActorRequestError::Protocol(anyhow::anyhow!(
+            "Lazily actor socket closed without a response"
+        )));
+    }
+    Ok(response.trim().to_string())
+}
 
 /// The agent-doc state node `type_tag`s: the stable cross-language
 /// vocabulary plugins address nodes by.

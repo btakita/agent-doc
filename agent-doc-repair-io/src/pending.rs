@@ -29,17 +29,27 @@ pub fn save_pending_with_current_content(
     response: &str,
     current_content: &str,
 ) -> Result<()> {
+    save_pending_with_current_content_and_plan(file, response, current_content, None)
+}
+
+pub fn save_pending_with_current_content_and_plan(
+    file: &Path,
+    response: &str,
+    current_content: &str,
+    mutation_plan_json: Option<&str>,
+) -> Result<()> {
     let canonical_response =
         agent_doc_template_io::canonicalize_response_for_capture_with_current_content(
             file,
             response,
             current_content,
         )?;
-    let capture = agent_doc_capture_io::capture_response_with_current_content_and_intent(
+    let capture = agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
         file,
         &canonical_response,
         current_content,
         Some(response),
+        mutation_plan_json,
     )?;
     save_pending_after_capture(file, response, &capture)
 }

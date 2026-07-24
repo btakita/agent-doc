@@ -122,12 +122,7 @@ pub fn resume_captured_finalize(
         return CapturedFinalizeResumeOutcome::Superseded;
     }
 
-    let result = agent_doc_repair_io::repair_preserving_live_authority(
-        agent_doc_repair_runtime_io::repair_coordinator_effects(
-            &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
-        ),
-        file,
-    );
+    let result = resume_captured_finalize_intent(file, expected);
     match result {
         Ok(outcome) => {
             let committed = agent_doc_cycle_state_io::load_with_closeout_projection(file)
@@ -153,6 +148,45 @@ pub fn resume_captured_finalize(
         }
         Err(err) => classify_captured_finalize_resume_error(&format!("{err:#}")),
     }
+}
+
+fn resume_captured_finalize_intent(
+    file: &Path,
+    expected: &CapturedFinalizeResumeKey,
+) -> Result<RepairOutcome> {
+    let capture =
+        agent_doc_cycle_state_io::load_projected_captured_response(file, &expected.capture_id)?
+            .filter(|capture| {
+                capture.cycle_id == expected.cycle_id
+                    && capture.response_sha256 == expected.response_sha256
+            });
+    if let Some(capture) = capture
+        && let Some(plan_json) = capture.mutation_plan_json.as_deref()
+    {
+        let plan: agent_doc_write_command_io::CapturedCloseoutMutationPlan =
+            serde_json::from_str(plan_json)
+                .map_err(|err| anyhow::anyhow!("decode captured closeout mutation plan: {err}"))?;
+        let options =
+            agent_doc_write_command_io::CommandOptions::recovery_from_captured_closeout_mutation_plan(
+                file, plan,
+            );
+        let response = capture.intent_body.unwrap_or(capture.response_body);
+        agent_doc_write_runtime_io::run_command_with_response(
+            options,
+            agent_doc_write_command_io::CommitMode::Required,
+            response,
+        )?;
+        return Ok(RepairOutcome::ReplayedResponse);
+    }
+
+    // Backward-compatible recovery for captures written before the typed
+    // mutation plan became part of the Lazily intent.
+    agent_doc_repair_io::repair_preserving_live_authority(
+        agent_doc_repair_runtime_io::repair_coordinator_effects(
+            &agent_doc_write_runtime_io::REPAIR_REPLAY_WRITE_EFFECTS,
+        ),
+        file,
+    )
 }
 
 fn classify_captured_finalize_resume_error(reason: &str) -> CapturedFinalizeResumeOutcome {

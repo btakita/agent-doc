@@ -80,6 +80,8 @@ pub struct CaptureRecord {
     pub response_body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent_body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutation_plan_json: Option<String>,
     pub state: CaptureState,
 }
 
@@ -272,6 +274,22 @@ pub fn capture_response_with_current_content_and_intent(
     file_content: &str,
     intent_body: Option<&str>,
 ) -> Result<CaptureRecord> {
+    capture_response_with_current_content_and_intent_and_plan(
+        file,
+        response,
+        file_content,
+        intent_body,
+        None,
+    )
+}
+
+pub fn capture_response_with_current_content_and_intent_and_plan(
+    file: &Path,
+    response: &str,
+    file_content: &str,
+    intent_body: Option<&str>,
+    mutation_plan_json: Option<&str>,
+) -> Result<CaptureRecord> {
     let response_sha256 = agent_doc_hash::content_hash(response);
     let existing_cycle_id =
         agent_doc_cycle_state_io::load_with_closeout_projection(file)?.map(|s| s.cycle_id);
@@ -307,6 +325,7 @@ pub fn capture_response_with_current_content_and_intent(
         response_sha256: response_sha256.clone(),
         response_body: redacted_response,
         intent_body: intent_body.map(agent_doc_secret_redact::redact),
+        mutation_plan_json: mutation_plan_json.map(agent_doc_secret_redact::redact),
         state: CaptureState::Captured,
     };
     agent_doc_cycle_state_io::mark_response_captured(
@@ -325,6 +344,7 @@ pub fn capture_response_with_current_content_and_intent(
             response_sha256: &record.response_sha256,
             response_body: &record.response_body,
             intent_body: record.intent_body.as_deref(),
+            mutation_plan_json: record.mutation_plan_json.as_deref(),
             file_hash: record.file_hash.as_deref(),
             snapshot_hash: record.snapshot_hash.as_deref(),
             baseline_content: record.baseline_content.as_deref(),
@@ -497,6 +517,7 @@ pub fn load_by_id(file: &Path, capture_id: &str) -> Result<Option<CaptureRecord>
         response_sha256: projected.response_sha256,
         response_body: projected.response_body,
         intent_body: projected.intent_body,
+        mutation_plan_json: projected.mutation_plan_json,
         state: capture_state,
     }))
 }
@@ -1286,6 +1307,7 @@ fn checkpoint_capture_projection(file: &Path, record: &CaptureRecord) -> Result<
             response_sha256: &record.response_sha256,
             response_body: &record.response_body,
             intent_body: record.intent_body.as_deref(),
+            mutation_plan_json: record.mutation_plan_json.as_deref(),
             file_hash: record.file_hash.as_deref(),
             snapshot_hash: record.snapshot_hash.as_deref(),
             baseline_content: record.baseline_content.as_deref(),

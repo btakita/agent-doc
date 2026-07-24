@@ -14,6 +14,7 @@ test-support = []
 name = "agent_doc_cycle_state_io"
 
 [dependencies]
+agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.24" }
 agent-doc-document = { path = "../agent-doc-document", version = "0.35.24" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.24" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.24" }
@@ -24,6 +25,7 @@ agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.24" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.24" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.24" }
 agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.24" }
+agent-doc-state-wire = { path = "../agent-doc-state-wire", version = "0.35.24" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.24" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.24" }
 anyhow = "1"

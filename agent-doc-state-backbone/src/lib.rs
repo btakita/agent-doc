@@ -501,6 +501,11 @@ pub enum StateFact {
         /// The canonical response body remains separate for materialization proof.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         intent_body: Option<String>,
+        /// Sanitized, replayable typed closeout mutations (backlog, icebox,
+        /// review, queue, and status). Transport overrides and sibling commits
+        /// are deliberately excluded.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mutation_plan_json: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         file_hash: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -510,6 +515,25 @@ pub enum StateFact {
         /// the bytes needed to reconcile a partially materialized response.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         baseline_content: Option<String>,
+    },
+    /// One Lazily-authoritative owner may advance a closeout cycle at a time.
+    /// The claim expires unless the owner refreshes it; an exact release cannot
+    /// clear a newer takeover claim.
+    CloseoutOwnerClaimed {
+        document_hash: String,
+        cycle_id: String,
+        owner_id: String,
+        owner_pid: u32,
+        role: String,
+        claimed_secs: u64,
+        expires_secs: u64,
+    },
+    CloseoutOwnerReleased {
+        document_hash: String,
+        cycle_id: String,
+        owner_id: String,
+        reason: String,
+        released_secs: u64,
     },
     /// Retire one content-bearing response projection after its materialization
     /// has been durably superseded (for example by compact archive placement).
@@ -825,6 +849,8 @@ impl StateFact {
             | Self::QueueDrainStallContinuationRecorded { document_hash, .. }
             | Self::QueueDrainStallContinuationCleared { document_hash, .. }
             | Self::ResponseCaptured { document_hash, .. }
+            | Self::CloseoutOwnerClaimed { document_hash, .. }
+            | Self::CloseoutOwnerReleased { document_hash, .. }
             | Self::CapturedResponseRetired { document_hash, .. }
             | Self::CapturedResponseReactivated { document_hash, .. }
             | Self::ResponseDraftCheckpointed { document_hash, .. }
@@ -877,6 +903,8 @@ impl StateFact {
             | Self::TurnIntentCheckpointed { .. }
             | Self::RealtimeSteeringObserved { .. }
             | Self::ResponseCaptured { .. }
+            | Self::CloseoutOwnerClaimed { .. }
+            | Self::CloseoutOwnerReleased { .. }
             | Self::CapturedResponseRetired { .. }
             | Self::CapturedResponseReactivated { .. }
             | Self::ResponseDraftCheckpointed { .. }
@@ -978,6 +1006,8 @@ impl StateFact {
             }
             Self::SupervisorHosting { .. } => "supervisor_hosting",
             Self::ResponseCaptured { .. } => "response_captured",
+            Self::CloseoutOwnerClaimed { .. } => "closeout_owner_claimed",
+            Self::CloseoutOwnerReleased { .. } => "closeout_owner_released",
             Self::CapturedResponseRetired { .. } => "captured_response_retired",
             Self::CapturedResponseReactivated { .. } => "captured_response_reactivated",
             Self::ResponseDraftCheckpointed { .. } => "response_draft_checkpointed",
@@ -1687,6 +1717,7 @@ impl DocumentStateProjection {
                 response_sha256,
                 response_body,
                 intent_body,
+                mutation_plan_json,
                 file_hash,
                 snapshot_hash,
                 baseline_content,
@@ -1715,6 +1746,7 @@ impl DocumentStateProjection {
                         response_sha256: response_sha256.clone(),
                         response_body: response_body.clone(),
                         intent_body: intent_body.clone(),
+                        mutation_plan_json: mutation_plan_json.clone(),
                         file_hash: file_hash
                             .clone()
                             .or_else(|| self.closeout.response_file_hash.clone()),
@@ -1729,6 +1761,39 @@ impl DocumentStateProjection {
                         response_sha256: response_sha256.clone(),
                         response_body: intent_body.clone().unwrap_or_else(|| response_body.clone()),
                     });
+                }
+            }
+            StateFact::CloseoutOwnerClaimed {
+                cycle_id,
+                owner_id,
+                owner_pid,
+                role,
+                claimed_secs,
+                expires_secs,
+                ..
+            } => {
+                if self.closeout.cycle_id.as_deref() == Some(cycle_id)
+                    && self.closeout.phase.is_some_and(CyclePhase::is_open)
+                {
+                    self.closeout.owner = Some(CloseoutOwnerProjection {
+                        cycle_id: cycle_id.clone(),
+                        owner_id: owner_id.clone(),
+                        owner_pid: *owner_pid,
+                        role: role.clone(),
+                        claimed_secs: *claimed_secs,
+                        expires_secs: *expires_secs,
+                    });
+                }
+            }
+            StateFact::CloseoutOwnerReleased {
+                cycle_id, owner_id, ..
+            } => {
+                if self.closeout.cycle_id.as_deref() == Some(cycle_id)
+                    && self.closeout.owner.as_ref().is_some_and(|owner| {
+                        owner.cycle_id == *cycle_id && owner.owner_id == *owner_id
+                    })
+                {
+                    self.closeout.owner = None;
                 }
             }
             StateFact::CapturedResponseRetired {
@@ -3131,6 +3196,8 @@ pub struct CloseoutProjection {
     pub cycle_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<CloseoutOwnerProjection>,
     /// Newest complete turn-intent checkpoint from the state ledger. Normal
     /// execution reads this projection; filesystem projections are recovery-only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3202,6 +3269,52 @@ pub struct ResponseDraftProjection {
 }
 
 impl CloseoutProjection {
+    /// Decide a closeout-owner compare-and-swap from the Lazily projection.
+    ///
+    /// The caller supplies process liveness as typed evidence; the decision never
+    /// consults SQLite or a filesystem lock. The document actor must serialize
+    /// this decision with the resulting `CloseoutOwnerClaimed` fact append.
+    pub fn decide_owner_claim(
+        &self,
+        request: &CloseoutOwnerClaimRequest,
+        current_owner_alive: Option<bool>,
+    ) -> CloseoutOwnerClaimOutcome {
+        let Some(cycle_id) = self.cycle_id.as_deref() else {
+            return CloseoutOwnerClaimOutcome::CycleSuperseded;
+        };
+        if !self.phase.is_some_and(CyclePhase::is_open)
+            || request
+                .expected_cycle_id
+                .as_deref()
+                .is_some_and(|expected| expected != cycle_id)
+        {
+            return CloseoutOwnerClaimOutcome::CycleSuperseded;
+        }
+
+        if let Some(owner) = self.owner.as_ref()
+            && owner.owner_id != request.owner_id
+            && owner.is_active_at(request.now_secs)
+            && !(request.allow_dead_owner_takeover && current_owner_alive == Some(false))
+        {
+            return CloseoutOwnerClaimOutcome::HeldByOther(owner.clone());
+        }
+
+        CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection {
+            cycle_id: cycle_id.to_string(),
+            owner_id: request.owner_id.clone(),
+            owner_pid: request.owner_pid,
+            role: request.role.clone(),
+            claimed_secs: request.now_secs,
+            expires_secs: request.now_secs.saturating_add(request.lease_secs.max(1)),
+        })
+    }
+
+    pub fn owner_release_matches(&self, cycle_id: &str, owner_id: &str) -> bool {
+        self.owner
+            .as_ref()
+            .is_some_and(|owner| owner.cycle_id == cycle_id && owner.owner_id == owner_id)
+    }
+
     fn refresh_capture_content_hashes(
         &mut self,
         cycle_id: &str,
@@ -3262,6 +3375,7 @@ impl CloseoutProjection {
                 // event, so it may already describe this new cycle. Keep it;
                 // `load` validates the checkpoint cycle against the projection.
                 self.session_id = None;
+                self.owner = None;
                 self.write_phase = None;
                 self.capture_id = None;
                 self.response_sha256 = None;
@@ -3287,6 +3401,7 @@ impl CloseoutProjection {
             self.response_file_hash = None;
             self.response_snapshot_hash = None;
             self.captured_response = None;
+            self.owner = None;
             self.response_cell = None;
             self.write_phase = None;
             self.realtime_steering = TurnSteeringProjection::none();
@@ -3369,11 +3484,54 @@ pub struct CapturedResponseProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub intent_body: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutation_plan_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snapshot_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline_content: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloseoutOwnerProjection {
+    pub cycle_id: String,
+    pub owner_id: String,
+    pub owner_pid: u32,
+    pub role: String,
+    pub claimed_secs: u64,
+    pub expires_secs: u64,
+}
+
+impl CloseoutOwnerProjection {
+    pub fn is_active_at(&self, now_secs: u64) -> bool {
+        now_secs < self.expires_secs
+    }
+}
+
+pub const CLOSEOUT_OWNER_LEASE_SECS: u64 = 300;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloseoutOwnerClaimRequest {
+    /// `None` claims the currently open cycle. Recovery supplies the exact
+    /// captured cycle so a stale worker cannot claim a successor turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_cycle_id: Option<String>,
+    pub owner_id: String,
+    pub owner_pid: u32,
+    pub role: String,
+    pub now_secs: u64,
+    pub lease_secs: u64,
+    #[serde(default)]
+    pub allow_dead_owner_takeover: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CloseoutOwnerClaimOutcome {
+    Acquired(CloseoutOwnerProjection),
+    HeldByOther(CloseoutOwnerProjection),
+    CycleSuperseded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -4745,6 +4903,7 @@ mod tests {
             response_sha256: "response-1".into(),
             response_body: Some("response body".into()),
             intent_body: None,
+            mutation_plan_json: None,
             file_hash: None,
             snapshot_hash: None,
             baseline_content: None,
@@ -4781,6 +4940,108 @@ mod tests {
             Some(CyclePhase::ResponseCaptured)
         );
         assert!(projection.closeout.abandoned_reason.is_none());
+    }
+
+    #[test]
+    fn closeout_owner_claim_is_a_lazily_projection_cas() {
+        let mut projection = CloseoutProjection {
+            cycle_id: Some("cycle-1".into()),
+            phase: Some(CyclePhase::ResponseCaptured),
+            ..CloseoutProjection::default()
+        };
+        let request = CloseoutOwnerClaimRequest {
+            expected_cycle_id: Some("cycle-1".into()),
+            owner_id: "foreground-1".into(),
+            owner_pid: 101,
+            role: "foreground_finalize".into(),
+            now_secs: 10,
+            lease_secs: 30,
+            allow_dead_owner_takeover: true,
+        };
+        let acquired = projection.decide_owner_claim(&request, None);
+        let CloseoutOwnerClaimOutcome::Acquired(owner) = acquired else {
+            panic!("open Lazily cycle should be claimable");
+        };
+        assert_eq!(owner.cycle_id, "cycle-1");
+        assert_eq!(owner.expires_secs, 40);
+        projection.owner = Some(owner.clone());
+
+        let recovery = CloseoutOwnerClaimRequest {
+            expected_cycle_id: Some("cycle-1".into()),
+            owner_id: "recovery-1".into(),
+            owner_pid: 202,
+            role: "session_check_recovery".into(),
+            now_secs: 20,
+            lease_secs: 30,
+            allow_dead_owner_takeover: true,
+        };
+        assert_eq!(
+            projection.decide_owner_claim(&recovery, Some(true)),
+            CloseoutOwnerClaimOutcome::HeldByOther(owner.clone())
+        );
+        assert!(matches!(
+            projection.decide_owner_claim(&recovery, Some(false)),
+            CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection {
+                ref owner_id,
+                owner_pid: 202,
+                ..
+            }) if owner_id == "recovery-1"
+        ));
+
+        let stale_cycle = CloseoutOwnerClaimRequest {
+            expected_cycle_id: Some("cycle-0".into()),
+            ..recovery
+        };
+        assert_eq!(
+            projection.decide_owner_claim(&stale_cycle, Some(false)),
+            CloseoutOwnerClaimOutcome::CycleSuperseded
+        );
+        assert!(projection.owner_release_matches("cycle-1", "foreground-1"));
+        assert!(!projection.owner_release_matches("cycle-1", "recovery-1"));
+    }
+
+    #[test]
+    fn exact_owner_release_cannot_clear_a_newer_lazily_claim() {
+        let mut projection = DocumentStateProjection::new("doc-owner");
+        projection.apply(&StateFact::PreflightStarted {
+            document_hash: "doc-owner".into(),
+            cycle_id: "cycle-1".into(),
+            session_id: None,
+            tracked_work_maintenance_required: None,
+        });
+        projection.apply(&StateFact::CloseoutOwnerClaimed {
+            document_hash: "doc-owner".into(),
+            cycle_id: "cycle-1".into(),
+            owner_id: "owner-new".into(),
+            owner_pid: 202,
+            role: "recovery".into(),
+            claimed_secs: 20,
+            expires_secs: 50,
+        });
+        projection.apply(&StateFact::CloseoutOwnerReleased {
+            document_hash: "doc-owner".into(),
+            cycle_id: "cycle-1".into(),
+            owner_id: "owner-old".into(),
+            reason: "late_drop".into(),
+            released_secs: 21,
+        });
+        assert_eq!(
+            projection
+                .closeout
+                .owner
+                .as_ref()
+                .map(|owner| owner.owner_id.as_str()),
+            Some("owner-new")
+        );
+
+        projection.apply(&StateFact::CloseoutOwnerReleased {
+            document_hash: "doc-owner".into(),
+            cycle_id: "cycle-1".into(),
+            owner_id: "owner-new".into(),
+            reason: "finished".into(),
+            released_secs: 22,
+        });
+        assert!(projection.closeout.owner.is_none());
     }
 
     fn authority_event(
@@ -5147,6 +5408,7 @@ mod tests {
                     "<!-- agent:patch:exchange -->\nDone.\n<!-- /agent:patch:exchange -->\n<!-- agent:patch:backlog -->\n- [ ] [#bpcontract] Preserve every pending change.\n<!-- /agent:patch:backlog -->\n"
                         .into(),
                 ),
+                mutation_plan_json: Some("{\"pending_edit\":[\"#bpcontract=keep open\"]}".into()),
                 file_hash: None,
                 snapshot_hash: None,
                 baseline_content: None,
@@ -5214,6 +5476,7 @@ mod tests {
                 response_sha256: "response-sha".into(),
                 response_body: Some("### Re: cell — gpt-5\n\nDone.\n".into()),
                 intent_body: None,
+                mutation_plan_json: None,
                 file_hash: None,
                 snapshot_hash: None,
                 baseline_content: None,
@@ -5276,6 +5539,7 @@ mod tests {
                 response_sha256: "sha-response".into(),
                 response_body: Some("### Re: topic - gpt-5\n\nDone.\n".into()),
                 intent_body: None,
+                mutation_plan_json: None,
                 file_hash: Some("file-sha".into()),
                 snapshot_hash: Some("snapshot-sha".into()),
                 baseline_content: Some("captured baseline\n".into()),
@@ -5628,6 +5892,7 @@ mod tests {
                 response_sha256: "sha-response".into(),
                 response_body: None,
                 intent_body: None,
+                mutation_plan_json: None,
                 file_hash: None,
                 snapshot_hash: None,
                 baseline_content: None,

@@ -25547,7 +25547,7 @@ fn test_agent_doc_stream_io_routes_document_reads_through_runtime_authority() {
                 "agent_doc_template_io::canonicalize_response_for_capture_with_current_content("
             )
             && repair_pending_source.contains(
-                "agent_doc_capture_io::capture_response_with_current_content_and_intent("
+                "agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan("
             ),
         "repair pending IO should let realtime callers save pending captures without capture IO rereading the active document"
     );

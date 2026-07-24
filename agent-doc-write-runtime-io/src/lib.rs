@@ -419,6 +419,7 @@ pub(crate) struct WriteFlags {
     pub(crate) strict_closeout: bool,
     pub(crate) force_disk: bool,
     pub(crate) no_pending_capture: bool,
+    pub(crate) mutation_plan_json: Option<String>,
     pub(crate) empty_response_recovery: Option<EmptyResponseRecovery>,
     pub(crate) rerun_command_base: Option<String>,
 }
@@ -438,6 +439,192 @@ fn pending_write_flags(flags: &WriteFlags) -> agent_doc_session_check_io::Pendin
 pub(crate) const EMPTY_RESPONSE_ERROR: &str = "empty response — nothing to write";
 
 pub(crate) type EmptyResponseRecovery = fn(&Path, bool, bool, bool) -> Result<bool>;
+
+thread_local! {
+    /// Capability tokens for strict-write recursion on this thread. A repair
+    /// replay may re-enter the write runtime while its outer closeout guard is
+    /// still live; that nested call is covered by the existing actor claim.
+    static ACTIVE_FOREGROUND_CLOSEOUTS: std::cell::RefCell<Vec<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+struct CloseoutOwnerGuard {
+    file: std::path::PathBuf,
+    owner_key: std::path::PathBuf,
+    cycle_id: String,
+    owner_id: String,
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    heartbeat: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for CloseoutOwnerGuard {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take()
+            && stop.send(()).is_err()
+        {
+            agent_doc_ops_log_io::log_op(
+                &self.file,
+                &format!(
+                    "closeout_owner_heartbeat_stop_disconnected file={} cycle_id={} owner_id={}",
+                    self.file.display(),
+                    self.cycle_id,
+                    self.owner_id
+                ),
+            );
+        }
+        if let Some(heartbeat) = self.heartbeat.take()
+            && heartbeat.join().is_err()
+        {
+            agent_doc_ops_log_io::log_op(
+                &self.file,
+                &format!(
+                    "closeout_owner_heartbeat_panicked file={} cycle_id={} owner_id={}",
+                    self.file.display(),
+                    self.cycle_id,
+                    self.owner_id
+                ),
+            );
+        }
+        if let Err(err) =
+            agent_doc_controller_io::project_controller::release_closeout_owner_for_file(
+                &self.file,
+                &self.cycle_id,
+                &self.owner_id,
+                "foreground_closeout_finished",
+            )
+        {
+            agent_doc_ops_log_io::log_op(
+                &self.file,
+                &format!(
+                    "closeout_owner_release_failed file={} cycle_id={} owner_id={} err={err}",
+                    self.file.display(),
+                    self.cycle_id,
+                    self.owner_id,
+                ),
+            );
+        }
+        ACTIVE_FOREGROUND_CLOSEOUTS.with(|active| {
+            let mut active = active.borrow_mut();
+            if let Some(index) = active.iter().rposition(|path| path == &self.owner_key) {
+                active.remove(index);
+            } else {
+                agent_doc_ops_log_io::log_op(
+                    &self.file,
+                    &format!(
+                        "closeout_owner_local_capability_missing file={} cycle_id={} owner_id={}",
+                        self.file.display(),
+                        self.cycle_id,
+                        self.owner_id,
+                    ),
+                );
+            }
+        });
+    }
+}
+
+fn current_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+fn claim_foreground_closeout_owner(file: &Path) -> Result<Option<CloseoutOwnerGuard>> {
+    use agent_doc_controller_io::project_controller as controller;
+
+    // Ignored/untracked and standalone documents have no project actor. Their
+    // existing write path decides whether to skip or use the explicit
+    // actorless compatibility boundary.
+    if agent_doc_project_root_io::project_root_containing(file).is_none() {
+        return Ok(None);
+    }
+    let owner_key = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    if ACTIVE_FOREGROUND_CLOSEOUTS
+        .with(|active| active.borrow().iter().any(|path| path == &owner_key))
+    {
+        return Ok(None);
+    }
+
+    let owner_id = controller::new_closeout_owner_id("foreground-finalize");
+    let owner_pid = std::process::id();
+    let role = "foreground_finalize";
+    let cycle_id = match controller::claim_closeout_owner_for_file(
+        file,
+        controller::CloseoutOwnerClaimRequest {
+            expected_cycle_id: None,
+            owner_id: owner_id.clone(),
+            owner_pid,
+            role: role.to_string(),
+            now_secs: current_epoch_secs(),
+            lease_secs: controller::CLOSEOUT_OWNER_LEASE_SECS,
+            allow_dead_owner_takeover: true,
+        },
+    )? {
+        controller::CloseoutOwnerClaimOutcome::Acquired(owner) => owner.cycle_id,
+        controller::CloseoutOwnerClaimOutcome::HeldByOther(owner) => {
+            anyhow::bail!(
+                "closeout operation is already in progress for cycle {} by {} pid={} role={} until={}",
+                owner.cycle_id,
+                owner.owner_id,
+                owner.owner_pid,
+                owner.role,
+                owner.expires_secs
+            );
+        }
+        controller::CloseoutOwnerClaimOutcome::CycleSuperseded => return Ok(None),
+    };
+
+    let (stop, stopped) = std::sync::mpsc::channel();
+    let heartbeat_file = file.to_path_buf();
+    let heartbeat_cycle = cycle_id.clone();
+    let heartbeat_owner = owner_id.clone();
+    let heartbeat = std::thread::spawn(move || {
+        let interval =
+            std::time::Duration::from_secs((controller::CLOSEOUT_OWNER_LEASE_SECS / 3).max(1));
+        loop {
+            match stopped.recv_timeout(interval) {
+                Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            let refreshed = controller::claim_closeout_owner_for_file(
+                &heartbeat_file,
+                controller::CloseoutOwnerClaimRequest {
+                    expected_cycle_id: Some(heartbeat_cycle.clone()),
+                    owner_id: heartbeat_owner.clone(),
+                    owner_pid,
+                    role: role.to_string(),
+                    now_secs: current_epoch_secs(),
+                    lease_secs: controller::CLOSEOUT_OWNER_LEASE_SECS,
+                    allow_dead_owner_takeover: false,
+                },
+            );
+            if !matches!(
+                refreshed,
+                Ok(controller::CloseoutOwnerClaimOutcome::Acquired(_))
+            ) {
+                agent_doc_ops_log_io::log_op(
+                    &heartbeat_file,
+                    &format!(
+                        "closeout_owner_heartbeat_stopped file={} cycle_id={} owner_id={} outcome={refreshed:?}",
+                        heartbeat_file.display(),
+                        heartbeat_cycle,
+                        heartbeat_owner,
+                    ),
+                );
+                break;
+            }
+        }
+    });
+    ACTIVE_FOREGROUND_CLOSEOUTS.with(|active| active.borrow_mut().push(owner_key.clone()));
+    Ok(Some(CloseoutOwnerGuard {
+        file: file.to_path_buf(),
+        owner_key,
+        cycle_id,
+        owner_id,
+        stop: Some(stop),
+        heartbeat: Some(heartbeat),
+    }))
+}
 
 pub fn run_command_with_response(
     options: CommandOptions,
@@ -1173,6 +1360,7 @@ fn run_command_inner(
     empty_response_recovery: Option<EmptyResponseRecovery>,
 ) -> Result<()> {
     let file = options.file.as_path();
+    let _closeout_owner = claim_foreground_closeout_owner(file)?;
     let _force_disk_authority_scope = if options.force_disk {
         Some(
             agent_doc_document_realtime_io::begin_force_disk_authority_scope(
@@ -1422,6 +1610,9 @@ fn run_command_inner(
         strict_closeout: commit_mode == CommitMode::Required,
         force_disk: options.force_disk,
         no_pending_capture: options.no_pending_capture,
+        mutation_plan_json: Some(serde_json::to_string(
+            &options.captured_closeout_mutation_plan(),
+        )?),
         empty_response_recovery,
         rerun_command_base: finalize_rerun_command_base(FinalizeRerunCommand {
             required_commit: commit_mode == CommitMode::Required,

@@ -2720,6 +2720,101 @@ pub fn wait_for_supervisor_recycle_settle_for_file(
     wait_for_supervisor_recycle_settle(&project_root)
 }
 
+pub fn ensure_controller_running_for_file(file: &Path) -> Result<()> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    ensure_controller_running(&project_root, LaunchMode::Lazy)
+}
+
+pub use agent_doc_state_backbone::{
+    CloseoutOwnerClaimOutcome, CloseoutOwnerClaimRequest, CloseoutOwnerProjection,
+};
+pub const CLOSEOUT_OWNER_LEASE_SECS: u64 = agent_doc_state_backbone::CLOSEOUT_OWNER_LEASE_SECS;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CloseoutOwnerReleaseRequest {
+    cycle_id: String,
+    owner_id: String,
+    reason: String,
+    released_secs: u64,
+}
+
+pub fn new_closeout_owner_id(role: &str) -> String {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("{role}-{}-{nonce}", std::process::id())
+}
+
+/// Claim or refresh closeout ownership through the Lazily document actor.
+///
+/// The controller serializes the projection decision and fact append. SQLite is
+/// only the actor's persistence substrate and is never read by this client.
+pub fn claim_closeout_owner_for_file(
+    file: &Path,
+    request: CloseoutOwnerClaimRequest,
+) -> Result<CloseoutOwnerClaimOutcome> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    #[cfg(feature = "test-support")]
+    ensure_state_actor_for_tests(&project_root)?;
+    #[cfg(not(feature = "test-support"))]
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "closeout_owner_claim".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("closeout".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&request)?),
+        },
+    )
+}
+
+pub fn release_closeout_owner_for_file(
+    file: &Path,
+    cycle_id: &str,
+    owner_id: &str,
+    reason: &str,
+) -> Result<bool> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    ensure_controller_running(&project_root, LaunchMode::Lazy)?;
+    request_controller(
+        &project_root,
+        ControllerRequest {
+            command: "closeout_owner_release".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("closeout".to_string()),
+            reason: Some(reason.to_string()),
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(&CloseoutOwnerReleaseRequest {
+                cycle_id: cycle_id.to_string(),
+                owner_id: owner_id.to_string(),
+                reason: reason.to_string(),
+                released_secs: timestamp_secs(),
+            })?),
+        },
+    )
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct QueueContextClearPayload {
     command: String,
@@ -7007,6 +7102,104 @@ pub fn serve(project_root: &Path, launch_mode: LaunchMode) -> Result<()> {
     )
 }
 
+/// Minimal live Lazily actor used by cross-crate tests.
+///
+/// This deliberately omits controller process-global services (relay-hub
+/// ownership, exit watchers, supervisors, and recycle watchdogs). It exercises
+/// the same actor memory, RPC handlers, and durable fact sink as production
+/// without making unrelated tests share process-global controller state.
+#[cfg(feature = "test-support")]
+pub struct StateActorTestHandle {
+    should_stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(feature = "test-support")]
+fn state_actors_for_tests() -> &'static Mutex<BTreeMap<PathBuf, StateActorTestHandle>> {
+    static ACTORS: OnceLock<Mutex<BTreeMap<PathBuf, StateActorTestHandle>>> = OnceLock::new();
+    ACTORS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+#[cfg(feature = "test-support")]
+fn ensure_state_actor_for_tests(project_root: &Path) -> Result<()> {
+    let canonical = project_root
+        .canonicalize()
+        .unwrap_or_else(|_| project_root.to_path_buf());
+    let mut actors = state_actors_for_tests().lock();
+    if actors.contains_key(&canonical) {
+        return Ok(());
+    }
+    shutdown_stale_controller(&canonical);
+    let actor = start_state_actor_for_tests(&canonical)?;
+    actors.insert(canonical, actor);
+    Ok(())
+}
+
+#[cfg(feature = "test-support")]
+impl Drop for StateActorTestHandle {
+    fn drop(&mut self) {
+        self.should_stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take()
+            && thread.join().is_err()
+        {
+            eprintln!("[agent-doc] test Lazily state actor thread panicked");
+        }
+    }
+}
+
+#[cfg(feature = "test-support")]
+pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTestHandle> {
+    let sock = socket_path(project_root);
+    if sock.exists() {
+        std::fs::remove_file(&sock)
+            .with_context(|| format!("remove stale test actor socket {}", sock.display()))?;
+    }
+    if let Some(parent) = sock.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bootstrap = write_bootstrap(project_root, LaunchMode::Lazy)?;
+    let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
+    let name = sock.clone().to_fs_name::<GenericFilePath>()?;
+    let listener = ListenerOptions::new()
+        .name(name)
+        .create_sync()
+        .with_context(|| format!("failed to listen on {}", sock.display()))?;
+    listener
+        .set_nonblocking(ListenerNonblockingMode::Accept)
+        .context("failed to set test state actor listener nonblocking")?;
+
+    let should_stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = Arc::clone(&should_stop);
+    let actor_root = project_root.to_path_buf();
+    let thread = std::thread::spawn(move || {
+        while !thread_stop.load(Ordering::SeqCst) && actor_root.is_dir() {
+            match listener.accept() {
+                Ok(stream) => {
+                    if let Err(err) = serve_client(stream, &runtime, &thread_stop, &sock) {
+                        eprintln!("[agent-doc] test Lazily state actor client failed: {err:#}");
+                    }
+                }
+                Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(CONNECT_POLL);
+                }
+                Err(_) => break,
+            }
+        }
+        if let Err(err) = std::fs::remove_file(&sock)
+            && err.kind() != ErrorKind::NotFound
+        {
+            eprintln!(
+                "[agent-doc] failed to remove test Lazily state actor socket {}: {err}",
+                sock.display()
+            );
+        }
+    });
+    Ok(StateActorTestHandle {
+        should_stop,
+        thread: Some(thread),
+    })
+}
+
 #[derive(Debug)]
 struct ProjectRootIncarnation {
     inode: Option<u64>,
@@ -8364,6 +8557,21 @@ pub(crate) fn handle_request_locked(
         "supervisor_recycle_wait_settled" => controller_envelope(
             runtime.wait_for_supervisor_recycle_settle(SUPERVISOR_RECYCLE_SETTLE_WAIT),
         ),
+        "state_event_append" => controller_envelope(handle_state_event_append(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "closeout_owner_claim" => controller_envelope(handle_closeout_owner_claim(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "closeout_owner_release" => controller_envelope(handle_closeout_owner_release(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "queue_context_clear_started" => controller_envelope(handle_queue_context_clear_started(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -9528,6 +9736,140 @@ pub(crate) fn request_string(value: &Option<String>, name: &str) -> Result<Strin
 
 pub(crate) fn request_u64(value: Option<u64>, name: &str) -> Result<u64> {
     value.with_context(|| format!("controller request missing {name}"))
+}
+
+fn closeout_owner_event_nonce() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default()
+}
+
+pub(crate) fn handle_state_event_append(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<bool> {
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let event: agent_doc_state_backbone::StateEvent =
+        serde_json::from_str(&payload_json).context("parse state actor append payload")?;
+    append_apply_state_event(bootstrap, runtime, event)
+}
+
+pub(crate) fn handle_closeout_owner_claim(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<CloseoutOwnerClaimOutcome> {
+    let file = request_file(&request)?;
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let claim: CloseoutOwnerClaimRequest =
+        serde_json::from_str(&payload_json).context("parse closeout owner claim")?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+
+    let (outcome, recycle) = {
+        let mut memory = runtime.memory.lock();
+        let current = memory
+            .state_projection
+            .document(&document_hash)
+            .map(|document| document.closeout.clone())
+            .unwrap_or_default();
+        let current_owner_alive = current.owner.as_ref().and_then(|owner| {
+            (owner.owner_id != claim.owner_id
+                && owner.is_active_at(claim.now_secs)
+                && claim.allow_dead_owner_takeover)
+                .then(|| process_is_alive(owner.owner_pid))
+        });
+        let outcome = current.decide_owner_claim(&claim, current_owner_alive);
+        if let CloseoutOwnerClaimOutcome::Acquired(owner) = &outcome {
+            let event = agent_doc_state_backbone::StateEvent::new(
+                format!(
+                    "closeout-owner-claimed:{document_hash}:{}:{}:{}",
+                    owner.cycle_id,
+                    owner.owner_id,
+                    closeout_owner_event_nonce()
+                ),
+                agent_doc_state_backbone::StateFact::CloseoutOwnerClaimed {
+                    document_hash: document_hash.clone(),
+                    cycle_id: owner.cycle_id.clone(),
+                    owner_id: owner.owner_id.clone(),
+                    owner_pid: owner.owner_pid,
+                    role: owner.role.clone(),
+                    claimed_secs: owner.claimed_secs,
+                    expires_secs: owner.expires_secs,
+                },
+            );
+            append_state_event(&bootstrap.project_root, &event)?;
+            memory.state_ledger.append(event.clone());
+            memory.state_projection.apply(&event);
+        }
+        let recycle = memory.state_projection.project_supervisor_recycle();
+        (outcome, recycle)
+    };
+    runtime.supervisor_recycle_graph.set(recycle);
+    runtime.supervisor_recycle_waiters.notify_all();
+
+    agent_doc_ops_log_io::log_op(
+        &file,
+        &format!(
+            "closeout_owner_actor_claim file={} owner_id={} expected_cycle={} outcome={outcome:?}",
+            file.display(),
+            claim.owner_id,
+            claim.expected_cycle_id.as_deref().unwrap_or("current"),
+        ),
+    );
+    Ok(outcome)
+}
+
+pub(crate) fn handle_closeout_owner_release(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<bool> {
+    let file = request_file(&request)?;
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let release: CloseoutOwnerReleaseRequest =
+        serde_json::from_str(&payload_json).context("parse closeout owner release")?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+
+    let (released, recycle) = {
+        let mut memory = runtime.memory.lock();
+        let release_matches = memory
+            .state_projection
+            .document(&document_hash)
+            .is_some_and(|document| {
+                document
+                    .closeout
+                    .owner_release_matches(&release.cycle_id, &release.owner_id)
+            });
+        if release_matches {
+            let event = agent_doc_state_backbone::StateEvent::new(
+                format!(
+                    "closeout-owner-released:{document_hash}:{}:{}:{}",
+                    release.cycle_id,
+                    release.owner_id,
+                    closeout_owner_event_nonce()
+                ),
+                agent_doc_state_backbone::StateFact::CloseoutOwnerReleased {
+                    document_hash: document_hash.clone(),
+                    cycle_id: release.cycle_id.clone(),
+                    owner_id: release.owner_id.clone(),
+                    reason: release.reason.clone(),
+                    released_secs: release.released_secs,
+                },
+            );
+            append_state_event(&bootstrap.project_root, &event)?;
+            memory.state_ledger.append(event.clone());
+            memory.state_projection.apply(&event);
+        }
+        (
+            release_matches,
+            memory.state_projection.project_supervisor_recycle(),
+        )
+    };
+    runtime.supervisor_recycle_graph.set(recycle);
+    runtime.supervisor_recycle_waiters.notify_all();
+    Ok(released)
 }
 
 fn route_submit_event_id(kind: &str, document_hash: &str, submit_epoch: u64) -> String {
@@ -14873,6 +15215,102 @@ mod tests {
         assert!(ops_log.contains("visible_write_commit_candidate_durable_event_recorded"));
         assert!(ops_log.contains("authority=state_backbone"));
         assert!(ops_log.contains("recovery=controller_reconcile"));
+    }
+
+    #[test]
+    fn closeout_owner_cas_is_serialized_by_live_lazily_projection() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n"))
+            .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new(bootstrap.clone()).unwrap();
+
+        let claim_request = |owner_id: &str| ControllerRequest {
+            command: "closeout_owner_claim".to_string(),
+            file: Some(doc.clone()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: Some("test".to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(
+                serde_json::to_string(&CloseoutOwnerClaimRequest {
+                    expected_cycle_id: Some(cycle.cycle_id.clone()),
+                    owner_id: owner_id.to_string(),
+                    owner_pid: std::process::id(),
+                    role: "test_closeout".to_string(),
+                    now_secs: 10,
+                    lease_secs: 30,
+                    allow_dead_owner_takeover: true,
+                })
+                .unwrap(),
+            ),
+        };
+
+        let first =
+            handle_closeout_owner_claim(&bootstrap, &runtime, claim_request("owner-1")).unwrap();
+        assert!(matches!(
+            first,
+            CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection {
+                ref owner_id,
+                ..
+            }) if owner_id == "owner-1"
+        ));
+        let second =
+            handle_closeout_owner_claim(&bootstrap, &runtime, claim_request("owner-2")).unwrap();
+        assert!(matches!(
+            second,
+            CloseoutOwnerClaimOutcome::HeldByOther(CloseoutOwnerProjection {
+                ref owner_id,
+                ..
+            }) if owner_id == "owner-1"
+        ));
+
+        let released = handle_closeout_owner_release(
+            &bootstrap,
+            &runtime,
+            ControllerRequest {
+                command: "closeout_owner_release".to_string(),
+                file: Some(doc.clone()),
+                session_id: None,
+                pane_id: None,
+                window_id: None,
+                generation: None,
+                state: None,
+                caller: Some("test".to_string()),
+                reason: Some("finished".to_string()),
+                supervisor_pid: None,
+                supervisor_socket: None,
+                command_kind: None,
+                diagnostic_payload: Some(
+                    serde_json::to_string(&CloseoutOwnerReleaseRequest {
+                        cycle_id: cycle.cycle_id.clone(),
+                        owner_id: "owner-1".to_string(),
+                        reason: "finished".to_string(),
+                        released_secs: 11,
+                    })
+                    .unwrap(),
+                ),
+            },
+        )
+        .unwrap();
+        assert!(released);
+        assert!(matches!(
+            handle_closeout_owner_claim(&bootstrap, &runtime, claim_request("owner-2")).unwrap(),
+            CloseoutOwnerClaimOutcome::Acquired(CloseoutOwnerProjection {
+                ref owner_id,
+                ..
+            }) if owner_id == "owner-2"
+        ));
     }
 
     /// `#restartstderrbleed` — the auto-install child must NOT inherit the

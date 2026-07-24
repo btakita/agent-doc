@@ -18,9 +18,11 @@ agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.24" }
 agent-doc-write-command-io = { path = "../agent-doc-write-command-io", version = "0.35.24" }
 agent-doc-write-runtime-io = { path = "../agent-doc-write-runtime-io", version = "0.35.24" }
 anyhow = "1"
+serde_json = "1"
 
 [dev-dependencies]
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.24" }
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.24", features = ["test-support"] }
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.24", features = ["test-support"] }
 agent-doc-closeout-runtime-io = { path = "../agent-doc-closeout-runtime-io", version = "0.35.24" }
 agent-doc-crdt-relay-io = { path = "../agent-doc-crdt-relay-io", version = "0.35.24" }

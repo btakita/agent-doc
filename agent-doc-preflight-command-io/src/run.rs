@@ -953,6 +953,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             let file_content = resolve_current_preflight_document(file, "start_preflight")?;
             let snap_len = snap.as_ref().map(|s| s.len()).unwrap_or(0);
             let file_len = file_content.len();
+            agent_doc_controller_io::project_controller::ensure_controller_running_for_file(file)?;
             agent_doc_cycle_state_io::start_preflight(file, snap.as_deref(), Some(&file_content))?;
             agent_doc_ops_log_io::log_op(
                 file,

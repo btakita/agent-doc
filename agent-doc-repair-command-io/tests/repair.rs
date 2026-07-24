@@ -1237,10 +1237,14 @@ mod tests {
         let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
             .unwrap()
             .expect("captured response should expose a durable resume key");
-        assert!(matches!(
-            agent_doc_repair_command_io::resume_captured_finalize(&doc, &key),
-            agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
-        ));
+        let outcome = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            matches!(
+                outcome,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "{outcome:?}"
+        );
         assert!(matches!(
             agent_doc_repair_command_io::resume_captured_finalize(&doc, &key),
             agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Superseded
@@ -1255,6 +1259,69 @@ mod tests {
                 .phase,
             agent_doc_turn::CyclePhase::Committed
         ));
+    }
+
+    #[test]
+    fn binary_owned_resume_replays_captured_backlog_edit_plan() {
+        let dir = setup_project();
+        let doc = dir.path().join("test.md");
+        let content = concat!(
+            "---\n",
+            "session: test\n",
+            "agent_doc_format: append\n",
+            "agent_doc_write: merge\n",
+            "---\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#fix1] original next action\n",
+            "<!-- /agent:backlog -->\n\n",
+            "## User\n\n",
+            "Hello\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        init_git_repo(dir.path(), &doc);
+        agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+
+        let plan = agent_doc_write_command_io::CapturedCloseoutMutationPlan {
+            pending_edit: vec!["fix1=narrowed recovery action".to_string()],
+            ..Default::default()
+        };
+        let plan_json = serde_json::to_string(&plan).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content_and_intent_and_plan(
+            &doc,
+            "Recovered response with mutation intent.",
+            content,
+            Some("Recovered response with mutation intent."),
+            Some(&plan_json),
+        )
+        .unwrap();
+
+        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
+            .unwrap()
+            .expect("captured response should expose a durable resume key");
+        let outcome = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
+        assert!(
+            matches!(
+                outcome,
+                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
+            ),
+            "{outcome:?}"
+        );
+
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            result
+                .matches("Recovered response with mutation intent.")
+                .count(),
+            1
+        );
+        assert!(result.contains("[#fix1] narrowed recovery action"));
+        assert!(!result.contains("[#fix1] original next action"));
     }
 
     #[test]

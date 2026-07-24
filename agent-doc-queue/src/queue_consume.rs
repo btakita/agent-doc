@@ -11,6 +11,7 @@ use agent_doc_document::queue_projection::{
 };
 use agent_doc_document::write_normalization::strip_boundary_for_dedup;
 use agent_doc_element::element;
+use agent_doc_markdown_ast::mutations::{MutationNodePatch, MutationNodePatchOp};
 use anyhow::{Context, Result};
 
 use crate::{
@@ -286,6 +287,35 @@ pub fn mark_done_node_ops_for_done_ids(
     queue_mark_done_node_ops(&keys)
 }
 
+/// Map a batch of structural ops ([`IpcNodeOp`], Phase B vocabulary) to the
+/// drift-resilient node-patch wire format ([`MutationNodePatch`]) the editor
+/// already applies via `agent_doc_apply_node_patches`.
+///
+/// Effect mapping (Phase C, `#crdtstructops`):
+/// - `consume` / `mark_done` (strike-through/keep) → [`MutationNodePatchOp::Strike`].
+/// - `strike` (tombstone/remove) → [`MutationNodePatchOp::Remove`].
+///
+/// Reusing the existing node-patch machinery means the editor needs no new
+/// apply primitive — an `ApplyStructuralOp` intent just carries these as its
+/// `node_patches` without the whole-buffer canonical replace.
+pub fn ipc_node_ops_to_node_patches(ops: &[IpcNodeOp]) -> Vec<MutationNodePatch> {
+    ops.iter()
+        .map(|op| MutationNodePatch {
+            component: op.component.clone(),
+            node_key: op.node_id.clone(),
+            op: if op.is_tombstone() {
+                MutationNodePatchOp::Remove
+            } else {
+                MutationNodePatchOp::Strike
+            },
+            content: None,
+            expected_content: None,
+            before: None,
+            after: None,
+            order: Vec::new(),
+        })
+        .collect()
+}
 pub fn first_n_queue_prompt_texts(entries: &[QueueEntry], count: usize) -> Vec<String> {
     entries
         .iter()
@@ -1230,6 +1260,24 @@ mod tests {
         assert!(mark_done.iter().all(|op| op.op == OP_MARK_DONE));
         let strike = queue_strike_node_ops(&keys);
         assert!(strike.iter().all(|op| op.op == OP_STRIKE && op.is_tombstone()));
+    }
+
+    #[test]
+    fn ipc_node_ops_map_to_node_patch_wire_format() {
+        // consume + mark_done (strike-through/keep) -> MutationNodePatchOp::Strike.
+        // strike (tombstone/remove) -> MutationNodePatchOp::Remove.
+        let ops = vec![
+            IpcNodeOp::consume("queue", "queue:0:a:0".into()),
+            IpcNodeOp::mark_done("queue", "queue:0:b:0".into()),
+            IpcNodeOp::strike("queue", "queue:0:c:0".into()),
+        ];
+        let patches = ipc_node_ops_to_node_patches(&ops);
+        assert_eq!(patches.len(), 3);
+        assert_eq!(patches[0].node_key, "queue:0:a:0");
+        assert_eq!(patches[0].op, MutationNodePatchOp::Strike);
+        assert_eq!(patches[1].op, MutationNodePatchOp::Strike);
+        assert_eq!(patches[2].op, MutationNodePatchOp::Remove);
+        assert!(patches.iter().all(|p| p.content.is_none() && p.order.is_empty()));
     }
 
     #[test]

@@ -2436,7 +2436,11 @@ class PatchWatcher implements vscode.Disposable {
         }
         const filePath = typeof message.file === 'string' ? message.file : undefined;
         switch (type) {
-            case EditorIntent.ApplyCanonical: {
+            // `ApplyStructuralOp` (CRDT structural ops, `#crdtstructops` Phase C)
+            // rides the same node-patch apply path as `ApplyCanonical`: the binary
+            // sends only `node_patches` (strike/mark_done) with no canonical content.
+            case EditorIntent.ApplyCanonical:
+            case EditorIntent.ApplyStructuralOp: {
                 if (!filePath || (typeof message.fullContent === 'string' && message.fullContent.length > 0)) return 0;
                 const patch = {
                     ...message,

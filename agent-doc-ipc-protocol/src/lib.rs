@@ -14,6 +14,13 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EditorIntent {
     ApplyCanonical,
+    /// Apply a batch of node-keyed structural ops (strike / mark_done) WITHOUT a
+    /// whole-buffer canonical replace. Carries `node_patches` only; the editor
+    /// applies them to its live buffer via the existing node-patch machinery
+    /// (`agent_doc_apply_node_patches`) and publishes the same receipt. This is
+    /// the CRDT structural-op channel (`#crdtstructops` Phase C) that retires the
+    /// flock-serialized full-text rewrite for the queue consume sites.
+    ApplyStructuralOp,
     Reposition,
     SaveDocument,
     RefreshContent,
@@ -27,6 +34,7 @@ impl EditorIntent {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ApplyCanonical => "apply_canonical",
+            Self::ApplyStructuralOp => "apply_structural_op",
             Self::Reposition => "reposition",
             Self::SaveDocument => "save_document",
             Self::RefreshContent => "refresh_content",

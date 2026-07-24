@@ -36,6 +36,9 @@ private enum class CrdtReplicaEventReason(val token: String) {
 /** Cross-language editor intent names; mirrored by Rust and VS Code. */
 private enum class EditorIntent(val token: String) {
     ApplyCanonical("apply_canonical"),
+    /// Apply node-keyed structural ops (strike / mark_done) WITHOUT a whole-buffer
+    /// canonical replace. Carries `node_patches` only (`#crdtstructops` Phase C).
+    ApplyStructuralOp("apply_structural_op"),
     Reposition("reposition"),
     SaveDocument("save_document"),
     RefreshContent("refresh_content"),
@@ -370,7 +373,13 @@ class PatchWatcher(private val project: Project) : Disposable {
         val type = extractStringField(json, "type") ?: return 0
 
         return when (type) {
-            EditorIntent.ApplyCanonical.token -> {
+            // `ApplyStructuralOp` (CRDT structural ops, `#crdtstructops` Phase C)
+            // rides the same node-patch apply path as `ApplyCanonical`: the binary
+            // sends only `node_patches` (strike/mark_done) with no canonical
+            // content, so `applyPatch` applies just the node ops and publishes the
+            // same receipt. A distinct token keeps the intent auditable and leaves
+            // room to diverge the handling without a new apply primitive.
+            EditorIntent.ApplyCanonical.token, EditorIntent.ApplyStructuralOp.token -> {
                 val patch = parsePatchJson(json) ?: return 0
                 if (!patch.targetsThisEditor()) {
                     LOG.info("[socket] patch_id ${patch.patchId} targets editor_id ${patch.editorId}; this editor is ${EditorIdentity.id}")

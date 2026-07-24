@@ -15,6 +15,7 @@ pub mod document_replay;
 pub mod exchange_node_merge;
 pub mod exchange_seqcrdt;
 pub mod frontmatter_crdt;
+pub mod queue_seqcrdt;
 pub mod response_cell;
 
 pub use document_cell::{

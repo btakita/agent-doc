@@ -113,26 +113,26 @@ Fixed in agent-doc commit `2bf8988a0` (`fix: serialize closeout through Lazily a
 
 Regression coverage includes actor CAS/release ordering, exact-once captured response recovery with a backlog edit, safe mutation-plan reconstruction, legacy-capture compatibility, and the full repair suite. `make check` passed across the 7,883-test workspace run; `make install-full` succeeded and recycled the installed controller/editor integration. The latest main CI run is green.
 
-### Re: Lazily state on the closeout hot path — gpt-5.6-sol
+### Re: agent-doc churn and Lazily durable sinks — gpt-5
 
-You were right: the `flock`/SQLite ownership seam was the wrong architecture. It existed because closeout recovery had been treated as an independent cross-process repair path that reloaded a cold projection and arbitrated beside the live actor. That made SQLite and a filesystem lock decision authorities, which is exactly what Lazily state is meant to prevent.
+Fixed the causes of the churn and released agent-doc 0.35.25.
 
-Fixed in agent-doc commit `2bf8988a0` (`fix: serialize closeout through Lazily actor`):
+- Closeout ownership, heartbeats, release, and captured mutation replay now go through typed transitions on the live Lazily actor. SQLite is the actor-emitted restart projection; it and `flock` no longer arbitrate the closeout hot path. The agent-doc harness now records this as the `#lazily-hot-path` architecture rule.
+- Binary installation is monotonic: an older checkout cannot overwrite a newer installed agent-doc unless `AGENT_DOC_ALLOW_DOWNGRADE=1` is explicitly selected.
+- A stale long-lived MCP server now detects executable replacement by inode and `execve`s the installed binary while replaying the in-flight stateful request over the same stdio transport. `session-check` is included because it can advance recovery state.
+- Strict closeout canonicalizes harmless heading drift before capture: `### Plan:` becomes a valid `### Re:` heading, body-only prose receives a response heading, and empty or non-exchange patchbacks remain rejected.
+- Captured tracked-work mutations are persisted with the response intent, so repair/replay does not reconstruct them from a newer command line.
 
-- Closeout claim, refresh, takeover, and exact release are now serialized transitions against the live Lazily document projection. The controller checks typed PID liveness for dead-owner takeover while holding the actor-memory transition boundary.
-- Foreground finalize claims ownership before `ResponseCaptured`, so captured-finalize recovery cannot race it and commit an incomplete response. Nested strict-write recovery reuses the outer local actor capability instead of competing with itself.
-- State-fact producers route through the live actor. SQLite is only the actor-emitted durable fact sink and cold-start hydration path; a post-connect actor failure fails closed instead of bypassing the actor. `flock` remains only at controller bootstrap/explicitly actorless compatibility boundaries.
-- `ResponseCaptured` now durably stores the sanitized typed closeout mutation plan. Recovery replays the normal write path with backlog edits, done/gate/review changes, and queue completion intent intact, while excluding runtime authority such as `force_disk`, lint overrides, and sibling commits.
-- Added the `#lazily-hot-path` rule to `src/agent-doc/AGENTS.md` so future ownership/CAS/lease/dedup work must use actor state and may not independently reload SQLite at the decision seam.
+The bounded Lazily design plan is at `tasks/software/plan-lazily-durable-effect-sinks.md` (commit `636becadb`). It keeps storage application-owned, distinguishes coalesced projections from lossless history, reuses Effect/AsyncEffect, TopicCell, DurableOutbox, existing durability markers, and gates any shared API on two consumers plus net code reduction.
 
-Regression coverage includes actor CAS/release ordering, exact-once captured response recovery with a backlog edit, safe mutation-plan reconstruction, legacy-capture compatibility, and the full repair suite. `make check` passed across the 7,883-test workspace run; `make install-full` succeeded and recycled the installed controller/editor integration. The latest main CI run is green.
-<!-- agent:boundary:d5b01b9d -->
+Verification: focused package regressions passed; full `make check` passed; normal and full-LTO installs passed; installed `agent-doc --version` reports 0.35.25. Agent-doc commits `91e26902b` and `a51c6b83f` are on `main`, tag `v0.35.25` is pushed, and the CI and Release workflows were in progress at the required single inspection.
+<!-- agent:boundary:d886b46e -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ⏭️ do [#fmgcverify]
-- 📌 do [#qactsync]
+- ⏭️ 📌 do [#qactsync]
 - 📌 do [#ftimmediate]
 - 📌 do [#qeditrace]
 - 📌 do [#jbcompactcommit]

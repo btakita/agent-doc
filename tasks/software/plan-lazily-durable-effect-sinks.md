@@ -178,3 +178,100 @@ That gives agents a clear authority rule immediately and tests it against the
 agent-doc failure mode that motivated the work. It avoids prematurely adding a
 new Lazily subsystem when the existing effect, topic, outbox, durability, and
 receipt primitives may already be sufficient.
+
+## Progress (live log — read this first when resuming)
+
+All work below is committed and pushed to `main`. Tag: `#lzdurablesink`.
+
+### Architecture decision (binds the remaining work)
+
+Closeout authority routes through **lazily `command-plane-v1`**
+(`CommandSubmit` + terminal `CausalReceipt`), **not** a bespoke
+`send_ndjson_request_to_actor` verb. A bespoke `closeout_phase_advance`
+socket-verb was drafted and reverted (`send_ndjson_request_to_actor` is the
+wrong primitive — it reinvents idempotency/generation/supersession the command
+plane already provides). The durable-sink shape holds: the phase
+`turn_intent_checkpoint` + phase fact(s) are the effect sink
+(`append_apply_state_event` = idempotent SQLite insert + in-memory apply), and
+the `CausalReceipt` is the monotone acknowledgement.
+
+Event labels are typed, not free-text: `CloseoutPhaseEvent` is the label;
+`Committed(CommitObservation)` carries the closed stable/no-op commit
+vocabulary; `Abandoned` carries a named `reason` field; `last_event_label()`
+derives the legacy `last_event` string.
+
+### Phase 1 — DONE (guidance before API)
+
+- lazily-spec `35563c1`: `docs/durable-sinks.md` + `protocol.md` § Durable effect
+  sinks + `SUMMARY.md` entry.
+- lazily-formal `6e46ce2`: `LazilyFormal/DurableSink.lean` (monotone
+  `durable_through`, projection batch-coalesces to settled epoch, lossless
+  history replay, sink-failure-never-regresses-authority, cold hydrate resumes).
+  `make check` green.
+- lazily-rs `2095d9c`: README durable-effect-sinks section.
+- agent-doc: `AGENTS.md` durable-sink section + the architecture-review prompt.
+
+### Phase 2 — foundations + closeout authority DONE; live transport + migration PENDING
+
+Done in agent-doc (all on `main`):
+
+- `1c4c2a04e` — `commit_barrier_for_closeout` reads the live in-memory projection
+  (`runtime.document_state_projection`), no `state.db` replay, no self-RPC.
+- `bbb69746d` — `reconstruct_cycle_state(&DocumentStateProjection)` pure helper
+  (shared by SQLite `load` and the actor).
+- `dda683a30` — pure fact builders `build_turn_intent_checkpoint_event` +
+  `build_closeout_projection_event` (+ pub `CloseoutProjectionEvent`).
+- `6e5b0b635` — client side: `build_closeout_advance_submit` +
+  `closeout_advance_receipt` + `CloseoutAdvancePayload` on command-plane-v1.
+- `4a5d584a4` — typed event labels (above).
+- `9ec4b4b00` — `service_closeout_advance` authority (decode → reconstruct from
+  live projection → `decide_*` → `append_apply_state_event` sink → `CausalReceipt`)
+  + `decide_write_applied`; in-process test.
+- `f2dc95061` — `decide_response_captured` / `decide_committed` / `decide_abandoned`
+  (+ `CloseoutDecision` for the tri-state) ; `service_closeout_advance` routes all
+  four transitions; tests cover `PreflightStarted→WriteApplied→Committed` + `Abandoned`.
+
+The `mark_*` client funcs already delegate to the shared pure `decide_*`
+(behavior-preserving; 50 cycle-state-io tests green; clippy `--all-targets` clean).
+
+### Remaining todos (Phase 2)
+
+1. **Wire the live `CommandTransport` over the controller socket** (cross-cutting;
+   also unlocks `supervisor_recycle` + editor routes, which are foundation-only
+   today). lazily API: `CommandTransport` trait `lazily-rs/src/command.rs:523`,
+   `CommandMessage` `:217`, `CommandRpcClient` `:548`. Controller serve loop:
+   `serve_client` `rpc.rs:8304`, `handle_request_for_client` `:8344`. Client transport
+   today: `agent_doc_state_wire::send_ndjson_request_to_actor`. Frame
+   `CommandSubmit`/receipts over that socket, dispatch by `namespace`/`name` to
+   `service_closeout_advance`, emit the `CausalReceipt`.
+2. **Migrate the `mark_*` clients to submit `closeout_advance` commands** (they
+   currently use the local `load→decide→save→append` path; the `decide_*` + builders
+   are already shared). Callers of `load_with_closeout_projection` span ~45 files
+   (run: `rg -n 'load_with_closeout_projection'` in agent-doc).
+3. **Migrate `closeout_owner_claim`/`release` onto the command plane** — add
+   `build_closeout_owner_claim_submit` + `service_closeout_owner_claim` paralleling
+   `closeout_advance`; the existing bespoke handlers are
+   `handle_closeout_owner_claim` `rpc.rs:9781` / `handle_closeout_owner_release`
+   (decide via `decide_owner_claim` on the projection's `closeout`).
+4. **Read-only inspection sites from the live projection.** Chokepoint:
+   `load_document_projection` (`cycle-state-io/src/lib.rs` ≈ L700) — migrating it
+   covers `load` / `load_with_closeout_projection` / `load_closeout_projection` /
+   `load_document_disk_write`. Controller-internal callers must NOT self-RPC
+   (`commit_barrier_for_closeout` already converted; `persist_session_actor_closeout`
+   is client-called so safe). Leave `load_recent_captured_response_checkpoints`
+   (legitimate bounded history read).
+5. **Remove the per-consume `flock`** — `agent-doc-queue-io/src/queue_consume.rs:49`
+   `acquire_doc_lock` (6 sites: 212/376/576/648/734/815) +
+   `agent-doc-write-runtime-io/src/lib.rs:2478`. Replace with actor-owned dedup.
+6. **Full `make check` green** — clippy `--all-targets` + nextest + `sim-medium` +
+   `version-sync` + `lean` + `tla` (the `Makefile` `check` target). Known flake: the
+   `crdt_checkpoint_*` pair fails under `cargo test --lib` (cross-test leakage,
+   `#wsflake2`) but passes under nextest isolation — pre-existing, not caused by this
+   work.
+
+### Resume hint
+
+The command-plane closeout foundation is complete and tested in-process. The next
+concrete step is todo (1): implement a `CommandTransport` over the controller
+socket so `service_closeout_advance` is reachable from a client, then (2) point
+`mark_*` at it. Everything committed; `cargo check` is green on clean `main`.

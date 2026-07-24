@@ -319,6 +319,7 @@ mod tests {
                 component: "queue".to_string(),
                 node_id: "queue:0".to_string(),
                 op: "consume".to_string(),
+                content: None,
             }],
             remaining: 0,
             drained: true,

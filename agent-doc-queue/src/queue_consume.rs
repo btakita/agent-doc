@@ -150,12 +150,20 @@ pub const OP_CONSUME: &str = "consume";
 pub const OP_MARK_DONE: &str = "mark_done";
 /// The canonical op label for a tombstone (remove) structural op.
 pub const OP_STRIKE: &str = "strike";
+/// The canonical op label for a content replace structural op (carries `content`).
+/// Used when a node's mutation is more than a bare strike-through — e.g. the
+/// `#qstrikenote` annotation appended to a struck free-text head — so the
+/// per-node target text is sent as a drift-resilient `MutationNodePatchOp::Replace`.
+pub const OP_REPLACE: &str = "replace";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpcNodeOp {
     pub component: String,
     pub node_id: String,
     pub op: String,
+    /// Replacement text for `OP_REPLACE` ops (the fully-mutated node raw, e.g. an
+    /// annotated struck line). `None` for strike/consume/mark_done/strike ops.
+    pub content: Option<String>,
 }
 
 impl IpcNodeOp {
@@ -174,11 +182,26 @@ impl IpcNodeOp {
         Self::new(component, node_id, OP_STRIKE)
     }
 
+    /// A replace op: swap the node's raw text for `content` (→
+    /// `MutationNodePatchOp::Replace`). Use this when the per-node mutation
+    /// carries more than a bare strike-through (e.g. an annotation). The node
+    /// stays live with the new text; in `QueueCrdt` terms this is a mark_done
+    /// effect (the node is not tombstoned).
+    pub fn replace(component: &str, node_id: String, content: String) -> Self {
+        Self {
+            component: component.to_string(),
+            node_id,
+            op: OP_REPLACE.to_string(),
+            content: Some(content),
+        }
+    }
+
     fn new(component: &str, node_id: String, op: &str) -> Self {
         Self {
             component: component.to_string(),
             node_id,
             op: op.to_string(),
+            content: None,
         }
     }
 
@@ -193,7 +216,7 @@ impl IpcNodeOp {
     /// [`QueueCrdt`]: agent_doc_merge::queue_seqcrdt::QueueCrdt
     pub fn kind(&self) -> NodeOpKind {
         match self.op.as_str() {
-            OP_MARK_DONE => NodeOpKind::MarkDone,
+            OP_MARK_DONE | OP_REPLACE => NodeOpKind::MarkDone,
             OP_STRIKE => NodeOpKind::Strike,
             _ => NodeOpKind::Consume,
         }
@@ -207,11 +230,15 @@ impl IpcNodeOp {
     }
 
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
+        let mut v = serde_json::json!({
             "component": self.component,
             "node_id": self.node_id,
             "op": self.op,
-        })
+        });
+        if let Some(content) = &self.content {
+            v["content"] = serde_json::Value::String(content.clone());
+        }
+        v
     }
 }
 
@@ -300,19 +327,28 @@ pub fn mark_done_node_ops_for_done_ids(
 /// `node_patches` without the whole-buffer canonical replace.
 pub fn ipc_node_ops_to_node_patches(ops: &[IpcNodeOp]) -> Vec<MutationNodePatch> {
     ops.iter()
-        .map(|op| MutationNodePatch {
-            component: op.component.clone(),
-            node_key: op.node_id.clone(),
-            op: if op.is_tombstone() {
-                MutationNodePatchOp::Remove
+        .map(|op| {
+            let is_replace = op.op == OP_REPLACE;
+            let (patch_op, content) = if is_replace {
+                (
+                    MutationNodePatchOp::Replace,
+                    op.content.clone().unwrap_or_default(),
+                )
+            } else if op.is_tombstone() {
+                (MutationNodePatchOp::Remove, String::new())
             } else {
-                MutationNodePatchOp::Strike
-            },
-            content: None,
-            expected_content: None,
-            before: None,
-            after: None,
-            order: Vec::new(),
+                (MutationNodePatchOp::Strike, String::new())
+            };
+            MutationNodePatch {
+                component: op.component.clone(),
+                node_key: op.node_id.clone(),
+                op: patch_op,
+                content: if is_replace { Some(content) } else { None },
+                expected_content: None,
+                before: None,
+                after: None,
+                order: Vec::new(),
+            }
         })
         .collect()
 }
@@ -329,6 +365,46 @@ pub fn apply_structural_ops_to_content(content: &str, ops: &[IpcNodeOp]) -> Resu
     let patches = ipc_node_ops_to_node_patches(ops);
     agent_doc_markdown_ast::mutations::apply_node_patches(content, &patches)
         .map_err(|err| anyhow::anyhow!("structural op apply failed: {err}"))
+}
+
+/// Derive node-keyed `OP_REPLACE` structural ops from the per-node raw-text diff
+/// between `before` and `after`. For each node whose raw changed (e.g. a free-text
+/// head that was struck `~~text~~` AND annotated `~~text~~ — note`), emit a
+/// [`IpcNodeOp::replace`] carrying the new raw. This is the robust bridge from a
+/// site's full-text computation to node-only structural ops: it reuses the actual
+/// computed target text, so it never diverges from the site's `new_document` for
+/// the mutated nodes, without reimplementing the strike/annotate logic.
+///
+/// Nodes unchanged between `before` and `after` produce no op; the caller falls
+/// back to the full-text write when the result is empty (e.g. a mutation the node
+/// model can't express, like a non-item excise).
+pub fn node_replace_ops_from_diff(
+    before: &str,
+    after: &str,
+    component: &str,
+) -> Result<Vec<IpcNodeOp>> {
+    // Compare full node spans (which include the `- ` bullet) so a Replace op —
+    // which rewrites `item.start_byte..end_byte` — preserves the bullet. Using
+    // `item.raw` (bullet-stripped) here would drop the bullet on apply.
+    let before_spans: HashMap<String, String> = agent_doc_markdown_ast::mutations::item_nodes(
+        before, component,
+    )
+    .map_err(|err| anyhow::anyhow!("node diff: failed to parse before: {err}"))?
+    .into_iter()
+    .map(|n| (n.node_key, before[n.item.start_byte..n.item.end_byte].to_string()))
+    .collect();
+    let after_nodes = agent_doc_markdown_ast::mutations::item_nodes(after, component)
+        .map_err(|err| anyhow::anyhow!("node diff: failed to parse after: {err}"))?;
+    let mut ops = Vec::new();
+    for n in after_nodes {
+        let after_span = &after[n.item.start_byte..n.item.end_byte];
+        if let Some(before_span) = before_spans.get(&n.node_key)
+            && after_span != before_span
+        {
+            ops.push(IpcNodeOp::replace(component, n.node_key, after_span.to_string()));
+        }
+    }
+    Ok(ops)
 }
 pub fn first_n_queue_prompt_texts(entries: &[QueueEntry], count: usize) -> Vec<String> {
     entries
@@ -1322,6 +1398,31 @@ mod tests {
         let removed = apply_structural_ops_to_content(&content, &ops).unwrap();
         assert!(!removed.contains("beta"), "tombstoned node is gone");
         assert!(removed.contains("- do [#alpha]\n"), "sibling survives");
+    }
+
+    #[test]
+    fn replace_op_carries_content_and_maps_to_node_patch_replace() {
+        let op = IpcNodeOp::replace("queue", "queue:0:a:0".into(), "~~struck~~ — note".into());
+        assert_eq!(op.kind(), NodeOpKind::MarkDone, "replace is a mark_done effect");
+        assert!(!op.is_tombstone());
+        assert_eq!(op.content.as_deref(), Some("~~struck~~ — note"));
+        let patches = ipc_node_ops_to_node_patches(&[op]);
+        assert_eq!(patches[0].op, MutationNodePatchOp::Replace);
+        assert_eq!(patches[0].content.as_deref(), Some("~~struck~~ — note"));
+    }
+
+    #[test]
+    fn node_replace_ops_from_diff_derives_per_node_replace() {
+        // before: bare heads; after: one head struck+annotated. The diff yields a
+        // single Replace op for the mutated node, and applying it reproduces after.
+        let before = queue_doc("- do [#alpha]\n- a free-text report\n");
+        let after = queue_doc("- do [#alpha]\n- ~~a free-text report~~\n");
+        let ops = node_replace_ops_from_diff(&before, &after, "queue").unwrap();
+        assert_eq!(ops.len(), 1, "only the mutated node yields an op");
+        assert_eq!(ops[0].op, OP_REPLACE);
+        // Applying the derived op to `before` reproduces `after` for the queue body.
+        let applied = apply_structural_ops_to_content(&before, &ops).unwrap();
+        assert_eq!(applied, after, "derived Replace op reproduces the target");
     }
 
     #[test]

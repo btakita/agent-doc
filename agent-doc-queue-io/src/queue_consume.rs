@@ -17,7 +17,9 @@ use agent_doc_queue::{
         answered_free_text_head_node_keys, consume_queue_nodes_by_key, first_n_queue_prompt_texts,
         head_id_names_open_backlog_item, id_backed_head_node_keys,
         mark_entries_completed_by_done_ids, normalized_done_id_bag,
-        queue_consume_count_for_done_ids, queue_consume_node_ops, queue_prompt_node_keys_for_count,
+        node_replace_ops_from_diff,
+        queue_consume_count_for_done_ids, queue_consume_node_ops,
+        queue_mark_done_node_ops, queue_prompt_node_keys_for_count,
         queue_prompt_node_keys_for_done_ids, strike_all_noise_queue_heads,
     },
     queue_response::{
@@ -456,9 +458,20 @@ pub fn strike_answered_free_text_queue_heads(
         None => None,
     };
 
+    // `#crdtstructops` node-only path: derive per-node Replace ops from the
+    // struck+annotated diff (each newly-struck free-text head carries its
+    // `#qstrikenote` annotation in the replaced raw). When the diff yields ops,
+    // converge via structural ops instead of the full-text write; otherwise
+    // (force-disk repair, or a shape the node model can't express) keep full-text.
+    let replace_ops = node_replace_ops_from_diff(&content, &new_document, "queue")
+        .unwrap_or_default();
     if skip_visible_guard {
         effects
             .atomic_write(file, &new_document)
+            .context("free-text strike: failed to write document")?;
+    } else if !replace_ops.is_empty() {
+        effects
+            .converge_structural_ops(file, &replace_ops, &content, "free_text_strike")
             .context("free-text strike: failed to write document")?;
     } else {
         effects
@@ -901,13 +914,21 @@ pub fn mark_completed_queue_prompts_for_done_ids(
         None
     };
 
-    // `#fcc0`: converge the done-id mark write through the editor IPC when a JB
-    // listener is active (no `File Cache Conflict` dialog); fall back to the
-    // guarded disk write otherwise. The force-disk repair path keeps its raw
-    // bypass — it deliberately skips IPC/IDE and the visible-write guard.
+    // `#crdtstructops` node-only path: when the done-id heads are AST-addressable,
+    // converge via structural mark_done ops (the per-node strike-through is
+    // byte-identical to the whole-body `render` for those entries) instead of the
+    // full-text write. The force-disk repair path and the non-AST fallback
+    // (multiline `---`-fenced prompts that the node enumerator can't see) keep the
+    // full-text `render` write.
+    let done_node_keys = queue_prompt_node_keys_for_done_ids(&content, done_ids, &marked_texts);
     if skip_visible_guard {
         effects
             .atomic_write(file, &new_document)
+            .context("queue done-id mark: failed to write document")?;
+    } else if done_node_keys.ast_backed {
+        let ops = queue_mark_done_node_ops(&done_node_keys.keys);
+        effects
+            .converge_structural_ops(file, &ops, &content, "queue_done_id_mark")
             .context("queue done-id mark: failed to write document")?;
     } else {
         effects

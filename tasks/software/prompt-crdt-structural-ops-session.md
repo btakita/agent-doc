@@ -108,5 +108,19 @@ The file-TOCTOU `flock` is now fully retired from `agent-doc-queue-io/src/queue_
 **Verification:** all 116 `agent-doc-queue-io` tests pass byte-identical (the `TrackingStrikeEffects` lock-ordering test still passes — it asserts the controller read happens lock-free, which dropping the flock preserves). `make install && make check` green; TLA+ `ResponseCheckpoint` unchanged.
 
 The shared `agent_doc_fs::acquire_doc_lock` primitive is retained for any remaining actorless boundary, per the plan. Submodule commit `19aa7434a`.
-<!-- agent:boundary:959df136 -->
+
+### Re: Node-only ops + SQLite off the hot path — glm-5-2
+
+Both follow-up tasks landed on `main`, each with `make install && make check` green.
+
+**Node-only structural ops (4/6 sites).** Sites 2 (free-text strike) and 6 (mark_completed) now route through node-only `converge_structural_ops`, joining 4+5:
+- Vocabulary: `IpcNodeOp` gained an optional `content` + `OP_REPLACE` (→ `MutationNodePatchOp::Replace`) so a node mutation can carry more than a bare strike.
+- Site 2: per-node Replace ops derived from the struck+annotated diff (`node_replace_ops_from_diff`) — bullet-preserving, carries the `#qstrikenote` annotation in the replaced span. 19 free-text tests byte-identical.
+- Site 6: `mark_done` ops when done-id heads are AST-addressable; non-AST/multiline + force-disk fall back to full-text render.
+- Sites 1 (consume) and 3 (noise prune) stay full-text for fundamental reasons: site 1 crosses into exchange (`embed_consumed_prompt_in_response`) + frontmatter; site 3 has a non-node-addressable multiline/freeform excise. Both already dropped the flock.
+
+**SQLite off the run/queue hot path (`#lazily-hot-path`).** The one residual client-side SQLite RMW — the owner-pane wedge counter (`#recguard-wedge-escape` backstop) — now routes through the controller. `owner_pane_io::{record,clear}` send `record_owner_pane_wedge` / `clear_owner_pane_wedge` commands to the controller socket; the controller does the load→decide→upsert server-side over its own `state.db`. The direct SQLite path survives only for the actorless/bootstrap boundary + transient-failure fallback. The client sends its computed `document_hash` to avoid any hash-derivation mismatch. No client-side SQLite RMW remains on a run/queue decision seam.
+
+**Verification:** owner-pane-io tests (actorless path) pass unchanged; 116 queue-io tests byte-identical; TLA+ `ResponseCheckpoint` green. Submodule commits `36a90ce72` (node-only) + `4889dbee4` (SQLite).
+<!-- agent:boundary:0059c9da -->
 <!-- /agent:exchange -->

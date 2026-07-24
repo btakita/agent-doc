@@ -173,6 +173,34 @@ A plausible promoted helper is a small policy/acknowledgement vocabulary around
 an existing effect. A generic ORM, repository layer, “durable cell” graph node,
 or built-in SQLite sink is out of scope.
 
+### Phase 4 promotion review — DEFER (criterion 5 not yet met)
+
+Now that two consumers share the shape (agent-doc closeout + community-pulse
+`set_budget`), review the duplicated code against the six criteria:
+
+| # | Criterion | Verdict |
+|---|---|---|
+| 1 | storage-independent | ✅ `CommandSubmit`/`CausalReceipt` are storage-agnostic |
+| 2 | sync + async effects | ⚠️ sync only exercised so far |
+| 3 | composes with `DurableOutbox`/`TopicCell`/`Durable`/receipts | ✅ uses `CausalReceipt` |
+| 4 | no new scheduler/graph node/backend/observer/txn-coordinator | ✅ just helpers |
+| 5 | **replaces more app code than it adds to lazily** | ❌ **not yet** |
+| 6 | small conformance fixture + laws | ✅ |
+
+The genuinely shared, domain-independent surface is small: ~10 lines each for
+(a) `CommandSubmit` construction from a typed payload + `(namespace, name,
+payload_type, policy)` + payload hashing, and (b) `Result<(), String> →
+CausalReceipt` mapping. The two consumers don't even share an identical
+`payload_hash` (agent-doc uses SHA-256; community-pulse uses `DefaultHasher`),
+so extraction would *add* standardization work. With two consumers that is
+roughly break-even, not a net reduction — criterion 5 fails.
+
+**Decision: do NOT promote yet.** Re-run this review after a third consumer
+adopts the shape (or after the shared surface grows), at which point a small
+`lazily` helper — `CommandSubmit::domain_command(...)` + a receipt-from-outcome
+fn — would clearly pass criterion 5. This matches the plan's "promote only proven
+common structure, only when it replaces more than it adds" intent.
+
 **Second-consumer (Phase 4 gate): DONE — `community-pulse` `1d3a197`.** It adopts
 the `CommandSubmit → authority → sink → CausalReceipt` shape for the attention-
 budget transition (`set_budget`): the engine is the authority (clamps the budget
@@ -311,16 +339,27 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
 - `agent_doc_cycle_state_io::set_in_controller_request(bool)` — thread-local
   guard against self-RPC for any client helper invoked during controller request
   handling. Reuse it when migrating more hot-path calls (todo 5).
-5. **BLOCKED on a prerequisite — not a standalone flock removal.** The per-consume
+5. **Gated on a prerequisite (not a standalone flock removal).** The per-consume
    `flock` (`agent-doc-queue-io/src/queue_consume.rs:49` `acquire_doc_lock`, 6 sites)
    guards a **document read-parse-write TOCTOU** ("prevent concurrent edits from
    invalidating parsed offsets"), not the closeout transition. Dropping it safely
    requires routing queue consume through the command-plane authority first (so
-   the controller owns document-edit serialization / dedup) — the same shape as
-   the `mark_*` / owner claim migration, but for the queue-consume surface, which
-   is not on the command plane yet. Remove the `flock` only after that migration;
-   removing it now would reintroduce the TOCTOU race. + the
+   the controller owns document-edit serialization / dedup) — a real migration of
+   the queue-consume surface, not a quick fix. + the
    `agent-doc-write-runtime-io/src/lib.rs:2478` site.
+
+### Shared prerequisite for the remaining follow-ups (mark_committed + todo 5)
+
+Both remaining items are gated on **every closeout/queue write routing through
+the controller's in-memory projection** (so the live projection never lags
+`state.db`). `mark_committed`'s command-plane migration was live-debugged: the
+session-check recovery diverges because the controller's in-memory sees a
+different cycle phase than `state.db` at a given commit, so the command-plane
+decide no-ops/refreshes where the local path transitions. `append_state_fact`
+*does* route through the controller when its socket exists, so the bypass is
+indirect and not yet isolated. Until that prerequisite is met, `mark_committed`
+stays local and the per-consume `flock` stays — both keep `make check` green.
+This is a focused migration with its own scope, not a bounded tweak.
 6. **DONE — `8e7f711ce`** Full `make check` green (clippy `--all-targets` +
    nextest + `sim-medium` + `version-sync` + `lean` + `tla`). (Pre-existing flake
    note: the `crdt_checkpoint_*` pair can fail under `cargo test --lib` from
@@ -337,11 +376,14 @@ second consumer DONE** — `community-pulse` `1d3a197` adopts the shape for
 review. Phase 3 enforcement is largely present in lazily (compile-fail +
 property laws); its agent-doc architecture TEST is blocked on Phase 2 cleanliness.
 
-Two follow-ups remain: (a) migrate `mark_committed` onto the command plane —
-live-debug confirmed the recovery issues multiple commits whose refresh/label
-ordering diverges from the local path, but a test-support controller-lifecycle
-quirk resisted pinning; needs a focused recovery-flow trace; and (b) todo (5) —
-route queue consume through the authority, then drop the per-consume `flock`.
-Once those land, add the Phase 3 architecture test, then run the Phase 4
-promotion review (extract a small policy/ack vocabulary to lazily only if the
-six criteria hold).
+Two follow-ups remain, **both gated on the same prerequisite** (route every
+closeout/queue write through the controller's in-memory projection): (a) migrate
+`mark_committed` onto the command plane — live-debugged; the recovery diverges
+because the live projection lags `state.db`; the bypass is indirect and not yet
+isolated; and (b) todo (5) — route queue consume through the authority, then drop
+the per-consume `flock`. That prerequisite is a focused migration with its own
+scope. Once it lands, add the Phase 3 architecture test.
+
+**Phase 4 promotion review: DEFER** (recorded above) — two consumers share the
+shape but criterion 5 (net code reduction) isn't met yet; re-review after a third
+consumer.

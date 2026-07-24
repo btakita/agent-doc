@@ -90,5 +90,23 @@ All five phases of `plan-crdt-structural-ops.md` are committed to `main` (`#crdt
 **Verification:** 20+ new tests across crates (convergence laws, vocabulary classification, op→patch mapping, detached apply, controller-authority apply_ops). TLA+ `ResponseCheckpoint` model unchanged and green. The file-TOCTOU `flock` is retired for 2/6 sites; the remaining 4 are the follow-up.
 
 **Submodule commits:** `94c2676d3` (A) → `1ab61b836` (B) → `868f33298` (C) → `490b2f2b7` (D) → `c18a928b1` (E).
-<!-- agent:boundary:9a65976a -->
+
+### Re: Migration complete — flock retired from all 6 sites — glm-5-2
+
+The file-TOCTOU `flock` is now fully retired from `agent-doc-queue-io/src/queue_consume.rs`. The local `acquire_doc_lock` wrapper is deleted; no `flock` remains in queue consume.
+
+**What changed:** dropped `acquire_doc_lock` from the remaining 4 sites — site 1 (consume), site 2 (free-text strike), site 3 (noise prune), site 6 (mark_completed). Combined with Phase D's sites 4+5 (orphan strike, ack), all 6 sites are now flock-free.
+
+**Why it's safe without the lock:**
+- **Detached (no editor):** the controller is the single writer — no concurrent file mutation possible, so the read-parse-write cycle needs no TOCTOU guard.
+- **Editor-attached:** the write flows through `converge_document_or_disk` → the CRDT relay, which converges concurrent editor edits — the relay (not a kernel lock) is the convergence mechanism.
+
+**Site split (unchanged from the Phase D design):**
+- Sites 4+5 route through `converge_structural_ops` (pure node-key strike-through).
+- Sites 1/2/3/6 keep the full-text write (`converge_document_or_disk`/`atomic_write`) because their mutations carry semantics a bare node-key strike doesn't — `#qstrikenote` annotation (site 2), non-node-addressable multiline/freeform excise (site 3), whole-body `render` normalization (site 6). Routing those through node-only structural ops needs `IpcNodeOp`/`MutationNodePatch` extended with annotation/excise payloads — a future enhancement, not a blocker for flock retirement.
+
+**Verification:** all 116 `agent-doc-queue-io` tests pass byte-identical (the `TrackingStrikeEffects` lock-ordering test still passes — it asserts the controller read happens lock-free, which dropping the flock preserves). `make install && make check` green; TLA+ `ResponseCheckpoint` unchanged.
+
+The shared `agent_doc_fs::acquire_doc_lock` primitive is retained for any remaining actorless boundary, per the plan. Submodule commit `19aa7434a`.
+<!-- agent:boundary:959df136 -->
 <!-- /agent:exchange -->

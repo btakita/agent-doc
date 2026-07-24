@@ -64,12 +64,6 @@ pub trait QueueConsumeWriteEffects {
     }
 }
 
-fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
-    // Delegate to the single shared file-TOCTOU lock primitive in `agent-doc-fs`
-    // (`#lzdurablesink` — the file-level edit boundary; see its doc comment).
-    agent_doc_fs::acquire_doc_lock(path)
-}
-
 fn log_snapshot_recovery_warning(file: &Path, context: &str, detail: impl Display) {
     eprintln!("[queue] snapshot recovery warning during {context}: {detail}");
     agent_doc_ops_log_io::log_op(
@@ -215,9 +209,12 @@ fn consume_queue_prompts_with_options(
     expected_head: Option<&str>,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<Option<QueueConsumptionOutcome>> {
-    // Hold the document lock for the entire read-parse-write cycle to prevent
-    // concurrent edits from invalidating parsed offsets (TOCTOU fix).
-    let _lock = acquire_doc_lock(file)?;
+    // `#crdtstructops` Phase D follow-on: no file-TOCTOU flock across the
+    // read-parse-write cycle. The detached single-writer consumes directly; the
+    // editor-attached path converges via the relay. The consume still computes
+    // the full re-rendered `new_document` (it re-renders the queue body), so the
+    // write keeps `converge_document_or_disk` / `atomic_write`; the structural
+    // `node_ops` ride alongside for the editor-attached relay path.
     let content = if skip_visible_guard {
         effects.force_disk_document_content(file, "queue_consume force_disk")?
     } else {
@@ -381,7 +378,12 @@ pub fn strike_answered_free_text_queue_heads(
     } else {
         Some(effects.current_document_content(file, "free_text_queue_strike")?)
     };
-    let _lock = acquire_doc_lock(file)?;
+    // `#crdtstructops` Phase D follow-on: no file-TOCTOU flock. The detached
+    // single-writer strikes directly; the editor-attached path converges via the
+    // relay. The strike carries the `#qstrikenote` annotation, so it keeps the
+    // full-text `converge_document_or_disk` write (annotation is not a bare
+    // node-key op) — the flock retirement comes from single-writer + relay
+    // convergence, not node-only structural ops.
     let content = match resolved_editor_content {
         Some(content) => content,
         None => effects.force_disk_document_content(file, "free_text_queue_strike force_disk")?,
@@ -581,7 +583,11 @@ pub fn prune_noise_queue_heads(
     file: &Path,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<usize> {
-    let _lock = acquire_doc_lock(file)?;
+    // `#crdtstructops` Phase D follow-on: no file-TOCTOU flock. The noise prune
+    // mixes a node-addressable bulleted strike with a non-addressable
+    // multiline/freeform byte-range excise, so it keeps the full-text
+    // `converge_document_or_disk` write; the flock retirement comes from the
+    // detached single-writer + editor-attached relay convergence.
     let content = effects.current_document_content(file, "queue_noise_prune")?;
     let (fm, _) = frontmatter::parse(&content)?;
     if fm.queue_active != Some(true) {
@@ -828,7 +834,11 @@ pub fn mark_completed_queue_prompts_for_done_ids(
         return Ok(0);
     }
 
-    let _lock = acquire_doc_lock(file)?;
+    // `#crdtstructops` Phase D follow-on: the done-id mark converges without the
+    // file-TOCTOU flock. The detached single-writer projects the mark directly;
+    // the editor-attached path converges via the relay. The mark uses full-text
+    // `render` (whole-body normalization + done-id key fallback) so it keeps the
+    // existing `converge_document_or_disk` write rather than node-only ops.
     let content = effects.current_document_content(file, "queue_done_id_mark")?;
     let components = element::parse(&content)?;
     let Some(queue_component) = components

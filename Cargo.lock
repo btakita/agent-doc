@@ -591,6 +591,7 @@ dependencies = [
  "agent-doc-supervisor-io",
  "agent-doc-turn",
  "anyhow",
+ "lazily 0.48.1",
  "serde",
  "serde_json",
  "tempfile",

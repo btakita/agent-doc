@@ -10611,9 +10611,8 @@ fn closeout_advance_outcome(
     runtime: &ControllerRuntime,
     submit: &lazily::CommandSubmit,
 ) -> Result<(), String> {
-    use super::command_plane::{CloseoutAdvancePayload, CloseoutPhaseEvent};
-
-    let payload = CloseoutAdvancePayload::decode(submit).map_err(|e| format!("{e:#}"))?;
+    use super::command_plane::{decode_closeout_advance_payload, CloseoutPhaseEvent};
+    let payload = decode_closeout_advance_payload(submit).map_err(|e| format!("{e:#}"))?;
     let file = std::path::PathBuf::from(&payload.document_path);
     let document_hash = agent_doc_hash::document_id_for_path(&file);
     let document = runtime
@@ -16208,6 +16207,46 @@ mod tests {
         let next = request(&project_root, "status").unwrap();
         let next_status: ControllerStatus = serde_json::from_str(&next).unwrap();
         assert!(next_status.active);
+        let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
+        assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn mark_write_applied_routes_through_command_plane_when_controller_live() {
+        // `#lzdurablesink` / `#lazily-hot-path`: with a live controller, the
+        // `mark_write_applied` chokepoint submits a `closeout_advance` command
+        // over the command plane instead of the local load→decide→save→append
+        // path. The controller authority decides from the live projection, sinks
+        // the fact, and returns a terminal applied receipt; the client reads back
+        // the advanced cycle state. End-to-end proof through the real controller
+        // socket (not `handle_request_locked` in-process).
+        let dir = tempfile::TempDir::new().unwrap();
+        let project_root = dir.path().to_path_buf();
+        std::fs::create_dir_all(project_root.join("tasks")).unwrap();
+        let doc = project_root.join("tasks/live.md");
+        std::fs::write(&doc, "body\n").unwrap();
+
+        let server_root = project_root.clone();
+        let handle = std::thread::spawn(move || serve(&server_root, LaunchMode::Lazy).unwrap());
+        wait_for_test_controller(&project_root);
+
+        let state = agent_doc_cycle_state_io::mark_write_applied(
+            &doc,
+            "write_applied",
+            None,
+            Some("body\n"),
+        )
+        .expect("mark_write_applied through the command plane");
+        assert_eq!(state.phase, agent_doc_turn::CyclePhase::WriteApplied);
+
+        // The durable sink fired through the controller authority: a fresh
+        // client read reconstructs WriteApplied from the sunk facts.
+        let readback = agent_doc_cycle_state_io::load(&doc)
+            .expect("read back cycle state")
+            .expect("a cycle state exists");
+        assert_eq!(readback.phase, agent_doc_turn::CyclePhase::WriteApplied);
+
         let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
         assert!(shutdown.contains("\"ok\":true"), "{shutdown}");
         handle.join().unwrap();

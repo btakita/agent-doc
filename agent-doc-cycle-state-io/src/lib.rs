@@ -57,6 +57,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+pub mod command_plane;
 pub mod pipeline_frontmatter;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1268,6 +1269,27 @@ pub fn mark_write_applied(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
+    // `#lazily-hot-path`: when a controller is live, the transition is decided
+    // from the live Lazily projection over the command plane (not this client's
+    // cold `state.db` read) and the phase fact(s) are sunk in the controller.
+    // When no controller exists (actorless bootstrap / cold start), keep the
+    // local `load→decide→save→append` path as the compatibility boundary.
+    if submit_closeout_advance_via_socket(
+        file,
+        command_plane::CloseoutPhaseEvent::WriteApplied,
+        None,
+        snapshot_content,
+        file_content,
+        None,
+        None,
+    )? {
+        let state = load(file)?.context(
+            "closeout_advance WriteApplied applied through the command plane but no cycle state \
+             was read back",
+        )?;
+        append_phase_event_to_session_log(file, &state, file_content);
+        return Ok(state);
+    }
     let (state, transitioned) =
         decide_write_applied(load(file)?, file, event, snapshot_content, file_content);
     if transitioned {
@@ -2529,6 +2551,107 @@ fn append_state_fact(
             payload_json: &payload_json,
         },
     )
+}
+
+/// Submit a `closeout_advance` command to the controller authority over the
+/// lazily command plane (`#lzdurablesink`, `command-plane-v1`). When a controller
+/// is live, the transition is decided from the live in-memory projection — not
+/// this client's cold `state.db` read — and the phase fact(s) are sunk in the
+/// controller. This is the `#lazily-hot-path` authority rule: a hot-path
+/// transition must not reload storage to arbitrate itself.
+///
+/// Returns:
+/// - `Ok(true)` — a controller was live and the terminal `CausalReceipt` was
+///   `applied` (an idempotent no-op at the current phase folds as `applied`).
+/// - `Ok(false)` — no controller socket exists (actorless bootstrap / cold
+///   start); the caller must use the local `load→decide→save→append` fallback.
+/// - `Err(_)` — the controller was live but the transport/decode failed or the
+///   terminal receipt was `rejected` (fail closed; never silently fall back).
+fn submit_closeout_advance_via_socket(
+    file: &Path,
+    event: command_plane::CloseoutPhaseEvent,
+    reason: Option<&str>,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    response_sha256: Option<&str>,
+    cycle_id_hint: Option<&str>,
+) -> Result<bool> {
+    use command_plane::{build_closeout_advance_submit, CloseoutAdvancePayload};
+
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    let controller_socket = agent_doc_controller::paths::socket_path(&project_root);
+    if !controller_socket.exists() {
+        return Ok(false);
+    }
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let payload = CloseoutAdvancePayload {
+        document_path: canonical.to_string_lossy().to_string(),
+        event,
+        reason: reason.map(str::to_string),
+        snapshot_content: snapshot_content.map(str::to_string),
+        file_content: file_content.map(str::to_string),
+        response_sha256: response_sha256.map(str::to_string),
+        cycle_id_hint: cycle_id_hint.map(str::to_string),
+    };
+    // Stable, replay-safe command id / idempotency key derived from
+    // (document, event, content) so a duplicate advance dedupes onto the same
+    // command — mirroring the durable sink's idempotent re-delivery.
+    let event_label = payload.last_event_label();
+    let content_key = format!(
+        "{}:{}:{}",
+        snapshot_content.unwrap_or(""),
+        file_content.unwrap_or(""),
+        response_sha256.unwrap_or("")
+    );
+    let command_id = format!(
+        "closeout-advance:{document_hash}:{event_label}:{}",
+        agent_doc_hash::content_hash(&content_key)
+    );
+    let submit = build_closeout_advance_submit(&command_id, "cycle_state", &command_id, 0, payload)?;
+    let payload_json = serde_json::to_string(&submit).context("encode command_plane_submit")?;
+    let request = serde_json::json!({
+        "command": "command_plane_submit",
+        "file": canonical,
+        "caller": "cycle_state",
+        "diagnostic_payload": payload_json,
+    });
+    #[derive(serde::Deserialize)]
+    #[allow(dead_code)]
+    struct ReceiptEnvelope {
+        ok: bool,
+        data: Option<lazily::CausalReceipt>,
+        error: Option<String>,
+    }
+    let raw = agent_doc_state_wire::send_ndjson_request_to_actor(
+        &controller_socket,
+        &request,
+        std::time::Duration::from_secs(5),
+    )
+    .context("submit closeout_advance command through the Lazily controller")?;
+    let envelope: ReceiptEnvelope =
+        serde_json::from_str(&raw).context("decode closeout_advance command-plane response")?;
+    if !envelope.ok {
+        anyhow::bail!(
+            "closeout_advance command rejected by controller: {}",
+            envelope.error.as_deref().unwrap_or("unknown error")
+        );
+    }
+    let receipt = envelope
+        .data
+        .context("closeout_advance command returned no terminal receipt")?;
+    if receipt.outcome != lazily::ReceiptOutcome::Applied {
+        anyhow::bail!(
+            "closeout_advance command not applied: {:?}{}",
+            receipt.outcome,
+            receipt
+                .reason
+                .as_deref()
+                .map(|r| format!(" ({r})"))
+                .unwrap_or_default()
+        );
+    }
+    Ok(true)
 }
 
 fn append_semantic_merge_ack_recorded_event(

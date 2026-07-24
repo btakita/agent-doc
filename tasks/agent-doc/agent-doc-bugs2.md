@@ -140,14 +140,27 @@ Fixed and released agent-doc 0.35.25.
 - Agent-doc session-check confirmed cycle `cycle-1784860530755` committed successfully.
 
 CI and Release workflows were in progress at the required single inspection. The unrelated dirty `src/agent-doc` worktree was left untouched.
-<!-- agent:boundary:8ea0f775 -->
+
+### Re: #fmgcverify — gpt-5
+
+> **Queue prompt:**
+>
+> do [#fmgcverify]
+
+
+Verified live against the current JetBrains generation. The backlog text named plugin 0.2.291, but the registered and expected live generation is now 0.2.292; `reliable-sync-status` reported this document open/live under PID 2968236 and editor id `jetbrains-2968236-4c1e1bf1-44bf-4aec-95ee-aabffb792418`.
+
+I issued the same two-step Project Controller `state_subscribe` sequence used by the plugin, bound to that exact live PID/editor identity. The first response returned a Snapshot at document version 2165 with `peer_ack_recorded: true`; the second sent `acked_version: 2165` and returned a Delta at the same version with `peer_ack_recorded: true`. The durable `state_event_peer_acks` row then advanced from version 1 to 2165 (timestamp 1784860976). Because the controller only records an ACK when PID and editor id match a live registration, this proves both live-registration matching and durable ACK advancement.
+
+No code changes were needed. `#fmgcverify` is complete.
+<!-- agent:boundary:ac0eff5b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ do [#fmgcverify]
+- ~~⏭️ do [#fmgcverify]~~
 - ⏭️ 📌 do [#qactsync]
-- 📌 do [#ftimmediate]
+- ⏭️ 📌 do [#ftimmediate]
 - 📌 do [#qeditrace]
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
@@ -215,7 +228,6 @@ This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack wa
 - [ ] [#crdtauth6] [operator-verify] CRDT authority live proof: verify the existing JB DocumentListener -> CrdtReplicaForwarder.forwardLocalDelta path, Kotlin Unix-socket ReplicaTransport, VS Code koffi replica seam, and Rust fan-out stay connected in a live editor session. This is proof/parity work only; operator-visible text is already authoritative and must not wait on this item. Plan: tasks/agent-doc/plan-crdt-authority-model.md
 - [ ] [#nsfz] [operator-verify] #startupdeadline live dogfood: drive a real harness that never reaches a dispatch-ready prompt (e.g. auth-walled/hung TUI) and confirm the session fails closed within 30s with a 'session did not become dispatch-ready in Ns' stderr diagnostic + a recorded startup_miss marker, instead of hanging. Code-complete + tested (make check 5101 green, release build green); needs a live editor/pane eyeball.
 - [ ] [#suprestassoc-live] [operator-verify] Restart the `tasks/professional/equityfundingsource.md` supervisor in a live editor/tmux setup and verify the actor/admin projection keeps EFS bound to its own pane/session without re-associating to `tasks/agent-doc/agent-doc-bugs2.md`.
-- [ ] [#fmgcverify] [operator-verify] After restarting JetBrains onto plugin 0.2.291, confirm the live registration is current and state_event_peer_acks advances for the document after two Project Controller state subscriptions.
 <!-- /agent:backlog -->
 
 ## Review

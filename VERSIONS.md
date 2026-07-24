@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.27
+
+_JetBrains plugin 0.2.292; VS Code extension 0.2.56._
+
+- **Free-text queue heads now carry execution context without synthetic tracked work (`#ftimmediate`).** Inline `[focused-cycle]`, `[operator-verify]`, and `[clean-session]` tokens use the same parser and drain policy as backlog items: a focused head yields the in-session loop and is picked up by the supervisor after a forced clear, operator verification remains human-gated, and clean-session work stays drainable while retaining its reset reason. Production-backed SimWorld coverage pins the focused-cycle yield → clear → dispatch path, and no extra ids, side records, or persistence layer were introduced.
+
 ## 0.35.26
 
 _JetBrains plugin 0.2.292; VS Code extension 0.2.56._

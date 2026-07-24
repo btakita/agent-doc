@@ -6813,7 +6813,39 @@ fn opted_out_document_clears_and_drains_without_auto_recycle() {
 
 #[test]
 fn focused_cycle_yields_to_supervisor_clear_and_fresh_agent_drain() {
-    // `#qfocsup` / `#tb4q`: deterministic proof for the operator-visible path.
+    // `#qfocsup` / `#tb4q` / `#ftimmediate`: deterministic proof for the
+    // operator-visible path. Pin the production queue classifier first so the
+    // simulated yield -> clear -> dispatch schedule cannot pass while free-text
+    // execution context is disconnected from the real drain seam.
+    let free_text_head = "[focused-cycle] fix the free-text queue regression";
+    let free_text_doc = format!(
+        "---\nqueue_active: true\n---\n\n\
+         <!-- agent:queue auto go -->\n- {free_text_head}\n<!-- /agent:queue -->\n"
+    );
+    assert_eq!(
+        agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+            &free_text_doc,
+            agent_doc_queue::queue_continuation::DrainScope::InSessionLoop,
+        ),
+        None,
+        "the current session yields the tagged free-text head"
+    );
+    assert_eq!(
+        agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+            &free_text_doc,
+            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
+        )
+        .as_deref(),
+        Some(free_text_head),
+        "the supervisor owns the same head after the clear"
+    );
+    assert!(
+        agent_doc_queue::queue_continuation::head_requires_focused_cycle_in(
+            &free_text_doc,
+            free_text_head,
+        )
+    );
+
     // A focused-cycle head is not run by the accreted in-session loop. It yields
     // with `ui_outcome=deferred_for_supervisor_drain`, the supervisor promotes a
     // fresh binary if needed, force-clears for a fresh context, dispatches the

@@ -340,17 +340,22 @@ fn execution_context_ids(
 
 /// Whether queue `head` maps to a `[clean-session]` backlog item.
 pub fn head_requires_clean_session_in(content: &str, head: &str) -> bool {
-    head_id_in_set(head, &clean_session_backlog_ids(content))
+    backlog::item_execution_context(head).clean_session_required
+        || head_id_in_set(head, &clean_session_backlog_ids(content))
 }
 
 /// Whether queue `head` maps to a `[focused-cycle]` backlog item.
 pub fn head_requires_focused_cycle_in(content: &str, head: &str) -> bool {
-    head_id_in_set(head, &focused_cycle_backlog_ids(content))
+    backlog::item_execution_context(head).focused_cycle_required
+        || head_id_in_set(head, &focused_cycle_backlog_ids(content))
 }
 
 /// Whether queue `head` maps to a backlog item requiring supervisor context reset.
 pub fn head_requires_context_reset_in(content: &str, head: &str) -> bool {
-    head_id_in_set(head, &context_reset_backlog_ids(content))
+    let inline = backlog::item_execution_context(head);
+    inline.clean_session_required
+        || inline.focused_cycle_required
+        || head_id_in_set(head, &context_reset_backlog_ids(content))
 }
 
 fn head_id_in_set(head: &str, ids: &HashSet<String>) -> bool {
@@ -401,6 +406,7 @@ pub fn drainable_head_prompt_for_scope(content: &str, scope: DrainScope) -> Opti
         &deferred_ids,
         &after_deps_from_content(content),
         queue_facts.preset_supplies_directive,
+        scope,
     )
     .cloned()
 }
@@ -430,6 +436,7 @@ pub fn drainable_head_count(content: &str) -> usize {
                 &deferred_ids,
                 &after_deps,
                 queue_facts.preset_supplies_directive,
+                DrainScope::InSessionLoop,
             ),
             _ => false,
         })
@@ -549,6 +556,7 @@ fn first_drainable_head<'a>(
     deferred_ids: &HashSet<String>,
     after_deps: &HashMap<String, Vec<String>>,
     preset_supplies_directive: bool,
+    scope: DrainScope,
 ) -> Option<&'a QueuePrompt> {
     entries_after.iter().find_map(|entry| match entry {
         QueueEntry::Prompt(prompt) => {
@@ -558,6 +566,7 @@ fn first_drainable_head<'a>(
                 deferred_ids,
                 after_deps,
                 preset_supplies_directive,
+                scope,
             ) {
                 Some(prompt)
             } else {
@@ -574,6 +583,7 @@ fn head_is_drainable(
     deferred_ids: &HashSet<String>,
     after_deps: &HashMap<String, Vec<String>>,
     preset_supplies_directive: bool,
+    scope: DrainScope,
 ) -> bool {
     let drainable = if preset_supplies_directive {
         is_drainable_queue_head_with_context(text, true)
@@ -581,6 +591,20 @@ fn head_is_drainable(
         is_drainable_queue_head(text)
     };
     if !drainable {
+        return false;
+    }
+    // `#ftimmediate`: free-text heads have no backlog id through which to
+    // inherit execution context. Parse the same inline tags directly from the
+    // queue text so `[focused-cycle]` yields the in-session loop but remains
+    // supervisor-drainable after a forced clear, while `[operator-verify]`
+    // stays deferred in both scopes. This is intentionally a projection of the
+    // existing tag vocabulary, not a synthesized tracked-work record.
+    let inline_context = backlog::item_execution_context(text);
+    let inline_undrainable = match scope {
+        DrainScope::InSessionLoop => inline_context.loop_undrainable(),
+        DrainScope::Supervisor => inline_context.supervisor_undrainable(),
+    };
+    if inline_undrainable {
         return false;
     }
     match extract_head_id(text) {
@@ -1228,6 +1252,58 @@ mod tests {
     }
 
     #[test]
+    fn free_text_focused_cycle_yields_to_supervisor_and_requests_clear() {
+        let head = "[focused-cycle] fix queue identity loss";
+        let content = doc_with_backlog(&[head], &[]);
+
+        assert_eq!(
+            live_drainable_continuation_head(&content, DrainScope::InSessionLoop),
+            None,
+            "the accreted in-session loop must yield a focused free-text head"
+        );
+        assert_eq!(
+            live_drainable_continuation_head(&content, DrainScope::Supervisor).as_deref(),
+            Some(head),
+            "the supervisor must pick up the same head after clearing context"
+        );
+        assert_eq!(drainable_head_count(&content), 0);
+        assert!(head_requires_focused_cycle_in(&content, head));
+        assert!(head_requires_context_reset_in(&content, head));
+        assert!(!head_requires_clean_session_in(&content, head));
+    }
+
+    #[test]
+    fn free_text_operator_verify_stays_deferred_from_every_agent_drain() {
+        let head = "[operator-verify] verify live relay behavior";
+        let content = doc_with_backlog(&[head], &[]);
+
+        assert_eq!(
+            live_drainable_continuation_head(&content, DrainScope::InSessionLoop),
+            None
+        );
+        assert_eq!(
+            live_drainable_continuation_head(&content, DrainScope::Supervisor),
+            None
+        );
+        assert_eq!(drainable_head_count(&content), 0);
+        assert!(!head_requires_context_reset_in(&content, head));
+    }
+
+    #[test]
+    fn free_text_clean_session_drains_and_carries_clear_reason() {
+        let head = "[clean-session] build the release artifact";
+        let content = doc_with_backlog(&[head], &[]);
+
+        assert_eq!(
+            live_drainable_continuation_head(&content, DrainScope::InSessionLoop).as_deref(),
+            Some(head)
+        );
+        assert_eq!(drainable_head_count(&content), 1);
+        assert!(head_requires_clean_session_in(&content, head));
+        assert!(head_requires_context_reset_in(&content, head));
+    }
+
+    #[test]
     fn supervisor_drains_explicit_start_without_marking_continuation_required() {
         let content = concat!(
             "---\nqueue_active: true\nqueue: start\n---\n\n",
@@ -1648,8 +1724,18 @@ mod fr79_orphan_reconcile_tests {
 
     #[test]
     fn matching_is_case_insensitive_and_ignores_empty_ids() {
-        assert!(!queue_head_id_is_orphaned("OPEN1", &set(&["open1"]), &set(&[]), &set(&[])));
-        assert!(!queue_head_id_is_orphaned("  ", &set(&[]), &set(&[]), &set(&[])));
+        assert!(!queue_head_id_is_orphaned(
+            "OPEN1",
+            &set(&["open1"]),
+            &set(&[]),
+            &set(&[])
+        ));
+        assert!(!queue_head_id_is_orphaned(
+            "  ",
+            &set(&[]),
+            &set(&[]),
+            &set(&[])
+        ));
     }
 
     /// `active_tracked_ids` must span every component that can hold a live item,

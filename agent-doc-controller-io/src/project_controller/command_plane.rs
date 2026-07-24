@@ -125,6 +125,124 @@ pub fn supervisor_recycle_receipt(
     }
 }
 
+/// Command name within the namespace for a closeout phase advance request.
+pub const CLOSEOUT_ADVANCE_NAME: &str = "closeout_advance";
+/// Fully-qualified payload schema id for the closeout phase advance request.
+pub const CLOSEOUT_ADVANCE_PAYLOAD_TYPE: &str = "agent-doc.closeout_advance.v1";
+
+/// Which closeout phase transition a `closeout_advance` command requests. The
+/// controller authority runs the pure `CyclePhaseMachine` over these.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CloseoutPhaseEvent {
+    WriteApplied,
+    ResponseCaptured,
+    Committed,
+    Abandoned,
+}
+
+/// Payload body for `agent-doc.closeout_advance.v1`. A client asks the controller
+/// authority to advance a document's closeout phase machine; the controller
+/// decides from its live Lazily projection, emits the phase fact(s) as the
+/// durable sink (`#lzdurablesink`), and acknowledges with a terminal
+/// [`CausalReceipt`] — never a transport ACK. This retires the bespoke
+/// `closeout_phase_advance` / `closeout_owner_*` controller-socket verbs onto
+/// the command plane. lazily treats this body as opaque bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CloseoutAdvancePayload {
+    pub event: CloseoutPhaseEvent,
+    pub event_label: String,
+    pub snapshot_content: Option<String>,
+    pub file_content: Option<String>,
+    pub response_sha256: Option<String>,
+    pub cycle_id_hint: Option<String>,
+}
+
+impl CloseoutAdvancePayload {
+    /// Serialize to the inline command payload bytes.
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        serde_json::to_vec(self).context("encode closeout_advance command payload")
+    }
+
+    /// Decode from a `CommandSubmit`'s inline payload, validating the payload type.
+    pub fn decode(submit: &CommandSubmit) -> Result<Self> {
+        anyhow::ensure!(
+            submit.payload_type == CLOSEOUT_ADVANCE_PAYLOAD_TYPE,
+            "unexpected command payload_type {:?} (want {CLOSEOUT_ADVANCE_PAYLOAD_TYPE})",
+            submit.payload_type,
+        );
+        let IpcValue::Inline(bytes) = &submit.payload else {
+            anyhow::bail!("closeout_advance command payload must be inline bytes");
+        };
+        serde_json::from_slice(bytes).context("decode closeout_advance command payload")
+    }
+}
+
+/// Build the `CommandSubmit` for a closeout phase advance. `command_id` must be
+/// stable + replay-safe; `idempotency_key` dedupes concurrent advances for the
+/// same document/cycle/event (the caller derives it from the same inputs as the
+/// phase-fact event id, so a duplicate fold is exactly the sink's idempotent
+/// re-delivery). `authority_generation` is the live closeout-owner generation
+/// the command is stamped against; a stale generation is ignored by the
+/// authority (the `#lzdurablesink` "no reload at the decision seam" rule).
+pub fn build_closeout_advance_submit(
+    command_id: impl Into<String>,
+    source: impl Into<String>,
+    idempotency_key: impl Into<String>,
+    authority_generation: u64,
+    payload: CloseoutAdvancePayload,
+) -> Result<CommandSubmit> {
+    let command_id = command_id.into();
+    let bytes = payload.encode()?;
+    let payload_hash = payload_hash(&bytes);
+    Ok(CommandSubmit {
+        causation_id: command_id.clone(),
+        command_id,
+        source: source.into(),
+        target: CONTROLLER_TARGET.to_string(),
+        namespace: NAMESPACE.to_string(),
+        name: CLOSEOUT_ADVANCE_NAME.to_string(),
+        authority_generation,
+        idempotency_key: idempotency_key.into(),
+        // A phase advance has no hard deadline; it settles when the authority
+        // folds the transition and emits the terminal receipt.
+        deadline_ms: 0,
+        policy: CommandPolicy {
+            // A duplicate advance for the same document/cycle/event folds onto
+            // the same command — the phase machine is idempotent at a fixed
+            // generation, mirroring the sink's idempotent re-delivery.
+            dedupe: DedupePolicy::SameIdempotencyKey,
+            supersede: false,
+            cancel_on_preempt: false,
+        },
+        payload_type: CLOSEOUT_ADVANCE_PAYLOAD_TYPE.to_string(),
+        payload_hash,
+        payload: IpcValue::Inline(bytes),
+        required_features: vec![REQUIRED_FEATURE_RECEIPTS.to_string()],
+    })
+}
+
+/// The controller's terminal receipt for a serviced closeout-advance command:
+/// `applied` once the phase transition folded and the fact(s) landed in the
+/// durable sink, `rejected` (with a reason) if the authority could not advance
+/// (stale generation, no document, a no-op at the current phase, …). This
+/// receipt — not a return value or transport ACK — is the terminal authority
+/// the client resolves on.
+pub fn closeout_advance_receipt(
+    submit: &CommandSubmit,
+    receipt_id: impl Into<String>,
+    observer: impl Into<String>,
+    generation: u64,
+    outcome: Result<(), String>,
+) -> CausalReceipt {
+    match outcome {
+        Ok(()) => CausalReceipt::applied(receipt_id, &submit.command_id, observer, generation),
+        Err(reason) => {
+            CausalReceipt::rejected(receipt_id, &submit.command_id, observer, generation)
+                .with_reason(reason)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +330,126 @@ mod tests {
             CallState::Resolved(entry) => {
                 assert_eq!(entry.status, CommandStatus::Rejected);
                 assert_eq!(entry.reason.as_deref(), Some("controller_unavailable"));
+            }
+            other => panic!("expected Resolved(Rejected), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn closeout_advance_payload_roundtrips_and_validates_type() {
+        let payload = CloseoutAdvancePayload {
+            event: CloseoutPhaseEvent::WriteApplied,
+            event_label: "write_applied".to_string(),
+            snapshot_content: Some("snap".to_string()),
+            file_content: Some("body".to_string()),
+            response_sha256: None,
+            cycle_id_hint: None,
+        };
+        let submit = build_closeout_advance_submit(
+            "cmd-adv-1",
+            "cycle_state",
+            "doc:cycle:write_applied:body",
+            7,
+            payload,
+        )
+        .unwrap();
+        assert_eq!(submit.namespace, NAMESPACE);
+        assert_eq!(submit.name, CLOSEOUT_ADVANCE_NAME);
+        assert_eq!(submit.payload_type, CLOSEOUT_ADVANCE_PAYLOAD_TYPE);
+        assert_eq!(submit.policy.dedupe, DedupePolicy::SameIdempotencyKey);
+        let decoded = CloseoutAdvancePayload::decode(&submit).unwrap();
+        assert_eq!(decoded.event, CloseoutPhaseEvent::WriteApplied);
+        assert_eq!(decoded.event_label, "write_applied");
+        assert_eq!(decoded.file_content.as_deref(), Some("body"));
+    }
+
+    #[test]
+    fn closeout_advance_wrong_payload_type_fails_closed() {
+        let mut submit = build_closeout_advance_submit(
+            "cmd-adv-2",
+            "cycle_state",
+            "doc:cycle:write_applied:body",
+            1,
+            CloseoutAdvancePayload {
+                event: CloseoutPhaseEvent::WriteApplied,
+                event_label: "write_applied".to_string(),
+                snapshot_content: None,
+                file_content: None,
+                response_sha256: None,
+                cycle_id_hint: None,
+            },
+        )
+        .unwrap();
+        submit.payload_type = "agent-doc.supervisor_recycle.v1".to_string();
+        assert!(CloseoutAdvancePayload::decode(&submit).is_err());
+    }
+
+    #[test]
+    fn closeout_advance_resolves_only_on_terminal_receipt() {
+        // The command-plane RPC round-trip for a phase advance: submit → the call
+        // stays Pending until the controller folds the transition, persists the
+        // fact(s) as the sink, and emits the terminal applied receipt.
+        let mut client = CommandRpcClient::new(VecTransport { sent: Vec::new() });
+        let submit = build_closeout_advance_submit(
+            "cmd-adv-9",
+            "cycle_state",
+            "doc:cycle:write_applied:body",
+            3,
+            CloseoutAdvancePayload {
+                event: CloseoutPhaseEvent::WriteApplied,
+                event_label: "write_applied".to_string(),
+                snapshot_content: None,
+                file_content: Some("body".to_string()),
+                response_sha256: None,
+                cycle_id_hint: None,
+            },
+        )
+        .unwrap();
+        let id = client.submit(submit.clone()).unwrap();
+        assert_eq!(client.poll_call(&id), CallState::Pending);
+
+        let receipt =
+            closeout_advance_receipt(&submit, "rcpt-adv-1", "project-controller", 3, Ok(()));
+        client.ingest_receipt(&receipt);
+        match client.poll_call(&id) {
+            CallState::Resolved(entry) => assert_eq!(entry.status, CommandStatus::Applied),
+            other => panic!("expected Resolved(Applied), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn closeout_advance_rejected_resolves_rejected() {
+        let mut client = CommandRpcClient::new(VecTransport { sent: Vec::new() });
+        let submit = build_closeout_advance_submit(
+            "cmd-adv-r",
+            "cycle_state",
+            "doc:cycle:committed:body",
+            4,
+            CloseoutAdvancePayload {
+                event: CloseoutPhaseEvent::Committed,
+                event_label: "committed".to_string(),
+                snapshot_content: None,
+                file_content: None,
+                response_sha256: None,
+                cycle_id_hint: None,
+            },
+        )
+        .unwrap();
+        let id = client.submit(submit.clone()).unwrap();
+        // The authority rejects (e.g. a stale generation or a no-op at the current
+        // phase); the terminal receipt carries the reason.
+        let receipt = closeout_advance_receipt(
+            &submit,
+            "rcpt-adv-2",
+            "project-controller",
+            4,
+            Err("stale_authority_generation".to_string()),
+        );
+        client.ingest_receipt(&receipt);
+        match client.poll_call(&id) {
+            CallState::Resolved(entry) => {
+                assert_eq!(entry.status, CommandStatus::Rejected);
+                assert_eq!(entry.reason.as_deref(), Some("stale_authority_generation"));
             }
             other => panic!("expected Resolved(Rejected), got {other:?}"),
         }

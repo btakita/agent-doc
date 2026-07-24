@@ -251,19 +251,18 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
    `ControllerCommandTransport: lazily::CommandTransport` over the one-line socket
    + `submit_closeout_advance_command`. `#[allow(dead_code)]` dropped; clippy
    `--all-targets` clean; nextest 219 passed (3 new dispatch tests). Pushed to `main`.
-2. **DONE — `2047beab6` + `9bef9a98e`** Migrate the `mark_*` clients to submit
-   `closeout_advance` commands — at the chokepoint, not 40 call sites. The
-   closeout command-plane vocabulary (`CloseoutAdvancePayload` /
-   `CloseoutPhaseEvent` / `CommitObservation` + `build_closeout_advance_submit`)
-   moved down to `agent-doc-cycle-state-io` (closeout-domain owner, +lazily ipc
-   dep); `controller-io` re-exports + keeps `decode_closeout_advance_payload`.
-   All four `mark_*` are now dual-path: controller live → submit `closeout_advance`
-   (decide from the live projection, the `#lazily-hot-path` fix); no controller →
-   local `load→decide→save→append` fallback (actorless/bootstrap, so the 50
-   cycle-state-io tests + cold start are untouched). `committed` canonicalizes the
-   caller's free-text label to `CommitObservation` on the wire. clippy clean;
-   nextest green incl. live-socket tests proving all four transitions route
-   through the command plane end-to-end; 254 caller-crate tests green.
+2. **DONE — `2047beab6` + `9bef9a98e` + `8e7f711ce`** Migrate the `mark_*`
+   clients to submit `closeout_advance` commands — at the chokepoint. The
+   closeout command-plane vocabulary moved down to `agent-doc-cycle-state-io`
+   (+lazily ipc dep); `controller-io` re-exports + keeps `decode_closeout_advance_payload`.
+   **Routed through the command plane:** `mark_write_applied`,
+   `mark_response_captured`, `mark_abandoned` (dual-path: controller live →
+   submit; no controller → local fallback). **`mark_committed` stays local for
+   now** — it is the complex case (diverse labels + an idempotency refresh on an
+   already-committed cycle); routing it through the command plane changes the
+   recovery commit ordering/label (`capture_committed` vs `commit_success`).
+   Migrate once that recovery-flow ordering is pinned. The `event_label` payload
+   field + `service_closeout_advance` are ready for it.
 3. **DONE — `e0978409f`** Migrate `closeout_owner_claim`/`release` onto the
    command plane. They are coordination CAS ops whose authority result is the
    typed outcome (`CloseoutOwnerClaimOutcome`: Acquired/HeldByOther/CycleSuperseded;
@@ -272,29 +271,46 @@ The `mark_*` client funcs already delegate to the shared pure `decide_*`
    release→bool). Shared `run_closeout_owner_*` cores extracted; bespoke verbs +
    command-plane services both call them. Vocabulary in cycle-state-io. clippy
    clean; nextest 272 passed.
-4. **DONE — `3d29324d0`** Read-only inspection from the live projection. The
-   `load_document_projection` chokepoint (covers `load` /
+4. **DONE — `3d29324d0` + `8e7f711ce`** Read-only inspection from the live
+   projection. `load_document_projection` (covers `load` /
    `load_with_closeout_projection` / `load_closeout_projection` /
    `load_document_disk_write`) prefers the controller's live in-memory projection
    when a controller is live, replaying cold state.db only for the actorless
-   boundary. New read-only `document_state_projection` verb. No production
-   controller-internal caller self-RPCs (verified). clippy clean; nextest 272
-   passed.
-5. **Remove the per-consume `flock`** — `agent-doc-queue-io/src/queue_consume.rs:49`
-   `acquire_doc_lock` (6 sites: 212/376/576/648/734/815) +
-   `agent-doc-write-runtime-io/src/lib.rs:2478`. Replace with actor-owned dedup.
-6. **Full `make check` green** — clippy `--all-targets` + nextest + `sim-medium` +
-   `version-sync` + `lean` + `tla` (the `Makefile` `check` target). Known flake: the
-   `crdt_checkpoint_*` pair fails under `cargo test --lib` (cross-test leakage,
-   `#wsflake2`) but passes under nextest isolation — pre-existing, not caused by this
-   work.
+   boundary. New read-only `document_state_projection` verb. Two robustness fixes
+   the live flows surfaced (both genuine prerequisites for a live-projection
+   authority): an **in-controller self-RPC guard** (`set_in_controller_request`
+   thread-local, set by the serve entry — the controller's own request handling
+   must not round-trip to the socket it is serving), and a **stale-socket →
+   state.db fallback** (fall back on any Connect error, not only an absent socket
+   file). make check green.
+
+### New foundation primitives (from todo 4, available to the rest of Phase 2)
+- `agent_doc_cycle_state_io::set_in_controller_request(bool)` — thread-local
+  guard against self-RPC for any client helper invoked during controller request
+  handling. Reuse it when migrating more hot-path calls (todo 5).
+5. **BLOCKED on a prerequisite — not a standalone flock removal.** The per-consume
+   `flock` (`agent-doc-queue-io/src/queue_consume.rs:49` `acquire_doc_lock`, 6 sites)
+   guards a **document read-parse-write TOCTOU** ("prevent concurrent edits from
+   invalidating parsed offsets"), not the closeout transition. Dropping it safely
+   requires routing queue consume through the command-plane authority first (so
+   the controller owns document-edit serialization / dedup) — the same shape as
+   the `mark_*` / owner claim migration, but for the queue-consume surface, which
+   is not on the command plane yet. Remove the `flock` only after that migration;
+   removing it now would reintroduce the TOCTOU race. + the
+   `agent-doc-write-runtime-io/src/lib.rs:2478` site.
+6. **DONE — `8e7f711ce`** Full `make check` green (clippy `--all-targets` +
+   nextest + `sim-medium` + `version-sync` + `lean` + `tla`). (Pre-existing flake
+   note: the `crdt_checkpoint_*` pair can fail under `cargo test --lib` from
+   cross-test leakage, `#wsflake2`, but passes under nextest isolation.)
 
 ### Resume hint
 
-Todo (1) is done: the command-plane authority is reachable from a client over
-the live socket. Todo (2) is done: all four `mark_*` variants submit
-`closeout_advance` at the chokepoint when a controller is live (dual-path actorless
-fallback). The next concrete step is todo (3): migrate `closeout_owner_claim`/
-`release` onto the command plane (paralleling `closeout_advance`), then (4) the
-read-only inspection chokepoint, (5) drop the per-consume `flock`. Everything
-committed; clippy clean + nextest green on `main`.
+Todos 1–4 + 6 are done and `make check` is green on `main`. The command-plane
+authority is live for closeout: `mark_write_applied`/`mark_response_captured`/
+`mark_abandoned` + owner claim/release route through it; `load*` reads the live
+projection; the self-RPC guard + stale-socket fallback are in place. Two
+follow-ups remain: (a) migrate `mark_committed` onto the command plane once its
+recovery commit-ordering/label is pinned (it stays local today), and (b) todo
+(5) — route queue consume through the authority, then drop the per-consume
+`flock`. After Phase 2 is fully uniform, Phase 3 (cheap enforcement) and the
+Phase 4 second consumer (freehold or community-pulse).

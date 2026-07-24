@@ -42,6 +42,26 @@ pub trait QueueConsumeWriteEffects {
         source_content: &str,
         reason: &str,
     ) -> Result<()>;
+
+    /// Converge a batch of CRDT structural ops (`#crdtstructops` Phase D). The
+    /// default impl projects the ops onto `source_content` via
+    /// [`apply_structural_ops_to_content`] and delegates to
+    /// [`converge_document_or_disk`](Self::converge_document_or_disk), which
+    /// already handles the detached file-write and the editor-attached relay —
+    /// so a site that emits structural ops instead of a flock-serialized
+    /// whole-buffer rewrite converges identically. The editor-attached runtime
+    /// impl may override this to send an `ApplyStructuralOp` intent directly.
+    fn converge_structural_ops(
+        &self,
+        file: &Path,
+        ops: &[agent_doc_queue::queue_consume::IpcNodeOp],
+        source_content: &str,
+        reason: &str,
+    ) -> Result<()> {
+        let target_content =
+            agent_doc_queue::queue_consume::apply_structural_ops_to_content(source_content, ops)?;
+        self.converge_document_or_disk(file, &target_content, source_content, reason)
+    }
 }
 
 fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
@@ -633,7 +653,11 @@ pub fn strike_orphan_id_backed_queue_head(
     id: &str,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<bool> {
-    let _lock = acquire_doc_lock(file)?;
+    // `#crdtstructops` Phase D: the strike converges through CRDT structural ops
+    // (no flock). The detached single-writer projection writes the file; the
+    // editor-attached path converges via the relay. The read-parse cycle below
+    // still validates against `content`, but the file-TOCTOU `flock` is retired —
+    // the CRDT, not a kernel lock, is the convergence mechanism.
     let content = effects.current_document_content(file, "orphan_queue_head_strike")?;
     let target_id =
         agent_doc_element_backlog::backlog::normalize_pending_id(id).to_ascii_lowercase();
@@ -682,8 +706,9 @@ pub fn strike_orphan_id_backed_queue_head(
         None => None,
     };
     let base_hash = agent_doc_hash::content_hash(&content);
+    let strike_ops = queue_consume_node_ops(&keys);
     effects
-        .converge_document_or_disk(file, &new_document, &content, "orphan_id_head_strike")
+        .converge_structural_ops(file, &strike_ops, &content, "orphan_id_head_strike")
         .context("orphan strike: failed to write document")?;
     if let Some(snap) = new_snapshot {
         save_snapshot_recovery_only(file, &snap, "orphan id head snapshot sync");
@@ -719,7 +744,9 @@ pub fn acknowledge_open_id_backed_queue_head(
     id: &str,
     effects: &dyn QueueConsumeWriteEffects,
 ) -> Result<bool> {
-    let _lock = acquire_doc_lock(file)?;
+    // `#crdtstructops` Phase D: the ack strike converges through CRDT structural
+    // ops (no flock) — same detached-single-writer / editor-relay split as the
+    // orphan strike above.
     let content = effects.current_document_content(file, "open_id_head_ack")?;
     let target_id =
         agent_doc_element_backlog::backlog::normalize_pending_id(id).to_ascii_lowercase();
@@ -767,8 +794,9 @@ pub fn acknowledge_open_id_backed_queue_head(
         None => None,
     };
     let base_hash = agent_doc_hash::content_hash(&content);
+    let ack_ops = queue_consume_node_ops(&keys);
     effects
-        .converge_document_or_disk(file, &new_document, &content, "open_id_head_ack")
+        .converge_structural_ops(file, &ack_ops, &content, "open_id_head_ack")
         .context("open-id ack: failed to write document")?;
     if let Some(snap) = new_snapshot {
         save_snapshot_recovery_only(file, &snap, "open id ack snapshot sync");

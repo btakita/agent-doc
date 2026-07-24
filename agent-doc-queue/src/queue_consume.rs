@@ -316,6 +316,20 @@ pub fn ipc_node_ops_to_node_patches(ops: &[IpcNodeOp]) -> Vec<MutationNodePatch>
         })
         .collect()
 }
+
+/// Apply a batch of structural ops to document `content`, returning the mutated
+/// text. This is the pure detached-writer projection of the CRDT structural ops:
+/// it maps each [`IpcNodeOp`] to a [`MutationNodePatch`] and applies them via the
+/// existing `apply_node_patches` machinery, which is byte-identical to the
+/// per-site `consume_queue_nodes_by_key` strike-through for node-addressable
+/// ops (`strike_node_patch` calls the same `consume_node`). The editor-attached
+/// path instead sends an `ApplyStructuralOp` intent (Phase C); this helper is
+/// the detached single-writer fallback (Phase E).
+pub fn apply_structural_ops_to_content(content: &str, ops: &[IpcNodeOp]) -> Result<String> {
+    let patches = ipc_node_ops_to_node_patches(ops);
+    agent_doc_markdown_ast::mutations::apply_node_patches(content, &patches)
+        .map_err(|err| anyhow::anyhow!("structural op apply failed: {err}"))
+}
 pub fn first_n_queue_prompt_texts(entries: &[QueueEntry], count: usize) -> Vec<String> {
     entries
         .iter()
@@ -1278,6 +1292,36 @@ mod tests {
         assert_eq!(patches[1].op, MutationNodePatchOp::Strike);
         assert_eq!(patches[2].op, MutationNodePatchOp::Remove);
         assert!(patches.iter().all(|p| p.content.is_none() && p.order.is_empty()));
+    }
+
+    #[test]
+    fn apply_structural_ops_to_content_strikes_targeted_nodes() {
+        // The detached single-writer projection: structural ops applied to content
+        // produce the same strike-through as the per-site consume path, leaving
+        // non-targeted nodes untouched.
+        let content = queue_doc("- do [#alpha]\n- do [#beta]\n");
+        let keys = id_backed_head_node_keys(&content, "beta").unwrap();
+        let ops = queue_consume_node_ops(&keys);
+        let struck = apply_structural_ops_to_content(&content, &ops).unwrap();
+        assert!(
+            struck.contains("~~do [#beta]~~"),
+            "targeted node is struck-through:\n{struck}"
+        );
+        assert!(
+            struck.contains("- do [#alpha]\n"),
+            "non-targeted node is untouched:\n{struck}"
+        );
+    }
+
+    #[test]
+    fn apply_structural_ops_tombstone_removes_the_node() {
+        let content = queue_doc("- do [#alpha]\n- do [#beta]\n");
+        let keys = id_backed_head_node_keys(&content, "beta").unwrap();
+        // A strike (tombstone) op removes the node entirely.
+        let ops = queue_strike_node_ops(&keys);
+        let removed = apply_structural_ops_to_content(&content, &ops).unwrap();
+        assert!(!removed.contains("beta"), "tombstoned node is gone");
+        assert!(removed.contains("- do [#alpha]\n"), "sibling survives");
     }
 
     #[test]

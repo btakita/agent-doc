@@ -126,7 +126,21 @@ Fixed the causes of the churn and released agent-doc 0.35.25.
 The bounded Lazily design plan is at `tasks/software/plan-lazily-durable-effect-sinks.md` (commit `636becadb`). It keeps storage application-owned, distinguishes coalesced projections from lossless history, reuses Effect/AsyncEffect, TopicCell, DurableOutbox, existing durability markers, and gates any shared API on two consumers plus net code reduction.
 
 Verification: focused package regressions passed; full `make check` passed; normal and full-LTO installs passed; installed `agent-doc --version` reports 0.35.25. Agent-doc commits `91e26902b` and `a51c6b83f` are on `main`, tag `v0.35.25` is pushed, and the CI and Release workflows were in progress at the required single inspection.
-<!-- agent:boundary:d886b46e -->
+
+### Re: Response
+
+Fixed and released agent-doc 0.35.25.
+
+- Lazily actor state now owns closeout coordination; SQLite/`flock` are off that hot path.
+- Downgrades are blocked by default, and stale MCP servers re-exec while replaying the active request.
+- Strict closeout headings normalize automatically.
+- Full `make check`, normal install, and full-LTO install passed.
+- Released commits `91e26902b` and `a51c6b83f`; tag `v0.35.25` pushed.
+- Lazily plan: [plan-lazily-durable-effect-sinks.md](/home/brian/work/btakita/agent-loop/tasks/software/plan-lazily-durable-effect-sinks.md)
+- Agent-doc session-check confirmed cycle `cycle-1784860530755` committed successfully.
+
+CI and Release workflows were in progress at the required single inspection. The unrelated dirty `src/agent-doc` worktree was left untouched.
+<!-- agent:boundary:8ea0f775 -->
 <!-- /agent:exchange -->
 ## Queue
 

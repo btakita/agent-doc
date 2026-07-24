@@ -1234,17 +1234,23 @@ pub fn mark_recycle_resume_consumed(file: &Path) -> Result<Option<CycleState>> {
     Ok(Some(state))
 }
 
-pub fn mark_write_applied(
+/// Pure decision core of `mark_write_applied`: advance the phase and produce the
+/// mutated state. Returns `(state, transitioned)`; `transitioned = false` means
+/// the phase could not advance (idempotent no-op) and the caller MUST emit no
+/// fact. Pure (no I/O), so it is shared by [`mark_write_applied`] and the
+/// controller's live authority path on the command plane (`#lzdurablesink`).
+pub fn decide_write_applied(
+    current: Option<CycleState>,
     file: &Path,
     event: &str,
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
-) -> Result<CycleState> {
+) -> (CycleState, bool) {
     let mut state =
-        load(file)?.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
+        current.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
     let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::WriteApplied)
     else {
-        return Ok(state);
+        return (state, false);
     };
     state.phase = next_phase;
     state.last_event = event.to_string();
@@ -1253,9 +1259,22 @@ pub fn mark_write_applied(
     state.file_hash = file_content.map(agent_doc_hash::content_hash);
     state.normalized_snapshot_hash = snapshot_content.map(replay_content_hash);
     state.normalized_file_hash = file_content.map(replay_content_hash);
-    save(file, &state)?;
-    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::WriteApplied)?;
-    append_phase_event_to_session_log(file, &state, file_content);
+    (state, true)
+}
+
+pub fn mark_write_applied(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<CycleState> {
+    let (state, transitioned) =
+        decide_write_applied(load(file)?, file, event, snapshot_content, file_content);
+    if transitioned {
+        save(file, &state)?;
+        append_closeout_projection_event(file, &state, CloseoutProjectionEvent::WriteApplied)?;
+        append_phase_event_to_session_log(file, &state, file_content);
+    }
     Ok(state)
 }
 

@@ -10488,6 +10488,103 @@ fn append_apply_state_event(
     Ok(inserted)
 }
 
+/// Authority-side service for a `closeout_advance` command (`#lzdurablesink`).
+/// Decodes the [`lazily::CommandSubmit`], decides the phase transition from the
+/// live Lazily projection (no `state.db` replay), emits the phase fact(s) as the
+/// durable sink via [`append_apply_state_event`], and returns the terminal
+/// [`lazily::CausalReceipt`] — the command's terminal authority, never a
+/// transport ACK. Counterpart to
+/// [`super::command_plane::build_closeout_advance_submit`]; the live
+/// `CommandTransport` wiring is the cross-cutting follow-up.
+///
+/// Every command resolves to a receipt: a decode failure, an unrouted event, or
+/// a sink error is a `rejected` receipt (fail closed); an applied transition (or
+/// an idempotent no-op at the requested phase) is `applied`.
+//
+// Foundation-only until the live CommandTransport dispatch wires this in (the
+// same follow-up that `supervisor_recycle` awaits); exercised by the in-process
+// authority test today.
+#[allow(dead_code)]
+pub(crate) fn service_closeout_advance(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    submit: &lazily::CommandSubmit,
+) -> lazily::CausalReceipt {
+    use super::command_plane::{closeout_advance_receipt, CONTROLLER_TARGET};
+    let outcome = closeout_advance_outcome(bootstrap, runtime, submit);
+    closeout_advance_receipt(
+        submit,
+        format!("{}:rcpt", submit.command_id),
+        CONTROLLER_TARGET,
+        submit.authority_generation,
+        outcome,
+    )
+}
+
+#[allow(dead_code)]
+fn closeout_advance_outcome(
+    bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    submit: &lazily::CommandSubmit,
+) -> Result<(), String> {
+    use super::command_plane::{CloseoutAdvancePayload, CloseoutPhaseEvent};
+
+    let payload = CloseoutAdvancePayload::decode(submit).map_err(|e| format!("{e:#}"))?;
+    let file = std::path::PathBuf::from(&payload.document_path);
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let document = runtime
+        .document_state_projection(&document_hash)
+        .map_err(|e| format!("{e:#}"))?;
+    let current = match document.as_ref() {
+        Some(d) => agent_doc_cycle_state_io::reconstruct_cycle_state(d)
+            .map_err(|e| format!("{e:#}"))?,
+        None => None,
+    };
+    // The next checkpoint sequence is the last recorded one + 1 (0 when none).
+    let checkpoint_sequence = document
+        .as_ref()
+        .and_then(|d| d.closeout.turn_intent_checkpoint.as_ref())
+        .map(|c| c.checkpoint_sequence.saturating_add(1))
+        .unwrap_or(0);
+
+    let event_label = payload.last_event_label();
+    let (state, transitioned) = match payload.event {
+        CloseoutPhaseEvent::WriteApplied => agent_doc_cycle_state_io::decide_write_applied(
+            current,
+            &file,
+            &event_label,
+            payload.snapshot_content.as_deref(),
+            payload.file_content.as_deref(),
+        ),
+        // ResponseCaptured / Committed / Abandoned migrate onto this authority next;
+        // until then a request for them is rejected so the caller fails closed.
+        other => return Err(format!("closeout_advance: event {other:?} not yet routed through the authority")),
+    };
+
+    // An idempotent no-op (the phase could not advance) folds as `applied`: the
+    // requested end-state already holds and the sink emits nothing.
+    if !transitioned {
+        return Ok(());
+    }
+
+    let checkpoint = agent_doc_cycle_state_io::build_turn_intent_checkpoint_event(
+        &document_hash,
+        checkpoint_sequence,
+        &state,
+    )
+    .map_err(|e| format!("{e:#}"))?;
+    append_apply_state_event(bootstrap, runtime, checkpoint).map_err(|e| format!("{e:#}"))?;
+    if let Some(phase_event) = agent_doc_cycle_state_io::build_closeout_projection_event(
+        &document_hash,
+        &state,
+        agent_doc_cycle_state_io::CloseoutProjectionEvent::WriteApplied,
+    ) {
+        append_apply_state_event(bootstrap, runtime, phase_event)
+            .map_err(|e| format!("{e:#}"))?;
+    }
+    Ok(())
+}
+
 fn append_and_apply_state_event(
     bootstrap: &ControllerBootstrap,
     runtime: &ControllerRuntime,
@@ -14919,6 +15016,54 @@ mod tests {
         );
         assert!(!outcome.graceful, "force skips the graceful shutdown RPC");
         assert!(outcome.force);
+    }
+
+    #[test]
+    fn closeout_advance_authority_decides_from_live_projection_and_sinks_fact() {
+        // `#lzdurablesink`: the authority services a closeout_advance CommandSubmit
+        // from its live Lazily projection — no state.db replay — advances the pure
+        // phase machine, emits the fact(s) as the durable sink, and returns a
+        // terminal CausalReceipt (applied). With no prior state the machine
+        // synthesizes a PreflightStarted cycle and advances it to WriteApplied.
+        use super::command_plane::{
+            build_closeout_advance_submit, CloseoutAdvancePayload, CloseoutPhaseEvent,
+        };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/authority.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        let bootstrap = runtime.bootstrap_snapshot().unwrap();
+
+        let submit = build_closeout_advance_submit(
+            "cmd-authority-1",
+            "cycle_state",
+            "doc:cycle:write_applied:body",
+            1,
+            CloseoutAdvancePayload {
+                document_path: doc.to_string_lossy().to_string(),
+                event: CloseoutPhaseEvent::WriteApplied,
+                reason: None,
+                snapshot_content: None,
+                file_content: Some("body".to_string()),
+                response_sha256: None,
+                cycle_id_hint: None,
+            },
+        )
+        .unwrap();
+
+        let receipt = service_closeout_advance(&bootstrap, &runtime, &submit);
+        assert_eq!(receipt.outcome, lazily::ReceiptOutcome::Applied);
+
+        // The durable sink fired: the live projection now observes WriteApplied.
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let phase = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .and_then(|d| d.closeout.phase);
+        assert_eq!(phase, Some(agent_doc_turn::CyclePhase::WriteApplied));
     }
 
     #[test]

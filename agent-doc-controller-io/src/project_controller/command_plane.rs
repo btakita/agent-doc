@@ -176,6 +176,10 @@ impl CommitObservation {
 /// the command plane. lazily treats this body as opaque bytes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CloseoutAdvancePayload {
+    /// Canonical path of the document whose closeout phase advances. The
+    /// `CommandSubmit` envelope is document-agnostic, so the target document is
+    /// part of the domain payload.
+    pub document_path: String,
     /// The typed transition (and label). See [`CloseoutPhaseEvent`].
     pub event: CloseoutPhaseEvent,
     /// Present only when `event == Abandoned`. An abandonment reason is
@@ -383,6 +387,7 @@ mod tests {
     #[test]
     fn closeout_advance_payload_roundtrips_and_validates_type() {
         let payload = CloseoutAdvancePayload {
+            document_path: "/tmp/doc.md".to_string(),
             event: CloseoutPhaseEvent::WriteApplied,
             reason: None,
             snapshot_content: Some("snap".to_string()),
@@ -411,6 +416,7 @@ mod tests {
     fn closeout_advance_last_event_label_is_derived_from_the_typed_event() {
         // No free-text label crosses the boundary: last_event derives from the enum.
         let write = CloseoutAdvancePayload {
+            document_path: "/tmp/doc.md".to_string(),
             event: CloseoutPhaseEvent::WriteApplied,
             reason: None,
             snapshot_content: None,
@@ -428,6 +434,7 @@ mod tests {
             (CommitObservation::CommitAlreadyCurrent, "commit_already_current"),
         ] {
             let committed = CloseoutAdvancePayload {
+                document_path: "/tmp/doc.md".to_string(),
                 event: CloseoutPhaseEvent::Committed(obs),
                 reason: None,
                 snapshot_content: None,
@@ -440,6 +447,7 @@ mod tests {
 
         // An abandon reason is a named field, not a label.
         let abandoned = CloseoutAdvancePayload {
+            document_path: "/tmp/doc.md".to_string(),
             event: CloseoutPhaseEvent::Abandoned,
             reason: Some("stalled_preflight".to_string()),
             snapshot_content: None,
@@ -458,6 +466,7 @@ mod tests {
             "doc:cycle:write_applied:body",
             1,
             CloseoutAdvancePayload {
+                document_path: "/tmp/doc.md".to_string(),
                 event: CloseoutPhaseEvent::WriteApplied,
                 reason: None,
                 snapshot_content: None,
@@ -483,6 +492,7 @@ mod tests {
             "doc:cycle:write_applied:body",
             3,
             CloseoutAdvancePayload {
+                document_path: "/tmp/doc.md".to_string(),
                 event: CloseoutPhaseEvent::WriteApplied,
                 reason: None,
                 snapshot_content: None,
@@ -513,6 +523,7 @@ mod tests {
             "doc:cycle:committed:body",
             4,
             CloseoutAdvancePayload {
+                document_path: "/tmp/doc.md".to_string(),
                 event: CloseoutPhaseEvent::Committed(CommitObservation::CommitSuccess),
                 reason: None,
                 snapshot_content: None,

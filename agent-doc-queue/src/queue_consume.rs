@@ -113,6 +113,43 @@ pub struct NextQueueHeadSelection {
     pub stop_fence_at_head: bool,
 }
 
+/// The structural-op vocabulary for queue node mutations. Each variant maps to a
+/// [`QueueCrdt`](agent_doc_merge::queue_seqcrdt::QueueCrdt) effect (Phase A,
+/// `agent-doc-merge::queue_seqcrdt`):
+/// - [`NodeOpKind::Consume`] / [`NodeOpKind::MarkDone`] → `QueueCrdt::mark_done`
+///   (the node stays, rendered `~~text~~` — completed).
+/// - [`NodeOpKind::Strike`] → `QueueCrdt::strike` (tombstone — the node is
+///   removed from the live view).
+///
+/// Phase B of `plan-crdt-structural-ops`: this is the IPC vocabulary the editor
+/// structural-op handler (Phase C) applies and the consume sites (Phase D) emit
+/// instead of a flock-serialized whole-buffer rewrite.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeOpKind {
+    /// Strike-through/keep (Prompt → Completed). The historical consume op.
+    Consume,
+    /// Mark completed (same CRDT effect as `Consume`; distinct intent for audit).
+    MarkDone,
+    /// Tombstone/remove.
+    Strike,
+}
+
+impl NodeOpKind {
+    /// `true` for ops that tombstone the node in the [`QueueCrdt`].
+    ///
+    /// [`QueueCrdt`]: agent_doc_merge::queue_seqcrdt::QueueCrdt
+    pub fn is_tombstone(self) -> bool {
+        matches!(self, NodeOpKind::Strike)
+    }
+}
+
+/// The canonical op label for a consume (strike-through/keep) structural op.
+pub const OP_CONSUME: &str = "consume";
+/// The canonical op label for a mark-done (completed) structural op.
+pub const OP_MARK_DONE: &str = "mark_done";
+/// The canonical op label for a tombstone (remove) structural op.
+pub const OP_STRIKE: &str = "strike";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IpcNodeOp {
     pub component: String,
@@ -121,12 +158,51 @@ pub struct IpcNodeOp {
 }
 
 impl IpcNodeOp {
-    fn consume(component: &str, node_id: String) -> Self {
+    /// A consume op (strike-through/keep → `QueueCrdt::mark_done`).
+    pub fn consume(component: &str, node_id: String) -> Self {
+        Self::new(component, node_id, OP_CONSUME)
+    }
+
+    /// A mark-done op (completed → `QueueCrdt::mark_done`).
+    pub fn mark_done(component: &str, node_id: String) -> Self {
+        Self::new(component, node_id, OP_MARK_DONE)
+    }
+
+    /// A strike op (tombstone/remove → `QueueCrdt::strike`).
+    pub fn strike(component: &str, node_id: String) -> Self {
+        Self::new(component, node_id, OP_STRIKE)
+    }
+
+    fn new(component: &str, node_id: String, op: &str) -> Self {
         Self {
             component: component.to_string(),
             node_id,
-            op: "consume".to_string(),
+            op: op.to_string(),
         }
+    }
+
+    /// The durable node key this op targets (the `node_id` is the queue
+    /// `node_key` from `agent_doc_markdown_ast::mutations::item_nodes`).
+    pub fn node_key(&self) -> &str {
+        &self.node_id
+    }
+
+    /// Classify this op's effect on the [`QueueCrdt`].
+    ///
+    /// [`QueueCrdt`]: agent_doc_merge::queue_seqcrdt::QueueCrdt
+    pub fn kind(&self) -> NodeOpKind {
+        match self.op.as_str() {
+            OP_MARK_DONE => NodeOpKind::MarkDone,
+            OP_STRIKE => NodeOpKind::Strike,
+            _ => NodeOpKind::Consume,
+        }
+    }
+
+    /// `true` if this op tombstones (removes) the node in the [`QueueCrdt`].
+    ///
+    /// [`QueueCrdt`]: agent_doc_merge::queue_seqcrdt::QueueCrdt
+    pub fn is_tombstone(&self) -> bool {
+        self.kind().is_tombstone()
     }
 
     pub fn to_json(&self) -> serde_json::Value {
@@ -144,6 +220,70 @@ pub fn queue_consume_node_ops(node_keys: &[String]) -> Vec<IpcNodeOp> {
         .cloned()
         .map(|node_key| IpcNodeOp::consume("queue", node_key))
         .collect()
+}
+
+/// Build mark-done structural ops for the given queue node keys.
+pub fn queue_mark_done_node_ops(node_keys: &[String]) -> Vec<IpcNodeOp> {
+    node_keys
+        .iter()
+        .cloned()
+        .map(|node_key| IpcNodeOp::mark_done("queue", node_key))
+        .collect()
+}
+
+/// Build strike (tombstone) structural ops for the given queue node keys.
+pub fn queue_strike_node_ops(node_keys: &[String]) -> Vec<IpcNodeOp> {
+    node_keys
+        .iter()
+        .cloned()
+        .map(|node_key| IpcNodeOp::strike("queue", node_key))
+        .collect()
+}
+
+/// Structural ops for site 2 (`strike_answered_free_text_queue_heads`): consume
+/// (strike-through) the answered free-text queue heads.
+pub fn free_text_strike_node_ops(
+    content: &str,
+    response_body: &str,
+    baseline: Option<&str>,
+) -> Result<Vec<IpcNodeOp>> {
+    let keys = answered_free_text_head_node_keys(content, response_body, baseline)?;
+    Ok(queue_consume_node_ops(&keys))
+}
+
+/// Structural ops for the node-addressable part of site 3
+/// (`prune_noise_queue_heads`): consume (strike-through) the bulleted noise heads
+/// and orphan id-backed heads. The multiline/freeform excise is byte-range
+/// removal of non-item content and is NOT node-addressable, so it is not
+/// represented here; callers keep that excise in the full-text path until a
+/// non-item structural op exists.
+pub fn noise_prune_node_ops(content: &str) -> Result<Vec<IpcNodeOp>> {
+    let mut keys = noise_queue_head_node_keys(content)?;
+    for key in orphan_id_queue_head_node_keys(content)? {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    Ok(queue_consume_node_ops(&keys))
+}
+
+/// Structural ops for sites 4 and 5 (`strike_orphan_id_backed_queue_head` +
+/// `acknowledge_open_id_backed_queue_head`): consume (strike-through) the
+/// id-backed queue head(s) resolving to `target_id`.
+pub fn id_backed_strike_node_ops(content: &str, target_id: &str) -> Result<Vec<IpcNodeOp>> {
+    let keys = id_backed_head_node_keys(content, target_id)?;
+    Ok(queue_consume_node_ops(&keys))
+}
+
+/// Structural ops for site 6 (`mark_completed_queue_prompts_for_done_ids`):
+/// mark-done the queue entries whose directive id is in `done_ids`.
+pub fn mark_done_node_ops_for_done_ids(
+    content: &str,
+    done_ids: &[String],
+    consumed_texts: &[String],
+) -> Vec<IpcNodeOp> {
+    let keys = queue_prompt_node_keys_for_done_ids(content, done_ids, consumed_texts).keys;
+    queue_mark_done_node_ops(&keys)
 }
 
 pub fn first_n_queue_prompt_texts(entries: &[QueueEntry], count: usize) -> Vec<String> {
@@ -1045,6 +1185,104 @@ mod tests {
         format!(
             "---\nqueue_active: true\n---\n\n## Exchange\n\n<!-- agent:exchange -->\n{response}\n<!-- /agent:exchange -->\n\n## Queue\n\n<!-- agent:queue -->\n{queue_body}\n<!-- /agent:queue -->\n"
         )
+    }
+
+    fn queue_doc(body: &str) -> String {
+        format!("<!-- agent:queue -->\n{body}<!-- /agent:queue -->\n")
+    }
+
+    #[test]
+    fn ipc_node_op_vocabulary_classifies_crdt_effect() {
+        // consume + mark_done → not tombstone (QueueCrdt::mark_done).
+        let consume = IpcNodeOp::consume("queue", "queue:0:a:0".into());
+        assert_eq!(consume.kind(), NodeOpKind::Consume);
+        assert!(!consume.is_tombstone());
+        assert_eq!(consume.op, OP_CONSUME);
+
+        let mark_done = IpcNodeOp::mark_done("queue", "queue:0:b:0".into());
+        assert_eq!(mark_done.kind(), NodeOpKind::MarkDone);
+        assert!(!mark_done.is_tombstone());
+        assert_eq!(mark_done.op, OP_MARK_DONE);
+
+        // strike → tombstone (QueueCrdt::strike).
+        let strike = IpcNodeOp::strike("queue", "queue:0:c:0".into());
+        assert_eq!(strike.kind(), NodeOpKind::Strike);
+        assert!(strike.is_tombstone());
+        assert_eq!(strike.op, OP_STRIKE);
+    }
+
+    #[test]
+    fn ipc_node_op_node_key_accessor_and_json_round_trip() {
+        let op = IpcNodeOp::mark_done("queue", "queue:0:alpha:0".into());
+        assert_eq!(op.node_key(), "queue:0:alpha:0");
+        let json = op.to_json();
+        assert_eq!(json["op"], "mark_done");
+        assert_eq!(json["component"], "queue");
+        assert_eq!(json["node_id"], "queue:0:alpha:0");
+    }
+
+    #[test]
+    fn node_op_helpers_build_correct_op_labels() {
+        let keys = vec!["queue:0:a:0".to_string(), "queue:0:b:0".to_string()];
+        let consume = queue_consume_node_ops(&keys);
+        assert!(consume.iter().all(|op| op.op == OP_CONSUME));
+        let mark_done = queue_mark_done_node_ops(&keys);
+        assert!(mark_done.iter().all(|op| op.op == OP_MARK_DONE));
+        let strike = queue_strike_node_ops(&keys);
+        assert!(strike.iter().all(|op| op.op == OP_STRIKE && op.is_tombstone()));
+    }
+
+    #[test]
+    fn free_text_strike_node_ops_never_tombstone() {
+        let content = queue_doc("- a plain free-text report\n- do [#alpha]\n");
+        let ops = free_text_strike_node_ops(
+            &content,
+            "### Re: report\n\nAnswered the plain free-text report.\n",
+            None,
+        )
+        .unwrap();
+        // Whatever the free-text heuristic targets, the ops must be mark_done
+        // (strike-through/keep), never tombstones.
+        assert!(
+            ops.iter().all(|op| !op.is_tombstone()),
+            "free-text strike is mark_done, not remove"
+        );
+        assert!(ops.iter().all(|op| op.node_key().starts_with("queue:")));
+    }
+
+    #[test]
+    fn id_backed_strike_node_ops_target_the_named_id() {
+        let content = queue_doc("- do [#alpha]\n- do [#beta]\n");
+        let ops = id_backed_strike_node_ops(&content, "beta").unwrap();
+        assert_eq!(ops.len(), 1, "only the beta id-backed head is targeted");
+        assert_eq!(ops[0].op, OP_CONSUME);
+        assert!(!ops[0].is_tombstone());
+    }
+
+    #[test]
+    fn noise_prune_node_ops_are_mark_done_not_remove() {
+        let content = queue_doc("- $ ./run-tests.sh\n- do [#alpha]\n");
+        let ops = noise_prune_node_ops(&content).unwrap();
+        // The bulleted/orphan strike is mark_done (strike-through/keep); the
+        // non-node-addressable multiline excise is intentionally NOT here.
+        assert!(
+            ops.iter().all(|op| !op.is_tombstone()),
+            "bulleted noise strike is mark_done, not remove"
+        );
+        assert!(ops.iter().all(|op| op.node_key().starts_with("queue:")));
+    }
+
+    #[test]
+    fn mark_done_node_ops_for_done_ids_target_completed_entries() {
+        let content = queue_doc("- do [#alpha]\n- do [#beta]\n");
+        let ops = mark_done_node_ops_for_done_ids(
+            &content,
+            &["alpha".to_string()],
+            &["do [#alpha]".to_string()],
+        );
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].op, OP_MARK_DONE);
+        assert!(!ops[0].is_tombstone());
     }
 
     #[test]

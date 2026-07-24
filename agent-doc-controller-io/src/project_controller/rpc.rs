@@ -10548,39 +10548,103 @@ fn closeout_advance_outcome(
         .unwrap_or(0);
 
     let event_label = payload.last_event_label();
-    let (state, transitioned) = match payload.event {
-        CloseoutPhaseEvent::WriteApplied => agent_doc_cycle_state_io::decide_write_applied(
-            current,
-            &file,
-            &event_label,
-            payload.snapshot_content.as_deref(),
-            payload.file_content.as_deref(),
-        ),
-        // ResponseCaptured / Committed / Abandoned migrate onto this authority next;
-        // until then a request for them is rejected so the caller fails closed.
-        other => return Err(format!("closeout_advance: event {other:?} not yet routed through the authority")),
+    use agent_doc_cycle_state_io::CloseoutProjectionEvent;
+    // Normalize every transition to `(state, checkpoint, phase-facts)` so the sink
+    // loop is uniform. An empty decision (no checkpoint, no facts) is an idempotent
+    // no-op that folds as `applied`.
+    let (state, checkpoint, facts): (
+        agent_doc_cycle_state_io::CycleState,
+        bool,
+        Vec<CloseoutProjectionEvent>,
+    ) = match payload.event {
+        CloseoutPhaseEvent::WriteApplied => {
+            let (state, transitioned) = agent_doc_cycle_state_io::decide_write_applied(
+                current,
+                &file,
+                &event_label,
+                payload.snapshot_content.as_deref(),
+                payload.file_content.as_deref(),
+            );
+            (
+                state,
+                transitioned,
+                if transitioned {
+                    vec![CloseoutProjectionEvent::WriteApplied]
+                } else {
+                    Vec::new()
+                },
+            )
+        }
+        CloseoutPhaseEvent::ResponseCaptured => {
+            let Some(response_sha256) = payload.response_sha256.as_deref() else {
+                return Err(
+                    "closeout_advance: ResponseCaptured requires response_sha256".to_string(),
+                );
+            };
+            let (state, transitioned) = agent_doc_cycle_state_io::decide_response_captured(
+                current,
+                &file,
+                &event_label,
+                payload.snapshot_content.as_deref(),
+                payload.file_content.as_deref(),
+                response_sha256,
+                payload.cycle_id_hint.as_deref(),
+            );
+            (
+                state,
+                transitioned,
+                if transitioned {
+                    vec![CloseoutProjectionEvent::ResponseCaptured]
+                } else {
+                    Vec::new()
+                },
+            )
+        }
+        CloseoutPhaseEvent::Committed(_) => {
+            let decision = agent_doc_cycle_state_io::decide_committed(
+                current,
+                &file,
+                &event_label,
+                payload.snapshot_content.as_deref(),
+                payload.file_content.as_deref(),
+            );
+            (decision.state, decision.checkpoint, decision.facts)
+        }
+        CloseoutPhaseEvent::Abandoned => {
+            let decision = agent_doc_cycle_state_io::decide_abandoned(
+                current,
+                &file,
+                &event_label,
+                payload.snapshot_content.as_deref(),
+                payload.file_content.as_deref(),
+            );
+            (decision.state, decision.checkpoint, decision.facts)
+        }
     };
 
-    // An idempotent no-op (the phase could not advance) folds as `applied`: the
-    // requested end-state already holds and the sink emits nothing.
-    if !transitioned {
+    // An idempotent no-op folds as `applied`: the requested end-state already
+    // holds and the sink emits nothing.
+    if !checkpoint && facts.is_empty() {
         return Ok(());
     }
 
-    let checkpoint = agent_doc_cycle_state_io::build_turn_intent_checkpoint_event(
-        &document_hash,
-        checkpoint_sequence,
-        &state,
-    )
-    .map_err(|e| format!("{e:#}"))?;
-    append_apply_state_event(bootstrap, runtime, checkpoint).map_err(|e| format!("{e:#}"))?;
-    if let Some(phase_event) = agent_doc_cycle_state_io::build_closeout_projection_event(
-        &document_hash,
-        &state,
-        agent_doc_cycle_state_io::CloseoutProjectionEvent::WriteApplied,
-    ) {
-        append_apply_state_event(bootstrap, runtime, phase_event)
+    if checkpoint {
+        let checkpoint_event = agent_doc_cycle_state_io::build_turn_intent_checkpoint_event(
+            &document_hash,
+            checkpoint_sequence,
+            &state,
+        )
+        .map_err(|e| format!("{e:#}"))?;
+        append_apply_state_event(bootstrap, runtime, checkpoint_event)
             .map_err(|e| format!("{e:#}"))?;
+    }
+    for fact in &facts {
+        if let Some(phase_event) =
+            agent_doc_cycle_state_io::build_closeout_projection_event(&document_hash, &state, *fact)
+        {
+            append_apply_state_event(bootstrap, runtime, phase_event)
+                .map_err(|e| format!("{e:#}"))?;
+        }
     }
     Ok(())
 }
@@ -15064,6 +15128,91 @@ mod tests {
             .unwrap()
             .and_then(|d| d.closeout.phase);
         assert_eq!(phase, Some(agent_doc_turn::CyclePhase::WriteApplied));
+    }
+
+    #[test]
+    fn closeout_advance_authority_routes_committed_and_abandoned() {
+        // All four transitions route through the authority on the command plane.
+        // Seed WriteApplied, then advance Committed(CommitSuccess); also verify
+        // Abandoned on a fresh open cycle reaches the Abandoned phase. Each step
+        // returns an applied CausalReceipt and the live projection advances.
+        use super::command_plane::{
+            build_closeout_advance_submit, CloseoutAdvancePayload, CloseoutPhaseEvent,
+            CommitObservation,
+        };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let doc = dir.path().join("tasks/routed.md");
+        std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        std::fs::write(&doc, "body").unwrap();
+        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        let bootstrap = runtime.bootstrap_snapshot().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let mk = |command_id: &str, event: CloseoutPhaseEvent, reason: Option<&str>| {
+            build_closeout_advance_submit(
+                command_id,
+                "cycle_state",
+                format!("doc:cycle:{command_id}"),
+                1,
+                CloseoutAdvancePayload {
+                    document_path: doc.to_string_lossy().to_string(),
+                    event,
+                    reason: reason.map(str::to_string),
+                    snapshot_content: None,
+                    file_content: Some("body".to_string()),
+                    response_sha256: None,
+                    cycle_id_hint: None,
+                },
+            )
+            .unwrap()
+        };
+
+        // PreflightStarted → WriteApplied → Committed.
+        let receipt =
+            service_closeout_advance(&bootstrap, &runtime, &mk("wa", CloseoutPhaseEvent::WriteApplied, None));
+        assert_eq!(receipt.outcome, lazily::ReceiptOutcome::Applied);
+        let receipt = service_closeout_advance(
+            &bootstrap,
+            &runtime,
+            &mk("cm", CloseoutPhaseEvent::Committed(CommitObservation::CommitSuccess), None),
+        );
+        assert_eq!(receipt.outcome, lazily::ReceiptOutcome::Applied);
+        let phase = runtime
+            .document_state_projection(&document_hash)
+            .unwrap()
+            .and_then(|d| d.closeout.phase);
+        assert_eq!(phase, Some(agent_doc_turn::CyclePhase::Committed));
+
+        // A fresh document with an open cycle can be abandoned through the authority.
+        let dir2 = tempfile::TempDir::new().unwrap();
+        let doc2 = dir2.path().join("tasks/abandon.md");
+        std::fs::create_dir_all(doc2.parent().unwrap()).unwrap();
+        std::fs::write(&doc2, "body").unwrap();
+        let runtime2 = Arc::new(ControllerRuntime::new(test_bootstrap(&dir2)).unwrap());
+        let bootstrap2 = runtime2.bootstrap_snapshot().unwrap();
+        let submit = build_closeout_advance_submit(
+            "ab",
+            "cycle_state",
+            "doc:cycle:ab",
+            1,
+            CloseoutAdvancePayload {
+                document_path: doc2.to_string_lossy().to_string(),
+                event: CloseoutPhaseEvent::Abandoned,
+                reason: Some("stalled_preflight".to_string()),
+                snapshot_content: None,
+                file_content: None,
+                response_sha256: None,
+                cycle_id_hint: None,
+            },
+        )
+        .unwrap();
+        let receipt = service_closeout_advance(&bootstrap2, &runtime2, &submit);
+        assert_eq!(receipt.outcome, lazily::ReceiptOutcome::Applied);
+        let phase2 = runtime2
+            .document_state_projection(&agent_doc_hash::document_id_for_path(&doc2))
+            .unwrap()
+            .and_then(|d| d.closeout.phase);
+        assert_eq!(phase2, Some(agent_doc_turn::CyclePhase::Abandoned));
     }
 
     #[test]

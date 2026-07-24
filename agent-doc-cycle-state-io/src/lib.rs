@@ -1278,20 +1278,24 @@ pub fn mark_write_applied(
     Ok(state)
 }
 
-pub fn mark_response_captured(
+/// Pure decision core of `mark_response_captured`. See [`decide_write_applied`]
+/// for the contract; `transitioned = false` means emit no fact. Shared by
+/// [`mark_response_captured`] and the controller authority (`#lzdurablesink`).
+pub fn decide_response_captured(
+    current: Option<CycleState>,
     file: &Path,
     event: &str,
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
     response_sha256: &str,
     cycle_id_hint: Option<&str>,
-) -> Result<CycleState> {
-    let mut state = load(file)?.unwrap_or_else(|| {
+) -> (CycleState, bool) {
+    let mut state = current.unwrap_or_else(|| {
         synthetic_state_with_id(file, CyclePhase::PreflightStarted, cycle_id_hint)
     });
     let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::ResponseCaptured)
     else {
-        return Ok(state);
+        return (state, false);
     };
     state.phase = next_phase;
     state.last_event = event.to_string();
@@ -1302,13 +1306,35 @@ pub fn mark_response_captured(
     state.normalized_file_hash = file_content.map(replay_content_hash);
     state.capture_id = Some(state.cycle_id.clone());
     state.response_sha256 = Some(response_sha256.to_string());
-    save(file, &state)?;
-    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::ResponseCaptured)?;
-    append_phase_event_to_session_log(file, &state, file_content);
-    // NB: intentionally do NOT mirror the pipeline block here. A captured response
-    // is the complete final payload, but capture durability is not visible document
-    // authority. The mirror runs at `write_applied` only after final placement is
-    // proven. Recovery-only partial checkpoints never call this transition (#22a8).
+    (state, true)
+}
+
+pub fn mark_response_captured(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+    response_sha256: &str,
+    cycle_id_hint: Option<&str>,
+) -> Result<CycleState> {
+    let (state, transitioned) = decide_response_captured(
+        load(file)?,
+        file,
+        event,
+        snapshot_content,
+        file_content,
+        response_sha256,
+        cycle_id_hint,
+    );
+    if transitioned {
+        save(file, &state)?;
+        append_closeout_projection_event(file, &state, CloseoutProjectionEvent::ResponseCaptured)?;
+        append_phase_event_to_session_log(file, &state, file_content);
+        // NB: intentionally do NOT mirror the pipeline block here. A captured response
+        // is the complete final payload, but capture durability is not visible document
+        // authority. The mirror runs at `write_applied` only after final placement is
+        // proven. Recovery-only partial checkpoints never call this transition (#22a8).
+    }
     Ok(state)
 }
 
@@ -1842,13 +1868,32 @@ pub fn record_editor_convergence_required(
     Ok(Some(state))
 }
 
-pub fn mark_committed(
+/// A pure closeout transition decision richer than `(state, transitioned)`: the
+/// resulting state plus which durable facts to emit. `checkpoint` requests a
+/// `turn_intent_checkpoint` fact; `facts` are the phase facts; `session_log` is a
+/// client-side log signal (the authority ignores it). An empty decision
+/// (`checkpoint=false`, no `facts`) is an idempotent no-op that emits nothing.
+#[derive(Debug, Clone)]
+pub struct CloseoutDecision {
+    pub state: CycleState,
+    pub checkpoint: bool,
+    pub facts: Vec<CloseoutProjectionEvent>,
+    pub session_log: bool,
+}
+
+/// Pure decision core of `mark_committed`. The committed transition is tri-state:
+/// (1) already committed + matching/stable event → refresh content hashes
+/// (checkpoint only if a hash changed) and re-emit the `Committed` fact; (2) the
+/// phase machine cannot advance → no-op; (3) a real advance → checkpoint +
+/// `Committed` fact. Shared by [`mark_committed`] and the authority.
+pub fn decide_committed(
+    current: Option<CycleState>,
     file: &Path,
     event: &str,
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
-) -> Result<CycleState> {
-    let mut state = match load(file)? {
+) -> CloseoutDecision {
+    let mut state = match current {
         Some(state) if state.phase == CyclePhase::Abandoned => {
             synthetic_state(file, CyclePhase::WriteApplied)
         }
@@ -1877,13 +1922,16 @@ pub fn mark_committed(
         }
         if refreshed {
             state.updated_at = now_secs();
-            save(file, &state)?;
         }
-        append_closeout_projection_event(file, &state, CloseoutProjectionEvent::Committed)?;
-        return Ok(state);
+        return CloseoutDecision {
+            state,
+            checkpoint: refreshed,
+            facts: vec![CloseoutProjectionEvent::Committed],
+            session_log: false,
+        };
     }
     let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::Committed) else {
-        return Ok(state);
+        return CloseoutDecision { state, checkpoint: false, facts: vec![], session_log: false };
     };
     state.phase = next_phase;
     state.last_event = event.to_string();
@@ -1897,29 +1945,59 @@ pub fn mark_committed(
         state.file_hash = Some(agent_doc_hash::content_hash(content));
         state.normalized_file_hash = Some(replay_content_hash(content));
     }
-    save(file, &state)?;
-    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::Committed)?;
-    append_phase_event_to_session_log(file, &state, file_content);
-    Ok(state)
+    CloseoutDecision {
+        state,
+        checkpoint: true,
+        facts: vec![CloseoutProjectionEvent::Committed],
+        session_log: true,
+    }
 }
 
-pub fn mark_abandoned(
+pub fn mark_committed(
     file: &Path,
     event: &str,
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> Result<CycleState> {
+    let decision = decide_committed(load(file)?, file, event, snapshot_content, file_content);
+    if decision.checkpoint {
+        save(file, &decision.state)?;
+    }
+    for fact in &decision.facts {
+        append_closeout_projection_event(file, &decision.state, *fact)?;
+    }
+    if decision.session_log {
+        append_phase_event_to_session_log(file, &decision.state, file_content);
+    }
+    Ok(decision.state)
+}
+
+/// Pure decision core of `mark_abandoned` (see [`CloseoutDecision`]). Tri-state:
+/// (1) already abandoned → re-emit the `Abandoned` fact only; (2) not an open
+/// cycle → no-op; (3) real abandon → checkpoint + `Abandoned` fact. Shared by
+/// [`mark_abandoned`] and the authority.
+pub fn decide_abandoned(
+    current: Option<CycleState>,
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> CloseoutDecision {
     let mut state =
-        load(file)?.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
+        current.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
     if state.phase == CyclePhase::Abandoned {
-        append_closeout_projection_event(file, &state, CloseoutProjectionEvent::Abandoned)?;
-        return Ok(state);
+        return CloseoutDecision {
+            state,
+            checkpoint: false,
+            facts: vec![CloseoutProjectionEvent::Abandoned],
+            session_log: false,
+        };
     }
     if !state.is_open() {
-        return Ok(state);
+        return CloseoutDecision { state, checkpoint: false, facts: vec![], session_log: false };
     }
     let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::Abandoned) else {
-        return Ok(state);
+        return CloseoutDecision { state, checkpoint: false, facts: vec![], session_log: false };
     };
     state.phase = next_phase;
     state.last_event = event.to_string();
@@ -1932,10 +2010,31 @@ pub fn mark_abandoned(
         state.file_hash = Some(agent_doc_hash::content_hash(content));
         state.normalized_file_hash = Some(replay_content_hash(content));
     }
-    save(file, &state)?;
-    append_closeout_projection_event(file, &state, CloseoutProjectionEvent::Abandoned)?;
-    append_phase_event_to_session_log(file, &state, file_content);
-    Ok(state)
+    CloseoutDecision {
+        state,
+        checkpoint: true,
+        facts: vec![CloseoutProjectionEvent::Abandoned],
+        session_log: true,
+    }
+}
+
+pub fn mark_abandoned(
+    file: &Path,
+    event: &str,
+    snapshot_content: Option<&str>,
+    file_content: Option<&str>,
+) -> Result<CycleState> {
+    let decision = decide_abandoned(load(file)?, file, event, snapshot_content, file_content);
+    if decision.checkpoint {
+        save(file, &decision.state)?;
+    }
+    for fact in &decision.facts {
+        append_closeout_projection_event(file, &decision.state, *fact)?;
+    }
+    if decision.session_log {
+        append_phase_event_to_session_log(file, &decision.state, file_content);
+    }
+    Ok(decision.state)
 }
 
 /// Restore the exact cycle that was incorrectly abandoned by the

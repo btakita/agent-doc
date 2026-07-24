@@ -4734,16 +4734,24 @@ pub fn route_disk_change_signal_via_controller_model_for_doc(
 
 fn handle_crdt_commit_barrier_rpc(
     bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<bool> {
     let requested_file = request_file(&request)?;
     let canonical = canonical_controller_request_file(bootstrap, &requested_file);
-    commit_barrier_for_closeout(&canonical)
+    commit_barrier_for_closeout(runtime, &canonical)
 }
 
-fn commit_barrier_for_closeout(canonical: &Path) -> Result<bool> {
-    let durable_response_cell = agent_doc_cycle_state_io::load_closeout_projection(canonical)?
-        .is_some_and(|projection| projection.response_cell.is_some());
+/// `durable_response_cell` readiness is read from the live in-memory Lazily
+/// projection (`#lzdurablesink`). This runs inside the controller process, so it
+/// MUST NOT replay `state.db`, nor round-trip a read back through the controller
+/// socket: while the controller is live it is the single authority. The relay
+/// barrier below is a separate editor→canonical flush, not a state read.
+fn commit_barrier_for_closeout(runtime: &ControllerRuntime, canonical: &Path) -> Result<bool> {
+    let document_hash = agent_doc_hash::document_id_for_path(canonical);
+    let durable_response_cell = runtime
+        .document_state_projection(&document_hash)?
+        .is_some_and(|document| document.closeout.response_cell.is_some());
     let ready = if durable_response_cell {
         agent_doc_crdt_relay_io::commit_barrier_for_durable_response_cell(canonical)
     } else {
@@ -4781,6 +4789,7 @@ struct ControllerCommitDocumentPayload {
 /// canonical as authority and does not round-trip back to this controller.
 fn handle_commit_document_rpc(
     bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<ControllerCommitDocumentOutcome> {
     let requested_file = request_file(&request)?;
@@ -4796,7 +4805,7 @@ fn handle_commit_document_rpc(
     // editor-behind readiness bit — this is an explicit authority commit, the
     // canonical is authority, and editors reconcile via the replace-capable replica
     // delivery.
-    let barrier_ready = commit_barrier_for_closeout(&canonical)?;
+    let barrier_ready = commit_barrier_for_closeout(runtime, &canonical)?;
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
@@ -4811,6 +4820,7 @@ fn handle_commit_document_rpc(
 
 fn handle_compact_document_rpc(
     bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<serde_json::Value> {
     let requested_file = request_file(&request)?;
@@ -4818,7 +4828,7 @@ fn handle_compact_document_rpc(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let invocation: ControllerCompactDocumentInvocation =
         serde_json::from_str(&payload_json).context("failed to parse compact_document payload")?;
-    let barrier_ready = commit_barrier_for_closeout(&canonical)?;
+    let barrier_ready = commit_barrier_for_closeout(runtime, &canonical)?;
     agent_doc_ops_log_io::log_op(
         &canonical,
         &format!(
@@ -8794,10 +8804,18 @@ pub(crate) fn handle_request_locked(
             controller_envelope(handle_crdt_text_adopt_rpc(&bootstrap_snapshot, request))
         }
         "crdt_commit_barrier" => {
-            controller_envelope(handle_crdt_commit_barrier_rpc(&bootstrap_snapshot, request))
+            controller_envelope(handle_crdt_commit_barrier_rpc(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
         }
         "commit_document" => {
-            controller_envelope(handle_commit_document_rpc(&bootstrap_snapshot, request))
+            controller_envelope(handle_commit_document_rpc(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
         }
         "compact_document" => {
             if let Some(client_version) =
@@ -8809,7 +8827,11 @@ pub(crate) fn handle_request_locked(
                     client_version,
                 );
             }
-            controller_envelope(handle_compact_document_rpc(&bootstrap_snapshot, request))
+            controller_envelope(handle_compact_document_rpc(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
         }
         "crdt_record_committed_baseline" => controller_envelope(
             handle_crdt_record_committed_baseline_rpc(&bootstrap_snapshot, request),

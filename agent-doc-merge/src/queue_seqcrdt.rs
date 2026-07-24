@@ -64,6 +64,26 @@ impl QueueNode {
     }
 }
 
+/// The effect of one structural op on the [`QueueCrdt`]. This is the
+/// controller-side mirror of the IPC `IpcNodeOp` vocabulary (Phase B): the
+/// detached writer folds a batch of these into its replica ([`QueueCrdt::apply_ops`])
+/// so the replica is the convergence authority, not a kernel file lock.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueueOp {
+    pub node_key: String,
+    pub kind: QueueOpKind,
+}
+
+/// The two structural-op effects the [`QueueCrdt`] models.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QueueOpKind {
+    /// Flip the node to completed (`~~text~~`); it stays live. Mirrors the IPC
+    /// `consume` / `mark_done` ops.
+    MarkDone,
+    /// Tombstone the node; it drops from the live view. Mirrors the IPC `strike` op.
+    Strike,
+}
+
 /// A `lazily::SeqCrdt`-backed queue: an ordered, conflict-free sequence of
 /// [`QueueNode`]s keyed by durable `node_key`, mirroring [`ExchangeCrdt`].
 ///
@@ -169,6 +189,30 @@ impl QueueCrdt {
             }
             None => false,
         }
+    }
+
+    /// Apply a batch of structural ops to this replica. This is the controller-
+    /// authority convergence path (Phase E detached fallback): a single detached
+    /// writer folds the cycle's structural ops into its [`QueueCrdt`] replica so
+    /// the replica — not a kernel file lock — is the convergence authority. The
+    /// file is then rendered from the replica for node-addressable projections.
+    ///
+    /// Each op's effect matches the IPC vocabulary: [`QueueOpKind::MarkDone`]
+    /// flips the node to completed (strike-through/keep); [`QueueOpKind::Strike`]
+    /// tombstones it. Returns the number of ops that applied against a live node.
+    pub fn apply_ops(&mut self, ops: &[QueueOp], now_micros: u64) -> usize {
+        let mut applied = 0usize;
+        for op in ops {
+            let key = &op.node_key;
+            let touched = match op.kind {
+                QueueOpKind::MarkDone => self.mark_done(key, now_micros),
+                QueueOpKind::Strike => self.strike(key, now_micros),
+            };
+            if touched {
+                applied += 1;
+            }
+        }
+        applied
     }
 
     /// Fork this replica under a new peer id, preserving element lineage so a
@@ -420,5 +464,51 @@ mod tests {
         ];
         let tree = QueueCrdt::from_nodes(THEIRS_PEER, &dup, T0);
         assert_eq!(tree.ids().len(), 1, "duplicate node_key collapses");
+    }
+
+    #[test]
+    fn apply_ops_is_the_controller_authority_convergence_path() {
+        // Phase E: the detached single-writer folds a cycle's structural ops into
+        // its QueueCrdt replica, which is the convergence authority (no flock).
+        let mut replica = QueueCrdt::from_inner(THEIRS_PEER, "- alpha\n- beta\n- gamma\n", T0);
+        let alpha = replica.ids()[0].clone();
+        let beta = replica.ids()[1].clone();
+
+        let applied = replica.apply_ops(
+            &[
+                QueueOp {
+                    node_key: alpha.clone(),
+                    kind: QueueOpKind::MarkDone,
+                },
+                QueueOp {
+                    node_key: beta.clone(),
+                    kind: QueueOpKind::Strike,
+                },
+            ],
+            T0 + 1,
+        );
+        assert_eq!(applied, 2, "both ops applied against live nodes");
+        assert!(replica.get(&alpha).unwrap().done, "alpha marked done");
+        assert!(!replica.contains(&beta), "beta tombstoned");
+        let rendered = replica.render();
+        assert!(rendered.contains("- ~~alpha~~\n"), "alpha rendered done");
+        assert!(!rendered.contains("beta"), "beta absent");
+        assert!(rendered.contains("- gamma\n"), "untouched node survives");
+    }
+
+    #[test]
+    fn apply_ops_on_unknown_keys_is_a_safe_no_op() {
+        // A detached writer folding ops against a stale/unknown key must not panic
+        // and must not affect live nodes.
+        let mut replica = QueueCrdt::from_inner(THEIRS_PEER, "- alpha\n", T0);
+        let applied = replica.apply_ops(
+            &[QueueOp {
+                node_key: "queue:0:ghost:0".to_string(),
+                kind: QueueOpKind::Strike,
+            }],
+            T0 + 1,
+        );
+        assert_eq!(applied, 0, "unknown key applies nothing");
+        assert_eq!(replica.ids().len(), 1, "live node untouched");
     }
 }

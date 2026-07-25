@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -478,17 +478,34 @@ The clean sequence stands: decline + Acadian yes this weekend; the SDK contract 
 **On "where I can augment the work as well":** that's the Phase-0/milestone posture from the structure doc, and it composes cleanly with the intro *as long as it's the second sentence, not the headline*. The evenings-conflict warning from the last cycle still applies to your share of any such arrangement... an augment role next to Riza is smaller than solo-building the SDK, which actually makes this the most patchboard-compatible version of staying involved with Haiven.
 
 **Sequencing (unchanged, one addition):** decline + Acadian yes this weekend, nothing bundled into the decline... the existing "an intro that's useful" line already plants the seed. Then, if Craig engages... or even unprompted a few days later, intros are always welcome... send: "You should meet Riza Ingalls... founding engineer at PresenceAI, and you're both in Austin. Separately, if a milestone-scoped hand on the SDK would help you hit October, I'm open to that too... your repos, your review, either piece independently." Two gifts, no strings, zero control taken. Tracked under `#sdkcontract`; `#rizaingallshttps` is done.
-<!-- agent:boundary:ebb98012 -->
+❯ 🚧 Riza started off with front-end work then did full stack work at PresenceAI using Python. He is capable of learning, especially with AI assistance. I havn't made any SDKs. Riza has worked on the PresenceAI api extensively. Would this be an appealing fit or is this too much of a stretch?
+
+### Re: is the Brian + Riza SDK fit appealing, or a stretch? — fable
+
+Honest answer: **pitched as engine-SDK expertise, it's a stretch. Pitched as an evidence-backed split with milestone gates, it's genuinely appealing.** The difference is entirely in what you claim versus what you show. The fit map is now in the structure doc (commit `aea1089`).
+
+**First, correct your own resume claim... "I haven't made any SDKs" undersells you badly.** The lazily family *is* SDK engineering by another name: one API surface implemented across 8 languages including C++, Kotlin, Zig, and Rust, each with idiomatic wrappers, packaging to half a dozen registries, and cross-binding conformance suites. That's precisely the shape of Haiven's problem... same API, many platforms, consistency enforced by tests... and it's public and inspectable, which beats any claim. What you genuinely haven't done is *engine-runtime* work: Unity's player loop and IL2CPP constraints, Unreal's module/build system. That part is learnable atop your base, and the credible move is to say exactly that to Craig rather than round yourself up to "engine expert."
+
+**Riza, honestly:** front-end → Python full-stack with extensive PresenceAI API work is a real profile, but it's the *API-consumer and web half* of the skill space. As "the Unity/Unreal candidate," that's the stretch... "capable of learning, especially with AI assistance" is true of many good engineers and is precisely the sentence a CTO cannot bank an October launch on. But look at Haiven's actual SDK matrix: Unity (C#), Unreal (C++), **Roblox (Luau), React Native (JS/TS), Discord**. The bottom half of that list is squarely in Riza's lane: RN/JS SDK, Discord integration, API-consumer developer experience, docs, samples, conformance testing. And for a child-safety platform, the Roblox and Discord surfaces are arguably the most market-critical ones.
+
+**The credible pitch, if the conversation gets there:** a complementary split... you on the core client protocol library plus the engine integrations (deep systems background, learning the engine specifics openly), Riza on RN/JS, Discord, and docs/DX. Lead with *evidence, not promises*: the lazily repos do the talking for you, PresenceAI's shipped product does part of it for Riza. Then let the structure carry the risk argument: Phase 0 and per-milestone acceptance mean Craig never bets more than one milestone on the fit question... it converts "are they a stretch?" from a judgment call he must make up front into an empirical question he can exit cheaply. That's what makes an honest stretch *appealing*: seed CTOs don't need certainty, they need bounded downside and visible progress.
+
+**What would sink it:** overselling. If the pitch says "SDK experts," Craig eventually discovers neither of you has shipped a Unity plugin, and the trust cost lands on the relationship you've spent this whole negotiation protecting. If the pitch says "here's exactly what we've each built, here's the split that maps to it, here's the gate structure that protects you"... that's the same candor that's carried every prior exchange with him, and it's the version worth sending.
+
+Preconditions unchanged: Riza double opt-in first, decline + Acadian yes before any of this goes out, and your evenings posture decided before you offer your half. `#rizastartedoff` is done; the whole thread stays tracked under `#sdkcontract`.
+<!-- agent:boundary:f9c60f9c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority -->
+- 🚧 do [#rizastartedoff]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [x] 🚧 [#rizastartedoff] Riza started off with front-end work then did full stack work at PresenceAI using Python. He is capable of learning, especially with AI assistance. I havn't made any SDKs. Riza has worked on the PresenceAI api extensively. Would this be an appealing fit or is this too much of a stretch?
 - [ ] [#sdkcontract] [recommended] If Craig engages the door-open line, send the milestone-SOW proposal from tasks/recruit/haiven/sdk-contract-structure.md; first resolve the evenings conflict (build vs Phase-0-only vs referral-first)
 - [ ] [#haivensend] #haivensend [operator-verify] Send ONE Haiven email per the decision: compensation ask (tasks/recruit/haiven/compensation-reply-draft.md) if a matched offer would change the answer, or the warm decline (tasks/recruit/haiven/decline-draft.md) if Acadian wins regardless
 - [ ] [#acadiansend] [operator-verify] Send Acadian recruiter questions (tasks/recruit/acadian/recruiter-questions-draft.md) incl. signing-bonus/advance ask; file written answers under tasks/recruit/acadian/

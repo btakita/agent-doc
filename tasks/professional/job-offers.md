@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -560,7 +560,16 @@ Backlog updated: `#haivensend` now points at the v3 letter; `#sdkcontract` is pr
 **"I have someone in mind": recommend no — as the letter stands.** Three reasons, all already latent in your own notes. First, it floats a person who hasn't agreed to be floated — unnamed doesn't fix that, because Craig's natural reply is "who?", and then you either name Riza pre-opt-in or visibly walk it back ("let me check with them"), which reveals you teased before asking. Second, it converts the planned *unprompted* intro — a gift, sent on your timing a few days later — into an IOU Craig can redeem on his timing. Third, the current line is load-bearing precisely because it commits no one: "an intro that's useful" plants the seed without a promissory note. If you want the concreteness, the right move is sequencing, not phrasing: send Riza the one-liner already drafted in the notes *first* — if his opt-in lands before Sunday, you can write something strictly stronger than "someone in mind": you can name him. So either send as-is, or ping Riza today and upgrade only on his yes.
 
 Housekeeping: this cycle started wedged (`delivery_pending` on preflight) — `admin reload-lib` cleared it, no data touched. The auto-admitted `#prototypeincludemultiple` is closed with this answer. Exchange is at 529 lines / 22 sections (accretion warn) — noting per policy, not stalling the queue.
-<!-- agent:boundary:46d088dc -->
+I forgot to mention AI harness tooling for SDK development. This is a valid part of the SDK. An opinionated harness...similar to Livekit's harness.
+
+### Re: #prototypeincludemultiple close-out + AI harness tooling — fable
+
+**#prototypeincludemultiple (record repair):** the full answer is in the previous response block ("multi-engine prototype + someone in mind"): engine-neutral golden-file conformance fixtures + ONE deep Unity integration + optional thin Discord conformance client; Unreal parity stays the first paid milestone. This block exists so the directive id has a materialized `### Re:` record; no change to that recommendation.
+
+**AI harness tooling (LiveKit-Agents-style): yes, it's a real part of the SDK story — and it slots into the ladder, not the prototype.** The LiveKit analogy is apt and worth taking seriously: LiveKit's core SDKs are transport, but LiveKit Agents — the opinionated harness for running AI agents against their realtime infrastructure — became a major adoption driver in the AI wave. Haiven's equivalent is compelling because their domain makes agents first-class citizens: moderation/safety agents watching chat streams (which connects directly to your Roblox child-safety observation earlier in this doc), NPC conversationalists, and companion bots are all "participants" in a realtime chat session. Two scope points. First, it does NOT go in the 1-2 week prototype or the letter — same discipline as the multi-engine question; the letter's offer stays bounded. Second, it's actually an argument FOR the spec-first architecture you'd be selling: an agent harness is just another *client* of the same API surface — a headless, server-side "engine." If the spec and conformance fixtures are engine-neutral, the harness passes the same fixtures the Unity SDK does, which means the prototype's scaffolding validates the future AI layer for free. Where it earns a mention: the scope sketch when Craig says the word — as a named rung on the milestone ladder ("agent harness: server-side SDK + opinionated agent runtime, passing the same conformance suite"), positioned as the reason the API spec should define server-side event streams from day one. Recorded on `#sdkcontract`.
+
+Housekeeping: this cycle hit a preflight/write gate deadlock (drift guard vs already-committed gate) — recovered via `reset --from-current --preserve-session`; no text lost. One cosmetic artifact remains: a stray `92bcca70` line at the very end of the file (after `&lt;!-- /agent:done --&gt;`), a leaked boundary hash — safe for you to delete in the editor whenever convenient.
+<!-- agent:boundary:9dccf0a3 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -571,7 +580,7 @@ Housekeeping: this cycle started wedged (`delivery_pending` on preflight) — `a
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#sdkcontract] #sdkcontract If Craig engages the prototype offer: sketch scope (ONE engine + spec + conformance scaffold + sample, 1-2wks), then milestone SOW per tasks/recruit/haiven/sdk-contract-structure.md; Riza intro contingent on prototype reception + Riza double opt-in
+- [ ] [#sdkcontract] #sdkcontract If Craig engages the prototype offer: sketch scope (ONE engine + spec + conformance scaffold + sample, 1-2wks), then milestone SOW per tasks/recruit/haiven/sdk-contract-structure.md; AI agent-harness layer (LiveKit-Agents-style) recorded as a milestone-ladder item; Riza intro contingent on prototype reception + Riza double opt-in
 - [ ] [#haivensend] #haivensend [operator-verify] Send the v3 decline+offer letter (tasks/recruit/haiven/decline-draft.md) to Craig; compensation-reply-draft.md is superseded/history-only
 - [ ] [#acadiansend] [operator-verify] Send Acadian recruiter questions (tasks/recruit/acadian/recruiter-questions-draft.md) incl. signing-bonus/advance ask; file written answers under tasks/recruit/acadian/
 <!-- /agent:backlog -->
@@ -601,3 +610,4 @@ Roblox already has a Child Safety team. Is this something that Haiven would appr
 - 2026-07-25 [#prototypeincludemultiple] I could have the prototype include multiple engines (Unity + Unreal + Discord) to validate the conformance.
 "for an intro that's useful": Should I also say "I have someone in mind"?
 <!-- /agent:done -->
+92bcca70

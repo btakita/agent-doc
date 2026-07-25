@@ -51,6 +51,17 @@ The entire Acadian decision was purchased with evenings for patchboard/lazily. A
   patchboard resumes after); or
 - **Offer referral-first**: help Craig scope the SOW + interview SDK contractors, take
   no build role. Costs almost nothing, high goodwill.
+- **Referral + augment (Riza hybrid)**: introduce Riza Ingalls (founding engineer at
+  PresenceAI, Austin-based... same city as Craig) as a candidate Craig evaluates
+  INDEPENDENTLY, with Brian augmenting on a milestone basis if useful. Preconditions
+  before offering: (1) ask Riza first... double opt-in, confirm interest and
+  availability; (2) confirm Riza's engine-side (C#/C++, Unity/Unreal) experience...
+  "not a Golang developer" is irrelevant for engine SDKs, but engine experience is the
+  actual fit question; if unconfirmed, pitch Riza as "a strong realtime engineer worth
+  meeting," not "your SDK candidate," and let Craig judge fit. Framing that avoids any
+  control optics: separate offers, no package deal... "your repos, your review, your
+  hiring decision; evaluate Riza on merits; separately, I'm glad to augment per
+  milestone if that helps." Never present Brian-as-lead-of-a-two-person-external-team.
 
 ## If bringing it up proactively (optional decline-email line)
 

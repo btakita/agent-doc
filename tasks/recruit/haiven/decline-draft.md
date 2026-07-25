@@ -57,7 +57,7 @@ github.com/lazily-hub/lazily-formal, and the bindings are all under
 github.com/lazily-hub. I'm currently implementing the C# binding
 (github.com/lazily-hub/lazily-cs)... proving the same conformance technique works in
 C#, which is exactly what a Unity SDK would be written in. And the patterns already
-hold across the divide that matters for your matrix... systems languages (Rust, C++,
+hold across the divide that matters for your matrix... systems languages (C++, Rust,
 Zig) and GC runtimes alike... so the Unreal half is familiar ground, not a new bet.
 It's designed for clean
 handoff: if the prototype lands and you want me to continue milestone-by-milestone, I'm
@@ -66,8 +66,9 @@ everything... spec, tests, working code, docs... and we keep the fee nominal. Yo
 repos, your review, either way. Worst case, Haiven gets a validated head start on the
 SDK for close to nothing.
 
-If that's interesting, say the word and I'll sketch the scope this week. Either way,
-I'm rooting for the August beta and the October launch, and my door stays open... for
+If that's interesting, say the word and we can discuss the shape of the api.
+I'll sketch the scope & can begin implementing the prototype this week.
+Either way, I'm rooting for the August beta and the October launch, and my door stays open... for
 an intro that's useful or a conversation whenever you want one.
 
 With real appreciation,
@@ -90,6 +91,9 @@ Brian
   answers it (bounded vs. open-ended), repeat it plainly.
 - **Prototype scope guard**: 1-2 weeks means ONE engine + spec + conformance scaffold +
   sample, not the matrix. Resist scope growth until the milestone conversation.
+  The "sample" is a minimal demo scene... join a room, presence indicators, a chat
+  panel (a day of uGUI), optionally grafted onto a stock Unity starter template so it
+  demos like a game... NOT a reference game with real gameplay/assets/UI.
 - Prior negotiation-path drafts (compensation ask) are superseded by this letter;
   `compensation-reply-draft.md` stays in the repo as history only. Full contract
   structure if it continues: `sdk-contract-structure.md`.

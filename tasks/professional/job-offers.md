@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -272,7 +272,41 @@ Three questions, three answers.
 **3. What happens if Acadian fires you early: the honest answer is the 12 months is an expectation, not a guarantee.** Standard staffing/EOR engagements are terminable for convenience with short notice... typically 1-2 weeks, sometimes zero... and your W-2 through PGC is at-will. If they cut you at month 3, you keep what you billed, there's no severance, PGC benefits end (COBRA-style continuation or marketplace), and as a W-2 employee you'd generally qualify for Virginia unemployment while you re-search. So the $208-225k figure should be read as "rate x months they actually keep you." Three mitigations: **(a)** read the actual termination clause before accepting and ask the recruiter directly what the notice period is... this is a normal question that costs nothing; **(b)** if it's bare (immediate/for-convenience), ask for a 2-4 week notice period in the SOW... modest, often granted; **(c)** weigh the realistic risk: a stable, profitable company that just ran a hiring process rarely cuts a productive contractor early... the real risk is a project cancellation or finance-sector budget freeze, not performance whim. Also remember it's symmetric: the same clause is your exit door if Haiven-like opportunities reappear or the engagement sours. And for calibration, Haiven is at-will too, with startup-survival risk on top... neither offer guarantees duration; they just fail differently. Added `#acadianterms` to backlog [recommended]: get the notice clause plus the >40hr-billing and renewal confirmations in writing from the recruiter before you accept.
 
 Practical sequence for the next 30 hours: send the Haiven email today (the draft is ready at `tasks/recruit/haiven/compensation-reply-draft.md`), ask Acadian's recruiter the notice-period question in parallel, and let Sunday evening resolve the tree.
-<!-- agent:boundary:db3fbafa -->
+I meant, what happens if Haiven fires me early in regards to the offer?
+
+### Re: what happens if Haiven fires you early — fable
+
+Got it... the question was about Haiven, not Acadian. Here's what early termination does to each component of the offer as currently shaped, then the protections worth negotiating... because the honest answer is that **the current shape leaves you badly exposed in exactly the window where startup firings happen.**
+
+**Component by component, if they terminate you at month N:**
+
+- **Salary:** you keep what you earned through the termination date. Virginia is at-will with no statutory notice or severance... absent a contract clause, the default is zero severance, effective immediately. As a W-2 employee you'd generally qualify for Virginia unemployment.
+- **Signing bonus ($20k ask):** depends entirely on the clawback clause. The common default is "repay if you leave within 12 months"... make sure it reads "repay only on *voluntary* resignation or termination *for cause*." If they fire you without cause at month 4 under a bare clawback, you could owe the bonus back while unemployed. No clawback clause at all = you keep it.
+- **Equity (the big one):** with a standard 1-year cliff, **fired at month 11 = zero equity. Nothing vests before the cliff.** After the cliff you keep the vested fraction (fired at month 18 on a 4-year schedule = ~37.5% of the grant) and forfeit the rest. If the instrument is options, there's a second trap: the typical 90-day post-termination exercise window means you must pay the strike price within 3 months of being fired to keep even the vested part... while job-hunting.
+- **Revenue share:** the component most likely to simply *evaporate*. A contractual revenue share tied to employment almost certainly ends with employment unless the paper says otherwise. Since the revenue share is the piece most likely to ever pay you (per the $100M analysis... the Richeys' pattern is private-and-profitable, not exit), "does the revenue share survive termination without cause, at least for the vested fraction?" belongs on the written-terms question list.
+- **Benefits:** end at termination; COBRA-style continuation at full cost or marketplace.
+
+**The asymmetry to hold in your head:** if Acadian cuts you early, you lose future billings and walk with everything you earned. If Haiven cuts you before month 12, you lose future salary *and* the entire equity package *and* likely the revenue share... after having given up a $208-225k alternative. And the realistic early-firing scenario at a startup isn't performance... it's a runway crunch or pivot, exactly when severance promises are hardest to collect.
+
+**What to negotiate (all standard asks for a founder-title hire):**
+
+1. **Vesting: monthly with no cliff, or cliff waiver on termination without cause.** The cliff protects the company from bad hires who quit; it should not let them fire you at month 11 for free. "Founder Engineer" is exactly the title that justifies founder-style vesting. Fallback: prorated cliff credit if terminated without cause.
+2. **Signing-bonus clawback scoped to voluntary exit / for-cause only.** One sentence; costs them nothing if they intend to keep you.
+3. **Modest severance without cause: 2 months salary.** Frame it plainly: "I'm walking away from a $208k contract seat; I need downside symmetry."
+4. **Extended post-termination exercise window** if options (ask 5-10 years; even 12 months beats the 90-day default).
+5. **Revenue-share survival language** for the vested fraction.
+
+Their reaction to #1 and #3 is the strongest good-faith tell yet: a company that expects to keep you has no reason to defend a free-firing window. If they refuse all downside protection *and* stay vague on equity terms, the Haiven package is "at-will salary below your alternative plus a lottery ticket they can void"... and the decision gate resolves to Acadian on its own.
+
+### Re: do #acadianterms — recruiter questions drafted — fable
+
+> **Queue prompt:**
+>
+> do [#acadianterms]
+
+
+Executed the agent-side of `#acadianterms`: the recruiter message is drafted and committed at **`tasks/recruit/acadian/recruiter-questions-draft.md`** (commit `69f3a4c`)... three written-confirmation questions (notice/termination clause, >40hr billing mechanics, renewal + rate renegotiation) framed around your Sunday-evening answer, with a counter ready if notice comes back as "immediate" (ask for 2-4 weeks in the SOW). The item is now gated rather than done because its completion condition is external: you send it, and the recruiter's written answers land. Unblock = paste their reply into `tasks/recruit/acadian/` and the decision gate updates.
+<!-- agent:boundary:b8df0566 -->
 <!-- /agent:exchange -->
 
 ## Queue

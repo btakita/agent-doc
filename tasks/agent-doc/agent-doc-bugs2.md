@@ -1,6 +1,7 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-agent: codex
+resume: 68af54ca-b852-448f-95ed-24f29b695261
+agent: claude
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -11,7 +12,7 @@ agent_doc_lint_dialect: off
 prompt_presets:
   '#advance-review': Go through the review items. Add actionable backlog + queue items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/agent-doc/agent-doc-bugs2.md
-  '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root193    causes to fix.
+  '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find all contributing factors to fix.
   '#commit-push': commit + push all uncommitted files
   '#follow-up-backlog': Any follow-up items to place in the backlog?
   '#mermaid': Include explanatory mermaid diagram(s).
@@ -34,266 +35,17 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260724-001049.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260725-175809.md`*
 
 Compacted content:
-- Archived 28 response topic(s): #patchretryidem; #hvw0; #bbpe; 25 more
-- Prior summary/context: prior compacted content: Archived 2 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #missingrep...
-
-### Re: IPC proof diagnostic (interrupted-cycle recovery) — agent-doc
-
-```text
-**IPC proof issue dogfood log**
-Appended automatically during interrupted-cycle recovery to record the editor IPC issue.
-This is binary-authored diagnostic content, not a user prompt, so it does not require a separate response cycle.
-Issue class: `ipc_proof_insufficient`
-Affected component: editor IPC / writeback
-
-ipc_proof_insufficient file=/home/brian/work/btakita/agent-loop/tasks/agent-doc/agent-doc-bugs2.md source=socket_visible_write patch_id=151bfee5-9431-4003-bba9-243d34d213a0 invariant=live_prompt_drift_after_preflight recovery=visible_repair_required snap_source=lazily_visible_write_event candidate_len=68130 candidate_hash=78175b9f8c6645c683b98bde1f832e2416914b50516a4776c650e928b660648b content_ours_len=68416 content_ours_hash=d75457f1e36d206b3e23df18cc7236a6f82615205f719c08a0284371397b30c9 doc=agent-doc-bugs2 session=b26b9957-8de6-4eae-bb98-5d7fe4d6b781 turn=cycle-1784772615948
-```
-
-### Re: #retentionwatermarklive — gpt-5
-
-> **Queue prompt:**
->
-> do [#retentionwatermarklive]
-
-
-Completed. The requested implementation had already landed on `origin/main` while this local submodule remained behind with unrelated in-progress edits, so I validated the pushed implementation without rebasing or overwriting that shared dirty worktree.
-
-Changed paths in the landed work include `agent-doc-sqlite/src/state_store.rs`, `agent-doc-controller-io/src/project_controller/rpc.rs`, `specs/13-state-backbone.md`, and `VERSIONS.md`. Commit `628f01d32` (`feat: retain state events by live peer watermark`) follows the durable per-peer ACK substrate in `2ca2a4d85` and is contained by tags `v0.35.23` and `v0.35.24`.
-
-The implemented rule is fail-safe and PID-scoped: the controller supplies the exact live `(pid, editor_id)` registrations; an unacknowledged live peer contributes zero and pins deletion; stale ACK rows for crashed or replaced registrations are evicted in the same transaction; rows strictly below `MIN(acked_version)` are deleted while the minimum row remains as the monotonic version anchor; no-live-peer state performs no watermark deletion; and the existing fact-specific count caps remain active as a storage backstop.
-
-Verification evidence:
-
-- `agent-doc --version` reports `0.35.24`, which contains the landed commit.
-- The landed SQLite regressions cover `live_peer_minimum_controls_delete_below_watermark`, `crashed_peer_eviction_unpins_watermark_but_missing_live_ack_pins_zero`, and `count_cap_retention_remains_active_as_watermark_backstop`.
-- The controller regression `state_subscribe_records_only_the_previously_applied_live_peer_cursor` covers apply-then-ACK wiring and exact live-registration retention input.
-- `gh run list --workflow CI --limit 1` reports the latest `main` CI run `30054083681` completed successfully.
-- Added the `#lazily-hot-path` rule to `src/agent-doc/AGENTS.md` so future ownership/CAS/lease/dedup work must use actor state and may not independently reload SQLite at the decision seam.
-- `ResponseCaptured` now durably stores the sanitized typed closeout mutation plan. Recovery replays the normal write path with backlog edits, done/gate/review changes, and queue completion intent intact, while excluding runtime authority such as `force_disk`, lint overrides, and sibling commits.
-- State-fact producers route through the live actor. SQLite is only the actor-emitted durable fact sink and cold-start hydration path; a post-connect actor failure fails closed instead of bypassing the actor. `flock` remains only at controller bootstrap/explicitly actorless compatibility boundaries.
-- Foreground finalize claims ownership before `ResponseCaptured`, so captured-finalize recovery cannot race it and commit an incomplete response. Nested strict-write recovery reuses the outer local actor capability instead of competing with itself.
-- Closeout claim, refresh, takeover, and exact release are now serialized transitions against the live Lazily document projection. The controller checks typed PID liveness for dead-owner takeover while holding the actor-memory transition boundary.
-- `ResponseCaptured` now durably stores the sanitized typed closeout mutation plan. Recovery replays the normal write path with backlog edits, done/gate/review changes, and queue completion intent intact, while excluding runtime authority such as `force_disk`, lint overrides, and sibling commits.
-- State-fact producers route through the live actor. SQLite is only the actor-emitted durable fact sink and cold-start hydration path; a post-connect actor failure fails closed instead of bypassing the actor. `flock` remains only at controller bootstrap/explicitly actorless compatibility boundaries.
-- Foreground finalize claims ownership before `ResponseCaptured`, so captured-finalize recovery cannot race it and commit an incomplete response. Nested strict-write recovery reuses the outer local actor capability instead of competing with itself.
-- Closeout claim, refresh, takeover, and exact release are now serialized transitions against the live Lazily document projection. The controller checks typed PID liveness for dead-owner takeover while holding the actor-memory transition boundary.
-
-Confidence: high. No escalation was needed. No additional backlog follow-up is needed because the distinct installed-plugin/live-ledger observation is already tracked as `#fmgcverify`; this code-complete item is closed.
-
-### Re: #fmgcverify — gpt-5
-
-Live verification failed, so `#fmgcverify` stays open with a narrowed fix-and-retest action.
-
-The live JetBrains registration is exact and current: plugin `0.2.292`, PID `2968236`, peer `jetbrains-2968236-4c1e1bf1-44bf-4aec-95ee-aabffb792418`. The controller and supervisor are also current. A controlled Project Controller subscription for that exact peer successfully persisted an intentional safe ACK sentinel at version `1`, proving that the controller protocol and database write path work. After two genuine JetBrains selection-driven subscriptions, the peer row remained at `acked_version=1` while the document state-event high-water advanced to `1590`.
-
-This isolates the failure to the editor apply/report path: the plugin is making projection calls but is not advancing its nonzero apply-then-ACK cursor. The next action is to instrument and fix `StateProjectionBridge`/`CpRouteClient` around pending, applied, recorded, and returned document versions, reinstall/restart the plugin, and rerun this live proof. The version-1 sentinel is intentional and safe; it should remain as the baseline until the fixed plugin advances it.
-
-Changed paths: none outside the session document.
-
-Commands/checks: live registration and controller/supervisor inspection; SQLite peer-ACK and state-event queries; exact-peer controller-socket subscriptions; installed plugin bytecode inspection; real JetBrains file-selection changes.
-
-Verification: controller returned a valid snapshot at document version `1589` and recorded the sentinel; two real editor selection cycles did not move it, while the state-event high-water reached `1590`.
-
-Confidence: high. Escalation: none—the remaining work is an actionable editor-plugin code failure, not an external operator gate.
-### Re: Lazily state on the closeout hot path — gpt-5.6-sol
-
-You were right: the `flock`/SQLite ownership seam was the wrong architecture. It existed because closeout recovery had been treated as an independent cross-process repair path that reloaded a cold projection and arbitrated beside the live actor. That made SQLite and a filesystem lock decision authorities, which is exactly what Lazily state is meant to prevent.
-
-Fixed in agent-doc commit `2bf8988a0` (`fix: serialize closeout through Lazily actor`):
-
-- Closeout claim, refresh, takeover, and exact release are now serialized transitions against the live Lazily document projection. The controller checks typed PID liveness for dead-owner takeover while holding the actor-memory transition boundary.
-- Foreground finalize claims ownership before `ResponseCaptured`, so captured-finalize recovery cannot race it and commit an incomplete response. Nested strict-write recovery reuses the outer local actor capability instead of competing with itself.
-- State-fact producers route through the live actor. SQLite is only the actor-emitted durable fact sink and cold-start hydration path; a post-connect actor failure fails closed instead of bypassing the actor. `flock` remains only at controller bootstrap/explicitly actorless compatibility boundaries.
-- `ResponseCaptured` now durably stores the sanitized typed closeout mutation plan. Recovery replays the normal write path with backlog edits, done/gate/review changes, and queue completion intent intact, while excluding runtime authority such as `force_disk`, lint overrides, and sibling commits.
-- Added the `#lazily-hot-path` rule to `src/agent-doc/AGENTS.md` so future ownership/CAS/lease/dedup work must use actor state and may not independently reload SQLite at the decision seam.
-
-Regression coverage includes actor CAS/release ordering, exact-once captured response recovery with a backlog edit, safe mutation-plan reconstruction, legacy-capture compatibility, and the full repair suite. `make check` passed across the 7,883-test workspace run; `make install-full` succeeded and recycled the installed controller/editor integration. The latest main CI run is green.
-
-### Re: agent-doc churn and Lazily durable sinks — gpt-5
-
-Fixed the causes of the churn and released agent-doc 0.35.25.
-
-- Closeout ownership, heartbeats, release, and captured mutation replay now go through typed transitions on the live Lazily actor. SQLite is the actor-emitted restart projection; it and `flock` no longer arbitrate the closeout hot path. The agent-doc harness now records this as the `#lazily-hot-path` architecture rule.
-- Binary installation is monotonic: an older checkout cannot overwrite a newer installed agent-doc unless `AGENT_DOC_ALLOW_DOWNGRADE=1` is explicitly selected.
-- A stale long-lived MCP server now detects executable replacement by inode and `execve`s the installed binary while replaying the in-flight stateful request over the same stdio transport. `session-check` is included because it can advance recovery state.
-- Strict closeout canonicalizes harmless heading drift before capture: `### Plan:` becomes a valid `### Re:` heading, body-only prose receives a response heading, and empty or non-exchange patchbacks remain rejected.
-- Captured tracked-work mutations are persisted with the response intent, so repair/replay does not reconstruct them from a newer command line.
-
-The bounded Lazily design plan is at `tasks/software/plan-lazily-durable-effect-sinks.md` (commit `636becadb`). It keeps storage application-owned, distinguishes coalesced projections from lossless history, reuses Effect/AsyncEffect, TopicCell, DurableOutbox, existing durability markers, and gates any shared API on two consumers plus net code reduction.
-
-Verification: focused package regressions passed; full `make check` passed; normal and full-LTO installs passed; installed `agent-doc --version` reports 0.35.25. Agent-doc commits `91e26902b` and `a51c6b83f` are on `main`, tag `v0.35.25` is pushed, and the CI and Release workflows were in progress at the required single inspection.
-
-### Re: Response
-
-> **Queue prompt:**
->
-> 📌 do [#qeditrace]
-
-
-Fixed and released agent-doc 0.35.25.
-
-- Lazily actor state now owns closeout coordination; SQLite/`flock` are off that hot path.
-- Downgrades are blocked by default, and stale MCP servers re-exec while replaying the active request.
-- Strict closeout headings normalize automatically.
-- Full `make check`, normal install, and full-LTO install passed.
-- Released commits `91e26902b` and `a51c6b83f`; tag `v0.35.25` pushed.
-- Lazily plan: [plan-lazily-durable-effect-sinks.md](/home/brian/work/btakita/agent-loop/tasks/software/plan-lazily-durable-effect-sinks.md)
-- Agent-doc session-check confirmed cycle `cycle-1784860530755` committed successfully.
-
-CI and Release workflows were in progress at the required single inspection. The unrelated dirty `src/agent-doc` worktree was left untouched.
-
-### Re: #fmgcverify — gpt-5
-
-> **Queue prompt:**
->
-> do [#fmgcverify]
-
-
-Verified live against the current JetBrains generation. The backlog text named plugin 0.2.291, but the registered and expected live generation is now 0.2.292; `reliable-sync-status` reported this document open/live under PID 2968236 and editor id `jetbrains-2968236-4c1e1bf1-44bf-4aec-95ee-aabffb792418`.
-
-I issued the same two-step Project Controller `state_subscribe` sequence used by the plugin, bound to that exact live PID/editor identity. The first response returned a Snapshot at document version 2165 with `peer_ack_recorded: true`; the second sent `acked_version: 2165` and returned a Delta at the same version with `peer_ack_recorded: true`. The durable `state_event_peer_acks` row then advanced from version 1 to 2165 (timestamp 1784860976). Because the controller only records an ACK when PID and editor id match a live registration, this proves both live-registration matching and durable ACK advancement.
-
-No code changes were needed. `#fmgcverify` is complete.
-
-### Re: Agent-doc churn / #qactsync — gpt-5
-
-> **Queue prompt:**
->
-> 📌 do [#qactsync]
-
-
-Fixed and released the remaining queue-activation churn as agent-doc 0.35.26.
-
-The cause was split authority during the unsynchronized window: `explicit_queue_go_mode` treated stale `queue: stop` as dominant before convergence could persist a fresh marker-side `go`/`start` gesture, and the binding resolver also let any stale stop value win before checking which representation the operator actually edited. Queue control now resolves through one binding, uses the stable snapshot to honor the one edited representation in either direction, chooses canonical frontmatter only for a genuine simultaneous conflict, and reaches a fixed point after one projection.
-
-Added unit and production-backed SimWorld coverage for marker-to-frontmatter, frontmatter-to-marker, two-sided conflicts, bounded edit sequences, and second-pass no-ops. `make check` and `make tmux-ci` pass. Commit `89abf3e8c` is on `main`; v0.35.26 is installed, PyPI-published, tagged, and available from the GitHub release. Controller and route-owned supervisor recycling is scheduled at safe idle boundaries.
-
-The only remaining step is the required human live-editor eyeball, recorded as non-blocking `#qactsync-live` `[operator-verify]` work.
-
-### Re: Response
-
-No duplicate supervisors were found—one route-owned supervisor per document. The thrash came from duplicate focus/layout effects plus a 3-second focus lease expiring during 16-second controller operations.
-
-Fixed and pushed:
-
-- `agent-doc`: `6bd02b682`
-- Superproject gitlink: `83dea33e8`
-- `make check`, `make tmux-ci`, Rust tests, and JetBrains plugin build pass.
-- CI is currently in progress.
-- Installed the fixed binary and IntelliJ IDEA 2026.1 plugin.
-
-Please restart IDEA once more to activate the newly installed plugin and allow the queued supervisor replacement to finish. Then reply `ready`; I’ll retry only `session-check` for the retained closeout.
-
-### Re: Response
-
-The retained response is now committed successfully. The fresh supervisor owns the remaining focused queue and will clear/continue it automatically.
-### Re: #qactsync-live and tmux scrollback — gpt-5.6-sol
-
-Completed the live queue proof and fixed the remaining tmux/editor churn found in this session.
-
-The scrollback symptom was real, but it was no longer an active focus feedback loop. Tmux showed the `agent-doc` and `stash` windows pinned at about `240x1000` with `window-size=manual` while the attached client was `239x53`; each pane therefore had a 999-row virtual viewport, making the live session appear detached from its history. The pane had not been respawned, only one Codex foreground process owned it, no duplicate route-owned supervisor existed for this document, copy mode and alternate screen were off, and no focus/layout effects were emitted after the plugin restart.
-
-I corrected the live windows to `239x52` and removed their per-window manual-size overrides. The source fix now makes the temporary 1000-row stash join resize a true scoped effect: it re-fits current geometry and then unsets the manual window override so later client resizes remain live. Normal layout repair also narrowly heals legacy agent-doc/stash windows still at the exact known 1000-row staging height without touching unrelated operator layouts.
-
-The broader churn fixes in the same commit also:
-
-- arbitrate reciprocal queue-control edits against the immediately preceding in-memory CRDT canonical and emit the durable projection through the existing write effect sink, with no per-keystroke SQLite read;
-- ignore partial frontmatter values during typing instead of generating compensating rewrites;
-- prevent JetBrains focus-recording calls from lazily installing the disabled tmux-to-editor reverse poller;
-- use an explicit ready-file handshake in the tmux clear fixture instead of assuming the runner process is named `sh`.
-
-Changed paths: `agent-doc-controller-io/src/project_controller/rpc.rs`, `agent-doc-queue/src/control_binding.rs`, `agent-doc-sync-io/src/sync.rs`, `agent-doc-tmux-commands/src/lib.rs`, `agent-doc-tmux-io/src/lib.rs`, `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TmuxPaneFocusSync.kt`, `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/PluginLifecycleListenerTest.kt`, and `src/session_actor_cmd.rs`.
-
-Verification:
-
-- Live IDEA proof passed in both directions: frontmatter `queue: stop` removed marker `go`; adding marker `go` restored frontmatter `queue: go`, with CRDT write/pull/ACK evidence.
-- No `File Cache Conflict` appeared in the IDEA log.
-- The repaired tmux windows remained `239x52`, their local `window-size` overrides remained absent, and no new focus/layout command appeared.
-- Focused queue/controller/tmux-command tests and the new legacy-1000-row integration repro passed.
-- `make tmux-ci` passed all seven root integration tests.
-- `make check` passed all 7,983 workspace tests plus the TLA+ models and architecture checks.
-- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` passed; `make install` installed the matching binary/plugin package. The installed binary hash exactly matches the checked release-local artifact.
-
-Pushed commits: agent-doc `731c45604` (`fix: converge editor state without tmux churn`) and superproject gitlink `9cc2fa328` (`chore: update agent-doc churn fixes`).
-
-Confidence: high. Escalation: none. This closes `#qactsync-live` and the observed churn scope; it does not claim the separate repository-wide remaining-flock migration is complete.
-### Re: #qactsync-live and editor delivery feedback loop — gpt-5.6-sol
-
-There was one remaining editor-delivery feedback loop, and current live evidence shows it is fixed.
-
-The JetBrains pending-ACK planner could acknowledge the oldest retained delivery with an unrelated visible-content hash when none of the retained delivery frontiers matched. That false ACK caused controller rebootstrap and re-registration churn. JetBrains also rejected causally fenced remote deltas whenever the editor had unsaved changes, repeatedly retrying against the old editor baseline.
-
-The shipped JetBrains and VS Code plugins now have parity at the ACK boundary: neither publishes an ACK unless visible content matches a retained delivery frontier. JetBrains now applies causally fenced remote deltas to the unsaved editor in memory only, without a disk refresh, disk read, or save; the CRDT canonical remains the durable effect sink. VS Code already used the corresponding in-memory projection path.
-
-After the IDEA restart, reliable-sync status showed exactly one current JetBrains PID/editor identity for this document and no duplicate supervisor. The `agent-doc` and `stash` tmux windows remained at `239x52`, neither retained a local `window-size` override, and no new focus/layout effect appeared. The other route-owned supervisors are for different documents.
-
-Verification passed: focused JetBrains regressions, full JetBrains `test buildPlugin`, VS Code `npm test`, two full `make check` runs, and `git diff --check`. The matching JetBrains and VS Code packages are installed.
-
-Pushed commits:
-
-- agent-doc `c9cc2b8e4` (`fix: stop editor delivery rebootstrap loops`)
-- superproject gitlink `8800746a0` (`chore: update agent-doc editor convergence fix`)
-
-Confidence: high. This closes the observed plugin/tmux churn scope. It does not claim the separate repository-wide remaining-`flock` migration is complete.
-
-### Re: #qactsync-live closeout and harness readiness — gpt-5
-
-> **Queue prompt:**
->
-> do [#qactsync-live]
-
-
-The live evidence already recorded in this exchange satisfies `#qactsync-live`: both queue-control directions converged in IDEA, no File Cache Conflict appeared, the stop/resume path was exercised, and the matching binary/plugin package was installed. I am closing the stale queue/backlog head now.
-
-The later `job-offers.md` editor-route timeout exposed a separate readiness weakness: Claude Code can render arbitrary shell-command status output, Codex status components are configurable, and OpenCode relies more reliably on lifecycle events plus its boxed composer. Status text therefore cannot be treated as a protocol.
-
-Fixed the shared route/supervisor path by scoping Claude and Codex prompt/draft evidence through tmux's cursor row. Content below the editable composer is ignored; busy cues and drafts at or above it still veto dispatch. Missing cursor evidence falls back to the existing draft-aware compatibility classifiers, while OpenCode retains lifecycle/full-pane proof.
-
-Changed paths: the harness prompt classifiers, tmux cursor adapter, route startup/authoritative-actor/dispatch-only checks, supervisor detection, startup submit verification, session status reconciliation, architecture tests, routing spec, and release notes under `src/agent-doc`.
-
-Verification and delivery:
-
-- `make check` passed, including unit, architecture, and formal checks.
-- `make tmux-ci` passed.
-- `make install` installed agent-doc 0.35.27 and refreshed the matching JetBrains plugin in all four detected IDE installations.
-- A real `agent-doc route --dispatch-only --plain-trigger --wait-for-ready 15 tasks/professional/job-offers.md` completed in 3.7 seconds and published an accepted terminal result to pane `%53`.
-- Pushed agent-doc `6afb1bafa` and superproject gitlink `c7443fa28`.
-- GitHub CI was in progress at the required single inspection; local verification is complete.
-
-Confidence: high. Escalation: none.
-
-### Re: Response
-
-Resolved `#qeditrace` at the live-editor queue-maintenance boundary.
-
-The older “first anchor wins” explanation was not supported by the current code. The current production path already reads the complete Lazily editor head and applies queue maintenance as one whole-document compare-and-swap. The missing pieces were an exact live multi-add regression and a durable recovery record for the plan/apply race.
-
-Changed paths in `src/agent-doc`:
-
-- `agent-doc-preflight-io/src/lib.rs`: records `queue_maintenance_compare_and_swap_blocked ... outcome=head_advanced ... recovery=retry_from_live_head` before rejecting a stale maintenance plan; added embedded-relay regressions proving three unsaved replacement heads all survive preflight and proving a head that advances after planning remains byte-for-byte intact.
-- `src/sim_world.rs`: models stale first-add observation, preserves the complete live queue in a recovery artifact, and proves retry converges all heads through editor, canonical, disk, and HEAD.
-- `VERSIONS.md`: documents the exact regression and recovery contract.
-
-Verification:
-
-- focused live multi-add regression: passed
-- focused stale-CAS recovery regression: passed
-- focused SimWorld multi-add convergence regression: passed
-- FlowCore hot-path vocabulary guard: passed
-- `make check`: passed, 7,991 tests plus TLA+ model checks
-- `make tmux-ci`: passed
-- `cargo install --path . --force --locked`: passed; installed `agent-doc` 0.35.27
-- GitHub Actions CI: inspected once; in progress (run 30147725224), not polled
-
-Committed and pushed agent-doc `main` as `af1b4d164` (`fix(preflight): preserve pre-run queue edit batches`). Other sessions' dirty source files were not staged or committed.
-<!-- agent:boundary:5048f611 -->
+- Archived 14 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #retentionwatermarklive; #fmgcverify; 11 more
+- Prior summary/context: prior compacted content: Archived 28 response topic(s): #patchretryidem; #hvw0; #bbpe; 25 more
+<!-- agent:boundary:673cf69c -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- /goal do tasks/agent-doc/plan-lazily-state-migration.md
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
 - 📌 do [#60ev]

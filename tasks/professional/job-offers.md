@@ -390,7 +390,7 @@ So the actual "ask" Craig has to say yes to today is $205k in cash for an engine
 **The feeling worth separating from the numbers:** it's natural to feel bad asking a scrappy team for real money... but Craig's email did the inviting, the funding disclosure was volunteered (not extracted), and a company that can't afford a documented, well-justified ask from a strong candidate is telling you something important about the offer *before* you accept it, not after. Compassion here means being honest and transparent about your reasoning, not discounting the ask.
 
 **What I changed in the draft** (`tasks/recruit/haiven/compensation-reply-draft.md`, commit `81cb506db`): added a short paragraph right after the funding-transparency thank-you, making explicit that these numbers came from running the math against your other offer rather than picking a target cold, and that the cash-light/equity-heavy shape is deliberate given their raise stage... not padding. It reads as considerate without softening any of the actual numbers. No changes to the ask itself... the floor, trade, and negotiation notes at the bottom of the draft are unchanged.
-❯ 🚧 I think going with Acadian would be better even if Haiven matches the offer...due to the amount of time that I can have for my own work. Sortof like betting on myself.
+❯ I think going with Acadian would be better even if Haiven matches the offer...due to the amount of time that I can have for my own work. Sortof like betting on myself.
 
 ### Re: betting on yourself — the Acadian-even-if-they-match position — fable
 
@@ -407,7 +407,7 @@ That position is coherent, and honestly it's where the accumulated analysis has 
 **The practical consequence: don't send an ask you've already decided to refuse.** Extracting a matched offer from a half-raised-seed CTO who engaged in good faith, then declining it, costs you goodwill and costs him board-facing effort... and gaming is a small world. So I drafted the second email: a warm, honest decline at **`tasks/recruit/haiven/decline-draft.md`** (commit `2521781`). It tells Craig the truth... the reason is time and betting on your own work, not money... notes Haiven deserves a founding engineer who can pour launch-crunch hours in, and deliberately leaves the door open (contract sprint on the SDK, realtime/CRDT consulting, October-launch well-wishes). Both emails now sit committed side by side; `#haivensend` is updated to "send exactly one, per your decision."
 
 **Where that leaves Sunday:** if the answer to question 3 is "no waver"... send the decline to Craig, tell the Acadian recruiter yes (the notice/billing/renewal questions in `tasks/recruit/acadian/recruiter-questions-draft.md` can ride along with the acceptance... they're confirmation hygiene, not conditions), and start sketching the 90-day patchboard milestone the evenings just bought. If there's any waver, send the compensation ask today as planned and let Craig's real numbers test you. Either way you're choosing from clarity now, not deadline pressure... which is what all of this was for.
-❯ 🚧 Should I mention that Acadian offered more money? I also don't want to make it seem that I was using Haiven for a higher bid.
+❯ Should I mention that Acadian offered more money? I also don't want to make it seem that I was using Haiven for a higher bid.
 
 ### Re: should the decline mention that Acadian offered more money? — fable
 
@@ -424,7 +424,7 @@ That position is coherent, and honestly it's where the accumulated analysis has 
 One last calibration, since your instinct here is good: the fact that you're worried about *seeming* mercenary while literally leaving ~$20k+/year on the table to decline gracefully tells you the worry is about kindness, not optics. The kindest version of a "no" is clear, warm, and free of numbers... which is the draft you already have.
 
 No new follow-up items this cycle... both send-items (`#haivensend`, `#acadiansend`) already cover the remaining operator actions.
-❯ 🚧 I was thinking this through the Acadian offer more and weighing how my life would be with either company. And that is how I came to the conclusion. Should that be in the draft? I don't think Haiven would need CRDT consulting.
+❯ I was thinking this through the Acadian offer more and weighing how my life would be with either company. And that is how I came to the conclusion. Should that be in the draft? I don't think Haiven would need CRDT consulting.
 
 ### Re: life-weighing framing in the decline + dropping CRDT consulting — fable
 
@@ -457,7 +457,7 @@ Short answers first: **it's not a longshot** (it's probably the most plausible f
 **How to bring it up: don't upgrade the decline yet.** The current door-open line ("a contract sprint on the SDK") is exactly calibrated... visible enough that a candidate-thin CTO will notice it, light enough that it costs nothing if he doesn't. The draft includes a stronger optional variant ("milestone-scoped contract on the engine SDKs... your repos, your review, spend gated per milestone... I'd genuinely consider it") — **use it only if you've already decided you'd say yes**, because Craig likely follows up on it. Tracked as `#sdkcontract`: if he engages, resolve the evenings posture, then send the structure.
 
 The clean sequence stands: decline + Acadian yes this weekend; the SDK contract is a door Craig can walk through afterward, on terms already written down.
-❯ 🚧 riza-ingalls (https://www.linkedin.com/in/riza-ingalls/) was a founding engineer at PresenceAI. I had riza-ingalls as one of my references. Riza lives in Austin, TX...as does Craig. Would it make sense to introduce Riza as a candidate for the SDK. Where I can augment the work as well? Or would this come off as prying control away from Craig + Luke at Haiven?
+❯ riza-ingalls (https://www.linkedin.com/in/riza-ingalls/) was a founding engineer at PresenceAI. I had riza-ingalls as one of my references. Riza lives in Austin, TX...as does Craig. Would it make sense to introduce Riza as a candidate for the SDK. Where I can augment the work as well? Or would this come off as prying control away from Craig + Luke at Haiven?
 
 ### Re: introducing Riza as an SDK candidate + you augmenting — fable
 
@@ -478,7 +478,7 @@ The clean sequence stands: decline + Acadian yes this weekend; the SDK contract 
 **On "where I can augment the work as well":** that's the Phase-0/milestone posture from the structure doc, and it composes cleanly with the intro *as long as it's the second sentence, not the headline*. The evenings-conflict warning from the last cycle still applies to your share of any such arrangement... an augment role next to Riza is smaller than solo-building the SDK, which actually makes this the most patchboard-compatible version of staying involved with Haiven.
 
 **Sequencing (unchanged, one addition):** decline + Acadian yes this weekend, nothing bundled into the decline... the existing "an intro that's useful" line already plants the seed. Then, if Craig engages... or even unprompted a few days later, intros are always welcome... send: "You should meet Riza Ingalls... founding engineer at PresenceAI, and you're both in Austin. Separately, if a milestone-scoped hand on the SDK would help you hit October, I'm open to that too... your repos, your review, either piece independently." Two gifts, no strings, zero control taken. Tracked under `#sdkcontract`; `#rizaingallshttps` is done.
-❯ 🚧 Riza started off with front-end work then did full stack work at PresenceAI using Python. He is capable of learning, especially with AI assistance. I havn't made any SDKs. Riza has worked on the PresenceAI api extensively. Would this be an appealing fit or is this too much of a stretch?
+❯ Riza started off with front-end work then did full stack work at PresenceAI using Python. He is capable of learning, especially with AI assistance. I havn't made any SDKs. Riza has worked on the PresenceAI api extensively. Would this be an appealing fit or is this too much of a stretch?
 
 ### Re: is the Brian + Riza SDK fit appealing, or a stretch? — fable
 
@@ -493,7 +493,7 @@ Honest answer: **pitched as engine-SDK expertise, it's a stretch. Pitched as an 
 **What would sink it:** overselling. If the pitch says "SDK experts," Craig eventually discovers neither of you has shipped a Unity plugin, and the trust cost lands on the relationship you've spent this whole negotiation protecting. If the pitch says "here's exactly what we've each built, here's the split that maps to it, here's the gate structure that protects you"... that's the same candor that's carried every prior exchange with him, and it's the version worth sending.
 
 Preconditions unchanged: Riza double opt-in first, decline + Acadian yes before any of this goes out, and your evenings posture decided before you offer your half. `#rizastartedoff` is done; the whole thread stays tracked under `#sdkcontract`.
-<!-- agent:boundary:f9c60f9c -->
+<!-- agent:boundary:f1ebbc28 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -505,7 +505,6 @@ Preconditions unchanged: Riza double opt-in first, decline + Acadian yes before 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [x] 🚧 [#rizastartedoff] Riza started off with front-end work then did full stack work at PresenceAI using Python. He is capable of learning, especially with AI assistance. I havn't made any SDKs. Riza has worked on the PresenceAI api extensively. Would this be an appealing fit or is this too much of a stretch?
 - [ ] [#sdkcontract] [recommended] If Craig engages the door-open line, send the milestone-SOW proposal from tasks/recruit/haiven/sdk-contract-structure.md; first resolve the evenings conflict (build vs Phase-0-only vs referral-first)
 - [ ] [#haivensend] #haivensend [operator-verify] Send ONE Haiven email per the decision: compensation ask (tasks/recruit/haiven/compensation-reply-draft.md) if a matched offer would change the answer, or the warm decline (tasks/recruit/haiven/decline-draft.md) if Acadian wins regardless
 - [ ] [#acadiansend] [operator-verify] Send Acadian recruiter questions (tasks/recruit/acadian/recruiter-questions-draft.md) incl. signing-bonus/advance ask; file written answers under tasks/recruit/acadian/
@@ -530,4 +529,5 @@ Preconditions unchanged: Riza double opt-in first, decline + Acadian yes before 
 - 2026-07-25 [#ipcarveout] Prepare an open-source IP carve-out exhibit (lazily, tsift, agent-doc, patchboard, tmux-router, corky, etc.) to attach to whichever agreement is signed
 - 2026-07-25 [#fullydilutedshares] What are "fully diluted shares"?
 - 2026-07-25 [#rizaingallshttps] riza-ingalls (https://www.linkedin.com/in/riza-ingalls/) was a founding engineer at PresenceAI. I had riza-ingalls as one of my references. Riza lives in Austin, TX...as does Craig. Would it make sense to introduce Riza as a candidate for the SDK. Where I can augment the work as well? Or would this come off as prying control away from Craig + Luke at Haiven?
+- 2026-07-25 [#rizastartedoff] Riza started off with front-end work then did full stack work at PresenceAI using Python. He is capable of learning, especially with AI assistance. I havn't made any SDKs. Riza has worked on the PresenceAI api extensively. Would this be an appealing fit or is this too much of a stretch?
 <!-- /agent:done -->

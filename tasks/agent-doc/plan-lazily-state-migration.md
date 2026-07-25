@@ -230,7 +230,21 @@ only *fail closed* (today) or *make it idempotent first*.
 
 ## Adjacent gaps surfaced this session (track separately, not Lazily-state items)
 
-- **ghost-text-misread-as-draft. — RESOLVED 2026-07-25.** route/dispatch treated
+- **ghost-text-misread-as-draft — the styling fix was only HALF the fix; the other
+  half landed 2026-07-25 (agent-doc `d7884a408`).** The entry below claimed this
+  resolved. It recurred the same day on a live pane: Run Agent Doc refused pane %4
+  with `unblocker=submit_or_clear_pane_draft` over Claude's autosuggest
+  `❯\u{a0}Please compact the exchange` — an instruction the operator could not
+  satisfy. `prompt_candidate_is_dim_placeholder` was correct; the route path fed it
+  `capture_pane` (plain `capture-pane -p`), which **strips the SGR-2 styling that is
+  the entire discriminator**, so it could never see dim and always answered "real
+  draft". Every capture reaching a dim-sensitive predicate now uses
+  `capture_pane_with_ansi`. Lesson worth carrying: the harness-level unit tests
+  passed throughout, because they are handed raw content directly — the predicate was
+  tested, the *plumbing that feeds it* was not. The new guard pins the plumbing.
+  Live evidence: `capture-pane -p -e` showed
+  `^[[39m❯<nbsp>^[[2mPlease compact the exchange^[[0m`.
+- **ghost-text-misread-as-draft. — original entry, styling half only.** route/dispatch treated
   Claude Code autosuggest ghost text as an unsent operator draft and refused
   `route --dispatch-only` injection (`blocked_with_exact_unblocker`,
   `unblocker=submit_or_clear_pane_draft`) when the composer was actually empty.

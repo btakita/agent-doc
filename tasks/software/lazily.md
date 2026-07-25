@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -23,13 +23,35 @@ queue: go
 /goal Please create lazily-cs (C#) implementation. Create gh lazily-hub/lazily-cs. Add a submodule to src/lazily-cs. Please ensure lazily-cs is in conformance with lazily-spec + lazily-formal + conformance test suite + added to features table + implements all features on the features table.
 
 '#spec-test-commit-push': update spec + tests. commit + push
-<!-- agent:boundary:5e59c997 -->
+
+### Re: create lazily-cs (C#) — opus-5
+
+> **Queue prompt:** /goal Please create lazily-cs (C#) implementation. Create gh lazily-hub/lazily-cs. Add a submodule to src/lazily-cs. Please ensure lazily-cs is in conformance with lazily-spec + lazily-formal + conformance test suite + added to features table + implements all features on the features table.
+
+`lazily-hub/lazily-cs` exists, is a submodule at `src/lazily-cs`, and ships a real, spec-conformant reactive kernel. All 48 feature rows are **not** done — that is ten more phases of work, now planned and queued rather than claimed.
+
+**What shipped and is proved**
+
+- **Row 0, reactive graph.** `Source<T>` / `Computed<T>` / `Effect`, value-threaded `Compute` (no ambient stack), non-consuming mark-frontier invalidation, pull-time equality guard, `Eager()`/`Lazy()`, `Batch`, explicit disposal, `TeardownScope` with reverse-creation-order teardown and `Disarm`, edge-degree introspection, and a bounded effect drain that names the offending effect on exhaustion.
+- **Row 15, merge algebra.** `KeepLatest`/`Sum`/`Max`/`SetUnion`/`RawFifo`, `Cell ≡ Source<KeepLatest>`, associativity and flag laws under test.
+- **Conformance: the whole `reactive-graph` corpus replays with an empty ledger** — 20 fixtures, 215 assertions, zero unsupported, zero known divergences. That includes the five merge-feed fixtures and `feedback_drain_bound_reports_exhaustion`, which lazily-go parks as unsupported. Two things made that reachable: a `Source` already carries its `MergePolicy` in a field, so `merge_cell` needed no new node kind; and I implemented the bounded drain rather than skipping the fixture that needs it.
+- 32 tests green, `dotnet format` clean, CI green on the first run.
+
+**On over-mocking — you were right to ask, and one thing was.** The runner drives a real `Context` end to end; nothing about the library is stubbed. But `merges_of` was counted in the *runner*, incrementing before each call to `Merge()` — which is what the reference runner does, and it is weaker than it looks: it counts the runner's intention, not the library's work, so a binding that swallowed the fold entirely would still report the right number. I moved the counter **inside the merge policy's fold**, so `merges_of` now observes folds the library actually performed. I then mutation-checked the suite: breaking `Merge` to keep-latest fails 1 test; cutting the invalidation walk to one level fails 6. It is not vacuous.
+
+**What is queued, not done.** `#lzcsconcurrency` `#lzcscollections` `#lzcsstatechart` `#lzcsqueues` `#lzcscrdt` `#lzcsipc` `#lzcssync` `#lzcstemporal` `#lzcscluster` `#lzcsplane` `#lzcspackage` — one per actionable phase, each keyed to its coverage rows and the corpus it must replay, in `tasks/software/lazily-cs-parity-plan.md`. Concurrency goes first on purpose: the reactive-graph corpus exists partly to catch an async cascade defect that a single-model replay cannot see, so the context kinds are a prerequisite for every later plane rather than a peer.
+
+**lazily-formal** needs no change. It is language-agnostic, and lazily-cs conforms to it through the corpus — `scope_teardown_equals_fold_of_disposals` is the executable form of `disposeScope_eq_disposeAll`, and it passes.
+
+**Coverage matrix.** `coverage.json` gained a `C#` column (rows 0 and 15 ✅, the other 46 `—`), `sync-coverage.mjs` gained `../lazily-cs/README.md` as a target, and all nine sibling READMEs plus `docs/coverage.md` were regenerated and committed one repo at a time. lazily-spec CI is green; the sibling README-only runs were still in progress and are not gating.
+
+Pushed: `lazily-cs` (new), `lazily-spec`, nine sibling READMEs, and the superproject gitlinks.
+<!-- agent:boundary:1015e4db -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- /goal Please create lazily-cs (C#) implementation. Create gh lazily-hub/lazily-cs. Add a submodule to src/lazily-cs. Please ensure lazily-cs is in conformance with lazily-spec + lazily-formal + conformance test suite + added to features table + implements all features on the features table.
 <!-- /agent:queue -->
 
 ## Backlog

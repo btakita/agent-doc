@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -240,20 +240,36 @@ Executed `#haivenask`: the compensation reply draft is written and committed at 
 The draft file also carries negotiation notes for when they counter: floor at $180k + $15k + 0.75% written; the $175k-for-1.0%+$25k trade if they're base-constrained; and the tell to watch — specific answers to the written-terms request means good faith, vagueness means weight the equity at ~$0 and re-run the decision gate.
 
 Review the draft, edit numbers to taste, and it's ready to paste into email or LinkedIn. `#ipcarveout` remains the next actionable item and should be produced as soon as Haiven engages on the framework.
-<!-- agent:boundary:20e39ea6 -->
+
+### Re: #ipcarveout — future side-work carve-outs, and which company makes it easier — fable
+
+> **Queue prompt:**
+>
+> [#ipcarveout]: I plan on working on side projects. Can I have future side-work as a carve-out? Would it be easier with Acadian than with Haiven?
+
+
+Short answers: **yes, future side-work can be carved out, but it requires a specific clause beyond the standard pre-existing-IP exhibit... and it's meaningfully easier with Acadian than with Haiven.** I also went ahead and produced the deliverable: the carve-out exhibit is committed at **`tasks/recruit/ip-carveout-exhibit.md`** (commit `0d51caf`), ready to attach to either agreement.
+
+**Why the standard exhibit isn't enough for you.** The usual "Exhibit A" only protects what exists *before* your start date. Your plan is ongoing side projects, so the thing that matters is the *future-inventions* clause. Default employment IP agreements assign anything "related to the company's business or anticipated R&D"... and one more thing that matters for you specifically: **Virginia has no statutory invention-assignment protection** (no California §2870 equivalent), so the contract text is your entire protection. The exhibit I drafted therefore has two parts: the pre-existing list (lazily family, agent-doc, tsift, patchboard, tmux-router, corky, and the rest, each with "and successors" language), plus two tiers of future-works clause: Tier 1 (company claims nothing built on your own time without company resources, *even if related to their business*) and Tier 2 fallback (a tightly-scoped "Excluded Field" definition that expressly excludes developer tooling, reactive-state, and CRDT/sync libraries). Plus a red-line list of clauses to strike from their draft.
+
+**Acadian: structurally easy.** Two reasons. First, it's a 12-month *contract* engagement through PGC... market-standard contractor terms assign only the work product delivered under the engagement, not everything you invent during the term. Second, zero domain overlap: Acadian is financial services; your projects are developer infrastructure. Nobody at a lender is going to claim a reactive-signals library. Action items are just hygiene: read PGC's assignment clause, confirm it's deliverables-scoped, strike any "all inventions during the term" language, attach the exhibit as a precaution.
+
+**Haiven: negotiable but genuinely harder, and higher-stakes.** A Founder Engineer PIIA will default broad, and here the domain overlap is real: lazily (reactive/CRDT), agent-doc (realtime multi-replica sync), and patchboard sit *adjacent to Haiven's actual product* (realtime chat/presence SDK infrastructure). Under a default "related to the Company's business" clause, next year's lazily release or patchboard iteration is arguably assignable... which is exactly why the future-works clause, not just the exhibit list, is the non-negotiable part with them. Open with Tier 1; fall back to Tier 2 with a narrow Excluded Field ("AI chat moderation and player-safety systems for multiplayer games", not "realtime infrastructure"). Their response to this ask is another good-faith tell, same as the equity terms.
+
+**One non-legal reality check:** the carve-out protects your *ownership*, not your *hours*. Haiven's expected overtime reduces side-project time no matter what the contract says; Acadian gives you both the cleaner legal position and the actual evenings. If ongoing side-work is a first-class goal for 2026, that compounds the earlier "Acadian is the stronger default" conclusion.
+
+`#ipcarveout` is done: exhibit drafted, committed, and applicable to both offers. Recommend a one-hour employment-attorney review of whichever final agreement you sign... cheap insurance given Virginia's lack of a statutory floor.
+<!-- agent:boundary:8940a286 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority start -->
-- ~~do [#haivenask]~~
-- [#ipcarveout]: I plan on working on side projects. Can I have future side-work as a carve-out? Would it be easier with Acadian than with Haiven?
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#ipcarveout] Prepare an open-source IP carve-out exhibit (lazily, tsift, agent-doc, patchboard, tmux-router, corky, etc.) to attach to whichever agreement is signed
 <!-- /agent:backlog -->
 
 ## Icebox
@@ -266,4 +282,5 @@ Review the draft, edit numbers to taste, and it's ready to paste into email or L
 <!-- agent:done -->
 - 2026-07-25 [#reassessopusanswers] Please reassess Opus' answers. What do you think the likelihood to reach $100M ARR?
 - 2026-07-25 [#haivenask] #haivenask Draft the Haiven compensation reply (equity-forward frame: base $180-185k anchor $190k + signing $20-25k + 1.0% primary equity ask with clean terms; cash parity with $208k+ alternative explicitly not expected) as an email/message draft for review
+- 2026-07-25 [#ipcarveout] Prepare an open-source IP carve-out exhibit (lazily, tsift, agent-doc, patchboard, tmux-router, corky, etc.) to attach to whichever agreement is signed
 <!-- /agent:done -->

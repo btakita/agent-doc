@@ -7,6 +7,30 @@ use agent_doc_supervisor::ipc_protocol::IpcMethod;
 use anyhow::{Context, Result};
 use std::path::Path;
 
+/// Whether an actor in `actor_state` can receive steered text at all.
+///
+/// `#steergateidle` — an **active turn is not a precondition**. This gate used to
+/// require `actor_state == "busy"`, so a selection sent at an idle pane was rejected
+/// with an unsatisfiable instruction: there was no turn to steer and no way for the
+/// operator to create one from the editor. Operator directive 2026-07-25: idle must
+/// deliver rather than error. A live harness is waiting for input in exactly that
+/// state, which is the case where delivering the selection is most obviously right.
+///
+/// Dropping the requirement also stops the supervisor's state classification from
+/// being load-bearing. A turn that WAS active but still read `"ready"` (observed
+/// 2026-07-25, alongside repeated 5s controller-response timeouts on the same actor)
+/// previously turned a state-tracking lag into a hard user-visible failure. Both live
+/// states now accept, so that lag degrades to a no-op instead of a rejection.
+///
+/// What still fails closed is a pane with nothing able to receive input — `starting`
+/// (no composer yet), `closed`, `blocked`, or a state the supervisor could not report
+/// (`missing`/absent, which arrives here as an empty string). The caller additionally
+/// requires the actor session to match, which is the real safety property: never
+/// inject one document's selection into another session's pane.
+fn actor_state_accepts_steering(actor_state: &str) -> bool {
+    matches!(actor_state, "busy" | "ready" | "waiting_input")
+}
+
 pub fn deliver_active_turn_steering(
     file: &Path,
     steering_id: &str,
@@ -46,9 +70,9 @@ pub fn deliver_active_turn_steering(
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .to_string();
-    if actor_state != "busy" || actor_session_id != session_id {
+    if !actor_state_accepts_steering(actor_state) || actor_session_id != session_id {
         anyhow::bail!(
-            "selected-text turn steering requires the authoritative pane to have an active turn (actor_state={actor_state:?}, actor_session={actor_session_id:?})"
+            "selected-text turn steering needs the authoritative pane to be able to accept input for this session (actor_state={actor_state:?}, actor_session={actor_session_id:?})"
         );
     }
     let actor_pane_id = state
@@ -123,4 +147,46 @@ pub fn deliver_active_turn_steering(
         actor_pane_id,
         actor_generation,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `#steergateidle` — the operator-reported regression: a selection sent at an
+    /// idle pane was rejected because the gate demanded an active turn, leaving the
+    /// operator an instruction they could not satisfy (there was no turn to steer,
+    /// and the editor could not create one).
+    ///
+    /// The second half of that report matters just as much: a turn that WAS active
+    /// still read `"ready"`. Accepting both live states is what stops a supervisor
+    /// state-tracking lag from becoming a hard user-visible failure — the whole
+    /// point is that this predicate must not be load-bearing on that distinction.
+    #[test]
+    fn steering_does_not_require_an_active_turn() {
+        assert!(
+            actor_state_accepts_steering("ready"),
+            "an idle pane must accept a selection instead of rejecting it"
+        );
+        assert!(
+            actor_state_accepts_steering("busy"),
+            "an active turn must still accept steering"
+        );
+        assert!(
+            actor_state_accepts_steering("waiting_input"),
+            "a pane explicitly waiting for input is the clearest accept case"
+        );
+    }
+
+    /// A pane with nothing able to receive input still fails closed — the gate is
+    /// narrowed, not removed. `""` is the shape an unreportable state arrives in.
+    #[test]
+    fn steering_still_fails_closed_when_the_pane_cannot_receive_input() {
+        for state in ["starting", "closed", "blocked", "missing", ""] {
+            assert!(
+                !actor_state_accepts_steering(state),
+                "{state:?} has no composer able to receive steered text"
+            );
+        }
+    }
 }

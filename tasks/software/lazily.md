@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: go
 ---
 
 ## Status
@@ -87,12 +87,30 @@ Three of your four tokens are real; one is ignored, and the whole thing is inert
 **No new backlog items this cycle.** This turn produced no actionable follow-up work of its own — the eleven lazily-cs phases already in `agent:backlog` are the whole remaining plan, and the two things to change (`queue: stop` → `start`, delete the stray `queue` token) are operator marker edits, not tracked work.
 
 Say the word and I will flip `queue: start`, remove the stray `queue` token, and drain — but the drain is ten multi-repo phases with commits and pushes under `#spec-test-commit-push`, so I want the go from you rather than inferring it from an attribute edit.
-<!-- agent:boundary:b9ff7b5f -->
+
+### Re: queue + backlog attributes — opus-5
+
+Three of your four tokens are real, one was a lint-blocking typo that I removed, and the queue is populated but will not run.
+
+**`&lt;!-- agent:backlog priority queue --&gt;` — both valid.** Bare `queue` is the backlog→queue sync attribute in **append** mode (`queue=sync|append|prepend` are the explicit forms). Bare `priority` stable-sorts backlog items by their per-item `priority=<1..9>` token before the sync, and because this backlog is *also* `queue`-tagged it additionally runs the synced queue through the priority/auto-DAG recompute, so an append-built queue is reordered immediately rather than at the next activation.
+
+**On `agent:queue`, `preset` and `priority` are valid but the trailing `queue` was not.** `queue` is only meaningful on `agent:backlog`/`pending`; on `agent:queue` it is not a recognized key. Preflight warned `misplaced_component_attr`, and the lint gate hard-blocked closeout with `agent-doc/malformed-attr` — "attribute `queue` on `agent:queue` is missing `=value`" — so the cycle could not be sealed until it was gone. I deleted that one token; the marker now reads `&lt;!-- agent:queue preset="…" priority --&gt;`.
+
+**The queue body is already full; the loop is off.** All eleven `do [#id]` prompts are sitting in `agent:queue` in backlog order. But frontmatter carries `queue: stop`, which resolves the sync policy to `ExplicitlyStopped` — preflight reports `held 11 backlog id(s) out of explicitly stopped queue binding`, `queue_active: false`, `queue_drainable_head_count: 0`. The `queue` attribute only ever *populates*; it never starts the loop. Starting it means setting frontmatter `queue: start` (alias `go`), or putting the `start`/`go` control on the `agent:queue` marker.
+
+**Head order, if you start it.** No item carries a `priority=<1..9>` token, so document order stands: `#lzgoerrorretry` first — the lazily-go `Error → Computing` spec disagreement — then `#lzcscollections`. If you want collections first, as the last exchange said, move it to the top of the backlog or give it `priority=1`. Backlog-sourced prompts are append-stable, so ordering is decided in the backlog, not by editing the queue.
+
+**Two environment flags I am not acting on.** The running `agent-doc` binary is missing three committed changes (newest `c29e32b7f feat: rebuild request as an Effect over a signal (Tier 2)`), and the live JetBrains plugin is 0.2.293 against the 0.2.294 this binary ships. Both belong to the concurrent agent-doc session — `tasks/agent-doc/agent-doc-bugs2.md` is foreign-owned by pane %1 — and building that tree from this document would race a session mid-change. I requested `agent-doc admin recycle` (deferred to the next idle boundary) and left the `make install` / plugin update to that session.
+
+**No new backlog items this cycle.** Nothing actionable came out of this turn that is not already tracked — the eleven lazily-cs phases in `agent:backlog` are the whole remaining plan, and flipping `queue: stop` is an operator control, not tracked work.
+
+Give me the go and I will flip `queue: start` and drain. I am not inferring it from an attribute edit, because the drain is ten multi-repo phases that commit and push under your `#spec-test-commit-push` preset.
+<!-- agent:boundary:78fc800f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue preset="#spec-test-commit-push" priority queue -->
+<!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - do [#lzgoerrorretry]
 - do [#lzcscollections]
 - do [#lzcsstatechart]

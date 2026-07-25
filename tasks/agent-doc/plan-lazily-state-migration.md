@@ -367,8 +367,17 @@ backlog id per phase; do not touch fixed-seed fuzz.
   than sleeping it blindly, and falls back to the previous blind sleep whenever no
   controller or hub can answer, so the loop stays fail-open.
 
-  **Still open in Phase 1:** W8 (compact CRDT-merge converge retry) can now consume
-  the same await; W7 needs the editor `save_document` disk-flush result
+  **Landed 2026-07-25 — W8.** `converge_compacted_with_retry` retried
+  `try_editor_converge` with *no wait at all*, and it retries precisely when the error
+  is `retry_crdt_merge` — i.e. the live canonical is mid-delta from an in-flight
+  delivery — so an immediate retry re-hit the same in-flight state by construction. It
+  now waits on the same cross-process convergence await first. Waiting before the
+  `current_document_content` re-read also makes the existing drift check *more*
+  accurate: a settled read distinguishes a transient in-flight delta from a genuine
+  concurrent operator edit instead of sampling a half-applied one. `Ok(None)`/`Err`
+  fall through to that unchanged check, so the retry stays fail-open.
+
+  **Still open in Phase 1:** W7 needs the editor `save_document` disk-flush result
   published once (a genuine OS boundary, rubric #3 — do not fold it into the
   convergence cell, and note its current 1s/20ms disk poll is already the
   single-consumer effect-source shape, so the win there is small); W3 and W4 follow

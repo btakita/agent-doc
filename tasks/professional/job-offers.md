@@ -457,7 +457,28 @@ Short answers first: **it's not a longshot** (it's probably the most plausible f
 **How to bring it up: don't upgrade the decline yet.** The current door-open line ("a contract sprint on the SDK") is exactly calibrated... visible enough that a candidate-thin CTO will notice it, light enough that it costs nothing if he doesn't. The draft includes a stronger optional variant ("milestone-scoped contract on the engine SDKs... your repos, your review, spend gated per milestone... I'd genuinely consider it") — **use it only if you've already decided you'd say yes**, because Craig likely follows up on it. Tracked as `#sdkcontract`: if he engages, resolve the evenings posture, then send the structure.
 
 The clean sequence stands: decline + Acadian yes this weekend; the SDK contract is a door Craig can walk through afterward, on terms already written down.
-<!-- agent:boundary:712c4a90 -->
+❯ 🚧 riza-ingalls (https://www.linkedin.com/in/riza-ingalls/) was a founding engineer at PresenceAI. I had riza-ingalls as one of my references. Riza lives in Austin, TX...as does Craig. Would it make sense to introduce Riza as a candidate for the SDK. Where I can augment the work as well? Or would this come off as prying control away from Craig + Luke at Haiven?
+
+### Re: introducing Riza as an SDK candidate + you augmenting — fable
+
+> **Queue prompt:**
+>
+> do [#rizaingallshttps]
+
+
+**An introduction is a gift; a package deal is a takeover. Offered separately, this doesn't pry control from anyone... bundled, it can.** The distinction decides everything here, and the structure doc now carries the hybrid posture with its preconditions (commit `3908eef`).
+
+**Why the intro itself is safe.** Recommending a candidate is among the most welcome things you can do for a hiring-thin seed CTO... it costs Craig nothing and he keeps every lever: his interview, his repos, his decision. Riza has genuinely attractive surface for Haiven: founding-engineer experience at PresenceAI (realtime production systems... squarely adjacent to Haiven's domain), and **Austin... the same city as Craig**, which for a seed-stage company means whiteboards and coffee, not just Zoom. The "prying control" optic only materializes if you present yourself as the intermediary: "Riza and I will do your SDK" is an external team bidding for a workstream. "Meet Riza; separately, I'm glad to augment per milestone if useful" is two independent gifts. Keep them independent... let Craig assemble the pieces himself if he wants both. If HE combines them, it was his idea, and control was never in question.
+
+**Two preconditions before any intro (both in the doc):**
+
+1. **Ask Riza first.** Double opt-in is the iron rule of introductions... confirm Riza is interested in and available for early-stage game-infrastructure work before Craig's name enters the conversation. Riza stood as your reference, so the relationship supports the ask; a "would you be open to..." message costs one text.
+2. **Confirm the actual fit axis.** You noted Riza isn't a Golang developer... but that's the wrong axis: engine SDKs are C#/C++/engine-side work, and Go only touches the backend API edge. The real question is whether Riza has Unity/Unreal experience. If yes, pitch "SDK candidate." If unknown, pitch "a strong realtime engineer worth meeting"... still valuable, and it keeps you honest instead of overselling a fit you haven't verified.
+
+**On "where I can augment the work as well":** that's the Phase-0/milestone posture from the structure doc, and it composes cleanly with the intro *as long as it's the second sentence, not the headline*. The evenings-conflict warning from the last cycle still applies to your share of any such arrangement... an augment role next to Riza is smaller than solo-building the SDK, which actually makes this the most patchboard-compatible version of staying involved with Haiven.
+
+**Sequencing (unchanged, one addition):** decline + Acadian yes this weekend, nothing bundled into the decline... the existing "an intro that's useful" line already plants the seed. Then, if Craig engages... or even unprompted a few days later, intros are always welcome... send: "You should meet Riza Ingalls... founding engineer at PresenceAI, and you're both in Austin. Separately, if a milestone-scoped hand on the SDK would help you hit October, I'm open to that too... your repos, your review, either piece independently." Two gifts, no strings, zero control taken. Tracked under `#sdkcontract`; `#rizaingallshttps` is done.
+<!-- agent:boundary:ebb98012 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -491,4 +512,5 @@ The clean sequence stands: decline + Acadian yes this weekend; the SDK contract 
 - 2026-07-25 [#haivenask] #haivenask Draft the Haiven compensation reply (equity-forward frame: base $180-185k anchor $190k + signing $20-25k + 1.0% primary equity ask with clean terms; cash parity with $208k+ alternative explicitly not expected) as an email/message draft for review
 - 2026-07-25 [#ipcarveout] Prepare an open-source IP carve-out exhibit (lazily, tsift, agent-doc, patchboard, tmux-router, corky, etc.) to attach to whichever agreement is signed
 - 2026-07-25 [#fullydilutedshares] What are "fully diluted shares"?
+- 2026-07-25 [#rizaingallshttps] riza-ingalls (https://www.linkedin.com/in/riza-ingalls/) was a founding engineer at PresenceAI. I had riza-ingalls as one of my references. Riza lives in Austin, TX...as does Craig. Would it make sense to introduce Riza as a candidate for the SDK. Where I can augment the work as well? Or would this come off as prying control away from Craig + Luke at Haiven?
 <!-- /agent:done -->

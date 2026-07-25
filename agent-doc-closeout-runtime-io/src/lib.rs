@@ -331,6 +331,57 @@ impl agent_doc_session_check_io::SessionCheckEffects for RuntimeSessionCheckEffe
             state = reactivated;
             reactivated_false_stale_capture = true;
         }
+        // A commit records the semantic closeout, but it does not imply that an
+        // attached editor has already projected the acknowledged Lazily state
+        // to disk. Recovery must keep owning that durable effect after the
+        // phase transition. It may save only the exact converged authority that
+        // already contains this cycle's captured response; it never replays a
+        // committed response into an unrelated operator edit.
+        if state.phase == CyclePhase::Committed {
+            let (Some(capture_id), Some(response_sha256)) = (
+                state.capture_id.as_deref(),
+                state.response_sha256.as_deref(),
+            ) else {
+                return Ok(Outcome::NotApplicable);
+            };
+            let Some(capture) =
+                agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id)?
+            else {
+                return Ok(Outcome::NotApplicable);
+            };
+            if capture.cycle_id != state.cycle_id
+                || capture.response_sha256 != response_sha256
+                || capture.response_body.trim().is_empty()
+                || agent_doc_document_realtime_io::pending_document_write(file).is_none()
+            {
+                return Ok(Outcome::NotApplicable);
+            }
+            let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
+                file,
+                "session_check_committed_capture_effect_sink_current",
+            )?;
+            if !agent_doc_turn::response_replay::response_materialized_in_content(
+                &capture.response_body,
+                &current,
+            ) {
+                return Ok(Outcome::NotApplicable);
+            }
+            return match agent_doc_document_realtime_io::settle_retained_captured_projection_through_authority(
+                file,
+                &capture.response_body,
+                "session_check_committed_capture_effect_sink_settlement",
+            ) {
+                Ok(true) => Ok(Outcome::Committed),
+                Ok(false) => Ok(Outcome::Retained {
+                    reason: "committed capture is current in Lazily but its durable editor-save effect has not settled".to_string(),
+                }),
+                Err(err) => Ok(Outcome::Retained {
+                    reason: format!(
+                        "committed capture durable editor-save effect is not yet safe to settle: {err:#}"
+                    ),
+                }),
+            };
+        }
         if !matches!(
             state.phase,
             CyclePhase::ResponseCaptured | CyclePhase::WriteApplied
@@ -796,6 +847,74 @@ mod tests {
                 .unwrap()
                 .expect("the exact same capture remains in the durable ledger");
         assert_eq!(capture.cycle_id, state.cycle_id);
+    }
+
+    #[test]
+    fn committed_capture_settles_its_retained_effect_sink() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let file = dir.path().join("session.md");
+        let base = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "Please investigate.\n",
+            "<!-- agent:boundary:base -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        let response = concat!(
+            "<!-- patch:exchange -->\n",
+            "### Re: investigate — test\n\n",
+            "Fixed the retained closeout.\n",
+            "<!-- /patch:exchange -->\n",
+            "<!-- no-pending-capture -->\n",
+        );
+        let target = concat!(
+            "---\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: investigate — test\n\n",
+            "Fixed the retained closeout.\n",
+            "<!-- agent:boundary:response -->\n",
+            "<!-- /agent:exchange -->\n",
+        );
+
+        std::fs::write(&file, base).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            base,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let capture = agent_doc_capture_io::capture_response(&file, response).unwrap();
+        std::fs::write(&file, target).unwrap();
+        agent_doc_cycle_state_io::mark_committed(&file, "commit_success", Some(base), Some(target))
+            .unwrap();
+        agent_doc_document_realtime_io::retain_deferred_document_write_target(
+            &file,
+            base,
+            target,
+            "committed_capture_effect_sink_test",
+            agent_doc_document_realtime_io::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+
+        let before = agent_doc_cycle_state_io::load_with_closeout_projection(&file)
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.phase, CyclePhase::Committed);
+        assert_eq!(
+            before.capture_id.as_deref(),
+            Some(capture.capture_id.as_str())
+        );
+        assert!(agent_doc_document_realtime_io::pending_document_write(&file).is_some());
+
+        let outcome = RuntimeSessionCheckEffects
+            .resume_captured_finalize(&file)
+            .unwrap();
+        assert_eq!(outcome, CapturedFinalizeResumeOutcome::Committed);
+        assert!(
+            agent_doc_document_realtime_io::pending_document_write(&file).is_none(),
+            "exact Lazily/disk proof must retire the committed cycle's retained effect"
+        );
     }
 
     #[test]

@@ -1340,25 +1340,30 @@ pub fn settle_retained_captured_projection_through_authority(
         // A prior cycle can leave a deferred reconnect target in front of this
         // durable capture. Replaying the whole journal would merge that stale
         // branch into the new response and can resurrect deleted queue state or
-        // malformed scaffolding. Exact current authority/disk equality proves
-        // that the older lineage has been superseded; retire it before the new
-        // capture submits its own single-base CAS.
+        // malformed scaffolding. When current authority already materializes
+        // the response, however, it is the safe semantic state: let the normal
+        // native-save effect sink below project those exact bytes before
+        // retiring the older lineage. Only a current cut that still lacks the
+        // response needs exact disk equality before the stale lineage can be
+        // discarded.
         let disk = resolve_disk_current_document_content(path, source)?;
-        if disk != canonical {
+        if disk != canonical && !response_already_materialized {
             return Ok(false);
         }
-        validate_canonical_document_target(path, &canonical, source)?;
-        clear_all_deferred_document_write_intents(path, source)?;
-        agent_doc_ops_log_io::log_op(
-            path,
-            &format!(
-                "retained_captured_prior_lineage_superseded file={} prior_intent_count={} canonical_hash={} canonical_disk_exact=true active_capture_materialized={}",
-                path.display(),
-                pending_journal.len(),
-                agent_doc_hash::content_hash(&canonical),
-                response_already_materialized,
-            ),
-        );
+        if disk == canonical {
+            validate_canonical_document_target(path, &canonical, source)?;
+            clear_all_deferred_document_write_intents(path, source)?;
+            agent_doc_ops_log_io::log_op(
+                path,
+                &format!(
+                    "retained_captured_prior_lineage_superseded file={} prior_intent_count={} canonical_hash={} canonical_disk_exact=true active_capture_materialized={}",
+                    path.display(),
+                    pending_journal.len(),
+                    agent_doc_hash::content_hash(&canonical),
+                    response_already_materialized,
+                ),
+            );
+        }
     }
     if canonical != pending.target_content
         && !response_already_materialized
@@ -8043,6 +8048,73 @@ mod tests {
         );
         assert!(pending_document_write(&file).is_none());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), captured_current);
+    }
+
+    #[test]
+    fn superseded_capture_lineage_reaches_native_save_sink_for_current_response() {
+        let editor_base =
+            "# Session\n\n<!-- agent:exchange -->\nPlease investigate.\n<!-- /agent:exchange -->\n";
+        let captured_response = "### Re: investigate\n\nFixed the retained closeout.\n";
+        let captured_current = format!(
+            "# Session\n\n<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            captured_response.trim_end()
+        );
+        let (_dir, file, _canonical) = temp_doc(&captured_current);
+        let identity = "test-superseded-capture-native-save-sink";
+        seed_reliable_sync_open(&file, identity);
+        let (_client_id, _bootstrap) = test_support_register_replica_for_file(&file, identity)
+            .unwrap()
+            .expect("editor replica should attach");
+
+        retain_deferred_document_write_target(
+            &file,
+            &captured_current,
+            editor_base,
+            "superseded_capture_stale_lineage_test",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        retain_deferred_document_write_target(
+            &file,
+            editor_base,
+            &captured_current,
+            "superseded_capture_current_lineage_test",
+            DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+        )
+        .unwrap();
+        std::fs::write(&file, editor_base).expect("simulate disk trailing Lazily authority");
+
+        assert!(
+            !settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "superseded_capture_native_save_sink_test",
+            )
+            .unwrap(),
+            "an unavailable editor save sink must retain the effect"
+        );
+        assert!(
+            pending_document_write(&file).is_some(),
+            "the retained effect must survive until disk proves the exact Lazily cut"
+        );
+        let ops = std::fs::read_to_string(_dir.path().join(".agent-doc/logs/ops.log"))
+            .unwrap_or_default();
+        assert!(
+            ops.contains("native_editor_save_pending")
+                && ops.contains("source=acknowledged_captured_projection_settlement"),
+            "current response authority must reach the native-save effect sink: {ops}"
+        );
+
+        std::fs::write(&file, &captured_current).expect("simulate exact native editor save");
+        assert!(
+            settle_retained_captured_projection_through_authority(
+                &file,
+                captured_response,
+                "superseded_capture_native_save_sink_after_save_test",
+            )
+            .unwrap()
+        );
+        assert!(pending_document_write(&file).is_none());
     }
 
     #[test]

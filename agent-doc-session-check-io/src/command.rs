@@ -741,7 +741,10 @@ fn resume_captured_finalize_for_recovery(
     let resumable = cycle_state.as_ref().is_some_and(|state| {
         matches!(
             state.phase,
-            CyclePhase::ResponseCaptured | CyclePhase::WriteApplied | CyclePhase::Abandoned
+            CyclePhase::ResponseCaptured
+                | CyclePhase::WriteApplied
+                | CyclePhase::Committed
+                | CyclePhase::Abandoned
         )
     });
     if !resumable {
@@ -2024,6 +2027,39 @@ mod terminal_convergence_tests {
         assert!(
             resume_captured_finalize_before_terminal_convergence(&file, &ResumeEffects).unwrap(),
             "exact authority/disk convergence must still terminalize retained capture state"
+        );
+    }
+
+    #[test]
+    fn session_check_resumes_retained_effect_after_cycle_is_committed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ reproduce retained response\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, baseline).unwrap();
+        agent_doc_cycle_state_io::start_preflight(&file, Some(baseline), Some(baseline)).unwrap();
+        agent_doc_capture_io::capture_response_with_current_content(
+            &file,
+            "### Re: retained response — gpt-5\n\nRecovered body.\n",
+            baseline,
+        )
+        .unwrap();
+        agent_doc_cycle_state_io::mark_committed(
+            &file,
+            "commit_success",
+            Some(baseline),
+            Some(baseline),
+        )
+        .unwrap();
+
+        assert!(
+            resume_captured_finalize_before_terminal_convergence(&file, &ResumeEffects).unwrap(),
+            "Committed records can still own a deferred durable projection effect"
         );
     }
 

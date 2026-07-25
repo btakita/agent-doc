@@ -182,7 +182,11 @@ Fixed and pushed:
 - Installed the fixed binary and IntelliJ IDEA 2026.1 plugin.
 
 Please restart IDEA once more to activate the newly installed plugin and allow the queued supervisor replacement to finish. Then reply `ready`; I’ll retry only `session-check` for the retained closeout.
-<!-- agent:boundary:b7cbf8ab -->
+
+### Re: Response
+
+The retained response is now committed successfully. The fresh supervisor owns the remaining focused queue and will clear/continue it automatically.
+<!-- agent:boundary:f1e0e0a7 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -1282,10 +1282,13 @@ dependencies = [
 name = "agent-doc-owner-pane-io"
 version = "0.35.27"
 dependencies = [
+ "agent-doc-controller",
  "agent-doc-fs",
  "agent-doc-sqlite",
+ "agent-doc-state-wire",
  "agent-doc-turn",
  "anyhow",
+ "serde",
  "serde_json",
  "tempfile",
 ]

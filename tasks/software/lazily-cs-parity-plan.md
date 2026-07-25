@@ -14,9 +14,20 @@ Repo: `git@github.com:lazily-hub/lazily-cs.git` → `src/lazily-cs` (submodule).
   creation order, `Disarm`), edge-degree introspection, bounded effect drain with attribution.
 - **Row 15 — merge algebra.** `MergePolicy<T>` with `KeepLatest`/`Sum`/`Max`/`SetUnion`/`RawFifo`,
   `Cell ≡ Source<KeepLatest>`, law tests for associativity and the declared flags.
-- **Conformance.** The whole `reactive-graph` corpus replays (20 fixtures, 215 assertions) with an
-  empty unsupported/divergence ledger — including the five merge-feed fixtures and the
-  bounded-feedback-drain fixture that several sibling runners park as unsupported.
+- **Rows 5, 6 — concurrency layers (`#lzcsconcurrency`).** `ThreadSafeContext` (reentrant lock over
+  the single-threaded kernel, reusing its batch coalescing, so it *refines* rather than
+  reimplements) plus `ThreadSafeKernel.ApplyBatch`/`FlushBatch`, the pure counterpart of the Lean
+  `ThreadSafe` model. `AsyncContext` as a distinct graph: `AsyncSource`/`AsyncComputed`/
+  `AsyncEffectHandle`, the `Empty`/`Computing`/`Resolved`/`Error` state machine, a revision per
+  slot, in-flight deduplication, the five cancellation properties, the `get_async` re-resolve
+  loop, retained-cleanup effects with serialized reruns, and a synchronous batch boundary.
+- **Conformance.** The whole `reactive-graph` corpus replays with an empty unsupported/divergence
+  ledger — including the five merge-feed fixtures and the bounded-feedback-drain fixture that
+  several sibling runners park as unsupported. The runner is parameterised over the execution
+  model and replays the same op stream against `Context`, `ThreadSafeContext`, and `AsyncContext`
+  (51 fixture replays, 584 assertions). Mutation-checked both ways: cutting the async walk to one
+  level fails only `transitive_invalidation_reaches_depth` on `AsyncContext`; dropping the
+  thread-safe batch boundary fails only the `ThreadSafeContext` replays.
 
 ## Method, per phase
 
@@ -46,7 +57,6 @@ A row is only marked shipped when its corpus replays with an empty ledger. A par
 
 | ID | Rows | Scope | Corpora |
 |---|---|---|---|
-| `#lzcsconcurrency` | 5, 6 | `ThreadSafeContext` (lock-backed) and `AsyncContext`. Re-parameterise the reactive-graph runner over the execution model so all three replay the same corpus — the async cascade defect this corpus exists to catch is invisible to a single-model replay. | reactive-graph (×3 models) |
 | `#lzcscollections` | 1–4, 9–11 | `SlotMap` / `ThreadSafeSlotMap` / `AsyncSlotMap` materialization, `ReactiveMap` (`CellMap`/`SlotMap`), `CellTree` + reconcile, `SemTree`, stable-id alignment. | collections, materialization, familysync |
 | `#lzcsstatechart` | 7, 8 | Flat state machine, Harel statecharts. | statechart |
 | `#lzcsqueues` | 12–14, 16 | `QueueCell` + `QueueStorage`, `TopicCell`, `WorkQueueCell`, `RelayCell` with `BackpressurePolicy`/`SpillStore`/`Transport`. Builds directly on the merge algebra already shipped. | (unit + rateshape overlap) |

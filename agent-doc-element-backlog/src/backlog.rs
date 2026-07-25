@@ -2718,7 +2718,8 @@ const REPRESENTATIVE_ID_STOPWORDS: &[&str] = &[
     "how", "its", "it", "you", "our", "we", "use", "used", "using", "make", "makes", "made",
     "please", "also", "still", "just", "only", "even", "new", "get", "gets", "set", "sets", "add",
     "adds", "via", "per", "each", "both", "there", "their", "they", "them", "here", "about",
-    "instead", "rather", "because", "since", "while", "after", "before", "agent", "doc", "agentdoc",
+    "instead", "rather", "because", "since", "while", "after", "before", "agent", "doc",
+    "agentdoc",
 ];
 
 /// Strip fenced blocks, inline code spans, and blockquoted context so a derived

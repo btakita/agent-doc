@@ -324,8 +324,7 @@ impl RelayHub {
     /// already dirty the derived count through the cell dependency).
     fn bump_membership_epoch(&self) {
         let epoch = self.ctx.get(&self.membership_epoch);
-        self.ctx
-            .set(&self.membership_epoch, epoch.wrapping_add(1));
+        self.ctx.set(&self.membership_epoch, epoch.wrapping_add(1));
     }
 
     /// Reactive read of member `client_id`'s liveness (the single source of truth that
@@ -2564,8 +2563,6 @@ mod tests {
     /// an edge per cycle: the same key re-materializes the same cell.
     #[test]
     fn reconnect_churn_on_stable_identity_does_not_grow_the_liveness_edge_set() {
-        use lazily::reactive_graph::ReactiveGraph;
-
         let mut hub = RelayHub::new(1);
         hub.register(2).unwrap();
         // Force the derived count to compute so its dependency edges exist.
@@ -2594,8 +2591,6 @@ mod tests {
     /// one hub the graph stops growing once every identity has been seen.
     #[test]
     fn liveness_edge_set_is_bounded_by_distinct_identities_not_churn() {
-        use lazily::reactive_graph::ReactiveGraph;
-
         let mut hub = RelayHub::new(1);
         for id in 2..=9u64 {
             hub.register(id).unwrap();

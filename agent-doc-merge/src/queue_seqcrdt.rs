@@ -299,7 +299,10 @@ mod tests {
         assert!(tree.strike(&a, T0 + 1));
         assert!(!tree.contains(&a), "struck node is not live");
         assert_eq!(tree.ids().len(), 1);
-        assert!(!tree.render().contains("- a\n"), "struck node is absent from render");
+        assert!(
+            !tree.render().contains("- a\n"),
+            "struck node is absent from render"
+        );
     }
 
     #[test]
@@ -307,18 +310,19 @@ mod tests {
         let mut tree = QueueCrdt::from_inner(THEIRS_PEER, "- do [#alpha]\n", T0);
         let a = tree.ids()[0].clone();
         assert!(tree.mark_done(&a, T0 + 1));
-        assert_eq!(tree.render(), "- ~~do [#alpha]~~\n", "done renders struck-through");
+        assert_eq!(
+            tree.render(),
+            "- ~~do [#alpha]~~\n",
+            "done renders struck-through"
+        );
         assert!(tree.get(&a).unwrap().done);
         assert!(tree.contains(&a), "marked-done node is still live");
     }
 
     #[test]
     fn merge_is_commutative_and_idempotent() {
-        let base = QueueCrdt::from_nodes(
-            OURS_PEER,
-            &[(key("a"), QueueNode::active("do [#a]"))],
-            T0,
-        );
+        let base =
+            QueueCrdt::from_nodes(OURS_PEER, &[(key("a"), QueueNode::active("do [#a]"))], T0);
         let mut ours = base.fork(OURS_PEER);
         let mut theirs = base.fork(THEIRS_PEER);
         ours.push_back(&key("b"), QueueNode::active("do [#b]"), T0 + 1);
@@ -382,7 +386,10 @@ mod tests {
         // Symmetric: merge the other direction too.
         let mut merged2 = theirs.clone();
         merged2.merge(&ours, T0 + 4);
-        assert!(!merged2.contains(&alpha), "tombstone wins in both merge orders");
+        assert!(
+            !merged2.contains(&alpha),
+            "tombstone wins in both merge orders"
+        );
     }
 
     #[test]
@@ -400,7 +407,10 @@ mod tests {
 
         let mut merged = ours.clone();
         merged.merge(&stale, T0 + 2);
-        assert!(!merged.contains(&a), "later mark_done cannot resurrect a tombstone");
+        assert!(
+            !merged.contains(&a),
+            "later mark_done cannot resurrect a tombstone"
+        );
     }
 
     #[test]
@@ -424,7 +434,10 @@ mod tests {
 
         assert!(merged.contains(&alpha), "alpha survives (done, not struck)");
         assert!(!merged.contains(&beta), "beta is tombstoned");
-        assert!(merged.get(&alpha).unwrap().done, "alpha's mark_done survived");
+        assert!(
+            merged.get(&alpha).unwrap().done,
+            "alpha's mark_done survived"
+        );
         assert!(merged.contains(&key("b")));
         assert!(merged.contains(&key("c")));
         assert_eq!(merged.ids().len(), 3, "alpha + b + c");

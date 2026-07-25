@@ -132,8 +132,7 @@ pub fn check_reaped_queue_head_without_response(
     // `#respidxparse`: parse the exchange AST ONCE for the whole cycle. This
     // loop and the loss detector below both used to re-parse `content` and
     // every archive per id.
-    let response_index =
-        agent_doc_turn::closeout_signal::ResponseIndex::build(&content, &archives);
+    let response_index = agent_doc_turn::closeout_signal::ResponseIndex::build(&content, &archives);
     for id in &ordered_ids {
         let source = response_index.source_for(id);
         agent_doc_ops_log_io::log_op(

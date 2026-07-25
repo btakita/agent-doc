@@ -470,7 +470,8 @@ mod tests {
     /// because the operator wrote "Please add ..." instead of "Add ...".
     #[test]
     fn politeness_prefixes_do_not_demote_an_imperative() {
-        let polite = "Please add a backup command to backup the TMO system. Test backup on the sandbox.";
+        let polite =
+            "Please add a backup command to backup the TMO system. Test backup on the sandbox.";
         assert!(
             text_line_looks_like_prompt_target(polite),
             "a polite instruction must still classify as a prompt target"

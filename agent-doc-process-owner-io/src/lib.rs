@@ -321,9 +321,9 @@ pub fn process_tree_owns_other_document(root_pid: &str, claimed_file: &Path) -> 
 /// must not read as "free to claim or reap".
 pub fn process_tree_runs_unmanaged_harness_session(root_pid: &str) -> bool {
     process_tree_pids(root_pid).into_iter().any(|pid| {
-        process_command(&pid).as_deref().is_some_and(
-            agent_doc_controller::command_line::cmdline_is_unmanaged_harness_session,
-        )
+        process_command(&pid)
+            .as_deref()
+            .is_some_and(agent_doc_controller::command_line::cmdline_is_unmanaged_harness_session)
     })
 }
 

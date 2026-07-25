@@ -2,7 +2,7 @@
 
 use libloading::{Library, Symbol};
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::{c_char, c_int, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_int};
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
 
@@ -180,9 +180,11 @@ unsafe fn exercise_generation(
 
         let version_ptr = unsafe { version() };
         assert!(!version_ptr.is_null());
-        assert!(!unsafe { CStr::from_ptr(version_ptr) }
-            .to_string_lossy()
-            .is_empty());
+        assert!(
+            !unsafe { CStr::from_ptr(version_ptr) }
+                .to_string_lossy()
+                .is_empty()
+        );
         unsafe { free_string(version_ptr) };
         assert_eq!(
             unsafe { start(project_root.as_ptr(), accept_message) },

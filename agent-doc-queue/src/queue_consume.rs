@@ -386,13 +386,17 @@ pub fn node_replace_ops_from_diff(
     // Compare full node spans (which include the `- ` bullet) so a Replace op —
     // which rewrites `item.start_byte..end_byte` — preserves the bullet. Using
     // `item.raw` (bullet-stripped) here would drop the bullet on apply.
-    let before_spans: HashMap<String, String> = agent_doc_markdown_ast::mutations::item_nodes(
-        before, component,
-    )
-    .map_err(|err| anyhow::anyhow!("node diff: failed to parse before: {err}"))?
-    .into_iter()
-    .map(|n| (n.node_key, before[n.item.start_byte..n.item.end_byte].to_string()))
-    .collect();
+    let before_spans: HashMap<String, String> =
+        agent_doc_markdown_ast::mutations::item_nodes(before, component)
+            .map_err(|err| anyhow::anyhow!("node diff: failed to parse before: {err}"))?
+            .into_iter()
+            .map(|n| {
+                (
+                    n.node_key,
+                    before[n.item.start_byte..n.item.end_byte].to_string(),
+                )
+            })
+            .collect();
     let after_nodes = agent_doc_markdown_ast::mutations::item_nodes(after, component)
         .map_err(|err| anyhow::anyhow!("node diff: failed to parse after: {err}"))?;
     let mut ops = Vec::new();
@@ -401,7 +405,11 @@ pub fn node_replace_ops_from_diff(
         if let Some(before_span) = before_spans.get(&n.node_key)
             && after_span != before_span
         {
-            ops.push(IpcNodeOp::replace(component, n.node_key, after_span.to_string()));
+            ops.push(IpcNodeOp::replace(
+                component,
+                n.node_key,
+                after_span.to_string(),
+            ));
         }
     }
     Ok(ops)
@@ -878,11 +886,15 @@ pub fn queue_prompt_node_keys_for_count(
         })
         .unwrap_or_default();
     let corresponds = unstruck.len() >= count
-        && unstruck.iter().enumerate().take(count).all(|(index, node)| {
-            parsed_heads.get(index).is_some_and(|head| {
-                queue_prompt_texts_match_for_consumption(&node.item.text, head)
-            })
-        });
+        && unstruck
+            .iter()
+            .enumerate()
+            .take(count)
+            .all(|(index, node)| {
+                parsed_heads.get(index).is_some_and(|head| {
+                    queue_prompt_texts_match_for_consumption(&node.item.text, head)
+                })
+            });
     if corresponds {
         return Ok(QueuePromptNodeKeys {
             keys: unstruck
@@ -1349,7 +1361,11 @@ mod tests {
         let mark_done = queue_mark_done_node_ops(&keys);
         assert!(mark_done.iter().all(|op| op.op == OP_MARK_DONE));
         let strike = queue_strike_node_ops(&keys);
-        assert!(strike.iter().all(|op| op.op == OP_STRIKE && op.is_tombstone()));
+        assert!(
+            strike
+                .iter()
+                .all(|op| op.op == OP_STRIKE && op.is_tombstone())
+        );
     }
 
     #[test]
@@ -1367,7 +1383,11 @@ mod tests {
         assert_eq!(patches[0].op, MutationNodePatchOp::Strike);
         assert_eq!(patches[1].op, MutationNodePatchOp::Strike);
         assert_eq!(patches[2].op, MutationNodePatchOp::Remove);
-        assert!(patches.iter().all(|p| p.content.is_none() && p.order.is_empty()));
+        assert!(
+            patches
+                .iter()
+                .all(|p| p.content.is_none() && p.order.is_empty())
+        );
     }
 
     #[test]
@@ -1403,7 +1423,11 @@ mod tests {
     #[test]
     fn replace_op_carries_content_and_maps_to_node_patch_replace() {
         let op = IpcNodeOp::replace("queue", "queue:0:a:0".into(), "~~struck~~ — note".into());
-        assert_eq!(op.kind(), NodeOpKind::MarkDone, "replace is a mark_done effect");
+        assert_eq!(
+            op.kind(),
+            NodeOpKind::MarkDone,
+            "replace is a mark_done effect"
+        );
         assert!(!op.is_tombstone());
         assert_eq!(op.content.as_deref(), Some("~~struck~~ — note"));
         let patches = ipc_node_ops_to_node_patches(&[op]);

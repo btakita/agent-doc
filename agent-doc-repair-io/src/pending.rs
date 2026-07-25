@@ -138,8 +138,7 @@ fn load_state_event_ledger(
 ) -> Result<agent_doc_state_backbone::EventLedger> {
     let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
     let mut ledger = agent_doc_state_backbone::EventLedger::new();
-    for row in
-        agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(document_hash))?
+    for row in agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(document_hash))?
     {
         let event: agent_doc_state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
             .with_context(|| {

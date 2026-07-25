@@ -7,11 +7,11 @@ use lazily::{ThreadSafeContext, ThreadSafeStateMachine};
 use serde::{Deserialize, Serialize};
 
 pub mod authority_recovery;
-pub mod coined_ids;
 pub mod closeout_guard;
 pub mod closeout_recovery;
 pub mod closeout_signal;
 pub mod codex_stop_continuation;
+pub mod coined_ids;
 pub mod cp_projection;
 pub mod cycle_ack;
 pub mod cycle_policy;

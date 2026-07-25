@@ -109,7 +109,11 @@ where
                         timers.total_elapsed.as_millis()
                     ),
                     SettleDeferReason::NoProgress => {
-                        format!("remained {} for {}ms", state, timers.stalled_for.as_millis())
+                        format!(
+                            "remained {} for {}ms",
+                            state,
+                            timers.stalled_for.as_millis()
+                        )
                     }
                 };
                 anyhow::bail!(
@@ -285,7 +289,10 @@ mod tests {
             |_file, _reason, _targets| Ok(()),
         );
 
-        assert!(outcome.is_err(), "a stalled frontier must still fail closed");
+        assert!(
+            outcome.is_err(),
+            "a stalled frontier must still fail closed"
+        );
         let message = format!("{:#}", outcome.unwrap_err());
         assert!(
             message.contains("delivery_pending"),
@@ -334,11 +341,9 @@ mod tests {
             signals.len()
         );
         assert!(
-            signals
-                .iter()
-                .all(|(reason, targets)| *reason
-                    == CrdtReplicaEventReason::AckRecoveryForceRefresh
-                    && *targets == 2),
+            signals.iter().all(|(reason, targets)| *reason
+                == CrdtReplicaEventReason::AckRecoveryForceRefresh
+                && *targets == 2),
             "every retry must carry the same force-refresh reason and live target count"
         );
     }

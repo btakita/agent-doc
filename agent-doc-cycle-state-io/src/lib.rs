@@ -1314,8 +1314,7 @@ pub fn decide_write_applied(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> (CycleState, bool) {
-    let mut state =
-        current.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
+    let mut state = current.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
     let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::WriteApplied)
     else {
         return (state, false);
@@ -2041,7 +2040,12 @@ pub fn decide_committed(
         };
     }
     let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::Committed) else {
-        return CloseoutDecision { state, checkpoint: false, facts: vec![], session_log: false };
+        return CloseoutDecision {
+            state,
+            checkpoint: false,
+            facts: vec![],
+            session_log: false,
+        };
     };
     state.phase = next_phase;
     state.last_event = event.to_string();
@@ -2111,8 +2115,7 @@ pub fn decide_abandoned(
     snapshot_content: Option<&str>,
     file_content: Option<&str>,
 ) -> CloseoutDecision {
-    let mut state =
-        current.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
+    let mut state = current.unwrap_or_else(|| synthetic_state(file, CyclePhase::PreflightStarted));
     if state.phase == CyclePhase::Abandoned {
         return CloseoutDecision {
             state,
@@ -2122,10 +2125,20 @@ pub fn decide_abandoned(
         };
     }
     if !state.is_open() {
-        return CloseoutDecision { state, checkpoint: false, facts: vec![], session_log: false };
+        return CloseoutDecision {
+            state,
+            checkpoint: false,
+            facts: vec![],
+            session_log: false,
+        };
     }
     let Some(next_phase) = CyclePhaseMachine::transition(state.phase, CycleEvent::Abandoned) else {
-        return CloseoutDecision { state, checkpoint: false, facts: vec![], session_log: false };
+        return CloseoutDecision {
+            state,
+            checkpoint: false,
+            facts: vec![],
+            session_log: false,
+        };
     };
     state.phase = next_phase;
     state.last_event = event.to_string();
@@ -2705,7 +2718,7 @@ fn submit_closeout_advance_via_socket(
     response_sha256: Option<&str>,
     cycle_id_hint: Option<&str>,
 ) -> Result<bool> {
-    use command_plane::{build_closeout_advance_submit, CloseoutAdvancePayload};
+    use command_plane::{CloseoutAdvancePayload, build_closeout_advance_submit};
 
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
@@ -2738,7 +2751,8 @@ fn submit_closeout_advance_via_socket(
         "closeout-advance:{document_hash}:{event_label}:{}",
         agent_doc_hash::content_hash(&content_key)
     );
-    let submit = build_closeout_advance_submit(&command_id, "cycle_state", &command_id, 0, payload)?;
+    let submit =
+        build_closeout_advance_submit(&command_id, "cycle_state", &command_id, 0, payload)?;
     let payload_json = serde_json::to_string(&submit).context("encode command_plane_submit")?;
     let request = serde_json::json!({
         "command": "command_plane_submit",

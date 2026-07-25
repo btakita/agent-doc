@@ -22,7 +22,7 @@ object TerminalUtil {
     private val LOG = Logger.getInstance(TerminalUtil::class.java)
     private const val ROUTE_ERROR_DIAGNOSTICS_DIR = ".agent-doc/state/editor-route-errors"
     private const val RESTART_TELEMETRY_OPS_LOG_MAX_LINES = 400
-    internal const val RUN_ROUTE_WAIT_FOR_READY_SECONDS = 15L
+    internal const val RUN_ROUTE_WAIT_FOR_READY_SECONDS = 120L
     private const val UI_OUTCOME_QUEUED_BEHIND_OWNER = "queued_behind_owner"
     private const val UI_OUTCOME_RECOVERED_AND_RETRIED = "recovered_and_retried"
     private const val SUPERVISOR_RESTART_REDIRECT_MARKER = "supervisor_restart_redirect"

@@ -682,7 +682,11 @@ mod tests {
         let queue_prompts = vec!["do [#fr79backfill]".to_string()];
         let changes = vec![prompt_change("- 📌 do [#fr79backfill]")];
 
-        assert!(!prompt_changes_preempt_queue(&changes, true, &queue_prompts));
+        assert!(!prompt_changes_preempt_queue(
+            &changes,
+            true,
+            &queue_prompts
+        ));
     }
 
     /// The fix is not a blank cheque: a prompt typed OUTSIDE the queue is real
@@ -690,7 +694,9 @@ mod tests {
     #[test]
     fn a_prompt_outside_the_queue_still_preempts_the_drain() {
         let queue_prompts = vec!["do [#fr79backfill]".to_string()];
-        let changes = vec![prompt_change("Actually, stop and explain the design first.")];
+        let changes = vec![prompt_change(
+            "Actually, stop and explain the design first.",
+        )];
 
         assert!(
             prompt_changes_preempt_queue(&changes, true, &queue_prompts),

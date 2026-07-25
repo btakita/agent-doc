@@ -368,8 +368,7 @@ mod tests {
         assert!(stopped.contains("queue: stop\n"));
         assert!(stopped.contains("<!-- agent:queue -->"));
 
-        let resume_gesture =
-            stopped.replacen("<!-- agent:queue -->", "<!-- agent:queue go -->", 1);
+        let resume_gesture = stopped.replacen("<!-- agent:queue -->", "<!-- agent:queue go -->", 1);
         let (resumed, resume_changed) =
             converge_queue_control_binding_content(&resume_gesture, Some(&stopped)).unwrap();
         assert!(resume_changed);

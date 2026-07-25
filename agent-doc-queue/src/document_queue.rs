@@ -32,9 +32,8 @@
 //! This module is I/O-free. Callers handle reading/writing files.
 
 use agent_doc_document::queue_projection::{
-    AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKER, PRIORITIZED_MARKERS,
-    apply_in_progress_marker, strip_in_progress_marker, strip_in_progress_marker_for_display,
-    strip_priority_markers,
+    AGENT_PRIORITIZED_MARKERS, PRIORITIZED_MARKER, PRIORITIZED_MARKERS, apply_in_progress_marker,
+    strip_in_progress_marker, strip_in_progress_marker_for_display, strip_priority_markers,
 };
 use agent_doc_element_queue::QueueItemLifecycle;
 use anyhow::Result;
@@ -3516,7 +3515,10 @@ mod tests {
             .expect("reorders");
         let out = render(&sorted);
         assert!(out.contains("- deploy\n"));
-        assert!(!out.contains("[#deploy"), "no id may be minted into the operator's line");
+        assert!(
+            !out.contains("[#deploy"),
+            "no id may be minted into the operator's line"
+        );
     }
 
     /// A real `#id` must still win when a free-text line's identity collides
@@ -4909,7 +4911,6 @@ mod tests {
         assert!(act.trigger.is_none());
     }
 
-    #[test]
     /// `#a2zx`: repeated boolean flags accumulate permanently because nothing
     /// collapsed a flag that was already present. These are the exact malformed
     /// tags the live `agent-doc-bugs2.md` grew.
@@ -5312,7 +5313,10 @@ mod tests {
             "- a\n    - deeply indented child\n- b\n",
         ] {
             let rendered = render(&parse(body).unwrap());
-            assert_eq!(rendered, body, "round-trip must preserve bytes for {body:?}");
+            assert_eq!(
+                rendered, body,
+                "round-trip must preserve bytes for {body:?}"
+            );
         }
     }
 

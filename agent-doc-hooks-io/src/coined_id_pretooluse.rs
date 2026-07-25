@@ -70,7 +70,10 @@ pub fn is_commit_command(command: &str) -> bool {
             if !word.starts_with('-') {
                 break;
             }
-            let takes_value = matches!(*word, "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--exec-path");
+            let takes_value = matches!(
+                *word,
+                "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--exec-path"
+            );
             rest.next();
             if takes_value {
                 rest.next();
@@ -233,8 +236,8 @@ pub fn handle_pretooluse() -> anyhow::Result<()> {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
     let pane = std::env::var("TMUX_PANE").ok();
-    let known = active_document_for(&cwd, pane.as_deref())
-        .and_then(|file| known_ids_for_document(&file));
+    let known =
+        active_document_for(&cwd, pane.as_deref()).and_then(|file| known_ids_for_document(&file));
     let decision = match &known {
         Some(known) => pretooluse_decision(tool_name, tool_input, known, true),
         None => PreToolUseDecision::Allow,

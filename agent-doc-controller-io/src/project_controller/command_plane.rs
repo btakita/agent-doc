@@ -131,20 +131,19 @@ pub fn supervisor_recycle_receipt(
 // without depending on the controller runtime. Re-export here so existing
 // `command_plane::`-qualified usages resolve unchanged.
 pub use agent_doc_cycle_state_io::command_plane::{
+    CLOSEOUT_ADVANCE_NAME, CLOSEOUT_ADVANCE_PAYLOAD_TYPE, CLOSEOUT_OWNER_CLAIM_NAME,
+    CLOSEOUT_OWNER_CLAIM_PAYLOAD_TYPE, CLOSEOUT_OWNER_RELEASE_NAME,
+    CLOSEOUT_OWNER_RELEASE_PAYLOAD_TYPE, CloseoutAdvancePayload, CloseoutOwnerClaimPayload,
+    CloseoutOwnerReleasePayload, CloseoutPhaseEvent, CommitObservation,
     build_closeout_advance_submit, build_closeout_owner_claim_submit,
-    build_closeout_owner_release_submit, CloseoutAdvancePayload, CloseoutOwnerClaimPayload,
-    CloseoutOwnerReleasePayload, CloseoutPhaseEvent, CLOSEOUT_ADVANCE_NAME,
-    CLOSEOUT_ADVANCE_PAYLOAD_TYPE, CLOSEOUT_OWNER_CLAIM_NAME, CLOSEOUT_OWNER_CLAIM_PAYLOAD_TYPE,
-    CLOSEOUT_OWNER_RELEASE_NAME, CLOSEOUT_OWNER_RELEASE_PAYLOAD_TYPE, CommitObservation,
+    build_closeout_owner_release_submit,
 };
 
 /// Decode a [`CloseoutAdvancePayload`] from a [`CommandSubmit`]'s inline
 /// payload, validating the payload type. Lives here (not on the type) because it
 /// touches the lazily envelope, which the closeout-domain crate does not depend
 /// on.
-pub fn decode_closeout_advance_payload(
-    submit: &CommandSubmit,
-) -> Result<CloseoutAdvancePayload> {
+pub fn decode_closeout_advance_payload(submit: &CommandSubmit) -> Result<CloseoutAdvancePayload> {
     decode_typed_payload::<CloseoutAdvancePayload>(submit, CLOSEOUT_ADVANCE_PAYLOAD_TYPE)
 }
 
@@ -428,7 +427,10 @@ mod tests {
         for (obs, label) in [
             (CommitObservation::Commit, "commit"),
             (CommitObservation::CommitSuccess, "commit_success"),
-            (CommitObservation::CommitAlreadyCurrent, "commit_already_current"),
+            (
+                CommitObservation::CommitAlreadyCurrent,
+                "commit_already_current",
+            ),
         ] {
             let committed = CloseoutAdvancePayload {
                 document_path: "/tmp/doc.md".to_string(),

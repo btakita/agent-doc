@@ -90,8 +90,8 @@ fn try_controller_envelope(
         Duration::from_secs(5),
     )
     .context("submit owner-pane wedge command through the Lazily controller")?;
-    let envelope: ControllerEnvelope = serde_json::from_str(&raw)
-        .context("decode owner-pane wedge controller response")?;
+    let envelope: ControllerEnvelope =
+        serde_json::from_str(&raw).context("decode owner-pane wedge controller response")?;
     Ok(Some(envelope))
 }
 
@@ -117,10 +117,7 @@ pub fn record(file: &Path, head: &str) -> Result<u32> {
         Some(head),
     )? && envelope.ok
     {
-        let count = envelope
-            .data
-            .and_then(|v| v.as_u64())
-            .unwrap_or(1) as u32;
+        let count = envelope.data.and_then(|v| v.as_u64()).unwrap_or(1) as u32;
         return Ok(count);
     }
     // Controller absent or rejected — fall through to the direct SQLite path so

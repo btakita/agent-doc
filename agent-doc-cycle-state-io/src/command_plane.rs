@@ -15,7 +15,8 @@
 
 use anyhow::{Context, Result};
 use lazily::{CommandPolicy, CommandSubmit, DedupePolicy, IpcValue};
-use serde::{Deserialize, Serialize};/// Domain namespace owning agent-doc command payloads. lazily never decodes these.
+use serde::{Deserialize, Serialize};
+/// Domain namespace owning agent-doc command payloads. lazily never decodes these.
 /// NOTE: must match `agent-doc-controller-io`'s `command_plane::NAMESPACE` — the
 /// controller dispatch refuses a foreign namespace; the integration test guards it.
 pub const NAMESPACE: &str = "agent-doc";

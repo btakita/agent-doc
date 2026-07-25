@@ -594,7 +594,13 @@ impl HarnessConfig {
         let trimmed = stripped.trim();
         self.prompt_patterns
             .iter()
-            .any(|p| trimmed == p || trimmed.starts_with(&format!("{} ", p)))
+            .any(|p| {
+                trimmed == p
+                    || trimmed
+                        .strip_prefix(p)
+                        .and_then(|suffix| suffix.chars().next())
+                        .is_some_and(char::is_whitespace)
+            })
             || (self.binary == "claude"
                 && trimmed.starts_with("⏵⏵ ")
                 && trimmed.contains("(shift+tab to cycle)"))
@@ -2346,6 +2352,23 @@ mod tests {
         assert_eq!(
             pane_composer_draft_at_cursor(&h, pane, Some(1)).as_deref(),
             Some("› do not overwrite this operator draft")
+        );
+    }
+
+    #[test]
+    fn cursor_scoped_draft_detection_accepts_claude_non_breaking_prompt_space() {
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "completed response\n",
+            "❯\u{a0}do #haivenask\n",
+            "custom model and context status\n",
+            "custom permission-mode status\n",
+        );
+
+        assert!(h.is_prompt_line("❯\u{a0}do #haivenask"));
+        assert_eq!(
+            pane_composer_draft_at_cursor(&h, pane, Some(1)).as_deref(),
+            Some("❯\u{a0}do #haivenask")
         );
     }
 

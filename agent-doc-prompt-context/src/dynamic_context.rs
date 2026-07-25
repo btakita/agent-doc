@@ -224,9 +224,7 @@ impl DynamicContextProjection {
         let duplicate_decisions = ctx.computed({
             let candidates = candidate_context_chunks;
             let ledger = ledger_snapshot_cell;
-            move |ctx: &Compute| {
-                decide_context_injections(ctx.get(&candidates), &ctx.get(&ledger))
-            }
+            move |ctx: &Compute| decide_context_injections(ctx.get(&candidates), &ctx.get(&ledger))
         });
 
         let rendered_manifest = ctx.computed({

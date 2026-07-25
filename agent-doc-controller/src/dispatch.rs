@@ -2932,7 +2932,11 @@ mod tests {
     #[test]
     fn routed_cycle_ack_wait_is_capped_at_the_client_deadline() {
         let base = routed_cycle_ack_timeout(true, false);
-        assert_eq!(base, Duration::from_secs(30), "base timeout with live child");
+        assert_eq!(
+            base,
+            Duration::from_secs(30),
+            "base timeout with live child"
+        );
 
         // The live regression: client deadline shorter than the base.
         assert_eq!(
@@ -4547,15 +4551,14 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
     fn starting_pane_draft_message_reports_the_draft_and_its_unblocker() {
         let outcome_fields =
             "ui_outcome=blocked_with_exact_unblocker unblocker=submit_or_clear_pane_draft";
-        let drafted = dispatch_only_starting_pane_draft_message(
-            DispatchOnlyStartingPaneDraftMessageFacts {
+        let drafted =
+            dispatch_only_starting_pane_draft_message(DispatchOnlyStartingPaneDraftMessageFacts {
                 harness_binary: "claude",
                 pane: "%38",
                 file_display: "tasks/recruit/acadian-take-home.md",
                 draft_preview: "❯ keep the uv.lock",
                 outcome_fields,
-            },
-        );
+            });
         assert!(drafted.contains("composer holds unsent operator input"));
         assert!(drafted.contains("keep the uv.lock"));
         assert!(drafted.contains("submit or clear that draft"));

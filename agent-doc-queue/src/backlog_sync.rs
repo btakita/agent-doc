@@ -482,12 +482,7 @@ pub fn enqueue_created_ids_in_content(
     let ranks = collect_backlog_priority_ranks(&components, content);
     let deps = collect_after_deps(&components, content);
     let block: HashSet<String> = fresh.iter().cloned().collect();
-    fresh.sort_by_key(|id| {
-        (
-            ranks.get(id).copied().unwrap_or(u8::MAX),
-            id.clone(),
-        )
-    });
+    fresh.sort_by_key(|id| (ranks.get(id).copied().unwrap_or(u8::MAX), id.clone()));
     let mut ordered: Vec<String> = Vec::with_capacity(fresh.len());
     let mut placed: HashSet<String> = HashSet::new();
     // Insert each id after any in-block prerequisite it declares. Bounded to
@@ -995,7 +990,10 @@ mod tests {
         // Declare the edges: c after b, b after a.
         let content = content
             .replace("[#c] priority=1 fast", "[#c] priority=1 after=#b fast")
-            .replace("[#b] priority=5 depends", "[#b] priority=5 after=#a depends");
+            .replace(
+                "[#b] priority=5 depends",
+                "[#b] priority=5 after=#a depends",
+            );
 
         let updated = enqueue_created_ids_in_content(
             &content,

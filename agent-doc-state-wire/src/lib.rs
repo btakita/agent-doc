@@ -739,13 +739,12 @@ mod tests {
             StateFact::RealtimeSteeringObserved {
                 document_hash: doc.to_string(),
                 cycle_id: cycle.to_string(),
-                steering:
-                    agent_doc_turn::cp_projection::TurnSteeringProjection::observed_aggregate(
-                        agent_doc_turn::cp_projection::TurnSteeringState::PromptTarget,
-                        2,
-                        Some("first edit".to_string()),
-                        Some("first edit\n\nsecond edit".to_string()),
-                    ),
+                steering: agent_doc_turn::cp_projection::TurnSteeringProjection::observed_aggregate(
+                    agent_doc_turn::cp_projection::TurnSteeringState::PromptTarget,
+                    2,
+                    Some("first edit".to_string()),
+                    Some("first edit\n\nsecond edit".to_string()),
+                ),
                 content_hash: "steering-hash".to_string(),
             },
         )

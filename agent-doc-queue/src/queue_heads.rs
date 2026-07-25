@@ -628,11 +628,7 @@ mod tests {
     /// is `--done`.
     #[test]
     fn explicit_queue_resolution_ids_exclude_backlog_edits() {
-        let resolution = explicit_queue_resolution_ids(
-            &["fzmutloss".to_string()],
-            &[],
-            &[],
-        );
+        let resolution = explicit_queue_resolution_ids(&["fzmutloss".to_string()], &[], &[]);
         assert_eq!(resolution, vec!["fzmutloss".to_string()]);
         assert!(
             !resolution.contains(&"patchretryidem".to_string()),
@@ -659,11 +655,7 @@ mod tests {
                 &["gate".to_string()],
                 &["review".to_string()],
             ),
-            vec![
-                "done".to_string(),
-                "gate".to_string(),
-                "review".to_string(),
-            ]
+            vec!["done".to_string(), "gate".to_string(), "review".to_string(),]
         );
     }
 

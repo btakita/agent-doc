@@ -16,11 +16,10 @@ use agent_doc_queue::{
         IpcNodeOp, QueueConsumptionPlan, annotate_newly_struck_free_text_heads,
         answered_free_text_head_node_keys, consume_queue_nodes_by_key, first_n_queue_prompt_texts,
         head_id_names_open_backlog_item, id_backed_head_node_keys,
-        mark_entries_completed_by_done_ids, normalized_done_id_bag,
-        node_replace_ops_from_diff,
-        queue_consume_count_for_done_ids, queue_consume_node_ops,
-        queue_mark_done_node_ops, queue_prompt_node_keys_for_count,
-        queue_prompt_node_keys_for_done_ids, strike_all_noise_queue_heads,
+        mark_entries_completed_by_done_ids, node_replace_ops_from_diff, normalized_done_id_bag,
+        queue_consume_count_for_done_ids, queue_consume_node_ops, queue_mark_done_node_ops,
+        queue_prompt_node_keys_for_count, queue_prompt_node_keys_for_done_ids,
+        strike_all_noise_queue_heads,
     },
     queue_response::{
         embed_consumed_prompt_in_response, first_nonempty_line, queue_head_is_free_text_prompt,
@@ -463,8 +462,8 @@ pub fn strike_answered_free_text_queue_heads(
     // `#qstrikenote` annotation in the replaced raw). When the diff yields ops,
     // converge via structural ops instead of the full-text write; otherwise
     // (force-disk repair, or a shape the node model can't express) keep full-text.
-    let replace_ops = node_replace_ops_from_diff(&content, &new_document, "queue")
-        .unwrap_or_default();
+    let replace_ops =
+        node_replace_ops_from_diff(&content, &new_document, "queue").unwrap_or_default();
     if skip_visible_guard {
         effects
             .atomic_write(file, &new_document)
@@ -1231,9 +1230,12 @@ pub fn plan_queue_prompt_consumption_with_snapshot_and_count(
     // A drained queue consumes nothing and succeeds, so the cycle can commit
     // whatever else it carries.
     if consumed_texts.is_empty()
-        && entries
-            .iter()
-            .any(|entry| matches!(entry, agent_doc_queue::document_queue::QueueEntry::Completed(_)))
+        && entries.iter().any(|entry| {
+            matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::Completed(_)
+            )
+        })
         && !entries.iter().any(|entry| {
             matches!(
                 entry,

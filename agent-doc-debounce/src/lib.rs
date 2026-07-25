@@ -19,8 +19,7 @@ pub fn authority_settle_max_wait(settle_ms: u64) -> std::time::Duration {
 /// drain while the current transition stays `delivery_pending`. Bounded well under
 /// the no-progress budget so a drain that applies nothing gets several attempts
 /// instead of one, while staying far coarser than the 100ms observe poll.
-pub const URGENT_DRAIN_RETRY_INTERVAL: std::time::Duration =
-    std::time::Duration::from_millis(750);
+pub const URGENT_DRAIN_RETRY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(750);
 
 /// `#routeprogresswait`: how much longer a settle wait may run when the Lazily
 /// frontier is *actively advancing*, as a multiple of the no-progress budget.

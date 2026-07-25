@@ -137,7 +137,8 @@ mod tests {
     /// since a coined id in a code comment is exactly the durable case.
     #[test]
     fn tags_are_found_in_prose_backticks_and_parens() {
-        let response = "Landed (`#qstrikechurn`) and also #qbulletlesshead, plus `#superviserrsilent`.";
+        let response =
+            "Landed (`#qstrikechurn`) and also #qbulletlesshead, plus `#superviserrsilent`.";
         let mut found = coined_ids(response, &known(&[]));
         found.sort();
         assert_eq!(

@@ -2756,9 +2756,7 @@ pub fn claim_closeout_owner_for_file(
     file: &Path,
     request: CloseoutOwnerClaimRequest,
 ) -> Result<CloseoutOwnerClaimOutcome> {
-    use super::command_plane::{
-        build_closeout_owner_claim_submit, CloseoutOwnerClaimPayload,
-    };
+    use super::command_plane::{CloseoutOwnerClaimPayload, build_closeout_owner_claim_submit};
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     #[cfg(feature = "test-support")]
@@ -2792,7 +2790,10 @@ pub fn claim_closeout_owner_for_file(
         },
     )?;
     let submit_json = serde_json::to_string(&submit)?;
-    request_controller(&project_root, ControllerRequest::command_plane_submit(submit_json))
+    request_controller(
+        &project_root,
+        ControllerRequest::command_plane_submit(submit_json),
+    )
 }
 
 pub fn release_closeout_owner_for_file(
@@ -2801,9 +2802,7 @@ pub fn release_closeout_owner_for_file(
     owner_id: &str,
     reason: &str,
 ) -> Result<bool> {
-    use super::command_plane::{
-        build_closeout_owner_release_submit, CloseoutOwnerReleasePayload,
-    };
+    use super::command_plane::{CloseoutOwnerReleasePayload, build_closeout_owner_release_submit};
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     ensure_controller_running(&project_root, LaunchMode::Lazy)?;
@@ -2827,7 +2826,10 @@ pub fn release_closeout_owner_for_file(
         },
     )?;
     let submit_json = serde_json::to_string(&submit)?;
-    request_controller(&project_root, ControllerRequest::command_plane_submit(submit_json))
+    request_controller(
+        &project_root,
+        ControllerRequest::command_plane_submit(submit_json),
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8698,7 +8700,7 @@ pub(crate) fn handle_request_locked(
                 runtime.as_ref(),
                 request,
             ))
-        },
+        }
         "queue_context_clear_started" => controller_envelope(handle_queue_context_clear_started(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -8922,20 +8924,16 @@ pub(crate) fn handle_request_locked(
         "crdt_text_adopt" => {
             controller_envelope(handle_crdt_text_adopt_rpc(&bootstrap_snapshot, request))
         }
-        "crdt_commit_barrier" => {
-            controller_envelope(handle_crdt_commit_barrier_rpc(
-                &bootstrap_snapshot,
-                runtime.as_ref(),
-                request,
-            ))
-        }
-        "commit_document" => {
-            controller_envelope(handle_commit_document_rpc(
-                &bootstrap_snapshot,
-                runtime.as_ref(),
-                request,
-            ))
-        }
+        "crdt_commit_barrier" => controller_envelope(handle_crdt_commit_barrier_rpc(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
+        "commit_document" => controller_envelope(handle_commit_document_rpc(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "compact_document" => {
             if let Some(client_version) =
                 stale_mutating_client_binary(client_binary_version.as_deref())
@@ -10104,7 +10102,9 @@ pub(crate) fn handle_record_owner_pane_wedge(
     _runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<u32> {
-    use agent_doc_turn::owner_pane_recursion::{OwnerPaneWedgeRecord, record_owner_pane_wedge_fire};
+    use agent_doc_turn::owner_pane_recursion::{
+        OwnerPaneWedgeRecord, record_owner_pane_wedge_fire,
+    };
     const OWNER_PANE_WEDGE_STATE_KIND: &str = "owner_pane_wedge";
     let canonical_path = request_file(&request)?;
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
@@ -10794,7 +10794,9 @@ fn handle_command_plane_submit(
     // `closeout_owner_claim`/`release` use for serialized structured payloads —
     // so the shared `ControllerRequest` shape is unchanged.
     let submit_json = request.diagnostic_payload.ok_or_else(|| {
-        anyhow::anyhow!("command_plane_submit requires a CommandSubmit envelope in diagnostic_payload")
+        anyhow::anyhow!(
+            "command_plane_submit requires a CommandSubmit envelope in diagnostic_payload"
+        )
     })?;
     let submit: lazily::CommandSubmit =
         serde_json::from_str(&submit_json).context("decode command_plane_submit CommandSubmit")?;
@@ -10833,21 +10835,15 @@ fn dispatch_command_plane_submit(
     // pattern, so matching on the const identifier would bind instead of compare.
     if ns == NAMESPACE && name == CLOSEOUT_ADVANCE_NAME {
         Ok(serde_json::to_value(service_closeout_advance(
-            bootstrap,
-            runtime,
-            submit,
+            bootstrap, runtime, submit,
         ))?)
     } else if ns == NAMESPACE && name == CLOSEOUT_OWNER_CLAIM_NAME {
         Ok(serde_json::to_value(service_closeout_owner_claim(
-            bootstrap,
-            runtime,
-            submit,
+            bootstrap, runtime, submit,
         )?)?)
     } else if ns == NAMESPACE && name == CLOSEOUT_OWNER_RELEASE_NAME {
         Ok(serde_json::to_value(service_closeout_owner_release(
-            bootstrap,
-            runtime,
-            submit,
+            bootstrap, runtime, submit,
         )?)?)
     } else {
         Ok(serde_json::to_value(
@@ -10882,7 +10878,7 @@ pub(crate) fn service_closeout_advance(
     runtime: &ControllerRuntime,
     submit: &lazily::CommandSubmit,
 ) -> lazily::CausalReceipt {
-    use super::command_plane::{closeout_advance_receipt, CONTROLLER_TARGET};
+    use super::command_plane::{CONTROLLER_TARGET, closeout_advance_receipt};
     let outcome = closeout_advance_outcome(bootstrap, runtime, submit);
     closeout_advance_receipt(
         submit,
@@ -10898,7 +10894,7 @@ fn closeout_advance_outcome(
     runtime: &ControllerRuntime,
     submit: &lazily::CommandSubmit,
 ) -> Result<(), String> {
-    use super::command_plane::{decode_closeout_advance_payload, CloseoutPhaseEvent};
+    use super::command_plane::{CloseoutPhaseEvent, decode_closeout_advance_payload};
     let payload = decode_closeout_advance_payload(submit).map_err(|e| format!("{e:#}"))?;
     let file = std::path::PathBuf::from(&payload.document_path);
     let document_hash = agent_doc_hash::document_id_for_path(&file);
@@ -10906,8 +10902,9 @@ fn closeout_advance_outcome(
         .document_state_projection(&document_hash)
         .map_err(|e| format!("{e:#}"))?;
     let current = match document.as_ref() {
-        Some(d) => agent_doc_cycle_state_io::reconstruct_cycle_state(d)
-            .map_err(|e| format!("{e:#}"))?,
+        Some(d) => {
+            agent_doc_cycle_state_io::reconstruct_cycle_state(d).map_err(|e| format!("{e:#}"))?
+        }
         None => None,
     };
     // The next checkpoint sequence is the last recorded one + 1 (0 when none).
@@ -15489,7 +15486,7 @@ mod tests {
         // envelope — never a transport ACK. This is the in-process proof that
         // `service_closeout_advance` is now reachable from a client request.
         use super::command_plane::{
-            build_closeout_advance_submit, CloseoutAdvancePayload, CloseoutPhaseEvent,
+            CloseoutAdvancePayload, CloseoutPhaseEvent, build_closeout_advance_submit,
         };
 
         let dir = tempfile::TempDir::new().unwrap();
@@ -15573,7 +15570,13 @@ mod tests {
             serde_json::from_value(envelope["data"].clone()).unwrap();
         assert_eq!(receipt.outcome, lazily::ReceiptOutcome::Rejected);
         assert_eq!(receipt.causation_id, submit.command_id);
-        assert!(receipt.reason.as_deref().unwrap().contains("nonexistent_op"));
+        assert!(
+            receipt
+                .reason
+                .as_deref()
+                .unwrap()
+                .contains("nonexistent_op")
+        );
     }
 
     #[test]
@@ -15601,11 +15604,16 @@ mod tests {
         let response = handle_request_locked(&line, &runtime, &mut should_stop).unwrap();
 
         let envelope: serde_json::Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(envelope["ok"], false, "foreign namespace must be refused: {envelope}");
-        assert!(envelope["error"]
-            .as_str()
-            .unwrap()
-            .contains("foreign namespace"));
+        assert_eq!(
+            envelope["ok"], false,
+            "foreign namespace must be refused: {envelope}"
+        );
+        assert!(
+            envelope["error"]
+                .as_str()
+                .unwrap()
+                .contains("foreign namespace")
+        );
     }
 
     #[test]
@@ -15616,7 +15624,7 @@ mod tests {
         // terminal CausalReceipt (applied). With no prior state the machine
         // synthesizes a PreflightStarted cycle and advances it to WriteApplied.
         use super::command_plane::{
-            build_closeout_advance_submit, CloseoutAdvancePayload, CloseoutPhaseEvent,
+            CloseoutAdvancePayload, CloseoutPhaseEvent, build_closeout_advance_submit,
         };
 
         let dir = tempfile::TempDir::new().unwrap();
@@ -15664,8 +15672,8 @@ mod tests {
         // Abandoned on a fresh open cycle reaches the Abandoned phase. Each step
         // returns an applied CausalReceipt and the live projection advances.
         use super::command_plane::{
-            build_closeout_advance_submit, CloseoutAdvancePayload, CloseoutPhaseEvent,
-            CommitObservation,
+            CloseoutAdvancePayload, CloseoutPhaseEvent, CommitObservation,
+            build_closeout_advance_submit,
         };
 
         let dir = tempfile::TempDir::new().unwrap();
@@ -15696,13 +15704,20 @@ mod tests {
         };
 
         // PreflightStarted → WriteApplied → Committed.
-        let receipt =
-            service_closeout_advance(&bootstrap, &runtime, &mk("wa", CloseoutPhaseEvent::WriteApplied, None));
+        let receipt = service_closeout_advance(
+            &bootstrap,
+            &runtime,
+            &mk("wa", CloseoutPhaseEvent::WriteApplied, None),
+        );
         assert_eq!(receipt.outcome, lazily::ReceiptOutcome::Applied);
         let receipt = service_closeout_advance(
             &bootstrap,
             &runtime,
-            &mk("cm", CloseoutPhaseEvent::Committed(CommitObservation::CommitSuccess), None),
+            &mk(
+                "cm",
+                CloseoutPhaseEvent::Committed(CommitObservation::CommitSuccess),
+                None,
+            ),
         );
         assert_eq!(receipt.outcome, lazily::ReceiptOutcome::Applied);
         let phase = runtime
@@ -16589,13 +16604,9 @@ mod tests {
 
         agent_doc_cycle_state_io::mark_write_applied(&doc, "write_applied", None, Some("body\n"))
             .expect("write_applied through the command plane");
-        let committed = agent_doc_cycle_state_io::mark_committed(
-            &doc,
-            "commit_success",
-            None,
-            Some("body\n"),
-        )
-        .expect("mark_committed through the command plane");
+        let committed =
+            agent_doc_cycle_state_io::mark_committed(&doc, "commit_success", None, Some("body\n"))
+                .expect("mark_committed through the command plane");
         assert_eq!(committed.phase, agent_doc_turn::CyclePhase::Committed);
         // The command plane carries the typed CommitObservation, so the canonical
         // label is stamped back as last_event.
@@ -16641,8 +16652,8 @@ mod tests {
         // already proven by the mark_write_applied integration test, so this
         // exercises the dispatch + service in-process (mirroring the CAS test).
         use super::command_plane::{
-            build_closeout_owner_claim_submit, build_closeout_owner_release_submit,
             CloseoutOwnerClaimPayload, CloseoutOwnerReleasePayload,
+            build_closeout_owner_claim_submit, build_closeout_owner_release_submit,
         };
         use agent_doc_state_backbone::{CloseoutOwnerClaimOutcome, CloseoutOwnerClaimRequest};
 
@@ -16678,26 +16689,20 @@ mod tests {
             .unwrap()
         };
 
-        let first =
-            serde_json::from_value::<CloseoutOwnerClaimOutcome>(dispatch_command_plane_submit(
-                &bootstrap,
-                runtime.as_ref(),
-                &claim_submit("owner-1"),
-            )
-            .unwrap())
-            .unwrap();
+        let first = serde_json::from_value::<CloseoutOwnerClaimOutcome>(
+            dispatch_command_plane_submit(&bootstrap, runtime.as_ref(), &claim_submit("owner-1"))
+                .unwrap(),
+        )
+        .unwrap();
         assert!(matches!(
             first,
             CloseoutOwnerClaimOutcome::Acquired(ref p) if p.owner_id == "owner-1"
         ));
-        let second =
-            serde_json::from_value::<CloseoutOwnerClaimOutcome>(dispatch_command_plane_submit(
-                &bootstrap,
-                runtime.as_ref(),
-                &claim_submit("owner-2"),
-            )
-            .unwrap())
-            .unwrap();
+        let second = serde_json::from_value::<CloseoutOwnerClaimOutcome>(
+            dispatch_command_plane_submit(&bootstrap, runtime.as_ref(), &claim_submit("owner-2"))
+                .unwrap(),
+        )
+        .unwrap();
         assert!(matches!(
             second,
             CloseoutOwnerClaimOutcome::HeldByOther(ref p) if p.owner_id == "owner-1"
@@ -16717,23 +16722,16 @@ mod tests {
             },
         )
         .unwrap();
-        let released: bool =
-            serde_json::from_value::<bool>(dispatch_command_plane_submit(
-                &bootstrap,
-                runtime.as_ref(),
-                &release,
-            )
-            .unwrap())
-            .unwrap();
+        let released: bool = serde_json::from_value::<bool>(
+            dispatch_command_plane_submit(&bootstrap, runtime.as_ref(), &release).unwrap(),
+        )
+        .unwrap();
         assert!(released);
-        let reclaimed =
-            serde_json::from_value::<CloseoutOwnerClaimOutcome>(dispatch_command_plane_submit(
-                &bootstrap,
-                runtime.as_ref(),
-                &claim_submit("owner-2"),
-            )
-            .unwrap())
-            .unwrap();
+        let reclaimed = serde_json::from_value::<CloseoutOwnerClaimOutcome>(
+            dispatch_command_plane_submit(&bootstrap, runtime.as_ref(), &claim_submit("owner-2"))
+                .unwrap(),
+        )
+        .unwrap();
         assert!(matches!(
             reclaimed,
             CloseoutOwnerClaimOutcome::Acquired(ref p) if p.owner_id == "owner-2"

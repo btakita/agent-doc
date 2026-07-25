@@ -1305,11 +1305,16 @@ fn line_is_managed_state_only(line: &str) -> bool {
     // Strikethrough tildes and priority markers can nest in either order
     // (`- ~~📌 do ...~~` as well as `- 📌 ~~do ...~~`), so peel both to a fixed
     // point instead of assuming one layout.
-    let mut queue_body = trimmed.strip_prefix("- ").unwrap_or(trimmed).trim().to_string();
+    let mut queue_body = trimmed
+        .strip_prefix("- ")
+        .unwrap_or(trimmed)
+        .trim()
+        .to_string();
     loop {
-        let peeled = element_queue::strip_priority_markers(queue_body.trim_start_matches('~').trim())
-            .trim()
-            .to_string();
+        let peeled =
+            element_queue::strip_priority_markers(queue_body.trim_start_matches('~').trim())
+                .trim()
+                .to_string();
         if peeled == queue_body {
             break;
         }
@@ -1325,8 +1330,7 @@ fn line_is_managed_state_only(line: &str) -> bool {
     let is_list_item = trimmed.starts_with("- ");
     let struck_whole_line = {
         let body = trimmed.strip_prefix("- ").unwrap_or("").trim();
-        body
-            .strip_prefix("~~")
+        body.strip_prefix("~~")
             .and_then(|rest| rest.strip_suffix("~~"))
             .is_some_and(|inner| !inner.trim().is_empty() && !inner.contains("~~"))
     };
@@ -5030,11 +5034,7 @@ Done.\n\
     /// not a consumed head, so it must still read as user intent.
     #[test]
     fn change_is_managed_state_only_rejects_partial_strikes_and_prose() {
-        for line in [
-            "- use ~~foo~~ bar instead",
-            "~~not a list item~~",
-            "- ~~~~",
-        ] {
+        for line in ["- use ~~foo~~ bar instead", "~~not a list item~~", "- ~~~~"] {
             assert!(
                 !change_is_managed_state_only(&pbc(PromptBearingChangeKind::ContentEdit, line)),
                 "only a fully-struck list line is bookkeeping: {line}"

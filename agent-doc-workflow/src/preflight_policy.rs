@@ -356,7 +356,10 @@ mod tests {
             &[],
         );
         assert_eq!(execution, ResolvedFreeTextExecution::Queue);
-        assert!(warning.is_none(), "auto -> queue is intended, not a fallback");
+        assert!(
+            warning.is_none(),
+            "auto -> queue is intended, not a fallback"
+        );
     }
 
     #[test]

@@ -243,7 +243,8 @@ mod tests {
             .unwrap();
         }
         assert_eq!(spawns, 2);
-        let value = run_with_observation_cache(&read_cmd("%2"), || panic!("must be cached")).unwrap();
+        let value =
+            run_with_observation_cache(&read_cmd("%2"), || panic!("must be cached")).unwrap();
         assert_eq!(value, "/tmp/%2");
     }
 
@@ -293,10 +294,13 @@ mod tests {
         let _scope = begin_observation_scope();
         let mut spawns = 0;
         for _ in 0..3 {
-            run_with_observation_cache(&TmuxCommand::new(["capture-pane", "-p", "-t", "%1"]), || {
-                spawns += 1;
-                Ok("prompt".to_string())
-            })
+            run_with_observation_cache(
+                &TmuxCommand::new(["capture-pane", "-p", "-t", "%1"]),
+                || {
+                    spawns += 1;
+                    Ok("prompt".to_string())
+                },
+            )
             .unwrap();
         }
         assert_eq!(
@@ -348,7 +352,10 @@ mod tests {
             Ok("/tmp".to_string())
         })
         .unwrap();
-        assert_eq!(spawns, 1, "an inner scope drop must not clear the outer memo");
+        assert_eq!(
+            spawns, 1,
+            "an inner scope drop must not clear the outer memo"
+        );
         drop(outer);
     }
 }

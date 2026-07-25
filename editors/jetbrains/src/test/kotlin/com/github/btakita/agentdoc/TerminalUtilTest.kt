@@ -19,7 +19,7 @@ class TerminalUtilTest {
                 "--dispatch-only",
                 "--plain-trigger",
                 "--wait-for-ready",
-                "15",
+                "120",
                 "tasks/root.md",
             ),
             TerminalUtil.buildEditorRouteRequestCommand("tasks/root.md"),

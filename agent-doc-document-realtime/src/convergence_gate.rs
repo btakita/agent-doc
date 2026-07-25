@@ -262,7 +262,9 @@ impl CrdtWriteBackoff {
         if advanced {
             return self.initial_ms;
         }
-        current_ms.saturating_mul(2).clamp(self.initial_ms, self.max_ms)
+        current_ms
+            .saturating_mul(2)
+            .clamp(self.initial_ms, self.max_ms)
     }
 }
 

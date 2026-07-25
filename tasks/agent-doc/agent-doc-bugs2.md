@@ -56,15 +56,33 @@ The witness latch is the fix, not an optimization: missing-replica was excluded 
 **Why job-offers never converges — root cause found.** The liveness plane holds **two** registrations for `job-offers.md`: `jetbrains-6206-…` and `jetbrains-1264567-…`. `pid 6206` is the pre-restart IDEA and is **dead** (`kill -0` confirms); `1264567` is live. `delivery_converged` folds over all *live* members having empty pending queues, so a ghost peer that can never ACK makes convergence unreachable. This is why restarting the IDE did not help — the restart **added** a registration instead of replacing one. Restarting again will likely add a third. Filed `#ghostregreap`; Phase 0's `73e489aab` reaps ghost liveness from the process-exit watcher, but that reap is not reaching reliable-sync editor *registrations*.
 
 Also filed `#steergateidle`: requiring an active turn for selected-text steering is the wrong gate (an idle pane should dispatch the selection, not error), and the `actor_state="ready"` classification was itself wrong — corroborated by repeated 5s controller-response timeouts in the same window, i.e. a failed read reported as authoritative instead of failing closed.
-<!-- agent:boundary:68d63556 -->
+
+### Re: complete all 3 tiers — opus-5
+
+All three tiers are landed, plus the two coined ids they introduced are now filed rather than dangling in source.
+
+**Tier 1** (`34546de4f`) — controller asks surviving editors to rebuild at restart. Fixes the reported stranding, but only covers the restart instant.
+
+**Tier 2 — deliberately not shipped, on your instruction.** I built it (a controller-side `Effect` over a derived signal in a `ProcessScope`), and you said not to fortify Effects. You were right: an Effect *in the controller* still owns a cross-process push, which is the exact thing that fails as `reload-lib reached 1/4 endpoints`. Hardening it would have been effort spent on the wrong layer. My attempt also damaged `rpc.rs` with an index-slice edit (140 errors, whole functions deleted) — reverted, nothing survives, and it is the precise mistake my own notes warn about.
+
+**Tier 3** (`46f2321ad` + this cycle) — the decision is now derived from replicated state, and the repair belongs to the actor that owns the replica:
+
+- `registrations_missing_replica` / `peer_registrations_missing_replica` derive "who needs a rebuild" from the liveness plane, which already converges cross-process as an OR-set plus LWW. The desired set was never controller-local state that had to be *sent*.
+- Controller command `peer_replicas_missing` answers a peer's question **about itself**.
+- FFI export `agent_doc_peer_replicas_missing` is the editor-side consumer: the editor asks and repairs, so the controller pushes nothing and there is no endpoint to fail to reach. It is correct whichever side restarted — controller losing its process-local hub, editor reconnecting, or a registration arriving after any fan-out already ran. An up-to-date editor gets `[]` and does nothing.
+
+The controller's Tier-1 fan-out now consumes the Tier-3 derivation instead of re-deriving "everyone", so it is a compatibility nudge for plugins predating the editor-side consumer, not architecture.
+
+Remaining honest scope: the JetBrains/VS Code plugins do not yet *call* `agent_doc_peer_replicas_missing` on reconnect. The shared-library half is done per the FFI-first rule; the thin editor caller is not, and I would rather say so than imply the loop is closed.
+<!-- agent:boundary:a8c35ec8 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#ghostregreap]
+- do [#stategraphjoin]
+- do [#ctrlkillreregister]
 - do [#steergateidle]
-- ~~/goal do tasks/agent-doc/plan-lazily-state-migration.md~~
-- 📌 do [#jbcompactcommit]
+- ⏭️ 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
 - 📌 do [#60ev]
 - 📌 do [#2y8j]
@@ -99,7 +117,8 @@ Also filed `#steergateidle`: requiring an active turn for selected-text steering
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#ghostregreap] #agent-doc-bug A dead editor registration survives an IDE restart and pins delivery_converged=false forever. Live evidence 2026-07-25 on job-offers.md: the plane held BOTH jetbrains-6206-... (pid 6206, pre-restart IDEA, confirmed dead via kill -0) and jetbrains-1264567-... (live). delivery_converged folds over ALL live members' pending queues, so a ghost peer that can never ACK makes convergence unreachable — why restarting the IDE did not help (it ADDED a registration rather than replacing one) and why preflight logged 20+ consecutive state=delivery_pending deferrals (mean 12.1s, 242s total). Phase 0's 73e489aab reaps ghost liveness from the process-exit watcher; that reap is not reaching reliable-sync editor REGISTRATIONS. Fix: treat a registration whose pid fails a liveness check as not-live in the convergence fold, and reap it when a new pid registers for the same document. Regression: two registrations for one document, one dead pid, must fold to converged.
+- [ ] [#stategraphjoin] #agent-doc-bug Reactive graphs are lifetime-typed; disconnected islands are an anti-pattern. Audited 2026-07-25: 50 sites workspace-wide call *Context::new() directly, and agent-doc-state-backbone alone held NINE state machines each minting a private ThreadSafeContext in its constructor — nothing in one graph could derive from another, invalidation never crossed a boundary, and a Computed created in such a context is Computed in name only. A shared context is necessary but NOT sufficient: a bare &ThreadSafeContext lets a cell join a graph with the wrong LIFETIME, and neither direction is caught at runtime (document cell in a turn graph is torn down at closeout and silently stops updating; turn cell in a document graph leaks across turns). DONE so far: DocumentScope/TurnScope/ProcessScope types added, all nine machines gained new_in(&DocumentScope), rule encoded in AGENTS.md, regression asserts the join is real by reading state back through the scope's context. REMAINING: migrate the other ~40 call sites off bare *Context::new(), and add an architecture guard failing on a new bare context inside a long-lived owner.
+- [ ] [#ctrlkillreregister] #agent-doc-bug Killing the controller strands a live editor. Hydration restores the durable liveness plane so the editor still reads as registered, but the relay hub holding its replica is process-local, died with the previous controller, and nothing rehydrates it — leaving attached-with-missing-replica until the plugin happens to re-register, which is why operators reach for an IDE restart. DONE: Tier 1 restart fan-out (34546de4f); Tier 3 replicated derivation registrations_missing_replica/peer_registrations_missing_replica (46f2321ad), controller command peer_replicas_missing, and FFI export agent_doc_peer_replicas_missing so the editor asks about itself and repairs instead of being pushed at. Tier 2 (controller-side Effect) intentionally skipped: it still owns a cross-process push, the failure behind 'reload-lib reached 1/4 endpoints'. REMAINING: have the JetBrains and VS Code plugins call agent_doc_peer_replicas_missing on reconnect/startup, then retire the Tier 1 fan-out as a compatibility shim.
 - [ ] [#steergateidle] #agent-doc-bug Selected-text turn steering is gated on an active turn and rejects otherwise ('requires the authoritative pane to have an active turn (actor_state=ready)'). Both halves are wrong per operator: (a) an active turn should not be required — an idle pane should dispatch the selection as a normal trigger, not error; (b) detection was incorrect, a turn WAS active while it reported ready. (b) is corroborated by repeated 'timed out after 5.0s waiting for project controller response' on admin inspect in the same window, so a failed actor-state read may be surfacing as authoritative 'ready'. Fix both: idle becomes a dispatch path, and a failed read fails closed or retries instead of reporting ready. Related #selectedturnsteering.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 ### Re: #bbpe — gpt-5

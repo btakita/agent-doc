@@ -437,7 +437,27 @@ Both instincts are right, and both are now in the draft (commit `c95c3bd`).
 The decline is now fully aligned with how you actually reached the decision... math checked, life weighed, betting on yourself... with no numbers, no consulting presumption, and the door left open. It's ready to send whenever you are (`#haivensend`), alongside the Acadian yes.
 
 No new follow-up items... the two send-items already cover what remains.
-<!-- agent:boundary:0abb7b50 -->
+I do know of some developers who might be interested. riza-ingalls is not a Golang developer. tbh, I don't know anyone who would be that great fit for the SDK developer. They are certainly out there though. I could contract. I imagine that Haiven would not want to contract though. What would be a way to do the SDK work as a contract where they have control + transparency into the development...Where it would be successful if I were to undertake the project? If this is a longshot, it may not be worth bringing up.
+
+### Re: SDK work as a contract — structure, odds, and whether to bring it up — fable
+
+Short answers first: **it's not a longshot** (it's probably the most plausible future you and Haiven share), **the structure that gives them control + transparency exists and is standard**, and **the way to bring it up is the one line already in your decline**... with the full proposal held in reserve. I drafted that proposal: **`tasks/recruit/haiven/sdk-contract-structure.md`** (commit `c44026e`). But there's one conflict on your side to resolve before you dangle it seriously.
+
+**Why it's not a longshot.** Your intuition that "Haiven would not want to contract" is right for *core product*... companies guard the realtime backend... but the engine SDKs are the opposite case, and routinely contracted: bounded wrappers around their stable API, objective acceptance criteria, little roadmap context needed. Three things push Craig toward yes: the SDK-specialist market is thin (you... a well-networked engineer... can't name a great fit offhand; neither can he), the SDK is launch-critical for developer adoption, and a milestone contract is *cash-friendlier* than the FTE package he was prepared to fund... no benefits, no equity, spend gated per milestone on the same August/October milestones his remaining funding is gated on. You'd be converting his hiring problem into a procurement decision.
+
+**The structure (control + transparency by construction), summarized from the draft:**
+
+1. **Milestone SOW, one engine at a time** ... Phase 0 is a small paid design doc + conformance test plan (Unity first); then alpha → beta → launch-ready per engine. Haiven only ever commits to the *next* milestone, and either party exits cleanly at a boundary.
+2. **All work in their repos from day one** ... their GitHub org, their CI, their code review, work-for-hire assignment. Zero lock-in: if you vanished, they'd hold reviewed code, docs, and a green test suite. This single mechanism answers the "control + transparency" question almost entirely.
+3. **Bounded cadence** ... 10-15 hrs/wk band, weekly demo, the 12-5pm ET overlap you already offered.
+4. **Payment on acceptance, not hours** ... conformance suite green on target engine versions per milestone. Fixed-fee per milestone (caps their exposure) anchored off ~$110-140/hr.
+
+**The conflict you have to resolve first, honestly:** you just bought your evenings back with the Acadian decision, and a 10-15 hr/wk SDK contract spends exactly those evenings... on Haiven's product instead of patchboard. The draft lists three deliberate postures: don't offer (door-open stays politeness); offer **Phase 0 + Unity only** (bounded 6-10 weeks, real cash and relationship, then patchboard resumes); or **referral-first** (help Craig scope the SOW and vet SDK contractors, build nothing... near-zero hours, high goodwill). On the referral thread itself: since you can't name a strong fit today (riza-ingalls being non-Golang is beside the point... the SDK work is engine-side C#/C++ anyway, which just underlines how specific this niche is), don't promise introductions in the decline; the existing "an intro that's useful" line covers it without committing anyone.
+
+**How to bring it up: don't upgrade the decline yet.** The current door-open line ("a contract sprint on the SDK") is exactly calibrated... visible enough that a candidate-thin CTO will notice it, light enough that it costs nothing if he doesn't. The draft includes a stronger optional variant ("milestone-scoped contract on the engine SDKs... your repos, your review, spend gated per milestone... I'd genuinely consider it") — **use it only if you've already decided you'd say yes**, because Craig likely follows up on it. Tracked as `#sdkcontract`: if he engages, resolve the evenings posture, then send the structure.
+
+The clean sequence stands: decline + Acadian yes this weekend; the SDK contract is a door Craig can walk through afterward, on terms already written down.
+<!-- agent:boundary:712c4a90 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -448,6 +468,7 @@ No new follow-up items... the two send-items already cover what remains.
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#sdkcontract] [recommended] If Craig engages the door-open line, send the milestone-SOW proposal from tasks/recruit/haiven/sdk-contract-structure.md; first resolve the evenings conflict (build vs Phase-0-only vs referral-first)
 - [ ] [#haivensend] #haivensend [operator-verify] Send ONE Haiven email per the decision: compensation ask (tasks/recruit/haiven/compensation-reply-draft.md) if a matched offer would change the answer, or the warm decline (tasks/recruit/haiven/decline-draft.md) if Acadian wins regardless
 - [ ] [#acadiansend] [operator-verify] Send Acadian recruiter questions (tasks/recruit/acadian/recruiter-questions-draft.md) incl. signing-bonus/advance ask; file written answers under tasks/recruit/acadian/
 <!-- /agent:backlog -->

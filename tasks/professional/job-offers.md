@@ -306,7 +306,7 @@ Their reaction to #1 and #3 is the strongest good-faith tell yet: a company that
 
 
 Executed the agent-side of `#acadianterms`: the recruiter message is drafted and committed at **`tasks/recruit/acadian/recruiter-questions-draft.md`** (commit `69f3a4c`)... three written-confirmation questions (notice/termination clause, >40hr billing mechanics, renewal + rate renegotiation) framed around your Sunday-evening answer, with a counter ready if notice comes back as "immediate" (ask for 2-4 weeks in the SOW). The item is now gated rather than done because its completion condition is external: you send it, and the recruiter's written answers land. Unblock = paste their reply into `tasks/recruit/acadian/` and the decision gate updates.
-❯ 🚧 I would like to ask Acadian for either a small signing bonus or an advance on the first paycheck.
+❯ I would like to ask Acadian for either a small signing bonus or an advance on the first paycheck.
 ❯ Should we include the termination protection (severence + clawback protection). Craig mentioned a Founder's Package...not necessarily a Founding Engineer. Please interpret this email.
 
 ```
@@ -390,7 +390,7 @@ So the actual "ask" Craig has to say yes to today is $205k in cash for an engine
 **The feeling worth separating from the numbers:** it's natural to feel bad asking a scrappy team for real money... but Craig's email did the inviting, the funding disclosure was volunteered (not extracted), and a company that can't afford a documented, well-justified ask from a strong candidate is telling you something important about the offer *before* you accept it, not after. Compassion here means being honest and transparent about your reasoning, not discounting the ask.
 
 **What I changed in the draft** (`tasks/recruit/haiven/compensation-reply-draft.md`, commit `81cb506db`): added a short paragraph right after the funding-transparency thank-you, making explicit that these numbers came from running the math against your other offer rather than picking a target cold, and that the cash-light/equity-heavy shape is deliberate given their raise stage... not padding. It reads as considerate without softening any of the actual numbers. No changes to the ask itself... the floor, trade, and negotiation notes at the bottom of the draft are unchanged.
-<!-- agent:boundary:df7a0891 -->
+<!-- agent:boundary:ad153d99 -->
 <!-- /agent:exchange -->
 
 ## Queue

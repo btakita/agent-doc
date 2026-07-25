@@ -1225,6 +1225,21 @@ fn assert_non_exchange_markers_preserved(
 /// editor-delta race is retried; a genuine concurrent edit fails closed.
 const COMPACT_CONVERGE_MAX_ATTEMPTS: usize = 3;
 
+/// How long a `retry_crdt_merge` retry waits for the controller's
+/// delivery-convergence witness before re-reading the live canonical text
+/// (#compactcrdtretry). A `retry_crdt_merge` refusal means an editor delivery is
+/// mid-delta, so retrying instantly re-hits the same in-flight state; two seconds
+/// covers a normal editor delta round trip (the same order as the other
+/// delivery-await windows) without stalling the compact when the buffer is
+/// genuinely contended — the await returns EARLY the moment convergence lands, so
+/// the full window is only ever consumed when delivery really has not settled.
+/// Tests use a token window: the controller is unreachable there, so the await
+/// fails open immediately.
+#[cfg(test)]
+const COMPACT_CONVERGE_DELIVERY_WAIT: std::time::Duration = std::time::Duration::from_millis(5);
+#[cfg(not(test))]
+const COMPACT_CONVERGE_DELIVERY_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// True when a compact editor-convergence error is the CRDT compare-and-swap
 /// baseline refusal (`recovery=retry_crdt_merge`), i.e. the live canonical text
 /// drifted from the base the compaction was computed against.
@@ -1253,6 +1268,47 @@ fn converge_compacted_with_retry(
                 if attempt < COMPACT_CONVERGE_MAX_ATTEMPTS
                     && is_retryable_crdt_merge_error(&err) =>
             {
+                // A `retry_crdt_merge` refusal means the live canonical text is
+                // mid-delta from an in-flight editor delivery, so retrying instantly
+                // just re-hits the same in-flight state. Wait on the controller's
+                // delivery-convergence witness first: the hub is process-local, so
+                // only the controller can answer. It returns EARLY the moment
+                // convergence lands, otherwise it consumes the window. Doing this
+                // BEFORE the `current_document_content` re-read also makes the drift
+                // check below MORE accurate — reading a settled buffer distinguishes
+                // "transient in-flight delta" from "genuine concurrent operator edit"
+                // instead of sampling a half-applied delta and mistaking it for
+                // either one. `Ok(None)` (no hub for this document) and `Err` (the
+                // controller could not be asked) both mean "nothing to wait on" —
+                // never "delivery finished" — so we proceed to the same drift check,
+                // which still fails closed on a real edit. This keeps the retry
+                // fail-open exactly as before.
+                match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+                    file,
+                    COMPACT_CONVERGE_DELIVERY_WAIT,
+                ) {
+                    // Observed: the await already consumed up to the window (it
+                    // returns early only when convergence landed), so do not wait
+                    // again here.
+                    Ok(Some(_)) => {}
+                    // No hub for this document: there is no in-flight delivery to
+                    // wait for, so the immediate re-read is already the settled read.
+                    Ok(None) => {}
+                    Err(wait_err) => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "compact_converge_convergence_unavailable file={} fallback=immediate_reread detail={}",
+                                file.display(),
+                                format!("{wait_err:#}")
+                                    .replace('\n', " | ")
+                                    .chars()
+                                    .take(160)
+                                    .collect::<String>()
+                            ),
+                        );
+                    }
+                }
                 let current = effects
                     .current_document_content(file, "compact_converge_retry")
                     .unwrap_or_default();
@@ -1985,6 +2041,54 @@ mod tests {
             err.to_string()
                 .contains("document changed during compaction"),
             "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn converge_compacted_delivery_gated_retry_keeps_both_outcomes() {
+        // #compactcrdtretry: gating the retry on the controller's delivery-convergence
+        // witness must not change either outcome. `/tmp/...md` has no `.agent-doc`
+        // project root, so `await_delivery_convergence_for_file` returns Err (the
+        // controller cannot be asked) and the retry proceeds fail-open — no live
+        // controller and no real wait, which is also why the elapsed bound below holds.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let doc = std::path::Path::new("/tmp/does-not-matter.md");
+        let base = "prompt\n";
+        let started = std::time::Instant::now();
+
+        // Re-settled live text: the gated retry still converges.
+        let resettled = RetryConvergeEffects {
+            fail_times: AtomicUsize::new(1),
+            current: base.to_string(),
+            converge_calls: AtomicUsize::new(0),
+        };
+        converge_compacted_with_retry(&resettled, doc, "compacted\n", base)
+            .expect("delivery-gated retry must still converge a transient retry_crdt_merge");
+        assert_eq!(
+            resettled.converge_calls.load(Ordering::Relaxed),
+            2,
+            "gating must not change the retry count"
+        );
+
+        // Genuine concurrent edit: the drift check still runs AFTER the wait and
+        // still fails closed with the unchanged message.
+        let drifted = RetryConvergeEffects {
+            fail_times: AtomicUsize::new(3),
+            current: "prompt\noperator typed more\n".to_string(),
+            converge_calls: AtomicUsize::new(0),
+        };
+        let err = converge_compacted_with_retry(&drifted, doc, "compacted\n", base)
+            .expect_err("a genuine concurrent edit must still fail closed after the wait");
+        assert!(
+            err.to_string()
+                .contains("document changed during compaction"),
+            "unexpected error: {err:#}"
+        );
+
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "the convergence gate must not block on a real wait in tests (elapsed={:?})",
+            started.elapsed()
         );
     }
 

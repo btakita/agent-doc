@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -47,19 +47,40 @@ queue: go
 
 Pushed: `lazily-cs` (new), `lazily-spec`, nine sibling READMEs, and the superproject gitlinks.
 /goal Complete all lazily-cs features in the feature table.
-<!-- agent:boundary:d40e1b41 -->
+
+### Re: complete all lazily-cs features — opus-5
+
+> **Queue prompt:** /goal Complete all lazily-cs features in the feature table.
+
+One of ten phases is done, not all of them. `#lzcsconcurrency` — rows 5 and 6 — is shipped, proved, and pushed. The other 44 rows are nine more phases and are still queued. I am saying that up front because the alternative is a claim that would not survive contact with the ledger.
+
+**What shipped**
+
+`ThreadSafeContext` wraps the single-threaded kernel in a reentrant lock and reuses its batch coalescing, so it *refines* the kernel rather than reimplementing it — a one-write critical section is observationally a plain `Set`, and three writes in a batch are one cascade. `ThreadSafeKernel.ApplyBatch`/`FlushBatch` port the Lean `ThreadSafe` model as a pure function over a node table, which is what makes the coalescing law checkable without a live graph.
+
+`AsyncContext` is a distinct graph, not an overload: its own handles, the `Empty`/`Computing`/`Resolved`/`Error` state machine, a revision per slot, in-flight deduplication, the five cancellation properties, the `get_async` re-resolve loop, and retained-cleanup effects with serialized reruns over a synchronous batch boundary.
+
+**The part that mattered.** The reactive-graph runner is now parameterised over the execution model and replays the same op stream against all three contexts — 51 fixture replays, 584 assertions, empty ledger. That is the whole reason this phase went first. A cascade that stops one level below the write is *correct* synchronously and *broken* asynchronously: an async read short-circuits on a resolved cache, so the stale value is served forever and no pull chain rescues it. I mutation-checked exactly that — cutting the async walk to one level fails `transitive_invalidation_reaches_depth` plus four other fixtures on `AsyncContext` and nothing at all on the other two models. Dropping the thread-safe batch boundary fails only the `ThreadSafeContext` replays. Neither mutation is visible from the sync plane, which is the point.
+
+**Nine fixture/model pairs are gated, each with a reason.** `AsyncContext` ships no eager slot constructor (3 signal fixtures), no `MergePolicy` (5 merge fixtures), and no bounded effect drain (1) — all three are synchronous-kernel constructs. I gated rather than degraded on purpose: a lazy slot standing in for an eager signal produces plausible numbers that satisfy two of the three assertions a signal fixture makes, so the suite would go green while testing the opposite of the fixture's purpose.
+
+**Three deliberate divergences from lazily-go**, recorded in `AGENTS.md` so they are decisions: serialization is a reentrant lock rather than an owner goroutine; the async invalidation walk is non-consuming, matching this binding's own synchronous kernel, so degree assertions mean the same thing on all three models; and an `Error` slot retries on the next read. That last one is a real disagreement — lazily-go serves the stored error forever, `docs/async.md` says `Error → Computing` on retry. I followed the spec and queued `#lzgoerrorretry` to settle which side is wrong.
+
+56 tests, format clean, CI green on lazily-cs and lazily-spec. Coverage rows 5 and 6 flipped, nine sibling READMEs regenerated one commit per repo, superproject gitlinks committed.
+
+**What is left.** `#lzcscollections` `#lzcsstatechart` `#lzcsqueues` `#lzcscrdt` `#lzcsipc` `#lzcssync` `#lzcstemporal` `#lzcscluster` `#lzcsplane` `#lzcspackage`, in `tasks/software/lazily-cs-parity-plan.md`. Each is at least the size of the one just finished — collections is larger — and each ends the same way: its corpus replays with an empty ledger, or the row does not flip. Collections is next.
+<!-- agent:boundary:5ae07efb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue go -->
-- /goal Complete all lazily-cs features in the feature table.
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#lzcsconcurrency] lazily-cs: ThreadSafeContext (lock-backed) + AsyncContext, and re-parameterise the reactive-graph conformance runner over the execution model so all three replay the same corpus — plan: tasks/software/lazily-cs-parity-plan.md (coverage rows 5-6)
+- [ ] [#lzgoerrorretry] lazily-go: an async slot in Error serves the stored error forever, but docs/async.md § Async slot state machine lists `Error → Computing` — "get_async retry after an error". lazily-cs follows the spec; either lazily-go is a finding or the spec sentence is wrong. Decide in lazily-spec first, then fix whichever side loses
 - [ ] [#lzcscollections] lazily-cs: SlotMap / ThreadSafeSlotMap / AsyncSlotMap materialization, ReactiveMap (CellMap/SlotMap), CellTree + reconcile, SemTree, stable-id alignment; replay collections + materialization + familysync corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 1-4, 9-11)
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
@@ -76,3 +97,9 @@ Pushed: `lazily-cs` (new), `lazily-spec`, nine sibling READMEs, and the superpro
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-07-25 [#lzcsconcurrency] lazily-cs: ThreadSafeContext (lock-backed) + AsyncContext, and re-parameterise the reactive-graph conformance runner over the execution model so all three replay the same corpus — plan: tasks/software/lazily-cs-parity-plan.md (coverage rows 5-6)
+<!-- /agent:done -->

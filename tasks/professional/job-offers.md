@@ -390,7 +390,24 @@ So the actual "ask" Craig has to say yes to today is $205k in cash for an engine
 **The feeling worth separating from the numbers:** it's natural to feel bad asking a scrappy team for real money... but Craig's email did the inviting, the funding disclosure was volunteered (not extracted), and a company that can't afford a documented, well-justified ask from a strong candidate is telling you something important about the offer *before* you accept it, not after. Compassion here means being honest and transparent about your reasoning, not discounting the ask.
 
 **What I changed in the draft** (`tasks/recruit/haiven/compensation-reply-draft.md`, commit `81cb506db`): added a short paragraph right after the funding-transparency thank-you, making explicit that these numbers came from running the math against your other offer rather than picking a target cold, and that the cash-light/equity-heavy shape is deliberate given their raise stage... not padding. It reads as considerate without softening any of the actual numbers. No changes to the ask itself... the floor, trade, and negotiation notes at the bottom of the draft are unchanged.
-<!-- agent:boundary:5489dc4f -->
+❯ 🚧 I think going with Acadian would be better even if Haiven matches the offer...due to the amount of time that I can have for my own work. Sortof like betting on myself.
+
+### Re: betting on yourself — the Acadian-even-if-they-match position — fable
+
+That position is coherent, and honestly it's where the accumulated analysis has been pointing... but "even if Haiven matches" is a strong claim that deserves one honest pressure-test before it hardens into the decision. Then I'll give you the practical consequence, because it changes which email you send.
+
+**Why the reasoning is sound.** "Betting on myself" is exactly the right frame, and the math backs it. The Haiven equity's expected value came out to roughly a signing bonus ($15-50k, back-loaded, voidable pre-cliff). Your own projects... patchboard, lazily, the rest... are equity you hold at 100%, and what they need isn't capital, it's *your evenings*. Acadian sells those evenings back to you: Eastern hours, paid-and-therefore-bounded overtime, zero IP overlap, and $208-225k funding the runway. A matched Haiven offer fixes the *cash* column but cannot fix the *hours* column... Pacific meetings from an Eastern life plus launch-crunch overtime is precisely the schedule that kills side-project momentum. If the constraint that matters is time, matching doesn't actually match.
+
+**The honest pressure-test... three questions, answer them privately:**
+
+1. **The regret test.** Three years out, which loss stings more: the evenings you'd have poured into patchboard, or having passed on a with-spark founding team you liked? You've consistently signaled the former matters more... but notice that "more interesting + varied work" and "this team has more spark" were *your* words in the original brief. Make sure the bet-on-myself story isn't quietly discounting something you actually valued.
+2. **The shipping test.** The bet only pays if the evenings convert into shipped product. You have the track record (the lazily v2 release across 8 bindings says plenty), so this is less a doubt than a commitment device: Acadian-plus-own-work is a *plan*, not just a preference, if you can name what patchboard milestone the first 90 days of evenings buys.
+3. **The counterfactual-offer test.** If Craig came back with $200k + 2% + monthly vesting... genuinely extraordinary... would you waver? If yes, you're not at "even if they match," and the compensation ask should still go out. If no, the decision is made and negotiating would be theater.
+
+**The practical consequence: don't send an ask you've already decided to refuse.** Extracting a matched offer from a half-raised-seed CTO who engaged in good faith, then declining it, costs you goodwill and costs him board-facing effort... and gaming is a small world. So I drafted the second email: a warm, honest decline at **`tasks/recruit/haiven/decline-draft.md`** (commit `2521781`). It tells Craig the truth... the reason is time and betting on your own work, not money... notes Haiven deserves a founding engineer who can pour launch-crunch hours in, and deliberately leaves the door open (contract sprint on the SDK, realtime/CRDT consulting, October-launch well-wishes). Both emails now sit committed side by side; `#haivensend` is updated to "send exactly one, per your decision."
+
+**Where that leaves Sunday:** if the answer to question 3 is "no waver"... send the decline to Craig, tell the Acadian recruiter yes (the notice/billing/renewal questions in `tasks/recruit/acadian/recruiter-questions-draft.md` can ride along with the acceptance... they're confirmation hygiene, not conditions), and start sketching the 90-day patchboard milestone the evenings just bought. If there's any waver, send the compensation ask today as planned and let Craig's real numbers test you. Either way you're choosing from clarity now, not deadline pressure... which is what all of this was for.
+<!-- agent:boundary:69deb73f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -401,7 +418,7 @@ So the actual "ask" Craig has to say yes to today is $205k in cash for an engine
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#haivensend] [operator-verify] Send revised Haiven reply (tasks/recruit/haiven/compensation-reply-draft.md) to Craig today; then paste his written Founder's Package definition into the session for gate evaluation
+- [ ] [#haivensend] #haivensend [operator-verify] Send ONE Haiven email per the decision: compensation ask (tasks/recruit/haiven/compensation-reply-draft.md) if a matched offer would change the answer, or the warm decline (tasks/recruit/haiven/decline-draft.md) if Acadian wins regardless
 - [ ] [#acadiansend] [operator-verify] Send Acadian recruiter questions (tasks/recruit/acadian/recruiter-questions-draft.md) incl. signing-bonus/advance ask; file written answers under tasks/recruit/acadian/
 <!-- /agent:backlog -->
 

@@ -146,7 +146,48 @@ Revised structure:
 - Otherwise **Acadian**: $208-225k, your timezone, paid overtime, a month-12 raise checkpoint, and the open-source time your patchboard-first plan calls for.
 
 Bluntly: with billable overtime and a renegotiable rate, Acadian is now the stronger default. Haiven has to win on conviction... team, equity terms, and the kind of work... not on money. That's still a winnable case, but it's theirs to make, and their willingness to put 1.0% on paper is the cleanest test of it.
-<!-- agent:boundary:e0770874 -->
+❯ 🚧 Please assess Haiven...including the founder Luke Richey + the CTO Craig Fryar. I believe they can make $10M a year within a few years. Obviously their business model is up in the air. But please give me an assessment of the likelihood of achieving $1M revenue and $10M revenue.
+
+### Re: Haiven company + founder assessment ($1M / $10M revenue odds) — fable-5
+
+I researched the company and both principals. Quick grounding on what Haiven actually is, then the founders, then honest probability ranges. Caveat up front: this is a judgment call on a pre-revenue-model startup, not a forecast... treat the numbers as calibrated opinion, not fact.
+
+**What Haiven is**
+
+"The Indie Game Platform That Pays." Two things bolted together:
+1. **A trust-&-safety SDK** — real-time AI moderation, grooming/predator detection, chat + media filtering, mental-health signal detection, analytics. Drops into Unity, Unreal, Roblox, React Native, Discord. "Zero backend, zero cost" to the developer. This is the game-engine SDK work you'd be doing.
+2. **An ecosystem subscription marketplace** — players subscribe once at the ecosystem level and get benefits across participating indie titles; developers share that subscription revenue based on player time/engagement. Explicitly child-safety and faith-mission framed (Jesus.net partnership, Child Safe Tech Alliance).
+
+The important structural fact: **these two halves have very different odds.** The SDK is a proven category; the ecosystem-subscription marketplace is the moonshot.
+
+**The founders — genuinely experienced, not first-timers**
+
+- **Luke + Jennifer Richey** (CEO/COO, married co-founders): previously founded **Gravity Jack** (2009), an AR company that did **$22M+ cumulative revenue** over its life, ~$23M valuation, with Fortune 500 + government clients (Ford, Intel, NASA) plus a patent-licensing division and a crowdfunded game. Read that carefully: $22M *cumulative over ~15 years* is a solid, durable services/IP business... it is **not** a venture rocket or a big exit. It tells you they can build a real company and survive, and that they lean agency/IP/mission rather than hypergrowth. That's a meaningful signal about the *shape* of outcome to expect.
+- **Craig Fryar** (CTO): data/analytics leader, ex-**Tableau** (Global Director, Enterprise Strategy) and ex-**Wargaming.net** (World of Tanks — one of the most successful F2P gaming companies) as Chairman/CDO. This is a genuinely strong, credible gaming-data hire. He knows F2P monetization and analytics at scale, which is exactly the hard part of the ecosystem model.
+
+Net read on the team: **above-average execution capability, credible domain fit, but a track record that points to a mid-size durable outcome rather than a $100M rocket.** That's not a knock... it's actually well-matched to the safety-infra opportunity.
+
+**Market context (matters a lot)**
+
+Trust & safety in gaming is a real, funded, regulation-driven market right now: UK Online Safety Act, EU DSA, KOSA, age-verification mandates. Comparable companies are real businesses: Modulate (ToxMod), ActiveFence (acquired Spectrum Labs), GGWP, Hive, Two Hat (acquired by Microsoft/Xbox). So the SDK half sits in a category that *demonstrably* produces multi-million-dollar companies. The headwind: it's **crowded**, and Discord/Roblox/Xbox increasingly build safety in-house.
+
+**Likelihood of $1M revenue (~2-3 yr horizon): I'd put it around 45-60%.**
+Reasoning: if they sell the safety SDK B2B (per-seat / per-MAU to developers and platforms), $1M ARR is a very reachable milestone in a tailwind market with a credible team. The main thing that *lowers* it: if they over-index on the novel ecosystem-subscription marketplace, which has a brutal two-sided cold-start problem (need indie devs *and* paying players simultaneously), the road to first $1M gets much longer. Founders who've survived one company before are more likely to find the sellable wedge. Call it a coin-flip-plus.
+
+**Likelihood of $10M revenue (few-year horizon): I'd put it around 8-18%.**
+Reasoning: $10M ARR is a genuine venture-scale outcome that the large majority of startups never reach. Two paths get there: (a) the ecosystem subscription model actually works at scale — low probability, unproven model, hard consumer-subscription sell across indie titles whose own monetization is famously weak; or (b) they become a category-leading B2B safety vendor — possible but against well-funded incumbents and platform in-housing. No disclosed large VC round means they likely lack the capital to buy the growth, which caps the fast path. Not impossible, especially with Fryar's F2P chops and regulatory tailwind... but "within a few years" makes it a low-teens bet, not a base case.
+
+**What this means for your equity — the part that actually hits your bank account**
+
+Your instinct that they *could* reach $10M/yr isn't crazy; the issue is that **$10M revenue ≠ your payout**, and the two ways you'd get paid are very different:
+
+- **Equity (illiquid, exit-only):** at $10M revenue, a safety SaaS might carry a ~3-5x revenue enterprise value = ~$30-50M. **0.5% = ~$150-250k on paper; 1.0% = ~$300-500k** — *before* dilution from future raises and *before* liquidation preferences, and only realized on an acquisition/IPO that may never come. At $1M revenue, the equity is essentially nominal.
+- **Revenue-share (cash, if it stays private):** this is the more tangible near-term value and the one you flagged. But "0.5% founder package → likely revenue share if private" is doing a *lot* of undefined work. Revenue-share on *what* — gross, net, distributed how often, decided by whom, does it survive new investors? At $10M revenue, even a 0.5% *revenue* share = ~$50k/yr; that's real, but it must be written down precisely or it's worth zero.
+
+So the assessment *reinforces* the negotiation posture from the last cycle rather than changing it: **the expected value of the equity is real but modest and heavily back-loaded, so it cannot be vague.** Push for 1.0%, and — given the Richeys' history points to a "stays-private, profitable, mid-size" outcome more than an acquisition — **weight the revenue-share definition at least as heavily as the equity percentage**, because in the most likely good scenario (private + profitable, no exit) the revenue-share is the only thing that pays you. If they'll define the revenue-share mechanics crisply and put 1.0% on paper, that's genuine upside on top of a credible team. If they keep it hand-wavy, treat the equity as ~$0 and let Acadian's $208-225k cash win.
+
+*Sources: [haiven.gg](https://haiven.gg/), [Child Safe Tech Alliance profile](https://www.childsafetechalliance.org/blog/designing-safety-from-the-start-how-haiven-is-reimagining-gaming-for-kids), [Luke Richey LinkedIn](https://www.linkedin.com/in/lukerichey/), [Craig Fryar LinkedIn](https://www.linkedin.com/in/craigfryar/), [Gravity Jack / Spokane Journal](https://www.spokanejournal.com/articles/15619-gravity), [Gravity Jack Crunchbase](https://www.crunchbase.com/organization/gravity-jack). Company financials/funding are not publicly disclosed; revenue-model details are drawn from Haiven's own and the Child Safe Tech Alliance's descriptions.*
+<!-- agent:boundary:f1787e6d -->
 <!-- /agent:exchange -->
 
 ## Queue

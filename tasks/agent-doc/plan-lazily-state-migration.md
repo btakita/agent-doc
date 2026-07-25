@@ -261,8 +261,20 @@ only *fail closed* (today) or *make it idempotent first*.
   `Command::current_dir`. Repro: kill the project controller, then run any
   controller-dependent command. This is install-triggered, so an install-heavy
   dogfooding session self-inflicts it — it is why a project can go dead right after a
-  fix lands. Not a Lazily-state item; fix the root plumbing (and make
-  `project_root_or_cwd` reject an empty explicit root) separately.
+  fix lands. Reproduced three times on 2026-07-25, once per `make install`; each
+  needed a manual `controller serve` to clear, and one occurrence broke a
+  *concurrent* operator session's Run Agent Doc (`command-plane editor_route request
+  failed via .agent-doc/controller.sock: No such file or directory`).
+
+  **Do not "fix" this by hardening `project_root_or_cwd` alone — that is unproven.**
+  `admin inspect` resolves its root via `project_root_for_target_or_cwd(None,
+  Some(document))`, which should already yield the real root, so the empty value may
+  instead come from a stored bootstrap/status record consulted during relaunch. One
+  discriminating experiment settles it: with the controller down, run
+  `agent-doc admin inspect --project-root <explicit root> <FILE>`. Still failing with
+  the empty root exonerates the resolver and points at persisted launch state;
+  succeeding means the resolver seam is the cause and rejecting an empty explicit
+  root there is the fix. Not a Lazily-state item.
 - External `tmux send-keys Enter/C-m` cannot submit a route-owned pane's Claude
   composer (supervisor runs the harness in an inner PTY); operator recourse is
   manual keyboard — undercuts unattended recovery. (Mostly moot given the item
@@ -345,8 +357,18 @@ backlog id per phase; do not touch fixed-seed fuzz.
   why `delivery_convergence_witness_for_file` returns `Option` instead of defaulting:
   a suppression key must never be invented for a document the caller cannot observe.
 
-  **Still open in Phase 1:** the controller-side await that lets W6/W8/compact consume
-  the witness cross-process; W7 needs the editor `save_document` disk-flush result
+  **Landed 2026-07-25 — the cross-process convergence await + W6.** The correction
+  above is now implemented: `delivery_convergence_await` publishes convergence once
+  from the process that owns the hub (a single in-memory poll there replacing N
+  filesystem re-reads in each CLI — rubric #3), and `DeliveryConvergenceStatus`
+  carries an explicit `observed` flag so a controller hosting no hub for the document
+  says so immediately instead of waiting out the deadline or claiming convergence.
+  W6 (compact commit-observe) now waits on that fact for its backoff window rather
+  than sleeping it blindly, and falls back to the previous blind sleep whenever no
+  controller or hub can answer, so the loop stays fail-open.
+
+  **Still open in Phase 1:** W8 (compact CRDT-merge converge retry) can now consume
+  the same await; W7 needs the editor `save_document` disk-flush result
   published once (a genuine OS boundary, rubric #3 — do not fold it into the
   convergence cell, and note its current 1s/20ms disk poll is already the
   single-consumer effect-source shape, so the win there is small); W3 and W4 follow

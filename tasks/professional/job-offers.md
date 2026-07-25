@@ -340,12 +340,31 @@ Craig's email is the best development yet... and it contains one detail that qui
 **The Acadian ask: added to the recruiter draft.** A short paragraph now asks for "either a small signing bonus or an advance on the first invoice cycle," framed as a transition cash-flow bridge and explicitly not a deal-breaker. For a staffing/EOR seat a signing bonus is uncommon but an invoice advance is a payroll-mechanics question PGC can often accommodate... low-risk ask either way, and it signals you're close to accepting, which is fine given the Sunday timeline.
 
 **Updated next 24 hours** (tracked as `#haivensend` and `#acadiansend`, both operator sends): send the revised Haiven reply today (`tasks/recruit/haiven/compensation-reply-draft.md`... now a direct reply to Craig's email, deadline paragraph included), send the Acadian questions (`tasks/recruit/acadian/recruiter-questions-draft.md`), and let both responses land before Sunday evening. The decision gate is unchanged in shape, with one sharpened criterion: **Craig's written definition of the Founder's Package is now the pivotal input**... a concrete options grant with clean terms keeps Haiven fully in the game; anything hand-wavy about "Founder's Pack participation" means the equity is marketing, and Acadian wins on the numbers you already have.
-<!-- agent:boundary:553366b5 -->
+What are "fully diluted shares"?
+
+### Re: fully diluted shares — fable
+
+> **Queue prompt:**
+>
+> do [#fullydilutedshares]
+
+
+**Fully diluted shares** = the total share count you'd get if every option, warrant, SAFE/convertible note, and reserved-but-unissued option-pool share were exercised or converted into actual stock... not just the shares currently issued and sitting on the cap table today.
+
+Why it's the number that matters here: a "1.0%" offer means nothing until you know 1.0% *of what*. There are two honest ways to quote it, and they give very different answers:
+
+- **% of shares outstanding** — only counts stock already issued. Smaller denominator, so the same grant looks like a bigger percentage.
+- **% on a fully-diluted basis** — counts outstanding shares *plus* the full option pool (including the unallocated reserve), *plus* all SAFEs/notes as if converted. Bigger, more honest denominator. This is standard market practice for quoting founder/employee equity, which is why the draft asks Craig to define the grant "on a fully-diluted basis" instead of accepting a bare percentage.
+
+Concretely: if Haiven has 10M shares outstanding but 13M fully diluted (after a 20% option pool + existing SAFEs convert), then "1.0%" means 100,000 shares if he's quoting outstanding vs. 130,000 shares if he's quoting fully-diluted... same headline number, real difference in what you actually own.
+
+One thing fully-diluted-*today* does **not** protect you from: future dilution. It fixes the denominator as of now, but the next funding round (their still-unraised other half of Seed) issues new shares and dilutes everyone, including you, unless the grant carries anti-dilution/pro-rata protection... which it almost certainly won't at this stage. That's consistent with the EV math already in this doc: even a good outcome dilutes a 1.0% grant down to something like 0.3-0.5% by the time it's worth anything. So "fully diluted" tells you Craig isn't lowballing the *current* percentage; it doesn't promise the percentage stays that size.
+<!-- agent:boundary:701c844f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority -->
+<!-- agent:queue priority start -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -372,4 +391,5 @@ Craig's email is the best development yet... and it contains one detail that qui
 - 2026-07-25 [#reassessopusanswers] Please reassess Opus' answers. What do you think the likelihood to reach $100M ARR?
 - 2026-07-25 [#haivenask] #haivenask Draft the Haiven compensation reply (equity-forward frame: base $180-185k anchor $190k + signing $20-25k + 1.0% primary equity ask with clean terms; cash parity with $208k+ alternative explicitly not expected) as an email/message draft for review
 - 2026-07-25 [#ipcarveout] Prepare an open-source IP carve-out exhibit (lazily, tsift, agent-doc, patchboard, tmux-router, corky, etc.) to attach to whichever agreement is signed
+- 2026-07-25 [#fullydilutedshares] What are "fully diluted shares"?
 <!-- /agent:done -->

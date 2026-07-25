@@ -40,11 +40,29 @@ done
 Compacted content:
 - Archived 14 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #retentionwatermarklive; #fmgcverify; 11 more
 - Prior summary/context: prior compacted content: Archived 28 response topic(s): #patchretryidem; #hvw0; #bbpe; 25 more
-<!-- agent:boundary:c906846b -->
+
+### Re: do #missingreplicarebuild — opus-5
+
+**Done — but the item needed correcting first.** `#missingreplicarebuild` was **not in this document's backlog**. It lives only in `tasks/agent-doc-bugs2.done.md` (3 hits, archived in `c55019849`), so it was filed as complete while only half the work had landed.
+
+*Half already done:* the corruption vector — adopting stale disk under a live editor — is closed. `resolve_editor_unavailable_disk_read_fallback` re-runs `decide_authority_recovery` before any descent and bails with `invariant=attached_editor_never_descends_to_disk`. That refusal is exactly the "Lazily still reports the editor open, so disk is not consulted as a fallback" message seen live today.
+
+*Half missing:* on `missing_replica` exhaustion it failed closed **without ever asking the plugin to rebuild** (`rebuild_after_retry_exhaustion` was hardcoded to `reason == "sync_pending"`). So an operator whose editor was attached-but-not-answering had no in-binary recovery and had to restart the IDE — precisely what happened this session. It now asks once at the exhaustion boundary, then fails closed as before. Disk is still never adopted while the editor is open.
+
+The witness latch is the fix, not an optimization: missing-replica was excluded from Tier 1 for a measured ~28s per read site, and one compact/commit performs several resolutions. `claim_terminal_missing_replica_rebuild` grants at most one attempt per `EditorReplicaLivenessWitness`, re-arming only when a registration changes — no timer. Separate memo from the upstream self-heal so neither suppresses the other. `make check` 8015. Commit `993c76c3c`.
+
+**Preflight deferral churn (W3).** Quantified before fixing: 20 consecutive `preflight_visible_mutation_deferred_lazily_current`, all `state=delivery_pending`, mean 12.1s, 242s total. The settle loop polls at 100ms and each tick is a controller round trip recomputing the full current text — ~120 full-text round trips per 12s deferral on an 82KB file. It now parks on the delivery-convergence fact, returning the instant convergence lands; other blockers keep the plain poll. Commit `5b0af79ca`, `make check` 8014. This lowers the cost of waiting; it cannot make a non-ACKing replica converge.
+
+**Why job-offers never converges — root cause found.** The liveness plane holds **two** registrations for `job-offers.md`: `jetbrains-6206-…` and `jetbrains-1264567-…`. `pid 6206` is the pre-restart IDEA and is **dead** (`kill -0` confirms); `1264567` is live. `delivery_converged` folds over all *live* members having empty pending queues, so a ghost peer that can never ACK makes convergence unreachable. This is why restarting the IDE did not help — the restart **added** a registration instead of replacing one. Restarting again will likely add a third. Filed `#ghostregreap`; Phase 0's `73e489aab` reaps ghost liveness from the process-exit watcher, but that reap is not reaching reliable-sync editor *registrations*.
+
+Also filed `#steergateidle`: requiring an active turn for selected-text steering is the wrong gate (an idle pane should dispatch the selection, not error), and the `actor_state="ready"` classification was itself wrong — corroborated by repeated 5s controller-response timeouts in the same window, i.e. a failed read reported as authoritative instead of failing closed.
+<!-- agent:boundary:68d63556 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#ghostregreap]
+- do [#steergateidle]
 - ~~/goal do tasks/agent-doc/plan-lazily-state-migration.md~~
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
@@ -81,6 +99,8 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#ghostregreap] #agent-doc-bug A dead editor registration survives an IDE restart and pins delivery_converged=false forever. Live evidence 2026-07-25 on job-offers.md: the plane held BOTH jetbrains-6206-... (pid 6206, pre-restart IDEA, confirmed dead via kill -0) and jetbrains-1264567-... (live). delivery_converged folds over ALL live members' pending queues, so a ghost peer that can never ACK makes convergence unreachable — why restarting the IDE did not help (it ADDED a registration rather than replacing one) and why preflight logged 20+ consecutive state=delivery_pending deferrals (mean 12.1s, 242s total). Phase 0's 73e489aab reaps ghost liveness from the process-exit watcher; that reap is not reaching reliable-sync editor REGISTRATIONS. Fix: treat a registration whose pid fails a liveness check as not-live in the convergence fold, and reap it when a new pid registers for the same document. Regression: two registrations for one document, one dead pid, must fold to converged.
+- [ ] [#steergateidle] #agent-doc-bug Selected-text turn steering is gated on an active turn and rejects otherwise ('requires the authoritative pane to have an active turn (actor_state=ready)'). Both halves are wrong per operator: (a) an active turn should not be required — an idle pane should dispatch the selection as a normal trigger, not error; (b) detection was incorrect, a turn WAS active while it reported ready. (b) is corroborated by repeated 'timed out after 5.0s waiting for project controller response' on admin inspect in the same window, so a failed actor-state read may be surfacing as authoritative 'ready'. Fix both: idle becomes a dispatch path, and a failed read fails closed or retries instead of reporting ready. Related #selectedturnsteering.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 ### Re: #bbpe — gpt-5
 

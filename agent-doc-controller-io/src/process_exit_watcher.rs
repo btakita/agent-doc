@@ -21,11 +21,24 @@
 //! per-OS *event* primitives remain a latency optimization that can drop in behind the
 //! same [`ProcessExitWatcher`] seam later without touching any consumer.
 //!
+//! ## The polled set is derived, not tracked (`#ghosteditorliveness`)
+//!
+//! This watcher keeps **no private `watch()`ed set**. Every pid the reactive
+//! `editor_attach` authority ever attaches is, by construction, one it read out of the
+//! reliable-sync liveness plane's open-set (`mark_editor_attach_open` in
+//! `agent-doc-crdt-relay-io` seeds `attach()` *from* `open_pids().filter(pid_alive)`). So
+//! the plane's `all_open_pids().filter(pid_alive)` is always a superset of any tally a
+//! private `watch()` set could hold — and, unlike a private set, it survives a controller
+//! recycle (durable hydration repopulates it) and cannot drift under a register/deregister
+//! storm. Deriving the poll candidates directly from that single plane projection is what
+//! deletes the drift class: there is no second set to fall behind. `watch`/`unwatch` on this
+//! OS impl are therefore inert (the trait still carries them for the SimWorld fake, which
+//! records pids for its own assertions).
+//!
 //! The poller runs on a dedicated background thread owned by the project controller; the
 //! authority gate never blocks on it. Tests never install this watcher — they install a
 //! fake one and drive synthetic exit events (see `editor_attach`'s SimWorld tests).
 
-use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,38 +47,36 @@ use std::time::Duration;
 
 use agent_doc_document_realtime::editor_attach::{ProcessExitWatcher, editor_attach};
 
-/// How often the poller re-checks each watched pid. Bounds crash-detection latency; the
+/// How often the poller re-checks each candidate pid. Bounds crash-detection latency; the
 /// authority hot path stays reactive and never waits on this.
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 /// The controller-owned OS process-exit watcher. Installed once on the process-global
-/// [`editor_attach`] registry at controller startup.
-pub struct OsProcessExitWatcher {
-    watched: Arc<Mutex<HashSet<u32>>>,
-}
+/// [`editor_attach`] registry at controller startup. Stateless: the polled candidate set
+/// is derived on each tick from the reliable-sync liveness plane, never from a private
+/// tally (`#ghosteditorliveness`; see the module docs).
+pub struct OsProcessExitWatcher;
 
 impl OsProcessExitWatcher {
     /// Spawn the background poller thread and return the watcher handle. The thread runs
     /// for the lifetime of the controller process (it exits when the process does).
     pub fn new(project_root: PathBuf) -> Self {
-        let watched: Arc<Mutex<HashSet<u32>>> = Arc::new(Mutex::new(HashSet::new()));
-        let thread_watched = Arc::clone(&watched);
         thread::Builder::new()
             .name("agent-doc-process-exit-watcher".to_string())
-            .spawn(move || run_poll_loop(thread_watched, project_root))
+            .spawn(move || run_poll_loop(project_root))
             .expect("spawn agent-doc process-exit watcher thread");
-        Self { watched }
+        Self
     }
 }
 
 impl ProcessExitWatcher for OsProcessExitWatcher {
-    fn watch(&self, pid: u32) {
-        self.watched.lock().insert(pid);
-    }
+    /// Inert: the poll candidates are derived from the liveness plane, which
+    /// `attach()` has already seeded, so there is nothing to record here.
+    fn watch(&self, _pid: u32) {}
 
-    fn unwatch(&self, pid: u32) {
-        self.watched.lock().remove(&pid);
-    }
+    /// Inert: the liveness plane's `Close`/`Alive(false)` fact removes a pid from the
+    /// derived candidate set on its own; there is no private set to prune.
+    fn unwatch(&self, _pid: u32) {}
 }
 
 /// Install the OS process-exit watcher on the process-global editor-attachment registry.
@@ -75,21 +86,21 @@ pub fn install_process_exit_watcher(project_root: PathBuf) {
     editor_attach().install_watcher(Arc::new(OsProcessExitWatcher::new(project_root)));
 }
 
-fn run_poll_loop(watched: Arc<Mutex<HashSet<u32>>>, project_root: PathBuf) {
+fn run_poll_loop(project_root: PathBuf) {
     loop {
         thread::sleep(POLL_INTERVAL);
-        // The explicitly-`watch()`ed set is only ever seeded by live attach events
-        // in *this* process. It is empty after a fresh controller hydration and can
-        // drift from the liveness plane's open-set under a plugin register/deregister
-        // storm. Union it with every pid the plane itself still counts as
-        // open-and-alive so a crashed editor whose terminal `Alive{false}` was never
-        // published — e.g. one restored by durable hydration on controller restart —
-        // is still polled for death. Without this the ghost pid stays
-        // `pid_alive == true` forever (`pid_alive` presumes alive absent a death
-        // fact), holding `live_editors >= 1` and wedging every disk-authority resolve
-        // in an unrecoverable authority/disk-divergence loop (`#ghosteditorliveness`).
-        let mut candidates: HashSet<u32> = { watched.lock().iter().copied().collect() };
-        candidates.extend(plane_open_alive_pids());
+        // The poll candidates are the liveness plane's own open-and-alive set — the
+        // single authority. Because `editor_attach` only ever attaches pids it read
+        // out of this plane (`mark_editor_attach_open` seeds `attach()` *from*
+        // `open_pids().filter(pid_alive)`), the plane is always a superset of any
+        // private `watch()` tally. It also survives a controller recycle (durable
+        // hydration repopulates it) so a crashed editor whose terminal `Alive{false}`
+        // was never published is still polled for death. `pid_alive` presumes alive
+        // absent a death fact, so a stale ghost stays `pid_alive == true`, holding
+        // `live_editors >= 1` and wedging every disk-authority resolve until this poll
+        // reaps it (`#ghosteditorliveness`). Deriving from the plane instead of a
+        // private set is what deletes that drift class.
+        let candidates: HashSet<u32> = plane_open_alive_pids().into_iter().collect();
         for pid in pids_to_reap(&candidates, process_is_live) {
             // OS-observed exit → drive the reactive `alive` cell closed. Every
             // document that pid owned recomputes to detached.
@@ -97,9 +108,9 @@ fn run_poll_loop(watched: Arc<Mutex<HashSet<u32>>>, project_root: PathBuf) {
             // Sidecar-retirement Phase 3C: also write the reliable-sync
             // `Alive{false}` so the shadow liveness plane cascades the same
             // crash demote and the death fact is durably persisted (survives the
-            // next controller hydration).
+            // next controller hydration). This also drops the pid from the plane's
+            // open-and-alive set, so the next tick no longer lists it as a candidate.
             crate::project_controller::record_reliable_sync_editor_exit(&project_root, pid as u64);
-            watched.lock().remove(&pid);
         }
     }
 }
@@ -107,10 +118,10 @@ fn run_poll_loop(watched: Arc<Mutex<HashSet<u32>>>, project_root: PathBuf) {
 /// Every pid the reliable-sync liveness plane still counts as open-and-alive,
 /// across all documents, narrowed to the `u32` OS-pid width. This is the plane's
 /// own view of "who might be a live editor" — the exact set whose staleness
-/// produces the `#ghosteditorliveness` wedge — so polling it for death closes the
-/// gap between the plane's open-set and the watcher's `watch()`ed set. A plane
-/// `Pid` (u64) that does not fit `u32` cannot be a real OS pid; it is dropped
-/// rather than reaped (conservative: never demote what we cannot prove dead).
+/// produces the `#ghosteditorliveness` wedge — and it is the watcher's **sole**
+/// source of poll candidates: there is no private `watch()`ed set to fall behind
+/// it. A plane `Pid` (u64) that does not fit `u32` cannot be a real OS pid; it is
+/// dropped rather than reaped (conservative: never demote what we cannot prove dead).
 fn plane_open_alive_pids() -> Vec<u32> {
     let plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
     let projection = plane.projection();
@@ -210,5 +221,21 @@ mod tests {
         let candidates: HashSet<u32> = [1, 2, 3].into_iter().collect();
         let reaped = pids_to_reap(&candidates, |_| true);
         assert!(reaped.is_empty(), "no live pid is ever reaped: {reaped:?}");
+    }
+
+    #[test]
+    fn os_watcher_holds_no_private_watched_set() {
+        // `#ghosteditorliveness` guard: the OS watcher must derive its poll
+        // candidates solely from the reliable-sync liveness plane, never from a
+        // private `watch()`ed tally that can drift from the plane's open-set. A
+        // zero-sized watcher is the structural proof that no such field crept back
+        // in. If a future edit reintroduces a `HashSet`/`Mutex` tally as authority,
+        // this size assertion fails and forces the derive-from-plane rule back.
+        assert_eq!(
+            std::mem::size_of::<OsProcessExitWatcher>(),
+            0,
+            "OsProcessExitWatcher must stay stateless; the poll candidate set is \
+             derived from the liveness plane, not from a private watch() tally"
+        );
     }
 }

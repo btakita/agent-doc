@@ -69,17 +69,46 @@ One of ten phases is done, not all of them. `#lzcsconcurrency` — rows 5 and 6 
 56 tests, format clean, CI green on lazily-cs and lazily-spec. Coverage rows 5 and 6 flipped, nine sibling READMEs regenerated one commit per repo, superproject gitlinks committed.
 
 **What is left.** `#lzcscollections` `#lzcsstatechart` `#lzcsqueues` `#lzcscrdt` `#lzcsipc` `#lzcssync` `#lzcstemporal` `#lzcscluster` `#lzcsplane` `#lzcspackage`, in `tasks/software/lazily-cs-parity-plan.md`. Each is at least the size of the one just finished — collections is larger — and each ends the same way: its corpus replays with an empty ledger, or the row does not flip. Collections is next.
-<!-- agent:boundary:5ae07efb -->
+
+### Re: queue + backlog attributes — opus-5
+
+Three of your four tokens are real; one is ignored, and the whole thing is inert right now for a reason that is not in either marker.
+
+**`&lt;!-- agent:backlog priority queue --&gt;` — both valid.** Bare `queue` is the backlog→queue sync attribute in **append** mode (`queue=sync|append|prepend` are the explicit forms). Bare `priority` stable-sorts backlog items by their per-item `priority=<1..9>` token before the sync, and — because this backlog is *also* `queue`-tagged — additionally runs the synced queue through the priority/auto-DAG recompute, so an append-built queue is reordered immediately.
+
+**`&lt;!-- agent:queue preset="#spec-test-commit-push" priority queue --&gt;` — `preset` and `priority` are valid; the trailing `queue` is not.** `queue` is only meaningful on `agent:backlog`/`pending`. On `agent:queue` it is not a recognized key, so preflight warns `misplaced_component_attr` and ignores it — no mutation, but it will warn every cycle until you delete that one token. Drop it and keep `&lt;!-- agent:queue preset="#spec-test-commit-push" priority --&gt;`.
+
+**Nothing is queued, and the markers are not why.** Preflight reported `queue: held 11 backlog id(s) out of explicitly stopped queue binding`. Frontmatter carries `queue: stop`, which resolves the sync policy to `ExplicitlyStopped` and holds every active backlog id out of the mirror. Separately, even without `stop`, the `queue` attribute only *populates* the queue — it never starts the loop. To start it, set frontmatter `queue: start` (alias `go`), or put the `start`/`go` control on the `agent:queue` marker.
+
+**What it will do once started.** All 11 open backlog items sync in as `do [#id]`, in document order, then get the priority recompute. No item carries a `priority=<1..9>` token, so document order stands and the head is `#lzgoerrorretry` — the lazily-go `Error → Computing` spec disagreement — with `#lzcscollections` second. If you want collections first (the exchange says "collections is next"), either move it to the top of the backlog or give it `priority=1`; append-stability means backlog-sourced items land as a group behind any manual queue lines, so the ordering is decided in the backlog, not the queue.
+
+**One thing I am deliberately not touching.** Preflight also flagged a stale `agent-doc` install: the running binary is missing three committed changes, newest `c29e32b7f feat: rebuild request as an Effect over a signal (Tier 2)`. Those commits belong to the concurrent agent-doc session on another pane, and `tasks/agent-doc/agent-doc-bugs2.md` is foreign-owned by pane %1. Building that tree from this document would race a session mid-change, so I left it. That session owns its own `make install`.
+
+**No new backlog items this cycle.** This turn produced no actionable follow-up work of its own — the eleven lazily-cs phases already in `agent:backlog` are the whole remaining plan, and the two things to change (`queue: stop` → `start`, delete the stray `queue` token) are operator marker edits, not tracked work.
+
+Say the word and I will flip `queue: start`, remove the stray `queue` token, and drain — but the drain is ten multi-repo phases with commits and pushes under `#spec-test-commit-push`, so I want the go from you rather than inferring it from an attribute edit.
+<!-- agent:boundary:b9ff7b5f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
+<!-- agent:queue preset="#spec-test-commit-push" priority queue -->
+- do [#lzgoerrorretry]
+- do [#lzcscollections]
+- do [#lzcsstatechart]
+- do [#lzcsqueues]
+- do [#lzcscrdt]
+- do [#lzcsipc]
+- do [#lzcssync]
+- do [#lzcstemporal]
+- do [#lzcscluster]
+- do [#lzcsplane]
+- do [#lzcspackage]
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog -->
+<!-- agent:backlog priority queue -->
 - [ ] [#lzgoerrorretry] lazily-go: an async slot in Error serves the stored error forever, but docs/async.md § Async slot state machine lists `Error → Computing` — "get_async retry after an error". lazily-cs follows the spec; either lazily-go is a finding or the spec sentence is wrong. Decide in lazily-spec first, then fix whichever side loses
 - [ ] [#lzcscollections] lazily-cs: SlotMap / ThreadSafeSlotMap / AsyncSlotMap materialization, ReactiveMap (CellMap/SlotMap), CellTree + reconcile, SemTree, stable-id alignment; replay collections + materialization + familysync corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 1-4, 9-11)
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)

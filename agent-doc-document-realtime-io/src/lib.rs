@@ -5241,6 +5241,41 @@ fn clear_editor_replica_self_heal_exhausted(file: &std::path::Path) {
     EDITOR_REPLICA_SELF_HEAL_EXHAUSTED.lock().remove(file);
 }
 
+/// Files whose terminal missing-replica plugin rebuild has already been asked
+/// for, remembered against the liveness witness current when it was asked.
+///
+/// Separate from [`EDITOR_REPLICA_SELF_HEAL_EXHAUSTED`] on purpose: that memo
+/// guards the upstream re-registration loop, this one guards the single
+/// last-chance rebuild below it. Sharing one map would let either recovery
+/// suppress the other.
+static MISSING_REPLICA_TERMINAL_REBUILD_ASKED: std::sync::LazyLock<
+    Mutex<std::collections::HashMap<std::path::PathBuf, EditorReplicaLivenessWitness>>,
+> = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// Claim the one terminal rebuild attempt for `file` at the current witness.
+///
+/// Returns `true` at most once per liveness witness. This is the whole reason
+/// missing-replica can afford a rebuild here at all: a single compact/commit
+/// performs several resolutions, and paying the rebuild at each of them is the
+/// measured ~28s-per-read-site regression that made missing-replica ineligible
+/// for the Tier 1 rebuild above. Latching on the witness — not a clock — means
+/// the attempt re-arms the instant a registration actually changes.
+fn claim_terminal_missing_replica_rebuild(
+    file: &std::path::Path,
+    witness: &EditorReplicaLivenessWitness,
+) -> bool {
+    let mut asked = MISSING_REPLICA_TERMINAL_REBUILD_ASKED.lock();
+    if asked.get(file).is_some_and(|recorded| recorded == witness) {
+        return false;
+    }
+    asked.insert(file.to_path_buf(), witness.clone());
+    true
+}
+
+fn clear_terminal_missing_replica_rebuild(file: &std::path::Path) {
+    MISSING_REPLICA_TERMINAL_REBUILD_ASKED.lock().remove(file);
+}
+
 fn reobserve_missing_editor_replica_with_reregistration(
     file: &std::path::Path,
     source: &str,
@@ -5643,6 +5678,112 @@ fn resolve_editor_unavailable_disk_read_fallback(
         }
     }
 
+    // `#missingreplicarebuild` — last chance before failing closed.
+    //
+    // The operator directive is: realtime model, then rebuild from the plugin,
+    // then disk. Missing-replica is excluded from the Tier 1 rebuild above
+    // because `reobserve_missing_editor_replica_with_reregistration` already
+    // refreshes it upstream. But when THAT exhausts, this path used to fail
+    // closed without ever asking the plugin to rebuild — leaving an operator
+    // whose editor is attached-but-not-answering no in-binary recovery at all,
+    // and forcing a manual IDE restart to re-register the replica.
+    //
+    // Ask exactly once, here at the exhaustion boundary, and only then fail
+    // closed. Disk is still never adopted while the editor is open — that
+    // invariant belongs to the descent decision below and is unchanged.
+    //
+    // The witness latch is what makes this affordable: the several resolutions a
+    // single compact/commit performs share ONE attempt instead of each paying
+    // the rebuild, which is the regression that made missing-replica ineligible
+    // above. It re-arms only when a registration actually changes.
+    if !rebuild_eligible && reason == "missing_replica" && observe_editor_open(file) {
+        let witness = editor_replica_liveness_witness(file);
+        if claim_terminal_missing_replica_rebuild(file, &witness) {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "realtime_doc_resolve_missing_replica_terminal_rebuild_attempt file={} \
+                     source={} reason={} precedence=editor_then_disk scope=once_per_witness",
+                    file.display(),
+                    source,
+                    reason,
+                ),
+            );
+            match ensure_document_model_through_authority(file, source) {
+                Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                    text,
+                    live_editors,
+                    delivery_converged,
+                }) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "realtime_doc_resolve_missing_replica_terminal_rebuilt file={} \
+                             source={} reason={} tier=editor_buffer live_editors={} \
+                             delivery_converged={}",
+                            file.display(),
+                            source,
+                            reason,
+                            live_editors,
+                            delivery_converged,
+                        ),
+                    );
+                    // The plugin answered: the editor tier is restored, so this
+                    // resolution never reaches the disk question at all.
+                    record_editor_relay_authority(file, source, &text);
+                    clear_terminal_missing_replica_rebuild(file);
+                    let reconciliation = Reconciliation {
+                        authority: agent_doc_document_realtime::DocAuthority::EditorBuffer,
+                        content: text,
+                        diverged: false,
+                        reason: "crdt_relay_current",
+                    };
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "realtime_doc_resolve authority={} reason={} diverged={} file={} \
+                             source=crdt_relay live_editors={} delivery_converged={} \
+                             recovery=missing_replica_terminal_rebuild",
+                            reconciliation.authority.as_str(),
+                            reconciliation.reason,
+                            reconciliation.diverged,
+                            file.display(),
+                            live_editors,
+                            delivery_converged,
+                        ),
+                    );
+                    return Ok(reconciliation);
+                }
+                Ok(other) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "realtime_doc_resolve_missing_replica_terminal_rebuild_incomplete \
+                             file={} source={} reason={} status={}",
+                            file.display(),
+                            source,
+                            reason,
+                            current_text_status(&other),
+                        ),
+                    );
+                }
+                Err(err) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "realtime_doc_resolve_missing_replica_terminal_rebuild_failed file={} \
+                             source={} reason={} error={}",
+                            file.display(),
+                            source,
+                            reason,
+                            format!("{err:#}").replace('\n', "\\n"),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
     // Tier 2 is reachable only after the editor is proven detached. A failed
     // rebuild while it remains open must not turn stale disk into current text.
     let descent_decision = decide_authority_recovery(AuthorityRecoveryFacts {
@@ -5775,6 +5916,52 @@ mod tests {
                 .map(|(pid, id, ts)| (*pid, (*id).to_string(), *ts))
                 .collect(),
         }
+    }
+
+    /// `#missingreplicarebuild` — the terminal rebuild is claimable exactly once
+    /// per liveness witness.
+    ///
+    /// This latch is the load-bearing part of the fix, not an optimization.
+    /// Missing-replica was excluded from the Tier 1 rebuild because paying it at
+    /// every read site measured ~28s per site, and a single compact/commit
+    /// performs several resolutions. Without the latch, re-enabling the rebuild
+    /// here would reintroduce exactly that regression — so the property under
+    /// test is that repeated resolutions at an UNCHANGED witness claim nothing,
+    /// while a genuine registration change re-arms it.
+    #[test]
+    fn terminal_missing_replica_rebuild_is_claimed_once_per_liveness_witness() {
+        let file = std::path::Path::new("/tmp/agent-doc-terminal-rebuild-claim.md");
+        clear_terminal_missing_replica_rebuild(file);
+        let observed = witness(true, &[(4242, "jetbrains-a", 1_000)]);
+
+        assert!(
+            claim_terminal_missing_replica_rebuild(file, &observed),
+            "the first resolution at a new witness must get the one attempt"
+        );
+        for _ in 0..5 {
+            assert!(
+                !claim_terminal_missing_replica_rebuild(file, &observed),
+                "later resolutions in the same compact/commit must NOT re-pay the \
+                 rebuild while nothing has changed"
+            );
+        }
+
+        // A re-registration is real evidence the replica may be back, so the
+        // attempt re-arms — no timer involved.
+        let rearmed = witness(true, &[(4242, "jetbrains-a", 2_000)]);
+        assert!(
+            claim_terminal_missing_replica_rebuild(file, &rearmed),
+            "a changed registration witness must re-arm the terminal rebuild"
+        );
+
+        // The two memos are independent: claiming the terminal rebuild must not
+        // suppress the upstream self-heal retry loop.
+        clear_editor_replica_self_heal_exhausted(file);
+        assert!(
+            !should_pause_editor_replica_self_heal(file, &rearmed),
+            "the terminal-rebuild latch must not leak into the upstream self-heal memo"
+        );
+        clear_terminal_missing_replica_rebuild(file);
     }
 
     /// The self-heal memo suppresses the retry loop only while the realtime

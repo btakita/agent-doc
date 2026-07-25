@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -569,7 +569,7 @@ I forgot to mention AI harness tooling for SDK development. This is a valid part
 **AI harness tooling (LiveKit-Agents-style): yes, it's a real part of the SDK story — and it slots into the ladder, not the prototype.** The LiveKit analogy is apt and worth taking seriously: LiveKit's core SDKs are transport, but LiveKit Agents — the opinionated harness for running AI agents against their realtime infrastructure — became a major adoption driver in the AI wave. Haiven's equivalent is compelling because their domain makes agents first-class citizens: moderation/safety agents watching chat streams (which connects directly to your Roblox child-safety observation earlier in this doc), NPC conversationalists, and companion bots are all "participants" in a realtime chat session. Two scope points. First, it does NOT go in the 1-2 week prototype or the letter — same discipline as the multi-engine question; the letter's offer stays bounded. Second, it's actually an argument FOR the spec-first architecture you'd be selling: an agent harness is just another *client* of the same API surface — a headless, server-side "engine." If the spec and conformance fixtures are engine-neutral, the harness passes the same fixtures the Unity SDK does, which means the prototype's scaffolding validates the future AI layer for free. Where it earns a mention: the scope sketch when Craig says the word — as a named rung on the milestone ladder ("agent harness: server-side SDK + opinionated agent runtime, passing the same conformance suite"), positioned as the reason the API spec should define server-side event streams from day one. Recorded on `#sdkcontract`.
 
 Housekeeping: this cycle hit a preflight/write gate deadlock (drift guard vs already-committed gate) — recovered via `reset --from-current --preserve-session`; no text lost. One cosmetic artifact remains: a stray `92bcca70` line at the very end of the file (after `&lt;!-- /agent:done --&gt;`), a leaked boundary hash — safe for you to delete in the editor whenever convenient.
-❯ 🚧 "the repos are public if you want to kick the tires." Please link to the relevant lazily repos. Mention that I'm currently implementing lazily-cs...to prove the technique also works for conformance to C#...which Unity would use.
+❯ "the repos are public if you want to kick the tires." Please link to the relevant lazily repos. Mention that I'm currently implementing lazily-cs...to prove the technique also works for conformance to C#...which Unity would use.
 
 ### Re: lazily repo links + lazily-cs in the letter — fable
 
@@ -578,7 +578,7 @@ Done — the "kick the tires" sentence in `tasks/recruit/haiven/decline-draft.md
 I verified all four destinations are PUBLIC on GitHub before linking — including lazily-cs, whose repo description already reads well for this audience ("Lazy reactive primitives for C#/.NET... plus the lazily-spec wire protocol, CRDTs, and distributed plane"). The lazily-cs mention is a genuinely strong addition to the letter: it upgrades the prototype offer's central claim from "I've done this method in 8 languages" (impressive but engine-adjacent) to "I am doing it in C# right now" — direct evidence in the exact language the Unity integration would use, before Craig has said a word. It also quietly de-risks the 1-2 week estimate: the conformance technique's C# port is already underway, so the prototype starts warm, not cold. One caution kept in mind: the letter names three specific repos rather than dumping all twelve — spec and formal model are the two that prove the *method*, the org link covers breadth, and lazily-cs proves recency. No other letter changes.
 
 One-line status: exchange is at 552 lines / 24 sections (accretion warn, queue inactive) — compact when you opt in.
-❯ 🚧 Should we mention that I have experience applying the same patterns cross-language which includes Classes/Traits/Interfaces and other type constructs + Systems Languages/Garbage Collected languages + other language features?
+❯ Should we mention that I have experience applying the same patterns cross-language which includes Classes/Traits/Interfaces and other type constructs + Systems Languages/Garbage Collected languages + other language features?
 
 ### Re: #mentionexperienceapplyin cross-paradigm experience in the letter — fable
 
@@ -594,7 +594,20 @@ Why this form and not the full list (Classes/Traits/Interfaces, type constructs,
 The letter's credibility ladder in that paragraph is now complete and each rung is distinct: method (spec + formal model + conformance), breadth (8 language bindings, one org link), recency (lazily-cs in progress, in Unity's language), and coverage (both sides of the systems/GC divide, i.e. both engines). Recommend stopping here — a fifth credential sentence would tip the paragraph from receipts into selling.
 
 One-line status: exchange 561 lines / 25 sections (accretion warn); queue head #mentionexperienceapplyin closed with this response.
-<!-- agent:boundary:8042cdef -->
+Note that I can fully document the process + architecture + implementation details.
+Also, be respectful if they have other candidates in mind.
+Should I note that I'm not suggesting that we use Lazily...though it could be helpful (aside from the dependency)...but Lazily is an example of my work.
+
+### Re: reference game in the Unity prototype — fable
+
+**Yes to a runnable reference *scene*, no to a reference *game* — and your "'twould need a UI" instinct is exactly the reason.** A real reference game (gameplay, assets, menus) would spend the 1-2 week budget on Unity work that isn't SDK surface, and it shifts the perceived deliverable from "your SDK, validated" to "Brian's demo" — wrong emphasis for a handoff-designed offer. But shipping *nothing runnable* would be worse: for an SDK, the five-minute sample is the highest-leverage artifact — it proves the integration end-to-end against Haiven's live API, it's the thing Craig can run and show people, and it doubles as the quickstart doc. The right shape for a chat/presence SDK is a minimal demo scene: two clients join a room, presence indicators update, a chat panel works. The UI that requires is about a day of uGUI — a panel, not a game.
+
+**The demo-theater option, if you want more punch:** graft that scene onto a stock Unity starter template (third-person controller or similar free sample) so the demo *looks* like characters chatting in a game world without you building any gameplay. Cheap, looks great in a founder's investor demo, zero maintenance surface Haiven doesn't need. This mirrors how LiveKit/Photon ship examples: minimal rooms and scenes, never games.
+
+Note this doesn't grow the letter's scope at all — "sample" was already in the scope line; I sharpened the letter's private notes to pin it (`786d64e`): sample = minimal demo scene, optionally on a stock template, NOT a reference game. Your own letter edits (C++/Rust reorder, the new "discuss the shape of the api / begin implementing this week" closing) rode along in that commit — both read well, and the new closing is stronger: it converts "say the word" into a concrete next step with a this-week start.
+
+Two stray fragments sit at the very bottom of the document, outside all components: the leaked `92bcca70` hash line (from yesterday's wedge, still safe to delete) and `Twould need a/ui` — I read the latter as this prompt's companion thought and answered it above; delete both lines in the editor whenever convenient. Exchange is at 578 lines / 26 sections and the queue is inactive — say the word if you want `agent-doc compact` run on this doc. (Ops note: the shared controller crash-looped during this turn — the concurrent agent-doc dev session's controller-respawn work is the likely cause; this response landed on a retry.)
+<!-- agent:boundary:6bda3160 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -40,12 +40,12 @@ done
 Compacted content:
 - Archived 14 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #retentionwatermarklive; #fmgcverify; 11 more
 - Prior summary/context: prior compacted content: Archived 28 response topic(s): #patchretryidem; #hvw0; #bbpe; 25 more
-<!-- agent:boundary:673cf69c -->
+<!-- agent:boundary:c906846b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- /goal do tasks/agent-doc/plan-lazily-state-migration.md
+- ~~/goal do tasks/agent-doc/plan-lazily-state-migration.md~~
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
 - 📌 do [#60ev]

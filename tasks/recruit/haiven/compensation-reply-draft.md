@@ -28,15 +28,13 @@ Thank you for the transparency on the funding position... that kind of candor is
 exactly why this team is attractive, and congratulations on the seed progress and the
 path to the August beta.
 
-I want to be upfront about how I got to these numbers: I ran them against my other
-offer rather than picking a target cold, and I'm mindful that a half-raised seed means
-cash is the tight constraint right now. That's exactly why the ask below leans on
-equity and structure instead of cash parity... it's the minimum that makes the math
-work on my side, not an opening bid to negotiate down from.
-
-Here's where I need to be, stated plainly. My alternative is a contract seat that
-annualizes above $205k in cash. I'm not asking Haiven to match cash... I'm asking for a
-package where the equity and structure make the gap rational:
+I want to be upfront about how I got to these numbers, because I know an ask like this
+lands heavily on a seed-stage budget, and I don't make it lightly. My alternative is a
+contract seat that annualizes above $205k in cash. I sat down and ran the math on both
+paths honestly... and I'm mindful that cash is your tight constraint right now, which
+is exactly why this leans on equity and structure instead of asking you to match cash.
+This is the package where choosing Haiven becomes rational on my side of the ledger,
+not an opening bid:
 
 - **Base: $185,000**
 - **Signing bonus: $20,000** ... thank you for putting this on the table; a one-time
@@ -65,7 +63,11 @@ team, flexing around it.
 One timing note: I owe the other party an answer by Sunday evening. If you can respond
 on this framework by then... even informally... I can hold my decision open for you.
 
-Ready to move quickly.
+I'll be honest, Craig: I hope the math works, because I'd rather build with you. If
+parts of this framework don't fit where Haiven is right now, tell me which ones... I
+listed the pieces separately precisely so we can solve it together rather than
+trade ultimatums. However it lands, I'm grateful for how you've engaged through this...
+it says good things about the company you're building.
 
 Best,
 Brian
@@ -86,3 +88,9 @@ Brian
   weight equity at ~$0 and let the decision gate resolve to Acadian.
 - The IP carve-out exhibit lives at `tasks/recruit/ip-carveout-exhibit.md`; send Part 1
   + Part 2 when the offer letter arrives.
+- **Compassion calibration**: the email now acknowledges the ask lands heavily on a
+  seed budget, shows the math came from weighing the competing offer, and invites them
+  to counter on specific pieces. What it deliberately does NOT do: apologize for the
+  ask, pre-concede a number, or call the ask "flexible" as a whole. Empathy opens the
+  door to a collaborative counter; apology negotiates against yourself before they've
+  said a word. The floor in the notes above is unchanged.

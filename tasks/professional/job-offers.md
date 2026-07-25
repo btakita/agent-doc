@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -607,12 +607,12 @@ Should I note that I'm not suggesting that we use Lazily...though it could be he
 Note this doesn't grow the letter's scope at all — "sample" was already in the scope line; I sharpened the letter's private notes to pin it (`786d64e`): sample = minimal demo scene, optionally on a stock template, NOT a reference game. Your own letter edits (C++/Rust reorder, the new "discuss the shape of the api / begin implementing this week" closing) rode along in that commit — both read well, and the new closing is stronger: it converts "say the word" into a concrete next step with a this-week start.
 
 Two stray fragments sit at the very bottom of the document, outside all components: the leaked `92bcca70` hash line (from yesterday's wedge, still safe to delete) and `Twould need a/ui` — I read the latter as this prompt's companion thought and answered it above; delete both lines in the editor whenever convenient. Exchange is at 578 lines / 26 sections and the queue is inactive — say the word if you want `agent-doc compact` run on this doc. (Ops note: the shared controller crash-looped during this turn — the concurrent agent-doc dev session's controller-respawn work is the likely cause; this response landed on a retry.)
-<!-- agent:boundary:6bda3160 -->
+<!-- agent:boundary:c9d7a2e1 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority start -->
+<!-- agent:queue priority -->
 <!-- /agent:queue -->
 
 ## Backlog

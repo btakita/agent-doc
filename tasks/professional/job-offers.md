@@ -407,7 +407,24 @@ That position is coherent, and honestly it's where the accumulated analysis has 
 **The practical consequence: don't send an ask you've already decided to refuse.** Extracting a matched offer from a half-raised-seed CTO who engaged in good faith, then declining it, costs you goodwill and costs him board-facing effort... and gaming is a small world. So I drafted the second email: a warm, honest decline at **`tasks/recruit/haiven/decline-draft.md`** (commit `2521781`). It tells Craig the truth... the reason is time and betting on your own work, not money... notes Haiven deserves a founding engineer who can pour launch-crunch hours in, and deliberately leaves the door open (contract sprint on the SDK, realtime/CRDT consulting, October-launch well-wishes). Both emails now sit committed side by side; `#haivensend` is updated to "send exactly one, per your decision."
 
 **Where that leaves Sunday:** if the answer to question 3 is "no waver"... send the decline to Craig, tell the Acadian recruiter yes (the notice/billing/renewal questions in `tasks/recruit/acadian/recruiter-questions-draft.md` can ride along with the acceptance... they're confirmation hygiene, not conditions), and start sketching the 90-day patchboard milestone the evenings just bought. If there's any waver, send the compensation ask today as planned and let Craig's real numbers test you. Either way you're choosing from clarity now, not deadline pressure... which is what all of this was for.
-<!-- agent:boundary:69deb73f -->
+❯ 🚧 Should I mention that Acadian offered more money? I also don't want to make it seem that I was using Haiven for a higher bid.
+
+### Re: should the decline mention that Acadian offered more money? — fable
+
+**No number, no "more money" line... and the good news is the draft already threads this needle.** Here's the reasoning, split by which email you end up sending.
+
+**In the decline (the likely path): don't mention it.** Three reasons:
+
+1. **It muddies your true reason.** The honest cause is *time*... evenings for your own work. The moment the decline says "they offered more," Craig hears a money story, and money stories invite counters. You'd be opening the exact negotiation you decided not to have, in the same breath as declining it.
+2. **It reads as scorekeeping.** A departing candidate quoting the winning bid serves no purpose for the recipient... it can only make him feel outbid, which isn't true (you're declining *even if he matches*) and isn't kind.
+3. **Your worry about "using Haiven for a higher bid" is already structurally impossible... and the draft says so out loud.** That optics problem exists when someone extracts a counter-offer and shops it. You're doing the exact opposite: declining *without* extracting the counter. The draft's opening line... "I want to give it to you straight rather than negotiate toward an answer I'd already reached"... and its follow-up... "I ran the numbers carefully, and I believe you would have worked with me on the package"... tell Craig explicitly that this was never a bidding contest and that further negotiation wouldn't have changed the answer. That's the strongest possible protection against the perception you're worried about. No edit needed; the draft stands as committed.
+
+**If you waver and send the compensation ask instead:** the "$205k+ annualized" reference in that email is fine and should stay. Context: that's not shopping a bid... it's showing the math behind your number, which is transparency, not leverage. The sequence also protects you: Acadian's offer predates the Haiven negotiation, you never took a Haiven number back to Acadian, and you never will. "Using company A to bid up company B" requires a round trip; your information has only ever flowed one direction, with the math shown.
+
+One last calibration, since your instinct here is good: the fact that you're worried about *seeming* mercenary while literally leaving ~$20k+/year on the table to decline gracefully tells you the worry is about kindness, not optics. The kindest version of a "no" is clear, warm, and free of numbers... which is the draft you already have.
+
+No new follow-up items this cycle... both send-items (`#haivensend`, `#acadiansend`) already cover the remaining operator actions.
+<!-- agent:boundary:cd752d88 -->
 <!-- /agent:exchange -->
 
 ## Queue

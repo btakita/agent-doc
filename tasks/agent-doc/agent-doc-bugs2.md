@@ -72,7 +72,6 @@ Verification evidence:
 - The controller regression `state_subscribe_records_only_the_previously_applied_live_peer_cursor` covers apply-then-ACK wiring and exact live-registration retention input.
 - `gh run list --workflow CI --limit 1` reports the latest `main` CI run `30054083681` completed successfully.
 - Added the `#lazily-hot-path` rule to `src/agent-doc/AGENTS.md` so future ownership/CAS/lease/dedup work must use actor state and may not independently reload SQLite at the decision seam.
-- Added the `#lazily-hot-path` rule to `src/agent-doc/AGENTS.md` so future ownership/CAS/lease/dedup work must use actor state and may not independently reload SQLite at the decision seam.
 - `ResponseCaptured` now durably stores the sanitized typed closeout mutation plan. Recovery replays the normal write path with backlog edits, done/gate/review changes, and queue completion intent intact, while excluding runtime authority such as `force_disk`, lint overrides, and sibling commits.
 - State-fact producers route through the live actor. SQLite is only the actor-emitted durable fact sink and cold-start hydration path; a post-connect actor failure fails closed instead of bypassing the actor. `flock` remains only at controller bootstrap/explicitly actorless compatibility boundaries.
 - Foreground finalize claims ownership before `ResponseCaptured`, so captured-finalize recovery cannot race it and commit an incomplete response. Nested strict-write recovery reuses the outer local actor capability instead of competing with itself.
@@ -216,7 +215,25 @@ Verification:
 Pushed commits: agent-doc `731c45604` (`fix: converge editor state without tmux churn`) and superproject gitlink `9cc2fa328` (`chore: update agent-doc churn fixes`).
 
 Confidence: high. Escalation: none. This closes `#qactsync-live` and the observed churn scope; it does not claim the separate repository-wide remaining-flock migration is complete.
-<!-- agent:boundary:a5c42214 -->
+### Re: #qactsync-live and editor delivery feedback loop — gpt-5.6-sol
+
+There was one remaining editor-delivery feedback loop, and current live evidence shows it is fixed.
+
+The JetBrains pending-ACK planner could acknowledge the oldest retained delivery with an unrelated visible-content hash when none of the retained delivery frontiers matched. That false ACK caused controller rebootstrap and re-registration churn. JetBrains also rejected causally fenced remote deltas whenever the editor had unsaved changes, repeatedly retrying against the old editor baseline.
+
+The shipped JetBrains and VS Code plugins now have parity at the ACK boundary: neither publishes an ACK unless visible content matches a retained delivery frontier. JetBrains now applies causally fenced remote deltas to the unsaved editor in memory only, without a disk refresh, disk read, or save; the CRDT canonical remains the durable effect sink. VS Code already used the corresponding in-memory projection path.
+
+After the IDEA restart, reliable-sync status showed exactly one current JetBrains PID/editor identity for this document and no duplicate supervisor. The `agent-doc` and `stash` tmux windows remained at `239x52`, neither retained a local `window-size` override, and no new focus/layout effect appeared. The other route-owned supervisors are for different documents.
+
+Verification passed: focused JetBrains regressions, full JetBrains `test buildPlugin`, VS Code `npm test`, two full `make check` runs, and `git diff --check`. The matching JetBrains and VS Code packages are installed.
+
+Pushed commits:
+
+- agent-doc `c9cc2b8e4` (`fix: stop editor delivery rebootstrap loops`)
+- superproject gitlink `8800746a0` (`chore: update agent-doc editor convergence fix`)
+
+Confidence: high. This closes the observed plugin/tmux churn scope. It does not claim the separate repository-wide remaining-`flock` migration is complete.
+<!-- agent:boundary:a8e3cf9a -->
 <!-- /agent:exchange -->
 ## Queue
 

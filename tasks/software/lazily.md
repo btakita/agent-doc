@@ -105,14 +105,40 @@ Three of your four tokens are real, one was a lint-blocking typo that I removed,
 **No new backlog items this cycle.** Nothing actionable came out of this turn that is not already tracked — the eleven lazily-cs phases in `agent:backlog` are the whole remaining plan, and flipping `queue: stop` is an operator control, not tracked work.
 
 Give me the go and I will flip `queue: start` and drain. I am not inferring it from an attribute edit, because the drain is ten multi-repo phases that commit and push under your `#spec-test-commit-push` preset.
-<!-- agent:boundary:78fc800f -->
+
+### Re: async Error → Computing — opus-5
+
+The spec wins, and lazily-go is not the only binding that lost. Three did.
+
+**The survey.** Nine bindings, two behaviors. **Re-spawn on the next read:** lazily-rs (`AsyncSlotState::Error | Empty => spawn_async_compute`), lazily-py (`if self._state is SlotState.ERROR: self._spawn()  # retry`), lazily-js (`// empty or error: spawn a fresh compute`), lazily-kt (`SlotState.Empty, SlotState.Error -> spawnComputeLocked`), lazily-cs, and lazily-cpp (which recomputes unconditionally). **Cache the error and replay it forever:** lazily-go, lazily-dart, lazily-zig. lazily-go's test even names its source — "mirrors Dart getAsync, which throws `_error` in the error state — no auto-retry" — so this propagated from one binding to another rather than being decided three times.
+
+**What settled it was not the vote.** `LazilyFormal/AsyncSlotState.lean` already had `SlotEvent.retry` mapping `error → computing`. The Lean model is the spec's executable form, and a sticky-error binding implements `retry` as the identity on `Error`, so it is not a model of the state machine. The doc's transition list agreed (`Error → Computing` — "get_async retry after an error"). Only the state *table* was ambiguous: "callers receive the error **or** retry on the next `get_async`". That "or" is the whole defect. Three bindings read it as a permission.
+
+**Why sticky is wrong on the merits, not just by authority.** An `Error` slot holds no cached result — no value, no in-flight revision. Caching the error makes a transient failure permanent for the lifetime of the slot: a timed-out fetch or a disconnected peer is unrecoverable through any read path, and `invalidate` does not repair it either (it is a no-op on `Error` in py, and reaches `Empty` in rs — both reach retry through the *read*, not through the dependency change). There is no read a caller can perform to get out.
+
+**What shipped**
+
+- **lazily-spec** `docs/async.md` — the `Error` row now states that waiters on the failed attempt receive its error, that the error is not a cached value, and that the next `get_async` MUST re-spawn. The transition entry says the transition is mandatory, not optional, and records that `invalidate` on `Error` is a no-op because the retry is owned by the read.
+- **lazily-formal** — two new theorems. `retry_from_error_recomputes` pins `error → computing` at the slot's current revision; `retry_off_error_is_noop` pins that recovery cannot disturb an in-flight or resolved slot. Collapsing the retry case of `step` to the identity fails the first proof, so the model now distinguishes the two behaviors it previously permitted equally.
+- **lazily-go** — `GetAsync`'s `case AsyncSlotError` short-circuit is gone; `Error` falls through to the same spawn path as `Empty`. The `asyncSlot.err` field went with it: the error reaches the waiters of the attempt that produced it, so storing it was dead state that existed only to enable the replay.
+- **lazily-dart** — same change in `_awaitResolved`; `_error` deleted (the failure travels through `_inFlight.completeError`).
+- **lazily-zig** — `awaitResolved` re-spawns once on entry, so a read still costs exactly one compute and a persistently failing slot cannot loop. `err_value` is cleared only after `enqueueCompute` has actually moved the slot to `.computing`, because a failed enqueue under OOM leaves the slot in `.err` where the loop unwraps it.
+
+**Every new test is asserted on the compute counter, not the returned error.** This is the trap in this particular bug: a sticky binding also "returns boom" on every read — it just runs the body once. An error-only assertion passes against both behaviors, which is exactly how three bindings stayed wrong under green suites. lazily-dart's existing test is the clearest case: its comment claimed "Retry: a getAsync after the failure spawns a fresh computation", but the helper it called built a *different* slot and only proved the runtime survives a failure. It would have passed unchanged either way. Mutation-checked in all four repos — restoring the short-circuit fails `retry GetAsync = (0, boom), want (7, nil)` and `compute calls = 1, want 3` in go, both new dart tests, and both zig tests; collapsing Lean's retry case fails the proof.
+
+**lazily-zig's dropped-edge OOM test had the sticky assumption baked into its tail** — it asserted the slot "stays visibly failed" after the allocator recovered. Its real claim (an OOM must surface rather than silently resolving with a lying dependency set) is unchanged and still asserted. The error read now happens while the allocator is still failing, and recovery is asserted afterwards, including that the recovering recompute rebuilt the edge it had dropped — which is the thing the old assertion made unobservable.
+
+**Verification.** lazily-spec `make check` green (146 schema tests, Lean build, coverage sync). lazily-formal `lake build` green. lazily-go 425 tests + `go vet` green. lazily-dart 522 tests + `dart analyze` clean. lazily-zig `mise run test` green (442 tests). All five repos committed and pushed; superproject gitlinks committed. lazily-spec CI is green on this commit; lazily-go, lazily-dart and lazily-zig CI runs were still in progress and are recorded, not waited on. lazily-formal has no CI workflow.
+
+**One thing this does not do, and it is the reason the bug survived.** There is no conformance fixture for `Error → Computing`. The contract is now pinned by native tests in each binding plus the Lean proof, but the shared corpus never exercised it, which is why six bindings and three bindings disagreed for as long as they did without a single red suite. Adding one means teaching all nine runners an async-failure op, so it is queued as `#lzasyncerrfixture` rather than smuggled in here — a fixture the other eight runners panic on is worse than none.
+<!-- agent:boundary:0fb226ab -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lzgoerrorretry]
-- do [#lzcscollections]
+- ⏭️ do [#lzgoerrorretry]
+- 🚧 do [#lzcscollections]
 - do [#lzcsstatechart]
 - do [#lzcsqueues]
 - do [#lzcscrdt]
@@ -127,8 +153,9 @@ Give me the go and I will flip `queue: start` and drain. I am not inferring it f
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzgoerrorretry] lazily-go: an async slot in Error serves the stored error forever, but docs/async.md § Async slot state machine lists `Error → Computing` — "get_async retry after an error". lazily-cs follows the spec; either lazily-go is a finding or the spec sentence is wrong. Decide in lazily-spec first, then fix whichever side loses
-- [ ] [#lzcscollections] lazily-cs: SlotMap / ThreadSafeSlotMap / AsyncSlotMap materialization, ReactiveMap (CellMap/SlotMap), CellTree + reconcile, SemTree, stable-id alignment; replay collections + materialization + familysync corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 1-4, 9-11)
+- [ ] [#lzasyncerrfixture] lazily-spec: add a conformance fixture for the async Error -> Computing retry (a compute that fails once then succeeds; assert the re-spawn on the compute counter, not the returned error). Needs an async-failure op all nine runners accept — today the contract is pinned only by per-binding native tests plus LazilyFormal.AsyncSlotState, which is how go/dart/zig stayed divergent under green suites
+- [x] [#lzgoerrorretry] lazily-go: an async slot in Error serves the stored error forever, but docs/async.md § Async slot state machine lists `Error → Computing` — "get_async retry after an error". lazily-cs follows the spec; either lazily-go is a finding or the spec sentence is wrong. Decide in lazily-spec first, then fix whichever side loses
+- [ ] 🚧 [#lzcscollections] lazily-cs: SlotMap / ThreadSafeSlotMap / AsyncSlotMap materialization, ReactiveMap (CellMap/SlotMap), CellTree + reconcile, SemTree, stable-id alignment; replay collections + materialization + familysync corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 1-4, 9-11)
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
 - [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)

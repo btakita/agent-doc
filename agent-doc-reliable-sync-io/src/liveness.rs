@@ -273,6 +273,50 @@ impl LivenessProjection {
             .collect()
     }
 
+    /// `#ctrlkillreregister` Tier 3 — registrations that are live in the **replicated**
+    /// plane but have no replica in the asking peer's `held` set.
+    ///
+    /// This is the replicated-Computed form of "who needs a replica rebuilt". The
+    /// desired set is not controller-local state that has to be *sent* anywhere: it
+    /// is the registration set, which already converges across processes as an OR-set
+    /// plus LWW on this plane. So every peer derives the same answer from converged
+    /// state, and the answer needs no request, no fan-out, and no delivery guarantee.
+    ///
+    /// That is what makes it strictly better than an effect that pushes a rebuild
+    /// request. A push has to reach the other side — the failure mode behind
+    /// `reload-lib reached 1/4 endpoints` — and only covers the moment it fires. A
+    /// derivation over replicated state is correct whichever side restarted, and it
+    /// self-heals for a registration that arrives later, because convergence does not
+    /// care who was down.
+    ///
+    /// The controller calls this to learn which editors are stranded; the editor side
+    /// calls it with its own pid and its own live replicas to discover that *it* is
+    /// the one missing a replica, and repairs itself without being told.
+    ///
+    /// `held` is keyed by `document_hash`, matching [`EditorRegistration::document_hash`].
+    pub fn registrations_missing_replica(
+        &self,
+        held: &BTreeSet<String>,
+    ) -> Vec<EditorRegistration> {
+        self.all_live_registrations()
+            .into_iter()
+            .filter(|registration| !held.contains(&registration.document_hash))
+            .collect()
+    }
+
+    /// [`Self::registrations_missing_replica`] narrowed to one peer — the form an
+    /// editor uses on itself.
+    pub fn peer_registrations_missing_replica(
+        &self,
+        pid: Pid,
+        held: &BTreeSet<String>,
+    ) -> Vec<EditorRegistration> {
+        self.registrations_missing_replica(held)
+            .into_iter()
+            .filter(|registration| registration.pid == pid)
+            .collect()
+    }
+
     /// Live/open registrations across the whole projection.
     pub fn all_live_registrations(&self) -> Vec<EditorRegistration> {
         self.open_docs()
@@ -456,6 +500,84 @@ mod tests {
             ..newer.clone()
         }));
         assert_eq!(projection.live_registrations("docA"), vec![newer]);
+    }
+
+    /// `#ctrlkillreregister` Tier 3 — the missing-replica set is DERIVED from
+    /// replicated state, so both sides compute the same answer without either one
+    /// sending a request.
+    ///
+    /// This is what makes it better than pushing a rebuild: a push must reach the
+    /// other side and only covers the instant it fires, whereas this is correct
+    /// whichever peer restarted and self-heals for registrations that arrive later.
+    #[test]
+    fn missing_replica_set_is_derived_from_replicated_registrations() {
+        let mut projection = LivenessProjection::new();
+        for (doc, pid, editor_id) in [
+            ("docA", 1u64, "jetbrains-a"),
+            ("docB", 1u64, "jetbrains-a"),
+            ("docC", 7u64, "vscode-c"),
+        ] {
+            projection.apply(&LivenessOp::Open {
+                document_hash: doc.into(),
+                pid,
+                tag: format!("open-{doc}-{pid}"),
+            });
+            projection.apply(&LivenessOp::Register(EditorRegistration {
+                document_hash: doc.into(),
+                pid,
+                path: format!("/proj/{doc}.md"),
+                editor_id: editor_id.into(),
+                editor_kind: "jetbrains".into(),
+                editor_version: "test".into(),
+                capabilities: vec![],
+                timestamp_ms: 1,
+            }));
+        }
+
+        // A peer holding every replica it registered needs nothing.
+        let all: BTreeSet<String> = ["docA", "docB", "docC"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        assert!(projection.registrations_missing_replica(&all).is_empty());
+
+        // A controller that lost its hub (the process-local part that does NOT
+        // survive a restart) derives exactly who is stranded, with no message sent.
+        let none: BTreeSet<String> = BTreeSet::new();
+        let mut stranded: Vec<String> = projection
+            .registrations_missing_replica(&none)
+            .into_iter()
+            .map(|registration| registration.document_hash)
+            .collect();
+        stranded.sort();
+        assert_eq!(stranded, vec!["docA", "docB", "docC"]);
+
+        // An editor asks the same question about ITSELF and repairs without being
+        // told — the peer-scoped form.
+        let held_b_only: BTreeSet<String> = ["docB"].into_iter().map(str::to_string).collect();
+        let mine: Vec<String> = projection
+            .peer_registrations_missing_replica(1, &held_b_only)
+            .into_iter()
+            .map(|registration| registration.document_hash)
+            .collect();
+        assert_eq!(
+            mine,
+            vec!["docA".to_string()],
+            "only this peer's own un-held registration, not another peer's"
+        );
+
+        // A dead peer is not stranded — it has nothing to rebuild.
+        projection.apply(&LivenessOp::Alive {
+            pid: 7,
+            value: false,
+            stamp: stamp(30, 1),
+        });
+        let after_death: Vec<String> = projection
+            .registrations_missing_replica(&none)
+            .into_iter()
+            .map(|registration| registration.document_hash)
+            .collect();
+        assert_eq!(after_death, vec!["docA".to_string(), "docB".to_string()]);
     }
 
     // Conformance scenario `open_set_add_wins_over_stale_remove`

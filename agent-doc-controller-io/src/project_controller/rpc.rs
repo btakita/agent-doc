@@ -9734,10 +9734,16 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
 /// here must never block the controller from finishing startup — so failures are
 /// logged, never propagated.
 fn request_editor_replica_rebuild_after_restart(project_root: &Path) {
+    // Tier 3: ask the REPLICATED plane which registrations lack a replica here,
+    // rather than re-deriving "everyone" and pushing at all of them. `held` is what
+    // this process actually has — the hub is process-local, so after a restart it is
+    // empty and the derivation names exactly the stranded set. The same derivation
+    // run on the editor side lets it repair itself without being told.
+    let held: BTreeSet<String> = BTreeSet::new();
     let registrations = controller_liveness_plane()
         .lock()
         .projection()
-        .all_live_registrations();
+        .registrations_missing_replica(&held);
     let mut requested: BTreeSet<String> = BTreeSet::new();
     for registration in registrations {
         if !requested.insert(registration.path.clone()) {

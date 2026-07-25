@@ -23,8 +23,11 @@ make sure I understand the engagement terms precisely. Three questions:
 3. **Renewal:** My understanding is the engagement is renewable at the 12-month mark
    with the rate open to renegotiation. Can you confirm that's the expectation?
 
-A confirmation by email on these three is all I need. Looking forward to wrapping this
-up.
+One request as well: is there room for either a small signing bonus or an advance on
+the first invoice cycle? Transitioning between engagements carries a cash-flow gap, and
+a modest bridge would make the start seamless. Not a deal-breaker... just asking.
+
+A confirmation by email on these is all I need. Looking forward to wrapping this up.
 
 Best,
 Brian

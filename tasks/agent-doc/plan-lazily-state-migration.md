@@ -246,6 +246,23 @@ only *fail closed* (today) or *make it idempotent first*.
   (normal-intensity) input at the same prompt is still protected as a draft;
   both directions are pinned by
   `dim_autosuggest_ghost_text_is_not_an_operator_draft`.
+- **Controller relaunch passes an empty project root (`ctrlrespawnenoent2` guard
+  reproduced 2026-07-25).** After `make install`, the running controller self-recycles
+  off the replaced binary — and the automatic relaunch then fails closed for the whole
+  project: every controller-dependent command (`agent-doc read`, `admin inspect`)
+  errors with `cannot launch project controller: project root "" is empty or not a
+  directory`, while `admin list` (durable-state only) keeps working. Recovery was a
+  manual `agent-doc controller serve --project-root <root>`. The guard at
+  `project_controller/rpc.rs:7174` already names the shape correctly — a caller is
+  handing the launcher an empty root — so the open question is only *which* caller.
+  `project_root_or_cwd` (`agent-doc-project-root-io/src/lib.rs:21`) returns an
+  explicitly-passed root **without validating it is non-empty**, so a
+  `Some(PathBuf::new())` anywhere upstream propagates straight through to
+  `Command::current_dir`. Repro: kill the project controller, then run any
+  controller-dependent command. This is install-triggered, so an install-heavy
+  dogfooding session self-inflicts it — it is why a project can go dead right after a
+  fix lands. Not a Lazily-state item; fix the root plumbing (and make
+  `project_root_or_cwd` reject an empty explicit root) separately.
 - External `tmux send-keys Enter/C-m` cannot submit a route-owned pane's Claude
   composer (supervisor runs the harness in an inner PTY); operator recourse is
   manual keyboard — undercuts unattended recovery. (Mostly moot given the item

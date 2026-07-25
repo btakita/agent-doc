@@ -199,3 +199,6 @@
 [submodule "src/community-pulse"]
 	path = src/community-pulse
 	url = git@github.com:btakita/community-pulse.git
+[submodule "src/lazily-cs"]
+	path = src/lazily-cs
+	url = git@github.com:lazily-hub/lazily-cs.git

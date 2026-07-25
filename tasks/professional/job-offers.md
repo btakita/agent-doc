@@ -515,7 +515,36 @@ Two answers, one small edit made.
 The strategic read that falls out: **Haiven's real wedge is where no incumbent safety layer exists at all**... standalone indie games on Unity/Unreal, and Discord-adjacent communities... which is precisely the "zero backend, zero cost" pitch. On Roblox, the platform *is* the incumbent. So I'd revise my earlier "Roblox is market-critical" framing: Discord + standalone Unity/Unreal are the wedge; Roblox is a constrained, lower-priority surface... which conveniently is also the ordering that suits an SDK contract (Unity first, as already planned; Roblox last, if ever). There may also be a partnership/standards angle... Craig's "anticipated industry partner funding" and the Child Safe Tech Alliance membership hint Haiven courts platforms as *allies* rather than customers... but that's Luke and Craig's game, not a reason to change anything in your drafts.
 
 Net effect on your position: none on the decision, one small upgrade to the decline (sent), and one useful piece of diligence in your pocket... if the scoping conversation ever happens, "Unity first, Discord second, Roblox last because the platform constrains it" is the kind of observation that shows Craig you understand his market, not just his codebase. `#havnaskedriza` is done.
-<!-- agent:boundary:c246d207 -->
+My pitch could be...I have an existing multi-language/plaform called Lazily, which handles distributed message-passing over websockets/webrtc + rpc + ffi + shared memory. I don't need to use Lazily in the SDK, though that may be a beneficial. However, I have experience to build a suite of cross-language tools using specs + a formal suite + conformance suite. I also have a good eye for API design & creating coherency with the data model. I can also document the API and ensure user success...though Riza has more experience than I do with this.
+
+I could setup the project which would include specs + lean formal + conformance suite. And either continue the work or hand it off to someone to take over.
+
+I could pitch this as a way for Haiven to derisk and make progress on the SDK. If they find someone to take over or use a different approach, then my fee could be a small amount. Tbh, this is an interesting problem, so I'm willing to do this even if I don't get paid. My financial needs are already met. I'm interested in getting feedback for the work.
+
+My main motivation is that I don't know if I have the stomach for the long haul with a company unless the relationship is light. Acadian is a good fit for me. I belive in the Haiven product and their mission so I do want to help...but in a bounded way. Not necessarily part of their core team. I do want to keep the door open as well.
+
+I may be participating in the industry & it would be helpful to have allies. Please note that in the rejection letter. Be open about my interest in the industry and my desire to keep the door open. And I'm taking the other position to be able to continue my side-work in good faith. I see their needs, especially with the generous package they are offering, would potentially lead to me being conflicted with working at Haiven + my personal work over the next few years. I'm in a no-man's land with developing ambitious distributed projects without enough cashflow.
+
+I want to deliver focused value to Haiven and am willing + able to complete a prototype in 1-2 weeks. Propose this as a very low risk option for Craig. If it doesn't work, I can treat this as a learning experience. If Haiven wants to continue with me doing the work, I would be available.
+
+Riza did mention that he may have to look for work to make ends meet in a LinkedIn chat. I'm not yet sure how to introduce this idea to him. I think it may be contingent on if the prototype is well-received. The Austin co-location makes sense. Riza does pick up new tech quickly. He has a great attitude. And has experience with analytics driving Product...as a founding engineer at PresenceAI. 
+
+### Re: the seven steering items — letter reshaped into decline + bounded offer — fable
+
+All seven absorbed. The letter is rewritten as **v3: decline + bounded offer** at `tasks/recruit/haiven/decline-draft.md` (commit `2d58132`), and it now does exactly what your steering describes: declines the founding role in good faith, states your industry-ally intent openly, and makes the 1-2 week prototype a concrete, near-zero-risk offer to Craig. The compensation ask is formally superseded... it stays in the repo as history only. Item by item:
+
+**The pitch (1, 2) is in the letter, framed as method + evidence rather than promises:** "a working first-engine integration (I'd suggest Unity) against your API, plus the scaffolding that makes the rest of the SDK matrix cheap to build with or without me: an API spec, a conformance test suite, and docs"... backed by "one API surface maintained across 8 languages with spec, formal model, and conformance suites; the repos are public." One deliberate choice: **lazily is pitched as your method and track record, not as a dependency.** Whether lazily-the-library belongs inside Haiven's SDK is a technical decision for the scoping conversation; putting it in the letter would read as bringing your own hammer. The spec + Lean formal + conformance discipline is the credential, and it's verifiable.
+
+**The derisk framing (3) is in, with one protective change: "unpaid" stays private.** You're willing to do it free... interesting problem, financial needs met, feedback is the real compensation... but *saying* that devalues the work and creates awkward obligation dynamics on his side. The letter achieves the same near-zero risk honestly: "if you'd rather hand it to a hire or take a different approach, you keep everything... and we keep the fee nominal. Worst case, Haiven gets a validated head start on the SDK for close to nothing." Craig's downside is identical; your work keeps its dignity.
+
+**Your motivation (4) and the good-faith openness (5) became the letter's spine:** "I'm deep into my own distributed-systems work, and a founding role at Haiven deserves more focus than I could give while keeping that commitment. I'd rather tell you that now, in good faith, than have us discover it together in month three." Plus the ally line: "I plan to stay active in this industry for the long run, and I'd like to count you and Luke as allies in it." This framing also pre-answers the one awkward question the offer invites... *"why are you available for a prototype but not the job?"*... bounded vs. open-ended is the exact distinction the letter draws, so the offer reads as consistent rather than contradictory. Your "no-man's land" observation (ambitious distributed projects without cashflow) stays private... the letter conveys the conclusion without the vulnerability.
+
+**The prototype proposal (6) is the letter's centerpiece**, with a scope guard in the notes: 1-2 weeks means ONE engine + spec + conformance scaffold + sample... resist scope growth until the milestone conversation. "If that's interesting, say the word and I'll sketch the scope this week" gives Craig a single low-cost next action.
+
+**Riza (7): correctly held back, sequencing recorded.** Not in the letter; contingent on the prototype being well-received AND Riza's double opt-in. The make-ends-meet signal from LinkedIn makes your eventual ask *kind* rather than presumptuous... but it's his private situation, so it never reaches Craig. When the moment comes, the note has both one-message pitches ready: to Riza ("Haiven may need SDK/DX help after a prototype I built; you came to mind... interested in a conversation?") and to Craig (quick learner, great attitude, founding-engineer analytics-to-product at PresenceAI, Austin-local).
+
+Backlog updated: `#haivensend` now points at the v3 letter; `#sdkcontract` is prototype-first with the Riza contingency recorded. The Sunday sequence is unchanged and now fully coherent: this one letter closes the job negotiation, opens the bounded relationship, and costs Craig a single word to act on.
+<!-- agent:boundary:adb3a348 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -526,8 +555,8 @@ Net effect on your position: none on the decision, one small upgrade to the decl
 ## Backlog
 
 <!-- agent:backlog queue -->
-- [ ] [#sdkcontract] [recommended] If Craig engages the door-open line, send the milestone-SOW proposal from tasks/recruit/haiven/sdk-contract-structure.md; first resolve the evenings conflict (build vs Phase-0-only vs referral-first)
-- [ ] [#haivensend] #haivensend [operator-verify] Send ONE Haiven email per the decision: compensation ask (tasks/recruit/haiven/compensation-reply-draft.md) if a matched offer would change the answer, or the warm decline (tasks/recruit/haiven/decline-draft.md) if Acadian wins regardless
+- [ ] [#sdkcontract] #sdkcontract If Craig engages the prototype offer: sketch scope (ONE engine + spec + conformance scaffold + sample, 1-2wks), then milestone SOW per tasks/recruit/haiven/sdk-contract-structure.md; Riza intro contingent on prototype reception + Riza double opt-in
+- [ ] [#haivensend] #haivensend [operator-verify] Send the v3 decline+offer letter (tasks/recruit/haiven/decline-draft.md) to Craig; compensation-reply-draft.md is superseded/history-only
 - [ ] [#acadiansend] [operator-verify] Send Acadian recruiter questions (tasks/recruit/acadian/recruiter-questions-draft.md) incl. signing-bonus/advance ask; file written answers under tasks/recruit/acadian/
 <!-- /agent:backlog -->
 

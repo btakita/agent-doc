@@ -36,9 +36,13 @@ percentage, and how the revenue share works if Haiven stays private... percentag
 what, distributed on what cadence? Those mechanics matter more to me than the headline
 number, and clean terms here weigh heavily in my decision.
 
-Two smaller items for the offer letter: an IP carve-out for my pre-existing open-source
-projects (I'll provide the exact list), and core collaboration hours... I'm Eastern, and
-I'm happy to hold a 12-5pm ET overlap with the Pacific team and flex around it.
+Two smaller items for the offer letter: an IP carve-out covering my pre-existing
+open-source projects and future independent side work (I'll provide the exact list and
+language), and core collaboration hours... I'm Eastern, and I'm happy to hold a 12-5pm
+ET overlap with the Pacific team and flex around it.
+
+One timing note: I owe my other party an answer by Sunday evening. If you can respond on
+the framework above by then... even informally... I can hold my decision open for you.
 
 If this framework works for you, I'm ready to move quickly.
 

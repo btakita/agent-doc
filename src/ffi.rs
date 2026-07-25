@@ -2283,6 +2283,57 @@ pub unsafe extern "C" fn agent_doc_reliable_sync_liveness_enqueue(
     }
 }
 
+/// `#ctrlkillreregister` Tier 3 editor-side consumer: which documents this editor has
+/// registered but holds no replica for.
+///
+/// The editor is the only process that can create its own replica, so it asks about
+/// itself and repairs, instead of the controller pushing a rebuild request at it.
+/// A push has to reach the editor — the failure behind `reload-lib reached 1/4
+/// endpoints` — while this is driven by a process that is provably alive, because it
+/// just called. It is therefore correct whichever side restarted: a controller that
+/// lost its process-local hub, an editor that reconnected, or a registration that
+/// arrived after any fan-out already ran.
+///
+/// `held_json` is a JSON array of document hashes the caller already has a replica
+/// for; an up-to-date editor gets back `[]` and does nothing. Returns a JSON array of
+/// registrations to rebuild, or null on error. Free with `agent_doc_string_free`.
+///
+/// # Safety
+///
+/// Non-null pointers must be NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_peer_replicas_missing(
+    project_root: *const c_char,
+    pid: u64,
+    held_json: *const c_char,
+) -> *mut c_char {
+    let result = (|| -> anyhow::Result<String> {
+        let project_root = unsafe { required_ffi_string(project_root, "project_root") }?;
+        let held: Vec<String> = match unsafe { optional_ffi_string(held_json, "held_json") }? {
+            Some(raw) if !raw.trim().is_empty() => {
+                serde_json::from_str(&raw).context("parse held_json")?
+            }
+            _ => Vec::new(),
+        };
+        let missing = agent_doc_controller_io::project_controller::peer_replicas_missing(
+            &PathBuf::from(&project_root),
+            pid,
+            &held,
+        )?;
+        serde_json::to_string(&missing).context("serialize missing replica registrations")
+    })();
+    match result {
+        Ok(json) => CString::new(json)
+            .unwrap_or_default()
+            .into_raw(),
+        // Never swallow: an editor that cannot ask is one that stays stranded.
+        Err(err) => {
+            eprintln!("[ffi] agent_doc_peer_replicas_missing: {err:#}");
+            ptr::null_mut()
+        }
+    }
+}
+
 /// Ask the controller to flush its durable push outbox through `reliable_sync`
 /// (sidecar-retirement Phase 3C). Returns the ack cursor (`>= 0`) on success,
 /// `-1` on error.

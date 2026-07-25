@@ -3658,6 +3658,38 @@ pub fn await_delivery_convergence_for_file(
     Ok(status.observed.then_some(status))
 }
 
+/// `#ctrlkillreregister` Tier 3 — which of **this peer's** registrations still lack a
+/// replica, derived from the controller's converged liveness plane.
+///
+/// The editor calls this about itself and then re-registers what it is missing. That
+/// is the replicated-state form of the rebuild: the controller pushes nothing, so
+/// there is no endpoint to fail to reach, and it is correct whichever side restarted
+/// — a controller that lost its process-local hub, an editor that reconnected, or a
+/// registration that only arrived later.
+pub fn peer_replicas_missing(
+    project_root: &Path,
+    pid: u64,
+    held: &[String],
+) -> Result<Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>> {
+    let payload = serde_json::json!({ "pid": pid, "held": held });
+    let request = ControllerRequest {
+        command: "peer_replicas_missing".to_string(),
+        file: None,
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("editor_replica".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(payload.to_string()),
+    };
+    request_existing_controller_with_timeout(project_root, request, CONTROLLER_RPC_TIMEOUT)
+}
+
 pub fn record_visible_write_materialized_carry_forward_for_file(
     file: &Path,
     live_buffer_content: &str,
@@ -9077,6 +9109,11 @@ pub(crate) fn handle_request_locked(
                 request,
             ))
         }
+        "peer_replicas_missing" => controller_envelope(handle_peer_replicas_missing(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "delivery_convergence_await" => controller_envelope(handle_delivery_convergence_await(
             &bootstrap_snapshot,
             runtime.as_ref(),
@@ -11643,6 +11680,44 @@ pub(crate) fn handle_visible_write_commit_candidate_patch_await(
             wait,
         ),
     })
+}
+
+/// `#ctrlkillreregister` Tier 3 — answer a peer's own missing-replica question.
+///
+/// The editor is the actor that can create its replica, but the converged liveness
+/// plane lives here, so the editor asks *about itself* and repairs rather than being
+/// pushed a rebuild request. That inversion is the whole point: a push has to reach
+/// the editor (the `1/4 endpoints` failure), while a pull is driven by the side that
+/// is definitely alive — it just asked.
+///
+/// `held` is the set of document hashes the caller already has a replica for, so the
+/// answer is exactly what it still needs and an up-to-date editor gets an empty list.
+pub(crate) fn handle_peer_replicas_missing(
+    _bootstrap: &ControllerBootstrap,
+    _runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<Vec<agent_doc_reliable_sync_io::liveness::EditorRegistration>> {
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload_json).context("parse peer_replicas_missing payload")?;
+    let pid = payload
+        .get("pid")
+        .and_then(serde_json::Value::as_u64)
+        .context("peer_replicas_missing missing pid")?;
+    let held: BTreeSet<String> = payload
+        .get("held")
+        .and_then(serde_json::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(controller_liveness_plane()
+        .lock()
+        .projection()
+        .peer_registrations_missing_replica(pid, &held))
 }
 
 /// `#lazily-hot-path` Theme A — bounded server-side await for delivery convergence.

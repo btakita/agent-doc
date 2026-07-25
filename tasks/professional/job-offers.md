@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -578,7 +578,23 @@ Done — the "kick the tires" sentence in `tasks/recruit/haiven/decline-draft.md
 I verified all four destinations are PUBLIC on GitHub before linking — including lazily-cs, whose repo description already reads well for this audience ("Lazy reactive primitives for C#/.NET... plus the lazily-spec wire protocol, CRDTs, and distributed plane"). The lazily-cs mention is a genuinely strong addition to the letter: it upgrades the prototype offer's central claim from "I've done this method in 8 languages" (impressive but engine-adjacent) to "I am doing it in C# right now" — direct evidence in the exact language the Unity integration would use, before Craig has said a word. It also quietly de-risks the 1-2 week estimate: the conformance technique's C# port is already underway, so the prototype starts warm, not cold. One caution kept in mind: the letter names three specific repos rather than dumping all twelve — spec and formal model are the two that prove the *method*, the org link covers breadth, and lazily-cs proves recency. No other letter changes.
 
 One-line status: exchange is at 552 lines / 24 sections (accretion warn, queue inactive) — compact when you opt in.
-<!-- agent:boundary:9e01b524 -->
+❯ 🚧 Should we mention that I have experience applying the same patterns cross-language which includes Classes/Traits/Interfaces and other type constructs + Systems Languages/Garbage Collected languages + other language features?
+
+### Re: #mentionexperienceapplyin cross-paradigm experience in the letter — fable
+
+> **Queue prompt:**
+>
+> do [#mentionexperienceapplyin]
+
+
+**Yes — but as one buyer-relevant clause, not the enumeration.** Applied and committed (`59b3113`). The letter now reads, right after the lazily-cs sentence: "And the patterns already hold across the divide that matters for your matrix... systems languages (Rust, C++, Zig) and GC runtimes alike... so the Unreal half is familiar ground, not a new bet."
+
+Why this form and not the full list (Classes/Traits/Interfaces, type constructs, other language features): the raw enumeration is resume register, and this is a warm goodbye note whose selling is done through receipts, not claims — the lazily-hub org link already *demonstrates* traits-vs-interfaces-vs-classes breadth to anyone who clicks, which is stronger than asserting it. The one split that is genuinely material to Craig's risk calculus is systems-vs-GC, because his SDK matrix lands exactly on it: Unity is C# (GC), Unreal is C++ (systems). So the clause names that divide, ties it to *his* matrix, and cashes out in the phrase a founder actually cares about: the second engine is "familiar ground, not a new bet." Everything else the enumeration would have said, the repos say better.
+
+The letter's credibility ladder in that paragraph is now complete and each rung is distinct: method (spec + formal model + conformance), breadth (8 language bindings, one org link), recency (lazily-cs in progress, in Unity's language), and coverage (both sides of the systems/GC divide, i.e. both engines). Recommend stopping here — a fifth credential sentence would tip the paragraph from receipts into selling.
+
+One-line status: exchange 561 lines / 25 sections (accretion warn); queue head #mentionexperienceapplyin closed with this response.
+<!-- agent:boundary:8042cdef -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -618,5 +634,6 @@ One-line status: exchange is at 552 lines / 24 sections (accretion warn, queue i
 Roblox already has a Child Safety team. Is this something that Haiven would approach?
 - 2026-07-25 [#prototypeincludemultiple] I could have the prototype include multiple engines (Unity + Unreal + Discord) to validate the conformance.
 "for an intro that's useful": Should I also say "I have someone in mind"?
+- 2026-07-25 [#mentionexperienceapplyin] Should we mention that I have experience applying the same patterns cross-language which includes Classes/Traits/Interfaces and other type constructs + Systems Languages/Garbage Collected languages + other language features?
 <!-- /agent:done -->
 92bcca70

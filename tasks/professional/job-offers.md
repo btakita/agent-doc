@@ -306,18 +306,60 @@ Their reaction to #1 and #3 is the strongest good-faith tell yet: a company that
 
 
 Executed the agent-side of `#acadianterms`: the recruiter message is drafted and committed at **`tasks/recruit/acadian/recruiter-questions-draft.md`** (commit `69f3a4c`)... three written-confirmation questions (notice/termination clause, >40hr billing mechanics, renewal + rate renegotiation) framed around your Sunday-evening answer, with a counter ready if notice comes back as "immediate" (ask for 2-4 weeks in the SOW). The item is now gated rather than done because its completion condition is external: you send it, and the recruiter's written answers land. Unblock = paste their reply into `tasks/recruit/acadian/` and the decision gate updates.
-<!-- agent:boundary:b8df0566 -->
+❯ 🚧 I would like to ask Acadian for either a small signing bonus or an advance on the first paycheck.
+❯ Should we include the termination protection (severence + clawback protection). Craig mentioned a Founder's Package...not necessarily a Founding Engineer. Please interpret this email.
+
+```
+Brian,
+
+Thanks for your time on the phone and your continued candor about the offers you are considering. It came to mind that might be useful to understand that since January we have raised ~half of our target Seed Series, with additional funding coming in as we hit our August Beta, initial Founder's Pack revenue generation, and October launch milestones. 
+
+I believe it is important to underscore that we are funded through launch and beyond. Our VC and Angel Investors, plus anticipated industry partner funding, will continue providing us with a solid runway as we launch and ramp.
+
+I'm standing by to hear about where Haiven needs to be regarding base compensation and options, along with any questions you have on the offered benefits. We are flexible, including the possibility of offering you a one-time signing bonus.
+
+Thanks very much,
+
+Craig Fryar, CTO
+Austin, Texas
+```
+
+### Re: Craig's email interpreted + revised asks for both companies — fable
+
+Craig's email is the best development yet... and it contains one detail that quietly reframes the equity conversation. Both drafts are revised and committed (`9e140ba`). Point by point:
+
+**Interpreting the email.** Four signals:
+
+1. **This is strong good-faith engagement.** Unprompted funding transparency, an explicit invitation to name your number, signing bonus volunteered before you asked, and "we are flexible." That's the tell the decision gate was watching for... he's negotiating, not stalling.
+2. **"Raised ~half of our target Seed" cuts both ways.** The honest read: the other half is *not raised*, and the remainder is tied to milestones (August beta, Founder's Pack revenue, October launch). "Funded through launch and beyond" leans partly on *anticipated* industry-partner funding... anticipated is not committed. So: real runway confidence, but conditional. This is exactly the profile where the cliff-waiver and clawback protections matter... and now you can justify them from *his own disclosure* rather than generic startup caution.
+3. **"Base compensation and options"** ... he said options. That likely answers the instrument question (stock options, not restricted stock or a bare contractual rev-share). Good: options with defined terms is a real thing you can evaluate.
+4. **The detail that matters: "Founder's Pack revenue generation" is a *product*.** A Founder's Pack in gaming is an early-supporter purchase bundle... a revenue SKU, not an equity concept. So when Craig verbally offered a "Founder's Package," and you note it wasn't necessarily a "Founding Engineer" *title*, there's genuine ambiguity: is your 0.5% (a) an options grant nicknamed the founder's package, (b) something linked to Founder's Pack *product revenue*, or (c) a hybrid? These have wildly different values and failure modes. The revised draft asks Craig to define it precisely in writing... that paragraph is now the single most important question in the reply. Related adjustment: since "Founder Engineer" may not be a real title, the revised drafts stop leaning on "founder title justifies founder-style vesting" and justify every ask from the competing offer and the funding timeline instead.
+
+**Should the termination protection go in? Yes... included, in light form, and the funding disclosure is exactly why.** The revised reply asks for: (1) clawback limited to voluntary exit/for-cause... costs them nothing; (2) prorated vesting credit if terminated without cause before the cliff... costs equity, not cash, which a half-raised-seed company can actually afford; (3) 2 months severance, listed last and framed as flexible... the one a seed-stage balance sheet may genuinely push back on, so it's positioned as tradeable rather than a demand. Framing in the draft: "I'm committing through launch and beyond; these just make the downside symmetric."
+
+**The Acadian ask: added to the recruiter draft.** A short paragraph now asks for "either a small signing bonus or an advance on the first invoice cycle," framed as a transition cash-flow bridge and explicitly not a deal-breaker. For a staffing/EOR seat a signing bonus is uncommon but an invoice advance is a payroll-mechanics question PGC can often accommodate... low-risk ask either way, and it signals you're close to accepting, which is fine given the Sunday timeline.
+
+**Updated next 24 hours** (tracked as `#haivensend` and `#acadiansend`, both operator sends): send the revised Haiven reply today (`tasks/recruit/haiven/compensation-reply-draft.md`... now a direct reply to Craig's email, deadline paragraph included), send the Acadian questions (`tasks/recruit/acadian/recruiter-questions-draft.md`), and let both responses land before Sunday evening. The decision gate is unchanged in shape, with one sharpened criterion: **Craig's written definition of the Founder's Package is now the pivotal input**... a concrete options grant with clean terms keeps Haiven fully in the game; anything hand-wavy about "Founder's Pack participation" means the equity is marketing, and Acadian wins on the numbers you already have.
+<!-- agent:boundary:553366b5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority start -->
+<!-- agent:queue priority -->
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#haivensend] [operator-verify] Send revised Haiven reply (tasks/recruit/haiven/compensation-reply-draft.md) to Craig today; then paste his written Founder's Package definition into the session for gate evaluation
+- [ ] [#acadiansend] [operator-verify] Send Acadian recruiter questions (tasks/recruit/acadian/recruiter-questions-draft.md) incl. signing-bonus/advance ask; file written answers under tasks/recruit/acadian/
 <!-- /agent:backlog -->
+
+## Review
+
+<!-- agent:review -->
+- [/] [#acadianterms] [recommended] Before accepting Acadian: get the termination/notice clause from the PGC agreement and written confirmation of >40hr billing + renewal-renegotiation terms from the recruiter
+<!-- /agent:review -->
 
 ## Icebox
 

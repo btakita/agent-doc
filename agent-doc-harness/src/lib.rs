@@ -1126,6 +1126,39 @@ pub fn pane_composer_draft(harness: &HarnessConfig, content: &str) -> Option<Str
     protected_prompt_draft_preview(harness, content)
 }
 
+/// Restrict prompt inspection to the portion of the visible pane at or above
+/// the terminal cursor. Claude and Codex render configurable status chrome
+/// below their composer, so that suffix cannot participate in readiness or
+/// draft detection.
+fn content_through_cursor(content: &str, cursor_y: usize) -> Option<String> {
+    let lines = content.lines().collect::<Vec<_>>();
+    (cursor_y < lines.len()).then(|| lines[..=cursor_y].join("\n"))
+}
+
+fn cursor_scoped_prompt_content<'a>(
+    content: &'a str,
+    harness: &HarnessConfig,
+    cursor_y: Option<usize>,
+) -> std::borrow::Cow<'a, str> {
+    if matches!(harness.binary.as_str(), "claude" | "codex")
+        && let Some(scoped) = cursor_y.and_then(|row| content_through_cursor(content, row))
+    {
+        return std::borrow::Cow::Owned(scoped);
+    }
+    std::borrow::Cow::Borrowed(content)
+}
+
+/// Cursor-aware counterpart to [`pane_composer_draft`]. For Claude and Codex,
+/// arbitrary user-configured status lines below the composer are excluded.
+pub fn pane_composer_draft_at_cursor(
+    harness: &HarnessConfig,
+    content: &str,
+    cursor_y: Option<usize>,
+) -> Option<String> {
+    let scoped = cursor_scoped_prompt_content(content, harness, cursor_y);
+    pane_composer_draft(harness, &scoped)
+}
+
 pub fn dispatch_only_blocker_reason(harness: &HarnessConfig, content: &str) -> Option<String> {
     if let Some(reason) = harness.dispatch_blocker_reason(content) {
         return Some(reason);
@@ -1192,6 +1225,20 @@ pub fn ready_prompt_candidate(content: &str, harness: &HarnessConfig) -> Option<
         return latest_dispatch_ready_prompt;
     }
     latest_dispatch_ready_prompt
+}
+
+/// Cursor-aware counterpart to [`ready_prompt_candidate`]. Claude and Codex
+/// keep their editable composer at the terminal cursor and may render
+/// user-configured status chrome below it. OpenCode retains its existing
+/// bottom-chrome proof because its boxed composer cursor row is not itself a
+/// prompt glyph.
+pub fn ready_prompt_candidate_at_cursor(
+    content: &str,
+    harness: &HarnessConfig,
+    cursor_y: Option<usize>,
+) -> Option<String> {
+    let scoped = cursor_scoped_prompt_content(content, harness, cursor_y);
+    ready_prompt_candidate(&scoped, harness)
 }
 
 fn is_opencode_help_screen(output: &str) -> bool {
@@ -2261,6 +2308,44 @@ mod tests {
         assert!(
             h.is_dispatch_ready_prompt_line(&candidate),
             "status line must be skipped so the composer is the candidate: {candidate:?}"
+        );
+    }
+
+    #[test]
+    fn cursor_scoped_ready_prompt_ignores_arbitrary_claude_status_suffix() {
+        let h = HarnessConfig::claude();
+        let pane = concat!(
+            "completed response\n",
+            "────────────────────────────────────────────────────────────────\n",
+            "❯\n",
+            "────────────────────────────────────────────────────────────────\n",
+            "anything the user's status command chooses to print\n",
+            "a second arbitrary status line\n",
+        );
+
+        assert!(
+            ready_prompt_candidate(pane, &h).is_none(),
+            "the compatibility parser cannot understand arbitrary status text"
+        );
+        assert_eq!(
+            ready_prompt_candidate_at_cursor(pane, &h, Some(2)).as_deref(),
+            Some("❯")
+        );
+    }
+
+    #[test]
+    fn cursor_scoped_draft_detection_ignores_arbitrary_codex_status_suffix() {
+        let h = HarnessConfig::codex();
+        let pane = concat!(
+            "completed response\n",
+            "› do not overwrite this operator draft\n",
+            "custom status component one\n",
+            "custom status component two\n",
+        );
+
+        assert_eq!(
+            pane_composer_draft_at_cursor(&h, pane, Some(1)).as_deref(),
+            Some("› do not overwrite this operator draft")
         );
     }
 

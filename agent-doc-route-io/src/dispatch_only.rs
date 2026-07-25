@@ -33,7 +33,7 @@ use crate::dispatch_recovery::{
 use crate::dispatch_target::register_dispatch_target;
 use crate::launch_contract::reapply_codex_launch_contract_before_reuse;
 use crate::restart_handoff::wait_for_busy_restart_handoff;
-use crate::startup_ready::wait_for_agent_ready_outcome;
+use crate::startup_ready::{pane_composer_draft, wait_for_agent_ready_outcome};
 use crate::supervisor_runtime::restart_via_supervisor_with_mode;
 use agent_doc_controller::dispatch::{
     BusyPaneAutoFixOutcome, DispatchOnlyBlockerRecoveryHintFacts, DispatchOnlyReopenDelivery,
@@ -297,7 +297,7 @@ pub fn dispatch_only_send_reopen(
             // real unblocker instead (#panedraftunblocker).
             let draft = agent_doc_tmux_io::capture_pane(tmux, &dispatch_pane)
                 .ok()
-                .and_then(|content| agent_doc_harness::pane_composer_draft(harness, &content));
+                .and_then(|content| pane_composer_draft(tmux, &dispatch_pane, &content, harness));
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(

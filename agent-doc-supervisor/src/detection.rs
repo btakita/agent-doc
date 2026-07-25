@@ -123,6 +123,14 @@ pub fn pane_dispatch_ready(content: &str, harness: &HarnessConfig) -> bool {
     agent_doc_harness::ready_prompt_candidate(content, harness).is_some()
 }
 
+pub fn pane_dispatch_ready_at_cursor(
+    content: &str,
+    harness: &HarnessConfig,
+    cursor_y: Option<usize>,
+) -> bool {
+    agent_doc_harness::ready_prompt_candidate_at_cursor(content, harness, cursor_y).is_some()
+}
+
 pub fn pane_has_busy_cue(content: &str, harness: &HarnessConfig) -> bool {
     harness.has_busy_cue(content)
 }
@@ -294,6 +302,15 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 45% used
 
         assert!(pane_dispatch_ready(ready_output, &harness));
         assert!(!pane_dispatch_ready(busy_output, &harness));
+    }
+
+    #[test]
+    fn pane_dispatch_ready_at_cursor_ignores_custom_status_suffix() {
+        let harness = agent_doc_harness::HarnessConfig::claude();
+        let content = "completed response\n❯\narbitrary status output\nanother status line\n";
+
+        assert!(pane_dispatch_ready_at_cursor(content, &harness, Some(1)));
+        assert!(!pane_dispatch_ready(content, &harness));
     }
 
     #[test]

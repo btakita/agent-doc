@@ -31,6 +31,7 @@ use agent_doc_supervisor::route_runtime::{
 };
 use tmux_router::Tmux;
 
+use crate::startup_ready::pane_ready_prompt_candidate;
 use crate::supervisor_runtime::{query_supervisor_runtime, restart_via_supervisor};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -484,10 +485,11 @@ pub fn promote_starting_authoritative_actor_if_dispatch_ready(
     }
 
     let _ = tmux.select_pane(&record.pane_id);
-    let pane_ready = tmux
-        .capture_pane(&record.pane_id, Some(80))
+    let pane_ready = agent_doc_tmux_io::capture_pane(tmux, &record.pane_id)
         .ok()
-        .map(|content| agent_doc_harness::ready_prompt_candidate(&content, harness).is_some())
+        .map(|content| {
+            pane_ready_prompt_candidate(tmux, &record.pane_id, &content, harness).is_some()
+        })
         .unwrap_or(false);
     if !pane_ready {
         return (record, runtime);
@@ -726,8 +728,9 @@ pub fn wait_for_authoritative_actor_ready(
         agent_doc_ops_log_io::log_op(file, &log_line);
         // Diagnostic: capture the pane content at timeout so we can analyze why
         // ready_prompt_candidate never matched.
-        if let Ok(content) = tmux.capture_pane(&initial.record.pane_id, Some(80)) {
-            let candidate = agent_doc_harness::ready_prompt_candidate(&content, harness);
+        if let Ok(content) = agent_doc_tmux_io::capture_pane(tmux, &initial.record.pane_id) {
+            let candidate =
+                pane_ready_prompt_candidate(tmux, &initial.record.pane_id, &content, harness);
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -862,10 +865,11 @@ pub fn current_generation_ready_prompt_proven(
     target: &AuthoritativeActorDispatchTarget,
     harness: &HarnessConfig,
 ) -> bool {
-    if tmux
-        .capture_pane(&target.record.pane_id, Some(80))
+    if agent_doc_tmux_io::capture_pane(tmux, &target.record.pane_id)
         .ok()
-        .map(|content| agent_doc_harness::ready_prompt_candidate(&content, harness).is_some())
+        .map(|content| {
+            pane_ready_prompt_candidate(tmux, &target.record.pane_id, &content, harness).is_some()
+        })
         .unwrap_or(false)
     {
         return true;

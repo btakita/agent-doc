@@ -6,6 +6,8 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **Route and supervisor readiness now ignore arbitrary user status chrome by terminal structure instead of parsing presentation text.** Claude Code and Codex direct-pane checks scope their prompt/draft evidence through tmux's cursor row, while OpenCode keeps its boxed-composer and lifecycle-event proof. This removes the customizable-status false negative behind JetBrains `editor_route did not publish a terminal result within 20000ms`, preserves busy/drafted-input vetoes, and falls back to the compatibility classifiers when cursor evidence is unavailable.
+
 ## 0.35.27
 
 _JetBrains plugin 0.2.292; VS Code extension 0.2.56._

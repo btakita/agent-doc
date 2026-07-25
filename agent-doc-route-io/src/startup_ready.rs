@@ -33,6 +33,37 @@ impl AgentReadyWaitOutcome {
     }
 }
 
+/// Evaluate prompt readiness from the visible composer region. Claude and
+/// Codex may render arbitrary user-configured status text below the cursor;
+/// OpenCode retains its full-pane chrome proof.
+pub fn pane_ready_prompt_candidate(
+    tmux: &Tmux,
+    pane_id: &str,
+    content: &str,
+    harness: &HarnessConfig,
+) -> Option<String> {
+    agent_doc_harness::ready_prompt_candidate_at_cursor(
+        content,
+        harness,
+        agent_doc_tmux_io::pane_cursor_y(tmux, pane_id),
+    )
+}
+
+/// Detect an operator-owned composer draft using the same cursor-scoped prompt
+/// region as readiness.
+pub fn pane_composer_draft(
+    tmux: &Tmux,
+    pane_id: &str,
+    content: &str,
+    harness: &HarnessConfig,
+) -> Option<String> {
+    agent_doc_harness::pane_composer_draft_at_cursor(
+        harness,
+        content,
+        agent_doc_tmux_io::pane_cursor_y(tmux, pane_id),
+    )
+}
+
 /// Poll a tmux pane until the agent is ready to accept input.
 pub fn wait_for_agent_ready(
     tmux: &Tmux,
@@ -105,7 +136,7 @@ pub fn wait_for_agent_ready_outcome(
                 last_blocker = None;
             }
 
-            match agent_doc_harness::ready_prompt_candidate(&content, harness) {
+            match pane_ready_prompt_candidate(tmux, pane_id, &content, harness) {
                 Some(line) => {
                     if last_ready_line.as_deref() == Some(line.as_str()) {
                         ready_streak += 1;
@@ -173,7 +204,7 @@ pub fn fresh_start_no_ack_outcome(
     match agent_doc_tmux_io::capture_pane(tmux, pane) {
         Ok(content) => {
             let pane_dispatch_ready =
-                agent_doc_harness::ready_prompt_candidate(&content, harness).is_some();
+                pane_ready_prompt_candidate(tmux, pane, &content, harness).is_some();
             let trigger_pending = pane_composer_has_pending_trigger(&content, trigger);
             fresh_start_ack_outcome(false, pane_dispatch_ready, trigger_pending)
         }
@@ -190,7 +221,7 @@ pub fn auto_start_dispatch_ready_block(
 ) -> Option<AutoStartDispatchBlock> {
     let pane_shows_dispatch_ready_prompt = agent_doc_tmux_io::capture_pane(tmux, pane)
         .ok()
-        .and_then(|content| agent_doc_harness::ready_prompt_candidate(&content, harness))
+        .and_then(|content| pane_ready_prompt_candidate(tmux, pane, &content, harness))
         .is_some();
     let bare_shell_command = agent_doc_tmux_io::target_current_command(tmux, pane)
         .map(|c| c.trim().to_string())

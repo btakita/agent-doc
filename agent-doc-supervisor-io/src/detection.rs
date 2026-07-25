@@ -159,8 +159,14 @@ pub fn supervisor_pane_dispatch_ready<S>(state: &S, harness: &HarnessConfig) -> 
 where
     S: SupervisorDetectionState + ?Sized,
 {
-    let content = live_pane_content(state)?;
-    Some(supervisor_detection::pane_dispatch_ready(&content, harness))
+    let pane = state.owned_pane_id()?;
+    let tmux = tmux_router::Tmux::default_server();
+    let content = agent_doc_tmux_io::capture_pane(&tmux, &pane).ok()?;
+    Some(supervisor_detection::pane_dispatch_ready_at_cursor(
+        &content,
+        harness,
+        agent_doc_tmux_io::pane_cursor_y(&tmux, &pane),
+    ))
 }
 
 pub fn actor_state_is_busy_or_starting<S>(state: &S) -> bool

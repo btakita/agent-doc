@@ -3252,7 +3252,11 @@ fn live_pane_evidence_for_pane(
 
     let harness = agent_doc_harness::HarnessConfig::from_agent_name(&ctx.harness);
     let captured = agent_doc_tmux_io::capture_pane(tmux, &pane_id).unwrap_or_default();
-    let prompt_ready = live_pane_prompt_ready(&harness, &captured);
+    let prompt_ready = live_pane_prompt_ready_at_cursor(
+        &harness,
+        &captured,
+        agent_doc_tmux_io::pane_cursor_y(tmux, &pane_id),
+    );
     LivePaneEvidence {
         pane_id: Some(pane_id.clone()),
         source,
@@ -3361,12 +3365,27 @@ fn live_evidence_target(ctx: &SessionContext) -> (Option<String>, &'static str) 
     (None, "none")
 }
 
+#[cfg(test)]
 fn live_pane_prompt_ready(harness: &agent_doc_harness::HarnessConfig, captured: &str) -> bool {
+    live_pane_prompt_ready_at_cursor(harness, captured, None)
+}
+
+fn live_pane_prompt_ready_at_cursor(
+    harness: &agent_doc_harness::HarnessConfig,
+    captured: &str,
+    cursor_y: Option<usize>,
+) -> bool {
     // The harness child has exited and the persistent agent-doc wrapper owns
     // the pane. This is an operator-input surface, not a busy harness turn.
     // Recognizing only the bottom-most exact wrapper prompt prevents stale
     // scrollback from making a live turn look idle.
     if agent_doc_restart_prompt_visible(captured) {
+        return true;
+    }
+    if cursor_y.is_some()
+        && agent_doc_harness::ready_prompt_candidate_at_cursor(captured, harness, cursor_y)
+            .is_some()
+    {
         return true;
     }
     let candidate = harness.last_prompt_candidate(captured);
@@ -4510,16 +4529,16 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
 
     #[test]
     fn live_pane_prompt_ready_accepts_idle_claude_when_status_line_is_last() {
-        // The plan's question-1 state: no trailing `⏵⏵` line, status line last.
-        // With the status line ignorable and no busy cue, the `⏵⏵` composer above
-        // it becomes the candidate → ready.
+        // Status output is user-configurable. Cursor-scoped proof resolves the
+        // composer without interpreting any text rendered below it.
         let harness = agent_doc_harness::HarnessConfig::claude();
         let idle = concat!(
             "❯\n",
+            "────────────────────────────────────────────────────────────────\n",
             "  ⏵⏵ bypass permissions on (shift+tab to cycle)\n",
-            "  Opus 4.8 ctx:40% ~/work/btakita/agent-loop main brian@cachyos-x8664\n",
+            "  anything the user's status command chooses to print\n",
         );
-        assert!(live_pane_prompt_ready(&harness, idle));
+        assert!(live_pane_prompt_ready_at_cursor(&harness, idle, Some(0)));
     }
 
     #[test]

@@ -16973,7 +16973,8 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "dispatch_into_shell",
         "FreshStartAckOutcome",
         "fresh_start_ack_outcome",
-        "agent_doc_harness::ready_prompt_candidate(&content, harness).is_some()",
+        "agent_doc_harness::ready_prompt_candidate_at_cursor(",
+        "agent_doc_tmux_io::pane_cursor_y(tmux, pane_id)",
     ] {
         assert!(
             route_startup_ready_source.contains(required_snippet),
@@ -19726,6 +19727,7 @@ fn test_agent_doc_supervisor_policy_has_no_start_decisions_facade() {
         "pub fn ready_busy_blocker_reason(",
         "pub fn help_screen_visible(",
         "pub fn pane_dispatch_ready(",
+        "pub fn pane_dispatch_ready_at_cursor(",
         "pub fn pane_has_busy_cue(",
     ] {
         assert!(

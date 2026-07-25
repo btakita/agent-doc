@@ -972,12 +972,18 @@ fn verify_auto_trigger_submitted(
     let mut already_resubmitted = false;
     loop {
         let capture = agent_doc_tmux_io::capture_pane(&tmux, pane_id).ok();
+        let cursor_y = agent_doc_tmux_io::pane_cursor_y(&tmux, pane_id);
         let facts = agent_doc_supervisor::auto_trigger::AutoTriggerSubmitFacts {
             pane_captured: capture.is_some(),
             trigger_pending_in_composer: capture.as_deref().is_some_and(|content| {
-                agent_doc_harness::ready_prompt_candidate(content, harness_cfg).is_some()
-                    // (`#autotriggerscrollbackecho`) Scope the "still unsubmitted"
-                    // test to the CURRENT draft. `pane_composer_has_pending_trigger`
+                agent_doc_harness::ready_prompt_candidate_at_cursor(
+                    content,
+                    harness_cfg,
+                    cursor_y,
+                )
+                .is_some()
+                // (`#autotriggerscrollbackecho`) Scope the "still unsubmitted"
+                // test to the CURRENT draft. `pane_composer_has_pending_trigger`
                     // substring-matches the whole capture, which is only sound on the
                     // brand-new fresh pane it was written for (`#jbtsiftnosub2`). This
                     // supervisor entry point runs against a long-lived pane whose

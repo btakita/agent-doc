@@ -187,6 +187,17 @@ pub fn pane_pid(runner: &(impl TmuxCommandRunner + ?Sized), pane_id: &str) -> Op
         .ok()
 }
 
+/// Zero-based cursor row within the pane's visible viewport.
+///
+/// Claude and Codex keep the editable composer at this row while rendering
+/// configurable status chrome below it. Consumers can therefore scope prompt
+/// inspection without interpreting user-owned status text.
+pub fn pane_cursor_y(runner: &(impl TmuxCommandRunner + ?Sized), pane_id: &str) -> Option<usize> {
+    display_message_value(runner, Some(pane_id), "#{cursor_y}")?
+        .parse::<usize>()
+        .ok()
+}
+
 pub fn target_session_name(
     runner: &(impl TmuxCommandRunner + ?Sized),
     target: &str,
@@ -650,6 +661,15 @@ mod tests {
         };
 
         assert_eq!(pane_pid(&runner, "%1"), None);
+    }
+
+    #[test]
+    fn pane_cursor_y_parses_zero_based_viewport_row() {
+        let runner = FakeRunner {
+            response: "47\n".to_string(),
+        };
+
+        assert_eq!(pane_cursor_y(&runner, "%1"), Some(47));
     }
 
     #[test]

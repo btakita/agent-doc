@@ -1819,15 +1819,29 @@ pub fn schedule_stale_supervisor_cp_recycle(file: &Path, source: &str) -> String
 /// Retain supervisor recycle only as the fallback when the controller cannot
 /// publish the editor event.
 pub fn schedule_stale_editor_replica_cp_recycle(file: &Path, source: &str) -> String {
-    match agent_doc_crdt_relay_io::signal_crdt_replica_event(
+    match agent_doc_crdt_relay_io::signal_crdt_replica_event_with_counts(
         file,
         agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
         0,
     ) {
-        Ok(()) => {
-            let status =
-                "request_skipped reason=editor_reregister_primary editor_replica_reregister=requested"
-                    .to_string();
+        Ok(outcome) => {
+            // `#mrnh` / `#ghosteditorliveness`: the unit-form signal returns `Ok(())`
+            // even when the plane holds ZERO live registrations, and callers logged
+            // that as `editor_replica_reregister=requested` — a phantom "recovery is
+            // pending" that never converges because there is no editor to re-register.
+            // Report the counted outcome instead: `no_live_registration` when nothing
+            // exists to nudge, so session-check stops implying an automatic
+            // re-registration is in flight and falls through to disk/committed
+            // authority.
+            let status = if outcome.found == 0 {
+                "request_skipped reason=no_live_editor editor_replica_reregister=no_live_registration"
+                    .to_string()
+            } else {
+                format!(
+                    "request_skipped reason=editor_reregister_primary editor_replica_reregister={}",
+                    outcome.diagnosis()
+                )
+            };
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
@@ -18579,7 +18593,12 @@ mod tests {
     }
 
     #[test]
-    fn schedule_stale_editor_replica_cp_recycle_prefers_reregister_without_recycle() {
+    fn schedule_stale_editor_replica_cp_recycle_reports_no_live_registration_when_none_exists() {
+        // `#mrnh` / `#ghosteditorliveness`: with no live editor registration there is
+        // nothing to re-register, and the old unit-form signal reported a phantom
+        // `editor_replica_reregister=requested` that never converged. The counted
+        // outcome must instead report `no_live_registration` so session-check stops
+        // implying an automatic recovery is pending.
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
@@ -18588,9 +18607,13 @@ mod tests {
         let status =
             schedule_stale_editor_replica_cp_recycle(&file, "session_check_terminal_convergence");
         assert!(
-            status.contains("request_skipped reason=editor_reregister_primary")
-                && status.contains("editor_replica_reregister=requested"),
-            "editor re-registration should be the primary repair: {status}"
+            status.contains("reason=no_live_editor")
+                && status.contains("editor_replica_reregister=no_live_registration"),
+            "with no live editor the status must be honest, not a phantom request: {status}"
+        );
+        assert!(
+            !status.contains("editor_replica_reregister=requested"),
+            "must not imply a re-registration was requested when there is no editor: {status}"
         );
         assert!(
             agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())

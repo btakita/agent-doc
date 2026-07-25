@@ -6780,9 +6780,17 @@ mod tests {
         );
         assert!(!message.contains("retry_finalize"), "{message}");
         assert!(!message.contains("resubmit finalize without"), "{message}");
+        // `#mrnh` / `#ghosteditorliveness`: the recovery must prove it TARGETS the
+        // editor replica (a registration exists to re-register), not that a nudge was
+        // hardcoded as "requested". `reason=editor_reregister_primary` is emitted only
+        // when the counted signal found a live registration (`found > 0`); the honest
+        // per-delivery outcome then follows (`requested:N` when the socket is
+        // deliverable, `delivery_failed_to_all:N` in this synthetic harness with no
+        // real editor socket). Both are editor-replica recovery, neither is a disk
+        // write or supervisor recycle.
         assert!(
-            format!("{err:#}").contains("editor_replica_reregister=requested"),
-            "zero-replica recovery must request editor replica re-registration: {err:#}"
+            format!("{err:#}").contains("reason=editor_reregister_primary"),
+            "zero-replica recovery must target editor replica re-registration (a registration exists), not disk/supervisor recovery: {err:#}"
         );
         assert!(
             agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())

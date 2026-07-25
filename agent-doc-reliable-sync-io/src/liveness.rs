@@ -742,6 +742,68 @@ mod tests {
         assert_eq!(p.open_pids("docA"), [100, 200].into_iter().collect());
     }
 
+    // `#ghosteditorliveness` regression: a document restored by durable hydration
+    // (controller restart) carries `Open` + `Register` facts but NO `Alive` fact,
+    // because the crashed editor's exit watcher never published its terminal
+    // `Alive{false}`. `pid_alive` presumes alive absent a death fact, so the pid is
+    // a *ghost* — counted live forever, holding `live_editors >= 1` and wedging
+    // every disk-authority resolve. The exit-watcher reconciliation must publish the
+    // missing death fact (from OS `kill(pid,0)` == ESRCH), after which the ghost
+    // drops from every live view. `all_open_pids` must still surface the pid BEFORE
+    // reconciliation so the watcher can find it to reap.
+    #[test]
+    fn hydrated_open_without_alive_is_a_ghost_until_reaped() {
+        let mut p = LivenessProjection::new();
+        // Hydration replays the durable Open + Register with no Alive fact.
+        p.apply(&LivenessOp::Open {
+            document_hash: "docA".into(),
+            pid: 930287,
+            tag: "boot".into(),
+        });
+        p.apply(&LivenessOp::Register(EditorRegistration {
+            document_hash: "docA".into(),
+            pid: 930287,
+            path: "/proj/tasks/plan.md".into(),
+            editor_id: "jetbrains".into(),
+            editor_kind: "jetbrains".into(),
+            editor_version: "2024.2".into(),
+            capabilities: vec![],
+            timestamp_ms: 1,
+        }));
+
+        // Ghost: with no death fact the crashed editor reads as fully live.
+        assert!(p.pid_alive(930287), "no death fact ⇒ presumed alive (the bug)");
+        assert!(p.live_docs().contains("docA"), "ghost holds live_editors>=1");
+        assert_eq!(
+            p.live_registrations("docA").len(),
+            1,
+            "ghost registration is counted as a delivery target"
+        );
+        // The watcher's reap candidate source must still see the ghost pid.
+        assert!(
+            p.all_open_pids().contains(&930287),
+            "all_open_pids must surface the ghost so the watcher can reap it"
+        );
+
+        // Reconciliation: OS liveness says the pid is gone → publish the death fact
+        // the crashed editor never sent.
+        p.apply(&LivenessOp::Alive {
+            pid: 930287,
+            value: false,
+            stamp: stamp(100, 0),
+        });
+
+        assert!(!p.pid_alive(930287), "reap publishes the missing Alive{{false}}");
+        assert!(
+            !p.live_docs().contains("docA"),
+            "reaped ghost drops from live_docs ⇒ disk authority ⇒ convergence"
+        );
+        assert!(
+            p.live_registrations("docA").is_empty(),
+            "reaped ghost is no longer a delivery target"
+        );
+    }
+
     #[test]
     fn liveness_frame_roundtrips_through_crdtsync() {
         let batch = vec![

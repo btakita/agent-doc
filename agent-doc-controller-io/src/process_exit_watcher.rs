@@ -78,24 +78,62 @@ pub fn install_process_exit_watcher(project_root: PathBuf) {
 fn run_poll_loop(watched: Arc<Mutex<HashSet<u32>>>, project_root: PathBuf) {
     loop {
         thread::sleep(POLL_INTERVAL);
-        let snapshot: Vec<u32> = { watched.lock().iter().copied().collect() };
-        for pid in snapshot {
-            // Check liveness outside the lock (it may syscall).
-            if !process_is_live(pid) {
-                // OS-observed exit → drive the reactive `alive` cell closed. Every
-                // document that pid owned recomputes to detached.
-                editor_attach().process_exited(pid);
-                // Sidecar-retirement Phase 3C: also write the reliable-sync
-                // `Alive{false}` so the shadow liveness plane cascades the same
-                // crash demote (no-op unless dual-run is on).
-                crate::project_controller::record_reliable_sync_editor_exit(
-                    &project_root,
-                    pid as u64,
-                );
-                watched.lock().remove(&pid);
-            }
+        // The explicitly-`watch()`ed set is only ever seeded by live attach events
+        // in *this* process. It is empty after a fresh controller hydration and can
+        // drift from the liveness plane's open-set under a plugin register/deregister
+        // storm. Union it with every pid the plane itself still counts as
+        // open-and-alive so a crashed editor whose terminal `Alive{false}` was never
+        // published — e.g. one restored by durable hydration on controller restart —
+        // is still polled for death. Without this the ghost pid stays
+        // `pid_alive == true` forever (`pid_alive` presumes alive absent a death
+        // fact), holding `live_editors >= 1` and wedging every disk-authority resolve
+        // in an unrecoverable authority/disk-divergence loop (`#ghosteditorliveness`).
+        let mut candidates: HashSet<u32> = { watched.lock().iter().copied().collect() };
+        candidates.extend(plane_open_alive_pids());
+        for pid in pids_to_reap(&candidates, process_is_live) {
+            // OS-observed exit → drive the reactive `alive` cell closed. Every
+            // document that pid owned recomputes to detached.
+            editor_attach().process_exited(pid);
+            // Sidecar-retirement Phase 3C: also write the reliable-sync
+            // `Alive{false}` so the shadow liveness plane cascades the same
+            // crash demote and the death fact is durably persisted (survives the
+            // next controller hydration).
+            crate::project_controller::record_reliable_sync_editor_exit(&project_root, pid as u64);
+            watched.lock().remove(&pid);
         }
     }
+}
+
+/// Every pid the reliable-sync liveness plane still counts as open-and-alive,
+/// across all documents, narrowed to the `u32` OS-pid width. This is the plane's
+/// own view of "who might be a live editor" — the exact set whose staleness
+/// produces the `#ghosteditorliveness` wedge — so polling it for death closes the
+/// gap between the plane's open-set and the watcher's `watch()`ed set. A plane
+/// `Pid` (u64) that does not fit `u32` cannot be a real OS pid; it is dropped
+/// rather than reaped (conservative: never demote what we cannot prove dead).
+fn plane_open_alive_pids() -> Vec<u32> {
+    let plane = agent_doc_reliable_sync_io::global_liveness_plane().lock();
+    let projection = plane.projection();
+    projection
+        .all_open_pids()
+        .into_iter()
+        .filter(|pid| projection.pid_alive(*pid))
+        .filter_map(|pid| u32::try_from(pid).ok())
+        .collect()
+}
+
+/// Pure reap decision: of `candidates`, which pids does OS liveness report as
+/// gone? Extracted from [`run_poll_loop`] so the "a hydrated open pid that was
+/// never `watch()`ed is still reaped" rule (`#ghosteditorliveness`) is unit
+/// testable without a controller, a real thread, or the global plane. The
+/// liveness predicate is biased toward *alive* on an ambiguous permission error
+/// (see [`process_is_live`]), so only a genuinely-gone pid (ESRCH) is reaped.
+fn pids_to_reap(candidates: &HashSet<u32>, is_live: impl Fn(u32) -> bool) -> Vec<u32> {
+    candidates
+        .iter()
+        .copied()
+        .filter(|pid| !is_live(*pid))
+        .collect()
 }
 
 /// Whether `pid` is a currently-live process. Biased toward reporting **alive** on an
@@ -139,4 +177,38 @@ fn process_is_live(pid: u32) -> bool {
 #[cfg(not(any(unix, windows)))]
 fn process_is_live(_pid: u32) -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pids_to_reap_selects_only_dead_pids() {
+        // A candidate set mixing a live pid (still-attached editor) and a dead pid
+        // (crashed editor whose `Alive{false}` was never published, restored by
+        // hydration and hence never `watch()`ed). Only the dead pid is reaped, and
+        // the live pid is never demoted (`#ghosteditorliveness`).
+        let candidates: HashSet<u32> = [101, 202].into_iter().collect();
+        let is_live = |pid: u32| pid == 101;
+        let reaped = pids_to_reap(&candidates, is_live);
+        assert_eq!(reaped, vec![202], "only the dead pid is reaped: {reaped:?}");
+    }
+
+    #[test]
+    fn pids_to_reap_reaps_hydrated_ghost_never_watched() {
+        // The exact incident shape: the pid was NOT in the `watch()`ed set (that set
+        // is empty after hydration) but IS a plane-open candidate, and it is dead.
+        // The union feeds it here, and it is reaped so `live_editors` can drop to 0.
+        let candidates: HashSet<u32> = [930999].into_iter().collect();
+        let reaped = pids_to_reap(&candidates, |_| false);
+        assert_eq!(reaped, vec![930999]);
+    }
+
+    #[test]
+    fn pids_to_reap_keeps_all_live() {
+        let candidates: HashSet<u32> = [1, 2, 3].into_iter().collect();
+        let reaped = pids_to_reap(&candidates, |_| true);
+        assert!(reaped.is_empty(), "no live pid is ever reaped: {reaped:?}");
+    }
 }

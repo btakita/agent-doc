@@ -11,7 +11,7 @@ agent_doc_lint_dialect: off
 prompt_presets:
   '#advance-review': Go through the review items. Add actionable backlog + queue items to complete or advance the review items.,
   '#agent-doc-bug': Please create a plan for agent-doc to fix this issue. Add to the backlog of tasks/agent-doc/agent-doc-bugs2.md
-  '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root causes to fix.
+  '#code-review': Please review agent-doc codebase. Inspect the architecture and look for edge cases. Isolate concurrency issues and other workflow bugs. Let's find root193    causes to fix.
   '#commit-push': commit + push all uncommitted files
   '#follow-up-backlog': Any follow-up items to place in the backlog?
   '#mermaid': Include explanatory mermaid diagram(s).
@@ -186,13 +186,42 @@ Please restart IDEA once more to activate the newly installed plugin and allow t
 ### Re: Response
 
 The retained response is now committed successfully. The fresh supervisor owns the remaining focused queue and will clear/continue it automatically.
-<!-- agent:boundary:f1e0e0a7 -->
+### Re: #qactsync-live and tmux scrollback — gpt-5.6-sol
+
+Completed the live queue proof and fixed the remaining tmux/editor churn found in this session.
+
+The scrollback symptom was real, but it was no longer an active focus feedback loop. Tmux showed the `agent-doc` and `stash` windows pinned at about `240x1000` with `window-size=manual` while the attached client was `239x53`; each pane therefore had a 999-row virtual viewport, making the live session appear detached from its history. The pane had not been respawned, only one Codex foreground process owned it, no duplicate route-owned supervisor existed for this document, copy mode and alternate screen were off, and no focus/layout effects were emitted after the plugin restart.
+
+I corrected the live windows to `239x52` and removed their per-window manual-size overrides. The source fix now makes the temporary 1000-row stash join resize a true scoped effect: it re-fits current geometry and then unsets the manual window override so later client resizes remain live. Normal layout repair also narrowly heals legacy agent-doc/stash windows still at the exact known 1000-row staging height without touching unrelated operator layouts.
+
+The broader churn fixes in the same commit also:
+
+- arbitrate reciprocal queue-control edits against the immediately preceding in-memory CRDT canonical and emit the durable projection through the existing write effect sink, with no per-keystroke SQLite read;
+- ignore partial frontmatter values during typing instead of generating compensating rewrites;
+- prevent JetBrains focus-recording calls from lazily installing the disabled tmux-to-editor reverse poller;
+- use an explicit ready-file handshake in the tmux clear fixture instead of assuming the runner process is named `sh`.
+
+Changed paths: `agent-doc-controller-io/src/project_controller/rpc.rs`, `agent-doc-queue/src/control_binding.rs`, `agent-doc-sync-io/src/sync.rs`, `agent-doc-tmux-commands/src/lib.rs`, `agent-doc-tmux-io/src/lib.rs`, `editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TmuxPaneFocusSync.kt`, `editors/jetbrains/src/test/kotlin/com/github/btakita/agentdoc/PluginLifecycleListenerTest.kt`, and `src/session_actor_cmd.rs`.
+
+Verification:
+
+- Live IDEA proof passed in both directions: frontmatter `queue: stop` removed marker `go`; adding marker `go` restored frontmatter `queue: go`, with CRDT write/pull/ACK evidence.
+- No `File Cache Conflict` appeared in the IDEA log.
+- The repaired tmux windows remained `239x52`, their local `window-size` overrides remained absent, and no new focus/layout command appeared.
+- Focused queue/controller/tmux-command tests and the new legacy-1000-row integration repro passed.
+- `make tmux-ci` passed all seven root integration tests.
+- `make check` passed all 7,983 workspace tests plus the TLA+ models and architecture checks.
+- `GRADLE_USER_HOME=/tmp/agent-doc-gradle ./gradlew test buildPlugin` passed; `make install` installed the matching binary/plugin package. The installed binary hash exactly matches the checked release-local artifact.
+
+Pushed commits: agent-doc `731c45604` (`fix: converge editor state without tmux churn`) and superproject gitlink `9cc2fa328` (`chore: update agent-doc churn fixes`).
+
+Confidence: high. Escalation: none. This closes `#qactsync-live` and the observed churn scope; it does not claim the separate repository-wide remaining-flock migration is complete.
+<!-- agent:boundary:a5c42214 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ⏭️ do [#qactsync-live]
-- ⏭️ 📌 do [#ftimmediate]
 - 📌 do [#qeditrace]
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]

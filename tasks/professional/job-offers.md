@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -220,19 +220,39 @@ Reasoning from base rates and category evidence, not vibes:
 **Does the $100M scenario change your decision? No — and here's the EV math that proves it.** Suppose $100M ARR happens: valuation perhaps $500M-1B; your 1.0% diluted through the raises that funded the run is realistically 0.3-0.5%, worth ~$1.5-5M. Multiply by ~1%: **expected value ~$15-50k.** That's roughly one signing bonus. The tail is real enough to want the equity *on paper with clean terms*, but nowhere near big enough to accept a cash discount for it, work unpaid overtime for it, or skip the revenue-share definition. Every prior conclusion survives the reassessment: equity-forward ask (1.0%, written terms, revenue-share mechanics precisely defined), signing bonus does the cash bridging, and Acadian remains the stronger default that Haiven must beat on conviction.
 
 One framing note for your own head: you don't need to *believe* in the $100M case to take Haiven, and you shouldn't take Haiven *because* of it. The bet you'd actually be making is the 40-60% world where they build a real $1-10M mission business you enjoy working in, with a revenue-share that pays something and a small chance of more. Price the offer against that world, not the tail.
-<!-- agent:boundary:8d396312 -->
+
+### Re: do #haivenask — Haiven compensation reply drafted — fable
+
+> **Queue prompt:**
+>
+> do [#haivenask]
+
+
+Executed `#haivenask`: the compensation reply draft is written and committed at **`tasks/recruit/haiven/compensation-reply-draft.md`** (commit `833663a`). Nothing is sent... it's a draft for your review. (`[#reassessopusanswers]` was also closed out; its analysis is committed above.)
+
+**The package it proposes** (addressed to Craig; swap the greeting if the conversation is with Luke):
+
+- **Base: $185,000** — one deliberate calibration: I opened at $185k rather than the $190k anchor from the earlier analysis, because Craig's original job posting banded the role at $80-100k before it evolved into the Founder Engineer conversation; $190k risks reading off-scale, while $185k still anchors the top of your believed range. Edit up to $190k in the draft if you want the aggressive anchor.
+- **Signing: $20,000**, framed explicitly as the one-time bridge against a competing offer "annualizing above $205k in cash," with the plain statement that you're not asking them to match cash... you're asking for the equity to make the gap rational.
+- **Founder package: 1.0%**, 4-year vest / 1-year cliff, with the written-terms request: instrument, fully-diluted basis, and revenue-share mechanics (percentage of what, what cadence) if Haiven stays private.
+- **Offer-letter items**: IP carve-out for your pre-existing open-source (list to follow via `#ipcarveout`), and 12-5pm ET core-hours overlap.
+
+The draft file also carries negotiation notes for when they counter: floor at $180k + $15k + 0.75% written; the $175k-for-1.0%+$25k trade if they're base-constrained; and the tell to watch — specific answers to the written-terms request means good faith, vagueness means weight the equity at ~$0 and re-run the decision gate.
+
+Review the draft, edit numbers to taste, and it's ready to paste into email or LinkedIn. `#ipcarveout` remains the next actionable item and should be produced as soon as Haiven engages on the framework.
+<!-- agent:boundary:20e39ea6 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority start -->
+- ~~do [#haivenask]~~
+- [#ipcarveout]: I plan on working on side projects. Can I have future side-work as a carve-out? Would it be easier with Acadian than with Haiven?
 <!-- /agent:queue -->
 
 ## Backlog
 
-<!-- agent:backlog -->
-- [ ] 🚧 [#reassessopusanswers] Please reassess Opus' answers. What do you think the likelihood to reach $100M ARR?
-- [ ] [#haivenask] #haivenask Draft the Haiven compensation reply (equity-forward frame: base $180-185k anchor $190k + signing $20-25k + 1.0% primary equity ask with clean terms; cash parity with $208k+ alternative explicitly not expected) as an email/message draft for review
+<!-- agent:backlog queue -->
 - [ ] [#ipcarveout] Prepare an open-source IP carve-out exhibit (lazily, tsift, agent-doc, patchboard, tmux-router, corky, etc.) to attach to whichever agreement is signed
 <!-- /agent:backlog -->
 
@@ -240,3 +260,10 @@ One framing note for your own head: you don't need to *believe* in the $100M cas
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-07-25 [#reassessopusanswers] Please reassess Opus' answers. What do you think the likelihood to reach $100M ARR?
+- 2026-07-25 [#haivenask] #haivenask Draft the Haiven compensation reply (equity-forward frame: base $180-185k anchor $190k + signing $20-25k + 1.0% primary equity ask with clean terms; cash parity with $208k+ alternative explicitly not expected) as an email/message draft for review
+<!-- /agent:done -->

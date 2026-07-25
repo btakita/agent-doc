@@ -51,7 +51,12 @@ integration (I'd suggest Unity) against your API, plus the scaffolding that make
 rest of the SDK matrix cheap to build... with or without me: an API spec, a conformance
 test suite, and docs. This is the method I use for my own cross-language work... one
 API surface maintained across 8 languages with spec, formal model, and conformance
-suites; the repos are public if you want to kick the tires. It's designed for clean
+suites; the repos are public if you want to kick the tires: the spec lives at
+github.com/lazily-hub/lazily-spec, the formal model at
+github.com/lazily-hub/lazily-formal, and the bindings are all under
+github.com/lazily-hub. I'm currently implementing the C# binding
+(github.com/lazily-hub/lazily-cs)... proving the same conformance technique works in
+C#, which is exactly what a Unity SDK would be written in. It's designed for clean
 handoff: if the prototype lands and you want me to continue milestone-by-milestone, I'm
 available. If you'd rather hand it to a hire or take a different approach, you keep
 everything... spec, tests, working code, docs... and we keep the fee nominal. Your

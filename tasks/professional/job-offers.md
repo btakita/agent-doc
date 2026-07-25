@@ -424,7 +424,20 @@ That position is coherent, and honestly it's where the accumulated analysis has 
 One last calibration, since your instinct here is good: the fact that you're worried about *seeming* mercenary while literally leaving ~$20k+/year on the table to decline gracefully tells you the worry is about kindness, not optics. The kindest version of a "no" is clear, warm, and free of numbers... which is the draft you already have.
 
 No new follow-up items this cycle... both send-items (`#haivensend`, `#acadiansend`) already cover the remaining operator actions.
-<!-- agent:boundary:cd752d88 -->
+❯ 🚧 I was thinking this through the Acadian offer more and weighing how my life would be with either company. And that is how I came to the conclusion. Should that be in the draft? I don't think Haiven would need CRDT consulting.
+
+### Re: life-weighing framing in the decline + dropping CRDT consulting — fable
+
+Both instincts are right, and both are now in the draft (commit `c95c3bd`).
+
+**Yes, the life-weighing belongs in the decline... it's the truest and warmest sentence available.** The draft's core paragraph now reads: "It's not about the compensation... I ran the numbers carefully, and I believe you would have worked with me on the package. **What settled it was stepping back from the spreadsheets and honestly weighing what my day-to-day life would look like at each company.**" That one line does three jobs at once: it tells Craig the decision process was serious rather than reactive, it moves the reason completely off money (which kills the "used us for a higher bid" worry from the last cycle for good), and it's the kind of reason a founder can't argue with... nobody counters "I imagined my life." A better offer can beat a number; it can't beat a life.
+
+**And yes, "CRDT consulting" is gone.** You're right, and for a reason worth naming: Haiven's realtime chat/presence infrastructure is *their own core product*... offering to consult on it reads as presuming they need help with the thing they're building, which is faintly condescending in a goodbye note. The door-open line now offers only what's genuinely plausible and flattering: "a contract sprint on the SDK, or an intro that's useful." Scoped, humble, and actually the shape of help a launching seed company might take you up on.
+
+The decline is now fully aligned with how you actually reached the decision... math checked, life weighed, betting on yourself... with no numbers, no consulting presumption, and the door left open. It's ready to send whenever you are (`#haivensend`), alongside the Acadian yes.
+
+No new follow-up items... the two send-items already cover what remains.
+<!-- agent:boundary:0abb7b50 -->
 <!-- /agent:exchange -->
 
 ## Queue

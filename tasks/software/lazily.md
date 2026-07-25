@@ -131,7 +131,7 @@ The spec wins, and lazily-go is not the only binding that lost. Three did.
 **Verification.** lazily-spec `make check` green (146 schema tests, Lean build, coverage sync). lazily-formal `lake build` green. lazily-go 425 tests + `go vet` green. lazily-dart 522 tests + `dart analyze` clean. lazily-zig `mise run test` green (442 tests). All five repos committed and pushed; superproject gitlinks committed. lazily-spec CI is green on this commit; lazily-go, lazily-dart and lazily-zig CI runs were still in progress and are recorded, not waited on. lazily-formal has no CI workflow.
 
 **One thing this does not do, and it is the reason the bug survived.** There is no conformance fixture for `Error → Computing`. The contract is now pinned by native tests in each binding plus the Lean proof, but the shared corpus never exercised it, which is why six bindings and three bindings disagreed for as long as they did without a single red suite. Adding one means teaching all nine runners an async-failure op, so it is queued as `#lzasyncerrfixture` rather than smuggled in here — a fixture the other eight runners panic on is worse than none.
-<!-- agent:boundary:0fb226ab -->
+<!-- agent:boundary:fbd5474f -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -154,7 +154,6 @@ The spec wins, and lazily-go is not the only binding that lost. Three did.
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzasyncerrfixture] lazily-spec: add a conformance fixture for the async Error -> Computing retry (a compute that fails once then succeeds; assert the re-spawn on the compute counter, not the returned error). Needs an async-failure op all nine runners accept — today the contract is pinned only by per-binding native tests plus LazilyFormal.AsyncSlotState, which is how go/dart/zig stayed divergent under green suites
-- [x] [#lzgoerrorretry] lazily-go: an async slot in Error serves the stored error forever, but docs/async.md § Async slot state machine lists `Error → Computing` — "get_async retry after an error". lazily-cs follows the spec; either lazily-go is a finding or the spec sentence is wrong. Decide in lazily-spec first, then fix whichever side loses
 - [ ] 🚧 [#lzcscollections] lazily-cs: SlotMap / ThreadSafeSlotMap / AsyncSlotMap materialization, ReactiveMap (CellMap/SlotMap), CellTree + reconcile, SemTree, stable-id alignment; replay collections + materialization + familysync corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 1-4, 9-11)
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
@@ -176,4 +175,5 @@ The spec wins, and lazily-go is not the only binding that lost. Three did.
 
 <!-- agent:done -->
 - 2026-07-25 [#lzcsconcurrency] lazily-cs: ThreadSafeContext (lock-backed) + AsyncContext, and re-parameterise the reactive-graph conformance runner over the execution model so all three replay the same corpus — plan: tasks/software/lazily-cs-parity-plan.md (coverage rows 5-6)
+- 2026-07-25 [#lzgoerrorretry] lazily-go: an async slot in Error serves the stored error forever, but docs/async.md § Async slot state machine lists `Error → Computing` — "get_async retry after an error". lazily-cs follows the spec; either lazily-go is a finding or the spec sentence is wrong. Decide in lazily-spec first, then fix whichever side loses
 <!-- /agent:done -->

@@ -93,7 +93,36 @@ Negotiate Haiven fully first... it costs a week and nothing else. Then let the a
 - If they stall at $150-160k, get vague about the equity instrument, or refuse the IP carve-out, take Acadian. The $208k rate, matching timezone, and bounded commitment fund exactly the patchboard-first year you already planned, and a 12-month contract keeps the option to re-enter the market in 2027.
 
 One more diligence item either way: ask Acadian whether the contract is renewable/extendable and whether the rate is renegotiable at renewal... that changes how much weight the "expires in 12 months" risk deserves.
-<!-- agent:boundary:a9609555 -->
+❯ 🚧 Is $100/hr more like >$200k/year? Please reassess what I should ask for.
+
+### Re: $100/hr annualization reassessment — fable-5
+
+**Yes, you're right... >$200k/yr is the fair way to read it, and I was over-discounting.**
+
+$100/hr x 40 hrs x 52 weeks = $208k. My earlier ~$188-196k assumed 3 weeks vacation plus all holidays unpaid. But a contractor who works steadily and takes ~2 weeks off still bills 50 weeks = $200k. Two things push it even higher:
+
+1. **Hourly pays for every hour.** If the contract lets you bill actual hours (confirm this... some cap at 40), any week over 40 is paid at $100/hr. At Haiven, "likely more overtime" is *unpaid* by construction. A $180k salary at a realistic 48-50 hr founder-eng week is an effective $69-72/hr. That asymmetry is worth naming in your own head even if you don't say it to Haiven.
+2. **Your time off is under your control.** The discount only materializes if you actually take unpaid weeks; in a 12-month contract sprint, many people don't.
+
+So the honest year-1 comparison is:
+
+- **Acadian**: ~$200-208k cash, minus ~$9.3k unsubsidized single-tier health (Gold via PGC) → **~$195-199k effective** (single coverage; family coverage knocks off ~$28k instead).
+- **Haiven** (at my previous ask): $180k + $10k signing + subsidized benefits → **~$185-190k effective**, plus 0.5%.
+
+That's a real ~$10-20k year-1 gap in Acadian's favor, wider if you bill any overtime. Haiven's compensating assets are the equity and the fact that the job doesn't end in month 12.
+
+**Revised ask for Haiven** — raise the anchors so the package reaches ~$200k year-1 value:
+
+1. **Base: anchor $190k, land $180-185k.** The justification line writes itself: "My alternative pays a $208k annual rate. I'd rather build with you, but I need the package to get close."
+2. **Signing: ask $25k, accept $20k.** Size it explicitly as closing the year-1 gap. One-time money is the concession startups grant most easily, so let the signing bonus do the bridging work rather than pushing base past their ceiling.
+3. **Package math for them:** $185k + $20k = $205k year 1, or $180k + $25k = $205k. Either lands at parity with Acadian, and the 0.5% + ongoing role is then genuine upside instead of a consolation.
+4. **Equity asks unchanged** (instrument, fully-diluted basis, vesting, acceleration, revenue-share mechanics in writing; 0.75-1.0% is still a reasonable counter given the Founder Engineer title). If they can't move cash, trade: $175k base for 1.0% + $25k signing.
+5. **Keep the IP carve-out and core-hours asks** ... they're free for Haiven and matter most to you.
+
+And the mirror-image diligence question for Acadian gains weight: **can you bill above 40 hrs, and is the rate renegotiable at renewal?** If both answers are yes, Acadian's effective ceiling is meaningfully above $208k and the bar Haiven must clear rises again.
+
+Decision gate stays the same shape, with updated numbers: Haiven at **$180k+ base, $20k+ signing, real equity paper, IP carve-out** → take Haiven. Haiven stalling below ~$195k year-1 total or getting vague on equity → Acadian funds your patchboard year at the better rate.
+<!-- agent:boundary:7bcca397 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -104,7 +133,7 @@ One more diligence item either way: ask Acadian whether the contract is renewabl
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#haivenask] Draft the Haiven compensation reply (base anchor k, target k; signing -20k; equity term questions below) as an email/message draft for review
+- [ ] [#haivenask] #haivenask Draft the Haiven compensation reply (year-1 target ~$200k: base anchor $190k / land $180-185k + signing $20-25k; equity term questions from analysis) as an email/message draft for review
 - [ ] [#ipcarveout] Prepare an open-source IP carve-out exhibit (lazily, tsift, agent-doc, patchboard, tmux-router, corky, etc.) to attach to whichever agreement is signed
 <!-- /agent:backlog -->
 

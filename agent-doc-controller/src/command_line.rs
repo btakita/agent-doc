@@ -257,9 +257,113 @@ pub fn cmdline_is_unmanaged_harness_session(cmdline: &str) -> bool {
         && !cmdline_references_md_document(cmdline)
 }
 
+/// True when `cmdline` is the `agent-doc` binary itself.
+pub fn cmdline_runs_agent_doc_binary(cmdline: &str) -> bool {
+    cmdline
+        .split_whitespace()
+        .any(token_is_agent_doc_binary)
+}
+
+/// Tree-level form of [`cmdline_is_unmanaged_harness_session`]: true when a whole
+/// process tree is a harness session agent-doc did not start.
+///
+/// **This must be decided over the tree, never per process** (`#panehijackself`).
+/// agent-doc *starts* the harness as a child, so a managed pane's tree is
+///
+/// ```text
+/// zsh → agent-doc start --route-owned tasks/plan.md → claude --resume <id>
+/// ```
+///
+/// and the `claude` process **on its own** carries neither an `agent-doc` token
+/// nor a `.md`, so the per-process predicate answers "unmanaged" for it. Lifting
+/// that per-process answer with `any()` therefore called *every* agent-doc-managed
+/// pane foreign, and the cross-document owner guard then refused to surface each
+/// pane as the owner of its **own** document — which is what stopped the editor's
+/// automatic tmux pane swap on document switch.
+///
+/// The tree is managed iff the `agent-doc` binary appears anywhere in it. A `.md`
+/// token elsewhere in the tree is deliberately **not** enough: a transient
+/// `rg SPEC.md` running under the operator's own `claude` would otherwise make
+/// that session claimable, which is the exact `#bare-foreign-session-guard`
+/// regression. Ownership must be proven, never assumed.
+pub fn cmdlines_are_unmanaged_harness_session<'a, I>(cmdlines: I) -> bool
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut saw_unmanaged_harness = false;
+    for cmdline in cmdlines {
+        if cmdline_runs_agent_doc_binary(cmdline) {
+            return false;
+        }
+        saw_unmanaged_harness |= cmdline_is_unmanaged_harness_session(cmdline);
+    }
+    saw_unmanaged_harness
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The three panes as they really run, captured from the live tmux server
+    /// while the automatic pane swap was broken. `agent-doc start` is the pane's
+    /// child and the harness is *its* child, so the harness cmdline alone carries
+    /// neither an `agent-doc` token nor the document.
+    fn managed_pane_tree() -> [&'static str; 3] {
+        [
+            "-zsh",
+            "/home/brian/.cargo/bin/agent-doc start --route-owned \
+             --route-owned-reap-policy auto tasks/agent-doc/agent-doc-bugs2.md",
+            "/opt/claude-code/bin/claude --dangerously-skip-permissions --model opus \
+             --resume 68af54ca-b852-448f-95ed-24f29b695261",
+        ]
+    }
+
+    /// `#panehijackself` — the regression that broke the editor's automatic tmux
+    /// pane swap: every agent-doc-managed pane classified as a foreign session, so
+    /// the cross-document owner guard refused to surface any pane as the owner of
+    /// its *own* document.
+    ///
+    /// The per-process predicate answering "unmanaged" for the harness child is
+    /// not the bug — that is what it is asked. The bug was `any()`-ing it across
+    /// the tree. This asserts both halves, so a future refactor cannot "fix" the
+    /// tree predicate by weakening the per-process one.
+    #[test]
+    fn agent_doc_managed_pane_tree_is_not_an_unmanaged_harness_session() {
+        let tree = managed_pane_tree();
+
+        assert!(
+            cmdline_is_unmanaged_harness_session(tree[2]),
+            "precondition: the harness child alone carries no agent-doc token and no \
+             document, so per-process it does look unmanaged — which is why the \
+             decision must be made over the tree"
+        );
+
+        assert!(
+            !cmdlines_are_unmanaged_harness_session(tree),
+            "a pane whose tree contains the agent-doc binary is managed; calling it \
+             foreign makes the pane unelectable as its own document's owner"
+        );
+    }
+
+    /// The guard the fix must not weaken: an operator's own harness session stays
+    /// foreign even when a transient child mentions markdown. `rg SPEC.md` under a
+    /// bare `claude` must not launder that pane into a claimable one.
+    #[test]
+    fn bare_operator_harness_tree_stays_unmanaged_even_with_a_markdown_child() {
+        assert!(
+            cmdlines_are_unmanaged_harness_session([
+                "-zsh",
+                "/opt/claude-code/bin/claude --dangerously-skip-permissions",
+                "rg --line-number needle SPEC.md",
+            ]),
+            "a markdown token below the operator's own harness is not proof agent-doc \
+             started it (#bare-foreign-session-guard)"
+        );
+        assert!(
+            !cmdlines_are_unmanaged_harness_session(["-zsh", "vim notes.md"]),
+            "a tree with no harness session at all is not an unmanaged harness session"
+        );
+    }
 
     /// `#bare-foreign-session-guard` — the operator's own Claude Code session,
     /// started by hand in the project directory with no document argument. It

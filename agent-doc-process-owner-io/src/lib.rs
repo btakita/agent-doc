@@ -319,12 +319,22 @@ pub fn process_tree_owns_other_document(root_pid: &str, claimed_file: &Path) -> 
 /// This is the operator's own `claude`/`codex` session. It binds no `.md`, so
 /// the document-ownership predicates all answer "owns nothing" — which callers
 /// must not read as "free to claim or reap".
+///
+/// `#panehijackself`: the decision is made over the WHOLE tree
+/// ([`cmdlines_are_unmanaged_harness_session`]), never per process. agent-doc
+/// starts the harness as a child, so a managed pane's `claude` process on its own
+/// looks unmanaged — and `any()`-ing that per-process answer classified every
+/// agent-doc pane as foreign.
+///
+/// [`cmdlines_are_unmanaged_harness_session`]: agent_doc_controller::command_line::cmdlines_are_unmanaged_harness_session
 pub fn process_tree_runs_unmanaged_harness_session(root_pid: &str) -> bool {
-    process_tree_pids(root_pid).into_iter().any(|pid| {
-        process_command(&pid)
-            .as_deref()
-            .is_some_and(agent_doc_controller::command_line::cmdline_is_unmanaged_harness_session)
-    })
+    let cmdlines: Vec<String> = process_tree_pids(root_pid)
+        .into_iter()
+        .filter_map(|pid| process_command(&pid))
+        .collect();
+    agent_doc_controller::command_line::cmdlines_are_unmanaged_harness_session(
+        cmdlines.iter().map(String::as_str),
+    )
 }
 
 #[cfg(test)]

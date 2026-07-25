@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -493,13 +493,34 @@ Honest answer: **pitched as engine-SDK expertise, it's a stretch. Pitched as an 
 **What would sink it:** overselling. If the pitch says "SDK experts," Craig eventually discovers neither of you has shipped a Unity plugin, and the trust cost lands on the relationship you've spent this whole negotiation protecting. If the pitch says "here's exactly what we've each built, here's the split that maps to it, here's the gate structure that protects you"... that's the same candor that's carried every prior exchange with him, and it's the version worth sending.
 
 Preconditions unchanged: Riza double opt-in first, decline + Acadian yes before any of this goes out, and your evenings posture decided before you offer your half. `#rizastartedoff` is done; the whole thread stays tracked under `#sdkcontract`.
-<!-- agent:boundary:f1ebbc28 -->
+I havn't asked Riza yet, since this is the first time I'm pitching Haiven. Should I offer to help scope the work in the decline draft?
+Roblox already has a Child Safety team. Is this something that Haiven would approach?
+
+### Re: scope-help in the decline + the Roblox child-safety question — fable
+
+> **Queue prompt:**
+>
+> do [#havnaskedriza]
+
+
+Two answers, one small edit made.
+
+**1. Yes... offer the scoping help in the decline, and it's now in (commit `be47d57`).** The door-open line reads: "helping you scope the engine-SDK work into milestones, a contract sprint, or an intro that's useful... my door is open." Scoping help is the perfect thing to offer in a goodbye note, for three reasons. It's *giveable immediately*: unlike the intro (blocked on Riza's opt-in, which you correctly haven't sought yet... never float a person who hasn't agreed to be floated) and unlike the contract sprint (blocked on your evenings decision), helping Craig break the SDK work into milestone-shaped pieces costs you one conversation and zero commitments. It's *credibly yours to give*: structuring multi-platform client-library work into gated deliverables is literally what the lazily release train is. And it's *the channel everything else flows through*: if Craig takes you up on scoping, the conversation naturally surfaces "who could build milestone 1"... which is where the Riza intro and your augment offer belong, arising from his need instead of your pitch. The decline now offers exactly what's unblocked, and defers exactly what isn't.
+
+**2. Roblox: right instinct, important refinement.** Roblox has enormous in-house Trust & Safety... platform-enforced chat filtering, ML moderation at scale, a dedicated child-safety org. Two consequences for Haiven:
+
+- **Haiven will almost certainly never sell *to* Roblox corp**... you don't sell safety infrastructure to the company whose safety infrastructure is the platform. If "approach Roblox" means vendor-to-platform, that's a dead end, and I doubt Craig thinks otherwise.
+- **The Roblox *SDK* targets experience developers, not the platform**... indie creators building games on Roblox who want safety signals and analytics beyond the platform baseline. But this surface is the most constrained in Haiven's matrix: Roblox requires chat to flow through its own filtered TextChatService, and its ToS sharply limit what external services can do with communication data. A Haiven Roblox SDK is realistically a signals/analytics layer inside those rules, not a chat-safety replacement.
+
+The strategic read that falls out: **Haiven's real wedge is where no incumbent safety layer exists at all**... standalone indie games on Unity/Unreal, and Discord-adjacent communities... which is precisely the "zero backend, zero cost" pitch. On Roblox, the platform *is* the incumbent. So I'd revise my earlier "Roblox is market-critical" framing: Discord + standalone Unity/Unreal are the wedge; Roblox is a constrained, lower-priority surface... which conveniently is also the ordering that suits an SDK contract (Unity first, as already planned; Roblox last, if ever). There may also be a partnership/standards angle... Craig's "anticipated industry partner funding" and the Child Safe Tech Alliance membership hint Haiven courts platforms as *allies* rather than customers... but that's Luke and Craig's game, not a reason to change anything in your drafts.
+
+Net effect on your position: none on the decision, one small upgrade to the decline (sent), and one useful piece of diligence in your pocket... if the scoping conversation ever happens, "Unity first, Discord second, Roblox last because the platform constrains it" is the kind of observation that shows Craig you understand his market, not just his codebase. `#havnaskedriza` is done.
+<!-- agent:boundary:c246d207 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue priority -->
-- 🚧 do [#rizastartedoff]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -530,4 +551,6 @@ Preconditions unchanged: Riza double opt-in first, decline + Acadian yes before 
 - 2026-07-25 [#fullydilutedshares] What are "fully diluted shares"?
 - 2026-07-25 [#rizaingallshttps] riza-ingalls (https://www.linkedin.com/in/riza-ingalls/) was a founding engineer at PresenceAI. I had riza-ingalls as one of my references. Riza lives in Austin, TX...as does Craig. Would it make sense to introduce Riza as a candidate for the SDK. Where I can augment the work as well? Or would this come off as prying control away from Craig + Luke at Haiven?
 - 2026-07-25 [#rizastartedoff] Riza started off with front-end work then did full stack work at PresenceAI using Python. He is capable of learning, especially with AI assistance. I havn't made any SDKs. Riza has worked on the PresenceAI api extensively. Would this be an appealing fit or is this too much of a stretch?
+- 2026-07-25 [#havnaskedriza] I havn't asked Riza yet, since this is the first time I'm pitching Haiven. Should I offer to help scope the work in the decline draft?
+Roblox already has a Child Safety team. Is this something that Haiven would approach?
 <!-- /agent:done -->

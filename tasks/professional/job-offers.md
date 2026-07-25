@@ -122,7 +122,31 @@ That's a real ~$10-20k year-1 gap in Acadian's favor, wider if you bill any over
 And the mirror-image diligence question for Acadian gains weight: **can you bill above 40 hrs, and is the rate renegotiable at renewal?** If both answers are yes, Acadian's effective ceiling is meaningfully above $208k and the bar Haiven must clear rises again.
 
 Decision gate stays the same shape, with updated numbers: Haiven at **$180k+ base, $20k+ signing, real equity paper, IP carve-out** → take Haiven. Haiven stalling below ~$195k year-1 total or getting vague on equity → Acadian funds your patchboard year at the better rate.
-<!-- agent:boundary:7bcca397 -->
+❯ 🚧 I can bill above 40 hours and the rate is renegotiable at renewal.
+
+### Re: billable overtime + renegotiable renewal — fable-5
+
+Those two answers upgrade Acadian from "good 12-month stopgap" to "renewable seat with a rising ceiling":
+
+- **Paid overtime**: 45 hrs/wk x 50 weeks = **$225k**; 50 hrs = $250k. Every extra hour is compensated, versus Haiven where extra hours *reduce* your effective rate. (Counterweight: only count hours you'd actually choose to work. At a clean 40 you're still at $208k... don't let billable overtime become an obligation to work it.)
+- **Renegotiable renewal**: the "expires in month 12" risk I was pricing in mostly evaporates. If the engagement goes well you have a built-in rate-raise checkpoint at month 12, with a year of demonstrated value as leverage. The realistic Acadian trajectory is $208k+ year 1, higher after renewal.
+
+**What this means for the Haiven ask: stop trying to reach cash parity and make it equity-forward.** Haiven almost certainly can't pay $210-225k base, and pushing them there sours the negotiation. The honest frame flips to: "I'm not asking you to match my alternative's cash. I'm asking for a package where the equity makes the gap rational."
+
+Revised structure:
+
+1. **Base: $180-185k, anchor $190k** (unchanged). This is already near the top of the range you believe exists; squeezing harder buys little.
+2. **Signing: $20-25k** (unchanged). Still the easy one-time bridge.
+3. **Equity: 1.0% becomes the *primary* ask, not the fallback.** The cash gap vs Acadian is now structural (~$25-45k/yr depending on your hours), so the equity has to carry real weight to justify it. Say it plainly: "Given my alternative annualizes above $208k with paid overtime, I need the founder package at 1.0% with standard terms (4-yr vest, 1-yr cliff, double-trigger acceleration, terms on paper) for this to work." Settle at 0.75% if base lands at $185k.
+4. **Everything else holds**: instrument/vesting/revenue-share mechanics in writing, IP carve-out naming your projects, core-hours overlap for the ET-PT split.
+
+**Updated decision gate:**
+
+- Take **Haiven** only if you get: $180k+ base, $20k+ signing, **~1.0% with clean written terms**, and the IP carve-out... *and* you affirmatively want the multi-year startup bet with evening-shifted hours. The package now needs the equity to be real, because the cash case is gone.
+- Otherwise **Acadian**: $208-225k, your timezone, paid overtime, a month-12 raise checkpoint, and the open-source time your patchboard-first plan calls for.
+
+Bluntly: with billable overtime and a renegotiable rate, Acadian is now the stronger default. Haiven has to win on conviction... team, equity terms, and the kind of work... not on money. That's still a winnable case, but it's theirs to make, and their willingness to put 1.0% on paper is the cleanest test of it.
+<!-- agent:boundary:e0770874 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -133,7 +157,7 @@ Decision gate stays the same shape, with updated numbers: Haiven at **$180k+ bas
 ## Backlog
 
 <!-- agent:backlog -->
-- [ ] [#haivenask] #haivenask Draft the Haiven compensation reply (year-1 target ~$200k: base anchor $190k / land $180-185k + signing $20-25k; equity term questions from analysis) as an email/message draft for review
+- [ ] [#haivenask] #haivenask Draft the Haiven compensation reply (equity-forward frame: base $180-185k anchor $190k + signing $20-25k + 1.0% primary equity ask with clean terms; cash parity with $208k+ alternative explicitly not expected) as an email/message draft for review
 - [ ] [#ipcarveout] Prepare an open-source IP carve-out exhibit (lazily, tsift, agent-doc, patchboard, tmux-router, corky, etc.) to attach to whichever agreement is signed
 <!-- /agent:backlog -->
 

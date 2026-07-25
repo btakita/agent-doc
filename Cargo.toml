@@ -110,6 +110,7 @@ members = [
     "agent-doc-workflow-io",
     "agent-doc-work-graph",
     "agent-doc-state-backbone",
+    "agent-doc-state-scope",
     "agent-doc-state-observer-io",
     "agent-doc-state-wire",
     "agent-doc-status-io",
@@ -262,6 +263,7 @@ agent-doc-start-io = { path = "agent-doc-start-io", version = "0.35.28" }
 agent-doc-start-runtime-io = { path = "agent-doc-start-runtime-io", version = "0.35.28" }
 agent-doc-state-backbone = { path = "agent-doc-state-backbone", version = "0.35.28" }
 agent-doc-state-observer-io = { path = "agent-doc-state-observer-io", version = "0.35.28" }
+agent-doc-state-scope = { path = "agent-doc-state-scope", version = "0.35.28" }
 agent-doc-state-wire = { path = "agent-doc-state-wire", version = "0.35.28" }
 agent-doc-status-io = { path = "agent-doc-status-io", version = "0.35.28" }
 agent-doc-stream-io = { path = "agent-doc-stream-io", version = "0.35.28" }

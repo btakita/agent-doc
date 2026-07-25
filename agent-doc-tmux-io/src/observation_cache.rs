@@ -30,13 +30,17 @@
 
 use std::cell::RefCell;
 
+use agent_doc_state_scope::LocalReadScope;
 use agent_doc_tmux_commands::TmuxCommand;
-use lazily::{Context, SlotMap};
+use lazily::SlotMap;
 
 use crate::TmuxIoError;
 
 struct ObservationScopeState {
-    ctx: Context,
+    /// The scope this cache's slots live in (`#stategraphjoin`). Its lifetime is
+    /// exactly the observation scope's depth-counted extent, and re-taking it is
+    /// how a tmux mutation invalidates every memoized observation at once.
+    scope: LocalReadScope,
     /// Keyed by the full argv so two different `display-message` formats never
     /// collide. Only successful outputs are stored — an error may be transient
     /// and must not be memoized.
@@ -48,10 +52,10 @@ struct ObservationScopeState {
 
 impl ObservationScopeState {
     fn new() -> Self {
-        let ctx = Context::new();
-        let reads = SlotMap::new(&ctx);
+        let scope = LocalReadScope::new();
+        let reads = SlotMap::new(scope.ctx());
         Self {
-            ctx,
+            scope,
             reads,
             depth: 1,
             hits: 0,
@@ -63,8 +67,10 @@ impl ObservationScopeState {
         // Drop the derived slots wholesale rather than evicting key by key: a
         // mutation can invalidate observations we never explicitly recorded a
         // dependency on (a new pane changes `list-panes` for every window).
-        self.ctx = Context::new();
-        self.reads = SlotMap::new(&self.ctx);
+        // Re-taking the scope IS the invalidation: a tmux mutation must drop every
+        // memoized observation, and dropping the scope drops the whole graph.
+        self.scope = LocalReadScope::new();
+        self.reads = SlotMap::new(self.scope.ctx());
     }
 }
 
@@ -164,7 +170,7 @@ pub(crate) fn run_with_observation_cache(
     let cached = SCOPE.with(|scope| {
         let mut scope = scope.borrow_mut();
         let state = scope.as_mut()?;
-        let hit = state.reads.get(&state.ctx, &key);
+        let hit = state.reads.get(state.scope.ctx(), &key);
         if hit.is_some() {
             state.hits += 1;
         }
@@ -186,7 +192,7 @@ pub(crate) fn run_with_observation_cache(
             // returns without re-running the factory.
             state
                 .reads
-                .get_or_insert_with(&state.ctx, key, move |_| observed.clone());
+                .get_or_insert_with(state.scope.ctx(), key, move |_| observed.clone());
         }
     });
 

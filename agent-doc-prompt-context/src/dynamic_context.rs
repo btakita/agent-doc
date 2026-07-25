@@ -8,6 +8,7 @@ use std::cell::Cell as StdCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use agent_doc_state_scope::LocalTurnScope;
 use lazily::{Compute, Computed, Context, Source};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -170,7 +171,13 @@ type DecisionsSlot = Computed<Vec<ContextChunkDecision>>;
 type RenderedManifestSlot = Computed<RenderedContextManifest>;
 
 pub struct DynamicContextProjection {
-    ctx: Context,
+    /// `#stategraphjoin`: the projection's cells live in a turn-scoped graph whose
+    /// lifetime is the projection's own.
+    ///
+    /// Unlike `ThreadSafeContext`, `lazily::Context` is `Rc`-based and not `Clone`, so
+    /// the single-threaded scopes are *owned*, never handed out by clone — a caller
+    /// that wants to share this graph borrows [`Self::ctx`] instead.
+    scope: LocalTurnScope,
     component_hashes: ComponentHashesCell,
     prompt_inputs: PromptInputsCell,
     candidate_chunks: CandidateChunksCell,
@@ -198,6 +205,12 @@ impl DynamicContextProjection {
         )
     }
 
+    /// The scope's context, so a caller can read this projection's cells through the
+    /// same graph they were created in (`#stategraphjoin`).
+    pub fn ctx(&self) -> &Context {
+        self.scope.ctx()
+    }
+
     fn with_render_count(
         component_hashes: Vec<ComponentHash>,
         prompt_inputs: PromptTargetInputs,
@@ -205,7 +218,8 @@ impl DynamicContextProjection {
         ledger_snapshot: InjectionLedgerSnapshot,
         render_count: Rc<StdCell<usize>>,
     ) -> Self {
-        let ctx = Context::new();
+        let scope = LocalTurnScope::new();
+        let ctx = scope.ctx();
         let component_hashes_cell = ctx.source(component_hashes);
         let prompt_inputs_cell = ctx.source(prompt_inputs);
         let candidate_chunks_cell = ctx.source(candidate_chunks);
@@ -243,7 +257,7 @@ impl DynamicContextProjection {
         });
 
         Self {
-            ctx,
+            scope,
             component_hashes: component_hashes_cell,
             prompt_inputs: prompt_inputs_cell,
             candidate_chunks: candidate_chunks_cell,
@@ -257,38 +271,38 @@ impl DynamicContextProjection {
     }
 
     pub fn set_component_hashes(&self, component_hashes: Vec<ComponentHash>) {
-        self.ctx.set(
+        self.scope.ctx().set(
             &self.component_hashes,
             normalize_component_hashes(component_hashes),
         );
     }
 
     pub fn set_prompt_inputs(&self, prompt_inputs: PromptTargetInputs) {
-        self.ctx.set(&self.prompt_inputs, prompt_inputs);
+        self.scope.ctx().set(&self.prompt_inputs, prompt_inputs);
     }
 
     pub fn set_candidate_chunks(&self, candidate_chunks: Vec<ContextChunk>) {
-        self.ctx.set(&self.candidate_chunks, candidate_chunks);
+        self.scope.ctx().set(&self.candidate_chunks, candidate_chunks);
     }
 
     pub fn set_ledger_snapshot(&self, ledger_snapshot: InjectionLedgerSnapshot) {
-        self.ctx.set(&self.ledger_snapshot, ledger_snapshot);
+        self.scope.ctx().set(&self.ledger_snapshot, ledger_snapshot);
     }
 
     pub fn prompt_targets(&self) -> Vec<String> {
-        self.ctx.get(&self.prompt_targets)
+        self.scope.ctx().get(&self.prompt_targets)
     }
 
     pub fn candidate_context_chunks(&self) -> Vec<ContextChunk> {
-        self.ctx.get(&self.candidate_context_chunks)
+        self.scope.ctx().get(&self.candidate_context_chunks)
     }
 
     pub fn duplicate_decisions(&self) -> Vec<ContextChunkDecision> {
-        self.ctx.get(&self.duplicate_decisions)
+        self.scope.ctx().get(&self.duplicate_decisions)
     }
 
     pub fn rendered_manifest(&self) -> RenderedContextManifest {
-        self.ctx.get(&self.rendered_manifest)
+        self.scope.ctx().get(&self.rendered_manifest)
     }
 
     pub fn rendered_manifest_count(&self) -> usize {

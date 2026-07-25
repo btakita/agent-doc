@@ -11,6 +11,7 @@ publish = false
 name = "agent_doc_document_realtime"
 
 [dependencies]
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.28" }
 # `#relaylockpoison`: locks here are parking_lot, not `std::sync` — the workspace
 # keeps `panic=unwind` so the cdylib's `catch_unwind` guards survive a panic in a
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex

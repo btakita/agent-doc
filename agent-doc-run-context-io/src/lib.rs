@@ -373,12 +373,16 @@ where
 }
 
 pub fn cycle_context(file_path: PathBuf) -> CycleContext {
+    // #stategraphjoin-allow: this IS a scope factory — the context is the returned
+    // value's own graph, not a private island hidden inside a longer-lived owner.
     let ctx = CycleContext::new();
     ctx.set(file_path_cell(&ctx), file_path);
     ctx
 }
 
 pub fn actor_context(file_path: PathBuf) -> ActorContext {
+    // #stategraphjoin-allow: this IS a scope factory — the context is the returned
+    // value's own graph, not a private island hidden inside a longer-lived owner.
     let ctx = ActorContext::new();
     ctx.set(file_path_cell(&ctx), file_path);
     ctx

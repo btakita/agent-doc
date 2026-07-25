@@ -318,6 +318,11 @@ impl RelayHub {
     /// `agent-doc-crdt-relay-io`'s `hub_registry`, which is a registry-eviction
     /// question, not a reactive-scope one.
     fn build_liveness_core() -> LivenessCore {
+        // #stategraphjoin-allow: owned by the `RelayHub` and dropped with it, so hub
+        // disposal already tears the whole graph down and a scope would only re-express
+        // that ownership. Growth is bounded: `mint_client_id` derives client ids from a
+        // STABLE editor identity, so connection churn re-materializes the same cells.
+        // Both bounds are asserted against lazily's edge introspection in this module.
         let ctx = ThreadSafeContext::new();
         let membership_epoch = ctx.source(0u64);
         let delivery_epoch = ctx.source(0u64);
@@ -1367,6 +1372,9 @@ fn apply_canonical_document_tree_replace(current: &str, content: &str) -> Result
     if diffs.is_empty() {
         return Ok(());
     }
+    // #stategraphjoin-allow: bounded per-call pure transform. The context is built,
+    // used to fold a fixed diff list into a tree, and dropped before returning; no
+    // owner retains it and nothing derives from it across calls.
     let ctx = lazily::Context::new();
     let mut tree = agent_doc_merge::document_cell::DocumentCellTree::from_document(&ctx, current);
     for diff in &diffs {

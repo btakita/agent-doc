@@ -11,6 +11,7 @@ publish = false
 name = "agent_doc_tmux_io"
 
 [dependencies]
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.28" }
 agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.28" }
 agent-doc-tmux = { path = "../agent-doc-tmux", version = "0.35.28" }
 agent-doc-tmux-commands = { path = "../agent-doc-tmux-commands", version = "0.35.28" }

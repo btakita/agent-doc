@@ -2462,6 +2462,11 @@ pub fn converge_queue_via_lifecycle(
     // the authored multiplicity. The SM makes the no-op explicit — re-sighting an
     // already-kept identity is `OperatorAuthored`/`BacklogMirrored` against an
     // already-advanced state, which holds (no advance), so the copy is dropped.
+    // `#stategraphjoin`: one scope for this convergence pass, so the per-identity
+    // machines are cells in ONE graph instead of a private context per identity. The
+    // scope is dropped with the pass, which is exactly the lifetime these machines
+    // have — teardown is the scope, not a separate cleanup step.
+    let scope = agent_doc_state_scope::DocumentScope::new();
     let mut machines: std::collections::HashMap<_, QueueItemMachine> =
         std::collections::HashMap::new();
     let mut kept_count: std::collections::HashMap<_, usize> = std::collections::HashMap::new();
@@ -2583,7 +2588,7 @@ pub fn converge_queue_via_lifecycle(
         };
         machines
             .entry(key.clone())
-            .or_insert_with(|| QueueItemMachine::new(initial));
+            .or_insert_with(|| QueueItemMachine::new_in(&scope, initial));
         *seen += 1;
 
         // Apply the pin-variant survivor rewrite if this is the earliest member

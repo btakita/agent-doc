@@ -113,6 +113,7 @@ dependencies = [
  "agent-doc-start-runtime-io",
  "agent-doc-state-backbone",
  "agent-doc-state-observer-io",
+ "agent-doc-state-scope",
  "agent-doc-state-wire",
  "agent-doc-status-io",
  "agent-doc-stream-io",
@@ -521,6 +522,7 @@ dependencies = [
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
+ "agent-doc-state-scope",
  "agent-doc-state-wire",
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
@@ -663,6 +665,7 @@ dependencies = [
  "agent-doc-prompt-lines",
  "agent-doc-queue",
  "agent-doc-state-backbone",
+ "agent-doc-state-scope",
  "agent-doc-template",
  "agent-doc-turn",
  "anyhow",
@@ -819,6 +822,7 @@ name = "agent-doc-element-queue"
 version = "0.35.28"
 dependencies = [
  "agent-doc-element",
+ "agent-doc-state-scope",
  "lazily 0.48.1",
  "serde",
 ]
@@ -1203,6 +1207,7 @@ dependencies = [
  "agent-doc-frontmatter",
  "agent-doc-markdown-ast",
  "agent-doc-markdown-lossless",
+ "agent-doc-state-scope",
  "anyhow",
  "base64 0.22.1",
  "lazily 0.48.1",
@@ -1266,6 +1271,7 @@ dependencies = [
  "agent-doc-hash",
  "agent-doc-log-time",
  "agent-doc-project-root-io",
+ "agent-doc-state-scope",
  "agent-doc-turn",
  "anyhow",
  "lazily 0.48.1",
@@ -1499,6 +1505,7 @@ dependencies = [
  "agent-doc-element-backlog",
  "agent-doc-hash",
  "agent-doc-session-accretion",
+ "agent-doc-state-scope",
  "lazily 0.48.1",
  "serde",
  "serde_json",
@@ -1568,6 +1575,7 @@ dependencies = [
  "agent-doc-lease",
  "agent-doc-markdown-ast",
  "agent-doc-prompt-lines",
+ "agent-doc-state-scope",
  "anyhow",
  "libc",
  "proptest",
@@ -2194,6 +2202,7 @@ dependencies = [
 name = "agent-doc-state-backbone"
 version = "0.35.28"
 dependencies = [
+ "agent-doc-state-scope",
  "agent-doc-turn",
  "lazily 0.48.1",
  "serde",
@@ -2216,6 +2225,13 @@ dependencies = [
  "agent-doc-state-backbone",
  "agent-doc-supervisor",
  "agent-doc-turn",
+]
+
+[[package]]
+name = "agent-doc-state-scope"
+version = "0.35.28"
+dependencies = [
+ "lazily 0.48.1",
 ]
 
 [[package]]
@@ -2295,6 +2311,7 @@ dependencies = [
  "agent-doc-log-time",
  "agent-doc-prompt-lines",
  "agent-doc-queue",
+ "agent-doc-state-scope",
  "agent-doc-tmux-commands",
  "lazily 0.48.1",
  "serde",
@@ -2316,6 +2333,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-sqlite",
  "agent-doc-state-backbone",
+ "agent-doc-state-scope",
  "agent-doc-supervisor",
  "agent-doc-tmux-commands",
  "agent-doc-tmux-io",
@@ -2409,6 +2427,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
+ "agent-doc-state-scope",
  "agent-doc-supervisor",
  "agent-doc-supervisor-io",
  "agent-doc-supervisor-process",
@@ -2503,6 +2522,7 @@ dependencies = [
 name = "agent-doc-tmux"
 version = "0.35.28"
 dependencies = [
+ "agent-doc-state-scope",
  "lazily 0.48.1",
  "serde",
  "tempfile",
@@ -2523,6 +2543,7 @@ name = "agent-doc-tmux-io"
 version = "0.35.28"
 dependencies = [
  "agent-doc-fs",
+ "agent-doc-state-scope",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",
  "anyhow",
@@ -2547,6 +2568,7 @@ dependencies = [
  "agent-doc-markdown-ast",
  "agent-doc-prompt-lines",
  "agent-doc-queue",
+ "agent-doc-state-scope",
  "agent-doc-template",
  "lazily 0.48.1",
  "proptest",
@@ -2572,6 +2594,7 @@ dependencies = [
 name = "agent-doc-turn-executor-tmux"
 version = "0.35.28"
 dependencies = [
+ "agent-doc-state-scope",
  "agent-doc-tmux",
  "agent-doc-turn-executor",
  "serde",

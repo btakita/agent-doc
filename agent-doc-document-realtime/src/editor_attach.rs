@@ -87,9 +87,26 @@ pub struct EditorAttach {
 }
 
 impl EditorAttach {
-    /// Build an empty registry with no watcher installed.
+    /// Build an empty registry joined to `scope`'s graph (`#stategraphjoin`).
+    ///
+    /// Attachment is a process fact — the registry is a process-global singleton and
+    /// the OS process-exit watcher is installed on it once at startup — so it joins
+    /// the shared [`editor_process_scope`]. Sharing that scope with
+    /// [`crate::editor_open_docs`] is the point: "open" and "attached" are now cells
+    /// in one graph, so a derivation can span them instead of a caller reading two
+    /// islands and combining them by hand.
+    pub fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
+        Self::build(scope.ctx().clone())
+    }
+
+    /// Standalone registry in a private context — a pure helper for unit tests only.
+    /// A long-lived owner must use [`Self::new_in`]; see `#stategraphjoin`.
     pub fn new() -> Self {
-        let ctx = ThreadSafeContext::new();
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
+        Self::build(ThreadSafeContext::new())
+    }
+
+    fn build(ctx: ThreadSafeContext) -> Self {
         let epoch = ctx.source(0u64);
         let alive: ThreadSafeCellMap<u32, bool> = ThreadSafeCellMap::new(&ctx);
         let registered: ThreadSafeCellMap<(String, u32), bool> = ThreadSafeCellMap::new(&ctx);
@@ -278,7 +295,7 @@ impl Default for EditorAttach {
 /// reads `is_attached`/`is_tracked`.
 pub fn editor_attach() -> &'static EditorAttach {
     static GLOBAL: OnceLock<EditorAttach> = OnceLock::new();
-    GLOBAL.get_or_init(EditorAttach::new)
+    GLOBAL.get_or_init(|| EditorAttach::new_in(crate::editor_process_scope()))
 }
 
 #[cfg(test)]

@@ -120,6 +120,53 @@ separate deregistration step.
   idempotent when the signal is empty — which removes the "remember to call this"
   failure mode entirely.
 
+**The scope types live in `agent-doc-state-scope`,** a leaf crate with nothing but
+`lazily` under it. They started in `agent-doc-state-backbone`, which depends on
+`agent-doc-turn` — so the crates holding the remaining islands could not name a scope
+without a dependency cycle. `agent-doc-state-backbone` re-exports them, so existing
+`agent_doc_state_backbone::DocumentScope` paths keep working.
+
+**The rule is code-enforced** by `agent-doc-state-scope/tests/architecture_scope_guard.rs`.
+It cannot tell an island from a helper — that needs the author's intent — so it
+requires the intent be *written*: every non-test `*Context::new()` must carry a
+`// #stategraphjoin-allow: <reason>` comment within six lines above it. If you cannot
+write a reason, that is the finding; join a scope instead. "It is only a small
+context" is not a reason — an island is an island at any size.
+
+**Reactive vocabulary is `Source` / `Computed` / `Effect`, read with `get` (`#lzcellkernel`).**
+`signal` / `get_signal` / `ThreadSafeSignalHandle` are the pre-kernel two-node shape (a
+memoized slot plus a puller effect). They still compile, which is exactly why the same
+guard bans them: nothing else stops a new caller from reaching for the old form. Same
+escape hatch, different marker — `// #lzcellkernel-allow: <reason>`. The single-source
+fix is `#[deprecated]` on those methods in `lazily-rs` (matching the existing
+`get_cell`/`set_cell` deprecations); the thread-safe half is blocked on an eager
+`Computed` existing there.
+
+**Both thread-safety families are scoped (`#stategraphjoin-local`, closed).** The
+original scopes wrapped `ThreadSafeContext` only, which left single-threaded
+`lazily::Context` state with no scope of the right kind to join — the thread-local
+memo caches in `ops-log-io`, `tmux-io`, `supervisor-io`, `sync-io`, plus
+`prompt-context`'s projection, all named that gap in a comment. A comment is not a
+lifetime: it drops nothing and does not stop the next `Context::new()`. So
+`agent-doc-state-scope` also ships `LocalDocumentScope` / `LocalTurnScope` /
+`LocalProcessScope` and `LocalReadScope`, and those sites join them.
+
+`LocalReadScope` names the lifecycle those memo caches actually have: a **bounded read
+scope**, narrower than a turn — valid until the underlying system is mutated, not until
+the turn ends. Re-taking the scope *is* the invalidation, which is why they never
+needed an eviction policy.
+
+One difference is load-bearing: `ThreadSafeContext` is `Clone`, so a thread-safe scope
+is shared by handing out clones (`X::new_in(&DocumentScope, ..)`). `lazily::Context` is
+`Rc`-based and **not** `Clone`, so a local scope is *owned* by the state whose lifetime
+it is; a caller that needs the same graph borrows the owner's `ctx()`.
+
+The remaining `#stategraphjoin-allow` markers are the genuinely exempt shapes, not
+deferred work: an `X::new()` kept beside `X::new_in(scope, ..)` for unit tests, the
+`run-context-io` scope factory (the context *is* the returned value), the `RelayHub`'s
+own graph, and bounded per-call pure transforms such as `adstatechart`'s read-only
+advisory snapshot.
+
 ## Durable effect sinks (`#lzdurablesink`)
 
 Durable storage is an **effect sink**, not a transition authority. This restates

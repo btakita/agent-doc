@@ -11,6 +11,7 @@ publish = false
 name = "agent_doc_supervisor"
 
 [dependencies]
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.28" }
 agent-doc-diff = { path = "../agent-doc-diff", version = "0.35.28" }
 agent-doc-element = { path = "../agent-doc-element", version = "0.35.28" }
 agent-doc-element-backlog = { path = "../agent-doc-element-backlog", version = "0.35.28" }

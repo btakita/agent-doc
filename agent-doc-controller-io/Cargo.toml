@@ -14,6 +14,7 @@ name = "agent_doc_controller_io"
 test-support = []
 
 [dependencies]
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.28" }
 parking_lot = "0.12"
 agent-doc-controller = { path = "../agent-doc-controller", version = "0.35.28" }
 agent-doc-capture-io = { path = "../agent-doc-capture-io", version = "0.35.28" }

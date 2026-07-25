@@ -25,7 +25,7 @@ use interprocess::local_socket::{
     ToNsName,
     traits::{Listener as _, Stream as _},
 };
-use lazily::{Source, ThreadSafeContext, ThreadSafeSignalHandle};
+use lazily::{Computed, Source, ThreadSafeContext};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
@@ -510,6 +510,13 @@ pub(crate) struct ControllerRuntime {
     /// recycle takes effect at the next tick even mid-turn. Implies
     /// `recycle_requested`.
     recycle_forced: AtomicBool,
+    /// `#stategraphjoin` — the controller process's reactive scope.
+    ///
+    /// Every graph below is built in this one scope, so controller-lifetime facts
+    /// (claims, supervisor recycle) live in a single graph that can derive across
+    /// them, instead of one private context per struct. Dropping the runtime drops
+    /// the scope and every cell in it — teardown is the scope's lifetime.
+    _scope: agent_doc_state_scope::ProcessScope,
 }
 
 impl ControllerRuntime {
@@ -521,18 +528,22 @@ impl ControllerRuntime {
             recover_controller_after_restart(&bootstrap)?;
         }
         let memory = ControllerMemoryState::load(&bootstrap.project_root)?;
-        let supervisor_recycle_graph = ControllerSupervisorRecycleGraph::new(
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let supervisor_recycle_graph = ControllerSupervisorRecycleGraph::new_in(
+            &scope,
             memory.state_projection.project_supervisor_recycle(),
         );
+        let coordination_graph = ControllerCoordinationGraph::new_in(&scope);
         Ok(Self {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
-            coordination_graph: ControllerCoordinationGraph::new(),
+            coordination_graph,
             supervisor_recycle_graph,
             supervisor_recycle_waiters: Condvar::new(),
             state_projection_waiters: Condvar::new(),
             recycle_requested: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
+            _scope: scope,
         })
     }
 
@@ -743,8 +754,12 @@ struct ControllerCoordinationGraph {
 }
 
 impl ControllerCoordinationGraph {
-    fn new() -> Self {
-        let ctx = ThreadSafeContext::new();
+    /// `#stategraphjoin` — claims live for the controller process, so they join the
+    /// controller's [`ProcessScope`] rather than a private context. Sharing the scope
+    /// with the recycle graph is the point: both are process facts, and a derivation
+    /// across them is now possible instead of being blocked by a graph boundary.
+    fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
+        let ctx = scope.ctx().clone();
         let claims = ctx.source(BTreeMap::new());
         Self {
             ctx,
@@ -795,17 +810,30 @@ impl ControllerCoordinationGraph {
     }
 }
 
+/// `#stategraphjoin` — controller supervisor-recycle state, joined to the controller's
+/// [`ProcessScope`] instead of a private context.
+///
+/// The recycle projection outlives every document and every turn: it is a fact about
+/// the controller process. Naming that lifetime in the type is what stops it from
+/// being rebuilt in a document or turn graph, where it would be torn down under a
+/// caller still reading it.
 struct ControllerSupervisorRecycleGraph {
     ctx: ThreadSafeContext,
     projection: Source<agent_doc_state_backbone::SupervisorRecycleProjection>,
-    in_flight: ThreadSafeSignalHandle<bool>,
+    in_flight: Computed<bool>,
 }
 
 impl ControllerSupervisorRecycleGraph {
-    fn new(initial: agent_doc_state_backbone::SupervisorRecycleProjection) -> Self {
-        let ctx = ThreadSafeContext::new();
+    fn new_in(
+        scope: &agent_doc_state_scope::ProcessScope,
+        initial: agent_doc_state_backbone::SupervisorRecycleProjection,
+    ) -> Self {
+        let ctx = scope.ctx().clone();
         let projection = ctx.source(initial);
-        let in_flight = ctx.signal(move |ctx| {
+        // `#lzcellkernel`: a derived value is a `Computed` read with `get`. The old
+        // `signal`/`get_signal` pair is the pre-kernel two-node shape (memo slot plus
+        // a puller effect) and is not the vocabulary this codebase derives in.
+        let in_flight = ctx.computed(move |ctx| {
             matches!(
                 ctx.get(&projection).phase,
                 agent_doc_state_backbone::SupervisorRecyclePhase::InFlight
@@ -827,7 +855,7 @@ impl ControllerSupervisorRecycleGraph {
     }
 
     fn in_flight(&self) -> bool {
-        self.ctx.get_signal(&self.in_flight)
+        self.ctx.get(&self.in_flight)
     }
 }
 
@@ -6482,8 +6510,12 @@ agent:queue\n\
         // state-DB load) so the self-watchdog predicate is exercised in isolation.
         let state_projection = agent_doc_state_backbone::StateBackboneProjection::default();
         let state_ledger = agent_doc_state_backbone::EventLedger::default();
-        let supervisor_recycle_graph =
-            ControllerSupervisorRecycleGraph::new(state_projection.project_supervisor_recycle());
+        let scope = agent_doc_state_scope::ProcessScope::new();
+        let supervisor_recycle_graph = ControllerSupervisorRecycleGraph::new_in(
+            &scope,
+            state_projection.project_supervisor_recycle(),
+        );
+        let coordination_graph = ControllerCoordinationGraph::new_in(&scope);
         ControllerRuntime {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(ControllerMemoryState {
@@ -6494,11 +6526,12 @@ agent:queue\n\
                 map_backend: "std_btree_map",
             }),
             supervisor_recycle_graph,
-            coordination_graph: ControllerCoordinationGraph::new(),
+            coordination_graph,
             supervisor_recycle_waiters: Condvar::new(),
             state_projection_waiters: Condvar::new(),
             recycle_requested: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
+            _scope: scope,
         }
     }
     fn preparing_runtime_bootstrap(

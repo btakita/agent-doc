@@ -195,7 +195,26 @@ pub struct SupervisorMachine {
 }
 
 impl SupervisorMachine {
+    /// Join this machine to `scope`'s graph (`#stategraphjoin`).
+    ///
+    /// A supervisor actor is bound to one document's session; a new document gets a new actor, and dispatch/recovery decisions must not leak between documents.
+    ///
+    /// The scope owns the context, so dropping the scope drops this machine's cells —
+    /// teardown is the scope's lifetime, not a separate deregistration step.
+    pub fn new_in(scope: &agent_doc_state_scope::DocumentScope, initial: SupervisorState) -> Self {
+        let ctx = scope.ctx().clone();
+        let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_supervisor);
+        Self { ctx, machine }
+    }
+
+    /// Standalone machine in a private context — a pure-transition helper for unit
+    /// tests only.
+    ///
+    /// A long-lived owner must use [`Self::new_in`] instead: nothing outside a private
+    /// context can derive from its cells and invalidation never crosses it, so a
+    /// `Computed` built over one is Computed in name only.
     pub fn new(initial: SupervisorState) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_supervisor);
         Self { ctx, machine }

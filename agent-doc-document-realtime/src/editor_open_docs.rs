@@ -67,9 +67,24 @@ pub struct EditorOpenDocs {
 }
 
 impl EditorOpenDocs {
-    /// Build an empty registry.
+    /// Build an empty registry joined to `scope`'s graph (`#stategraphjoin`).
+    ///
+    /// The open-set is a process fact (one global registry fed by in-process editor
+    /// reports), so it joins the shared [`crate::editor_process_scope`] — the same
+    /// scope as [`crate::editor_attach`], which is what lets "open" and "attached"
+    /// participate in one derivation rather than two disconnected graphs.
+    pub fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
+        Self::build(scope.ctx().clone())
+    }
+
+    /// Standalone registry in a private context — a pure helper for unit tests only.
+    /// A long-lived owner must use [`Self::new_in`]; see `#stategraphjoin`.
     pub fn new() -> Self {
-        let ctx = ThreadSafeContext::new();
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
+        Self::build(ThreadSafeContext::new())
+    }
+
+    fn build(ctx: ThreadSafeContext) -> Self {
         let epoch = ctx.source(0u64);
         let docs: ThreadSafeCellMap<String, DocOpenState> = ThreadSafeCellMap::new(&ctx);
         let open_count = {
@@ -296,7 +311,7 @@ impl Default for EditorOpenDocs {
 /// and any controller-side reliable-sync reconcile drive this single instance.
 pub fn editor_open_docs() -> &'static EditorOpenDocs {
     static GLOBAL: OnceLock<EditorOpenDocs> = OnceLock::new();
-    GLOBAL.get_or_init(EditorOpenDocs::new)
+    GLOBAL.get_or_init(|| EditorOpenDocs::new_in(crate::editor_process_scope()))
 }
 
 #[cfg(test)]

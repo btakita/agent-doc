@@ -342,6 +342,9 @@ fn format_leaves(leaves: Vec<String>) -> String {
 /// Read-only observability (`#adstatechart2`): builds its own chart and never
 /// touches the live closeout path.
 pub fn configuration_snapshot(facts: &ChartFacts, observed: &ObservedPhases) -> String {
+    // #stategraphjoin-allow: read-only advisory snapshot (`#adstatechart2`). Builds a
+    // fresh chart, drives it from the passed facts, formats, and drops — it never
+    // touches the live closeout path and nothing derives from it.
     let ctx = lazily::Context::new();
     let Ok(chart) = new_adstatechart(&ctx) else {
         return "adstatechart.unavailable".to_string();
@@ -358,6 +361,9 @@ pub fn configuration_snapshot(facts: &ChartFacts, observed: &ObservedPhases) -> 
 /// identical snapshot (same [`snapshot_events`]), but is usable from a status
 /// observer thread — the cross-thread status-observation path for Phase E rung 3.
 pub fn configuration_snapshot_threadsafe(facts: &ChartFacts, observed: &ObservedPhases) -> String {
+    // #stategraphjoin-allow: read-only advisory snapshot (`#adstatechart2`). Builds a
+    // fresh chart, drives it from the passed facts, formats, and drops — it never
+    // touches the live closeout path and nothing derives from it.
     let ctx = lazily::ThreadSafeContext::new();
     let Ok(chart) = new_adstatechart_threadsafe(&ctx) else {
         return "adstatechart.unavailable".to_string();

@@ -24,6 +24,24 @@ pub mod watch_authority;
 pub mod write_authority;
 pub mod write_policy;
 
+/// `#stategraphjoin` — the one process-lifetime reactive scope for this crate's
+/// process-global registries.
+///
+/// [`editor_attach::editor_attach`] and [`editor_open_docs::editor_open_docs`] are
+/// both `OnceLock` singletons living for the process, and each used to mint its own
+/// `ThreadSafeContext`. That made them two islands: nothing could derive across
+/// "this document is open" and "this document is attached" — the two facts the
+/// authority gate combines — so callers read both and combined them imperatively,
+/// which is the derived-fact-that-only-updates-because-someone-called-update smell.
+///
+/// One shared scope makes them one graph. The scope's lifetime is the process, which
+/// is exactly the lifetime the singletons already had, so nothing is torn down early.
+pub fn editor_process_scope() -> &'static agent_doc_state_scope::ProcessScope {
+    static SCOPE: std::sync::OnceLock<agent_doc_state_scope::ProcessScope> =
+        std::sync::OnceLock::new();
+    SCOPE.get_or_init(agent_doc_state_scope::ProcessScope::new)
+}
+
 pub use read_authority::{
     BufferState, DocAuthority, ExternalDiskDecision, Reconciliation, ReconnectAuthority,
     buffer_supersedes, current_doc, external_disk_decision, reconcile_current_doc,
@@ -191,7 +209,26 @@ pub struct DocumentRealtimeMachine {
 }
 
 impl DocumentRealtimeMachine {
+    /// Join this machine to `scope`'s graph (`#stategraphjoin`).
+    ///
+    /// Which plane is authoritative for a document's text spans the whole time that document is open, across many turns.
+    ///
+    /// The scope owns the context, so dropping the scope drops this machine's cells —
+    /// teardown is the scope's lifetime, not a separate deregistration step.
+    pub fn new_in(scope: &agent_doc_state_scope::DocumentScope, initial: DocumentRealtimeState) -> Self {
+        let ctx = scope.ctx().clone();
+        let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_document_realtime);
+        Self { ctx, machine }
+    }
+
+    /// Standalone machine in a private context — a pure-transition helper for unit
+    /// tests only.
+    ///
+    /// A long-lived owner must use [`Self::new_in`] instead: nothing outside a private
+    /// context can derive from its cells and invalidation never crosses it, so a
+    /// `Computed` built over one is Computed in name only.
     pub fn new(initial: DocumentRealtimeState) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_document_realtime);
         Self { ctx, machine }

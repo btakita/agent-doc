@@ -195,7 +195,21 @@ pub struct VisibleWriteCommitCandidateMachine {
 }
 
 impl VisibleWriteCommitCandidateMachine {
+    /// Join this machine to `scope`'s graph (`#stategraphjoin`).
+    ///
+    /// A visible write's commit candidacy belongs to the document: the proof can arrive after the turn that produced it has closed.
+    ///
+    /// The scope owns the context, so dropping the scope drops this machine's cells.
+    pub fn new_in(scope: &agent_doc_state_scope::DocumentScope, initial: VisibleWriteCommitCandidateState) -> Self {
+        let ctx = scope.ctx().clone();
+        let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_visible_write_commit_candidate);
+        Self { ctx, machine }
+    }
+
+    /// Standalone machine in a private context — a pure-transition helper for unit
+    /// tests only. A long-lived owner must use [`Self::new_in`].
     pub fn new(initial: VisibleWriteCommitCandidateState) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine =
             ThreadSafeStateMachine::new(&ctx, initial, transition_visible_write_commit_candidate);
@@ -321,7 +335,21 @@ pub struct VisibleWriteMaterializedCarryForwardMachine {
 }
 
 impl VisibleWriteMaterializedCarryForwardMachine {
+    /// Join this machine to `scope`'s graph (`#stategraphjoin`).
+    ///
+    /// Carry-forward exists precisely to survive a turn boundary, so a turn-scoped graph would drop it at exactly the moment it is needed.
+    ///
+    /// The scope owns the context, so dropping the scope drops this machine's cells.
+    pub fn new_in(scope: &agent_doc_state_scope::DocumentScope, initial: VisibleWriteMaterializedCarryForwardState) -> Self {
+        let ctx = scope.ctx().clone();
+        let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_visible_write_materialized_carry_forward);
+        Self { ctx, machine }
+    }
+
+    /// Standalone machine in a private context — a pure-transition helper for unit
+    /// tests only. A long-lived owner must use [`Self::new_in`].
     pub fn new(initial: VisibleWriteMaterializedCarryForwardState) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(
             &ctx,

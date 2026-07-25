@@ -3017,100 +3017,83 @@ pub enum QueueDrainStallEvent {
 
 /// A lazily context whose **lifetime is part of its type** (`#stategraphjoin`).
 ///
-/// Before this, `agent-doc-state-backbone` held nine state machines that each called
-/// `ThreadSafeContext::new()` in their constructor — nine disconnected graphs.
-/// Nothing in one could derive from anything in another and invalidation never
-/// crossed a boundary, so every "reactive" value was an isolated island recomputed on
-/// its own. Adding one more private context per query is how a `Computed` ends up
-/// Computed in name only.
+/// Full rationale on the scope types themselves lives in [`agent_doc_state_scope`].
+/// The short form: a shared context is necessary but not sufficient, because a bare
+/// `&ThreadSafeContext` lets a cell join a graph with the wrong lifetime, and neither
+/// direction is caught at runtime — both surface much later as a stale value.
 ///
-/// Connecting them needs more than a shared context: a bare `&ThreadSafeContext`
-/// parameter would let a cell join *any* graph, including one with the wrong
-/// lifetime. A document-scoped cell placed in a turn-scoped graph is torn down at the
-/// end of the turn and silently stops updating; the reverse leaks turn state across
-/// turns. Neither is caught at runtime — both look like a stale value much later.
+/// The scope types live in the leaf crate [`agent_doc_state_scope`] so every crate
+/// holding reactive state can name one.
 ///
-/// So each scope is a distinct type, and the type names the lifecycle:
-///
-/// - [`DocumentScope`] — lives while a document is open. Document facts (write
-///   convergence, queue state) belong here.
-/// - [`TurnScope`] — lives for one response cycle. Dropped at closeout, taking its
-///   cells with it.
-/// - [`ProcessScope`] — lives for the process (controller/supervisor lifetime).
-///
-/// Dropping a scope drops its context and every cell created in it, so teardown is
-/// the scope's lifetime rather than a separate deregistration step.
-macro_rules! state_scope {
-    ($name:ident, $doc:literal) => {
-        #[doc = $doc]
-        #[derive(Default)]
-        pub struct $name {
-            ctx: ThreadSafeContext,
-        }
+/// They started here, but this crate depends on `agent-doc-turn` — so the crates
+/// holding the remaining islands could not join a scope without a dependency cycle.
+/// A leaf crate with nothing but `lazily` under it can be depended on from anywhere,
+/// which is what makes the rule enforceable workspace-wide rather than in one crate.
+/// Re-exported so existing `agent_doc_state_backbone::DocumentScope` paths keep
+/// working.
+pub use agent_doc_state_scope::{DocumentScope, ProcessScope, TurnScope};
 
-        impl $name {
-            pub fn new() -> Self {
-                Self {
-                    ctx: ThreadSafeContext::new(),
-                }
-            }
+/// Constructors for the nine document-scoped machines, as an extension trait.
+///
+/// It is a trait rather than an inherent `impl` because [`DocumentScope`] now lives in
+/// the leaf crate `agent-doc-state-scope` (the orphan rule), and moving it there is
+/// what let the crates below this one join a scope at all. The ergonomics are
+/// unchanged for anyone who imports the trait; `Machine::new_in(&scope, ..)` remains
+/// the direct form.
+pub trait DocumentScopeMachines {
+    fn queue_drain_stall(&self, initial: QueueDrainStallPhase) -> QueueDrainStallMachine;
 
-            /// The underlying context. Cells created here join this scope's graph and
-            /// share its lifetime.
-            pub fn ctx(&self) -> &ThreadSafeContext {
-                &self.ctx
-            }
-        }
-    };
+    fn queue_context_clear(&self, initial: QueueContextClearPhase) -> QueueContextClearMachine;
+
+    fn supervisor_recycle(&self, initial: SupervisorRecyclePhase) -> SupervisorRecycleMachine;
+
+    fn route_submit(&self, initial: RouteSubmitPhase) -> RouteSubmitMachine;
+
+    fn queue_head(&self, initial: QueueHeadPhase) -> QueueHeadMachine;
+
+    fn transport_patch(&self, initial: TransportPatchPhase) -> TransportPatchMachine;
+
+    fn actor_lifecycle(&self, initial: ActorLifecyclePhase) -> ActorLifecycleMachine;
+
+    fn route_readiness(&self, initial: RouteReadinessPhase) -> RouteReadinessMachine;
+
+    fn proof_gate(&self, initial: ProofGatePhase) -> ProofGateMachine;
 }
 
-state_scope!(
-    DocumentScope,
-    "State whose lifetime is one open document. See [`DocumentScope`] docs on scope typing."
-);
-state_scope!(
-    TurnScope,
-    "State whose lifetime is one response cycle; dropped at closeout."
-);
-state_scope!(
-    ProcessScope,
-    "State whose lifetime is the controller/supervisor process."
-);
-
-impl DocumentScope {
-    pub fn queue_drain_stall(&self, initial: QueueDrainStallPhase) -> QueueDrainStallMachine {
+impl DocumentScopeMachines for DocumentScope {
+    fn queue_drain_stall(&self, initial: QueueDrainStallPhase) -> QueueDrainStallMachine {
         QueueDrainStallMachine::new_in(self, initial)
     }
 
-    pub fn queue_context_clear(&self, initial: QueueContextClearPhase) -> QueueContextClearMachine {
+    fn queue_context_clear(&self, initial: QueueContextClearPhase) -> QueueContextClearMachine {
         QueueContextClearMachine::new_in(self, initial)
     }
 
-    pub fn supervisor_recycle(&self, initial: SupervisorRecyclePhase) -> SupervisorRecycleMachine {
+    fn supervisor_recycle(&self, initial: SupervisorRecyclePhase) -> SupervisorRecycleMachine {
         SupervisorRecycleMachine::new_in(self, initial)
     }
 
-    pub fn route_submit(&self, initial: RouteSubmitPhase) -> RouteSubmitMachine {
+    fn route_submit(&self, initial: RouteSubmitPhase) -> RouteSubmitMachine {
         RouteSubmitMachine::new_in(self, initial)
     }
 
-    pub fn queue_head(&self, initial: QueueHeadPhase) -> QueueHeadMachine {
+    fn queue_head(&self, initial: QueueHeadPhase) -> QueueHeadMachine {
         QueueHeadMachine::new_in(self, initial)
     }
 
-    pub fn transport_patch(&self, initial: TransportPatchPhase) -> TransportPatchMachine {
+    fn transport_patch(&self, initial: TransportPatchPhase) -> TransportPatchMachine {
         TransportPatchMachine::new_in(self, initial)
     }
 
-    pub fn actor_lifecycle(&self, initial: ActorLifecyclePhase) -> ActorLifecycleMachine {
+    fn actor_lifecycle(&self, initial: ActorLifecyclePhase) -> ActorLifecycleMachine {
         ActorLifecycleMachine::new_in(self, initial)
     }
 
-    pub fn route_readiness(&self, initial: RouteReadinessPhase) -> RouteReadinessMachine {
+    fn route_readiness(&self, initial: RouteReadinessPhase) -> RouteReadinessMachine {
         RouteReadinessMachine::new_in(self, initial)
     }
 
-    pub fn proof_gate(&self, initial: ProofGatePhase) -> ProofGateMachine {
+    fn proof_gate(&self, initial: ProofGatePhase) -> ProofGateMachine {
         ProofGateMachine::new_in(self, initial)
     }
 }
@@ -3122,6 +3105,7 @@ pub struct QueueDrainStallMachine {
 
 impl QueueDrainStallMachine {
     pub fn new(initial: QueueDrainStallPhase) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_queue_drain_stall);
         Self { ctx, machine }
@@ -3283,6 +3267,7 @@ pub struct QueueContextClearMachine {
 
 impl QueueContextClearMachine {
     pub fn new(initial: QueueContextClearPhase) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_queue_context_clear);
         Self { ctx, machine }
@@ -4214,6 +4199,7 @@ pub struct SupervisorRecycleMachine {
 
 impl SupervisorRecycleMachine {
     pub fn new(initial: SupervisorRecyclePhase) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_supervisor_recycle);
         Self { ctx, machine }
@@ -4407,6 +4393,7 @@ pub struct RouteSubmitMachine {
 
 impl RouteSubmitMachine {
     pub fn new(initial: RouteSubmitPhase) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_route_submit);
         Self { ctx, machine }
@@ -4638,6 +4625,7 @@ pub struct QueueHeadMachine {
 
 impl QueueHeadMachine {
     pub fn new(initial: QueueHeadPhase) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_queue_head);
         Self { ctx, machine }
@@ -4753,6 +4741,7 @@ pub struct TransportPatchMachine {
 
 impl TransportPatchMachine {
     pub fn new(initial: TransportPatchPhase) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_transport_patch);
         Self { ctx, machine }
@@ -4889,6 +4878,7 @@ pub struct ActorLifecycleMachine {
 
 impl ActorLifecycleMachine {
     pub fn new(initial: ActorLifecyclePhase) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_actor_lifecycle);
         Self { ctx, machine }
@@ -5044,6 +5034,7 @@ pub struct RouteReadinessMachine {
 
 impl RouteReadinessMachine {
     pub fn new(initial: RouteReadinessPhase) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_route_readiness);
         Self { ctx, machine }
@@ -5172,6 +5163,7 @@ pub struct ProofGateMachine {
 
 impl ProofGateMachine {
     pub fn new(initial: ProofGatePhase) -> Self {
+        // #stategraphjoin-allow: standalone pure-transition helper kept beside `new_in` for unit tests; no long-lived owner holds it.
         let ctx = ThreadSafeContext::new();
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_proof_gate);
         Self { ctx, machine }

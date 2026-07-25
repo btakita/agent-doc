@@ -1,5 +1,6 @@
 //! Ops-log read/write adapters.
 
+use agent_doc_state_scope::LocalTurnScope;
 use agent_doc_turn::op_log::{
     IPC_PROOF_INSUFFICIENT_EVENT, is_write_completed_commit_missing_event, strip_timestamp_prefix,
 };
@@ -109,17 +110,20 @@ fn cached_project_root(file: &Path) -> Option<std::sync::Arc<Path>> {
 /// Outside a scope, `cached_turn_id` resolves every call. That is correct, just
 /// slower, so an unscoped caller is never wrong.
 struct TurnAttributionScopeState {
-    ctx: lazily::Context,
+    /// The scope this cache's slots live in (`#stategraphjoin`). The context lives
+    /// exactly as long as the turn-attribution scope, and the scope boundary — not a
+    /// clock — invalidates it.
+    scope: LocalTurnScope,
     turn_ids: lazily::SlotMap<PathBuf, Option<std::sync::Arc<str>>>,
     depth: usize,
 }
 
 impl TurnAttributionScopeState {
     fn new() -> Self {
-        let ctx = lazily::Context::new();
-        let turn_ids = lazily::SlotMap::new(&ctx);
+        let scope = LocalTurnScope::new();
+        let turn_ids = lazily::SlotMap::new(scope.ctx());
         Self {
-            ctx,
+            scope,
             turn_ids,
             depth: 1,
         }
@@ -194,7 +198,7 @@ fn cached_turn_id(file: &Path) -> Option<std::sync::Arc<str>> {
         let probe = file.to_path_buf();
         state
             .turn_ids
-            .get_or_insert_with(&state.ctx, file.to_path_buf(), move |_| {
+            .get_or_insert_with(state.scope.ctx(), file.to_path_buf(), move |_| {
                 resolve_turn_id(&probe)
             })
     })

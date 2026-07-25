@@ -198,6 +198,7 @@ use crate::SyncLockAcquire;
 use crate::acquire_sync_lock;
 use agent_doc_controller::dispatch::{is_stash_window_name, normalize_context_session};
 use agent_doc_run_context_io::AgentDocContextExt;
+use agent_doc_state_scope::LocalProcessScope;
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
 #[cfg(test)]
 use agent_doc_supervisor::ipc_protocol::IpcResponse;
@@ -4441,18 +4442,21 @@ thread_local! {
     /// directory, a directory's owning repository is immutable for our purposes,
     /// so this memo needs no invalidation — which is why it is a plain lazily
     /// `SlotMap` rather than part of the mutation-invalidated tmux scope.
-    static GIT_TOPLEVEL_MEMO: (lazily::Context, lazily::SlotMap<PathBuf, Option<PathBuf>>) = {
-        let ctx = lazily::Context::new();
-        let map = lazily::SlotMap::new(&ctx);
-        (ctx, map)
+    ///
+    /// `#stategraphjoin`: the memo's lifetime is the process (per thread), so it
+    /// joins a [`LocalProcessScope`] rather than minting a private context.
+    static GIT_TOPLEVEL_MEMO: (LocalProcessScope, lazily::SlotMap<PathBuf, Option<PathBuf>>) = {
+        let scope = LocalProcessScope::new();
+        let map = lazily::SlotMap::new(scope.ctx());
+        (scope, map)
     };
 }
 
 fn git_toplevel_memoized(dir: &Path) -> Option<PathBuf> {
-    GIT_TOPLEVEL_MEMO.with(|(ctx, map)| {
+    GIT_TOPLEVEL_MEMO.with(|(scope, map)| {
         let key = dir.to_path_buf();
         let probe = key.clone();
-        map.get_or_insert_with(ctx, key, move |_| {
+        map.get_or_insert_with(scope.ctx(), key, move |_| {
             agent_doc_git_io::dirs::git_toplevel_at(&probe)
         })
     })

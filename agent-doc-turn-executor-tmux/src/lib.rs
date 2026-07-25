@@ -50,6 +50,10 @@ pub fn transition_tmux(
 
 pub struct TmuxTurnExecutorMachine {
     tmux: TmuxModelMachine,
+    /// `#stategraphjoin` — the scope the inner tmux machine joined. Held so the graph
+    /// outlives the machine reading it; dropping this executor drops the scope and
+    /// every cell in it.
+    _scope: agent_doc_state_scope::ProcessScope,
 }
 
 impl TmuxTurnExecutorMachine {
@@ -58,8 +62,12 @@ impl TmuxTurnExecutorMachine {
     }
 
     pub fn from_tmux_state(initial: TmuxRealtimeState) -> Self {
+        // The tmux model mirrors panes and supervisor health for the running process,
+        // so it joins a process-lifetime scope rather than minting a private context.
+        let scope = agent_doc_state_scope::ProcessScope::new();
         Self {
-            tmux: TmuxModelMachine::new(initial),
+            tmux: TmuxModelMachine::new_in(&scope, initial),
+            _scope: scope,
         }
     }
 

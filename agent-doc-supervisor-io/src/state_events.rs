@@ -6,6 +6,7 @@ use agent_doc_sqlite::state_store::{
     StateEventInsert, insert_state_event_in_db, load_state_events_from_db, open_state_db,
 };
 use agent_doc_state_backbone::{EventLedger, StateEvent};
+use agent_doc_state_scope::LocalReadScope;
 use anyhow::{Context, Result};
 
 pub(crate) struct DocumentStateIdentity {
@@ -53,25 +54,30 @@ thread_local! {
 }
 
 struct LedgerScopeState {
-    ctx: lazily::Context,
+    /// The scope this cache's slots live in (`#stategraphjoin`). Its lifetime is
+    /// exactly the ledger scope's depth-counted extent.
+    scope: LocalReadScope,
     ledgers: lazily::SlotMap<(PathBuf, String), Option<std::rc::Rc<EventLedger>>>,
     depth: usize,
 }
 
 impl LedgerScopeState {
     fn new() -> Self {
-        let ctx = lazily::Context::new();
-        let ledgers = lazily::SlotMap::new(&ctx);
+        let scope = LocalReadScope::new();
+        let ledgers = lazily::SlotMap::new(scope.ctx());
         Self {
-            ctx,
+            scope,
             ledgers,
             depth: 1,
         }
     }
 
     fn reset_entries(&mut self) {
-        self.ctx = lazily::Context::new();
-        self.ledgers = lazily::SlotMap::new(&self.ctx);
+        // Re-taking the scope IS the invalidation: the ledger memo must not outlive
+        // its scope, so the scope boundary drops the whole graph rather than evicting
+        // entries one at a time.
+        self.scope = LocalReadScope::new();
+        self.ledgers = lazily::SlotMap::new(self.scope.ctx());
     }
 }
 
@@ -170,7 +176,7 @@ pub(crate) fn load_document_ledger_shared(
     let cached = LEDGER_SCOPE.with(|scope| {
         let scope = scope.borrow();
         let state = scope.as_ref()?;
-        state.ledgers.get(&state.ctx, &key).flatten()
+        state.ledgers.get(state.scope.ctx(), &key).flatten()
     });
     if let Some(ledger) = cached {
         return Ok(ledger);
@@ -185,7 +191,7 @@ pub(crate) fn load_document_ledger_shared(
             let value = loaded.clone();
             state
                 .ledgers
-                .get_or_insert_with(&state.ctx, key, move |_| Some(value.clone()));
+                .get_or_insert_with(state.scope.ctx(), key, move |_| Some(value.clone()));
         }
     });
     Ok(loaded)

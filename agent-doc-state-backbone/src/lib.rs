@@ -3015,6 +3015,106 @@ pub enum QueueDrainStallEvent {
     Cleared,
 }
 
+/// A lazily context whose **lifetime is part of its type** (`#stategraphjoin`).
+///
+/// Before this, `agent-doc-state-backbone` held nine state machines that each called
+/// `ThreadSafeContext::new()` in their constructor — nine disconnected graphs.
+/// Nothing in one could derive from anything in another and invalidation never
+/// crossed a boundary, so every "reactive" value was an isolated island recomputed on
+/// its own. Adding one more private context per query is how a `Computed` ends up
+/// Computed in name only.
+///
+/// Connecting them needs more than a shared context: a bare `&ThreadSafeContext`
+/// parameter would let a cell join *any* graph, including one with the wrong
+/// lifetime. A document-scoped cell placed in a turn-scoped graph is torn down at the
+/// end of the turn and silently stops updating; the reverse leaks turn state across
+/// turns. Neither is caught at runtime — both look like a stale value much later.
+///
+/// So each scope is a distinct type, and the type names the lifecycle:
+///
+/// - [`DocumentScope`] — lives while a document is open. Document facts (write
+///   convergence, queue state) belong here.
+/// - [`TurnScope`] — lives for one response cycle. Dropped at closeout, taking its
+///   cells with it.
+/// - [`ProcessScope`] — lives for the process (controller/supervisor lifetime).
+///
+/// Dropping a scope drops its context and every cell created in it, so teardown is
+/// the scope's lifetime rather than a separate deregistration step.
+macro_rules! state_scope {
+    ($name:ident, $doc:literal) => {
+        #[doc = $doc]
+        #[derive(Default)]
+        pub struct $name {
+            ctx: ThreadSafeContext,
+        }
+
+        impl $name {
+            pub fn new() -> Self {
+                Self {
+                    ctx: ThreadSafeContext::new(),
+                }
+            }
+
+            /// The underlying context. Cells created here join this scope's graph and
+            /// share its lifetime.
+            pub fn ctx(&self) -> &ThreadSafeContext {
+                &self.ctx
+            }
+        }
+    };
+}
+
+state_scope!(
+    DocumentScope,
+    "State whose lifetime is one open document. See [`DocumentScope`] docs on scope typing."
+);
+state_scope!(
+    TurnScope,
+    "State whose lifetime is one response cycle; dropped at closeout."
+);
+state_scope!(
+    ProcessScope,
+    "State whose lifetime is the controller/supervisor process."
+);
+
+impl DocumentScope {
+    pub fn queue_drain_stall(&self, initial: QueueDrainStallPhase) -> QueueDrainStallMachine {
+        QueueDrainStallMachine::new_in(self, initial)
+    }
+
+    pub fn queue_context_clear(&self, initial: QueueContextClearPhase) -> QueueContextClearMachine {
+        QueueContextClearMachine::new_in(self, initial)
+    }
+
+    pub fn supervisor_recycle(&self, initial: SupervisorRecyclePhase) -> SupervisorRecycleMachine {
+        SupervisorRecycleMachine::new_in(self, initial)
+    }
+
+    pub fn route_submit(&self, initial: RouteSubmitPhase) -> RouteSubmitMachine {
+        RouteSubmitMachine::new_in(self, initial)
+    }
+
+    pub fn queue_head(&self, initial: QueueHeadPhase) -> QueueHeadMachine {
+        QueueHeadMachine::new_in(self, initial)
+    }
+
+    pub fn transport_patch(&self, initial: TransportPatchPhase) -> TransportPatchMachine {
+        TransportPatchMachine::new_in(self, initial)
+    }
+
+    pub fn actor_lifecycle(&self, initial: ActorLifecyclePhase) -> ActorLifecycleMachine {
+        ActorLifecycleMachine::new_in(self, initial)
+    }
+
+    pub fn route_readiness(&self, initial: RouteReadinessPhase) -> RouteReadinessMachine {
+        RouteReadinessMachine::new_in(self, initial)
+    }
+
+    pub fn proof_gate(&self, initial: ProofGatePhase) -> ProofGateMachine {
+        ProofGateMachine::new_in(self, initial)
+    }
+}
+
 pub struct QueueDrainStallMachine {
     ctx: ThreadSafeContext,
     machine: ThreadSafeStateMachine<QueueDrainStallPhase, QueueDrainStallEvent>,
@@ -3026,6 +3126,27 @@ impl QueueDrainStallMachine {
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_queue_drain_stall);
         Self { ctx, machine }
     }
+    /// Construct this machine **inside an existing document state graph**
+    /// (`#stategraphjoin`), so its cells share one `ThreadSafeContext` with the rest
+    /// of the document's state instead of forming a private island.
+    ///
+    /// [`Self::new`] keeps its own context for standalone/pure-transition use; it is
+    /// the isolated form, and every long-lived owner should prefer this one so cells
+    /// can eventually derive from one another and invalidate together.
+    pub fn new_in(scope: &DocumentScope, initial: QueueDrainStallPhase) -> Self {
+        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_queue_drain_stall);
+        Self {
+            ctx: scope.ctx().clone(),
+            machine,
+        }
+    }
+
+    /// Read this machine's state through an explicitly supplied context. Proves the
+    /// cells really live in the graph's context rather than a private one.
+    pub fn state_in(&self, ctx: &ThreadSafeContext) -> QueueDrainStallPhase {
+        self.machine.state(ctx)
+    }
+
 
     pub fn send(&self, event: QueueDrainStallEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -3166,6 +3287,27 @@ impl QueueContextClearMachine {
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_queue_context_clear);
         Self { ctx, machine }
     }
+    /// Construct this machine **inside an existing document state graph**
+    /// (`#stategraphjoin`), so its cells share one `ThreadSafeContext` with the rest
+    /// of the document's state instead of forming a private island.
+    ///
+    /// [`Self::new`] keeps its own context for standalone/pure-transition use; it is
+    /// the isolated form, and every long-lived owner should prefer this one so cells
+    /// can eventually derive from one another and invalidate together.
+    pub fn new_in(scope: &DocumentScope, initial: QueueContextClearPhase) -> Self {
+        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_queue_context_clear);
+        Self {
+            ctx: scope.ctx().clone(),
+            machine,
+        }
+    }
+
+    /// Read this machine's state through an explicitly supplied context. Proves the
+    /// cells really live in the graph's context rather than a private one.
+    pub fn state_in(&self, ctx: &ThreadSafeContext) -> QueueContextClearPhase {
+        self.machine.state(ctx)
+    }
+
 
     pub fn send(&self, event: QueueContextClearEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -4076,6 +4218,27 @@ impl SupervisorRecycleMachine {
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_supervisor_recycle);
         Self { ctx, machine }
     }
+    /// Construct this machine **inside an existing document state graph**
+    /// (`#stategraphjoin`), so its cells share one `ThreadSafeContext` with the rest
+    /// of the document's state instead of forming a private island.
+    ///
+    /// [`Self::new`] keeps its own context for standalone/pure-transition use; it is
+    /// the isolated form, and every long-lived owner should prefer this one so cells
+    /// can eventually derive from one another and invalidate together.
+    pub fn new_in(scope: &DocumentScope, initial: SupervisorRecyclePhase) -> Self {
+        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_supervisor_recycle);
+        Self {
+            ctx: scope.ctx().clone(),
+            machine,
+        }
+    }
+
+    /// Read this machine's state through an explicitly supplied context. Proves the
+    /// cells really live in the graph's context rather than a private one.
+    pub fn state_in(&self, ctx: &ThreadSafeContext) -> SupervisorRecyclePhase {
+        self.machine.state(ctx)
+    }
+
 
     pub fn send(&self, event: SupervisorRecycleEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -4248,6 +4411,27 @@ impl RouteSubmitMachine {
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_route_submit);
         Self { ctx, machine }
     }
+    /// Construct this machine **inside an existing document state graph**
+    /// (`#stategraphjoin`), so its cells share one `ThreadSafeContext` with the rest
+    /// of the document's state instead of forming a private island.
+    ///
+    /// [`Self::new`] keeps its own context for standalone/pure-transition use; it is
+    /// the isolated form, and every long-lived owner should prefer this one so cells
+    /// can eventually derive from one another and invalidate together.
+    pub fn new_in(scope: &DocumentScope, initial: RouteSubmitPhase) -> Self {
+        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_route_submit);
+        Self {
+            ctx: scope.ctx().clone(),
+            machine,
+        }
+    }
+
+    /// Read this machine's state through an explicitly supplied context. Proves the
+    /// cells really live in the graph's context rather than a private one.
+    pub fn state_in(&self, ctx: &ThreadSafeContext) -> RouteSubmitPhase {
+        self.machine.state(ctx)
+    }
+
 
     pub fn send(&self, event: RouteSubmitEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -4458,6 +4642,27 @@ impl QueueHeadMachine {
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_queue_head);
         Self { ctx, machine }
     }
+    /// Construct this machine **inside an existing document state graph**
+    /// (`#stategraphjoin`), so its cells share one `ThreadSafeContext` with the rest
+    /// of the document's state instead of forming a private island.
+    ///
+    /// [`Self::new`] keeps its own context for standalone/pure-transition use; it is
+    /// the isolated form, and every long-lived owner should prefer this one so cells
+    /// can eventually derive from one another and invalidate together.
+    pub fn new_in(scope: &DocumentScope, initial: QueueHeadPhase) -> Self {
+        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_queue_head);
+        Self {
+            ctx: scope.ctx().clone(),
+            machine,
+        }
+    }
+
+    /// Read this machine's state through an explicitly supplied context. Proves the
+    /// cells really live in the graph's context rather than a private one.
+    pub fn state_in(&self, ctx: &ThreadSafeContext) -> QueueHeadPhase {
+        self.machine.state(ctx)
+    }
+
 
     pub fn send(&self, event: QueueHeadEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -4552,6 +4757,27 @@ impl TransportPatchMachine {
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_transport_patch);
         Self { ctx, machine }
     }
+    /// Construct this machine **inside an existing document state graph**
+    /// (`#stategraphjoin`), so its cells share one `ThreadSafeContext` with the rest
+    /// of the document's state instead of forming a private island.
+    ///
+    /// [`Self::new`] keeps its own context for standalone/pure-transition use; it is
+    /// the isolated form, and every long-lived owner should prefer this one so cells
+    /// can eventually derive from one another and invalidate together.
+    pub fn new_in(scope: &DocumentScope, initial: TransportPatchPhase) -> Self {
+        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_transport_patch);
+        Self {
+            ctx: scope.ctx().clone(),
+            machine,
+        }
+    }
+
+    /// Read this machine's state through an explicitly supplied context. Proves the
+    /// cells really live in the graph's context rather than a private one.
+    pub fn state_in(&self, ctx: &ThreadSafeContext) -> TransportPatchPhase {
+        self.machine.state(ctx)
+    }
+
 
     pub fn send(&self, event: TransportPatchEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -4667,6 +4893,27 @@ impl ActorLifecycleMachine {
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_actor_lifecycle);
         Self { ctx, machine }
     }
+    /// Construct this machine **inside an existing document state graph**
+    /// (`#stategraphjoin`), so its cells share one `ThreadSafeContext` with the rest
+    /// of the document's state instead of forming a private island.
+    ///
+    /// [`Self::new`] keeps its own context for standalone/pure-transition use; it is
+    /// the isolated form, and every long-lived owner should prefer this one so cells
+    /// can eventually derive from one another and invalidate together.
+    pub fn new_in(scope: &DocumentScope, initial: ActorLifecyclePhase) -> Self {
+        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_actor_lifecycle);
+        Self {
+            ctx: scope.ctx().clone(),
+            machine,
+        }
+    }
+
+    /// Read this machine's state through an explicitly supplied context. Proves the
+    /// cells really live in the graph's context rather than a private one.
+    pub fn state_in(&self, ctx: &ThreadSafeContext) -> ActorLifecyclePhase {
+        self.machine.state(ctx)
+    }
+
 
     pub fn send(&self, event: ActorLifecycleEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -4801,6 +5048,27 @@ impl RouteReadinessMachine {
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_route_readiness);
         Self { ctx, machine }
     }
+    /// Construct this machine **inside an existing document state graph**
+    /// (`#stategraphjoin`), so its cells share one `ThreadSafeContext` with the rest
+    /// of the document's state instead of forming a private island.
+    ///
+    /// [`Self::new`] keeps its own context for standalone/pure-transition use; it is
+    /// the isolated form, and every long-lived owner should prefer this one so cells
+    /// can eventually derive from one another and invalidate together.
+    pub fn new_in(scope: &DocumentScope, initial: RouteReadinessPhase) -> Self {
+        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_route_readiness);
+        Self {
+            ctx: scope.ctx().clone(),
+            machine,
+        }
+    }
+
+    /// Read this machine's state through an explicitly supplied context. Proves the
+    /// cells really live in the graph's context rather than a private one.
+    pub fn state_in(&self, ctx: &ThreadSafeContext) -> RouteReadinessPhase {
+        self.machine.state(ctx)
+    }
+
 
     pub fn send(&self, event: RouteReadinessEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -4908,6 +5176,27 @@ impl ProofGateMachine {
         let machine = ThreadSafeStateMachine::new(&ctx, initial, transition_proof_gate);
         Self { ctx, machine }
     }
+    /// Construct this machine **inside an existing document state graph**
+    /// (`#stategraphjoin`), so its cells share one `ThreadSafeContext` with the rest
+    /// of the document's state instead of forming a private island.
+    ///
+    /// [`Self::new`] keeps its own context for standalone/pure-transition use; it is
+    /// the isolated form, and every long-lived owner should prefer this one so cells
+    /// can eventually derive from one another and invalidate together.
+    pub fn new_in(scope: &DocumentScope, initial: ProofGatePhase) -> Self {
+        let machine = ThreadSafeStateMachine::new(scope.ctx(), initial, transition_proof_gate);
+        Self {
+            ctx: scope.ctx().clone(),
+            machine,
+        }
+    }
+
+    /// Read this machine's state through an explicitly supplied context. Proves the
+    /// cells really live in the graph's context rather than a private one.
+    pub fn state_in(&self, ctx: &ThreadSafeContext) -> ProofGatePhase {
+        self.machine.state(ctx)
+    }
+
 
     pub fn send(&self, event: ProofGateEvent) -> bool {
         self.machine.send(&self.ctx, event)
@@ -6722,6 +7011,44 @@ mod tests {
                 .is_none()
         );
     }
+
+    /// `#stategraphjoin` — machines built from one [`DocumentScope`] must have their
+    /// cells in THAT scope's context, not private ones.
+    ///
+    /// The assertion is deliberately not "it compiles": each machine already stores a
+    /// context, so a private-island version type-checks identically. Reading state
+    /// back through the *scope's* context is what distinguishes a joined graph from
+    /// nine islands — a machine whose cells lived in its own context could not answer
+    /// through this one.
+    #[test]
+    fn machines_built_from_a_scope_share_that_scopes_graph() {
+        let document = DocumentScope::new();
+        let drain = document.queue_drain_stall(QueueDrainStallPhase::Idle);
+        let head = document.queue_head(QueueHeadPhase::Pending);
+
+        assert_eq!(drain.state_in(document.ctx()), QueueDrainStallPhase::Idle);
+        assert_eq!(head.state_in(document.ctx()), QueueHeadPhase::Pending);
+
+        // A transition on one machine is visible through the shared context, and does
+        // not disturb its neighbour in the same graph.
+        assert!(drain.send(QueueDrainStallEvent::Recorded));
+        assert_eq!(drain.state_in(document.ctx()), QueueDrainStallPhase::Pending);
+        assert_eq!(
+            head.state_in(document.ctx()),
+            QueueHeadPhase::Pending,
+            "joining one graph must not entangle unrelated machines"
+        );
+
+        // A separate scope is a separate lifetime and a separate graph.
+        let other = DocumentScope::new();
+        let other_drain = other.queue_drain_stall(QueueDrainStallPhase::Idle);
+        assert_eq!(
+            other_drain.state_in(other.ctx()),
+            QueueDrainStallPhase::Idle,
+            "a second scope starts its own graph"
+        );
+    }
+
 
     #[test]
     fn retained_capture_effect_rejects_overtaking_preflight_until_convergence() {

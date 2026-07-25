@@ -9711,7 +9711,65 @@ fn restore_reliable_sync_liveness(project_root: &Path) -> Result<()> {
     for pid in dead_open_pids {
         record_reliable_sync_editor_exit(project_root, pid);
     }
+    request_editor_replica_rebuild_after_restart(project_root);
     Ok(())
+}
+
+/// `#ctrlkillreregister` — ask every surviving editor to rebuild its replica once the
+/// controller is back.
+///
+/// Hydration above restores the durable liveness plane, so after a controller
+/// restart the editor still reads as *registered*. But the relay hub that holds each
+/// replica's CRDT membership is a **process-local** static: it died with the previous
+/// controller and nothing rehydrates it. The document therefore resolves as
+/// attached-with-missing-replica — an editor the plane says is live, with no replica
+/// behind it — until the plugin happens to re-register on its own.
+///
+/// That gap is why killing the controller strands a live IDE: operators see the
+/// document stop converging and reach for an IDE restart to force re-registration.
+/// The controller already knows exactly who to ask, so ask them instead of waiting.
+///
+/// Best-effort and non-destructive: this only requests a refresh. An editor that
+/// cannot be reached is left to the existing missing-replica recovery, and a failure
+/// here must never block the controller from finishing startup — so failures are
+/// logged, never propagated.
+fn request_editor_replica_rebuild_after_restart(project_root: &Path) {
+    let registrations = controller_liveness_plane()
+        .lock()
+        .projection()
+        .all_live_registrations();
+    let mut requested: BTreeSet<String> = BTreeSet::new();
+    for registration in registrations {
+        if !requested.insert(registration.path.clone()) {
+            continue;
+        }
+        let file = std::path::PathBuf::from(&registration.path);
+        match agent_doc_crdt_relay_io::signal_crdt_replica_event(
+            &file,
+            agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+            1,
+        ) {
+            Ok(()) => agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_restart_editor_replica_rebuild_requested file={} pid={} editor_id={}",
+                    registration.path, registration.pid, registration.editor_id
+                ),
+            ),
+            // Never swallow: an editor we could not reach is exactly the one an
+            // operator will find stranded, so name it.
+            Err(err) => agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_restart_editor_replica_rebuild_failed file={} pid={} editor_id={} error={}",
+                    registration.path,
+                    registration.pid,
+                    registration.editor_id,
+                    format!("{err:#}").replace('\n', " | ").chars().take(160).collect::<String>()
+                ),
+            ),
+        }
+    }
 }
 
 /// Default-on liveness authority with a durable cold path. The hot path is one

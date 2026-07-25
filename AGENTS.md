@@ -71,6 +71,55 @@ Interactive document sessions with AI agents.
 - **Oversized specs should split behind a stable index** — when a spec or instruction file grows past a clean single-purpose boundary, follow [runbooks/split-spec-files.md](runbooks/split-spec-files.md): keep the existing numbered entrypoint as an index, move normative detail into focused sibling files, update the top-level catalogs instead of growing another monolith, and keep that ownership rule aligned across managed Claude/Codex/OpenCode harness surfaces while leaving custom root instruction files opt-in unless they still match the generated baseline.
 - **FFI-first for editor integration (Shared Foundation pattern)** — when adding features that editors need (sync debounce, busy guards, IPC listeners, layout validation), implement in the FFI layer (`ffi.rs`) first, then call from editor plugins via JNA/FFI. Editor plugins should be thin event reporters — layout changed, file selected, etc. Business logic (debouncing, locking, socket listeners, idempotency checks) belongs in the shared FFI library, not duplicated across IntelliJ/VS Code plugins. **Ontology:** Both the FFI library and each editor plugin are **Systems** with their own **Perspectives**. Each exposes an **Interface** (C ABI, JNA bindings) — the defined boundary through which Systems communicate. The Shared Foundation pattern places shared logic at the broadest **Scope** (FFI library) so all consumer Systems access it through their Interfaces. **Test:** "Does this feature need to work in >1 editor?" → implement in FFI. Example: socket IPC listener lives in `ffi.rs` (`agent_doc_start_ipc_listener`), not in `PatchWatcher.kt`.
 
+## Reactive graphs are lifetime-typed; disconnected islands are an anti-pattern (`#stategraphjoin`)
+
+Every ad-hoc `Context` / `ThreadSafeContext` / `AsyncContext` constructed inside a
+type is a **private graph island**. Nothing outside can derive from its cells,
+invalidation never crosses it, and a `Computed` created in one is Computed in name
+only — it recomputes in isolation and nothing can depend on it. Audited 2026-07-25:
+**50 sites** across the workspace call `*Context::new()` directly, and
+`agent-doc-state-backbone` alone held **nine** state machines that each minted their
+own context in their constructor.
+
+Two smells prove you are looking at an island:
+
+- a "reactive" value that a caller still has to recompute, or that is rebuilt per
+  query and dropped (constructing a whole context to answer one comparison is
+  strictly worse than the comparison);
+- a derived fact that only updates because some code path remembered to call an
+  update, rather than because its inputs changed.
+
+**A shared context is necessary but not sufficient — the scope must be typed.** A
+bare `&ThreadSafeContext` parameter lets a cell join *any* graph, including one with
+the wrong lifetime, and neither mistake is caught at runtime:
+
+- a document-scoped cell placed in a turn graph is torn down at closeout and silently
+  stops updating;
+- a turn-scoped cell placed in a document graph leaks across turns.
+
+Both surface much later as a stale value, which is the most expensive failure shape
+this codebase has. So the scope is a **type**, and the type names the lifecycle:
+`DocumentScope` (one open document), `TurnScope` (one response cycle, dropped at
+closeout), `ProcessScope` (controller/supervisor lifetime). Dropping a scope drops
+its context and every cell in it, so teardown *is* the scope's lifetime rather than a
+separate deregistration step.
+
+**Rules.**
+
+- New document/turn/process state joins the matching scope: constructors take
+  `&DocumentScope` (or the appropriate scope type), never a bare context.
+- A bare `*Context::new()` inside a type is allowed only for a genuinely standalone
+  pure-transition helper — typically the `X::new()` kept beside `X::new_in(scope, ..)`
+  for unit tests. If a long-lived owner holds it, it is an island; fix it.
+- Do not "make it a `Computed`" by building a context per call. If there is no scope
+  to join yet, joining one *is* the work — say so rather than shipping the shape
+  without the properties.
+- The same applies to `Effect`: a side effect that must be *called* at the right
+  moment (a startup fan-out, a settle emission) is the imperative form. Gated on a
+  derived signal in a real scope, it fires whenever the signal says so and is
+  idempotent when the signal is empty — which removes the "remember to call this"
+  failure mode entirely.
+
 ## Durable effect sinks (`#lzdurablesink`)
 
 Durable storage is an **effect sink**, not a transition authority. This restates

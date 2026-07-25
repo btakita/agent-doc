@@ -15,6 +15,7 @@ pub mod crash_policy;
 pub mod detection;
 pub mod handoff;
 pub mod heartbeat;
+pub mod idle_revision;
 pub mod idle_reconcile;
 pub mod idle_watch;
 pub mod input;

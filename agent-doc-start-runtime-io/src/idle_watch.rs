@@ -24,6 +24,7 @@ use agent_doc_supervisor::{
         ready_busy_conflict_reconcile_decision, reconcile_stale_busy_idle_queue_state,
         stale_busy_idle_reconcile_decision,
     },
+    idle_revision::{ControllerProbeHealth, IdleRevisionState, RevisionObservation},
     idle_watch::{
         CapturedFinalizeResumeFacts, SupervisorAutoInstallPhase,
         captured_finalize_resume_retry_delay, captured_finalize_resume_should_start,
@@ -166,36 +167,47 @@ fn idle_watch_disk_revision(
     })
 }
 
-fn idle_watch_document_revision(
+/// Probe the document's revision, keeping the three outcomes distinct
+/// (`#idlerevisionreactive`).
+///
+/// This used to return `Option<IdleWatchDocumentRevision>`, and every caller read
+/// `None` as "changed" — so a controller that could not answer the *cheap* probe
+/// was immediately asked several *expensive* ones, every 500ms instead of every
+/// 60s. See [`agent_doc_supervisor::idle_revision`] for the full shape.
+fn idle_watch_revision_observation(
     file: &Path,
     controller_observation_suppressed: bool,
-) -> Option<IdleWatchDocumentRevision> {
+) -> RevisionObservation {
+    fn from_disk(file: &Path, suppressed: bool) -> RevisionObservation {
+        match idle_watch_disk_revision(file, suppressed) {
+            Some(revision) => RevisionObservation::observed(format!("{revision:?}")),
+            // No readable metadata is a real unknown, not a change.
+            None => RevisionObservation::Unresolved,
+        }
+    }
+
     let editor_attached =
         agent_doc_document_realtime_io::live_editor_endpoint_attached_for_file(file);
     if !editor_attached {
-        return idle_watch_disk_revision(file, controller_observation_suppressed);
+        return from_disk(file, controller_observation_suppressed);
     }
     if controller_observation_suppressed {
-        return None;
+        // We deliberately did not ask. That is the cooldown working, so it must
+        // not be reported as a change.
+        return RevisionObservation::Suppressed;
     }
 
     match agent_doc_controller_io::project_controller::revision_via_controller_model_read_for_doc(
         file,
         "idle_watch_document_revision",
     ) {
-        Ok(Some(agent_doc_crdt_relay_io::CurrentRevision::Detached)) => {
-            idle_watch_disk_revision(file, false)
-        }
-        Ok(Some(revision)) => Some(IdleWatchDocumentRevision::Controller(revision)),
-        Ok(None) | Err(_) => None,
+        Ok(Some(agent_doc_crdt_relay_io::CurrentRevision::Detached)) => from_disk(file, false),
+        Ok(Some(revision)) => RevisionObservation::observed(format!(
+            "{:?}",
+            IdleWatchDocumentRevision::Controller(revision)
+        )),
+        Ok(None) | Err(_) => RevisionObservation::Unresolved,
     }
-}
-
-fn idle_watch_revision_changed(
-    previous: Option<&IdleWatchDocumentRevision>,
-    current: Option<&IdleWatchDocumentRevision>,
-) -> bool {
-    current.is_none_or(|current| previous != Some(current))
 }
 
 /// `#fbwire` Phase 2 — is the session document's current visible text converged
@@ -944,7 +956,36 @@ pub(super) fn spawn_idle_queue_watch_thread(
             let mut controller_backoff_logged = false;
             let mut queue_state_observed = false;
             let mut last_quiescent_maintenance: Option<std::time::Instant> = None;
-            let mut last_document_revision: Option<IdleWatchDocumentRevision> = None;
+            // `#idlerevisionreactive`: the revision baseline, staleness, and
+            // controller probe health used to be loop-local `mut` bindings that
+            // whichever branch remembered to update. They are now one state
+            // machine cell and two `Computed`s in a process-lifetime scope, so a
+            // derived fact cannot be left behind by a branch that forgot it.
+            let revision_state = IdleRevisionState::new();
+            // The ONE thing here that is genuinely an effect: writing a
+            // diagnostic. Gated on derived health, so it fires on the transition
+            // and never per tick.
+            //
+            // The backoff deliberately is NOT an effect. An effect whose whole job
+            // is to set a variable is a `Computed` in disguise, and stamping a
+            // deadline from a clock reading puts the answer somewhere the graph
+            // cannot derive or invalidate. `should_probe_controller` counts
+            // skipped observations instead, so the backoff is a pure function of
+            // the observation stream.
+            let health_log_path = path.clone();
+            let _probe_health_effect = revision_state.on_probe_health_change(move |health| {
+                if let ControllerProbeHealth::Degraded { unresolved_streak } = health {
+                    agent_doc_ops_log_io::log_op(
+                        &health_log_path,
+                        &format!(
+                            "idle_watch_controller_probe_degraded file={} unresolved_streak={} retry_after_observations={} action=hold_projection_and_back_off",
+                            health_log_path.display(),
+                            unresolved_streak,
+                            agent_doc_supervisor::idle_revision::SUPPRESSED_OBSERVATIONS_BEFORE_RETRY,
+                        ),
+                    );
+                }
+            });
             let mut last_full_reconcile: Option<std::time::Instant> = None;
             let mut last_zombie_reap: Option<std::time::Instant> = None;
             // `#binaryownedfinalize`: once finalize has durably captured a
@@ -1197,17 +1238,24 @@ pub(super) fn spawn_idle_queue_watch_thread(
                     let controller_in_cooldown = controller_degraded_until
                         .is_some_and(|until| now < until)
                         || agent_doc_controller_io::project_controller::controller_model_pressure_cooldown_active_for_doc(&path);
-                    let revision = idle_watch_document_revision(
+                    // `#idlerevisionreactive`: feed the observation in and read
+                    // the derived answer back. Staleness and controller health are
+                    // `Computed`s over this one write, so neither can drift out of
+                    // step with the observation that produced it.
+                    // `#idlerevisionreactive`: the derived backoff joins the
+                    // caller's own suppression reasons. The cheap probe failing is
+                    // already evidence the controller is struggling, so it backs
+                    // off here rather than waiting for an expensive probe to fail
+                    // too — and because the answer is derived from the observation
+                    // stream, obeying it feeds the same stream that will clear it.
+                    let suppress_controller_observation = queue_controller_paused
+                        || controller_in_cooldown
+                        || !revision_state.should_probe_controller();
+                    revision_state.observe(idle_watch_revision_observation(
                         &path,
-                        queue_controller_paused || controller_in_cooldown,
-                    );
-                    let revision_changed = idle_watch_revision_changed(
-                        last_document_revision.as_ref(),
-                        revision.as_ref(),
-                    );
-                    if let Some(revision) = revision {
-                        last_document_revision = Some(revision);
-                    }
+                        suppress_controller_observation,
+                    ));
+                    let revision_changed = revision_state.projection_stale();
                     let full_reconcile_due = last_full_reconcile.is_none_or(|last| {
                         last.elapsed() >= IDLE_WATCH_FULL_RECONCILE_INTERVAL
                     });
@@ -3887,8 +3935,20 @@ mod tests {
         assert!(!stale_recycle_safe_checkpoint(false, 0));
     }
 
+    /// `#idlerevisionreactive`. This test previously asserted that a *failed*
+    /// probe invalidates the projection, on fail-safe grounds: better to redo the
+    /// expensive work than to miss a change.
+    ///
+    /// The intent was right and the mechanism was wrong. Missing a change is
+    /// already covered — [`IDLE_WATCH_FULL_RECONCILE_INTERVAL`] reruns the
+    /// authoritative projection every 60s regardless of what the probe said. So
+    /// the invalidate-on-failure rule bought no safety that was not already
+    /// there, and it cost a feedback loop: an unanswerable probe means the
+    /// controller is struggling, and the response was to issue the expensive
+    /// controller RPCs every 500ms instead of every 60s, up to 120x the intended
+    /// load, aimed at the process that was already failing to keep up.
     #[test]
-    fn idle_watch_full_projection_is_invalidated_only_by_revision_change_or_probe_failure() {
+    fn an_unanswerable_probe_does_not_invalidate_the_full_projection() {
         let first = IdleWatchDocumentRevision::Disk {
             len: 42,
             modified_nanos: 7,
@@ -3899,11 +3959,38 @@ mod tests {
             modified_nanos: 8,
             controller_observation_suppressed: false,
         };
+        let fingerprint = |revision: &IdleWatchDocumentRevision| format!("{revision:?}");
 
-        assert!(idle_watch_revision_changed(None, Some(&first)));
-        assert!(!idle_watch_revision_changed(Some(&first), Some(&first)));
-        assert!(idle_watch_revision_changed(Some(&first), Some(&changed)));
-        assert!(idle_watch_revision_changed(Some(&first), None));
+        let state = IdleRevisionState::new();
+        state.observe(RevisionObservation::observed(fingerprint(&first)));
+        assert!(state.projection_stale(), "a first observation is a change");
+
+        state.observe(RevisionObservation::observed(fingerprint(&first)));
+        assert!(!state.projection_stale(), "an equal revision is not a change");
+
+        state.observe(RevisionObservation::observed(fingerprint(&changed)));
+        assert!(state.projection_stale(), "a different revision is a change");
+
+        state.observe(RevisionObservation::Unresolved);
+        assert!(
+            !state.projection_stale(),
+            "an unanswered probe must not invalidate: the 60s full reconcile is \
+             the fail-safe, and escalating here feeds the wedge instead"
+        );
+
+        state.observe(RevisionObservation::Suppressed);
+        assert!(
+            !state.projection_stale(),
+            "a cooldown-suppressed probe must not invalidate the path the cooldown \
+             exists to avoid"
+        );
+
+        state.observe(RevisionObservation::observed(fingerprint(&first)));
+        assert!(
+            state.projection_stale(),
+            "the baseline survives the unanswered stretch, so a real change after \
+             it is still seen"
+        );
     }
 
     #[test]

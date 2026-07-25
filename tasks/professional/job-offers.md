@@ -94,7 +94,7 @@ Negotiate Haiven fully first... it costs a week and nothing else. Then let the a
 - If they stall at $150-160k, get vague about the equity instrument, or refuse the IP carve-out, take Acadian. The $208k rate, matching timezone, and bounded commitment fund exactly the patchboard-first year you already planned, and a 12-month contract keeps the option to re-enter the market in 2027.
 
 One more diligence item either way: ask Acadian whether the contract is renewable/extendable and whether the rate is renegotiable at renewal... that changes how much weight the "expires in 12 months" risk deserves.
-❯ 🚧 Is $100/hr more like >$200k/year? Please reassess what I should ask for.
+❯ Is $100/hr more like >$200k/year? Please reassess what I should ask for.
 
 ### Re: $100/hr annualization reassessment — fable-5
 
@@ -123,7 +123,7 @@ That's a real ~$10-20k year-1 gap in Acadian's favor, wider if you bill any over
 And the mirror-image diligence question for Acadian gains weight: **can you bill above 40 hrs, and is the rate renegotiable at renewal?** If both answers are yes, Acadian's effective ceiling is meaningfully above $208k and the bar Haiven must clear rises again.
 
 Decision gate stays the same shape, with updated numbers: Haiven at **$180k+ base, $20k+ signing, real equity paper, IP carve-out** → take Haiven. Haiven stalling below ~$195k year-1 total or getting vague on equity → Acadian funds your patchboard year at the better rate.
-❯ 🚧 I can bill above 40 hours and the rate is renegotiable at renewal.
+❯ I can bill above 40 hours and the rate is renegotiable at renewal.
 
 ### Re: billable overtime + renegotiable renewal — fable-5
 
@@ -147,7 +147,7 @@ Revised structure:
 - Otherwise **Acadian**: $208-225k, your timezone, paid overtime, a month-12 raise checkpoint, and the open-source time your patchboard-first plan calls for.
 
 Bluntly: with billable overtime and a renegotiable rate, Acadian is now the stronger default. Haiven has to win on conviction... team, equity terms, and the kind of work... not on money. That's still a winnable case, but it's theirs to make, and their willingness to put 1.0% on paper is the cleanest test of it.
-❯ 🚧 Please assess Haiven...including the founder Luke Richey + the CTO Craig Fryar. I believe they can make $10M a year within a few years. Obviously their business model is up in the air. But please give me an assessment of the likelihood of achieving $1M revenue and $10M revenue.
+❯ Please assess Haiven...including the founder Luke Richey + the CTO Craig Fryar. I believe they can make $10M a year within a few years. Obviously their business model is up in the air. But please give me an assessment of the likelihood of achieving $1M revenue and $10M revenue.
 
 ### Re: Haiven company + founder assessment ($1M / $10M revenue odds) — fable-5
 
@@ -188,7 +188,7 @@ Your instinct that they *could* reach $10M/yr isn't crazy; the issue is that **$
 So the assessment *reinforces* the negotiation posture from the last cycle rather than changing it: **the expected value of the equity is real but modest and heavily back-loaded, so it cannot be vague.** Push for 1.0%, and — given the Richeys' history points to a "stays-private, profitable, mid-size" outcome more than an acquisition — **weight the revenue-share definition at least as heavily as the equity percentage**, because in the most likely good scenario (private + profitable, no exit) the revenue-share is the only thing that pays you. If they'll define the revenue-share mechanics crisply and put 1.0% on paper, that's genuine upside on top of a credible team. If they keep it hand-wavy, treat the equity as ~$0 and let Acadian's $208-225k cash win.
 
 *Sources: [haiven.gg](https://haiven.gg/), [Child Safe Tech Alliance profile](https://www.childsafetechalliance.org/blog/designing-safety-from-the-start-how-haiven-is-reimagining-gaming-for-kids), [Luke Richey LinkedIn](https://www.linkedin.com/in/lukerichey/), [Craig Fryar LinkedIn](https://www.linkedin.com/in/craigfryar/), [Gravity Jack / Spokane Journal](https://www.spokanejournal.com/articles/15619-gravity), [Gravity Jack Crunchbase](https://www.crunchbase.com/organization/gravity-jack). Company financials/funding are not publicly disclosed; revenue-model details are drawn from Haiven's own and the Child Safe Tech Alliance's descriptions.*
-❯ 🚧 Please reassess Opus' answers. What do you think the likelihood to reach $100M ARR?
+❯ Please reassess Opus' answers. What do you think the likelihood to reach $100M ARR?
 
 ### Re: reassessment + $100M ARR odds — fable
 
@@ -220,7 +220,7 @@ Reasoning from base rates and category evidence, not vibes:
 **Does the $100M scenario change your decision? No — and here's the EV math that proves it.** Suppose $100M ARR happens: valuation perhaps $500M-1B; your 1.0% diluted through the raises that funded the run is realistically 0.3-0.5%, worth ~$1.5-5M. Multiply by ~1%: **expected value ~$15-50k.** That's roughly one signing bonus. The tail is real enough to want the equity *on paper with clean terms*, but nowhere near big enough to accept a cash discount for it, work unpaid overtime for it, or skip the revenue-share definition. Every prior conclusion survives the reassessment: equity-forward ask (1.0%, written terms, revenue-share mechanics precisely defined), signing bonus does the cash bridging, and Acadian remains the stronger default that Haiven must beat on conviction.
 
 One framing note for your own head: you don't need to *believe* in the $100M case to take Haiven, and you shouldn't take Haiven *because* of it. The bet you'd actually be making is the 40-60% world where they build a real $1-10M mission business you enjoy working in, with a revenue-share that pays something and a small chance of more. Price the offer against that world, not the tail.
-<!-- agent:boundary:d9a62bc8 -->
+<!-- agent:boundary:abf9a654 -->
 <!-- /agent:exchange -->
 
 ## Queue

@@ -102,7 +102,10 @@ fn dispatch_only_starting_pane_ready_via_authoritative_actor(
         return false;
     }
     let prompt_ready = current_generation_ready_prompt_proven(tmux, &actor, harness);
-    let recognized_blocker = agent_doc_tmux_io::capture_pane(tmux, dispatch_pane)
+    // Escapes preserved: `dispatch_only_blocker_reason` reaches
+    // `protected_prompt_input_reason`, which uses the dim/faint styling of the
+    // composer body to tell a ghost hint from real unsent input.
+    let recognized_blocker = agent_doc_tmux_io::capture_pane_with_ansi(tmux, dispatch_pane)
         .ok()
         .and_then(|content| agent_doc_harness::dispatch_only_blocker_reason(harness, &content));
     let ready_facts = authoritative_actor_ready_facts_from_target(&actor, prompt_ready);
@@ -204,9 +207,18 @@ pub fn dispatch_only_send_reopen(
             // state that can improve with time. Refuse before spending the
             // editor's route budget so the async command plane can publish the
             // exact unblocker while its client is still polling.
-            if let Some(draft_preview) = agent_doc_tmux_io::capture_pane(tmux, &dispatch_pane)
-                .ok()
-                .and_then(|content| pane_composer_draft(tmux, &dispatch_pane, &content, harness))
+            // Capture WITH escapes: the draft/ghost discriminator is the composer
+            // body's *styling* (dim/faint SGR 2 = placeholder, normal intensity =
+            // real keystrokes), so a plain `capture-pane -p` throws away the only
+            // signal that tells them apart and reports every autosuggest hint as an
+            // operator draft. Prompt parsing strips ANSI per line itself
+            // (`last_prompt_candidate`), so the candidate is unchanged either way.
+            if let Some(draft_preview) =
+                agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)
+                    .ok()
+                    .and_then(|content| {
+                        pane_composer_draft(tmux, &dispatch_pane, &content, harness)
+                    })
             {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -325,7 +337,9 @@ pub fn dispatch_only_send_reopen(
             // dispatch-ready predicate, so "wait for the pane to become ready"
             // would be an unsatisfiable instruction. Report the draft and the
             // real unblocker instead (#panedraftunblocker).
-            let draft = agent_doc_tmux_io::capture_pane(tmux, &dispatch_pane)
+            // Escapes preserved for the same reason as the pre-ready check above:
+            // dim/faint styling is what separates a ghost hint from real input.
+            let draft = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)
                 .ok()
                 .and_then(|content| pane_composer_draft(tmux, &dispatch_pane, &content, harness));
             agent_doc_ops_log_io::log_op(
@@ -368,7 +382,8 @@ pub fn dispatch_only_send_reopen(
         }
     }
 
-    if let Ok(content) = agent_doc_tmux_io::capture_pane(tmux, &dispatch_pane)
+    // Escapes preserved for the same reason as the recognized-blocker probe above.
+    if let Ok(content) = agent_doc_tmux_io::capture_pane_with_ansi(tmux, &dispatch_pane)
         && let Some(reason) = agent_doc_harness::dispatch_only_blocker_reason(harness, &content)
     {
         agent_doc_ops_log_io::log_op(
@@ -910,6 +925,49 @@ pub fn retry_dispatch_only_after_busy_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Operator-reported 2026-07-25: Run Agent Doc refused to dispatch into a pane
+    /// whose composer held only Claude's dim autosuggest hint
+    /// ("❯\u{a0}Please compact the exchange"), reporting
+    /// `unblocker=submit_or_clear_pane_draft` — an instruction the operator cannot
+    /// satisfy, because there is nothing to submit or clear.
+    ///
+    /// The discriminator (`prompt_candidate_is_dim_placeholder`) was already correct;
+    /// it was being fed a **plain** `capture-pane -p`, which strips the SGR-2 styling
+    /// that is the ONLY signal separating a ghost hint from real unsent input. This
+    /// pins the plumbing: every pane capture whose content reaches a dim-sensitive
+    /// predicate must preserve escapes. A behavioural test cannot cover it here (the
+    /// predicates need a live tmux pane and cursor), and the harness-level unit tests
+    /// pass either way precisely because they are handed raw content directly — which
+    /// is exactly how this regression slipped through.
+    #[test]
+    fn composer_draft_and_blocker_probes_capture_with_escapes() {
+        let full = include_str!("dispatch_only.rs");
+        // Scan production code only — otherwise this guard matches its own needle.
+        let source = full
+            .split_once("\n#[cfg(test)]")
+            .map(|(production, _)| production)
+            .expect("dispatch_only.rs must keep its tests behind #[cfg(test)]");
+        for (probe, context) in [
+            ("pane_composer_draft(tmux, &dispatch_pane", "composer draft"),
+            (
+                "agent_doc_harness::dispatch_only_blocker_reason(harness,",
+                "blocker reason",
+            ),
+        ] {
+            assert!(
+                source.contains(probe),
+                "{context} probe moved; update this guard"
+            );
+        }
+        assert!(
+            !source.contains("agent_doc_tmux_io::capture_pane(tmux,"),
+            "a dim-sensitive probe is reading a plain capture again — the SGR-2 \
+             styling that distinguishes an autosuggest ghost from real unsent \
+             operator input is stripped by `capture-pane -p`, so every hint would be \
+             reported as a draft with an unsatisfiable unblocker"
+        );
+    }
 
     #[test]
     fn starting_pane_recovery_consumes_one_total_ready_budget() {

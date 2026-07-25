@@ -214,7 +214,9 @@ pub fn codex_pane_in_shell_search_state(
     if is_codex_shell_search_blocker(blocker_reason) {
         return true;
     }
-    let Ok(captured) = agent_doc_tmux_io::capture_pane(tmux, pane) else {
+    // Escapes preserved: the blocker reason depends on composer styling to
+    // distinguish a dim ghost hint from real unsent operator input.
+    let Ok(captured) = agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane) else {
         return false;
     };
     is_codex_shell_search_blocker(

@@ -26,6 +26,11 @@ const CONTROLLER_CRDT_CURRENT_TEXT_POLL_TIMEOUT: Duration = Duration::from_secs(
 const CONTROLLER_CRDT_CURRENT_TEXT_READ_TIMEOUT: Duration = Duration::from_secs(5);
 const CONTROLLER_CRDT_REVISION_READ_TIMEOUT: Duration = Duration::from_millis(750);
 const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
+/// `#lazily-hot-path` W1 — ceiling for a single server-side visible-write receipt
+/// await. Matches the CRDT current-text budget above: the convergence wait is
+/// legitimately long, so the client's real deadline (not a global hang budget)
+/// governs, chunked into awaits no longer than this.
+const CONTROLLER_VISIBLE_WRITE_AWAIT_MAX: Duration = Duration::from_secs(120);
 const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
 const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
 /// A CP-owned git commit (barrier + stage + commit + boundary reposition) can run
@@ -3546,6 +3551,51 @@ pub fn visible_write_commit_candidate_for_patch_file(
         &canonical,
         patch_id,
     )
+}
+
+/// `#lazily-hot-path` W1 — await the visible-write receipt for `patch_id` instead of
+/// re-deriving it on a private timer.
+///
+/// The live controller records the receipt and holds the authoritative in-memory
+/// projection, so it is the one process that can *push* the arrival. This asks it to
+/// wait up to `wait`, and answers the moment the fact lands. Returns `Ok(None)` when
+/// the wait elapsed with no receipt, and `Err` only when the controller could not be
+/// asked at all — callers fall back to the durable projection read, which keeps a
+/// missing controller a slow path rather than a wedge.
+pub fn await_visible_write_commit_candidate_for_patch_file(
+    file: &Path,
+    patch_id: &str,
+    wait: std::time::Duration,
+) -> Result<Option<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection>> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let wait = wait.min(CONTROLLER_VISIBLE_WRITE_AWAIT_MAX);
+    let payload = serde_json::json!({
+        "patch_id": patch_id,
+        "wait_ms": u64::try_from(wait.as_millis()).unwrap_or(u64::MAX),
+    });
+    let request = ControllerRequest {
+        command: "visible_write_commit_candidate_patch_await".to_string(),
+        file: Some(canonical.to_path_buf()),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("visible_write".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(payload.to_string()),
+    };
+    // The response cannot arrive before the server-side await elapses, so the recv
+    // budget must outlast it; the margin covers request/response serialization.
+    let recv_timeout = wait.saturating_add(CONTROLLER_RPC_TIMEOUT);
+    let status: VisibleWriteCommitCandidatePatchStatus =
+        request_existing_controller_with_timeout(&project_root, request, recv_timeout)?;
+    Ok(status.proof)
 }
 
 pub fn record_visible_write_materialized_carry_forward_for_file(
@@ -8967,6 +9017,13 @@ pub(crate) fn handle_request_locked(
                 request,
             ))
         }
+        "visible_write_commit_candidate_patch_await" => {
+            controller_envelope(handle_visible_write_commit_candidate_patch_await(
+                &bootstrap_snapshot,
+                runtime.as_ref(),
+                request,
+            ))
+        }
         "visible_write_materialized_carry_forward_observed" => {
             controller_envelope(handle_visible_write_materialized_carry_forward_observed(
                 &bootstrap_snapshot,
@@ -11418,6 +11475,44 @@ pub(crate) fn handle_visible_write_commit_candidate_patch_status(
                     .applied_visible_write_candidate_for_patch(patch_id)
                     .cloned()
             }),
+    })
+}
+
+/// `#lazily-hot-path` W1 — bounded server-side await for a visible-write receipt.
+///
+/// The client supplies its own real deadline (`wait_ms`); the convergence wait is
+/// legitimately long (a slow controller/editor can take far more than the default
+/// RPC budget), so this is clamped to the controller ceiling rather than a global
+/// hang budget. The projection read stays authoritative inside the wait, so the
+/// answer is identical to `visible_write_commit_candidate_patch_status` — only the
+/// arrival is pushed instead of polled.
+pub(crate) fn handle_visible_write_commit_candidate_patch_await(
+    _bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<VisibleWriteCommitCandidatePatchStatus> {
+    let file = request_file(&request)?;
+    let canonical = file.canonicalize().unwrap_or(file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: serde_json::Value = serde_json::from_str(&payload_json)
+        .context("parse visible write candidate patch await payload")?;
+    let patch_id = payload
+        .get("patch_id")
+        .and_then(|value| value.as_str())
+        .context("visible write candidate patch await missing patch_id")?;
+    let wait = payload
+        .get("wait_ms")
+        .and_then(|value| value.as_u64())
+        .map(Duration::from_millis)
+        .unwrap_or(CONTROLLER_VISIBLE_WRITE_AWAIT_MAX)
+        .min(CONTROLLER_VISIBLE_WRITE_AWAIT_MAX);
+    Ok(VisibleWriteCommitCandidatePatchStatus {
+        proof: runtime.wait_for_visible_write_commit_candidate_patch(
+            &document_hash,
+            patch_id,
+            wait,
+        ),
     })
 }
 
@@ -19668,6 +19763,218 @@ mod tests {
         assert_eq!(resp.document_hash, "docwire-on");
         // Folded ⇒ the per-channel ack cursor advanced past the initial 0.
         assert!(resp.ack_through >= 1);
+    }
+
+    /// Build the three state events that record a visible-write receipt, the same
+    /// way the observed/direct recording paths do.
+    fn visible_write_receipt_events(
+        document_hash: &str,
+        patch_id: &str,
+        content: &str,
+    ) -> Vec<agent_doc_state_backbone::StateEvent> {
+        let payload = VisibleWriteCommitCandidatePayload {
+            patch_id: patch_id.to_string(),
+            model_revision: 7,
+            editor_visible_hash: visible_write_commit_candidate_hash(content),
+            commit_candidate_hash: visible_write_commit_candidate_hash(content),
+            commit_candidate_content: content.to_string(),
+            source: "test_receipt".to_string(),
+        };
+        let (generation, applied, proof) =
+            visible_write_commit_candidate_events(document_hash, &payload);
+        vec![generation, applied, proof]
+    }
+
+    /// `#lazily-hot-path` W1 — a receipt that already folded answers without waiting.
+    #[test]
+    fn visible_write_receipt_await_returns_a_receipt_that_already_folded() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("receipt-present.md");
+        std::fs::write(&file, "# receipt\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        for event in visible_write_receipt_events(&document_hash, "patch-present", "visible text") {
+            append_state_event(&bootstrap.project_root, &event).unwrap();
+        }
+        let runtime = ControllerRuntime::new(bootstrap).unwrap();
+
+        let started = Instant::now();
+        let proof = runtime
+            .wait_for_visible_write_commit_candidate_patch(
+                &document_hash,
+                "patch-present",
+                Duration::from_secs(30),
+            )
+            .expect("an already-folded receipt must answer immediately");
+
+        assert_eq!(proof.patch_id, "patch-present");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "an already-folded receipt must not wait on the deadline"
+        );
+    }
+
+    /// `#lazily-hot-path` W1 — THE property this primitive exists for: the waiter is
+    /// woken by the append that records the fact, not by its own timer. A waiter that
+    /// silently degraded to polling-until-deadline would still return the receipt, so
+    /// the assertion is on elapsed time against a deliberately long deadline.
+    #[test]
+    fn visible_write_receipt_await_wakes_on_the_recording_append() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("receipt-pushed.md");
+        std::fs::write(&file, "# receipt\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let runtime = Arc::new(ControllerRuntime::new(bootstrap).unwrap());
+
+        let recorder = Arc::clone(&runtime);
+        let recorded_hash = document_hash.clone();
+        let recorder = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            for event in visible_write_receipt_events(&recorded_hash, "patch-pushed", "pushed text")
+            {
+                recorder.apply_state_event(&event).unwrap();
+            }
+        });
+
+        let started = Instant::now();
+        let proof = runtime
+            .wait_for_visible_write_commit_candidate_patch(
+                &document_hash,
+                "patch-pushed",
+                Duration::from_secs(30),
+            )
+            .expect("the recording append must wake the waiter");
+        let elapsed = started.elapsed();
+        recorder.join().unwrap();
+
+        assert_eq!(proof.patch_id, "patch-pushed");
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "waiter must be woken by the append, not by its own deadline (elapsed {elapsed:?})"
+        );
+    }
+
+    /// `#lazily-hot-path` W1 — the await is bounded by the caller's deadline and
+    /// fails open (no receipt) instead of hanging, so a caller can still fall back to
+    /// its authoritative read.
+    #[test]
+    fn visible_write_receipt_await_is_bounded_by_the_caller_deadline() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("receipt-absent.md");
+        std::fs::write(&file, "# receipt\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let runtime = ControllerRuntime::new(bootstrap).unwrap();
+
+        let started = Instant::now();
+        let proof = runtime.wait_for_visible_write_commit_candidate_patch(
+            &document_hash,
+            "patch-never-recorded",
+            Duration::from_millis(120),
+        );
+
+        assert!(proof.is_none(), "no receipt was ever recorded");
+        assert!(
+            started.elapsed() >= Duration::from_millis(120),
+            "the await must consume the caller's deadline rather than spinning"
+        );
+    }
+
+    /// The await command answers with the same proof shape as the status command, so
+    /// swapping a poll for a push cannot change what the caller observes.
+    #[test]
+    fn visible_write_receipt_await_command_matches_the_status_command() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("receipt-command.md");
+        std::fs::write(&file, "# receipt\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        for event in visible_write_receipt_events(&document_hash, "patch-cmd", "command text") {
+            append_state_event(&bootstrap.project_root, &event).unwrap();
+        }
+        let runtime = ControllerRuntime::new(bootstrap.clone()).unwrap();
+
+        let request_for = |command: &str, payload: serde_json::Value| {
+            let mut request = empty_controller_request(command);
+            request.file = Some(file.clone());
+            request.diagnostic_payload = Some(payload.to_string());
+            request
+        };
+
+        let status = handle_visible_write_commit_candidate_patch_status(
+            &bootstrap,
+            &runtime,
+            request_for(
+                "visible_write_commit_candidate_patch_status",
+                serde_json::json!({ "patch_id": "patch-cmd" }),
+            ),
+        )
+        .expect("status handler ok");
+        let awaited = handle_visible_write_commit_candidate_patch_await(
+            &bootstrap,
+            &runtime,
+            request_for(
+                "visible_write_commit_candidate_patch_await",
+                serde_json::json!({ "patch_id": "patch-cmd", "wait_ms": 30_000 }),
+            ),
+        )
+        .expect("await handler ok");
+
+        assert_eq!(
+            status.proof.map(|proof| proof.commit_candidate_hash),
+            awaited.proof.map(|proof| proof.commit_candidate_hash),
+        );
+
+        // An absent receipt with a zero wait answers `None` immediately instead of
+        // falling back to the controller ceiling.
+        let started = Instant::now();
+        let missing = handle_visible_write_commit_candidate_patch_await(
+            &bootstrap,
+            &runtime,
+            request_for(
+                "visible_write_commit_candidate_patch_await",
+                serde_json::json!({ "patch_id": "patch-absent", "wait_ms": 0 }),
+            ),
+        )
+        .expect("await handler ok");
+        assert!(missing.proof.is_none());
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// Carry-forward guardrail for this migrated seam (`#lazily-hot-path`): once a
+    /// coordination fact has a Lazily cell, its decision site reads the in-memory
+    /// projection and must not re-derive the answer from durable storage. Without
+    /// this, a later "just reload it here to be safe" edit silently reintroduces the
+    /// per-waiter ledger fold this primitive exists to delete.
+    #[test]
+    fn visible_write_receipt_await_decides_from_lazily_state_not_durable_storage() {
+        let source = include_str!("../project_controller.rs");
+        let start = source
+            .find("fn wait_for_visible_write_commit_candidate_patch(")
+            .expect("the visible-write receipt await must exist");
+        let body = &source[start..];
+        let end = body
+            .find("\n    fn ")
+            .expect("the await must be followed by another method");
+        let body = &body[..end];
+
+        assert!(
+            body.contains("state_projection"),
+            "the await must decide from the in-memory Lazily projection"
+        );
+        for forbidden in [
+            "open_state_db",
+            "load_state_backbone_projection",
+            "load_state_event_ledger",
+            "flock",
+        ] {
+            assert!(
+                !body.contains(forbidden),
+                "visible-write receipt await must not arbitrate from `{forbidden}` \
+                 (#lazily-hot-path: durable storage is a sink, not a decision authority)"
+            );
+        }
     }
 
     #[test]

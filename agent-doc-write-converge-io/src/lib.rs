@@ -82,6 +82,15 @@ const VISIBLE_WRITE_RECEIPT_TIMEOUT_MS: u64 = 100;
 #[cfg(not(any(test, feature = "test-support")))]
 const VISIBLE_WRITE_RECEIPT_TIMEOUT_MS: u64 = 6_000;
 const VISIBLE_WRITE_RECEIPT_POLL_MS: u64 = 25;
+/// `#lazily-hot-path` W1 — longest single park on the controller's receipt push.
+///
+/// The receipt normally lands through the controller, which pushes it the instant it
+/// folds; this bound exists only so a receipt written straight to the durable ledger
+/// by `record_visible_write_commit_candidate_direct` (the controller-unreachable
+/// fallback, which the controller's in-memory projection never observes) is still
+/// picked up promptly by the authoritative re-read. Ten poll intervals: an order of
+/// magnitude fewer round trips than the old spin, with the same fallback visibility.
+const VISIBLE_WRITE_RECEIPT_AWAIT_CHUNK_MS: u64 = VISIBLE_WRITE_RECEIPT_POLL_MS * 10;
 
 /// Shared closeout budget for an editor's lazily-backed visible-write receipt.
 ///
@@ -1694,8 +1703,43 @@ pub fn poll_visible_write_content_lazily_event(
         if deadline.is_expired() {
             return Ok(None);
         }
-        let remaining_ms = timeout_ms.saturating_sub(elapsed_ms).max(1);
-        std::thread::sleep(poll_interval.min(std::time::Duration::from_millis(remaining_ms)));
+        let remaining =
+            std::time::Duration::from_millis(timeout_ms.saturating_sub(elapsed_ms).max(1));
+        // `#lazily-hot-path` W1 — park on the live controller's receipt push instead
+        // of re-deriving the fact on a private timer. The predicate above stays
+        // authoritative: whether the await reports the receipt, times out, or cannot
+        // be asked at all, the loop re-reads through the same authority, so a missed
+        // notify or an absent controller degrades to the old poll cadence and never
+        // wedges.
+        //
+        // The await is chunked rather than consuming the whole remaining deadline.
+        // The controller can only push a receipt its own in-memory projection saw, and
+        // `record_visible_write_commit_candidate_direct` writes the durable ledger
+        // without going through it. Chunking keeps that fallback observable on a
+        // bounded cadence while still collapsing the common case from one round trip
+        // per poll interval to one that returns the instant the fact lands.
+        let await_window = remaining.min(std::time::Duration::from_millis(
+            VISIBLE_WRITE_RECEIPT_AWAIT_CHUNK_MS,
+        ));
+        match agent_doc_controller_io::project_controller::await_visible_write_commit_candidate_for_patch_file(
+            file,
+            patch_id,
+            await_window,
+        ) {
+            Ok(_) => {}
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "visible_write_receipt_await_unavailable file={} patch_id={} fallback=poll_interval detail={}",
+                        file.display(),
+                        patch_id,
+                        format!("{err:#}").replace('\n', " | ").chars().take(160).collect::<String>()
+                    ),
+                );
+                std::thread::sleep(poll_interval.min(remaining));
+            }
+        }
     }
 }
 

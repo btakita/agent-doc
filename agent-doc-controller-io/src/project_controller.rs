@@ -494,6 +494,11 @@ pub(crate) struct ControllerRuntime {
     coordination_graph: ControllerCoordinationGraph,
     supervisor_recycle_graph: ControllerSupervisorRecycleGraph,
     supervisor_recycle_waiters: Condvar,
+    /// `#lazily-hot-path` W1 — notified whenever the in-memory state projection
+    /// advances (`apply_state_event` / `refresh_memory`). Bounded awaits park here
+    /// instead of making every waiter re-poll the projection on its own timer, so
+    /// one fact producer publishes once and all waiters react.
+    state_projection_waiters: Condvar,
     /// `#ctlrecycle` R2 — set true by the `recycle` RPC (`agent-doc admin recycle`).
     /// The serve-loop idle poll honors it the same way it honors binary staleness:
     /// once no dispatch is in flight (debounced), the controller self-terminates and
@@ -525,6 +530,7 @@ impl ControllerRuntime {
             coordination_graph: ControllerCoordinationGraph::new(),
             supervisor_recycle_graph,
             supervisor_recycle_waiters: Condvar::new(),
+            state_projection_waiters: Condvar::new(),
             recycle_requested: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
         })
@@ -589,6 +595,7 @@ impl ControllerRuntime {
         drop(memory);
         self.supervisor_recycle_graph.set(recycle);
         self.supervisor_recycle_waiters.notify_all();
+        self.state_projection_waiters.notify_all();
         Ok(())
     }
 
@@ -601,7 +608,42 @@ impl ControllerRuntime {
         };
         self.supervisor_recycle_graph.set(recycle);
         self.supervisor_recycle_waiters.notify_all();
+        self.state_projection_waiters.notify_all();
         Ok(())
+    }
+
+    /// `#lazily-hot-path` W1 — bounded await for the visible-write receipt of
+    /// `(document_hash, patch_id)`.
+    ///
+    /// The in-memory Lazily projection stays the authority: it is re-read on every
+    /// wake, so a missed notify degrades to a slower wait (bounded by the caller's
+    /// deadline) and never wedges. This exists so the CLI-side convergence wait is
+    /// a *push* from the process that records the fact, instead of every waiter
+    /// re-folding the durable ledger on its own timer.
+    fn wait_for_visible_write_commit_candidate_patch(
+        &self,
+        document_hash: &str,
+        patch_id: &str,
+        timeout: Duration,
+    ) -> Option<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection> {
+        let started = Instant::now();
+        let mut memory = self.memory.lock();
+        loop {
+            if let Some(proof) = memory
+                .state_projection
+                .document(document_hash)
+                .and_then(|document| document.applied_visible_write_candidate_for_patch(patch_id))
+                .cloned()
+            {
+                return Some(proof);
+            }
+            let elapsed = started.elapsed();
+            if elapsed >= timeout {
+                return None;
+            }
+            self.state_projection_waiters
+                .wait_for(&mut memory, timeout.saturating_sub(elapsed));
+        }
     }
 
     fn state_subscribe(
@@ -6454,6 +6496,7 @@ agent:queue\n\
             supervisor_recycle_graph,
             coordination_graph: ControllerCoordinationGraph::new(),
             supervisor_recycle_waiters: Condvar::new(),
+            state_projection_waiters: Condvar::new(),
             recycle_requested: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
         }

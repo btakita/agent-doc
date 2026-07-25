@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -259,7 +259,20 @@ Short answers: **yes, future side-work can be carved out, but it requires a spec
 **One non-legal reality check:** the carve-out protects your *ownership*, not your *hours*. Haiven's expected overtime reduces side-project time no matter what the contract says; Acadian gives you both the cleaner legal position and the actual evenings. If ongoing side-work is a first-class goal for 2026, that compounds the earlier "Acadian is the stronger default" conclusion.
 
 `#ipcarveout` is done: exhibit drafted, committed, and applicable to both offers. Recommend a one-hour employment-attorney review of whichever final agreement you sign... cheap insurance given Virginia's lack of a statutory floor.
-<!-- agent:boundary:8940a286 -->
+Should I mention the IP carve-out in my Haiven offer? I told the recruiter for Arcadian that I will have an answer by Sunday evening. What would happen if they choose to fire me early?
+
+### Re: carve-out timing, the Sunday deadline, and early-termination risk — fable
+
+Three questions, three answers.
+
+**1. Should you mention the IP carve-out in the Haiven reply? Yes... it's already in the draft, at the right weight.** The compensation draft mentions it as one of "two smaller items for the offer letter," which is exactly the correct posture: surface it early so the PIIA doesn't arrive as a surprise fight, but don't lead with it or paste legal language into a compensation email. The detailed two-tier clause work stays in your back pocket (`tasks/recruit/ip-carveout-exhibit.md`) until they send the offer letter. I made one wording upgrade to the draft (commit `d5241ee`): it now says "pre-existing open-source projects **and future independent side work**"... six extra words that put the future-works ask on the table from day one, so when Tier 1 language shows up later it's a follow-through, not an escalation. Mentioning it early is also cheap signal-gathering: a company that flinches at a routine carve-out mention was going to be a hard IP negotiation anyway, and you want to know that before Sunday, not after.
+
+**2. The Sunday-evening deadline: send the Haiven email today and put the deadline in it.** Today is Saturday; the ask email hasn't gone out, so the clock is the real risk, not the negotiation. I added a timing paragraph to the draft: "I owe my other party an answer by Sunday evening. If you can respond on the framework above by then... even informally... I can hold my decision open for you." A deadline you name honestly is leverage, not rudeness... it forces a fast good-faith signal from Haiven, which is exactly the tell your decision gate needs. Then the branches: **(a)** Haiven engages by Sunday with real numbers → run the decision gate as planned. **(b)** Haiven asks for a few more days → call the Acadian recruiter Monday morning and ask for 2-3 days; recruiters grant short extensions routinely, especially on contract seats, and "another offer is finalizing terms" is a normal reason. **(c)** Haiven goes quiet → that silence *is* the answer; take Acadian on schedule. One thing not to do: don't accept Acadian Sunday and keep negotiating Haiven... reneging on an accepted contract burns the recruiter relationship and the agency channel behind it.
+
+**3. What happens if Acadian fires you early: the honest answer is the 12 months is an expectation, not a guarantee.** Standard staffing/EOR engagements are terminable for convenience with short notice... typically 1-2 weeks, sometimes zero... and your W-2 through PGC is at-will. If they cut you at month 3, you keep what you billed, there's no severance, PGC benefits end (COBRA-style continuation or marketplace), and as a W-2 employee you'd generally qualify for Virginia unemployment while you re-search. So the $208-225k figure should be read as "rate x months they actually keep you." Three mitigations: **(a)** read the actual termination clause before accepting and ask the recruiter directly what the notice period is... this is a normal question that costs nothing; **(b)** if it's bare (immediate/for-convenience), ask for a 2-4 week notice period in the SOW... modest, often granted; **(c)** weigh the realistic risk: a stable, profitable company that just ran a hiring process rarely cuts a productive contractor early... the real risk is a project cancellation or finance-sector budget freeze, not performance whim. Also remember it's symmetric: the same clause is your exit door if Haiven-like opportunities reappear or the engagement sours. And for calibration, Haiven is at-will too, with startup-survival risk on top... neither offer guarantees duration; they just fail differently. Added `#acadianterms` to backlog [recommended]: get the notice clause plus the >40hr-billing and renewal confirmations in writing from the recruiter before you accept.
+
+Practical sequence for the next 30 hours: send the Haiven email today (the draft is ready at `tasks/recruit/haiven/compensation-reply-draft.md`), ask Acadian's recruiter the notice-period question in parallel, and let Sunday evening resolve the tree.
+<!-- agent:boundary:db3fbafa -->
 <!-- /agent:exchange -->
 
 ## Queue

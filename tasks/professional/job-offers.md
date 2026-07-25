@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -544,17 +544,31 @@ All seven absorbed. The letter is rewritten as **v3: decline + bounded offer** a
 **Riza (7): correctly held back, sequencing recorded.** Not in the letter; contingent on the prototype being well-received AND Riza's double opt-in. The make-ends-meet signal from LinkedIn makes your eventual ask *kind* rather than presumptuous... but it's his private situation, so it never reaches Craig. When the moment comes, the note has both one-message pitches ready: to Riza ("Haiven may need SDK/DX help after a prototype I built; you came to mind... interested in a conversation?") and to Craig (quick learner, great attitude, founding-engineer analytics-to-product at PresenceAI, Austin-local).
 
 Backlog updated: `#haivensend` now points at the v3 letter; `#sdkcontract` is prototype-first with the Riza contingency recorded. The Sunday sequence is unchanged and now fully coherent: this one letter closes the job negotiation, opens the bounded relationship, and costs Craig a single word to act on.
-<!-- agent:boundary:adb3a348 -->
+❯ I could have the prototype include multiple engines (Unity + Unreal + Discord) to validate the conformance.
+
+❯ "for an intro that's useful": Should I also say "I have someone in mind"?
+
+### Re: multi-engine prototype + "someone in mind" — fable
+
+**Multi-engine (Unity + Unreal + Discord): the instinct is right, the scope is wrong — split the difference with engine-neutral fixtures.** The instinct is correct because a conformance suite only one engine has ever passed proves nothing about engine-agnosticism; it may be silently overfit to that engine. That's exactly the lesson from the lazily release train — the fixture suite is only credible because 8 bindings pass the *same* fixtures. But three full engine SDKs in 1-2 weeks breaks the scope guard that makes the nominal-fee offer credible (Unity C#, Unreal C++, and a Discord client are three different toolchains), and it gives away the paid milestone ladder for free — "additional engines" IS the milestone conversation. The middle path that validates conformance without the blowup: (1) write the conformance fixtures engine-neutral from day one (golden-file style, the lazily pattern), (2) build ONE deep integration (Unity, as the letter says), and (3) optionally add a *thin* second client — Discord is the cheapest, a TS harness that runs only the conformance fixtures against their API, not a full SDK. That second thin client costs ~1-2 days and proves the suite isn't Unity-shaped, while Unreal parity stays intact as the natural first paid milestone. The letter needs no change — "the scaffolding that makes the rest of the SDK matrix cheap to build" already sells exactly this; it's a decision for the scope sketch when Craig says the word.
+
+**"I have someone in mind": recommend no — as the letter stands.** Three reasons, all already latent in your own notes. First, it floats a person who hasn't agreed to be floated — unnamed doesn't fix that, because Craig's natural reply is "who?", and then you either name Riza pre-opt-in or visibly walk it back ("let me check with them"), which reveals you teased before asking. Second, it converts the planned *unprompted* intro — a gift, sent on your timing a few days later — into an IOU Craig can redeem on his timing. Third, the current line is load-bearing precisely because it commits no one: "an intro that's useful" plants the seed without a promissory note. If you want the concreteness, the right move is sequencing, not phrasing: send Riza the one-liner already drafted in the notes *first* — if his opt-in lands before Sunday, you can write something strictly stronger than "someone in mind": you can name him. So either send as-is, or ping Riza today and upgrade only on his yes.
+
+Housekeeping: this cycle started wedged (`delivery_pending` on preflight) — `admin reload-lib` cleared it, no data touched. The auto-admitted `#prototypeincludemultiple` is closed with this answer. Exchange is at 529 lines / 22 sections (accretion warn) — noting per policy, not stalling the queue.
+<!-- agent:boundary:92bcca70 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority -->
+<!-- agent:queue priority start -->
+- 🚧 do [#prototypeincludemultiple]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] 🚧 [#prototypeincludemultiple] I could have the prototype include multiple engines (Unity + Unreal + Discord) to validate the conformance.
+"for an intro that's useful": Should I also say "I have someone in mind"?
 - [ ] [#sdkcontract] #sdkcontract If Craig engages the prototype offer: sketch scope (ONE engine + spec + conformance scaffold + sample, 1-2wks), then milestone SOW per tasks/recruit/haiven/sdk-contract-structure.md; Riza intro contingent on prototype reception + Riza double opt-in
 - [ ] [#haivensend] #haivensend [operator-verify] Send the v3 decline+offer letter (tasks/recruit/haiven/decline-draft.md) to Craig; compensation-reply-draft.md is superseded/history-only
 - [ ] [#acadiansend] [operator-verify] Send Acadian recruiter questions (tasks/recruit/acadian/recruiter-questions-draft.md) incl. signing-bonus/advance ask; file written answers under tasks/recruit/acadian/

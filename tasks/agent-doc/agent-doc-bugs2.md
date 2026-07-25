@@ -233,12 +233,38 @@ Pushed commits:
 - superproject gitlink `8800746a0` (`chore: update agent-doc editor convergence fix`)
 
 Confidence: high. This closes the observed plugin/tmux churn scope. It does not claim the separate repository-wide remaining-`flock` migration is complete.
-<!-- agent:boundary:a8e3cf9a -->
+
+### Re: #qactsync-live closeout and harness readiness — gpt-5
+
+> **Queue prompt:**
+>
+> do [#qactsync-live]
+
+
+The live evidence already recorded in this exchange satisfies `#qactsync-live`: both queue-control directions converged in IDEA, no File Cache Conflict appeared, the stop/resume path was exercised, and the matching binary/plugin package was installed. I am closing the stale queue/backlog head now.
+
+The later `job-offers.md` editor-route timeout exposed a separate readiness weakness: Claude Code can render arbitrary shell-command status output, Codex status components are configurable, and OpenCode relies more reliably on lifecycle events plus its boxed composer. Status text therefore cannot be treated as a protocol.
+
+Fixed the shared route/supervisor path by scoping Claude and Codex prompt/draft evidence through tmux's cursor row. Content below the editable composer is ignored; busy cues and drafts at or above it still veto dispatch. Missing cursor evidence falls back to the existing draft-aware compatibility classifiers, while OpenCode retains lifecycle/full-pane proof.
+
+Changed paths: the harness prompt classifiers, tmux cursor adapter, route startup/authoritative-actor/dispatch-only checks, supervisor detection, startup submit verification, session status reconciliation, architecture tests, routing spec, and release notes under `src/agent-doc`.
+
+Verification and delivery:
+
+- `make check` passed, including unit, architecture, and formal checks.
+- `make tmux-ci` passed.
+- `make install` installed agent-doc 0.35.27 and refreshed the matching JetBrains plugin in all four detected IDE installations.
+- A real `agent-doc route --dispatch-only --plain-trigger --wait-for-ready 15 tasks/professional/job-offers.md` completed in 3.7 seconds and published an accepted terminal result to pane `%53`.
+- Pushed agent-doc `6afb1bafa` and superproject gitlink `c7443fa28`.
+- GitHub CI was in progress at the required single inspection; local verification is complete.
+
+Confidence: high. Escalation: none.
+<!-- agent:boundary:8c0d818b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ do [#qactsync-live]
+- ~~⏭️ do [#qactsync-live]~~
 - 📌 do [#qeditrace]
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
@@ -275,7 +301,6 @@ Confidence: high. This closes the observed plugin/tmux churn scope. It does not 
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#qactsync-live] [operator-verify] On installed agent-doc v0.35.26 in a live editor, toggle only the agent:queue marker start/go/removed control and only queue: frontmatter start/stop; confirm each direction converges once without a File Cache Conflict or go-marker restoration. Unblocks after both edit directions and one stop/resume sequence are visibly observed.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 ### Re: #bbpe — gpt-5
 

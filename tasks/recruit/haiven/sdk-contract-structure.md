@@ -63,6 +63,27 @@ The entire Acadian decision was purchased with evenings for patchboard/lazily. A
   hiring decision; evaluate Riza on merits; separately, I'm glad to augment per
   milestone if that helps." Never present Brian-as-lead-of-a-two-person-external-team.
 
+## Honest fit map (if the augment/team conversation happens)
+
+Haiven's SDK matrix: Unity (C#), Unreal (C++), Roblox (Luau), React Native (JS/TS),
+Discord. Two different skill families hide in there.
+
+- **Brian**: "I haven't made any SDKs" undersells... the lazily family IS cross-language
+  client-library engineering: one API surface across 8 languages (incl. C++/Kotlin/
+  Zig/Rust) with per-language idiom, packaging to 6+ registries, and conformance
+  suites. That's the portfolio proof, and it's public/inspectable. The genuinely new
+  part is engine runtime constraints (Unity player loop/IL2CPP, Unreal module/build
+  system)... learnable atop that base, but say so plainly rather than claiming engine
+  expertise.
+- **Riza** (front-end → Python full-stack, extensive PresenceAI API work): a stretch as
+  the Unity/Unreal candidate... "can learn with AI assistance" is not something a CTO
+  banks an October launch on. A direct fit for the web-adjacent half: React Native/JS
+  SDK, Discord integration, API-consumer DX, docs/samples, conformance testing.
+- **Credible split if pitched**: Brian on the core client protocol library + Unity/
+  Unreal; Riza on RN/JS + Discord + docs/DX. Lead with evidence (lazily repos), not
+  promises, and let Phase 0 + milestone gates make fit an empirical question Craig can
+  exit cheaply... that's what turns "stretch" into "appealing."
+
 ## If bringing it up proactively (optional decline-email line)
 
 Replace the door-open sentence with the stronger variant:

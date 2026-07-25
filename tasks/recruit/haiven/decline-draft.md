@@ -27,7 +27,8 @@ three.
 
 I'm rooting for the August beta and the October launch. The safety-first architecture
 you're building matters, and if there's ever a scoped way I can help down the road...
-a contract sprint on the SDK, or an intro that's useful... my door is open.
+helping you scope the engine-SDK work into milestones, a contract sprint, or an intro
+that's useful... my door is open.
 
 With real appreciation,
 Brian

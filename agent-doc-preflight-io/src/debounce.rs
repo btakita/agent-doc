@@ -178,7 +178,61 @@ where
                 );
             }
         }
+        wait_one_settle_slice(file, observation.state, poll);
+    }
+}
+
+/// Longest single park while delivery is settling.
+///
+/// The settle loop's own cadence is [`agent_doc_debounce::SETTLE_POLL_INTERVAL`]
+/// (100ms), and every tick costs a controller round trip that recomputes the whole
+/// current text. When the blocker is `delivery_pending` that tick is pure waste: the
+/// controller can tell us the moment delivery converges, so one park replaces the
+/// spin. Kept short enough that urgent-drain and progress sampling still happen on
+/// roughly their old cadence.
+const DELIVERY_SETTLE_AWAIT_SLICE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Wait one slice of the settle loop.
+///
+/// `#lazily-hot-path` Theme A (W3): when the blocker is specifically a settling
+/// delivery, park on the controller's delivery-convergence await instead of sleeping
+/// blind. It returns the instant convergence lands — so a settle that would have been
+/// noticed up to a poll-interval late is noticed immediately — and it collapses the
+/// ~10 observations per second this loop otherwise makes into one park.
+///
+/// Every other blocker (missing replica, current pending, authority unavailable) has
+/// no convergence fact to wait on, so it keeps the plain sleep. So does an await that
+/// cannot answer (no hub for the document, or no reachable controller): falling back
+/// to the old cadence keeps this strictly fail-open, since the loop's budget and
+/// deferral semantics are unchanged either way.
+fn wait_one_settle_slice(file: &Path, state: &str, poll: std::time::Duration) {
+    if state != "delivery_pending" {
         std::thread::sleep(poll);
+        return;
+    }
+    match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+        file,
+        DELIVERY_SETTLE_AWAIT_SLICE,
+    ) {
+        // Observed: the await already consumed up to its slice, returning early only
+        // when convergence landed. Loop straight back to the authoritative observation.
+        Ok(Some(_)) => {}
+        Ok(None) => std::thread::sleep(poll),
+        Err(error) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "preflight_settle_convergence_unavailable file={} fallback=poll_interval detail={}",
+                    file.display(),
+                    format!("{error:#}")
+                        .replace('\n', " | ")
+                        .chars()
+                        .take(160)
+                        .collect::<String>()
+                ),
+            );
+            std::thread::sleep(poll);
+        }
     }
 }
 
@@ -242,6 +296,35 @@ mod tests {
             drain_targets: None,
             text: None,
             error: None,
+        }
+    }
+
+    /// `#lazily-hot-path` W3 — only a settling *delivery* has a convergence fact to
+    /// park on. Every other blocker must keep the plain poll, and so must an await
+    /// that cannot answer, or the loop would stall on a fact nobody will ever report.
+    ///
+    /// Operator-reported 2026-07-25: 20 consecutive deferrals, all
+    /// `state=delivery_pending`, mean 12.1s each (242s total). At a 100ms cadence each
+    /// of those burned ~120 controller round trips that each recompute the full
+    /// current text.
+    #[test]
+    fn only_a_settling_delivery_parks_on_the_convergence_fact() {
+        // No project root => the await errors immediately, exercising the fail-open
+        // path without a controller. Each call must therefore return promptly and
+        // never hang, whatever the blocker.
+        let file = std::path::Path::new("/nonexistent-agent-doc-root/settle-probe.md");
+        for state in [
+            "delivery_pending",
+            "missing_replica",
+            "current_pending",
+            "authority_unavailable",
+        ] {
+            let started = std::time::Instant::now();
+            wait_one_settle_slice(file, state, Duration::from_millis(10));
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "settle slice for {state} must stay bounded when no controller can answer"
+            );
         }
     }
 

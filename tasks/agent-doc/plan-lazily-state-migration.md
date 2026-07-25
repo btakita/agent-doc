@@ -266,9 +266,46 @@ backlog id per phase; do not touch fixed-seed fuzz.
   `watch()` tally, since `mark_editor_attach_open` only attaches plane-sourced pids).
   A zero-sized-struct regression guard forbids a private tally from returning. This
   is the pattern exemplar for the phases below.
-- **Phase 1 — Theme A: `delivery_converged` cell.** Highest leverage; dissolves the
-  compact/delivery-ACK wedge (W1, W3, W6, W7, W8, W4). Convert the five loops to
-  Effects gated on one per-file convergence cell.
+- **Phase 1 — Theme A: `delivery_converged` cell. W1 half LANDED; rest open.**
+  Highest leverage; dissolves the compact/delivery-ACK wedge (W1, W3, W6, W7, W8, W4).
+
+  **Landed 2026-07-25 — the cross-process receipt push (W1).** The missing primitive
+  was built as design correction 3 required, and it is *not* an in-process condvar.
+  Findings that shaped it: the receipt is recorded through the controller
+  (`visible_write_commit_candidate_observed` → `append_apply_state_event`) and read
+  back through it (`..._patch_status` → in-memory projection), so the controller is
+  already the one process holding both sides — the only missing piece was the
+  **await**. Its fallback read (`load_state_backbone_projection`) folds the *entire*
+  state-event ledger, so every poll iteration of W1 was an O(all events) fold against
+  a 50MB `state.db`; that, repeated for up to 120s, is the wedge's cost.
+  - `ControllerRuntime::wait_for_visible_write_commit_candidate_patch` — bounded,
+    condvar-notified await mirroring the in-tree `wait_for_supervisor_recycle_settle`
+    idiom, parked on a new `state_projection_waiters` notified by `apply_state_event`
+    / `refresh_memory`. The in-memory projection stays authoritative and is re-read on
+    every wake, so a missed notify degrades to a slower wait, never a wedge.
+  - Controller command `visible_write_commit_candidate_patch_await` takes the
+    **caller's real deadline** (`wait_ms`, clamped to a 120s controller ceiling, not a
+    10s global hang budget — design correction 3), and answers the identical proof
+    shape as `..._patch_status`. Safe to block: the controller already serves each
+    connection on its own thread, and `serve_client`'s idle timeout covers only
+    reading the request, not the handler.
+  - `poll_visible_write_content_lazily_event` now parks on that push for the rest of
+    its deadline instead of sleeping on a private timer; an absent controller or a
+    failed await logs `visible_write_receipt_await_unavailable` and falls back to the
+    old poll cadence.
+  - Coverage: 4 regressions incl. wake-on-append asserted by elapsed time against a
+    30s deadline (a silent degradation to poll-until-deadline still returns the
+    receipt, so time is the only honest assertion), plus a carry-forward guardrail
+    asserting the decision site never reads `open_state_db` /
+    `load_state_backbone_projection` / `load_state_event_ledger` / `flock`. The
+    guardrail was negative-tested — it fails when a violation is injected.
+
+  **Still open in Phase 1:** the `delivery_converged` half (W6/W8/compact) needs the
+  `DeliveryConvergenceWitness { version, converged }` threading a monotonic mutation
+  version through `RelayHub`'s `members`/`pending`/liveness writes; W7 needs the
+  editor `save_document` disk-flush result published once (a genuine OS boundary,
+  rubric #3 — do not fold it into the convergence cell); W3 and W4 follow once one of
+  those two cells exists.
   **⚠ Read the "DESIGN CORRECTIONS" block in Theme A first.** The 2026-07-25
   investigation overturned this section's premises: there is no cell to await (it
   must be built), W1 polls a *different* fact than `delivery_converged`, `WaitMachine`

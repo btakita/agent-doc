@@ -5315,39 +5315,24 @@ gpt-5.5 high · ~/work/btakita/agent-loop · Context 41% used
         let iso = tmux_router::IsolatedTmux::new(&socket);
         let pane = iso.new_session("test", dir.path()).unwrap();
         let output_path = dir.path().join("clear.txt");
+        let ready_path = dir.path().join("clear.ready");
         let done_path = dir.path().join("clear.done");
         iso.send_keys(
             &pane,
             &format!(
-                "sh -lc 'IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"'",
+                "sh -lc 'touch \"{}\"; IFS= read -r line; printf \"%s\" \"$line\" > \"{}\"; touch \"{}\"'",
+                ready_path.display(),
                 output_path.display(),
                 done_path.display()
             ),
         )
         .unwrap();
-        let pane_current_command = || {
-            iso.cmd()
-                .args([
-                    "display-message",
-                    "-t",
-                    &pane,
-                    "-p",
-                    "#{pane_current_command}",
-                ])
-                .output()
-                .ok()
-                .filter(|output| output.status.success())
-                .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        };
         let ready_deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while std::time::Instant::now() < ready_deadline
-            && pane_current_command().as_deref() != Some("sh")
-        {
+        while std::time::Instant::now() < ready_deadline && !ready_path.exists() {
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
-        assert_eq!(
-            pane_current_command().as_deref(),
-            Some("sh"),
+        assert!(
+            ready_path.exists(),
             "fixture must prove the line-reader is ready before sending `/clear`",
         );
 

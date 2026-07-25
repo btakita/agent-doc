@@ -5325,11 +5325,32 @@ fn handle_crdt_replica_rpc(
         return Ok(crdt_replica_refused_data("detached_authority"));
     }
 
+    // Capture the rolling Lazily/CRDT canonical before accepting the editor
+    // delta. Queue control gestures must be compared with the immediately
+    // preceding fixed point, not the cycle-opening merge snapshot: otherwise a
+    // stop→resume marker edit is indistinguishable from the stale marker that
+    // the preceding frontmatter edit just overrode.
+    let previous_text = if method_name == "replica_update" {
+        match agent_doc_crdt_relay_io::current_text_for_file_with_authority_nonblocking(
+            &canonical, authority,
+        )? {
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => Some(text),
+            agent_doc_crdt_relay_io::CurrentText::Detached
+            | agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+            | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => None,
+        }
+    } else {
+        None
+    };
     let data = controller_crdt_replica_data(&canonical, method_name, identity, &payload)?;
     if method_name == "replica_update"
         && let Some(runtime) = runtime
         && let Err(error) = observe_realtime_steering_after_replica_update(
-            bootstrap, runtime, &canonical, authority,
+            bootstrap,
+            runtime,
+            &canonical,
+            authority,
+            previous_text.as_deref(),
         )
     {
         // Steering is an observational projection over the already-accepted
@@ -5363,21 +5384,16 @@ fn observe_realtime_steering_after_replica_update(
     runtime: &ControllerRuntime,
     canonical: &Path,
     authority: agent_doc_document_realtime::crdt_authority::CrdtAuthority,
+    previous_text: Option<&str>,
 ) -> Result<bool> {
     let document_hash = agent_doc_hash::document_id_for_path(canonical);
-    let Some(state) = runtime.document_state_projection(&document_hash)? else {
-        return Ok(false);
-    };
-    let (Some(cycle_id), Some(phase)) = (state.closeout.cycle_id.as_deref(), state.closeout.phase)
-    else {
-        return Ok(false);
-    };
-    if !phase.is_open() {
-        return Ok(false);
-    }
-    let Some(baseline) = agent_doc_snapshot_io::load_document_baseline(canonical)? else {
-        return Ok(false);
-    };
+    let state = runtime.document_state_projection(&document_hash)?;
+    // `#qactsync-live`: the controller projection is the Lazily-owned hot
+    // state. Do not reopen SQLite or take a snapshot lock for every keystroke.
+    let baseline = state
+        .as_ref()
+        .and_then(|state| state.document.merge_baseline.as_ref())
+        .map(|baseline| baseline.content.as_str());
     let agent_doc_crdt_relay_io::CurrentText::Current { text, .. } =
         agent_doc_crdt_relay_io::current_text_for_file_with_authority_nonblocking(
             canonical, authority,
@@ -5385,8 +5401,42 @@ fn observe_realtime_steering_after_replica_update(
     else {
         return Ok(false);
     };
-    let event = realtime_steering_event_for_text(&document_hash, cycle_id, &baseline, &text);
-    append_apply_state_event(bootstrap, runtime, event)
+
+    let (converged, changed) =
+        agent_doc_queue::control_binding::converge_queue_control_binding_content(
+            &text,
+            previous_text,
+        )?;
+    let current = if changed {
+        // The CRDT relay is the existing durable effect sink. Feed the pure
+        // convergence result into it; do not add a second journal or watcher.
+        agent_doc_crdt_relay_io::apply_cp_write_for_file(
+            canonical,
+            &text,
+            &converged,
+            "realtime_queue_control_binding",
+        )?;
+        converged.as_str()
+    } else {
+        text.as_str()
+    };
+
+    let Some(state) = state.as_ref() else {
+        return Ok(changed);
+    };
+    let (Some(cycle_id), Some(phase)) = (state.closeout.cycle_id.as_deref(), state.closeout.phase)
+    else {
+        return Ok(changed);
+    };
+    if !phase.is_open() {
+        return Ok(changed);
+    }
+    let Some(baseline) = baseline else {
+        return Ok(changed);
+    };
+    let event = realtime_steering_event_for_text(&document_hash, cycle_id, baseline, current);
+    let observed = append_apply_state_event(bootstrap, runtime, event)?;
+    Ok(changed || observed)
 }
 
 fn realtime_steering_event_for_text(

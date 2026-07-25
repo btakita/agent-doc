@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import java.nio.file.Files
@@ -26,6 +27,17 @@ class PluginLifecycleListenerTest {
         )
         assertFalse(source.contains("openFile("))
         assertFalse(source.contains("TmuxPaneFocusSync.install(project)"))
+
+        val focusSyncSource = Files.readString(
+            Paths.get("src/main/kotlin/com/github/btakita/agentdoc/TmuxPaneFocusSync.kt")
+                .takeIf { Files.exists(it) }
+                ?: Paths.get("editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/TmuxPaneFocusSync.kt"),
+        )
+        assertEquals(
+            "only explicit install may construct the reverse-focus poller",
+            1,
+            Regex("""instances\.computeIfAbsent\(project\)""").findAll(focusSyncSource).count(),
+        )
     }
 
     @Test

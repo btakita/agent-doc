@@ -183,8 +183,11 @@ class TmuxPaneFocusSync private constructor(
         }
 
         fun recordCurrentTmuxFocus(project: Project) {
-            instances.computeIfAbsent(project) { TmuxPaneFocusSync(project) }
-                .recordCurrentTmuxFocus()
+            // Reverse tmux -> editor focus mirroring is opt-in. Recording state
+            // for claim/layout work must not silently construct the fixed-delay
+            // poller after PluginLifecycleListener deliberately left it
+            // uninstalled (#panefocusfeedback).
+            instances[project]?.recordCurrentTmuxFocus()
         }
 
         /**
@@ -194,8 +197,7 @@ class TmuxPaneFocusSync private constructor(
          * creating an editor -> tmux -> editor feedback loop.
          */
         fun recordEditorFocusIntent(project: Project, documentPath: String) {
-            instances.computeIfAbsent(project) { TmuxPaneFocusSync(project) }
-                .recordEditorFocusIntent(documentPath)
+            instances[project]?.recordEditorFocusIntent(documentPath)
         }
 
         fun disposeProject(project: Project) {

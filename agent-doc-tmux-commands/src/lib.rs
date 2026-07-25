@@ -107,11 +107,18 @@ pub fn resize_window_height(target: &str, height: &str) -> TmuxCommand {
     TmuxCommand::new(["resize-window", "-t", target, "-y", height])
 }
 
-/// `#stashresizerestore`: clear a manual `resize-window` by re-fitting the window
-/// to the clients displaying it (`-A`). tmux keeps an explicit size until it is
-/// cleared this way; `window-size latest` does not reclaim it on its own.
+/// `#stashresizerestore`: re-fit a manually resized window to the clients
+/// displaying it (`-A`). This corrects the current dimensions, but tmux still
+/// retains the per-window `window-size=manual` override; callers must also run
+/// [`inherit_window_size`] so later client resizes keep flowing to the window.
 pub fn resize_window_to_clients(target: &str) -> TmuxCommand {
     TmuxCommand::new(["resize-window", "-t", target, "-A"])
+}
+
+/// Remove a per-window size override so the window inherits the global
+/// `window-size` policy again.
+pub fn inherit_window_size(target: &str) -> TmuxCommand {
+    TmuxCommand::new(["set-option", "-w", "-u", "-t", target, "window-size"])
 }
 
 pub fn swap_window(source: &str, target: &str) -> TmuxCommand {
@@ -932,11 +939,18 @@ mod tests {
 
     #[test]
     fn resize_window_to_clients_uses_adjust_flag() {
-        // `#stashresizerestore`: `-A` re-fits to the clients, clearing the manual
-        // 1000-row height the stash join workaround sets. Without this the window
-        // stays pinned and every TUI in it renders into a ~1000-row viewport.
+        // `#stashresizerestore`: `-A` re-fits the current dimensions to clients.
         let command = resize_window_to_clients("@2");
         assert_eq!(command.args(), ["resize-window", "-t", "@2", "-A"]);
+    }
+
+    #[test]
+    fn inherit_window_size_unsets_the_per_window_override() {
+        let command = inherit_window_size("@2");
+        assert_eq!(
+            command.args(),
+            ["set-option", "-w", "-u", "-t", "@2", "window-size"]
+        );
     }
 
     #[test]

@@ -6,8 +6,7 @@
 pub mod observation_cache;
 
 pub use observation_cache::{
-    ObservationScopeStats, TmuxObservationScope, begin_observation_scope,
-    observation_scope_stats,
+    ObservationScopeStats, TmuxObservationScope, begin_observation_scope, observation_scope_stats,
 };
 
 use std::error::Error;
@@ -18,7 +17,8 @@ use std::process::{Command, Output};
 use agent_doc_tmux_commands::{
     TmuxCommand, TmuxSubmitProfile, capture_pane as capture_pane_command,
     capture_pane_with_ansi as capture_pane_with_ansi_command, display_message,
-    display_notification, kill_pane as kill_pane_command, kill_window as kill_window_command,
+    display_notification, inherit_window_size as inherit_window_size_command,
+    kill_pane as kill_pane_command, kill_window as kill_window_command,
     list_panes as list_panes_command, list_panes_all as list_panes_all_command,
     list_windows as list_windows_command, list_windows_all as list_windows_all_command,
     new_window_in_cwd as new_window_in_cwd_command, rename_window as rename_window_command,
@@ -373,14 +373,15 @@ pub fn resize_window_height(
         .map(|_| ())
 }
 
-/// `#stashresizerestore`: re-fit a window to its clients, clearing any manual
-/// `resize-window` height left behind by the stash-consolidation join workaround.
+/// `#stashresizerestore`: re-fit a window to its clients and remove the
+/// per-window manual-size override left by the stash-consolidation workaround.
 pub fn resize_window_to_clients(
     runner: &(impl TmuxCommandRunner + ?Sized),
     target: &str,
 ) -> Result<(), TmuxIoError> {
     runner
         .run(&agent_doc_tmux_commands::resize_window_to_clients(target))
+        .and_then(|_| runner.run(&inherit_window_size_command(target)))
         .map(|_| ())
 }
 
@@ -886,6 +887,21 @@ mod tests {
         assert_eq!(
             runner.commands(),
             vec![vec!["resize-window", "-t", "@2", "-y", "1000"]]
+        );
+    }
+
+    #[test]
+    fn resize_window_to_clients_refits_then_unsets_manual_size() {
+        let runner = RecordingRunner::new();
+
+        resize_window_to_clients(&runner, "@2").unwrap();
+
+        assert_eq!(
+            runner.commands(),
+            vec![
+                vec!["resize-window", "-t", "@2", "-A"],
+                vec!["set-option", "-w", "-u", "-t", "@2", "window-size"],
+            ]
         );
     }
 

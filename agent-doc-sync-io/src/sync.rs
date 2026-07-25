@@ -1007,17 +1007,20 @@ fn rescue_missing_agent_doc_window_from_candidates(
 ///
 /// Phase 4: Window index normalization — keep `agent-doc` at `0`, then pack
 /// stash windows as `1:stash`, `2:stash`, and so on.
+const STASH_JOIN_TEMP_HEIGHT: &str = "1000";
+
 pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) -> Result<()> {
     tracing::debug!(
         session_name,
         target_window_name,
         "sync::repair_layout start"
     );
-    // List all windows in the session: window_id, window_name, pane count
+    // List all windows in the session. Put the name last so names containing
+    // spaces remain parseable via splitn.
     let output = agent_doc_tmux_io::list_windows(
         tmux,
         Some(&format!("{}:", session_name)),
-        "#{window_id} #{window_name} #{window_panes}",
+        "#{window_id} #{window_panes} #{window_height} #{window_name}",
     );
     let window_list = match output {
         Ok(s) => s,
@@ -1030,26 +1033,51 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
         }
     };
 
-    // Parse windows into (id, name, pane_count)
+    // Parse windows into (id, pane_count, height, name).
     struct WinInfo {
         id: String,
         name: String,
         _pane_count: usize,
+        height: String,
     }
     let windows: Vec<WinInfo> = window_list
         .lines()
         .filter_map(|line| {
-            let mut parts = line.splitn(3, ' ');
+            let mut parts = line.splitn(4, ' ');
             let id = parts.next()?.to_string();
-            let name = parts.next()?.to_string();
             let pane_count: usize = parts.next()?.parse().ok()?;
+            let height = parts.next()?.to_string();
+            let name = parts.next()?.to_string();
             Some(WinInfo {
                 id,
                 name,
                 _pane_count: pane_count,
+                height,
             })
         })
         .collect();
+
+    // `#stashresizerestore`: heal windows pinned by binaries that used the
+    // 1000-row join workaround without fully removing tmux's manual-size
+    // override. Restrict recovery to the exact staging height and agent-doc's
+    // owned target/stash windows so an operator's unrelated manual layout is
+    // never normalized.
+    for window in &windows {
+        let agent_doc_owned =
+            window.name == target_window_name || is_stash_window_name(&window.name);
+        if agent_doc_owned && window.height == STASH_JOIN_TEMP_HEIGHT {
+            match agent_doc_tmux_io::resize_window_to_clients(tmux, &window.id) {
+                Ok(()) => sync_log(&format!(
+                    "layout_repair_unpinned_window window={} name={} stale_height={}",
+                    window.id, window.name, window.height
+                )),
+                Err(err) => eprintln!(
+                    "[repair] warning: could not unpin stale 1000-row window {} ({}): {}",
+                    window.id, window.name, err
+                ),
+            }
+        }
+    }
 
     // ── Fast path: if layout is already correct, skip repair ──
     let has_target = windows.iter().any(|w| w.name == target_window_name);
@@ -1137,9 +1165,11 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
                     // viewport: content sits at the bottom under ~950 rows of
                     // blank pane, which reads to the operator as "my history is
                     // gone".
-                    if let Err(err) =
-                        agent_doc_tmux_io::resize_window_height(tmux, &primary_id, "1000")
-                    {
+                    if let Err(err) = agent_doc_tmux_io::resize_window_height(
+                        tmux,
+                        &primary_id,
+                        STASH_JOIN_TEMP_HEIGHT,
+                    ) {
                         eprintln!(
                             "[repair] warning: could not grow stash window {primary_id} for join: {err}"
                         );
@@ -1207,8 +1237,8 @@ pub fn repair_layout(tmux: &Tmux, session_name: &str, target_window_name: &str) 
 
             // `#stashresizerestore`: hand the window back to the client size. The
             // 1000-row height above is a join-time workaround, not a layout
-            // choice, and tmux keeps a manual `resize-window` until it is cleared
-            // — `window-size latest` does NOT reclaim it.
+            // choice. Re-fit the current geometry and remove tmux's per-window
+            // manual-size override so subsequent client resizes remain live.
             if let Err(err) = agent_doc_tmux_io::resize_window_to_clients(tmux, &primary_id) {
                 eprintln!(
                     "[repair] warning: could not restore stash window {primary_id} to the client size: {err}"
@@ -6029,6 +6059,65 @@ mod tests {
         assert_eq!(
             windows_before, windows_after,
             "layout was already correct — nothing should change"
+        );
+    }
+
+    #[test]
+    #[ignore = "live tmux integration test; run `make tmux-ci`"]
+    fn repair_layout_unpins_legacy_staging_height() {
+        // `#stashresizerestore`: older repair code restored the visible
+        // dimensions but left `window-size=manual`, while still older code could
+        // leave the full 1000-row staging geometry behind. A normal repair must
+        // heal both without touching unrelated windows.
+        let iso = IsolatedTmux::new("sync-repair-unpin-staging-height");
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let _pane = iso.new_session("test", tmp.path()).unwrap();
+        let _ = iso.raw_cmd(&["rename-window", "-t", "test:0", "agent-doc"]);
+        let _ = iso.ensure_stash_window("test");
+        iso.raw_cmd(&["resize-window", "-t", "test:agent-doc", "-y", "1000"])
+            .unwrap();
+
+        let height_before = iso
+            .raw_cmd(&[
+                "display-message",
+                "-p",
+                "-t",
+                "test:agent-doc",
+                "#{window_height}",
+            ])
+            .unwrap();
+        assert_eq!(height_before.trim(), STASH_JOIN_TEMP_HEIGHT);
+
+        repair_layout(&iso, "test", "agent-doc").unwrap();
+
+        let height_after = iso
+            .raw_cmd(&[
+                "display-message",
+                "-p",
+                "-t",
+                "test:agent-doc",
+                "#{window_height}",
+            ])
+            .unwrap();
+        assert_ne!(
+            height_after.trim(),
+            STASH_JOIN_TEMP_HEIGHT,
+            "repair must remove the 1000-row staging viewport"
+        );
+        let local_window_size = iso
+            .raw_cmd(&[
+                "show-options",
+                "-w",
+                "-v",
+                "-t",
+                "test:agent-doc",
+                "window-size",
+            ])
+            .unwrap();
+        assert!(
+            local_window_size.trim().is_empty(),
+            "repair must remove the per-window manual-size override, got {local_window_size:?}"
         );
     }
 

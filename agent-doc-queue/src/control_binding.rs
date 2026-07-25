@@ -157,6 +157,13 @@ fn queue_binding_target(
         return Some(current.marker_mode.unwrap_or(QueueBindingMode::Stop));
     }
     if frontmatter_changed && !marker_changed {
+        // Realtime editor replicas publish intermediate frontmatter states while
+        // the operator is typing. An absent or unrecognized value is not a
+        // control gesture, so wait for start/go/stop instead of projecting the
+        // unchanged marker back into the field and fighting the editor.
+        if current.frontmatter_mode.is_none() && current.legacy_queue_active.is_none() {
+            return None;
+        }
         return current
             .frontmatter_mode
             .or_else(|| {
@@ -321,6 +328,53 @@ mod tests {
         assert!(changed);
         assert!(updated.contains("queue: stop\n"));
         assert!(updated.contains("<!-- agent:queue -->"));
+    }
+
+    #[test]
+    fn partial_frontmatter_edit_does_not_restore_marker_control() {
+        let snapshot = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#work]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let content = snapshot.replacen("queue: go", "queue: st", 1);
+
+        let (updated, changed) =
+            converge_queue_control_binding_content(&content, Some(snapshot)).unwrap();
+
+        assert!(!changed);
+        assert_eq!(updated, content);
+    }
+
+    #[test]
+    fn rolling_fixed_point_baseline_allows_stop_then_marker_resume() {
+        let started = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "queue: go\n",
+            "---\n\n",
+            "<!-- agent:queue go -->\n",
+            "- do [#work]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let stop_gesture = started.replacen("queue: go", "queue: stop", 1);
+        let (stopped, stop_changed) =
+            converge_queue_control_binding_content(&stop_gesture, Some(started)).unwrap();
+        assert!(stop_changed);
+        assert!(stopped.contains("queue: stop\n"));
+        assert!(stopped.contains("<!-- agent:queue -->"));
+
+        let resume_gesture =
+            stopped.replacen("<!-- agent:queue -->", "<!-- agent:queue go -->", 1);
+        let (resumed, resume_changed) =
+            converge_queue_control_binding_content(&resume_gesture, Some(&stopped)).unwrap();
+        assert!(resume_changed);
+        assert!(resumed.contains("queue: go\n"));
+        assert!(resumed.contains("<!-- agent:queue go -->"));
     }
 
     #[test]

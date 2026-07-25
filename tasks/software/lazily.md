@@ -131,14 +131,37 @@ The spec wins, and lazily-go is not the only binding that lost. Three did.
 **Verification.** lazily-spec `make check` green (146 schema tests, Lean build, coverage sync). lazily-formal `lake build` green. lazily-go 425 tests + `go vet` green. lazily-dart 522 tests + `dart analyze` clean. lazily-zig `mise run test` green (442 tests). All five repos committed and pushed; superproject gitlinks committed. lazily-spec CI is green on this commit; lazily-go, lazily-dart and lazily-zig CI runs were still in progress and are recorded, not waited on. lazily-formal has no CI workflow.
 
 **One thing this does not do, and it is the reason the bug survived.** There is no conformance fixture for `Error → Computing`. The contract is now pinned by native tests in each binding plus the Lean proof, but the shared corpus never exercised it, which is why six bindings and three bindings disagreed for as long as they did without a single red suite. Adding one means teaching all nine runners an async-failure op, so it is queued as `#lzasyncerrfixture` rather than smuggled in here — a fixture the other eight runners panic on is worse than none.
-<!-- agent:boundary:fbd5474f -->
+
+### Re: conformance fixture for the retry contract — opus-5
+
+Not done. The fixture exists and lazily-spec is green on it, one of nine runners is wired, and I am stopping there rather than reporting a corpus addition that would turn every binding red the moment it is pushed.
+
+**What the survey changed about the plan.** The item assumed the hard part was teaching nine runners a new op. It is not — all nine reactive-graph runners already replay against an `AsyncContext` model, so the async plane was reachable from the corpus all along. The real constraints are different: runners **ignore** a fixture's `model` field and replay every fixture against every model they ship, and the per-fixture ledgers (`reactiveGraphReplayed` / `reactiveGraphUnsupported`) mean a fixture landing in lazily-spec makes all nine bindings fail their corpus-drift check until each one replays or explicitly parks it. So an async-only fixture is not expressible without first extending the other runners' ledgers, and lazily-spec cannot be pushed ahead of the runners.
+
+**So the fixture is model-agnostic, and that is the better contract anyway.** `failed_compute_is_never_cached.json` states the rule without naming a state: a compute that fails is never cached, the next read re-runs the body. On the async plane that is `Error → Computing`; on the sync plane it is the same rule with no state to name. I verified against lazily-go that the sync plane already behaves this way — cached value, invalidate, failing recompute, then a read that recovers: computes go 1 → 2 → 3 and the value comes back as the current dependencies imply, through both `Get` and `TryGet`. So the fixture is not inventing a sync requirement; it is writing down what the bindings already do, which is exactly the ground the async divergence was hiding on.
+
+**Every assertion is on `computes_of`, none on the error.** Fifteen steps: a healthy baseline that proves the counter is meaningful (a warm read does not re-run), a single armed failure with recovery, then a doubly-armed failure proving a persistently failing node runs one compute *per read* rather than one compute total, and a final write proving the failing runs re-registered their edges instead of leaving the node detached. A caching binding raises the same errors at the same steps and is off by one on the counter at every one of them.
+
+**New op: `fail_next`.** `{"type":"fail_next","id":"slot","count":N}` arms the next N computes of an existing node to raise. It creates nothing and touches no dependency set. Registered in `_REACTIVE_GRAPH_OPS`, and `#lzasyncerrfixture` added to `_REACTIVE_GRAPH_TAGS` so the fixture can cite the contract it pins. lazily-spec `make check` is green — 147 tests, up from 146.
+
+**Where it stands, precisely.**
+
+- **lazily-spec** — fixture + op + tag, `make check` green. **Uncommitted.** Pushing it before the runners turns nine repos red.
+- **lazily-go** — `fail_next` implemented on both `syncModel` and `asyncModel` (an `armedFailures` map consumed *inside* the compute body, after the counter ticks, so an armed run is counted like any other), `graphModel.failNext` added, the sync read converts the armed panic into a read error, the `error` assertion generalized from its hardcoded `read_after_dispose` string, and the fixture promoted into `reactiveGraphReplayed`. **The suite is red: 20 divergences.** The library is not at fault — direct probes show the correct 1 → 2 → 3 compute sequence with recovery on both `Get` and `TryGet`. It is a wiring bug in my runner change: the counter stalls at 2 and later reads report an error without re-entering the body, which is the runner's read path swallowing something, not the graph caching a failure.
+- **The other eight runners** — untouched.
+
+**Nothing is pushed and no CI is red.** The cost is two dirty working trees: `lazily-spec` (fixture + schema test) and `lazily-go` (runner, suite red). Anyone else picking up lazily-go before this resumes will find it failing, so that is worth knowing before the next session touches it.
+
+Resume point: debug the lazily-go read path until the fixture replays clean on both models, then repeat the same ~15-line change across rs, py, js, kt, dart, cpp, zig and cs, then push lazily-spec and all nine together.
+<!-- agent:boundary:4e2ca80d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ⏭️ do [#lzgoerrorretry]
-- 🚧 do [#lzcscollections]
+- ~~do [#lzgoerrorretry]~~
+- 🚧 do [#lzasyncerrfixture]
+- ⏭️ do [#lzcscollections]
 - do [#lzcsstatechart]
 - do [#lzcsqueues]
 - do [#lzcscrdt]
@@ -153,8 +176,8 @@ The spec wins, and lazily-go is not the only binding that lost. Three did.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzasyncerrfixture] lazily-spec: add a conformance fixture for the async Error -> Computing retry (a compute that fails once then succeeds; assert the re-spawn on the compute counter, not the returned error). Needs an async-failure op all nine runners accept — today the contract is pinned only by per-binding native tests plus LazilyFormal.AsyncSlotState, which is how go/dart/zig stayed divergent under green suites
-- [ ] 🚧 [#lzcscollections] lazily-cs: SlotMap / ThreadSafeSlotMap / AsyncSlotMap materialization, ReactiveMap (CellMap/SlotMap), CellTree + reconcile, SemTree, stable-id alignment; replay collections + materialization + familysync corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 1-4, 9-11)
+- [ ] 🚧 [#lzasyncerrfixture] lazily-spec: land the async Error -> Computing conformance fixture. IN PROGRESS, uncommitted: conformance/reactive-graph/failed_compute_is_never_cached.json + fail_next in _REACTIVE_GRAPH_OPS + tag in _REACTIVE_GRAPH_TAGS (lazily-spec make check green, 147); lazily-go runner has fail_next on both models but its suite is RED with 20 divergences from a runner read-path wiring bug (the library is correct - probes show computes 1->2->3 with recovery on Get and TryGet). Eight runners untouched. Do NOT push lazily-spec before all nine runners replay it or every binding's corpus-drift check goes red
+- [ ] [#lzcscollections] lazily-cs: SlotMap / ThreadSafeSlotMap / AsyncSlotMap materialization, ReactiveMap (CellMap/SlotMap), CellTree + reconcile, SemTree, stable-id alignment; replay collections + materialization + familysync corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 1-4, 9-11)
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
 - [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)

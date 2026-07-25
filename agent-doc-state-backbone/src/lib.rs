@@ -1227,13 +1227,39 @@ impl DocumentStateProjection {
     /// correlation needed here. Keeping that relationship in the live Lazily
     /// projection avoids a second capture journal or a recovery-time SQLite
     /// scan.
+    /// Whether `intent`'s target is already the observed authority content.
+    ///
+    /// Convergence is **derived**, not remembered. `DocumentWriteConverged` is an
+    /// event some code path has to emit, and a path that commits without emitting it
+    /// leaves the journal entry alive forever — observed 2026-07-25, where a cycle
+    /// committed successfully (disk == live == HEAD) yet the retained entry survived
+    /// and blocked *every* subsequent cycle for the document, while `doctor`,
+    /// `session-check`, and `repair` all reported clean.
+    ///
+    /// Comparing the intent's `target_hash` against the authority's observed
+    /// `content_hash` answers the same question from state that already exists, so a
+    /// missed emission self-heals on the next read instead of wedging permanently.
+    /// The durable journal prune stays an effect gated on this signal
+    /// (`#lzdurablesink`) — this is the fact, not the sink write.
+    ///
+    /// Equality here means the authority literally holds the target content, which is
+    /// exactly what "the write landed" means, so treating it as converged cannot
+    /// discard a response that is not actually present.
+    pub fn write_intent_converged(&self, intent: &DocumentWriteIntentProjection) -> bool {
+        self.document
+            .latest_authority
+            .as_ref()
+            .and_then(|authority| authority.content_hash.as_deref())
+            .is_some_and(|observed| observed == intent.target_hash)
+    }
+
     pub fn retained_captured_response_write(&self) -> Option<&DocumentWriteIntentProjection> {
         let capture = self.closeout.captured_response.as_ref()?;
         let retains_capture = |pending: &&DocumentWriteIntentProjection| {
             agent_doc_turn::response_replay::response_materialized_in_content(
                 &capture.response_body,
                 &pending.target_content,
-            )
+            ) && !self.write_intent_converged(pending)
         };
 
         self.document
@@ -6763,6 +6789,53 @@ mod tests {
                 .retained_captured_response_write()
                 .map(|pending| pending.intent_id.as_str()),
             Some("intent-retained"),
+        );
+
+        // `#convergedderived` — the same retained entry must stop being retained the
+        // moment the authority is observed holding its target, WITHOUT any
+        // `DocumentWriteConverged` emission. A commit path that lands the write but
+        // never emits that event used to leave this entry alive forever, blocking
+        // every subsequent cycle for the document while `doctor`/`session-check`/
+        // `repair` all reported clean (observed 2026-07-25).
+        ledger.append(state_event(
+            "authority-observed-target",
+            StateFact::DocumentAuthorityObserved {
+                document_hash: document_hash.into(),
+                authority: DocumentAuthority::EditorRelay,
+                authority_epoch: 1,
+                source: "test".into(),
+                reason: "converged".into(),
+                content_hash: Some("target-retained".into()),
+                editor_id: None,
+            },
+        ));
+        let converged = ledger.project_document(document_hash).unwrap();
+        assert!(
+            converged.retained_captured_response_write().is_none(),
+            "an intent whose target IS the observed authority content has converged \
+             by derivation; a missed emission must self-heal, not wedge"
+        );
+
+        // A different authority content must NOT be mistaken for convergence.
+        ledger.append(state_event(
+            "authority-observed-other",
+            StateFact::DocumentAuthorityObserved {
+                document_hash: document_hash.into(),
+                authority: DocumentAuthority::EditorRelay,
+                authority_epoch: 2,
+                source: "test".into(),
+                reason: "still-pending".into(),
+                content_hash: Some("some-other-content".into()),
+                editor_id: None,
+            },
+        ));
+        let still_retained = ledger.project_document(document_hash).unwrap();
+        assert_eq!(
+            still_retained
+                .retained_captured_response_write()
+                .map(|pending| pending.intent_id.as_str()),
+            Some("intent-retained"),
+            "an unlanded write must stay retained and keep blocking a new cycle"
         );
 
         // Reproduce the churn: a later session tries to checkpoint and start a

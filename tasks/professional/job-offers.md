@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -390,12 +390,12 @@ So the actual "ask" Craig has to say yes to today is $205k in cash for an engine
 **The feeling worth separating from the numbers:** it's natural to feel bad asking a scrappy team for real money... but Craig's email did the inviting, the funding disclosure was volunteered (not extracted), and a company that can't afford a documented, well-justified ask from a strong candidate is telling you something important about the offer *before* you accept it, not after. Compassion here means being honest and transparent about your reasoning, not discounting the ask.
 
 **What I changed in the draft** (`tasks/recruit/haiven/compensation-reply-draft.md`, commit `81cb506db`): added a short paragraph right after the funding-transparency thank-you, making explicit that these numbers came from running the math against your other offer rather than picking a target cold, and that the cash-light/equity-heavy shape is deliberate given their raise stage... not padding. It reads as considerate without softening any of the actual numbers. No changes to the ask itself... the floor, trade, and negotiation notes at the bottom of the draft are unchanged.
-<!-- agent:boundary:ad153d99 -->
+<!-- agent:boundary:5489dc4f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority start -->
+<!-- agent:queue priority -->
 <!-- /agent:queue -->
 
 ## Backlog

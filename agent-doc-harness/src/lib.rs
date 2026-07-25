@@ -1287,12 +1287,20 @@ fn is_claude_permission_mode_chrome_line(trimmed: &str) -> bool {
 
 /// True for Claude Code composer text that is a rendered placeholder rather than
 /// operator input, e.g. `❯ Press up to edit queued messages` (shown when input
-/// was queued during a busy turn — the composer itself is empty).
+/// was queued during a busy turn) or `❯ describe a task for a new session`
+/// (shown as ghost hint text in a fresh, empty composer). In both cases the
+/// composer itself is empty.
 ///
 /// The Claude analogue of `is_codex_idle_placeholder_prompt`: such a line is
-/// dispatch-ready, and must not be reported as an unsent operator draft.
+/// dispatch-ready, and must not be reported as an unsent operator draft — a
+/// fresh pane whose empty composer wears this hint used to be refused with
+/// `composer holds unsent operator input ("❯ describe a task for a new session")`
+/// even though there was nothing to submit or clear (`#panedraftunblocker`).
 fn is_claude_idle_placeholder_prompt(trimmed: &str) -> bool {
-    const PLACEHOLDERS: &[&str] = &["Press up to edit queued messages"];
+    const PLACEHOLDERS: &[&str] = &[
+        "Press up to edit queued messages",
+        "describe a task for a new session",
+    ];
     let Some(rest) = trimmed.strip_prefix("❯ ") else {
         return false;
     };
@@ -2064,6 +2072,19 @@ mod tests {
             pane_composer_draft(
                 &h,
                 "────────\n❯ Press up to edit queued messages\n⏵⏵ bypass permissions on · 1 shell\n"
+            ),
+            None
+        );
+        // A fresh Claude pane renders `❯ describe a task for a new session` as
+        // ghost hint text in an empty composer. It is dispatch-ready, not an
+        // unsent operator draft (`#panedraftunblocker`) — dispatch-only reopen
+        // must inject rather than refuse with "composer holds unsent operator
+        // input".
+        assert!(h.is_dispatch_ready_prompt_line("❯ describe a task for a new session"));
+        assert_eq!(
+            pane_composer_draft(
+                &h,
+                "────────\n❯ describe a task for a new session\n⏵⏵ bypass permissions on · 1 shell\n"
             ),
             None
         );

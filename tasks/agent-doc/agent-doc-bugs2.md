@@ -35,101 +35,18 @@ done
 <!-- agent:exchange patch=append -->
 ### Session Summary
 
-*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260725-175809.md`*
+*Compacted. Content archived to `/home/brian/work/btakita/agent-loop/.agent-doc/archives/483039e7a9b103bd5b68223dac05a4c449ac03899aba53d6022e82100578b5b0-20260725-235517.md`*
 
 Compacted content:
-- Archived 14 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #retentionwatermarklive; #fmgcverify; 11 more
-- Prior summary/context: prior compacted content: Archived 28 response topic(s): #patchretryidem; #hvw0; #bbpe; 25 more
-
-### Re: do #missingreplicarebuild — opus-5
-
-**Done — but the item needed correcting first.** `#missingreplicarebuild` was **not in this document's backlog**. It lives only in `tasks/agent-doc-bugs2.done.md` (3 hits, archived in `c55019849`), so it was filed as complete while only half the work had landed.
-
-*Half already done:* the corruption vector — adopting stale disk under a live editor — is closed. `resolve_editor_unavailable_disk_read_fallback` re-runs `decide_authority_recovery` before any descent and bails with `invariant=attached_editor_never_descends_to_disk`. That refusal is exactly the "Lazily still reports the editor open, so disk is not consulted as a fallback" message seen live today.
-
-*Half missing:* on `missing_replica` exhaustion it failed closed **without ever asking the plugin to rebuild** (`rebuild_after_retry_exhaustion` was hardcoded to `reason == "sync_pending"`). So an operator whose editor was attached-but-not-answering had no in-binary recovery and had to restart the IDE — precisely what happened this session. It now asks once at the exhaustion boundary, then fails closed as before. Disk is still never adopted while the editor is open.
-
-The witness latch is the fix, not an optimization: missing-replica was excluded from Tier 1 for a measured ~28s per read site, and one compact/commit performs several resolutions. `claim_terminal_missing_replica_rebuild` grants at most one attempt per `EditorReplicaLivenessWitness`, re-arming only when a registration changes — no timer. Separate memo from the upstream self-heal so neither suppresses the other. `make check` 8015. Commit `993c76c3c`.
-
-**Preflight deferral churn (W3).** Quantified before fixing: 20 consecutive `preflight_visible_mutation_deferred_lazily_current`, all `state=delivery_pending`, mean 12.1s, 242s total. The settle loop polls at 100ms and each tick is a controller round trip recomputing the full current text — ~120 full-text round trips per 12s deferral on an 82KB file. It now parks on the delivery-convergence fact, returning the instant convergence lands; other blockers keep the plain poll. Commit `5b0af79ca`, `make check` 8014. This lowers the cost of waiting; it cannot make a non-ACKing replica converge.
-
-**Why job-offers never converges — root cause found.** The liveness plane holds **two** registrations for `job-offers.md`: `jetbrains-6206-…` and `jetbrains-1264567-…`. `pid 6206` is the pre-restart IDEA and is **dead** (`kill -0` confirms); `1264567` is live. `delivery_converged` folds over all *live* members having empty pending queues, so a ghost peer that can never ACK makes convergence unreachable. This is why restarting the IDE did not help — the restart **added** a registration instead of replacing one. Restarting again will likely add a third. Filed `#ghostregreap`; Phase 0's `73e489aab` reaps ghost liveness from the process-exit watcher, but that reap is not reaching reliable-sync editor *registrations*.
-
-Also filed `#steergateidle`: requiring an active turn for selected-text steering is the wrong gate (an idle pane should dispatch the selection, not error), and the `actor_state="ready"` classification was itself wrong — corroborated by repeated 5s controller-response timeouts in the same window, i.e. a failed read reported as authoritative instead of failing closed.
-
-### Re: complete all 3 tiers — opus-5
-
-All three tiers are landed, plus the two coined ids they introduced are now filed rather than dangling in source.
-
-**Tier 1** (`34546de4f`) — controller asks surviving editors to rebuild at restart. Fixes the reported stranding, but only covers the restart instant.
-
-**Tier 2 — deliberately not shipped, on your instruction.** I built it (a controller-side `Effect` over a derived signal in a `ProcessScope`), and you said not to fortify Effects. You were right: an Effect *in the controller* still owns a cross-process push, which is the exact thing that fails as `reload-lib reached 1/4 endpoints`. Hardening it would have been effort spent on the wrong layer. My attempt also damaged `rpc.rs` with an index-slice edit (140 errors, whole functions deleted) — reverted, nothing survives, and it is the precise mistake my own notes warn about.
-
-**Tier 3** (`46f2321ad` + this cycle) — the decision is now derived from replicated state, and the repair belongs to the actor that owns the replica:
-
-- `registrations_missing_replica` / `peer_registrations_missing_replica` derive "who needs a rebuild" from the liveness plane, which already converges cross-process as an OR-set plus LWW. The desired set was never controller-local state that had to be *sent*.
-- Controller command `peer_replicas_missing` answers a peer's question **about itself**.
-- FFI export `agent_doc_peer_replicas_missing` is the editor-side consumer: the editor asks and repairs, so the controller pushes nothing and there is no endpoint to fail to reach. It is correct whichever side restarted — controller losing its process-local hub, editor reconnecting, or a registration arriving after any fan-out already ran. An up-to-date editor gets `[]` and does nothing.
-
-The controller's Tier-1 fan-out now consumes the Tier-3 derivation instead of re-deriving "everyone", so it is a compatibility nudge for plugins predating the editor-side consumer, not architecture.
-
-Remaining honest scope: the JetBrains/VS Code plugins do not yet *call* `agent_doc_peer_replicas_missing` on reconnect. The shared-library half is done per the FFI-first rule; the thin editor caller is not, and I would rather say so than imply the loop is closed.
-
-### Re: #stategraphjoin, and the pane swap that was not a hijack — opus-5
-
-Two things landed: the queued item, and the bug behind what you were seeing.
-
-**#stategraphjoin is closed** (`d2c85f9c4`). Most of what the item still listed as remaining was already sitting uncommitted in the working tree: the scopes had been extracted into `agent-doc-state-scope` (a leaf crate with only `lazily` under it, so the crates that still held islands can name a scope without a dependency cycle), and `architecture_scope_guard.rs` already enforced the rule by requiring a written `#stategraphjoin-allow:` justification on every non-test `*Context::new()`.
-
-What was genuinely left was the gap the code itself kept pointing at. The scopes wrapped `ThreadSafeContext` only, so seven single-threaded sites had no scope of the right kind to join and named the gap in a comment instead. A comment is not a lifetime: it drops nothing, and it does not stop the next `Context::new()`. The crate now also ships `LocalDocumentScope` / `LocalTurnScope` / `LocalProcessScope` / `LocalReadScope`, and those seven sites join them: `ops-log-io`'s turn attribution, `tmux-io`'s observation cache, `supervisor-io`'s ledger cache, `sync-io`'s git-toplevel memo, `prompt-context`'s projection.
-
-`LocalReadScope` names the lifecycle those caches actually have, which is narrower than a turn: valid until the underlying system is mutated, not until the turn ends. Re-taking the scope *is* the invalidation, which is why they never needed an eviction policy.
-
-One difference turned out to be load-bearing. `ThreadSafeContext` is `Clone`, so a thread-safe scope is shared by handing out clones (`X::new_in(&DocumentScope, ..)`). `lazily::Context` is `Rc`-based and **not** `Clone`, so a local scope is *owned* by the state whose lifetime it is; a caller that needs the same graph borrows the owner's `ctx()`. The remaining `#stategraphjoin-allow` markers are the genuinely exempt shapes, not deferred work.
-
-### Re: the pane swap was never a hijack — opus-5
-
-You were right that something was wrong, and wrong about what. Nothing hijacked anything.
-
-`ops.log` had all three panes rejecting themselves at the same instant:
-
-```
-[sync] owner candidate pane %1 runs another document; not surfacing for tasks/agent-doc/agent-doc-bugs2.md
-[sync] owner candidate pane %5 runs another document; not surfacing for tasks/software/lazily.md
-[sync] owner candidate pane %4 runs another document; not surfacing for tasks/professional/job-offers.md
-```
-
-Each line is a pane refusing to be surfaced as the owner of its **own** document. My first guess was a relative-vs-absolute path comparison; that was wrong. Checking the live process trees instead of assuming:
-
-```
-zsh -> agent-doc start --route-owned tasks/agent-doc/agent-doc-bugs2.md -> claude --resume 68af54ca...
-```
-
-`process_tree_runs_unmanaged_harness_session` lifted a **per-process** predicate over the tree with `any()`. agent-doc starts the harness as a child, so the `claude` process on its own carries neither an `agent-doc` token nor a `.md`. Per-process it answers "unmanaged", correctly for the question it was asked. `any()` then made every agent-doc-managed pane foreign, `reject_cross_document_owner_pane` returned `None` for all of them, and no pane could ever be elected owner. That is exactly the symptom: switch documents in the editor, nothing swaps.
-
-Fixed in `ae10efbf9`. Foreignness is a property of the tree, so it is decided there: managed iff the `agent-doc` binary appears anywhere in the tree. A `.md` token elsewhere is deliberately not sufficient, because a transient `rg SPEC.md` under your own `claude` would otherwise launder that session into a claimable pane, which is the exact regression that got a live Claude Code session hijacked and its panes killed on 2026-07-19. The regression test pins both directions using cmdlines captured off the live tmux server, so a later refactor cannot "fix" the tree predicate by weakening the per-process one.
-
-`make check` green on both commits, pushed. CI run 30178975061 was still pending at closeout; recorded, not waited on. The live editor proof needs the route-owned supervisors to pick up the fresh binary, and the recycle is marked but deferring while the panes are busy.
-
-### Re: should this move into pure lazily, and the one-shot reliability concern — opus-5
-
-Yes, and both questions have the same answer, but the split matters.
-
-**Classification should stay pure, not become cells.** "Given these cmdlines, is this tree foreign, and whose document is it" is a transition function. It already lives in `command_line.rs` and is unit-testable, which is why the fix above could be pinned against real captured input. Wrapping a pure function in a `Computed` buys nothing.
-
-**Observation is what belongs in the graph, and that is where the unreliability lives.** Your instinct about one-shot commands is the actual defect class. Every decision today re-shells `ps` and `tmux`, each returning an answer that is already stale, with no subscription and no invalidation. Tonight's cost is in `ops.log`: `tmux_router 45063ms` against a 1000ms budget, `gap_window_to_ownership 25620ms`, `prune_stash_panes 8027ms` against 250ms, `window_resolution 4708ms`. And `observation_cache` exists precisely because of this. It memoizes raw argv output, which is a cache, not a derivation. The tell is the one I just re-scoped: its invalidation is "recreate the context", because there are no edges to invalidate along.
-
-The shape that fixes both: pane observations become `Source`s in a scope, the pane-to-document owner map becomes a `Computed` over them, and a pane change invalidates the owner map instead of every caller recomputing it. Filed as `#syncownerreactive`.
-
-**On the plugin specifically, agreed.** The CLI stays supported as an entrypoint, but the plugin should not be a caller of one-shot commands. It should be a thin event reporter into FFI: plugin reports "file selected" or "layout changed", FFI sets a `Source` in the document's scope, and an `Effect` drives the tmux consequence. That is the Shared Foundation rule already in `AGENTS.md`, applied to observation rather than to business logic, and it is what makes the swap reliable instead of a race between one-shot processes. Filed as `#jbpluginlazilyeffects`, ordered after `#syncownerreactive` since it consumes the derived owner map.
-
-One note on scope: this fix is upstream of what the `lazily.md` session is fighting. Owner resolution returning `None` for every pane affects route, claim, and recovery paths, not just the visible swap. I have not touched that supervisor. It serves other live documents and you said you want a go before `restart-supervisor`, so that stays your call.
-<!-- agent:boundary:77941800 -->
+- Archived 5 response topic(s): do #missingreplicarebuild; complete all 3 tiers; #stategraphjoin, and the pane swap that was not a hijack; 2 more
+- Prior summary/context: prior compacted content: Archived 14 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #retention...
+<!-- agent:boundary:6c8d9be1 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- 🚧 do [#stategraphjoin]
+- 🚧 do [#syncownerreactive]
+- do [#jbpluginlazilyeffects]
 - do [#ctrlkillreregister]
 - do [#steergateidle]
 - ⏭️ 📌 do [#jbcompactcommit]
@@ -167,7 +84,7 @@ One note on scope: this fix is upstream of what the `lazily.md` session is fight
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#syncownerreactive] #agent-doc-bug Owner resolution re-observes per call instead of deriving. Measured 2026-07-25 in ops.log while the pane swap was broken: sync_latency tmux_router elapsed_ms=45063 (budget 1000), gap_window_to_ownership 25620, prune_stash_panes 8027 (budget 250), window_resolution 4708, controller_actor_lookup 4297. Every decision re-shells ps/tmux, which is why observation_cache exists at all: it memoizes raw argv output, which is a cache, not a derivation (its invalidation is 'recreate the context', because there are no edges to invalidate along). Make pane observations Sources in a scope (see stategraphjoin) and the pane->document owner map a Computed over them, so a pane change invalidates the owner map instead of every caller recomputing it. Classification stays a pure function in command_line.rs; it is the OBSERVATION that belongs in the graph.
+- [ ] 🚧 [#syncownerreactive] #agent-doc-bug Owner resolution re-observes per call instead of deriving. Measured 2026-07-25 in ops.log while the pane swap was broken: sync_latency tmux_router elapsed_ms=45063 (budget 1000), gap_window_to_ownership 25620, prune_stash_panes 8027 (budget 250), window_resolution 4708, controller_actor_lookup 4297. Every decision re-shells ps/tmux, which is why observation_cache exists at all: it memoizes raw argv output, which is a cache, not a derivation (its invalidation is 'recreate the context', because there are no edges to invalidate along). Make pane observations Sources in a scope (see stategraphjoin) and the pane->document owner map a Computed over them, so a pane change invalidates the owner map instead of every caller recomputing it. Classification stays a pure function in command_line.rs; it is the OBSERVATION that belongs in the graph.
 - [ ] [#jbpluginlazilyeffects] #agent-doc-feature The JetBrains/VS Code plugin should drive lazily state + Effects, not one-shot CLI commands. Today every editor action (file selected, layout changed, Sync Tmux Pane) shells a fresh agent-doc process that re-observes the world from scratch and returns one answer that is already stale, with no subscription and no invalidation. Keep the CLI supported as an entrypoint, but the plugin path should be: plugin reports an event -> FFI sets a Source in the document scope -> an Effect drives the tmux/pane consequence. Same Shared Foundation rule already in AGENTS.md, applied to observation rather than business logic. Consumes the derived owner map from syncownerreactive, so order it after that.
 - [ ] [#ctrlkillreregister] #agent-doc-bug Killing the controller strands a live editor. Hydration restores the durable liveness plane so the editor still reads as registered, but the relay hub holding its replica is process-local, died with the previous controller, and nothing rehydrates it — leaving attached-with-missing-replica until the plugin happens to re-register, which is why operators reach for an IDE restart. DONE: Tier 1 restart fan-out (34546de4f); Tier 3 replicated derivation registrations_missing_replica/peer_registrations_missing_replica (46f2321ad), controller command peer_replicas_missing, and FFI export agent_doc_peer_replicas_missing so the editor asks about itself and repairs instead of being pushed at. Tier 2 (controller-side Effect) intentionally skipped: it still owns a cross-process push, the failure behind 'reload-lib reached 1/4 endpoints'. REMAINING: have the JetBrains and VS Code plugins call agent_doc_peer_replicas_missing on reconnect/startup, then retire the Tier 1 fan-out as a compatibility shim.
 - [ ] [#steergateidle] #agent-doc-bug Selected-text turn steering is gated on an active turn and rejects otherwise ('requires the authoritative pane to have an active turn (actor_state=ready)'). Both halves are wrong per operator: (a) an active turn should not be required — an idle pane should dispatch the selection as a normal trigger, not error; (b) detection was incorrect, a turn WAS active while it reported ready. (b) is corroborated by repeated 'timed out after 5.0s waiting for project controller response' on admin inspect in the same window, so a failed actor-state read may be surfacing as authoritative 'ready'. Fix both: idle becomes a dispatch path, and a failed read fails closed or retries instead of reporting ready. Related #selectedturnsteering.

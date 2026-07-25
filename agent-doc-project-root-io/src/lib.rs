@@ -16,10 +16,24 @@ pub fn project_root_containing(path: &Path) -> Option<PathBuf> {
     agent_doc_fs::find_project_root(path)
 }
 
+/// An explicitly-supplied root counts as supplied only when it is a real path.
+///
+/// `Some("")` is not a project root — it is a *missing* one wearing the shape of an
+/// answer. Passed through, it reaches `Command::current_dir("")`, which fails with
+/// `ENOENT` however healthy everything else is; the controller launcher carries a
+/// dedicated guard naming exactly that shape. Treating an empty explicit root as
+/// absent lets the normal document/cwd resolution produce a usable root instead.
+///
+/// Edge hardening, not a claimed fix for any particular outage: an empty path is
+/// never a valid project root, whatever produced it.
+fn explicit_root(project_root: Option<&Path>) -> Option<&Path> {
+    project_root.filter(|root| !root.as_os_str().is_empty())
+}
+
 /// Resolve an explicit project root, or fall back to the nearest `.agent-doc`
 /// ancestor of the current directory.
 pub fn project_root_or_cwd(project_root: Option<&Path>) -> Result<PathBuf> {
-    if let Some(root) = project_root {
+    if let Some(root) = explicit_root(project_root) {
         return Ok(root.to_path_buf());
     }
     let cwd = std::env::current_dir().context("failed to read current directory")?;
@@ -33,7 +47,7 @@ pub fn project_root_for_target_or_cwd(
     project_root: Option<&Path>,
     document: Option<&Path>,
 ) -> Result<PathBuf> {
-    if let Some(root) = project_root {
+    if let Some(root) = explicit_root(project_root) {
         return Ok(root.to_path_buf());
     }
     if let Some(document) = document
@@ -105,6 +119,36 @@ pub fn resolve_ipc_project_root(canonical: &Path) -> PathBuf {
 mod tests {
     use super::*;
     use std::process::Command;
+
+    /// An empty explicit root is a *missing* root wearing the shape of an answer.
+    /// Returning it verbatim sends `""` to `Command::current_dir`, which can only
+    /// fail — so it must be treated as absent and resolved normally instead.
+    #[test]
+    fn an_empty_explicit_project_root_is_treated_as_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let document = root.join("plan.md");
+        std::fs::write(&document, "# plan\n").unwrap();
+
+        // Empty explicit root + a resolvable document => the document's root wins.
+        let resolved =
+            project_root_for_target_or_cwd(Some(Path::new("")), Some(document.as_path())).unwrap();
+        assert!(
+            !resolved.as_os_str().is_empty(),
+            "an empty explicit root must never be returned verbatim"
+        );
+        assert_eq!(
+            resolved.canonicalize().unwrap(),
+            root.canonicalize().unwrap(),
+            "resolution must fall through to the document's project root"
+        );
+
+        // A real explicit root is still honored exactly.
+        let explicit =
+            project_root_for_target_or_cwd(Some(root), Some(document.as_path())).unwrap();
+        assert_eq!(explicit, root.to_path_buf());
+    }
 
     struct ScopedCurrentDir {
         previous: PathBuf,

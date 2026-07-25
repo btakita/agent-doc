@@ -3041,9 +3041,22 @@ fn reconcile_replicas_against_liveness_with(
 }
 
 /// Whether every live replica for `file` has drained its fan-out
-/// (`#deliveryackcut`). `Ok(true)` when no hub exists — nothing to block on.
-pub fn delivery_converged_for_file(file: &Path) -> Result<bool> {
-    Ok(with_existing_hub(file, |hub| hub.delivery_converged())?.unwrap_or(true))
+/// (`#deliveryackcut`), or `None` when this process hosts no hub for `file`.
+///
+/// The `None` is the point. This used to answer `Ok(true)` — "converged" — for a
+/// document the calling process cannot observe at all, because `hub_registry` is a
+/// process-local static and a CLI asking its own registry finds nothing. That is
+/// absence coerced into the most dangerous available answer: a caller learns
+/// "delivery finished" about a hub living in another process, which may still have
+/// unacked fan-out queued.
+///
+/// It is *not* the same shape as `LivenessProjection::pid_alive`'s presumed-alive
+/// default, which is deliberate and has the 500ms process-exit watcher reaping
+/// behind it. Nothing reaps behind this one, so the honest answer is `None` and the
+/// caller decides. Cross-process consumers should ask the controller — see
+/// `project_controller::await_delivery_convergence_for_file`.
+pub fn delivery_converged_for_file(file: &Path) -> Result<Option<bool>> {
+    with_existing_hub(file, |hub| hub.delivery_converged())
 }
 
 /// `#lazily-hot-path` Theme A — [`RelayHub::delivery_convergence_witness`] for `file`,

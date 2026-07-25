@@ -128,6 +128,11 @@ Verification: focused package regressions passed; full `make check` passed; norm
 
 ### Re: Response
 
+> **Queue prompt:**
+>
+> 📌 do [#qeditrace]
+
+
 Fixed and released agent-doc 0.35.25.
 
 - Lazily actor state now owns closeout coordination; SQLite/`flock` are off that hot path.
@@ -259,13 +264,37 @@ Verification and delivery:
 - GitHub CI was in progress at the required single inspection; local verification is complete.
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:8c0d818b -->
+
+### Re: Response
+
+Resolved `#qeditrace` at the live-editor queue-maintenance boundary.
+
+The older “first anchor wins” explanation was not supported by the current code. The current production path already reads the complete Lazily editor head and applies queue maintenance as one whole-document compare-and-swap. The missing pieces were an exact live multi-add regression and a durable recovery record for the plan/apply race.
+
+Changed paths in `src/agent-doc`:
+
+- `agent-doc-preflight-io/src/lib.rs`: records `queue_maintenance_compare_and_swap_blocked ... outcome=head_advanced ... recovery=retry_from_live_head` before rejecting a stale maintenance plan; added embedded-relay regressions proving three unsaved replacement heads all survive preflight and proving a head that advances after planning remains byte-for-byte intact.
+- `src/sim_world.rs`: models stale first-add observation, preserves the complete live queue in a recovery artifact, and proves retry converges all heads through editor, canonical, disk, and HEAD.
+- `VERSIONS.md`: documents the exact regression and recovery contract.
+
+Verification:
+
+- focused live multi-add regression: passed
+- focused stale-CAS recovery regression: passed
+- focused SimWorld multi-add convergence regression: passed
+- FlowCore hot-path vocabulary guard: passed
+- `make check`: passed, 7,991 tests plus TLA+ model checks
+- `make tmux-ci`: passed
+- `cargo install --path . --force --locked`: passed; installed `agent-doc` 0.35.27
+- GitHub Actions CI: inspected once; in progress (run 30147725224), not polled
+
+Committed and pushed agent-doc `main` as `af1b4d164` (`fix(preflight): preserve pre-run queue edit batches`). Other sessions' dirty source files were not staged or committed.
+<!-- agent:boundary:9c7c063f -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~⏭️ do [#qactsync-live]~~
-- 📌 do [#qeditrace]
+- ~~📌 do [#qeditrace]~~
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
 - 📌 do [#60ev]

@@ -14,6 +14,12 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use tmux_router::Tmux;
 
+#[derive(Debug, Clone, Copy)]
+pub struct StartingPaneRecoveryWaitOptions<'a> {
+    pub initial_status: Option<&'a agent_doc_supervisor::startup_miss::SessionLogStatus>,
+    pub max_wait: Option<std::time::Duration>,
+}
+
 pub fn resolve_fresh_dispatch_target_after_ready_wait(
     tmux: &Tmux,
     session_id: &str,
@@ -88,7 +94,7 @@ pub fn wait_for_starting_pane_recovery_target(
     current_pane: &str,
     file_path: &str,
     harness: &HarnessConfig,
-    initial_status: Option<&agent_doc_supervisor::startup_miss::SessionLogStatus>,
+    options: StartingPaneRecoveryWaitOptions<'_>,
 ) -> Option<StartingPaneRecoveryTarget> {
     let registry_base_dir =
         agent_doc_session_registry_io::dispatch_registry::registry_base_dir_for_dispatch(file_path);
@@ -96,7 +102,13 @@ pub fn wait_for_starting_pane_recovery_target(
         Some(harness.binary.as_str()),
         cfg!(test),
     );
-    let deadline = std::time::Instant::now() + budget.timeout;
+    let timeout = options
+        .max_wait
+        .map_or(budget.timeout, |limit| budget.timeout.min(limit));
+    if timeout.is_zero() {
+        return None;
+    }
+    let deadline = std::time::Instant::now() + timeout;
 
     while std::time::Instant::now() < deadline {
         let current_status =
@@ -110,7 +122,7 @@ pub fn wait_for_starting_pane_recovery_target(
                 .flatten();
 
         match starting_pane_recovery_target(
-            initial_status,
+            options.initial_status,
             current_status.as_ref(),
             current_pane,
             registered_pane.as_deref(),
@@ -130,7 +142,11 @@ pub fn wait_for_starting_pane_recovery_target(
             _ => {}
         }
 
-        std::thread::sleep(budget.poll_interval);
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        std::thread::sleep(budget.poll_interval.min(remaining));
     }
 
     None

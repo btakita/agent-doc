@@ -26,7 +26,8 @@ use crate::dispatch_only::{
     dispatch_only_send_reopen,
 };
 use crate::dispatch_recovery::{
-    resolve_fresh_dispatch_target_after_ready_wait, wait_for_starting_pane_recovery_target,
+    StartingPaneRecoveryWaitOptions, resolve_fresh_dispatch_target_after_ready_wait,
+    wait_for_starting_pane_recovery_target,
 };
 use crate::dispatch_target::register_dispatch_target;
 use crate::launch_contract::reapply_codex_launch_contract_before_reuse;
@@ -1364,7 +1365,10 @@ pub fn recover_dispatch_only_authoritative_waiting_input(
         pane,
         file_path,
         harness,
-        initial_status.as_ref(),
+        StartingPaneRecoveryWaitOptions {
+            initial_status: initial_status.as_ref(),
+            max_wait: None,
+        },
     ) {
         Some(StartingPaneRecoveryTarget::DifferentPane(recovered)) => recovered,
         Some(StartingPaneRecoveryTarget::SamePane) | None => {

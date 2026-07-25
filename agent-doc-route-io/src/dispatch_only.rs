@@ -9,7 +9,7 @@ pub use proof::{
 
 use anyhow::Result;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tmux_router::Tmux;
 
 use crate::authoritative_actor::{
@@ -27,7 +27,9 @@ use crate::dispatch::{
     SupervisorIpcDispatchOptions, dispatch_routed_reopen_with_mode,
     dispatch_via_supervisor_ipc_with_mode,
 };
-use crate::dispatch_recovery::wait_for_starting_pane_recovery_target;
+use crate::dispatch_recovery::{
+    StartingPaneRecoveryWaitOptions, wait_for_starting_pane_recovery_target,
+};
 use crate::dispatch_target::register_dispatch_target;
 use crate::launch_contract::reapply_codex_launch_contract_before_reuse;
 use crate::restart_handoff::wait_for_busy_restart_handoff;
@@ -63,6 +65,10 @@ pub struct DispatchOnlyRouteEffects {
     pub emit_busy_route_diagnostic: fn(&Tmux, &str, &Path, &HarnessConfig),
     pub dispatch_only_starting_pane_ready_timeout: fn(&HarnessConfig) -> Duration,
     pub file_route_dispatch_bug_report: for<'a> fn(RouteDispatchBugReportFacts<'a>),
+}
+
+fn remaining_ready_wait(deadline: Instant, now: Instant) -> Duration {
+    deadline.saturating_duration_since(now)
 }
 
 fn dispatch_only_starting_pane_ready_via_authoritative_actor(
@@ -187,6 +193,12 @@ pub fn dispatch_only_send_reopen(
         )?,
     );
     if requires_ready_probe {
+        // `--wait-for-ready` is one request budget, not a fresh allowance for
+        // every same-pane/handoff recovery attempt. Resetting it here made the
+        // async controller publish a useful terminal refusal after the editor
+        // had already stopped polling (#jbroutasync-starting).
+        let ready_timeout = (options.effects.dispatch_only_starting_pane_ready_timeout)(harness);
+        let ready_deadline = Instant::now() + ready_timeout;
         loop {
             if dispatch_only_starting_pane_ready_via_authoritative_actor(
                 tmux,
@@ -199,12 +211,12 @@ pub fn dispatch_only_send_reopen(
                 break;
             }
 
-            let ready_outcome = wait_for_agent_ready_outcome(
-                tmux,
-                &dispatch_pane,
-                (options.effects.dispatch_only_starting_pane_ready_timeout)(harness),
-                harness,
-            );
+            let remaining = remaining_ready_wait(ready_deadline, Instant::now());
+            let ready_outcome = if remaining.is_zero() {
+                crate::startup_ready::AgentReadyWaitOutcome::TimedOut
+            } else {
+                wait_for_agent_ready_outcome(tmux, &dispatch_pane, remaining, harness)
+            };
             if ready_outcome.is_ready() {
                 break;
             }
@@ -219,7 +231,9 @@ pub fn dispatch_only_send_reopen(
                 break;
             }
 
+            let recovery_remaining = remaining_ready_wait(ready_deadline, Instant::now());
             if recovery_attempts < 2
+                && !recovery_remaining.is_zero()
                 && let Some(target) = wait_for_starting_pane_recovery_target(
                     tmux,
                     file,
@@ -227,7 +241,10 @@ pub fn dispatch_only_send_reopen(
                     &dispatch_pane,
                     file_path,
                     harness,
-                    log_status.as_ref(),
+                    StartingPaneRecoveryWaitOptions {
+                        initial_status: log_status.as_ref(),
+                        max_wait: Some(recovery_remaining),
+                    },
                 )
             {
                 recovery_attempts += 1;
@@ -863,6 +880,25 @@ pub fn retry_dispatch_only_after_busy_pane(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn starting_pane_recovery_consumes_one_total_ready_budget() {
+        let start = Instant::now();
+        let deadline = start + Duration::from_secs(15);
+
+        assert_eq!(
+            remaining_ready_wait(deadline, start + Duration::from_secs(10)),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            remaining_ready_wait(deadline, start + Duration::from_secs(15)),
+            Duration::ZERO
+        );
+        assert_eq!(
+            remaining_ready_wait(deadline, start + Duration::from_secs(20)),
+            Duration::ZERO
+        );
+    }
 
     #[test]
     fn dispatch_only_progress_policy_is_harness_neutral() {

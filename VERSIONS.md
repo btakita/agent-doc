@@ -6,6 +6,7 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+- **`session-check` now finishes a durable captured closeout even when no route supervisor exists.** The CLI invokes the same keyed, idempotent captured-finalize replay used by the background supervisor before running the canonical closeout check, so a Codex Stop hook can settle a response and its captured queue mutation plan synchronously instead of cycling forever at `response_captured`.
 - **Route and supervisor readiness now ignore arbitrary user status chrome by terminal structure instead of parsing presentation text.** Claude Code and Codex direct-pane checks scope their prompt/draft evidence through tmux's cursor row, while OpenCode keeps its boxed-composer and lifecycle-event proof. This removes the customizable-status false negative behind JetBrains `editor_route did not publish a terminal result within 20000ms`, preserves busy/drafted-input vetoes, and falls back to the compatibility classifiers when cursor evidence is unavailable.
 - **Editor reroutes distinguish slow startup from a real Claude composer draft.** JetBrains `Run Agent Doc` again matches VS Code's 120-second dispatch-readiness budget instead of timing out after 15 seconds, and harness prompt parsing accepts Claude's non-breaking space between `❯` and drafted text. Exact coverage pins both behaviors, so slow startup gets the shared allowance while `❯ do #haivenask` reports the protected draft instead of an unsatisfiable boot-timeout loop.
 

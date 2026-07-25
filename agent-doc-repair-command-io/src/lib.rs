@@ -150,6 +150,24 @@ pub fn resume_captured_finalize(
     }
 }
 
+/// Run the operator-facing session check after giving one exact durable capture
+/// a synchronous chance to finish. Route-owned supervisors use the same keyed
+/// replay in the background; this command boundary covers non-routed sessions
+/// where no supervisor exists and a Stop hook is waiting on `session-check`.
+pub fn run_session_check(file: &Path, codex_final_gate: bool) -> Result<()> {
+    if let Some(key) = captured_finalize_resume_key(file)? {
+        // The replay is keyed and idempotent. Retryable or operator-owned
+        // outcomes remain durable and are reported by the canonical check
+        // below; a committed or superseded replay lets it return cleanly.
+        let _ = resume_captured_finalize(file, &key);
+    }
+    agent_doc_session_check_io::run_with_options(
+        file,
+        codex_final_gate,
+        &agent_doc_closeout_runtime_io::session_check_effects(),
+    )
+}
+
 fn resume_captured_finalize_intent(
     file: &Path,
     expected: &CapturedFinalizeResumeKey,

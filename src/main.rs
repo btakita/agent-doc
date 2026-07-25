@@ -4498,11 +4498,7 @@ fn try_main() -> anyhow::Result<()> {
         Commands::SessionCheck {
             file,
             codex_final_gate,
-        } => agent_doc_session_check_io::run_with_options(
-            &file,
-            codex_final_gate,
-            &agent_doc_closeout_runtime_io::session_check_effects(),
-        ),
+        } => agent_doc_repair_command_io::run_session_check(&file, codex_final_gate),
         Commands::Mcp { action } => match action {
             McpAction::Serve { project_root } => mcp::serve(project_root.as_deref()),
         },

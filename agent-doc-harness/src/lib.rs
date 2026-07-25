@@ -592,18 +592,15 @@ impl HarnessConfig {
     pub fn is_prompt_line(&self, line: &str) -> bool {
         let stripped = agent_doc_turn_executor_tmux::prompt::strip_ansi(line);
         let trimmed = stripped.trim();
-        self.prompt_patterns
-            .iter()
-            .any(|p| {
-                trimmed == p
-                    || trimmed
-                        .strip_prefix(p)
-                        .and_then(|suffix| suffix.chars().next())
-                        .is_some_and(char::is_whitespace)
-            })
-            || (self.binary == "claude"
-                && trimmed.starts_with("⏵⏵ ")
-                && trimmed.contains("(shift+tab to cycle)"))
+        self.prompt_patterns.iter().any(|p| {
+            trimmed == p
+                || trimmed
+                    .strip_prefix(p)
+                    .and_then(|suffix| suffix.chars().next())
+                    .is_some_and(char::is_whitespace)
+        }) || (self.binary == "claude"
+            && trimmed.starts_with("⏵⏵ ")
+            && trimmed.contains("(shift+tab to cycle)"))
     }
 
     /// True when the line is a rendered composer placeholder rather than real

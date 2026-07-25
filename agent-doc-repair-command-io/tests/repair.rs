@@ -1262,7 +1262,7 @@ mod tests {
     }
 
     #[test]
-    fn binary_owned_resume_replays_captured_backlog_edit_plan() {
+    fn session_check_replays_captured_mutation_plan_without_route_supervisor() {
         let dir = setup_project();
         let doc = dir.path().join("test.md");
         let content = concat!(
@@ -1301,17 +1301,8 @@ mod tests {
         )
         .unwrap();
 
-        let key = agent_doc_repair_command_io::captured_finalize_resume_key(&doc)
-            .unwrap()
-            .expect("captured response should expose a durable resume key");
-        let outcome = agent_doc_repair_command_io::resume_captured_finalize(&doc, &key);
-        assert!(
-            matches!(
-                outcome,
-                agent_doc_repair_command_io::CapturedFinalizeResumeOutcome::Committed { .. }
-            ),
-            "{outcome:?}"
-        );
+        agent_doc_repair_command_io::run_session_check(&doc, false)
+            .expect("session-check should synchronously replay and commit the durable capture");
 
         let result = std::fs::read_to_string(&doc).unwrap();
         assert_eq!(
@@ -1322,6 +1313,13 @@ mod tests {
         );
         assert!(result.contains("[#fix1] narrowed recovery action"));
         assert!(!result.contains("[#fix1] original next action"));
+        assert!(matches!(
+            agent_doc_cycle_state_io::load_with_closeout_projection(&doc)
+                .unwrap()
+                .expect("cycle state")
+                .phase,
+            agent_doc_turn::CyclePhase::Committed
+        ));
     }
 
     #[test]

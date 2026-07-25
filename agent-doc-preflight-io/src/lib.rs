@@ -4585,6 +4585,32 @@ fn queue_maintenance_head_label(current: &agent_doc_crdt_relay_io::CurrentText) 
     }
 }
 
+fn guard_queue_maintenance_expected_current(
+    file: &Path,
+    source: &str,
+    expected_current: &str,
+    current: &str,
+) -> Result<()> {
+    if current == expected_current {
+        return Ok(());
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "queue_maintenance_compare_and_swap_blocked source={source} outcome=head_advanced \
+             expected_hash={} current_hash={} expected_len={} current_len={} \
+             recovery=retry_from_live_head",
+            agent_doc_hash::content_hash(expected_current),
+            agent_doc_hash::content_hash(current),
+            expected_current.len(),
+            current.len(),
+        ),
+    );
+    anyhow::bail!(
+        "{source}: Lazily head advanced during queue maintenance; retry from the live head"
+    )
+}
+
 /// `#ensurereplicagen` — drive the model-ensure transition through whichever
 /// process actually owns the relay hub.
 ///
@@ -4750,10 +4776,7 @@ pub(crate) fn persist_queue_maintenance_doc(
     }
     match current {
         agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => {
-            anyhow::ensure!(
-                text == expected_current,
-                "{source}: Lazily head advanced during queue maintenance"
-            );
+            guard_queue_maintenance_expected_current(file, source, expected_current, &text)?;
             // `#ensurereplicagen`: the write is the symmetric half of the read
             // fix above and must land in the hub-owning process too.
             // `apply_cp_write_for_file` is process-local: with no hub in this
@@ -6129,6 +6152,181 @@ mod tests {
             std::fs::read_to_string(&doc)
                 .unwrap()
                 .contains("do [#alpha]")
+        );
+    }
+
+    fn publish_test_live_buffer(
+        doc: &Path,
+        editor_id: &str,
+        live_content: &str,
+    ) -> (String, agent_doc_merge::crdt_sync::ReplicaState) {
+        let canonical = doc.canonicalize().unwrap();
+        agent_doc_crdt_relay_io::register_embedded_relay_route_for_file(&canonical).unwrap();
+        let canonical_key = canonical.to_string_lossy().to_string();
+        let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash,
+                pid: std::process::id().into(),
+                tag: editor_id.to_string(),
+            }]);
+        let identity = format!("{editor_id}:{canonical_key}");
+        let (client_id, bootstrap) =
+            agent_doc_crdt_relay_io::register_replica_for_file(&canonical, &identity)
+                .unwrap()
+                .expect("test editor should register a CRDT relay replica");
+        let replica =
+            agent_doc_merge::crdt_sync::ReplicaState::from_encoded(client_id, &bootstrap).unwrap();
+        let replica_text = replica.text();
+        replica.apply_local_edit(0, replica_text.len() as u32, live_content);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &canonical,
+            &identity,
+            &replica.encode_state(),
+        )
+        .unwrap()
+        .expect("test editor should publish live buffer through CRDT relay");
+        (identity, replica)
+    }
+
+    #[test]
+    fn run_queue_maintenance_preserves_every_pre_run_live_buffer_queue_addition() {
+        // #qeditrace: the operator replaced a stale queue and added several
+        // heads before invoking Run Agent Doc. Maintenance must derive and CAS
+        // from the complete live buffer, never retain only its first addition.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let snapshot_content = concat!(
+            "---\n",
+            "agent_doc_session: test\n",
+            "agent_doc_format: template\n",
+            "agent_doc_write: crdt\n",
+            "queue_active: false\n",
+            "---\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: prior — gpt-5\n\nDone.\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:queue -->\n",
+            "- do [#stale-one]\n",
+            "- do [#stale-two]\n",
+            "<!-- /agent:queue -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, snapshot_content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot_content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let live_content = snapshot_content
+            .replace("<!-- agent:queue -->", "<!-- agent:queue auto -->")
+            .replace(
+                "- do [#stale-one]\n- do [#stale-two]\n",
+                "- do [#fresh-one]\n- do [#fresh-two]\n- do [#fresh-three]\n",
+            );
+        let _ = publish_test_live_buffer(&doc, "preflight-multi-add-test", &live_content);
+
+        let state = run_queue_maintenance(&doc, None).unwrap();
+
+        assert_eq!(
+            state.queue_prompts,
+            vec![
+                "do [#fresh-one]".to_string(),
+                "do [#fresh-two]".to_string(),
+                "do [#fresh-three]".to_string(),
+            ],
+        );
+        let current =
+            match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&doc).unwrap() {
+                agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+                other => panic!("expected embedded Lazily authority, got {other:?}"),
+            };
+        for id in ["fresh-one", "fresh-two", "fresh-three"] {
+            assert!(
+                current.contains(&format!("do [#{id}]")),
+                "live Lazily head lost {id}:\n{current}"
+            );
+        }
+        assert!(!current.contains("do [#stale-one]"));
+        assert!(!current.contains("do [#stale-two]"));
+        assert_eq!(
+            std::fs::read_to_string(&doc).unwrap(),
+            snapshot_content,
+            "preflight must not overwrite stale disk behind the editor authority"
+        );
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&doc)
+            .unwrap()
+            .unwrap();
+        for id in ["fresh-one", "fresh-two", "fresh-three"] {
+            assert!(
+                snapshot.contains(&format!("do [#{id}]")),
+                "recovery baseline lost {id}:\n{snapshot}"
+            );
+        }
+        assert!(!snapshot.contains("do [#stale-one]"));
+        assert!(!snapshot.contains("do [#stale-two]"));
+    }
+
+    #[test]
+    fn stale_queue_maintenance_cas_preserves_live_multi_adds_and_records_recovery() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let disk_content = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\n",
+            "agent_doc_write: crdt\nqueue_active: false\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n### Re: prior\nDone.\n",
+            "<!-- /agent:exchange -->\n",
+            "<!-- agent:queue -->\n- do [#old]\n<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, disk_content).unwrap();
+        let observed_first =
+            disk_content.replace("- do [#old]\n", "- do [#old]\n- do [#fresh-one]\n");
+        let (identity, replica) =
+            publish_test_live_buffer(&doc, "preflight-stale-cas-test", &observed_first);
+        let live_all = observed_first.replace(
+            "- do [#fresh-one]\n",
+            "- do [#fresh-one]\n- do [#fresh-two]\n- do [#fresh-three]\n",
+        );
+        let replica_text = replica.text();
+        replica.apply_local_edit(0, replica_text.len() as u32, &live_all);
+        agent_doc_crdt_relay_io::relay_replica_update_for_file(
+            &doc,
+            &identity,
+            &replica.encode_state(),
+        )
+        .unwrap()
+        .expect("test editor should publish the newer complete live buffer");
+
+        let stale_target = observed_first.replace("queue_active: false", "queue_active: true");
+        let error = persist_queue_maintenance_doc(
+            &doc,
+            &stale_target,
+            &observed_first,
+            None,
+            "qeditrace_test",
+        )
+        .expect_err("stale maintenance must fail closed");
+        assert!(
+            format!("{error:#}").contains("retry from the live head"),
+            "failure must name the recovery: {error:#}"
+        );
+
+        let current =
+            match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&doc).unwrap() {
+                agent_doc_crdt_relay_io::CurrentText::Current { text, .. } => text,
+                other => panic!("expected embedded Lazily authority, got {other:?}"),
+            };
+        assert_eq!(current, live_all, "stale maintenance mutated the live head");
+        let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("queue_maintenance_compare_and_swap_blocked")
+                && ops_log.contains("outcome=head_advanced")
+                && ops_log.contains("recovery=retry_from_live_head"),
+            "stale maintenance needs a durable recovery artifact:\n{ops_log}"
         );
     }
 

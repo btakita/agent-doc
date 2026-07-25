@@ -1645,6 +1645,18 @@ mod realtime_ipc_cycle_model {
         NeedsOperator,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum QueueMaintenanceObservation {
+        LiveHead,
+        StaleFirstAdditionOnly,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct QueueRecoveryArtifact {
+        reason: &'static str,
+        preserved_live_items: BTreeSet<u8>,
+    }
+
     fn resolve_ambiguity(evidence: AmbiguityEvidence) -> AmbiguityResolution {
         match evidence {
             AmbiguityEvidence::SameSemanticOperation => AmbiguityResolution::Dedupe,
@@ -1686,6 +1698,7 @@ mod realtime_ipc_cycle_model {
         Ack,
         UserEdit,
         AddQueueItem(u8),
+        RunQueueMaintenance(QueueMaintenanceObservation),
         SaveEditor,
         ExternalDiskChange,
         AcceptPendingDisk,
@@ -1728,6 +1741,7 @@ mod realtime_ipc_cycle_model {
                 | Self::AddQueueItem(_)
                 | Self::OpenEditor
                 | Self::CloseEditor => Capability::BoundedRetry,
+                Self::RunQueueMaintenance(_) => Capability::AuthorityEpochFence,
                 Self::Interrupt => Capability::CancellationPropagation,
                 Self::SaveEditor | Self::ForceDisk | Self::Commit => {
                     Capability::DurableEffectBarrier
@@ -1780,6 +1794,7 @@ mod realtime_ipc_cycle_model {
         disk_queue_items: BTreeMap<u8, usize>,
         head_queue_items: BTreeMap<u8, usize>,
         accepted_queue_items: BTreeSet<u8>,
+        queue_recovery_artifacts: Vec<QueueRecoveryArtifact>,
         pending_responses: BTreeSet<u8>,
         phase: Phase,
         fault: Fault,
@@ -1815,6 +1830,7 @@ mod realtime_ipc_cycle_model {
                 disk_queue_items: BTreeMap::new(),
                 head_queue_items: BTreeMap::new(),
                 accepted_queue_items: BTreeSet::new(),
+                queue_recovery_artifacts: Vec::new(),
                 pending_responses: BTreeSet::new(),
                 phase: Phase::Idle,
                 fault: Fault::None,
@@ -1929,6 +1945,25 @@ mod realtime_ipc_cycle_model {
                         self.retry_scheduled = true;
                     }
                 }
+                Action::RunQueueMaintenance(observation) => match observation {
+                    QueueMaintenanceObservation::LiveHead => {
+                        if self.live_editor && self.replica_epoch == Some(self.controller_epoch) {
+                            self.canonical_queue_items = self.editor_queue_items.clone();
+                            self.canonical = self.editor;
+                        }
+                    }
+                    QueueMaintenanceObservation::StaleFirstAdditionOnly => {
+                        // The maintenance candidate was derived after the first
+                        // operator addition but before later pre-run additions.
+                        // Whole-head CAS rejects it; the live editor remains the
+                        // recovery source and the durable artifact explains retry.
+                        self.queue_recovery_artifacts.push(QueueRecoveryArtifact {
+                            reason: "head_advanced_retry_from_live_head",
+                            preserved_live_items: self.editor_queue_items.keys().copied().collect(),
+                        });
+                        self.retry_scheduled = true;
+                    }
+                },
                 Action::SaveEditor => {
                     // Save advances durability only. It must never replay the
                     // already-admitted editor mutation into canonical state.
@@ -2502,6 +2537,48 @@ mod realtime_ipc_cycle_model {
         assert_eq!(world.canonical_queue_items.get(&9), Some(&1));
         assert_eq!(world.disk_queue_items.get(&9), Some(&1));
         assert_eq!(world.head_queue_items.get(&9), Some(&1));
+    }
+
+    #[test]
+    fn multiple_pre_run_queue_additions_survive_stale_maintenance_and_converge() {
+        let mut world = World::new();
+        for item_id in [7, 8, 9] {
+            world.apply(Action::AddQueueItem(item_id));
+        }
+        let live_before = world.editor_queue_items.clone();
+
+        world.apply(Action::RunQueueMaintenance(
+            QueueMaintenanceObservation::StaleFirstAdditionOnly,
+        ));
+
+        assert_eq!(
+            world.editor_queue_items, live_before,
+            "stale maintenance must not keep only the first operator addition"
+        );
+        assert_eq!(
+            world.queue_recovery_artifacts,
+            vec![QueueRecoveryArtifact {
+                reason: "head_advanced_retry_from_live_head",
+                preserved_live_items: BTreeSet::from([7, 8, 9]),
+            }],
+            "the retry must retain a recoverable description of the live queue"
+        );
+
+        world.apply(Action::RunQueueMaintenance(
+            QueueMaintenanceObservation::LiveHead,
+        ));
+        world.apply(Action::SaveEditor);
+        world.apply(Action::Commit);
+
+        for plane in [
+            &world.editor_queue_items,
+            &world.canonical_queue_items,
+            &world.disk_queue_items,
+            &world.head_queue_items,
+        ] {
+            assert_eq!(plane, &BTreeMap::from([(7, 1), (8, 1), (9, 1)]));
+        }
+        assert_eq!(world.phase, Phase::Committed);
     }
 
     #[test]

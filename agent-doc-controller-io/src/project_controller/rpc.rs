@@ -8798,9 +8798,11 @@ pub(crate) fn handle_request_locked(
         }
         "inspect_actor" => controller_envelope(handle_inspect_actor(&bootstrap_snapshot, request)),
         "tmux_focus_state" => controller_envelope(handle_tmux_focus_state(&bootstrap_snapshot)),
-        "tmux_layout_sync_state" => {
-            controller_envelope(handle_tmux_layout_sync_state(&bootstrap_snapshot, request))
-        }
+        "tmux_layout_sync_state" => controller_envelope(handle_tmux_layout_sync_state(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "state_subscribe" => controller_envelope(handle_state_subscribe(runtime.as_ref(), request)),
         "reliable_sync" => controller_envelope(handle_reliable_sync(
             &bootstrap_snapshot.project_root,
@@ -9842,6 +9844,22 @@ pub(crate) fn handle_state_event_append(
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
     let event: agent_doc_state_backbone::StateEvent =
         serde_json::from_str(&payload_json).context("parse state actor append payload")?;
+    let incoming_cycle = match &event.fact {
+        agent_doc_state_backbone::StateFact::TurnIntentCheckpointed { cycle_id, .. }
+        | agent_doc_state_backbone::StateFact::PreflightStarted { cycle_id, .. } => Some(cycle_id),
+        _ => None,
+    };
+    if let Some(incoming_cycle) = incoming_cycle {
+        let document = runtime.document_state_projection(event.document_hash())?;
+        if document.as_ref().is_some_and(|document| {
+            document.closeout.cycle_id.as_deref() != Some(incoming_cycle.as_str())
+                && document.retained_captured_response_write().is_some()
+        }) {
+            anyhow::bail!(
+                "state actor rejected cycle `{incoming_cycle}`: a retained document-write effect still owns the prior captured response"
+            );
+        }
+    }
     append_apply_state_event(bootstrap, runtime, event)
 }
 
@@ -12550,8 +12568,8 @@ fn layout_sync_state_expected_documents(
 
 fn layout_sync_state_actual_document_for_pane(
     project_root: &Path,
+    tmux: &tmux_router::Tmux,
     actor_store: &BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord>,
-    registry: &tmux_router::Registry,
     pane_id: &str,
 ) -> String {
     if let Some(record) = actor_store
@@ -12560,11 +12578,7 @@ fn layout_sync_state_actual_document_for_pane(
     {
         return canonical_layout_document_id(project_root, &record.document_id);
     }
-    registry
-        .values()
-        .find(|entry| entry.pane == pane_id && !entry.file.trim().is_empty())
-        .map(|entry| canonical_layout_document_id(project_root, &entry.file))
-        .unwrap_or_default()
+    active_pane_process_owner_document(tmux, pane_id, project_root).unwrap_or_default()
 }
 
 #[derive(Default)]
@@ -12611,6 +12625,7 @@ fn layout_sync_state_result(
 
 pub(crate) fn handle_tmux_layout_sync_state(
     bootstrap: &ControllerBootstrap,
+    runtime: &ControllerRuntime,
     request: ControllerRequest,
 ) -> Result<ControllerTmuxLayoutSyncStateReport> {
     let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
@@ -12704,17 +12719,17 @@ pub(crate) fn handle_tmux_layout_sync_state(
     let panes = tmux
         .list_panes_ordered(&window_id_value)
         .unwrap_or_default();
-    let conn = open_state_db(&bootstrap.project_root)?;
-    let actor_store = load_actor_store_from_db(&conn)?;
-    let registry =
-        agent_doc_session_registry_io::load_in(&bootstrap.project_root).unwrap_or_default();
+    // Layout inspection is a hot read path. The controller's lazily-held actor
+    // projection is authoritative here; SQLite and the registry are durable
+    // effect sinks, not competing read models.
+    let actor_store = runtime.actor_store_snapshot();
     let actual_documents = panes
         .iter()
         .map(|pane_id| {
             layout_sync_state_actual_document_for_pane(
                 &bootstrap.project_root,
+                &tmux,
                 &actor_store,
-                &registry,
                 pane_id,
             )
         })

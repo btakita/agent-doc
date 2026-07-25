@@ -926,8 +926,9 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                                     .map(|context| context.marker.as_str()),
                                 false,
                                 RoutedDispatchStartProof::CommandAcceptedOnly,
-                                // `#jbroutasync`: client deadline not yet threaded from the controller RPC boundary.
-                                None,
+                                // `#jbroutasync`: cap ACK waits at the command
+                                // deadline carried by the route invocation.
+                                crate::invocation::wait_for_ready_override(),
                                 effects.route_cycle_ack_effects,
                             )?;
                             return Ok(registered_pane.clone());
@@ -1099,8 +1100,9 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                         .map(|context| context.marker.as_str()),
                     true,
                     dispatch_start,
-                    // `#jbroutasync`: client deadline not yet threaded from the controller RPC boundary.
-                    None,
+                    // `#jbroutasync`: cap ACK waits at the command deadline
+                    // carried by the route invocation.
+                    crate::invocation::wait_for_ready_override(),
                     effects.route_cycle_ack_effects,
                 )?;
                 return Ok(registered_pane);
@@ -1238,8 +1240,9 @@ pub fn resolve_or_create_pane_with_auto_fix_retry(
                 .map(|context| context.marker.as_str()),
             false,
             dispatch_start,
-            // `#jbroutasync`: client deadline not yet threaded from the controller RPC boundary.
-            None,
+            // `#jbroutasync`: cap ACK waits at the command deadline carried by
+            // the route invocation.
+            crate::invocation::wait_for_ready_override(),
             effects.route_cycle_ack_effects,
         )?;
         return Ok(ack_pane.unwrap_or(new_pane));
@@ -1511,8 +1514,9 @@ pub fn optimistic_busy_pane_dispatch(
         prompt_bearing_marker,
         true,
         dispatch_start,
-        // `#jbroutasync`: client deadline not yet threaded from the controller RPC boundary.
-        None,
+        // `#jbroutasync`: cap ACK waits at the command deadline carried by the
+        // route invocation.
+        crate::invocation::wait_for_ready_override(),
         route_cycle_ack_effects,
     )?;
     Ok(ack_pane.unwrap_or_else(|| pane.to_string()))

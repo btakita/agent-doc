@@ -1220,6 +1220,29 @@ pub struct DocumentStateProjection {
 }
 
 impl DocumentStateProjection {
+    /// Return the durable document-write effect that still owns the current
+    /// captured response, if any.
+    ///
+    /// The effect target and the content-bearing capture already provide the
+    /// correlation needed here. Keeping that relationship in the live Lazily
+    /// projection avoids a second capture journal or a recovery-time SQLite
+    /// scan.
+    pub fn retained_captured_response_write(&self) -> Option<&DocumentWriteIntentProjection> {
+        let capture = self.closeout.captured_response.as_ref()?;
+        let retains_capture = |pending: &&DocumentWriteIntentProjection| {
+            agent_doc_turn::response_replay::response_materialized_in_content(
+                &capture.response_body,
+                &pending.target_content,
+            )
+        };
+
+        self.document
+            .pending_write_journal
+            .iter()
+            .find(retains_capture)
+            .or_else(|| self.document.pending_write.as_ref().filter(retains_capture))
+    }
+
     /// Construct an empty projection for `document_hash`. Public so the wire
     /// delta derivation (`state_wire`) can build the cold/empty projection used
     /// when a document has no accepted events yet (`#lazilystatesync2`).
@@ -1296,12 +1319,22 @@ impl DocumentStateProjection {
                 state_json,
                 ..
             } => {
-                self.closeout.turn_intent_checkpoint = Some(TurnIntentCheckpointProjection {
-                    cycle_id: cycle_id.clone(),
-                    checkpoint_sequence: *checkpoint_sequence,
-                    state_sha256: state_sha256.clone(),
-                    state_json: state_json.clone(),
-                });
+                if self.closeout.cycle_id.as_deref() != Some(cycle_id)
+                    && self.retained_captured_response_write().is_some()
+                {
+                    // A new preflight checkpoint must not hide the exact
+                    // capture owned by a still-pending document-write effect.
+                    // Replaying the ledger after a controller restart must
+                    // reach the same decision.
+                    self.reject_stale(StateDomain::Closeout, StateOwner::DocumentWriter);
+                } else {
+                    self.closeout.turn_intent_checkpoint = Some(TurnIntentCheckpointProjection {
+                        cycle_id: cycle_id.clone(),
+                        checkpoint_sequence: *checkpoint_sequence,
+                        state_sha256: state_sha256.clone(),
+                        state_json: state_json.clone(),
+                    });
+                }
             }
             StateFact::BaselineSaved {
                 cycle_id,
@@ -1696,11 +1729,17 @@ impl DocumentStateProjection {
                 tracked_work_maintenance_required,
                 ..
             } => {
-                self.closeout
-                    .apply_cycle_event(cycle_id, CycleEvent::StartPreflight);
-                self.closeout.session_id = session_id.clone();
-                self.closeout.tracked_work_maintenance_required =
-                    *tracked_work_maintenance_required;
+                if self.closeout.cycle_id.as_deref() != Some(cycle_id)
+                    && self.retained_captured_response_write().is_some()
+                {
+                    self.reject_stale(StateDomain::Closeout, StateOwner::DocumentWriter);
+                } else {
+                    self.closeout
+                        .apply_cycle_event(cycle_id, CycleEvent::StartPreflight);
+                    self.closeout.session_id = session_id.clone();
+                    self.closeout.tracked_work_maintenance_required =
+                        *tracked_work_maintenance_required;
+                }
             }
             StateFact::RealtimeSteeringObserved {
                 cycle_id, steering, ..
@@ -6655,6 +6694,156 @@ mod tests {
                 .document
                 .pending_write
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn retained_capture_effect_rejects_overtaking_preflight_until_convergence() {
+        let document_hash = "doc-retained";
+        let cycle_1 = "cycle-retained";
+        let cycle_2 = "cycle-overtaking";
+        let response = "### Re: retained — gpt-5\n\nThe durable response.\n";
+        let target = format!(
+            "# Session\n\n<!-- agent:exchange -->\n{}\n<!-- /agent:exchange -->\n",
+            response.trim_end()
+        );
+        let mut ledger = EventLedger::new();
+
+        ledger.append(state_event(
+            "checkpoint-retained",
+            StateFact::TurnIntentCheckpointed {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                checkpoint_sequence: 1,
+                state_sha256: "checkpoint-retained-sha".into(),
+                state_json: r#"{"cycle_id":"cycle-retained"}"#.into(),
+            },
+        ));
+        ledger.append(state_event(
+            "preflight-retained",
+            StateFact::PreflightStarted {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                session_id: Some("session-retained".into()),
+                tracked_work_maintenance_required: Some(false),
+            },
+        ));
+        ledger.append(state_event(
+            "capture-retained",
+            StateFact::ResponseCaptured {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_1.into(),
+                capture_id: "capture-retained".into(),
+                response_sha256: "response-retained-sha".into(),
+                response_body: Some(response.into()),
+                intent_body: None,
+                mutation_plan_json: None,
+                file_hash: None,
+                snapshot_hash: None,
+                baseline_content: None,
+            },
+        ));
+        ledger.append(state_event(
+            "write-retained",
+            StateFact::DocumentWriteDeferred {
+                document_hash: document_hash.into(),
+                intent_id: "intent-retained".into(),
+                expected_hash: "base".into(),
+                expected_content: Some("# Session\n".into()),
+                target_hash: "target-retained".into(),
+                target_content: target,
+                source: "finalize".into(),
+                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            },
+        ));
+
+        let retained = ledger.project_document(document_hash).unwrap();
+        assert_eq!(
+            retained
+                .retained_captured_response_write()
+                .map(|pending| pending.intent_id.as_str()),
+            Some("intent-retained"),
+        );
+
+        // Reproduce the churn: a later session tries to checkpoint and start a
+        // new preflight while the captured response is still awaiting ACK.
+        ledger.append(state_event(
+            "checkpoint-overtaking",
+            StateFact::TurnIntentCheckpointed {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_2.into(),
+                checkpoint_sequence: 2,
+                state_sha256: "checkpoint-overtaking-sha".into(),
+                state_json: r#"{"cycle_id":"cycle-overtaking"}"#.into(),
+            },
+        ));
+        ledger.append(state_event(
+            "preflight-overtaking",
+            StateFact::PreflightStarted {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_2.into(),
+                session_id: Some("session-overtaking".into()),
+                tracked_work_maintenance_required: Some(false),
+            },
+        ));
+
+        let still_retained = ledger.project_document(document_hash).unwrap();
+        assert_eq!(still_retained.closeout.cycle_id.as_deref(), Some(cycle_1));
+        assert_eq!(
+            still_retained
+                .closeout
+                .turn_intent_checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.cycle_id.as_str()),
+            Some(cycle_1),
+        );
+        assert_eq!(
+            still_retained
+                .closeout
+                .captured_response
+                .as_ref()
+                .map(|capture| capture.capture_id.as_str()),
+            Some("capture-retained"),
+        );
+
+        ledger.append(state_event(
+            "write-retained-converged",
+            StateFact::DocumentWriteConverged {
+                document_hash: document_hash.into(),
+                intent_id: "intent-retained".into(),
+                target_hash: "target-retained".into(),
+                source: "editor_ack".into(),
+            },
+        ));
+        ledger.append(state_event(
+            "checkpoint-after-convergence",
+            StateFact::TurnIntentCheckpointed {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_2.into(),
+                checkpoint_sequence: 3,
+                state_sha256: "checkpoint-after-convergence-sha".into(),
+                state_json: r#"{"cycle_id":"cycle-overtaking"}"#.into(),
+            },
+        ));
+        ledger.append(state_event(
+            "preflight-after-convergence",
+            StateFact::PreflightStarted {
+                document_hash: document_hash.into(),
+                cycle_id: cycle_2.into(),
+                session_id: Some("session-overtaking".into()),
+                tracked_work_maintenance_required: Some(false),
+            },
+        ));
+
+        let advanced = ledger.project_document(document_hash).unwrap();
+        assert_eq!(advanced.closeout.cycle_id.as_deref(), Some(cycle_2));
+        assert_eq!(
+            advanced
+                .closeout
+                .turn_intent_checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.checkpoint_sequence),
+            Some(3),
         );
     }
 

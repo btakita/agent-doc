@@ -164,7 +164,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
             // The controller's lazily-backed sync state report is the authority
             // for that mismatch; focus-only would select the right pane but leave
             // it in the wrong column.
-            if (!forceReconcile && layoutSynced == false) {
+            if (layoutSynced == false) {
                 return AutomaticCommandPlan(AutomaticCommandKind.Sync, visibleSignature)
             }
 
@@ -176,7 +176,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
             // moves the operator's active pane (it neutralizes any internal
             // selection), so emitting Sync here would leave the doc-to-doc switch
             // dead. A changed visible layout still goes through Sync.
-            if (!forceReconcile && visibleSignature == previousVisibleSignature) {
+            if (visibleSignature == previousVisibleSignature) {
                 return AutomaticCommandPlan(AutomaticCommandKind.Focus, visibleSignature)
             }
 
@@ -282,13 +282,9 @@ class EditorTabSyncListener : FileEditorManagerListener {
         snapshot: AutomaticStateSnapshot,
         delayMs: Long = DEBOUNCE_MS,
         requestedGeneration: Long? = null,
-        immediateFocus: Boolean = false,
     ) {
         latestSnapshot.set(snapshot)
         val generation = requestedGeneration ?: nextGeneration()
-        if (immediateFocus) {
-            focusExistingPaneImmediately(snapshot, generation)
-        }
         executor.schedule(sync@{
             try {
                 if (!isCurrentGeneration(generation)) {
@@ -300,31 +296,6 @@ class EditorTabSyncListener : FileEditorManagerListener {
                 log("error: ${e.message}")
             }
         }, delayMs.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
-    }
-
-    private fun focusExistingPaneImmediately(
-        snapshot: AutomaticStateSnapshot,
-        generation: Long,
-    ) {
-        executor.execute focus@{
-            try {
-                if (!isCurrentGeneration(generation)) {
-                    log("focus: superseded gen=$generation")
-                    return@focus
-                }
-                val result = CpRouteClient.submitFocusDocumentPane(
-                    projectRoot = snapshot.focusedProjectRoot,
-                    documentPath = snapshot.activeFile,
-                )
-                if (result.exitCode == 0) {
-                    log("focus: Project Controller submit accepted file=${snapshot.focusedRelativePath}")
-                } else {
-                    log("focus: skipped ${snapshot.focusedRelativePath}: ${result.output}")
-                }
-            } catch (e: Exception) {
-                log("focus: skipped ${snapshot.focusedRelativePath}: ${e.message}")
-            }
-        }
     }
 
     private fun captureSnapshot(
@@ -683,7 +654,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
 
         TmuxPaneFocusSync.recordEditorFocusIntent(event.manager.project, file.path)
         val snapshot = captureSnapshot(event.manager.project, file, forceReconcile = true) ?: return
-        requestAutomaticSync(event.manager.project, snapshot, immediateFocus = true)
+        requestAutomaticSync(event.manager.project, snapshot)
     }
 
     /**
@@ -713,7 +684,7 @@ class EditorTabSyncListener : FileEditorManagerListener {
         log("focusGained: file=${file.name} mdFiles=$visibleMdFiles")
         TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
         val snapshot = captureSnapshot(project, file, forceReconcile = false) ?: return
-        requestAutomaticSync(project, snapshot, immediateFocus = true)
+        requestAutomaticSync(project, snapshot)
     }
 
     /**

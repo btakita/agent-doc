@@ -1074,10 +1074,9 @@ pub fn route_via_authoritative_actor(
                 prompt_bearing_marker,
                 true,
                 dispatch_start,
-                // `#jbroutasync`: the client deadline is not yet threaded from
-                // the controller RPC boundary to this call site; `None` keeps
-                // the pre-existing base timeout until it is.
-                None,
+                // `#jbroutasync`: the invocation guard carries the command
+                // deadline from the controller boundary into every route branch.
+                crate::invocation::wait_for_ready_override(),
                 effects.route_cycle_ack_effects,
             )?;
             Ok(ack_pane.unwrap_or(dispatch_pane))
@@ -1233,10 +1232,9 @@ pub fn route_via_authoritative_actor(
                 prompt_bearing_marker,
                 true,
                 dispatch_start,
-                // `#jbroutasync`: the client deadline is not yet threaded from
-                // the controller RPC boundary to this call site; `None` keeps
-                // the pre-existing base timeout until it is.
-                None,
+                // `#jbroutasync`: the invocation guard carries the command
+                // deadline from the controller boundary into every route branch.
+                crate::invocation::wait_for_ready_override(),
                 effects.route_cycle_ack_effects,
             )?;
             Ok(ack_pane.unwrap_or(dispatch_pane))

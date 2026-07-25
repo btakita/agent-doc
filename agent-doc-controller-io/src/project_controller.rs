@@ -561,6 +561,10 @@ impl ControllerRuntime {
         Ok(self.memory.lock().actor_store.get(document_id).cloned())
     }
 
+    fn actor_store_snapshot(&self) -> BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord> {
+        self.memory.lock().actor_store.clone()
+    }
+
     fn refresh_memory(&self) -> Result<()> {
         let project_root = self.bootstrap_snapshot()?.project_root;
         let next = ControllerMemoryState::load(&project_root)?;

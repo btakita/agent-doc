@@ -108,7 +108,7 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `real markdown selection event still reconciles exact state so missing actors can start`() {
+    fun `real markdown selection event reconciles exact state with one focus effect`() {
         val visibleMdFiles = listOf("/repo/tasks/software/corky.md")
         val visibleSignature = visibleSignature(visibleMdFiles)
 
@@ -119,6 +119,24 @@ class EditorTabSyncListenerTest {
             previousVisibleSignature = visibleSignature,
             previousFocusedFile = "/repo/tasks/software/corky.md",
             forceReconcile = true,
+        )
+
+        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Focus, plan?.kind)
+    }
+
+    @Test
+    fun `forced reconcile still repairs a stale tmux layout`() {
+        val visibleMdFiles = listOf("/repo/tasks/software/corky.md")
+        val visibleSignature = visibleSignature(visibleMdFiles)
+
+        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
+            visibleMdFiles = visibleMdFiles,
+            visibleSignature = visibleSignature,
+            focusedFile = "/repo/tasks/software/corky.md",
+            previousVisibleSignature = visibleSignature,
+            previousFocusedFile = "/repo/tasks/software/corky.md",
+            forceReconcile = true,
+            layoutSynced = false,
         )
 
         assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)

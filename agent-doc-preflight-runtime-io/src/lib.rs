@@ -76,6 +76,10 @@ where
         agent_doc_commit_io::commit(file)
     }
 
+    fn retained_document_write(&self, file: &Path) -> bool {
+        agent_doc_document_realtime_io::pending_document_write(file).is_some()
+    }
+
     fn session_interruption(&self, file: &Path) -> Result<Option<String>> {
         match agent_doc_session_check_io::inspect(file, &self.session_check_effects)? {
             agent_doc_session_check_io::SessionCheckStatus::Ok(_) => Ok(None),

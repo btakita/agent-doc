@@ -171,7 +171,11 @@ class TmuxPaneFocusSync private constructor(
 
     companion object {
         private const val POLL_MS = 500L
-        private val EDITOR_FOCUS_INTENT_TTL_NANOS = TimeUnit.SECONDS.toNanos(3)
+        // This is only a hang guard: editor intent remains authoritative until
+        // tmux acknowledges the matching pane. Controller layout recovery has
+        // a 60-second request budget, so a three-second lease can expire while
+        // the accepted focus effect is still legitimately in flight.
+        private val EDITOR_FOCUS_INTENT_TTL_NANOS = TimeUnit.SECONDS.toNanos(90)
         private val instances = ConcurrentHashMap<Project, TmuxPaneFocusSync>()
 
         fun install(project: Project) {

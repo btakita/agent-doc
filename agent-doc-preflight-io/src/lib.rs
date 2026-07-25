@@ -731,6 +731,8 @@ pub trait PreflightCycleCompletionEffects {
 
     fn commit(&self, file: &Path) -> Result<bool>;
 
+    fn retained_document_write(&self, file: &Path) -> bool;
+
     fn session_interruption(&self, file: &Path) -> Result<Option<String>>;
 
     fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>>;
@@ -740,6 +742,23 @@ pub fn enforce_cycle_completion(
     file: &Path,
     effects: &impl PreflightCycleCompletionEffects,
 ) -> Result<(bool, bool)> {
+    // A retained document-write effect is an unfinished durable sink, even
+    // when an older repair accidentally made its closeout cycle look terminal.
+    // Give session-check one chance to settle the exact capture, then fail
+    // closed before a new preflight can replace its live projection.
+    if effects.retained_document_write(file) {
+        if let Some(reason) = effects.session_interruption(file)? {
+            anyhow::bail!("{}", reason.replace('\n', " "));
+        }
+        if effects.retained_document_write(file) {
+            anyhow::bail!(
+                "retained document-write effect remains unsettled for {}; retry `agent-doc session-check {}` before starting another cycle",
+                file.display(),
+                file.display(),
+            );
+        }
+    }
+
     let state = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
     let missing_commit_event = if state.as_ref().map(|state| state.is_open()).unwrap_or(false) {
         None
@@ -5019,6 +5038,8 @@ mod tests {
     struct TestPreflightCycleCompletionEffects {
         repair_calls: std::cell::Cell<usize>,
         commit_calls: std::cell::Cell<usize>,
+        retained_document_write: bool,
+        session_interruption: Option<String>,
     }
 
     impl PreflightCycleCompletionEffects for TestPreflightCycleCompletionEffects {
@@ -5032,8 +5053,12 @@ mod tests {
             Ok(false)
         }
 
+        fn retained_document_write(&self, _file: &Path) -> bool {
+            self.retained_document_write
+        }
+
         fn session_interruption(&self, _file: &Path) -> Result<Option<String>> {
-            Ok(None)
+            Ok(self.session_interruption.clone())
         }
 
         fn detect_bypassed_response_write(&self, _file: &Path) -> Result<Option<String>> {
@@ -9692,6 +9717,30 @@ mod tests {
             0,
             "stale open JSON must not force commit when lazily says committed"
         );
+    }
+
+    #[test]
+    fn enforce_cycle_completion_blocks_new_preflight_on_retained_effect() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let effects = TestPreflightCycleCompletionEffects {
+            retained_document_write: true,
+            session_interruption: Some(
+                "[session-check] INTERRUPTED: binary-owned response delivery is retained"
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+
+        let error = enforce_cycle_completion(&doc, &effects).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("binary-owned response delivery is retained"),
+        );
+        assert_eq!(effects.repair_calls.get(), 0);
+        assert_eq!(effects.commit_calls.get(), 0);
     }
 
     #[test]

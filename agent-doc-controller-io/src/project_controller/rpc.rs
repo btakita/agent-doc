@@ -13120,6 +13120,28 @@ fn decide_focus_pane_candidate<'a>(
     }
 }
 
+/// A `Blocked`/`Closed` *durable* actor projection must not veto a pure,
+/// non-mutating UI focus handoff when the pane's live process tree still exactly
+/// owns this document (a finished/blocked session whose pane is still open and
+/// showing that document). Focus is non-mutating and the alive/visible guards
+/// still apply downstream. Ownership is proven from the *live process tree*
+/// (`pane_process_owner_document`), never the stale durable state, so a pane
+/// reused by a different document stays refused (`actor_not_focusable`) and
+/// cross-document focus steal cannot happen. Returns the rescued pane when the
+/// reject is safe to override.
+fn focus_reject_rescued_by_live_pane_owner<'a>(
+    reject_reason: &str,
+    pane_id: Option<&'a str>,
+    pane_process_owner_document: Option<&str>,
+    document_id: &str,
+) -> Option<&'a str> {
+    if reject_reason != "actor_not_focusable" {
+        return None;
+    }
+    let pane = pane_id?;
+    (pane_process_owner_document == Some(document_id)).then_some(pane)
+}
+
 fn current_document_session_id(
     canonical: &Path,
     actor_record: Option<&agent_doc_sqlite::state_store::ActorRecord>,
@@ -13245,15 +13267,30 @@ pub(crate) fn handle_focus_document_pane(
             not_alive_reason,
         } => (pane_id.to_string(), focused_reason, not_alive_reason),
         FocusPaneCandidateDecision::Reject { reason, pane_id } => {
-            return Ok(tmux_focus_receipt(
-                false,
+            let pane_owner_document = pane_id
+                .and_then(|pane| active_pane_process_owner_document(&tmux, pane, &bootstrap.project_root));
+            if let Some(pane) = focus_reject_rescued_by_live_pane_owner(
                 reason,
-                Some(document_id),
-                pane_id.map(ToOwned::to_owned),
-                None,
-                None,
-                None,
-            ));
+                pane_id,
+                pane_owner_document.as_deref(),
+                &document_id,
+            ) {
+                (
+                    pane.to_string(),
+                    "focused_live_process_owner",
+                    "live_owner_pane_not_alive",
+                )
+            } else {
+                return Ok(tmux_focus_receipt(
+                    false,
+                    reason,
+                    Some(document_id),
+                    pane_id.map(ToOwned::to_owned),
+                    None,
+                    None,
+                    None,
+                ));
+            }
         }
     };
     if pane_id.is_empty() || !tmux.pane_alive(&pane_id) {
@@ -15253,6 +15290,51 @@ mod tests {
                 reason: "actor_not_focusable",
                 pane_id: Some("%closed"),
             },
+        );
+    }
+
+    #[test]
+    fn actor_not_focusable_reject_is_rescued_when_live_pane_still_owns_the_document() {
+        // A Blocked/Closed durable actor whose pane's live process tree still
+        // owns the same document is a valid non-mutating focus target — the
+        // finished/blocked session's pane is still open and showing that doc.
+        assert_eq!(
+            focus_reject_rescued_by_live_pane_owner(
+                "actor_not_focusable",
+                Some("%59"),
+                Some("doc-bugs2"),
+                "doc-bugs2",
+            ),
+            Some("%59"),
+        );
+    }
+
+    #[test]
+    fn actor_not_focusable_reject_stands_when_live_pane_owns_a_different_document() {
+        // A pane reused by a different document must NOT be focus-stolen.
+        assert_eq!(
+            focus_reject_rescued_by_live_pane_owner(
+                "actor_not_focusable",
+                Some("%59"),
+                Some("doc-other"),
+                "doc-bugs2",
+            ),
+            None,
+        );
+        // No live owner proof at all (bare shell / dead) also stands.
+        assert_eq!(
+            focus_reject_rescued_by_live_pane_owner("actor_not_focusable", Some("%59"), None, "doc-bugs2"),
+            None,
+        );
+        // Only `actor_not_focusable` is rescuable; other rejects are untouched.
+        assert_eq!(
+            focus_reject_rescued_by_live_pane_owner(
+                "missing_actor_record",
+                Some("%59"),
+                Some("doc-bugs2"),
+                "doc-bugs2",
+            ),
+            None,
         );
     }
 

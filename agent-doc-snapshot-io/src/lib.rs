@@ -2,9 +2,7 @@
 
 use anyhow::{Context, Result};
 use base64::Engine as _;
-use fs2::FileExt;
-use std::fs::{File, OpenOptions};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use agent_doc_document::transient_markers::normalize_transient_agent_doc_markers;
 use agent_doc_frontmatter::frontmatter::session_id_from_content;
@@ -52,42 +50,6 @@ impl SnapshotStateMigrationEvent {
                 subdir, old_hash_prefix, ext, new_hash_prefix, ext
             ),
         }
-    }
-}
-
-/// RAII guard for exclusive advisory lock on a markdown snapshot file.
-pub struct SnapshotLock {
-    _file: File,
-    lock_path: PathBuf,
-}
-
-impl SnapshotLock {
-    /// Acquire an exclusive advisory lock for the snapshot of the given document.
-    pub fn acquire(doc: &Path) -> Result<Self> {
-        let lock_path = agent_doc_fs::snapshot_flock_path_for(doc)?;
-        if let Some(parent) = lock_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)
-            .with_context(|| format!("failed to open snapshot lock {}", lock_path.display()))?;
-        file.lock_exclusive().with_context(|| {
-            format!("failed to acquire snapshot lock on {}", lock_path.display())
-        })?;
-        Ok(Self {
-            _file: file,
-            lock_path,
-        })
-    }
-}
-
-impl Drop for SnapshotLock {
-    fn drop(&mut self) {
-        let _ = self._file.unlock();
-        let _ = std::fs::remove_file(&self.lock_path);
     }
 }
 
@@ -329,7 +291,6 @@ pub fn delete_recovery_projection_and_clear_baseline(doc: &Path) -> Result<()> {
     if !snap.exists() {
         return clear_document_baseline(doc);
     }
-    let _lock = SnapshotLock::acquire(doc)?;
     if snap.exists() {
         std::fs::remove_file(&snap)?;
     }
@@ -805,18 +766,6 @@ mod tests {
             verify_snapshot_committed(&doc).unwrap(),
             SnapshotCommitStatus::NotInGitRepo,
         );
-    }
-
-    #[test]
-    fn markdown_snapshot_lock_file_is_removed_on_drop() {
-        let (_dir, doc) = setup();
-
-        let lock = SnapshotLock::acquire(&doc).unwrap();
-        let lock_path = agent_doc_fs::snapshot_flock_path_for(&doc).unwrap();
-        assert!(lock_path.exists());
-        drop(lock);
-
-        assert!(!lock_path.exists());
     }
 
     #[test]

@@ -29,7 +29,6 @@ use agent_doc_workflow::owner_pane_self_invocation::{
 };
 use agent_doc_workflow::session_cycle::compact_command_hint;
 use anyhow::{Context, Result};
-use fs2::FileExt;
 use std::fs::OpenOptions;
 use std::io::IsTerminal;
 #[cfg(unix)]
@@ -721,7 +720,6 @@ pub fn apply_append_response_with_authority(
     response: &str,
     force_disk: bool,
 ) -> Result<()> {
-    let doc_lock = acquire_doc_lock(file)?;
     agent_doc_snapshot_io::checkpoint_undo_content(file, baseline)?;
 
     let mut content_ours = baseline.to_string();
@@ -756,7 +754,6 @@ pub fn apply_append_response_with_authority(
         agent_doc_ops_log_io::log_op,
     )?;
     direct_run_atomic_write_with_authority(effects, file, &final_content, force_disk)?;
-    drop(doc_lock);
     Ok(())
 }
 
@@ -797,7 +794,6 @@ pub fn apply_template_response_with_authority(
         &patches, &unmatched,
     )?;
 
-    let doc_lock = acquire_doc_lock(file)?;
     agent_doc_snapshot_io::checkpoint_undo_content(file, baseline)?;
 
     let content_ours = agent_doc_template_io::apply_patches_with_project_config(
@@ -868,7 +864,6 @@ pub fn apply_template_response_with_authority(
         agent_doc_ops_log_io::log_op,
     )?;
     direct_run_atomic_write_with_authority(effects, file, &final_content, force_disk)?;
-    drop(doc_lock);
     Ok(())
 }
 
@@ -957,22 +952,6 @@ pub fn update_resume_id(
         agent_doc_ops_log_io::log_op,
     )?;
     Ok(())
-}
-
-pub fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
-    let lock_path = agent_doc_fs::state_lock_path_for(path)?;
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open doc lock {}", lock_path.display()))?;
-    file.lock_exclusive()
-        .with_context(|| format!("failed to acquire doc lock on {}", lock_path.display()))?;
-    Ok(file)
 }
 
 pub fn direct_run_atomic_write(

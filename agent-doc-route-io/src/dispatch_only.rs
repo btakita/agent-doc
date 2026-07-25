@@ -200,6 +200,36 @@ pub fn dispatch_only_send_reopen(
         let ready_timeout = (options.effects.dispatch_only_starting_pane_ready_timeout)(harness);
         let ready_deadline = Instant::now() + ready_timeout;
         loop {
+            // A visible operator draft is a terminal blocker, not a readiness
+            // state that can improve with time. Refuse before spending the
+            // editor's route budget so the async command plane can publish the
+            // exact unblocker while its client is still polling.
+            if let Some(draft_preview) = agent_doc_tmux_io::capture_pane(tmux, &dispatch_pane)
+                .ok()
+                .and_then(|content| pane_composer_draft(tmux, &dispatch_pane, &content, harness))
+            {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "route_dispatch_only_starting_pane_not_ready file={} pane={} harness={} outcome=operator_draft composer_draft=true",
+                        file.display(),
+                        dispatch_pane,
+                        harness.binary,
+                    ),
+                );
+                let outcome_fields = agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(
+                    StartingPaneBlocker::OperatorDraft.unblocker(),
+                );
+                anyhow::bail!(dispatch_only_starting_pane_draft_message(
+                    DispatchOnlyStartingPaneDraftMessageFacts {
+                        harness_binary: &harness.binary,
+                        pane: &dispatch_pane,
+                        file_display: &file.display().to_string(),
+                        draft_preview: &draft_preview,
+                        outcome_fields: &outcome_fields,
+                    },
+                ));
+            }
             if dispatch_only_starting_pane_ready_via_authoritative_actor(
                 tmux,
                 file,

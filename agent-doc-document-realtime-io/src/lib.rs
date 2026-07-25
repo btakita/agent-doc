@@ -6784,12 +6784,10 @@ mod tests {
             format!("{err:#}").contains("editor_replica_reregister=requested"),
             "zero-replica recovery must request editor replica re-registration: {err:#}"
         );
-        let recycle_request =
+        assert!(
             agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
-                .expect("zero-replica write must request automatic supervisor recovery");
-        assert_eq!(
-            recycle_request.reason,
-            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
+                .is_none(),
+            "targeted editor re-registration must not recycle a healthy supervisor",
         );
         assert!(!dir.path().join(".agent-doc/crdt-replica-events").exists());
         assert_eq!(

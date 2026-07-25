@@ -64,33 +64,6 @@ pub fn state_lock_path_for(doc: &Path) -> Result<PathBuf> {
     hashed_state_path(doc, LOCK_DIR, "lock")
 }
 
-/// Acquire an exclusive `flock` on the document's state lock file, holding it
-/// for a document-file read-parse-write cycle to prevent concurrent edits from
-/// invalidating parsed offsets (TOCTOU). The returned `File` releases the lock on
-/// drop (kernel cleans up the fd on process death — no lease/TTL needed).
-///
-/// `#lzdurablesink`: this is the file-level edit TOCTOU boundary, NOT a closeout-
-/// authority arbitration. `#lazily-hot-path` scopes its flock ban to closeout
-/// transitions; queue-consume document edits legitimately use flock here. The
-/// single shared definition (previously duplicated in queue-io + write-runtime-io).
-pub fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
-    use fs2::FileExt;
-    use std::fs::OpenOptions;
-    let lock_path = state_lock_path_for(path)?;
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open doc lock {}", lock_path.display()))?;
-    file.lock_exclusive()
-        .with_context(|| format!("failed to acquire doc lock on {}", lock_path.display()))?;
-    Ok(file)
-}
-
 /// Compute `<project_root>/.agent-doc/starting` for a document.
 ///
 /// Returns `None` when `doc` cannot be canonicalized or a root/fallback parent
@@ -123,11 +96,6 @@ pub fn startup_document_lock_path_for(doc: &Path) -> Option<PathBuf> {
 /// Compute `<project_root>/.agent-doc/starting/session-<hash>.lock`.
 pub fn startup_session_lock_path_for(doc: &Path, session_name: &str) -> Option<PathBuf> {
     Some(startup_starting_dir_for(doc)?.join(startup_session_lock_name(session_name)))
-}
-
-/// Compute the snapshot flock path adjacent to the snapshot sidecar.
-pub fn snapshot_flock_path_for(doc: &Path) -> Result<PathBuf> {
-    Ok(snapshot_path_for(doc)?.with_extension("md.lock"))
 }
 
 /// Rewrite `file_path` to be relative to `cwd` so a spawned command resolves
@@ -501,9 +469,9 @@ mod tests {
         document_state_hash, document_state_hash_from_str, inode_of_path,
         preserve_dropped_operator_buffer, quarantine_corrupt_file, read_optional,
         read_valid_or_quarantine, referenced_markdown_path, referenced_markdown_path_checked,
-        rewrite_start_path, running_exe_inode_for_pid, same_document_path, snapshot_flock_path_for,
-        snapshot_path_for, startup_document_lock_path_for, startup_session_lock_name,
-        startup_session_lock_path_for, startup_starting_dir_for, state_lock_path_for, write_atomic,
+        rewrite_start_path, running_exe_inode_for_pid, same_document_path, snapshot_path_for,
+        startup_document_lock_path_for, startup_session_lock_name, startup_session_lock_path_for,
+        startup_starting_dir_for, state_lock_path_for, write_atomic,
     };
     use std::path::Path;
 
@@ -786,19 +754,6 @@ mod tests {
         assert_eq!(
             startup_session_lock_path_for(&doc, "session-a").unwrap(),
             starting_dir.join(startup_session_lock_name("session-a"))
-        );
-    }
-
-    #[test]
-    fn snapshot_flock_path_is_adjacent_to_cold_projection() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
-        let doc = tmp.path().join("doc.md");
-        std::fs::write(&doc, "# doc\n").unwrap();
-
-        assert_eq!(
-            snapshot_flock_path_for(&doc).unwrap(),
-            snapshot_path_for(&doc).unwrap().with_extension("md.lock")
         );
     }
 

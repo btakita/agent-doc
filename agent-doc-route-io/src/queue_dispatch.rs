@@ -1,9 +1,7 @@
 //! Route dispatch queue writeback I/O.
 
 use anyhow::{Context, Result};
-use fs2::FileExt;
-use std::fs::{File, OpenOptions};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_turn::cycle_ack::PromptBearingRouteContext;
@@ -41,7 +39,6 @@ pub fn enqueue_route_dispatch_prompt(
     priority: bool,
     effects: RouteQueueEffects,
 ) -> Result<RouteQueueEnqueueOutcome> {
-    let _lock = acquire_route_queue_lock(file)?;
     let mut attempt = 0usize;
     loop {
         attempt += 1;
@@ -218,7 +215,6 @@ pub fn activate_existing_route_queue_head(
     source: &str,
     effects: RouteQueueEffects,
 ) -> Result<Option<RouteQueueEnqueueOutcome>> {
-    let _lock = acquire_route_queue_lock(file)?;
     let mut attempt = 0usize;
     loop {
         attempt += 1;
@@ -313,34 +309,4 @@ fn log_route_queue_write_retry(
             agent_doc_secret_redact::redact(&format!("{err:#}")).replace('\n', " "),
         ),
     );
-}
-
-fn route_queue_lock_path(file: &Path) -> Result<PathBuf> {
-    let canonical = std::fs::canonicalize(file)
-        .with_context(|| format!("failed to canonicalize {}", file.display()))?;
-    let base = agent_doc_project_root_io::project_root_containing(&canonical)
-        .or_else(|| canonical.parent().map(Path::to_path_buf))
-        .ok_or_else(|| {
-            anyhow::anyhow!("failed to resolve queue lock root for {}", file.display())
-        })?;
-    let hash = agent_doc_fs::document_state_hash_from_str(&canonical.to_string_lossy());
-    Ok(base
-        .join(".agent-doc/route-queue")
-        .join(format!("{hash}.lock")))
-}
-
-fn acquire_route_queue_lock(file: &Path) -> Result<File> {
-    let lock_path = route_queue_lock_path(file)?;
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let lock = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)
-        .with_context(|| format!("failed to open route queue lock {}", lock_path.display()))?;
-    lock.lock_exclusive()
-        .with_context(|| format!("failed to acquire route queue lock {}", lock_path.display()))?;
-    Ok(lock)
 }

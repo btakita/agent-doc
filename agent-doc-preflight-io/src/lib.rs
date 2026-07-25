@@ -765,6 +765,23 @@ pub fn enforce_cycle_completion(
     } else {
         agent_doc_ops_log_io::detect_write_completed_commit_missing(file)?
     };
+    // Fold the binary-owned diagnostic into the open recovery image before
+    // repair can transition that cycle to `committed`. Appending it afterwards
+    // created a working-tree exchange change whose owning cycle was already
+    // closed, so the following commit correctly refused it and the next
+    // preflight demanded a duplicate response cycle.
+    let ipc_dogfood_note_appended =
+        if state.as_ref().is_some_and(|state| state.is_open()) || missing_commit_event.is_some() {
+            match append_latest_ipc_dogfood_note(file) {
+                Ok(appended) => appended,
+                Err(e) => {
+                    eprintln!("[preflight] IPC dogfood note warning: {}", e);
+                    false
+                }
+            }
+        } else {
+            false
+        };
     if let Some(event) = missing_commit_event.as_deref() {
         eprintln!(
             "[preflight] WARNING: previous cycle wrote the response but no commit followed ({}) - attempting commit-boundary recovery before diff",
@@ -829,7 +846,7 @@ pub fn enforce_cycle_completion(
             file,
             &format!("resume_commit_success file={}", file.display()),
         );
-        return Ok((recovered, committed));
+        return Ok((recovered || ipc_dogfood_note_appended, committed));
     }
 
     let Some(state) = state else {
@@ -891,18 +908,6 @@ pub fn enforce_cycle_completion(
             false
         }
     };
-    let ipc_dogfood_note_appended = if recovered {
-        match append_latest_ipc_dogfood_note(file) {
-            Ok(appended) => appended,
-            Err(e) => {
-                eprintln!("[preflight] IPC dogfood note warning: {}", e);
-                false
-            }
-        }
-    } else {
-        false
-    };
-
     let committed = match effects.commit(file) {
         Ok(did_commit) => did_commit,
         Err(e) => {
@@ -9914,6 +9919,28 @@ mod tests {
             effects.commit_calls.get(),
             0,
             "stale open JSON must not force commit when lazily says committed"
+        );
+    }
+
+    #[test]
+    fn interrupted_cycle_folds_ipc_diagnostic_before_repair_can_commit() {
+        let source = include_str!("lib.rs");
+        let body = source
+            .split_once("pub fn enforce_cycle_completion(")
+            .unwrap()
+            .1
+            .split_once("pub fn append_latest_ipc_dogfood_note(")
+            .unwrap()
+            .0;
+        let append = body
+            .find("append_latest_ipc_dogfood_note(file)")
+            .expect("diagnostic append step");
+        let repair = body
+            .find("effects.repair(file)")
+            .expect("interrupted-cycle repair step");
+        assert!(
+            append < repair,
+            "binary diagnostic must join the open recovery image before repair can close its cycle"
         );
     }
 

@@ -443,6 +443,74 @@ pub(crate) fn decode_controller_response<T: DeserializeOwned>(
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CoordinationClaimResponse {
+    pub acquired: bool,
+}
+
+/// Atomically claim a set of ephemeral coordination scopes from the live
+/// controller's Lazily graph.
+pub fn try_claim_coordination(
+    project_root: &Path,
+    scopes: &[String],
+    owner_token: &str,
+    owner_pid: u32,
+) -> Result<bool> {
+    anyhow::ensure!(!scopes.is_empty(), "coordination scopes must not be empty");
+    anyhow::ensure!(
+        !owner_token.trim().is_empty(),
+        "coordination owner token must not be empty"
+    );
+    let response: CoordinationClaimResponse = request_controller_with_transport_retry(
+        project_root,
+        ControllerRequest {
+            command: "coordination_claim".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: Some(serde_json::to_string(scopes)?),
+            caller: Some(owner_token.to_string()),
+            reason: None,
+            supervisor_pid: Some(owner_pid),
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+        project_root,
+    )?;
+    Ok(response.acquired)
+}
+
+/// Release scopes previously acquired by [`try_claim_coordination`].
+pub fn release_coordination(
+    project_root: &Path,
+    scopes: &[String],
+    owner_token: &str,
+) -> Result<()> {
+    let _: serde_json::Value = request_controller_with_transport_retry(
+        project_root,
+        ControllerRequest {
+            command: "coordination_release".to_string(),
+            file: None,
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: Some(serde_json::to_string(scopes)?),
+            caller: Some(owner_token.to_string()),
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: None,
+        },
+        project_root,
+    )?;
+    Ok(())
+}
+
 pub fn start_session(
     project_root: &Path,
     request: StartSessionRequest,
@@ -612,6 +680,50 @@ pub fn refresh_supervisor_lease(
 }
 
 pub fn authoritative_actor_binding(
+    project_root: &Path,
+    file: &Path,
+) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        let document_id = agent_doc_session_actor_io::canonical_document_id_in(
+            project_root,
+            &file.to_string_lossy(),
+        );
+        load_actor_record(project_root, &document_id)
+    }
+
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        let response: ActorBindingResponse =
+            retry_controller_transport_drop(file, "actor_binding", || {
+                request_controller(
+                    project_root,
+                    ControllerRequest {
+                        command: "actor_binding".to_string(),
+                        file: Some(file.to_path_buf()),
+                        session_id: None,
+                        pane_id: None,
+                        window_id: None,
+                        generation: None,
+                        state: None,
+                        caller: None,
+                        reason: None,
+                        supervisor_pid: None,
+                        supervisor_socket: None,
+                        command_kind: None,
+                        diagnostic_payload: None,
+                    },
+                )
+            })?;
+        Ok(response.record)
+    }
+}
+
+/// Cold durable fallback for code already executing inside the project
+/// controller. External callers must use [`authoritative_actor_binding`] so the
+/// live Lazily/controller image remains the primary authority instead of
+/// reopening SQLite on the coordination hot path.
+fn durable_actor_binding(
     project_root: &Path,
     file: &Path,
 ) -> Result<Option<agent_doc_sqlite::state_store::ActorRecord>> {
@@ -1593,9 +1705,7 @@ pub fn status(project_root: &Path) -> Result<ControllerStatus> {
 /// read-only check can never block a live cycle.
 pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<String> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)?;
-    let record = authoritative_actor_binding(&project_root, file)
-        .ok()
-        .flatten()?;
+    let record = durable_actor_binding(&project_root, file).ok().flatten()?;
     let conn = open_state_db(&project_root).ok()?;
     let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)
         .ok()
@@ -1702,16 +1812,47 @@ pub fn schedule_stale_supervisor_cp_recycle(file: &Path, source: &str) -> String
 
 /// Schedule recovery when an editor-owned document has lost its relay member or
 /// when the canonical document and its disk projection diverge after closeout.
-/// This is the editor-authority equivalent of a stale-binary recycle and is
-/// intentionally independent of the proactive auto-recycle preference.
+///
+/// Re-registering the editor replica is the primary repair. Recycling an already
+/// current supervisor cannot create that editor-owned membership and used to
+/// produce an execve storm while the same recovery event was still in flight.
+/// Retain supervisor recycle only as the fallback when the controller cannot
+/// publish the editor event.
 pub fn schedule_stale_editor_replica_cp_recycle(file: &Path, source: &str) -> String {
-    schedule_supervisor_cp_recycle(
+    match agent_doc_crdt_relay_io::signal_crdt_replica_event(
         file,
-        source,
-        agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
-        "stale_editor_replica_cp_recycle_requested",
-        "editor_authority_unavailable_or_diverged",
-    )
+        agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh,
+        0,
+    ) {
+        Ok(()) => {
+            let status =
+                "request_skipped reason=editor_reregister_primary editor_replica_reregister=requested"
+                    .to_string();
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "stale_editor_replica_recovery_requested file={} source={} action=reregister_editor_replica request_status={} reason=editor_authority_unavailable_or_diverged",
+                    file.display(),
+                    source,
+                    status,
+                ),
+            );
+            status
+        }
+        Err(err) => {
+            let fallback = schedule_supervisor_cp_recycle(
+                file,
+                source,
+                agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
+                "stale_editor_replica_cp_recycle_requested",
+                "editor_authority_unavailable_or_diverged",
+            );
+            format!(
+                "editor_replica_reregister=failed:{} fallback={fallback}",
+                format!("{err:#}").replace('\n', "\\n")
+            )
+        }
+    }
 }
 
 fn schedule_supervisor_cp_recycle(
@@ -6591,7 +6732,7 @@ pub fn connect_or_launch(
     project_root: &Path,
     launch_mode: LaunchMode,
 ) -> Result<interprocess::local_socket::Stream> {
-    connect_or_launch_with_lock_wait(project_root, launch_mode, LAUNCH_LOCK_WAIT)
+    connect_or_launch_with_claim_wait(project_root, launch_mode, LAUNCH_CLAIM_WAIT)
 }
 
 fn active_controller_status_is_adoptable(
@@ -6667,10 +6808,10 @@ fn log_stable_stale_controller_restart(project_root: &Path, active_status: &Cont
     );
 }
 
-fn connect_or_launch_with_lock_wait(
+fn connect_or_launch_with_claim_wait(
     project_root: &Path,
     launch_mode: LaunchMode,
-    launch_lock_wait: Duration,
+    launch_claim_wait: Duration,
 ) -> Result<interprocess::local_socket::Stream> {
     if let Ok(active_status) = status(project_root)
         && active_status.active
@@ -6701,21 +6842,21 @@ fn connect_or_launch_with_lock_wait(
         }
     }
 
-    // Block (bounded) on launch-lock contention instead of failing fast: another
+    // Block (bounded) on bootstrap-claim contention instead of failing fast: another
     // launcher (concurrent start, sibling document, or a just-execve'd self-recycle
-    // racing its predecessor) is mid-launch on the shared project-root lock, and the
+    // racing its predecessor) is mid-launch for the shared project root, and the
     // double-checked `status` + `connect` below adopts whatever it publishes
     // (#suprecyclelock). Only a genuinely wedged holder returns an error — and even
     // then, adopt a live matching controller it may have published before wedging.
-    let launch_lock = match LaunchLock::acquire_blocking(project_root, launch_lock_wait) {
-        Ok(lock) => lock,
+    let launch_claim = match LaunchClaim::acquire_blocking(project_root, launch_claim_wait) {
+        Ok(claim) => claim,
         Err(err) => {
             if let Ok(active_status) = status(project_root)
                 && active_status.active
             {
                 let current_binary = current_binary_identity().ok();
                 if active_controller_status_is_adoptable(&active_status, current_binary.as_ref()) {
-                    log_launch_lock_waiter_adopted(project_root, &active_status, "timeout");
+                    log_launch_claim_waiter_adopted(project_root, &active_status, "timeout");
                     reap_stale_duplicate_controllers(
                         project_root,
                         active_status.pid,
@@ -6727,7 +6868,7 @@ fn connect_or_launch_with_lock_wait(
             return Err(err);
         }
     };
-    let waited_on_launch_lock = launch_lock.waited();
+    let waited_on_launch_claim = launch_claim.waited();
     // Self-heal: kill any predecessor wedged in `Preparing`/`Promoted` past the
     // threshold *before* we adopt or promote, so a stuck controller cannot keep
     // re-corrupting the working tree and respawn the `1002 → 1004 → 1006`
@@ -6751,8 +6892,8 @@ fn connect_or_launch_with_lock_wait(
     {
         let current_binary = current_binary_identity().ok();
         if active_controller_status_is_adoptable(&active_status, current_binary.as_ref()) {
-            if waited_on_launch_lock {
-                log_launch_lock_waiter_adopted(project_root, &active_status, "acquired");
+            if waited_on_launch_claim {
+                log_launch_claim_waiter_adopted(project_root, &active_status, "acquired");
             }
             reap_stale_duplicate_controllers(
                 project_root,
@@ -6839,7 +6980,7 @@ fn connect_or_launch_with_lock_wait(
     wait_for_controller_after_launch(project_root)
 }
 
-fn log_launch_lock_waiter_adopted(
+fn log_launch_claim_waiter_adopted(
     project_root: &Path,
     active_status: &ControllerStatus,
     phase: &str,
@@ -6847,7 +6988,7 @@ fn log_launch_lock_waiter_adopted(
     agent_doc_ops_log_io::log_op(
         project_root,
         &format!(
-            "controller_launch_lock_waiter_adopted_published_controller phase={} pid={} generation={}",
+            "controller_launch_claim_waiter_adopted_published_controller phase={} pid={} generation={}",
             phase,
             active_status
                 .pid
@@ -8465,6 +8606,43 @@ pub(crate) fn handle_request_locked(
         .and_then(|identity| serde_json::from_value::<ControllerBinaryIdentity>(identity).ok());
     let bootstrap_snapshot = runtime.bootstrap_snapshot()?;
     match request.command.as_str() {
+        "coordination_claim" => {
+            let scopes: Vec<String> = serde_json::from_str(
+                request
+                    .state
+                    .as_deref()
+                    .context("coordination_claim requires scopes")?,
+            )
+            .context("coordination_claim scopes must be a JSON string array")?;
+            let owner_token = request
+                .caller
+                .as_deref()
+                .context("coordination_claim requires owner token")?;
+            let owner_pid = request
+                .supervisor_pid
+                .context("coordination_claim requires owner pid")?;
+            let acquired = runtime.try_claim_coordination(&scopes, owner_token, owner_pid);
+            Ok(serde_json::to_string(&CoordinationClaimResponse {
+                acquired,
+            })?)
+        }
+        "coordination_release" => {
+            let scopes: Vec<String> = serde_json::from_str(
+                request
+                    .state
+                    .as_deref()
+                    .context("coordination_release requires scopes")?,
+            )
+            .context("coordination_release scopes must be a JSON string array")?;
+            let owner_token = request
+                .caller
+                .as_deref()
+                .context("coordination_release requires owner token")?;
+            runtime.release_coordination(&scopes, owner_token);
+            Ok(serde_json::to_string(
+                &serde_json::json!({ "released": true }),
+            )?)
+        }
         "status" => Ok(serde_json::to_string(
             &status::controller_status_from_bootstrap(
                 &controller_bootstrap_status_facts(&bootstrap_snapshot),
@@ -16897,14 +17075,14 @@ mod tests {
     }
 
     #[test]
-    fn connect_or_launch_adopts_controller_published_during_launch_lock_contention() {
+    fn connect_or_launch_adopts_controller_published_during_launch_claim_contention() {
         // #suprecyclelock / #1j8q: a self-recycled supervisor can re-run `start`
-        // while another project-root launcher still owns controller-launch.lock.
+        // while another project-root launcher still owns the bootstrap endpoint.
         // If that holder publishes a healthy controller before the waiter gives
         // up, the waiter must connect to it instead of surfacing os-error-11.
         let dir = tempfile::TempDir::new().unwrap();
         let project_root = dir.path().to_path_buf();
-        let held_lock = LaunchLock::acquire(&project_root).unwrap();
+        let held_claim = LaunchClaim::acquire(&project_root).unwrap();
 
         // `#ctrliotestflake`: this used to race wall-clock. The waiter was given a
         // fixed 150ms lock wait and the publish was timed with a bare 25ms sleep,
@@ -16914,14 +17092,14 @@ mod tests {
         // waiter fails outright. Order the phases explicitly instead: the caller
         // blocks on a lock wait long enough that it never expires, the publish
         // happens only after the caller signals it is about to contend, and
-        // releasing `held_lock` is what lets the waiter through. It then adopts
+        // releasing `held_claim` is what lets the waiter through. It then adopts
         // via the `phase=acquired` marker path rather than the timeout one, with
         // no timing budget to blow.
         let (entering_tx, entering_rx) = std::sync::mpsc::channel::<()>();
         let caller_root = project_root.clone();
         let caller = std::thread::spawn(move || {
             entering_tx.send(()).unwrap();
-            let stream = connect_or_launch_with_lock_wait(
+            let stream = connect_or_launch_with_claim_wait(
                 &caller_root,
                 LaunchMode::Lazy,
                 Duration::from_secs(30),
@@ -16953,7 +17131,7 @@ mod tests {
 
         // Only now may the contended waiter proceed: it waited, so it must adopt
         // the controller published while it was blocked.
-        drop(held_lock);
+        drop(held_claim);
         let result = caller.join().unwrap();
         assert!(
             result.is_ok(),
@@ -16964,12 +17142,12 @@ mod tests {
         let ops_log = std::fs::read_to_string(project_root.join(".agent-doc/logs/ops.log"))
             .unwrap_or_default();
         assert!(
-            ops_log.contains("controller_launch_lock_waiter_adopted_published_controller"),
+            ops_log.contains("controller_launch_claim_waiter_adopted_published_controller"),
             "contended adoption proof marker missing:\n{ops_log}"
         );
         assert!(
             !ops_log.contains("controller launch already in progress"),
-            "the historical launch-lock error must not be logged:\n{ops_log}"
+            "the historical launch-contention error must not be logged:\n{ops_log}"
         );
 
         let shutdown = request_with_reason(&project_root, "shutdown", "test_shutdown").unwrap();
@@ -18319,7 +18497,7 @@ mod tests {
     }
 
     #[test]
-    fn schedule_stale_editor_replica_cp_recycle_marks_doc_for_idle_recycle() {
+    fn schedule_stale_editor_replica_cp_recycle_prefers_reregister_without_recycle() {
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let file = dir.path().join("plan.md");
@@ -18328,21 +18506,21 @@ mod tests {
         let status =
             schedule_stale_editor_replica_cp_recycle(&file, "session_check_terminal_convergence");
         assert!(
-            status.contains("requested project_root="),
-            "schedule status should prove the request was written: {status}"
+            status.contains("request_skipped reason=editor_reregister_primary")
+                && status.contains("editor_replica_reregister=requested"),
+            "editor re-registration should be the primary repair: {status}"
         );
-        let request =
+        assert!(
             agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
-                .expect("stale editor replica request must be durable");
-        assert_eq!(
-            request.reason,
-            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
+                .is_none(),
+            "a successfully published editor repair must not hot-reload a healthy supervisor"
         );
         assert!(!dir.path().join(".agent-doc/crdt-replica-events").exists());
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(
-            ops_log.contains("stale_editor_replica_cp_recycle_requested")
+            ops_log.contains("stale_editor_replica_recovery_requested")
                 && ops_log.contains("source=session_check_terminal_convergence")
+                && ops_log.contains("action=reregister_editor_replica")
                 && ops_log.contains("reason=editor_authority_unavailable_or_diverged"),
             "ops log should record editor authority recovery:\n{ops_log}"
         );

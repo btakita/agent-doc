@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use agent_doc_run_context_io::CycleContext;
@@ -126,6 +127,23 @@ pub fn check_pending_capture_guard(file: &Path, rc: &CycleContext) -> Result<Gua
     )
 }
 
+fn known_ids_for_coined_guard(file: &Path, content: &str) -> Result<BTreeSet<String>> {
+    let components = agent_doc_element::element::parse(content)?;
+    let mut known = BTreeSet::new();
+    for component in components
+        .iter()
+        .filter(|component| component.name != "exchange")
+    {
+        known.extend(agent_doc_turn::coined_ids::extract_tags(
+            component.content(content),
+        ));
+    }
+    known.extend(
+        agent_doc_element_backlog_io::done_archive::external_done_archive_ids(file, content)?,
+    );
+    Ok(known)
+}
+
 /// `#coinedid` — the response invented `#id` tags that no tracked item records.
 ///
 /// The known universe is every component EXCEPT `exchange`: after commit the
@@ -155,22 +173,9 @@ pub fn check_coined_ids_guard(file: &Path, _rc: &CycleContext) -> Result<GuardRe
     let Ok(content) = std::fs::read_to_string(file) else {
         return Ok(GuardResult::None);
     };
-    let Ok(components) = agent_doc_element::element::parse(&content) else {
+    let Ok(known) = known_ids_for_coined_guard(file, &content) else {
         return Ok(GuardResult::None);
     };
-    let mut known = std::collections::BTreeSet::new();
-    // Every component EXCEPT `exchange` counts as tracked state. Allow-listing
-    // component names instead was too narrow: an id tracked in any other state
-    // component read as coined. `exchange` is excluded because after commit the
-    // response lives there, and an id must not be able to vouch for itself.
-    for component in components
-        .iter()
-        .filter(|component| component.name != "exchange")
-    {
-        known.extend(agent_doc_turn::coined_ids::extract_tags(
-            component.content(&content),
-        ));
-    }
     let coined = agent_doc_turn::coined_ids::coined_ids(&response_text, &known);
     Ok(agent_doc_workflow::session_check::coined_ids_guard_result(
         &coined,
@@ -221,4 +226,41 @@ pub fn check_pending_done_guard(file: &Path, rc: &CycleContext) -> Result<GuardR
 
     let file_display = doc.key().display().to_string();
     Ok(agent_doc_workflow::session_check::pending_done_guard_result(&file_display, &missing, mode))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_done_archive_ids_are_known_after_inline_reap() {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(dir.path())
+                .status()
+                .unwrap()
+                .success()
+        );
+        // `external_done_archive_ids` resolves the archive relative to the
+        // nearest `.agent-doc` project root (not a bare git root), so the temp
+        // project needs the marker directory the session doc lives under.
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        let archive = dir.path().join("session.done.md");
+        std::fs::write(&archive, "- [x] [#qeditrace] shipped editor route fix\n").unwrap();
+        let content = concat!(
+            "<!-- agent:exchange -->\n",
+            "### Re: #qeditrace\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:done archive=session.done.md -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&file, content).unwrap();
+
+        let known = known_ids_for_coined_guard(&file, content).unwrap();
+        assert!(known.contains("qeditrace"));
+        assert!(agent_doc_turn::coined_ids::coined_ids("closed #qeditrace", &known).is_empty());
+    }
 }

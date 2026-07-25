@@ -573,7 +573,7 @@ fn stream_loop(
 /// Flush accumulated text to the document via template patch.
 ///
 /// Wraps the text in a patch block targeting the specified component,
-/// applies template patches, and uses advisory locking for safe writes.
+/// applies template patches, and publishes the result through document authority.
 ///
 /// Stream mode uses **replace** mode for the target component regardless of
 /// the component's configured mode (e.g., exchange defaults to append). This is
@@ -619,18 +619,6 @@ pub fn flush_to_document(
     let mut mode_overrides = std::collections::HashMap::new();
     mode_overrides.insert(target.to_string(), "replace".to_string());
 
-    // Acquire lock
-    let lock_path = agent_doc_fs::state_lock_path_for(file)?;
-    if let Some(parent) = lock_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let lock_file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(&lock_path)?;
-    fs2::FileExt::lock_exclusive(&lock_file)?;
-
     // Read current file content
     let content_current = effects
         .current_document_content(file, "stream_flush_to_document")
@@ -650,7 +638,6 @@ pub fn flush_to_document(
     // Write atomically
     effects.atomic_write(file, &content_patched)?;
 
-    drop(lock_file);
     Ok(())
 }
 

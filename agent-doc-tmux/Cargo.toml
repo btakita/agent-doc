@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-tmux"
-version = "0.35.27"
+version = "0.35.28"
 edition = "2024"
 description = "Pure tmux realtime model state for agent-doc"
 license = "MIT"

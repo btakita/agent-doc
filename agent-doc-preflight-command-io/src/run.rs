@@ -592,11 +592,12 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
                         }
                     }
                     // Freshness gate: skip if another session committed this doc
-                    // within the last 5s. Inside the CommitLock critical section
-                    // this is a valid fast-path — a concurrent commit that just
-                    // ran will have advanced HEAD's commit time, so we avoid
-                    // re-spawning git (~10ms) for nothing. The gate only closes
-                    // races when paired with the per-file commit flock in git::commit.
+                    // within the last 5s. This is a valid fast-path — a
+                    // concurrent commit that just ran will have advanced HEAD's
+                    // commit time, so we avoid re-spawning git (~10ms) for
+                    // nothing. The gate only closes races when paired with Git's
+                    // index lock and HEAD update-ref compare-and-swap in
+                    // git::commit (there is no bespoke commit flock; #lazily-hot-path).
                     let fresh = agent_doc_git_io::revision::last_commit_mtime(&doc_path)
                         .ok()
                         .flatten()

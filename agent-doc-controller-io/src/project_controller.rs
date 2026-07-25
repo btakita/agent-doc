@@ -8,7 +8,7 @@ use crate::process::{is_same_project_controller_pid, process_is_alive};
 use agent_doc_controller::dispatch::{
     ControllerDispatchProofScope, ControllerDispatchReceipt, ControllerDispatchResultStatus,
 };
-use agent_doc_controller::paths::{launch_lock_path, socket_path};
+use agent_doc_controller::paths::socket_path;
 use agent_doc_controller::status::{
     self, ControlPlaneStoreCounts as ControllerControlPlaneStoreCounts, ControllerBinaryIdentity,
     ControllerBootstrapStatusFacts, ControllerFreshnessFacts, ControllerFreshnessStatus,
@@ -20,9 +20,9 @@ use agent_doc_controller::status::{
 use agent_doc_sqlite::state_store;
 use agent_doc_turn_executor::binary::current_agent_doc_binary;
 use anyhow::{Context, Result};
-use fs2::FileExt;
 use interprocess::local_socket::{
-    GenericFilePath, ListenerNonblockingMode, ListenerOptions, ToFsName,
+    GenericFilePath, GenericNamespaced, ListenerNonblockingMode, ListenerOptions, ToFsName,
+    ToNsName,
     traits::{Listener as _, Stream as _},
 };
 use lazily::{Source, ThreadSafeContext, ThreadSafeSignalHandle};
@@ -50,7 +50,6 @@ use state_store::{
 #[cfg(test)]
 use state_store::{ProjectionDiagnosticInsert, insert_projection_diagnostic_with_metadata};
 use std::collections::BTreeMap;
-use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -71,15 +70,15 @@ const LAUNCH_CONNECT_WAIT: Duration = Duration::from_millis(500);
 #[allow(dead_code)]
 const HANDOFF_CONNECT_WAIT: Duration = Duration::from_secs(30);
 const CONNECT_POLL: Duration = Duration::from_millis(50);
-/// How long a contended launch waits for the current holder to finish before
-/// giving up. Sized above `LAUNCH_CONNECT_WAIT` so a waiter outlasts the holder's
+/// How long a contended launch waits for the current bootstrap claimant to
+/// finish before giving up. Sized above `LAUNCH_CONNECT_WAIT` so a waiter outlasts the claimant's
 /// full `launch_detached` + `wait_for_controller_after_launch` window and can adopt the
 /// controller the holder published instead of failing the start (#suprecyclelock).
 #[cfg(not(any(test, feature = "test-support")))]
-const LAUNCH_LOCK_WAIT: Duration = Duration::from_secs(50);
+const LAUNCH_CLAIM_WAIT: Duration = Duration::from_secs(50);
 #[cfg(any(test, feature = "test-support"))]
-const LAUNCH_LOCK_WAIT: Duration = Duration::from_secs(1);
-const LAUNCH_LOCK_POLL: Duration = Duration::from_millis(50);
+const LAUNCH_CLAIM_WAIT: Duration = Duration::from_secs(1);
+const LAUNCH_CLAIM_POLL: Duration = Duration::from_millis(50);
 #[cfg(not(any(test, feature = "test-support")))]
 const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(any(test, feature = "test-support"))]
@@ -492,6 +491,7 @@ impl ControllerMemoryState {
 pub(crate) struct ControllerRuntime {
     bootstrap: Mutex<ControllerBootstrap>,
     memory: Mutex<ControllerMemoryState>,
+    coordination_graph: ControllerCoordinationGraph,
     supervisor_recycle_graph: ControllerSupervisorRecycleGraph,
     supervisor_recycle_waiters: Condvar,
     /// `#ctlrecycle` R2 — set true by the `recycle` RPC (`agent-doc admin recycle`).
@@ -522,6 +522,7 @@ impl ControllerRuntime {
         Ok(Self {
             bootstrap: Mutex::new(bootstrap),
             memory: Mutex::new(memory),
+            coordination_graph: ControllerCoordinationGraph::new(),
             supervisor_recycle_graph,
             supervisor_recycle_waiters: Condvar::new(),
             recycle_requested: AtomicBool::new(false),
@@ -563,6 +564,20 @@ impl ControllerRuntime {
 
     fn actor_store_snapshot(&self) -> BTreeMap<String, agent_doc_sqlite::state_store::ActorRecord> {
         self.memory.lock().actor_store.clone()
+    }
+
+    fn try_claim_coordination(
+        &self,
+        scopes: &[String],
+        owner_token: &str,
+        owner_pid: u32,
+    ) -> bool {
+        self.coordination_graph
+            .try_claim(scopes, owner_token, owner_pid)
+    }
+
+    fn release_coordination(&self, scopes: &[String], owner_token: &str) {
+        self.coordination_graph.release(scopes, owner_token);
     }
 
     fn refresh_memory(&self) -> Result<()> {
@@ -654,6 +669,7 @@ impl ControllerRuntime {
         let memory = self.memory.lock();
         Ok(agent_doc_controller::status::status_categories([
             ("actor_records", memory.actor_store.len()),
+            ("coordination_claims", self.coordination_graph.claim_count()),
             (
                 "state_backbone_documents",
                 memory.state_projection.documents.len(),
@@ -664,6 +680,76 @@ impl ControllerRuntime {
             ),
             ("write_through_sqlite", 1),
         ]))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CoordinationOwner {
+    token: String,
+    pid: u32,
+}
+
+/// Ephemeral controller-owned coordination state.
+///
+/// Claims are live process facts: they are held in Lazily state and disappear
+/// when explicitly released or when the owning process is no longer alive.
+/// SQLite remains a durable effect sink and is intentionally absent here.
+struct ControllerCoordinationGraph {
+    ctx: ThreadSafeContext,
+    claims: Source<BTreeMap<String, CoordinationOwner>>,
+    mutation: Mutex<()>,
+}
+
+impl ControllerCoordinationGraph {
+    fn new() -> Self {
+        let ctx = ThreadSafeContext::new();
+        let claims = ctx.source(BTreeMap::new());
+        Self {
+            ctx,
+            claims,
+            mutation: Mutex::new(()),
+        }
+    }
+
+    fn try_claim(&self, scopes: &[String], owner_token: &str, owner_pid: u32) -> bool {
+        let _mutation = self.mutation.lock();
+        let mut claims = self.ctx.get(&self.claims);
+        claims.retain(|_, owner| process_is_alive(owner.pid));
+        if scopes.iter().any(|scope| {
+            claims
+                .get(scope)
+                .is_some_and(|owner| owner.token != owner_token)
+        }) {
+            self.ctx.set(&self.claims, claims);
+            return false;
+        }
+        let owner = CoordinationOwner {
+            token: owner_token.to_string(),
+            pid: owner_pid,
+        };
+        for scope in scopes {
+            claims.insert(scope.clone(), owner.clone());
+        }
+        self.ctx.set(&self.claims, claims);
+        true
+    }
+
+    fn release(&self, scopes: &[String], owner_token: &str) {
+        let _mutation = self.mutation.lock();
+        let mut claims = self.ctx.get(&self.claims);
+        for scope in scopes {
+            if claims
+                .get(scope)
+                .is_some_and(|owner| owner.token == owner_token)
+            {
+                claims.remove(scope);
+            }
+        }
+        self.ctx.set(&self.claims, claims);
+    }
+
+    fn claim_count(&self) -> usize {
+        self.ctx.get(&self.claims).len()
     }
 }
 
@@ -1172,20 +1258,21 @@ struct ControllerEnvelope<T> {
     error: Option<String>,
 }
 
-pub struct LaunchLock {
-    _file: File,
+pub struct LaunchClaim {
+    _listener: interprocess::local_socket::Listener,
     waited: bool,
 }
 
-impl LaunchLock {
-    /// Non-blocking acquire: fails immediately if another launch holds the lock.
+impl LaunchClaim {
+    /// Non-blocking acquire: fails immediately if another launch owns the
+    /// process-lifetime bootstrap endpoint.
     pub fn acquire(project_root: &Path) -> Result<Self> {
         Self::acquire_inner(project_root, None)
     }
 
-    /// Bounded blocking acquire. Launch-lock contention is **not** a hard error:
+    /// Bounded blocking acquire. Bootstrap-claim contention is **not** a hard error:
     /// it means another agent-doc process (a concurrent `start`, a sibling
-    /// document's controller launch on the same project-root lock, or a
+    /// document's controller launch for the same project root, or a
     /// freshly-`execve`'d self-recycle racing its predecessor) is mid-launch.
     /// Failing fast turned that benign race into a `start` failure that surfaced
     /// `controller launch already in progress ... (os error 11)` on the pane —
@@ -1203,50 +1290,47 @@ impl LaunchLock {
     }
 
     fn acquire_inner(project_root: &Path, timeout: Option<Duration>) -> Result<Self> {
-        let path = launch_lock_path(project_root);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(&path)
-            .with_context(|| format!("failed to open {}", path.display()))?;
+        let canonical_root = project_root
+            .canonicalize()
+            .unwrap_or_else(|_| project_root.to_path_buf());
+        let root_key = agent_doc_hash::path_string_hash(canonical_root.to_string_lossy().as_ref());
+        let claim_name = format!("agent-doc-controller-launch-{root_key}");
         let deadline = timeout.map(|t| Instant::now() + t);
         let mut waited = false;
         loop {
-            match file.try_lock_exclusive() {
-                Ok(()) => {
+            let name = claim_name
+                .as_str()
+                .to_ns_name::<GenericNamespaced>()
+                .context("failed to map controller bootstrap claim name")?;
+            match ListenerOptions::new().name(name).create_sync() {
+                Ok(listener) => {
                     return Ok(Self {
-                        _file: file,
+                        _listener: listener,
                         waited,
                     });
                 }
                 Err(err) => {
-                    let contended = err.kind() == std::io::ErrorKind::WouldBlock;
+                    let contended = matches!(
+                        err.kind(),
+                        std::io::ErrorKind::AddrInUse | std::io::ErrorKind::WouldBlock
+                    );
                     match deadline {
                         Some(deadline) if contended && Instant::now() < deadline => {
                             waited = true;
-                            std::thread::sleep(LAUNCH_LOCK_POLL);
+                            std::thread::sleep(LAUNCH_CLAIM_POLL);
                             continue;
                         }
                         _ => {
                             return Err(err).with_context(|| {
-                                format!("controller launch already in progress: {}", path.display())
+                                format!(
+                                    "controller launch already in progress for bootstrap claim {claim_name}"
+                                )
                             });
                         }
                     }
                 }
             }
         }
-    }
-}
-
-impl Drop for LaunchLock {
-    fn drop(&mut self) {
-        let _ = self._file.unlock();
     }
 }
 
@@ -2677,10 +2761,6 @@ mod tests {
             socket_path(dir.path()),
             dir.path().join(".agent-doc/controller.sock")
         );
-        assert_eq!(
-            launch_lock_path(dir.path()),
-            dir.path().join(".agent-doc/locks/controller-launch.lock")
-        );
     }
 
     #[test]
@@ -3254,18 +3334,18 @@ mod tests {
         assert!(!dir.path().join(".agent-doc/last_layout.json").exists());
     }
     #[test]
-    fn singleton_launch_lock_rejects_concurrent_holder() {
+    fn singleton_launch_claim_rejects_concurrent_holder() {
         let dir = tempfile::TempDir::new().unwrap();
-        let first = LaunchLock::acquire(dir.path()).unwrap();
-        let second = LaunchLock::acquire(dir.path());
+        let first = LaunchClaim::acquire(dir.path()).unwrap();
+        let second = LaunchClaim::acquire(dir.path());
         assert!(second.is_err());
         drop(first);
-        assert!(LaunchLock::acquire(dir.path()).is_ok());
+        assert!(LaunchClaim::acquire(dir.path()).is_ok());
     }
     #[test]
-    fn blocking_launch_lock_waits_for_holder_then_acquires() {
+    fn blocking_launch_claim_waits_for_holder_then_acquires() {
         let dir = tempfile::TempDir::new().unwrap();
-        let first = LaunchLock::acquire(dir.path()).unwrap();
+        let first = LaunchClaim::acquire(dir.path()).unwrap();
         let root = dir.path().to_path_buf();
         let releaser = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(150));
@@ -3273,7 +3353,7 @@ mod tests {
         });
         // Times out far enough above the holder's release that contention resolves
         // into a successful acquire rather than an error.
-        let acquired = LaunchLock::acquire_blocking(dir.path(), Duration::from_secs(2));
+        let acquired = LaunchClaim::acquire_blocking(dir.path(), Duration::from_secs(2));
         assert!(
             acquired.is_ok(),
             "blocking acquire should wait out the holder"
@@ -3282,10 +3362,10 @@ mod tests {
         let _ = root;
     }
     #[test]
-    fn blocking_launch_lock_times_out_when_holder_never_releases() {
+    fn blocking_launch_claim_times_out_when_holder_never_releases() {
         let dir = tempfile::TempDir::new().unwrap();
-        let _held = LaunchLock::acquire(dir.path()).unwrap();
-        let acquired = LaunchLock::acquire_blocking(dir.path(), Duration::from_millis(100));
+        let _held = LaunchClaim::acquire(dir.path()).unwrap();
+        let acquired = LaunchClaim::acquire_blocking(dir.path(), Duration::from_millis(100));
         assert!(acquired.is_err(), "a wedged holder must time out");
     }
     #[test]
@@ -6372,6 +6452,7 @@ agent:queue\n\
                 map_backend: "std_btree_map",
             }),
             supervisor_recycle_graph,
+            coordination_graph: ControllerCoordinationGraph::new(),
             supervisor_recycle_waiters: Condvar::new(),
             recycle_requested: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),

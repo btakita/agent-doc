@@ -4,18 +4,25 @@ use crate::command::{self, RouteCommandEffects, RouteMode};
 use anyhow::Result;
 use std::cell::Cell;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tmux_router::Tmux;
 
 thread_local! {
-    /// Per-invocation override for bounded authoritative-actor ready waits.
-    static WAIT_FOR_READY_OVERRIDE: Cell<Option<Duration>> = const { Cell::new(None) };
+    /// Absolute per-invocation deadline shared by every route readiness phase.
+    ///
+    /// A relative duration here let pane resolution, startup recovery, and the
+    /// dispatch-only probe each spend the full editor budget independently.
+    /// Store one deadline so later phases receive only the remaining allowance.
+    static WAIT_FOR_READY_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
     /// Per-invocation flag forcing route-owned document mutations to disk.
     static FORCE_DISK_ROUTE_WRITES: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn wait_for_ready_override() -> Option<Duration> {
-    WAIT_FOR_READY_OVERRIDE.with(|cell| cell.get())
+    WAIT_FOR_READY_DEADLINE.with(|cell| {
+        cell.get()
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+    })
 }
 
 pub fn force_disk_route_writes() -> bool {
@@ -23,12 +30,13 @@ pub fn force_disk_route_writes() -> bool {
 }
 
 pub struct WaitForReadyOverrideGuard {
-    previous: Option<Duration>,
+    previous: Option<Instant>,
 }
 
 impl WaitForReadyOverrideGuard {
     pub fn set(value: Option<Duration>) -> Self {
-        let previous = WAIT_FOR_READY_OVERRIDE.with(|cell| cell.replace(value));
+        let deadline = value.and_then(|duration| Instant::now().checked_add(duration));
+        let previous = WAIT_FOR_READY_DEADLINE.with(|cell| cell.replace(deadline));
         Self { previous }
     }
 }
@@ -36,7 +44,7 @@ impl WaitForReadyOverrideGuard {
 impl Drop for WaitForReadyOverrideGuard {
     fn drop(&mut self) {
         let previous = self.previous;
-        WAIT_FOR_READY_OVERRIDE.with(|cell| cell.set(previous));
+        WAIT_FOR_READY_DEADLINE.with(|cell| cell.set(previous));
     }
 }
 

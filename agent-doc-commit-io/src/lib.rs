@@ -18,9 +18,7 @@ use agent_doc_git::{
 };
 use agent_doc_git_io::{
     dirs::{narrow_to_submodule, resolve_to_git_root},
-    transaction::{
-        CommitLock, CommitTransactionError, stage_and_commit_once, update_parent_submodule_pointer,
-    },
+    transaction::{CommitTransactionError, stage_and_commit_once, update_parent_submodule_pointer},
 };
 use agent_doc_queue_io::queue_consume;
 use anyhow::{Context, Result};
@@ -948,8 +946,8 @@ where
     }
     // `#jb-compact-commit-left-uncommitted`: under an authoritative-compaction
     // commit the snapshot loaded above IS the freshly re-asserted compacted
-    // content (`commit_compacted_authoritative` re-saved it inside the commit-lock
-    // window). It legitimately differs from HEAD — dropping the archived `### Re:`
+    // content (`commit_compacted_authoritative` re-saved it before the Git-native
+    // commit transaction). It legitimately differs from HEAD — dropping the archived `### Re:`
     // turns is the whole point of the commit — so the committed-historical drift
     // repair must NOT run here. It would classify the compacted snapshot as stale
     // exchange drift and revert it back to the pre-compact HEAD (observed live:
@@ -1522,7 +1520,6 @@ where
     let t_commit = std::time::Instant::now();
     let mut commit_attempts = 0u32;
     let commit_output = {
-        let _commit_lock = CommitLock::acquire(&git_root);
         loop {
             let t_staging = std::time::Instant::now();
             match stage_and_commit_once(&git_root, &resolved, snapshot_content.as_deref(), &msg) {

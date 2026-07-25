@@ -274,17 +274,17 @@ fn ensure_terminal_authority_disk_convergence(
         )?;
         return Ok(());
     }
-    let recycle_status =
+    let recovery_status =
         agent_doc_controller_io::project_controller::schedule_stale_editor_replica_cp_recycle(
             file,
             "session_check_terminal_convergence",
         );
     anyhow::bail!(
-        "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); refusing a false successful closeout. Automatic supervisor recycle status: {}. Replica re-registration and projection settlement are scheduled automatically; `session-check` is status-only. Do not rerun `finalize`, run `write --commit`, repair, or force-disk the response.",
+        "[session-check] INTERRUPTED: canonical editor authority and disk projection diverge for {} (authority_hash={}, disk_hash={}); refusing a false successful closeout. Automatic editor recovery status: {}. Replica re-registration and projection settlement are scheduled automatically; supervisor recycle is fallback-only when the targeted event cannot be published. `session-check` is status-only. Do not rerun `finalize`, run `write --commit`, repair, or force-disk the response.",
         file.display(),
         agent_doc_hash::content_hash(authority_content),
         agent_doc_hash::content_hash(disk_content),
-        recycle_status,
+        recovery_status,
     );
 }
 
@@ -2107,12 +2107,14 @@ mod terminal_convergence_tests {
         assert!(message.contains("scheduled automatically"));
         assert!(message.contains("`session-check` is status-only"));
         assert!(message.contains("Do not rerun `finalize`"));
-        let request =
+        assert!(
+            message.contains("supervisor recycle is fallback-only"),
+            "{message}"
+        );
+        assert!(
             agent_doc_supervisor_io::recycle_request::read_recycle_request(&file.to_string_lossy())
-                .expect("session-check divergence must request supervisor recovery");
-        assert_eq!(
-            request.reason,
-            agent_doc_supervisor::recycle_request::RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE,
+                .is_none(),
+            "session-check divergence must prefer targeted editor recovery",
         );
     }
 

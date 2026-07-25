@@ -711,11 +711,17 @@ fn load_document_projection(
                 }
                 return Ok(envelope.data);
             }
-            Err(agent_doc_state_wire::ActorRequestError::Connect(_)) => {
+            Err(agent_doc_state_wire::ActorRequestError::Connect(_))
+            | Err(agent_doc_state_wire::ActorRequestError::Timeout(_)) => {
                 // The socket file may be stale (controller exited/crashed) or
-                // absent (cold start). Fall back to `state.db` rather than
-                // erroring — a read must not fail just because the live
-                // controller is momentarily unreachable.
+                // absent (cold start), or the live controller accepted the
+                // connection but did not answer this read within the timeout
+                // (a wedged/overloaded actor surfaces `EAGAIN` — "Resource
+                // temporarily unavailable"). All are momentary unreachability:
+                // fall back to `state.db` rather than erroring — a read must not
+                // fail just because the live controller is slow or momentarily
+                // unreachable. (Hot-path *writes*/commands below still fail
+                // closed on `Timeout` via their catch-all arm.)
             }
             Err(err) => {
                 return Err(err)

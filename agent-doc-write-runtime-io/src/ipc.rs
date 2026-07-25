@@ -2074,7 +2074,6 @@ do #verfpfx. spec-test-build-install-commit-push
 mod core_tests {
     #![allow(unused_imports)]
     use super::*;
-    use fs2::FileExt;
     use std::fs;
     use std::fs::OpenOptions;
     use std::time::Duration;

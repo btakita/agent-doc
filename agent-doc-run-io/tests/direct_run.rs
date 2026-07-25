@@ -50,16 +50,13 @@
 //!   post-write commit so interrupted runs can be resumed from the exact
 //!   already-written response instead of looking like generic `response_captured`
 //!   drift.
-//! - Acquires an advisory `flock` on a per-document lock file before writing so
-//!   concurrent `agent-doc run` / watch-daemon invocations are serialized.
-//! - Re-reads the file under lock; if the user edited concurrently, performs a
-//!   3-way merge for append/merge docs or a CRDT merge for template+CRDT docs.
+//! - Submits document writes through the document authority. If the user edited
+//!   concurrently, the authority performs a 3-way merge for append/merge docs
+//!   or a CRDT merge for template+CRDT docs.
 //! - Tries IPC write to the IDE plugin first; on IPC miss, falls back to
 //!   `atomic_write` (temp file + POSIX rename) and saves a snapshot.
 //! - In git-backed runs, refuses success unless the post-write commit closes
 //!   the cycle in `committed`.
-//! - `acquire_doc_lock(path)`: opens/creates `.agent-doc/locks/<hash>.lock` and
-//!   acquires an exclusive `flock`; returned `File` releases the lock on drop.
 //! - `atomic_write(path, content)`: writes to a sibling temp file and renames
 //!   atomically, eliminating partial-write windows.
 //!
@@ -71,8 +68,6 @@
 //!   response write.
 //! - Git operations (branch creation, pre-commit) are skipped entirely when
 //!   `no_git=true`; the agent call and write still proceed normally.
-//! - The advisory flock serializes only agent-doc processes; editors bypass it.
-//!   Readers of the document file must not rely on the lock for read safety.
 //! - `atomic_write` is safe for concurrent callers on the same path; one write
 //!   wins and the file is never in a partially-written state.
 //! - Append-mode responses strip any echoed `## Assistant` heading before
@@ -88,21 +83,13 @@
 //! - `run_marks_write_applied_before_post_write_commit`: once the final
 //!   response is written (and any `resume` update lands), the cycle state is
 //!   advanced to `write_applied` before the post-write commit attempt.
-//! - `acquire_doc_lock_succeeds`: lock file created and exclusive lock acquired
-//!   on a fresh document path → `Ok(File)`.
-//! - `doc_lock_released_on_drop`: after dropping the lock handle, a second
-//!   `acquire_doc_lock` on the same path succeeds immediately.
 //! - `atomic_write_correct_content`: written content is exactly the input string.
 //! - `atomic_write_overwrites_existing`: writing to an existing file replaces
 //!   content atomically.
 //! - `concurrent_atomic_writes_no_corruption`: 20 concurrent writers → final
 //!   file is exactly one valid write; no partial or interleaved content.
 //! - `parallel_different_files_no_interference`: two concurrent cycles on
-//!   different files complete without lock contention or cross-contamination.
-//! - `same_file_serialized_by_flock`: two concurrent cycles on the same file
-//!   are serialized; both writes land with no corruption.
-//! - `flock_prevents_partial_read_during_write`: a reader blocked on the same
-//!   lock sees the completed write, not a partial state.
+//!   different files complete without authority contention or cross-contamination.
 //! - `merge_clean_no_conflicts`: agent response appended as "ours" + user
 //!   unchanged as "theirs" → clean 3-way merge containing the response.
 //! - `build_prompt_resume_lists_required_response_targets`: resumed prompt with
@@ -112,7 +99,7 @@
 use agent_doc_frontmatter::frontmatter;
 #[cfg(test)]
 use agent_doc_run_io::{
-    ActiveQueuePromptState, AutoQueueContinuation, RunCycleOutcome, RunMode, acquire_doc_lock,
+    ActiveQueuePromptState, AutoQueueContinuation, RunCycleOutcome, RunMode,
     active_queue_prompt_diff, active_queue_prompt_state, apply_template_response, build_prompt,
     direct_run_atomic_write, normalize_direct_run_prompt_prefixes, prompt_cache_routing_affinity,
     repair_document_frontmatter_on_disk, run_stderr_redirect_harness, should_continue_auto_queue,
@@ -1247,28 +1234,6 @@ old status\n\
     }
 
     #[test]
-    fn acquire_doc_lock_succeeds() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        std::fs::write(&doc, "content").unwrap();
-        let lock = acquire_doc_lock(&doc);
-        assert!(lock.is_ok());
-    }
-
-    #[test]
-    fn doc_lock_released_on_drop() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("test.md");
-        std::fs::write(&doc, "content").unwrap();
-        {
-            let _lock = acquire_doc_lock(&doc).unwrap();
-        }
-        // After drop, second acquire should succeed
-        let lock2 = acquire_doc_lock(&doc);
-        assert!(lock2.is_ok());
-    }
-
-    #[test]
     fn atomic_write_correct_content() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("atomic.md");
@@ -1395,7 +1360,7 @@ old status\n\
     // -----------------------------------------------------------------------
 
     /// Simulate two document cycles on different files running in parallel.
-    /// Both should complete without interference — no shared lock contention.
+    /// Both should complete without interference — no shared authority contention.
     #[test]
     fn parallel_different_files_no_interference() {
         let dir = TempDir::new().unwrap();
@@ -1409,8 +1374,7 @@ old status\n\
         let bar_a = Arc::clone(&barrier);
         let path_a = doc_a.clone();
         let ha = std::thread::spawn(move || {
-            let _lock = acquire_doc_lock(&path_a).unwrap();
-            bar_a.wait(); // both threads hold their own lock simultaneously
+            bar_a.wait();
             // Simulate read-modify-write cycle
             let content = std::fs::read_to_string(&path_a).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1425,8 +1389,7 @@ old status\n\
         let bar_b = Arc::clone(&barrier);
         let path_b = doc_b.clone();
         let hb = std::thread::spawn(move || {
-            let _lock = acquire_doc_lock(&path_b).unwrap();
-            bar_b.wait(); // both threads hold their own lock simultaneously
+            bar_b.wait();
             let content = std::fs::read_to_string(&path_b).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(10));
             direct_run_atomic_write(
@@ -1446,93 +1409,6 @@ old status\n\
         assert!(b.contains("Response B"), "Doc B missing response: {}", b);
         assert!(!a.contains("Response B"), "Doc A has B's response");
         assert!(!b.contains("Response A"), "Doc B has A's response");
-    }
-
-    /// Simulate two document cycles on the SAME file running concurrently.
-    /// flock serializes them — both writes land, no corruption.
-    #[test]
-    fn same_file_serialized_by_flock() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("shared.md");
-        std::fs::write(&doc, "# Shared Doc\n").unwrap();
-
-        let barrier = Arc::new(Barrier::new(2));
-        let mut handles = Vec::new();
-
-        for i in 0..2 {
-            let path = doc.clone();
-            let bar = Arc::clone(&barrier);
-            handles.push(std::thread::spawn(move || {
-                bar.wait(); // both start at the same time
-                let lock = acquire_doc_lock(&path).unwrap();
-                // Critical section: read, modify, write
-                let content = std::fs::read_to_string(&path).unwrap();
-                let updated = format!("{}writer-{}\n", content, i);
-                std::thread::sleep(std::time::Duration::from_millis(5));
-                direct_run_atomic_write(
-                    &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
-                    &path,
-                    &updated,
-                )
-                .unwrap();
-                drop(lock);
-            }));
-        }
-
-        for h in handles {
-            h.join().unwrap();
-        }
-
-        let final_content = std::fs::read_to_string(&doc).unwrap();
-        // Both writers should have appended (serialized by flock)
-        assert!(
-            final_content.contains("writer-0") && final_content.contains("writer-1"),
-            "Both writes should land (flock serializes): {}",
-            final_content
-        );
-    }
-
-    /// Verify that a locked document cycle prevents concurrent reads of
-    /// partial state — the second reader waits for the lock to be released.
-    #[test]
-    fn flock_prevents_partial_read_during_write() {
-        let dir = TempDir::new().unwrap();
-        let doc = dir.path().join("partial.md");
-        std::fs::write(&doc, "before").unwrap();
-
-        let path_w = doc.clone();
-        let path_r = doc.clone();
-        let (locked_tx, locked_rx) = std::sync::mpsc::channel();
-
-        // Writer: acquire lock, pause, then write
-        let writer = std::thread::spawn(move || {
-            let lock = acquire_doc_lock(&path_w).unwrap();
-            locked_tx.send(()).unwrap();
-            // Hold lock while "processing"
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            direct_run_atomic_write(
-                &agent_doc_run_runtime_io::DIRECT_RUN_EFFECTS,
-                &path_w,
-                "after",
-            )
-            .unwrap();
-            drop(lock);
-        });
-
-        // Reader: wait until writer definitely holds the lock, then block until release.
-        locked_rx.recv().unwrap();
-        let reader = std::thread::spawn(move || {
-            let _lock = acquire_doc_lock(&path_r).unwrap();
-            // By the time we get the lock, writer has finished
-            std::fs::read_to_string(&path_r).unwrap()
-        });
-
-        writer.join().unwrap();
-        let read_content = reader.join().unwrap();
-        assert_eq!(
-            read_content, "after",
-            "Reader should see completed write, not partial state"
-        );
     }
 
     #[test]

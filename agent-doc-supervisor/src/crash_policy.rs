@@ -115,11 +115,7 @@ pub enum SupervisorCleanExitResolution {
 /// Decide whether a clean child exit should prompt or restart in continue mode.
 pub fn supervisor_clean_exit_resolution(
     harness_restarts_on_clean_exit: bool,
-    route_owned: bool,
 ) -> SupervisorCleanExitResolution {
-    if route_owned {
-        return SupervisorCleanExitResolution::PromptUser;
-    }
     if harness_restarts_on_clean_exit {
         SupervisorCleanExitResolution::RestartContinue
     } else {
@@ -573,7 +569,7 @@ mod tests {
     #[test]
     fn clean_exit_resolution_prompts_when_harness_requires_user() {
         assert_eq!(
-            supervisor_clean_exit_resolution(false, false),
+            supervisor_clean_exit_resolution(false),
             SupervisorCleanExitResolution::PromptUser
         );
     }
@@ -581,17 +577,17 @@ mod tests {
     #[test]
     fn clean_exit_resolution_auto_restarts_for_resume_harnesses() {
         assert_eq!(
-            supervisor_clean_exit_resolution(true, false),
+            supervisor_clean_exit_resolution(true),
             SupervisorCleanExitResolution::RestartContinue
         );
     }
 
     #[test]
-    fn route_owned_clean_exit_prompts_instead_of_auto_restarting() {
+    fn route_owned_launch_origin_does_not_override_resume_harness_policy() {
         assert_eq!(
-            supervisor_clean_exit_resolution(true, true),
-            SupervisorCleanExitResolution::PromptUser,
-            "route-owned tmux autostart panes must not immediately restart a cleanly exited child"
+            supervisor_clean_exit_resolution(true),
+            SupervisorCleanExitResolution::RestartContinue,
+            "launch origin must not turn a managed /clear exit into a detached prompt"
         );
     }
 

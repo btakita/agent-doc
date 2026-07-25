@@ -1616,13 +1616,10 @@ pub fn run_with_reap_policy_and_resume(
 
         match action {
             RestartAction::PromptUser => {
-                match supervisor_clean_exit_resolution(
-                    matches!(
-                        harness.clean_exit_behavior,
-                        agent_doc_harness::CleanExitBehavior::RestartContinue
-                    ),
-                    route_owned,
-                ) {
+                match supervisor_clean_exit_resolution(matches!(
+                    harness.clean_exit_behavior,
+                    agent_doc_harness::CleanExitBehavior::RestartContinue
+                )) {
                     SupervisorCleanExitResolution::PromptUser => {
                         shared.transition_actor_state(
                             agent_doc_sqlite::state_store::ActorState::WaitingInput,

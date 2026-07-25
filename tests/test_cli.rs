@@ -10383,7 +10383,6 @@ fn test_agent_doc_run_io_owns_direct_run_prompt_and_queue_graph() {
         "pub fn normalize_direct_run_prompt_prefixes",
         "pub fn normalize_direct_run_template_content",
         "pub fn update_resume_id",
-        "pub fn acquire_doc_lock",
         "pub fn direct_run_atomic_write",
         "pub fn compute_run_diff",
         "pub fn active_queue_prompt_diff",
@@ -15580,12 +15579,7 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
         !orchestration_lib.contains("pub mod project_controller;"),
         "orchestration must not expose a project_controller root facade"
     );
-    for required in [
-        "pub const SOCKET_FILE",
-        "pub const LOCK_FILE",
-        "pub fn socket_path(",
-        "pub fn launch_lock_path(",
-    ] {
+    for required in ["pub const SOCKET_FILE", "pub fn socket_path("] {
         assert!(
             controller_paths.contains(required),
             "agent-doc-controller paths must own project controller path policy: {required}"
@@ -15600,12 +15594,10 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
         "const STATE_FILE",
         "const ACTOR_PROJECTION_FILE",
         "const LAYOUT_PROJECTION_FILE",
-        "const LOCK_FILE",
         "pub fn socket_path(",
         "pub fn state_path(",
         "fn actor_projection_path(",
         "fn layout_projection_path(",
-        "pub fn launch_lock_path(",
         "fn sessions_projection_entry(",
     ] {
         assert!(
@@ -15614,7 +15606,7 @@ fn test_agent_doc_controller_owns_project_controller_paths() {
         );
     }
     assert!(
-        project_controller.contains("use agent_doc_controller::paths::{"),
+        project_controller.contains("use agent_doc_controller::paths::socket_path;"),
         "project_controller.rs should call focused controller path policy directly"
     );
 }
@@ -24348,9 +24340,8 @@ fn test_agent_doc_ipc_protocol_owns_receipt_classification() {
     assert!(
         !route_source.contains("agent_doc_fs::find_project_root(")
             && !route_queue_dispatch_source.contains("agent_doc_fs::find_project_root(")
-            && route_queue_dispatch_source
-                .contains("agent_doc_project_root_io::project_root_containing("),
-        "route queue IO should call focused project-root IO instead of owning route-queue root discovery"
+            && !route_queue_dispatch_source.contains("acquire_route_queue_lock"),
+        "route queue IO must not own broad project-root discovery or a bespoke route-queue flock (#lazily-hot-path); CRDT merge retries serialize concurrent route-queue writes"
     );
     let route_startup_source =
         fs::read_to_string(manifest_dir.join("agent-doc-route-io/src/startup.rs")).unwrap();
@@ -25300,7 +25291,6 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_and_cold_recovery() {
     let snapshot_io =
         fs::read_to_string(manifest_dir.join("agent-doc-snapshot-io/src/lib.rs")).unwrap();
     for required in [
-        "pub struct SnapshotLock",
         "pub struct SnapshotStateMigrationReport",
         "pub enum SnapshotStateMigrationEvent",
         "pub fn load_document_baseline(",
@@ -25320,7 +25310,6 @@ fn test_agent_doc_snapshot_io_owns_durable_baselines_and_cold_recovery() {
         "pub fn checkpoint_crdt_recovery_projection(",
         "pub fn clear_crdt_recovery_projection(",
         "agent_doc_secret_redact::redact(content)",
-        "agent_doc_fs::snapshot_flock_path_for(doc)?",
         "StateFact::UndoCheckpointed",
         "StateFact::CrdtRecoveryProjectionCheckpointed",
         "StateFact::CrdtRecoveryProjectionCleared",
@@ -25576,15 +25565,24 @@ fn test_agent_doc_commit_io_marks_capture_committed_from_resolved_current_conten
             ),
         "commit must fail explicitly when current-document resolution fails; it must not treat a controller timeout as an empty visible document"
     );
+    // `#lazily-hot-path`: document closeout no longer takes a bespoke `flock`
+    // commit lock. Commit serialization relies on git's own `index.lock` retries
+    // (the hard safety net) instead of a repo-scoped `CommitLock`, so the lock
+    // type must be gone entirely and current-document content must still resolve
+    // before the git stage/commit transaction.
+    assert!(
+        !commit_source.contains("CommitLock"),
+        "commit closeout must not use a bespoke flock commit lock (#lazily-hot-path: flock is never used for document closeout)"
+    );
     let initial_current_idx = commit_source
         .find("commit_current_document_content(file, \"commit_initial_current\")")
         .expect("commit should resolve initial current document content");
-    let commit_lock_idx = commit_source
-        .find("let _commit_lock = CommitLock::acquire(&git_root);")
-        .expect("commit should acquire a commit lock around git stage/commit");
+    let stage_commit_idx = commit_source
+        .find("match stage_and_commit_once(&git_root, &resolved, snapshot_content.as_deref(), &msg)")
+        .expect("commit should run a git stage/commit transaction");
     assert!(
-        initial_current_idx < commit_lock_idx,
-        "commit must not hold the repo commit lock while resolving controller/current-document content"
+        initial_current_idx < stage_commit_idx,
+        "commit must resolve controller/current-document content before entering the git stage/commit transaction"
     );
     let impl_start = commit_source
         .find("impl agent_doc_git_io::post_commit_cleanup::PostCommitCleanupEffects")
@@ -26585,7 +26583,6 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
     let git_transaction_source =
         fs::read_to_string(manifest_dir.join("agent-doc-git-io/src/transaction.rs")).unwrap();
     for required in [
-        "pub struct CommitLock",
         "pub fn update_parent_submodule_pointer(",
         "pub enum CommitTransactionError",
         "pub fn stage_and_commit_once(",
@@ -26602,10 +26599,10 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         );
     }
     assert!(
-        !git_transaction_source.contains("file.lock_exclusive()")
-            && git_transaction_source.contains("repo commit-lock contended")
-            && git_transaction_source.contains("(proceeding unlocked)"),
-        "commit advisory lock contention must not block route/preflight; git index-lock retries are the hard safety net"
+        !git_transaction_source.contains("struct CommitLock")
+            && !git_transaction_source.contains("try_lock_exclusive()")
+            && git_transaction_source.contains("output_has_index_lock_contention(&output)"),
+        "commit transaction must not take a bespoke advisory commit lock (#lazily-hot-path: flock is never used for document closeout); git index-lock retries are the hard safety net"
     );
     assert!(
         !git_transaction_source.contains("agent_doc_orchestration::"),
@@ -26668,7 +26665,6 @@ fn test_agent_doc_document_owns_commit_normalization_policy() {
         "pub fn resolve_pane_cwd",
         "pub fn workspace_access_dirs_for_doc",
         "pub fn append_workspace_access_args",
-        "pub fn commit_lock_path_for_git_root",
     ] {
         assert!(
             git_dirs_source.contains(required),
@@ -29329,6 +29325,7 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
         "fn route_decide_closeout_recovery(",
         "pub fn route_closeout_drain_effects() -> RouteCloseoutDrainEffects",
         "static WAIT_FOR_READY_OVERRIDE",
+        "static WAIT_FOR_READY_DEADLINE",
         "static FORCE_DISK_ROUTE_WRITES",
     ] {
         assert!(
@@ -29359,7 +29356,7 @@ fn test_agent_doc_route_io_owns_route_command_runtime() {
             && route_command
                 .contains("agent_doc_controller_io::editor_route_errors::clear_for_success")
             && route_command.contains("cleanup_failed_route_panes(tmux")
-            && route_invocation.contains("static WAIT_FOR_READY_OVERRIDE")
+            && route_invocation.contains("static WAIT_FOR_READY_DEADLINE")
             && route_invocation.contains("static FORCE_DISK_ROUTE_WRITES")
             && route_invocation.contains("pub fn wait_for_ready_override(")
             && route_invocation.contains("pub fn force_disk_route_writes(")

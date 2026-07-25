@@ -1097,6 +1097,11 @@ backoff for a targeted pull on the existing replica, editor
 reload/controller-replacement handlers rebuild
 cached open-document forwarders, and later replica bootstrap/publication
 restores and proves that target;
+- stale-replica ACK recovery first publishes the targeted editor re-registration
+  event without recycling a healthy supervisor. JetBrains coalesces repeated
+  re-registration requests for the same open document within one bounded
+  interval and asks the existing replica to drain urgently; only failure to
+  publish the targeted recovery event may fall back to supervisor recycle;
 - `#crdtpushdrain`: the editor's no-op drain backoff gates only *speculative*
   polling (file-watcher, editor-event, and self-rescheduled drains that have no
   evidence of pending work). A controller-published CRDT remote event is positive

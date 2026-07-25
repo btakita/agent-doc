@@ -1,5 +1,3 @@
-use fs2::FileExt;
-use std::fs::{File, OpenOptions};
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -10,58 +8,6 @@ use agent_doc_git::{
     render_git_process_output,
 };
 
-/// Best-effort RAII guard for serializing commit transactions per git repo /
-/// submodule. Contention is deliberately nonblocking; git index-lock retries
-/// remain the hard safety net.
-pub struct CommitLock {
-    _file: File,
-}
-
-impl CommitLock {
-    pub fn acquire(git_root: &Path) -> Option<Self> {
-        let lock_path = crate::dirs::commit_lock_path_for_git_root(git_root)?;
-        let scope = crate::dirs::commit_lock_scope_path(git_root)?;
-        let lock_dir = lock_path.parent()?.to_path_buf();
-        if let Err(e) = std::fs::create_dir_all(&lock_dir) {
-            eprintln!(
-                "[commit] commit-lock dir create failed: {} (proceeding unlocked)",
-                e
-            );
-            return None;
-        }
-        let file = match OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)
-        {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!(
-                    "[commit] commit-lock open failed: {} (proceeding unlocked)",
-                    e
-                );
-                return None;
-            }
-        };
-        if let Err(e) = file.try_lock_exclusive() {
-            eprintln!(
-                "[commit] repo commit-lock contended for {}: {} (proceeding unlocked)",
-                scope.display(),
-                e
-            );
-            return None;
-        }
-        Some(Self { _file: file })
-    }
-}
-
-impl Drop for CommitLock {
-    fn drop(&mut self) {
-        let _ = self._file.unlock();
-    }
-}
-
 /// After a successful commit inside a submodule, stage and partial-commit the
 /// updated submodule pointer in the superproject. Uses an explicit pathspec on
 /// the commit so any other staged files in the parent index are preserved.
@@ -70,7 +16,6 @@ pub fn update_parent_submodule_pointer(
     submodule_root: &Path,
     msg: &str,
 ) -> anyhow::Result<()> {
-    let _commit_lock = CommitLock::acquire(super_root);
     let rel = match submodule_root.strip_prefix(super_root) {
         Ok(r) => r,
         Err(_) => anyhow::bail!(

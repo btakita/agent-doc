@@ -344,7 +344,7 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
     // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
-    let (doc_lock, content_at_start) = capture_locked_undo_checkpoint(file)?;
+    let content_at_start = capture_undo_checkpoint(file)?;
 
     let base = baseline.unwrap_or(&content_at_start);
 
@@ -393,7 +393,6 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
             Some(&content_current),
             Some(&content_current),
         );
-        drop(doc_lock);
         agent_doc_repair_io::pending::clear_pending(file)?;
         return Ok(());
     }
@@ -491,8 +490,6 @@ pub(crate) fn run(file: &Path, baseline: Option<&str>, flags: WriteFlags) -> Res
             &st,
         );
     }
-
-    drop(doc_lock);
 
     // Clear pending response after successful write
     agent_doc_repair_io::pending::clear_pending(file)?;
@@ -623,7 +620,7 @@ pub(crate) fn run_template(
     // Acquire advisory lock BEFORE reading document state.
     // Closing the window between content_at_start read and lock acquire
     // prevents concurrent agent-doc writes from drifting the baseline. (#08yv)
-    let (doc_lock, content_at_start) = capture_locked_undo_checkpoint(file)?;
+    let content_at_start = capture_undo_checkpoint(file)?;
 
     let base_cow = template_patch_application_base(TemplatePatchApplicationBase {
         file,
@@ -766,7 +763,6 @@ pub(crate) fn run_template(
             Some(&content_current),
             Some(&content_current),
         );
-        drop(doc_lock);
         agent_doc_repair_io::pending::clear_pending(file)?;
         return Ok(());
     }
@@ -872,8 +868,6 @@ pub(crate) fn run_template(
             &st,
         );
     }
-
-    drop(doc_lock);
 
     // Clear pending response after successful write
     agent_doc_repair_io::pending::clear_pending(file)?;
@@ -1091,7 +1085,7 @@ pub(crate) fn run_stream(
         }
     }
 
-    let (doc_lock, content_at_start) = capture_locked_undo_checkpoint(file)?;
+    let content_at_start = capture_undo_checkpoint(file)?;
 
     // Try IPC when plugin is installed and --force-disk is not set
     if !force_disk {
@@ -1220,7 +1214,6 @@ pub(crate) fn run_stream(
                 == strip_boundary_for_dedup(&content_at_start)
             {
                 log_dedup(file, "no changes after merge, skipping write");
-                drop(doc_lock);
                 agent_doc_repair_io::pending::clear_pending(file)?;
                 return Ok(());
             }
@@ -1248,7 +1241,6 @@ pub(crate) fn run_stream(
                 if elapsed_total > 0 {
                     eprintln!("[perf] run_stream total: {}ms", elapsed_total);
                 }
-                drop(doc_lock);
                 agent_doc_repair_io::pending::clear_pending(file)?;
                 return Ok(());
             }
@@ -1281,7 +1273,6 @@ pub(crate) fn run_stream(
                     patches.len(),
                 );
                 agent_doc_hooks_io::fire_doc_event(file, "post_write");
-                drop(doc_lock);
                 agent_doc_repair_io::pending::clear_pending(file)?;
                 return Ok(());
             }
@@ -1552,7 +1543,6 @@ pub(crate) fn run_stream(
             Some(&content_current),
             Some(&content_current),
         );
-        drop(doc_lock);
         agent_doc_repair_io::pending::clear_pending(file)?;
         let elapsed_total = t_total.elapsed().as_millis();
         if elapsed_total > 0 {
@@ -1709,8 +1699,6 @@ pub(crate) fn run_stream(
     ) {
         eprintln!("[write] cycle-state update failed: {} (non-fatal)", e);
     }
-
-    drop(doc_lock);
 
     // Clear pending response after successful write
     agent_doc_repair_io::pending::clear_pending(file)?;
@@ -2197,8 +2185,6 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     }
     content_ours.push_str("\n## User\n\n");
 
-    let doc_lock = acquire_doc_lock(file)?;
-
     let content_current =
         resolve_current_document_content(file, "apply_append_from_string_current_content")?;
 
@@ -2225,7 +2211,6 @@ pub fn apply_append_from_string(file: &Path, response: &str) -> Result<()> {
     )?;
     // Save snapshot as content_ours, not final_content
     save_recovery_snapshot(file, &content_ours, use_crdt)?;
-    drop(doc_lock);
     eprintln!("[write] Response appended to {}", file.display());
     Ok(())
 }
@@ -2292,8 +2277,6 @@ pub fn apply_template_from_string_with_options(
     .context("failed to apply template patches")?;
     let content_ours =
         normalize_template_structure_or_fail_preserving(&content_ours, file, Some(&content))?;
-
-    let doc_lock = acquire_doc_lock(file)?;
 
     let content_current = resolve_document_content_for_write_mode(
         file,
@@ -2367,7 +2350,6 @@ pub fn apply_template_from_string_with_options(
     }
     // Save snapshot as the repaired/merged final content.
     save_recovery_snapshot(file, &final_content, use_crdt)?;
-    drop(doc_lock);
     eprintln!("[write] Template patches applied to {}", file.display());
     Ok(())
 }
@@ -2376,7 +2358,6 @@ pub fn apply_template_from_string_with_options(
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use fs2::FileExt;
     use std::fs;
     use std::fs::OpenOptions;
     use std::time::Duration;

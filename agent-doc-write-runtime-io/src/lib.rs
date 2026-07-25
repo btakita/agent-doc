@@ -2473,17 +2473,11 @@ pub(crate) use ipc::*;
 // Internal helpers (same patterns as submit.rs)
 // ---------------------------------------------------------------------------
 
-fn acquire_doc_lock(path: &Path) -> Result<std::fs::File> {
-    // Delegate to the single shared file-TOCTOU lock primitive in `agent-doc-fs`.
-    agent_doc_fs::acquire_doc_lock(path)
-}
-
-fn capture_locked_undo_checkpoint(path: &Path) -> Result<(std::fs::File, String)> {
-    let doc_lock = acquire_doc_lock(path)?;
+fn capture_undo_checkpoint(path: &Path) -> Result<String> {
     let content_at_start = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
     agent_doc_snapshot_io::checkpoint_undo_content(path, &content_at_start)?;
-    Ok((doc_lock, content_at_start))
+    Ok(content_at_start)
 }
 
 /// When the current file already contains the response block, prefer adopting
@@ -2597,7 +2591,6 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
 mod tests {
     #![allow(unused_imports)]
     use super::*;
-    use fs2::FileExt;
     use std::fs;
     use std::fs::OpenOptions;
     use std::time::Duration;
@@ -3194,38 +3187,20 @@ mod tests {
     }
 
     #[test]
-    fn capture_locked_undo_checkpoint_reads_live_content_after_lock_wait() {
+    fn capture_undo_checkpoint_records_current_content() {
         let dir = TempDir::new().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         let doc = dir.path().join("test.md");
-        fs::write(&doc, "original\n").unwrap();
+        fs::write(&doc, "current\n").unwrap();
 
-        let lock_path = agent_doc_fs::state_lock_path_for(&doc).unwrap();
-        fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
-        let held_lock = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(false)
-            .open(&lock_path)
-            .unwrap();
-        held_lock.lock_exclusive().unwrap();
+        let captured_content = capture_undo_checkpoint(&doc).unwrap();
 
-        let doc_for_thread = doc.clone();
-        let capture = std::thread::spawn(move || capture_locked_undo_checkpoint(&doc_for_thread));
-
-        std::thread::sleep(Duration::from_millis(100));
-        fs::write(&doc, "updated while waiting\n").unwrap();
-        drop(held_lock);
-
-        let (captured_lock, captured_content) = capture.join().unwrap().unwrap();
-        drop(captured_lock);
-
-        assert_eq!(captured_content, "updated while waiting\n");
+        assert_eq!(captured_content, "current\n");
         assert_eq!(
             agent_doc_snapshot_io::load_undo_content(&doc)
                 .unwrap()
                 .unwrap(),
-            "updated while waiting\n"
+            "current\n"
         );
     }
     #[test]
@@ -3303,7 +3278,6 @@ mod tests {
         let doc = dir.path().join("test.md");
         fs::write(&doc, base).unwrap();
 
-        let doc_lock = acquire_doc_lock(&doc).unwrap();
         let content_current = fs::read_to_string(&doc).unwrap();
 
         let final_content = if content_current == base {
@@ -3312,7 +3286,6 @@ mod tests {
             agent_doc_merge_io::merge_contents(base, &ours, &content_current).unwrap()
         };
 
-        drop(doc_lock);
         assert_eq!(final_content, ours);
     }
     #[test]

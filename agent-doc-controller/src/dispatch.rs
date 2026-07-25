@@ -2332,6 +2332,17 @@ impl RoutedDispatchStartProof {
     pub const fn is_queued_behind_active_turn(self) -> bool {
         matches!(self, Self::AcceptedQueuedBehindActiveTurn)
     }
+
+    /// Whether the harness proved that the routed trigger left the composer and
+    /// began a turn. A slow model may not open its document cycle within the
+    /// fresh-start ACK window, but this proof means the session is live and must
+    /// not be reaped or marked as a startup miss.
+    pub const fn confirms_dispatch_start(self) -> bool {
+        matches!(
+            self,
+            Self::HookPromptMatched | Self::HookStateAdvanced | Self::PaneStateChanged
+        )
+    }
 }
 
 /// Pure decision for the busy dispatch-start short-circuit. When the pane is not
@@ -4040,6 +4051,18 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
         assert_eq!(
             fresh_start_ack_outcome(false, false, true),
             FreshStartAckOutcome::GenuineMissReap,
+        );
+    }
+
+    #[test]
+    fn dispatch_start_proof_keeps_a_slow_fresh_turn_live() {
+        assert!(RoutedDispatchStartProof::HookPromptMatched.confirms_dispatch_start());
+        assert!(RoutedDispatchStartProof::HookStateAdvanced.confirms_dispatch_start());
+        assert!(RoutedDispatchStartProof::PaneStateChanged.confirms_dispatch_start());
+        assert!(!RoutedDispatchStartProof::CommandAcceptedOnly.confirms_dispatch_start());
+        assert!(!RoutedDispatchStartProof::DispatchStartUnproven.confirms_dispatch_start());
+        assert!(
+            !RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn.confirms_dispatch_start()
         );
     }
 

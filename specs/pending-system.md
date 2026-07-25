@@ -176,8 +176,9 @@ On every preflight run:
 - Same-cycle resurrection invariant: once a cycle reaps a tracked `[#id]`, closeout must fail closed if that same id reappears in live tracked work before commit. Do not silently treat the stale rewrite as generic local drift.
 - Same-cycle completion invariant: when preflight/repair reap a user-authored `[x]` tracked item directly from the document, that id counts as intentionally resolved for the current cycle's history-replay guards even if no explicit `--done <id>` flag was recorded. Do not restore the older `[ ]` or `[/]` history entry just because the completion came from a manual document edit.
 - External archive invariant: preflight and session-check must treat IDs found
-  in the `agent:done archive=...done.md` target as completed-history proof for
-  backlog replay. Invalid archive targets fail closed instead of being ignored.
+in the `agent:done archive=...done.md` target as completed-history proof for
+backlog replay and as known identifiers for the coined-ID guard after inline
+history is reaped. Invalid archive targets fail closed instead of being ignored.
 - No-partial-reap invariant: if a completed tracked item is followed by malformed flush-left spill such as pasted command/diff transcript lines, reap/archive the whole logical block with that parent item. Do not delete only the tracked parent line and leave orphan prose behind in the live backlog.
 4. Commit the rewritten component as part of the existing boundary-maintenance commit.
 

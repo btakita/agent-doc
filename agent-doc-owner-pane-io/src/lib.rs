@@ -84,12 +84,23 @@ fn try_controller_envelope(
         "file": canonical_path,
         "diagnostic_payload": serde_json::to_string(&payload)?,
     });
-    let raw = agent_doc_state_wire::send_ndjson_request_to_actor(
+    let raw = match agent_doc_state_wire::send_ndjson_request_to_actor(
         &socket,
         &request,
         Duration::from_secs(5),
-    )
-    .context("submit owner-pane wedge command through the Lazily controller")?;
+    ) {
+        Ok(raw) => raw,
+        // Momentary unreachability (stale/absent socket, or a live-but-wedged
+        // actor that timed out): fall through to the direct SQLite path so a
+        // transient controller error never disables the wedge backstop. A
+        // genuine protocol/framing failure still fails closed.
+        Err(agent_doc_state_wire::ActorRequestError::Connect(_))
+        | Err(agent_doc_state_wire::ActorRequestError::Timeout(_)) => return Ok(None),
+        Err(err) => {
+            return Err(err)
+                .context("submit owner-pane wedge command through the Lazily controller");
+        }
+    };
     let envelope: ControllerEnvelope =
         serde_json::from_str(&raw).context("decode owner-pane wedge controller response")?;
     Ok(Some(envelope))

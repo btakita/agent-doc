@@ -677,19 +677,6 @@ fn load_live_authoritative_actor_record_uncached(
     if record.session_id != session_id || !tmux.pane_alive(&record.pane_id) {
         return None;
     }
-    if let Some(other) = pane_owned_document_other_than(tmux, &record.pane_id, &canonical) {
-        let message = format!(
-            "authoritative_actor_cross_document_pane_rejected file={} pane={} pane_owns={} session={} generation={}",
-            file.display(),
-            record.pane_id,
-            other,
-            session_id,
-            record.generation
-        );
-        sync_log(&message);
-        agent_doc_ops_log_io::log_op(file, &message);
-        return None;
-    }
     Some(record)
 }
 
@@ -4866,11 +4853,49 @@ pub fn pane_owned_document_other_than(
     pane_id: &str,
     claimed_file: &Path,
 ) -> Option<String> {
+    let canonical = claimed_file
+        .canonicalize()
+        .ok()
+        .unwrap_or_else(|| claimed_file.to_path_buf());
+    let claimed_actor_pane = agent_doc_project_root_io::project_root_containing(&canonical)
+        .and_then(|project_root| {
+            agent_doc_controller_io::project_controller::authoritative_actor_binding(
+                &project_root,
+                &canonical,
+            )
+            .ok()
+            .flatten()
+            .filter(|record| {
+                record.state != agent_doc_sqlite::state_store::ActorState::Closed
+                    && tmux.pane_alive(&record.pane_id)
+            })
+            .map(|record| record.pane_id)
+        });
+    if claimed_actor_pane.as_deref() == Some(pane_id) {
+        return None;
+    }
     let pane_pid = pane_pid_from_tmux(tmux, pane_id)?;
-    agent_doc_process_owner_io::process_tree_owner_document_other_than(
+    let process_owner = agent_doc_process_owner_io::process_tree_owner_document_other_than(
         &pane_pid.to_string(),
         claimed_file,
+    );
+    resolve_pane_owner_conflict(
+        pane_id,
+        claimed_actor_pane.as_deref(),
+        process_owner.as_deref(),
     )
+    .map(str::to_string)
+}
+
+fn resolve_pane_owner_conflict<'a>(
+    pane_id: &str,
+    claimed_actor_pane: Option<&str>,
+    process_owner: Option<&'a str>,
+) -> Option<&'a str> {
+    if claimed_actor_pane == Some(pane_id) {
+        return None;
+    }
+    process_owner
 }
 
 /// `#jb-tsift-pane-sync` cross-document execution diagnostic. Logs (best-effort,
@@ -5705,6 +5730,20 @@ mod tests {
             reject_cross_document_owner_pane(&tmux, bare.clone(), file, false),
             bare,
             "guard must not reject a candidate it cannot prove owns another document"
+        );
+    }
+
+    #[test]
+    fn live_claimed_actor_outvotes_stale_process_tree_document() {
+        assert_eq!(
+            resolve_pane_owner_conflict("%58", Some("%58"), Some("/tmp/.tmpo0A1jQ/session.md"),),
+            None,
+            "a descendant command line must not overrule the live Lazily actor binding",
+        );
+        assert_eq!(
+            resolve_pane_owner_conflict("%58", Some("%53"), Some("/tmp/.tmpo0A1jQ/session.md"),),
+            Some("/tmp/.tmpo0A1jQ/session.md"),
+            "process-tree evidence remains a cold fallback when another pane owns the claim",
         );
     }
 

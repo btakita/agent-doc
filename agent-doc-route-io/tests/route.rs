@@ -3687,12 +3687,16 @@ mod tests {
 
         // Outer scope sets a 30s override.
         let outer = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(30)));
-        assert_eq!(wait_for_ready_override(), Some(Duration::from_secs(30)));
+        let outer_remaining = wait_for_ready_override().expect("outer deadline");
+        assert!(outer_remaining <= Duration::from_secs(30));
+        assert!(outer_remaining > Duration::from_secs(29));
 
         {
             // Inner scope replaces with a 60s override.
             let _inner = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(60)));
-            assert_eq!(wait_for_ready_override(), Some(Duration::from_secs(60)));
+            let inner_remaining = wait_for_ready_override().expect("inner deadline");
+            assert!(inner_remaining <= Duration::from_secs(60));
+            assert!(inner_remaining > Duration::from_secs(59));
 
             // Nested unset is honored too.
             let _none = WaitForReadyOverrideGuard::set(None);
@@ -3700,7 +3704,9 @@ mod tests {
         }
 
         // Both nested guards dropped — back to outer 30s.
-        assert_eq!(wait_for_ready_override(), Some(Duration::from_secs(30)));
+        let restored_outer_remaining = wait_for_ready_override().expect("restored outer deadline");
+        assert!(restored_outer_remaining <= outer_remaining);
+        assert!(restored_outer_remaining > Duration::from_secs(29));
 
         drop(outer);
         // Outer dropped — back to unset baseline.
@@ -3718,15 +3724,36 @@ mod tests {
         );
 
         let guard = WaitForReadyOverrideGuard::set(Some(Duration::from_secs(60)));
-        assert_eq!(
-            dispatch_only_starting_pane_ready_timeout(&codex),
-            Duration::from_secs(60)
-        );
+        let remaining = dispatch_only_starting_pane_ready_timeout(&codex);
+        assert!(remaining <= Duration::from_secs(60));
+        assert!(remaining > Duration::from_secs(59));
         drop(guard);
 
         assert_eq!(
             dispatch_only_starting_pane_ready_timeout(&codex),
             dispatch_only_starting_pane_ready_timeout_for_binary(Some("codex"), false)
+        );
+    }
+
+    #[test]
+    fn dispatch_only_checks_operator_draft_before_spending_ready_budget() {
+        let source = include_str!("../src/dispatch_only.rs");
+        let ready_loop = source
+            .split_once("let ready_deadline = Instant::now() + ready_timeout;")
+            .unwrap()
+            .1
+            .split_once("let recovery_remaining")
+            .unwrap()
+            .0;
+        let draft_probe = ready_loop
+            .find("pane_composer_draft")
+            .expect("operator draft probe");
+        let blocking_wait = ready_loop
+            .find("wait_for_agent_ready_outcome")
+            .expect("ready wait");
+        assert!(
+            draft_probe < blocking_wait,
+            "a visible draft is terminal and must fail before the bounded ready wait"
         );
     }
 }

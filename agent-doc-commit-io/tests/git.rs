@@ -4602,7 +4602,7 @@ Duplicate replay should stay live.
         );
         commit_file(root, "session.md", pre_compact_head, "pre-compact HEAD");
         // snapshot = compacted (authoritative, re-asserted by the compaction
-        // closeout inside the commit-lock window); working tree / realtime
+        // closeout inside the Git-native commit transaction); working tree / realtime
         // resolution = pre-compact (editor-IPC-async lag or a frozen reliable-sync
         // canonical). This is the split that, without the scope guard, lets the
         // historical-snapshot repair revert the compacted snapshot to HEAD.

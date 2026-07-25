@@ -54,22 +54,6 @@ pub fn nested_git_dirs_under(git_dir: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-pub fn commit_lock_scope_path(git_root: &Path) -> Option<PathBuf> {
-    absolute_git_dir_at(git_root)
-}
-
-pub fn commit_lock_path_for_git_root(git_root: &Path) -> Option<PathBuf> {
-    let scope_path = commit_lock_scope_path(git_root)
-        .or_else(|| git_root.canonicalize().ok())
-        .unwrap_or_else(|| git_root.to_path_buf());
-    let key = agent_doc_hash::path_string_hash(scope_path.to_string_lossy().as_ref());
-    Some(
-        scope_path
-            .join("agent-doc-locks")
-            .join(format!("commit-repo-{key}.lock")),
-    )
-}
-
 pub fn push_workspace_access_dir(
     dirs: &mut Vec<PathBuf>,
     git_root: &Path,
@@ -762,27 +746,6 @@ mod tests {
         assert!(
             cwd.exists() || cwd == std::env::current_dir().unwrap_or_default(),
             "fallback cwd should be the process cwd or an existing path"
-        );
-    }
-
-    #[test]
-    fn commit_lock_path_is_scoped_to_absolute_git_dir() {
-        let dir = tempfile::TempDir::new().unwrap();
-        let root = dir.path();
-        init_repo(root);
-
-        let scope = commit_lock_scope_path(root).unwrap();
-        let lock_path = commit_lock_path_for_git_root(root).unwrap();
-
-        assert_eq!(scope, root.join(".git"));
-        assert!(lock_path.starts_with(&scope));
-        assert_eq!(lock_path.parent().unwrap(), scope.join("agent-doc-locks"));
-        assert!(
-            lock_path
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with("commit-repo-")
         );
     }
 }

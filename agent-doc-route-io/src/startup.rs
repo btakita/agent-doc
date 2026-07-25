@@ -910,6 +910,26 @@ pub fn auto_start_in_session_with_lock_mode(
                 let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
             }
             None => {
+                if dispatch_start.confirms_dispatch_start() {
+                    // The harness consumed/submitted the trigger, but a slow
+                    // model has not reached agent-doc preflight yet. That is an
+                    // in-flight turn, not a startup miss. Reaping it after the
+                    // fixed ACK window produced a stale marker after a proven
+                    // successful dispatch and encouraged duplicate reroutes.
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "fresh_route_start_inflight_kept file={} pane={} harness={} proof={} timeout_secs={} note=dispatch_start_proven_cycle_ack_pending",
+                            file.display(),
+                            dispatch_pane,
+                            harness.binary,
+                            dispatch_start.dispatch_stage_label(),
+                            ack_timeout.as_secs()
+                        ),
+                    );
+                    let _ = agent_doc_supervisor_io::startup_miss::clear_startup_miss(file);
+                    return Ok(Some(dispatch_pane));
+                }
                 // (#jbtsiftnosub2) Classify the no-ack pane from a single
                 // capture. A dispatch-ready pane whose composer STILL shows the
                 // injected trigger unsubmitted is the JB-created-fresh-pane

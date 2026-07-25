@@ -34,6 +34,7 @@ private const val CRDT_AWAIT_CLOSE_PUBLISH_TIMEOUT_MS = 2_000L
 private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
+private const val ACK_RECOVERY_REREGISTER_MIN_INTERVAL_MS = 5_000L
 // `#crdt-drain-idle-quiet`: back off work that arrived while a no-op drain was
 // already running. The resume callback must consume that retained work without
 // manufacturing another drain-all request; doing so turns one overlap into a
@@ -115,6 +116,15 @@ internal fun shouldStartRemoteDrainUtil(backoffScheduled: Boolean): Boolean = !b
  */
 internal fun shouldUrgentDrainForRemoteEventUtil(reasonToken: String?): Boolean =
     reasonToken != "request_full_state"
+
+internal fun ackRecoveryReregisterDueUtil(
+    lastStartedMs: Long?,
+    nowMs: Long,
+    minIntervalMs: Long = ACK_RECOVERY_REREGISTER_MIN_INTERVAL_MS,
+): Boolean =
+    lastStartedMs == null ||
+        nowMs < lastStartedMs ||
+        nowMs - lastStartedMs >= minIntervalMs
 
 @Suppress("UNUSED_PARAMETER")
 internal fun shouldAcknowledgeVisibleRemoteDeliveryUtil(
@@ -278,6 +288,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val drainRequestedPaths = ConcurrentHashMap.newKeySet<String>()
     private val registerFailureCounts = ConcurrentHashMap<String, Int>()
     private val registerRetryAfterMs = ConcurrentHashMap<String, Long>()
+    private val ackRecoveryReregisterStartedAtMs = ConcurrentHashMap<String, Long>()
     private val consecutiveNoOpReschedules = AtomicInteger(0)
     private val remoteDrainBackoffScheduled = AtomicBoolean(false)
     private val remoteEditorApplies =
@@ -312,6 +323,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         drainRequestedPaths.clear()
         registerFailureCounts.clear()
         registerRetryAfterMs.clear()
+        ackRecoveryReregisterStartedAtMs.clear()
         forwarders.values.forEach { it.deregister() }
         forwarders.clear()
         shadows.clear()
@@ -323,6 +335,20 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     } catch (_: InterruptedException) {
         Thread.currentThread().interrupt()
         false
+    }
+
+    private fun beginAckRecoveryReregister(filePath: String): Boolean {
+        val nowMs = System.currentTimeMillis()
+        var due = false
+        ackRecoveryReregisterStartedAtMs.compute(filePath) { _, lastStartedMs ->
+            if (ackRecoveryReregisterDueUtil(lastStartedMs, nowMs)) {
+                due = true
+                nowMs
+            } else {
+                lastStartedMs
+            }
+        }
+        return due
     }
 
     override fun documentChanged(event: DocumentEvent) {
@@ -1833,6 +1859,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 Triple(file.path, file.name, document)
             } ?: return
             val (resolvedFilePath, fileName, document) = openDocument
+            if (!manager.beginAckRecoveryReregister(resolvedFilePath)) {
+                manager.log.info(
+                    "[crdt-replica] coalesced delivery-ack re-register for $fileName reason=$reason",
+                )
+                manager.requestUrgentRemoteDrain(resolvedFilePath, "ack-recovery-reregister-coalesced")
+                return
+            }
             manager.log.info(
                 "[crdt-replica] forcing delivery-ack re-register for $fileName reason=$reason",
             )

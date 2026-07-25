@@ -36,6 +36,14 @@ use std::time::Duration;
 #[derive(Debug)]
 pub enum ActorRequestError {
     Connect(anyhow::Error),
+    /// The actor accepted the connection but did not send a complete response
+    /// within `response_timeout` — the recv timeout fired (`SO_RCVTIMEO` surfaces
+    /// a timed-out read as `EAGAIN`/`WouldBlock` on Linux, i.e. "Resource
+    /// temporarily unavailable"). A *read* caller must treat this like
+    /// [`Self::Connect`] — momentary unreachability — and fall back to a cold
+    /// projection instead of hard-erroring. A hot-path *write* / command caller
+    /// must still fail closed.
+    Timeout(anyhow::Error),
     Protocol(anyhow::Error),
 }
 
@@ -43,9 +51,21 @@ impl std::fmt::Display for ActorRequestError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Connect(err) => write!(formatter, "connect to Lazily actor: {err:#}"),
+            Self::Timeout(err) => write!(formatter, "timed out waiting for Lazily actor: {err:#}"),
             Self::Protocol(err) => write!(formatter, "exchange with Lazily actor: {err:#}"),
         }
     }
+}
+
+/// A recv-timeout on a socket configured with `set_recv_timeout` surfaces as
+/// `WouldBlock` (EAGAIN, "Resource temporarily unavailable") on Linux and
+/// `TimedOut` on some platforms. Both mean "the actor did not answer in time",
+/// not a genuine protocol/framing failure.
+fn is_recv_timeout(err: &std::io::Error) -> bool {
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    )
 }
 
 impl std::error::Error for ActorRequestError {}
@@ -93,10 +113,19 @@ pub fn send_ndjson_request_to_actor(
 
     let mut reader = BufReader::new(reader_half);
     let mut response = String::new();
-    let read = reader
-        .read_line(&mut response)
-        .context("read Lazily actor response")
-        .map_err(ActorRequestError::Protocol)?;
+    let read = match reader.read_line(&mut response) {
+        Ok(read) => read,
+        Err(err) if is_recv_timeout(&err) => {
+            return Err(ActorRequestError::Timeout(anyhow::Error::new(err).context(
+                format!("no response from Lazily actor within {response_timeout:?}"),
+            )));
+        }
+        Err(err) => {
+            return Err(ActorRequestError::Protocol(
+                anyhow::Error::new(err).context("read Lazily actor response"),
+            ));
+        }
+    };
     if read == 0 {
         return Err(ActorRequestError::Protocol(anyhow::anyhow!(
             "Lazily actor socket closed without a response"
@@ -1364,6 +1393,55 @@ mod tests {
             assert_eq!(decode("agent_doc.queue.head")["phase"], "completed");
             assert_eq!(decode("agent_doc.transport.patch")["phase"], "applied");
         }
+    }
+
+    /// A live actor that accepts the connection but never answers must surface
+    /// as [`ActorRequestError::Timeout`] (the recv-timeout `EAGAIN`/"Resource
+    /// temporarily unavailable" case), NOT as `Protocol`. Read callers rely on
+    /// this classification to fall back to the cold projection instead of
+    /// hard-erroring on a wedged/overloaded controller.
+    #[test]
+    fn unanswered_actor_read_classifies_as_timeout_not_protocol() {
+        use interprocess::local_socket::{
+            ListenerOptions, ToFsName, traits::Listener as _,
+        };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let socket_path = dir.path().join("actor.sock");
+        let name = socket_path
+            .clone()
+            .to_fs_name::<GenericFilePath>()
+            .unwrap();
+        let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        // Accept the connection but hold it open without ever writing a response,
+        // so the client's recv timeout fires.
+        let handle = std::thread::spawn(move || {
+            let _held = listener.accept();
+            std::thread::sleep(Duration::from_millis(600));
+        });
+
+        let request = serde_json::json!({ "command": "document_state_projection" });
+        let started = std::time::Instant::now();
+        let err = send_ndjson_request_to_actor(
+            &socket_path,
+            &request,
+            Duration::from_millis(150),
+        )
+        .expect_err("an unanswered actor read must error");
+
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the read must fail within the bounded recv timeout"
+        );
+        assert!(
+            matches!(err, ActorRequestError::Timeout(_)),
+            "recv-timeout read must be classified Timeout, got: {err:#}"
+        );
+        assert!(
+            err.to_string().contains("timed out"),
+            "Timeout Display must read as a timeout: {err}"
+        );
+        let _ = handle.join();
     }
 
     #[test]

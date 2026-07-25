@@ -317,12 +317,40 @@ backlog id per phase; do not touch fixed-seed fuzz.
     `load_state_backbone_projection` / `load_state_event_ledger` / `flock`. The
     guardrail was negative-tested — it fails when a violation is injected.
 
-  **Still open in Phase 1:** the `delivery_converged` half (W6/W8/compact) needs the
-  `DeliveryConvergenceWitness { version, converged }` threading a monotonic mutation
-  version through `RelayHub`'s `members`/`pending`/liveness writes; W7 needs the
-  editor `save_document` disk-flush result published once (a genuine OS boundary,
-  rubric #3 — do not fold it into the convergence cell); W3 and W4 follow once one of
-  those two cells exists.
+  **Landed 2026-07-25 — `DeliveryConvergenceWitness` (the Theme A witness itself).**
+  `RelayHub` gained a `delivery_epoch: Source<u64>` bumped at every write that can
+  change the fold — the 5 `pending` mutation sites, liveness transitions (`set_live`),
+  and membership (`bump_membership_epoch`) — and
+  `RelayHub::delivery_convergence_witness() -> DeliveryConvergenceWitness { version,
+  converged }`. It follows the hub's existing `#live-editor-reactive` idiom
+  (`ThreadSafeCellMap` liveness + `membership_epoch` + `Computed` count) rather than
+  inventing a mechanism, and the `delivery_converged()` fold stays authoritative as
+  design correction 4 requires. Note the real mutation surface was **5 sites**, not
+  the broad `members`/`pending`/liveness sweep the plan implied.
+  - Coverage includes the property that actually makes a witness useful:
+    `delivery_convergence_witness_version_is_stable_while_nothing_changes` — a version
+    that moved on every read would be "correct" and suppress nothing.
+  - First consumer: `crdt_current_text[_unavailable]` now logs `delivery_version`
+    beside `delivery_converged`. During a wedge, a repeated `delivery_converged=false`
+    cannot distinguish *churning but never settling* from *nothing moving at all*; a
+    frozen version says the latter outright.
+
+  **⚠ Correction for the remaining Phase 1 work — the hub is PROCESS-LOCAL.**
+  `hub_registry()` (`agent-doc-crdt-relay-io/src/lib.rs:531`) is a process-local
+  static, and `delivery_converged_for_file` defaults to **`true`** when this process
+  hosts no hub. So W6/W8 — which run in the *compact CLI* process — cannot consume the
+  witness directly: they would read an absent hub and be told "converged". The
+  remaining half therefore needs the **same cross-process treatment as W1** (a
+  controller-side await command over the controller's hub), not a local call. This is
+  why `delivery_convergence_witness_for_file` returns `Option` instead of defaulting:
+  a suppression key must never be invented for a document the caller cannot observe.
+
+  **Still open in Phase 1:** the controller-side await that lets W6/W8/compact consume
+  the witness cross-process; W7 needs the editor `save_document` disk-flush result
+  published once (a genuine OS boundary, rubric #3 — do not fold it into the
+  convergence cell, and note its current 1s/20ms disk poll is already the
+  single-consumer effect-source shape, so the win there is small); W3 and W4 follow
+  once the cross-process convergence await exists.
   **⚠ Read the "DESIGN CORRECTIONS" block in Theme A first.** The 2026-07-25
   investigation overturned this section's premises: there is no cell to await (it
   must be built), W1 polls a *different* fact than `delivery_converged`, `WaitMachine`

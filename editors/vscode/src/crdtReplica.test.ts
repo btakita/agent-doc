@@ -5,6 +5,7 @@ import {
     parsePullResponse,
     parseRegisterResponse,
     replicaBaselineDecision,
+    remoteAckReplayPlan,
     remoteTemplateProjectionDecision,
     shouldApplyRemoteUpdate,
     shouldForwardLocalDelta,
@@ -123,7 +124,33 @@ class FakeTransport implements ReplicaTransport {
 }
 
 describe('crdt replica manager', () => {
-    it('applies peer remote updates but suppresses self echoes', () => {
+    it('requires visible-content proof before replaying a retained ACK', () => {
+        const updates: ReplicaRemoteUpdate[] = [
+            {
+                patchId: 'crdt:1:42:11',
+                origin: 1,
+                target: 42,
+                generation: 11,
+                expectedContentHash: 'older',
+                update: Buffer.from([1]),
+            },
+            {
+                patchId: 'crdt:1:42:12',
+                origin: 1,
+                target: 42,
+                generation: 12,
+                expectedContentHash: 'visible',
+                update: Buffer.from([2]),
+            },
+        ];
+
+        assert.strictEqual(remoteAckReplayPlan(updates, 'not-yet-visible'), null);
+        const plan = remoteAckReplayPlan(updates, 'visible');
+        assert.strictEqual(plan?.candidate.generation, 11);
+        assert.strictEqual(plan?.acknowledgedThroughGeneration, 12);
+    });
+
+it('applies peer remote updates but suppresses self echoes', () => {
         const peer: ReplicaRemoteUpdate = {
             patchId: 'crdt:1:42:1',
             origin: 1,
@@ -280,6 +307,7 @@ describe('crdt replica manager', () => {
             origin: 1,
             target: 42,
             generation: 3,
+            expectedContentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
             update: Buffer.from([7, 8]),
         }];
         const manager = new CrdtReplicaManager({
@@ -450,6 +478,7 @@ describe('crdt replica manager', () => {
             origin: 1,
             target: 42,
             generation: 8,
+            expectedContentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
             update: Buffer.from([8]),
         }];
         const manager = new CrdtReplicaManager({
@@ -530,6 +559,7 @@ describe('crdt replica manager', () => {
             origin: 1,
             target: 42,
             generation: 6,
+            expectedContentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
             update: Buffer.from([7, 8]),
         }];
         const manager = new CrdtReplicaManager({
@@ -601,6 +631,7 @@ describe('crdt replica manager', () => {
             origin: 1,
             target: 42,
             generation: 7,
+            expectedContentHash: '3a3a8dbdec63746b4b7f8ac567d759ac146355398a5cbe9854cd9753379dd055',
             update: Buffer.from([7]),
         }];
         const manager = new CrdtReplicaManager({

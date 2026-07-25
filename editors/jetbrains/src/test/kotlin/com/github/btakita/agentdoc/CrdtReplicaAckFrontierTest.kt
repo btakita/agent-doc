@@ -40,16 +40,13 @@ class CrdtReplicaAckFrontierTest {
     }
 
     @Test
-    fun `unpublished visible text retries only one oldest ack without claiming a prefix`() {
+    fun `unpublished visible text sends no ack and cannot trigger rebootstrap`() {
         val updates = listOf(
             update(generation = 11, expectedHash = "older"),
             update(generation = 12, expectedHash = "newer"),
         )
 
-        val plan = remoteAckReplayPlanUtil(updates, "not-yet-published")!!
-
-        assertEquals(11L, plan.candidate.generation)
-        assertNull(plan.acknowledgedThroughGeneration)
+        assertNull(remoteAckReplayPlanUtil(updates, "not-yet-published"))
     }
 
     @Test

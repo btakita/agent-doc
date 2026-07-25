@@ -53,7 +53,7 @@ private data class PendingRemoteAck(
 
 internal data class RemoteAckReplayPlan(
     val candidate: ReplicaRemoteUpdate,
-    val acknowledgedThroughGeneration: Long?,
+    val acknowledgedThroughGeneration: Long,
 )
 
 /**
@@ -61,16 +61,24 @@ internal data class RemoteAckReplayPlan(
  * matches [visibleContentHash] against the newest represented pending target
  * and drains the entire prefix atomically, so replaying every historical
  * generation only creates head-of-line blocking while the editor is typing.
+ *
+ * No matching target means there is no visible-content proof and therefore no
+ * ACK to send. Sending the oldest delivery with an unrelated editor hash asks
+ * the controller to rebootstrap the replica and turns a deferred projection
+ * into a reconnect feedback loop.
  */
 internal fun remoteAckReplayPlanUtil(
     updates: Collection<ReplicaRemoteUpdate>,
     visibleContentHash: String,
 ): RemoteAckReplayPlan? {
-    val candidate = updates.minWithOrNull(compareBy<ReplicaRemoteUpdate> { it.generation }.thenBy { it.patchId })
-        ?: return null
     val acknowledgedThrough = updates.asSequence()
         .filter { it.expectedContentHash == visibleContentHash }
         .maxOfOrNull { it.generation }
+        ?: return null
+    val candidate = updates.asSequence()
+        .filter { it.generation <= acknowledgedThrough }
+        .minWithOrNull(compareBy<ReplicaRemoteUpdate> { it.generation }.thenBy { it.patchId })
+        ?: return null
     return RemoteAckReplayPlan(candidate, acknowledgedThrough)
 }
 
@@ -114,6 +122,27 @@ internal fun shouldAcknowledgeVisibleRemoteDeliveryUtil(
     targetText: String,
     diskPersisted: Boolean,
 ): Boolean = editorText == targetText
+
+internal enum class RemoteCrdtProjectionMode {
+    Reject,
+    MemoryOnly,
+    Persist,
+}
+
+/**
+ * The CRDT canonical is the durable effect sink. An unsaved editor can safely
+ * accept a causally fenced remote delta in memory, but the plugin must not
+ * refresh or save behind the operator. Clean editors still require exact disk
+ * proof before projection and persistence.
+ */
+internal fun remoteCrdtProjectionModeUtil(
+    documentUnsaved: Boolean,
+    diskCanPersist: Boolean,
+): RemoteCrdtProjectionMode = when {
+    documentUnsaved -> RemoteCrdtProjectionMode.MemoryOnly
+    diskCanPersist -> RemoteCrdtProjectionMode.Persist
+    else -> RemoteCrdtProjectionMode.Reject
+}
 
 internal enum class TemplateStructureProjectionState {
     Exact,
@@ -847,10 +876,14 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         ) ?: return 0
         if (!forwarder.ackRemoteUpdate(plan.candidate, visibleText)) return 0
 
-        val acknowledgedThrough = plan.acknowledgedThroughGeneration ?: plan.candidate.generation
         var acknowledged = 0
         for ((key, ack) in pending.entries) {
-            if (ack.update.generation <= acknowledgedThrough && pending.remove(key, ack)) acknowledged++
+            if (
+                ack.update.generation <= plan.acknowledgedThroughGeneration &&
+                pending.remove(key, ack)
+            ) {
+                acknowledged++
+            }
         }
         if (pending.isEmpty()) pendingRemoteAckReplays.remove(filePath, pending)
         return acknowledged
@@ -1210,7 +1243,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 ?: return completeRemoteEditorApply(pending, RemoteEditorApplyOutcome(false, null), started)
             val document = FileDocumentManager.getInstance().getDocument(targetFile)
                 ?: return completeRemoteEditorApply(pending, RemoteEditorApplyOutcome(false, null), started)
-            if (!refreshCleanDocumentBeforeRemoteApply(pending.filePath, targetFile, document)) {
+            val fileDocumentManager = FileDocumentManager.getInstance()
+            val documentWasUnsaved = fileDocumentManager.isDocumentUnsaved(document)
+            if (
+                !documentWasUnsaved &&
+                !refreshCleanDocumentBeforeRemoteApply(pending.filePath, targetFile, document)
+            ) {
                 return completeRemoteEditorApply(
                     pending,
                     RemoteEditorApplyOutcome(false, document.text),
@@ -1218,15 +1256,30 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                 )
             }
             val before = document.text
+            val projectionMode =
+                if (documentWasUnsaved) {
+                    RemoteCrdtProjectionMode.MemoryOnly
+                } else {
+                    remoteCrdtProjectionModeUtil(
+                        documentUnsaved = false,
+                        diskCanPersist =
+                            remoteCrdtDiskCanPersistUtil(
+                                pending.expectedText,
+                                pending.targetText,
+                                readRawDiskText(pending.filePath),
+                            ),
+                    )
+                }
             if (before == pending.targetText) {
                 shadows[pending.filePath] = pending.targetText
                 RemoteEditorApplyOutcome(
-                    persistRemoteCrdtTextIfSafe(
-                        pending.filePath,
-                        document,
-                        pending.expectedText,
-                        pending.targetText,
-                    ),
+                    projectionMode == RemoteCrdtProjectionMode.Persist &&
+                        persistRemoteCrdtTextIfSafe(
+                            pending.filePath,
+                            document,
+                            pending.expectedText,
+                            pending.targetText,
+                        ),
                     before,
                 )
             } else if (hasPendingLocal(pending.filePath)) {
@@ -1234,18 +1287,19 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             } else if (!remoteCrdtApplyStillCurrentUtil(pending.expectedText, before, pending.targetText)) {
                 log.warn("[crdt-replica] stale coalesced remote update rejected for ${pending.filePath}; editor text advanced before apply")
                 RemoteEditorApplyOutcome(false, before)
-            } else if (!remoteCrdtDiskCanPersistUtil(
-                    pending.expectedText,
-                    pending.targetText,
-                    readRawDiskText(pending.filePath),
-                )
-            ) {
+            } else if (projectionMode == RemoteCrdtProjectionMode.Reject) {
                 log.warn(
                     "[crdt-replica] coalesced remote update rejected because disk contains novel external text for ${pending.filePath}; " +
                         "expected_hash=${contentHash(pending.expectedText)} target_hash=${contentHash(pending.targetText)}"
                 )
                 RemoteEditorApplyOutcome(false, before)
             } else {
+                if (projectionMode == RemoteCrdtProjectionMode.MemoryOnly) {
+                    log.debug(
+                        "[crdt-replica] projecting remote delta into unsaved editor memory for ${pending.filePath}; " +
+                            "durable_sink=crdt_canonical disk_write=deferred",
+                    )
+                }
                 advanceNonOperatorMutationEpoch(pending.filePath)
                 applyingRemote.add(pending.filePath)
                 try {
@@ -1254,12 +1308,13 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                         shadows[pending.filePath] = pending.targetText
                     }
                     RemoteEditorApplyOutcome(
-                        persistRemoteCrdtTextIfSafe(
-                            pending.filePath,
-                            document,
-                            pending.expectedText,
-                            pending.targetText,
-                        ),
+                        projectionMode == RemoteCrdtProjectionMode.Persist &&
+                            persistRemoteCrdtTextIfSafe(
+                                pending.filePath,
+                                document,
+                                pending.expectedText,
+                                pending.targetText,
+                            ),
                         pending.targetText,
                     )
                 } finally {
@@ -1289,9 +1344,11 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
      * stale VirtualFile stamp; editing first and saving second would arm the
      * File Cache Conflict dialog even when disk still equals [expectedText].
      *
-     * Refreshing an unsaved Document is the inverse hazard: it immediately
-     * asks IntelliJ to choose between operator memory and disk. Fail closed in
-     * that case and let the exact editor baseline flow through the CRDT retry.
+     * Refreshing an unsaved Document is the inverse hazard: it immediately asks
+     * IntelliJ to choose between operator memory and disk. Delta deliveries skip
+     * this helper for unsaved buffers, project only into the Document, and leave
+     * persistence to the durable CRDT canonical. Replace deliveries still fail
+     * closed here because they do not carry merge semantics.
      */
     private fun refreshCleanDocumentBeforeRemoteApply(
         filePath: String,

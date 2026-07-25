@@ -163,6 +163,29 @@ interface PendingRemoteAck {
     update: ReplicaRemoteUpdate;
 }
 
+export interface RemoteAckReplayPlan {
+    candidate: ReplicaRemoteUpdate;
+    acknowledgedThroughGeneration: number;
+}
+
+/**
+ * Select an ACK carrier only when the visible editor hash proves a retained
+ * delivery frontier. An unrelated visible hash must remain a retry, never a
+ * controller rebootstrap request.
+ */
+export function remoteAckReplayPlan(
+    updates: readonly ReplicaRemoteUpdate[],
+    visibleContentHash: string,
+): RemoteAckReplayPlan | null {
+    const matching = updates.filter((update) => update.expectedContentHash === visibleContentHash);
+    if (matching.length === 0) return null;
+    const acknowledgedThroughGeneration = Math.max(...matching.map((update) => update.generation));
+    const candidate = updates
+        .filter((update) => update.generation <= acknowledgedThroughGeneration)
+        .sort((a, b) => a.generation - b.generation || a.patchId.localeCompare(b.patchId))[0];
+    return candidate ? { candidate, acknowledgedThroughGeneration } : null;
+}
+
 export function utf16RangeToCodePoints(
     oldText: string,
     rangeOffset: number,
@@ -987,21 +1010,19 @@ export class CrdtReplicaManager {
             return 0;
         }
         const visibleHash = sha256(visibleText);
-        const updates = Array.from(pending.values())
-            .map((ack) => ack.update)
-            .sort((a, b) => a.generation - b.generation || a.patchId.localeCompare(b.patchId));
-        const candidate = updates[0];
-        const matching = updates.filter((update) => update.expectedContentHash === visibleHash);
-        const acknowledgedThrough = matching.length > 0
-            ? Math.max(...matching.map((update) => update.generation))
-            : candidate.generation;
-        if (!(await forwarder.ackRemoteUpdate(candidate, visibleText))) {
+        const updates = Array.from(pending.values()).map((ack) => ack.update);
+        const plan = remoteAckReplayPlan(updates, visibleHash);
+        if (!plan) {
+            this.scheduleReplicaRetry(filePath, 'delivery-ack-not-visible');
+            return 0;
+        }
+        if (!(await forwarder.ackRemoteUpdate(plan.candidate, visibleText))) {
             this.scheduleReplicaRetry(filePath, 'delivery-ack-pending');
             return 0;
         }
         let acknowledged = 0;
         for (const [key, ack] of pending) {
-            if (ack.update.generation <= acknowledgedThrough) {
+            if (ack.update.generation <= plan.acknowledgedThroughGeneration) {
                 pending.delete(key);
                 acknowledged += 1;
             }

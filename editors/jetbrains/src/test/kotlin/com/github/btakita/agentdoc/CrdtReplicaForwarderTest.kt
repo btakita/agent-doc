@@ -258,6 +258,26 @@ class CrdtReplicaForwarderTest {
     }
 
     @Test
+    fun `unsaved editor projects remote deltas in memory without disk side effects`() {
+        assertEquals(
+            RemoteCrdtProjectionMode.MemoryOnly,
+            remoteCrdtProjectionModeUtil(documentUnsaved = true, diskCanPersist = false),
+        )
+        assertEquals(
+            RemoteCrdtProjectionMode.MemoryOnly,
+            remoteCrdtProjectionModeUtil(documentUnsaved = true, diskCanPersist = true),
+        )
+        assertEquals(
+            RemoteCrdtProjectionMode.Persist,
+            remoteCrdtProjectionModeUtil(documentUnsaved = false, diskCanPersist = true),
+        )
+        assertEquals(
+            RemoteCrdtProjectionMode.Reject,
+            remoteCrdtProjectionModeUtil(documentUnsaved = false, diskCanPersist = false),
+        )
+    }
+
+    @Test
     fun `replace delivery boundary requires editor buffer and replica to match the expected baseline`() {
         assertTrue(remoteCrdtReplaceStillCurrentUtil("base", "base", "base"))
         assertFalse(remoteCrdtReplaceStillCurrentUtil("base", "base typed", "base"))

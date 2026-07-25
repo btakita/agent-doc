@@ -46,7 +46,7 @@ queue: stop
 **Coverage matrix.** `coverage.json` gained a `C#` column (rows 0 and 15 ✅, the other 46 `—`), `sync-coverage.mjs` gained `../lazily-cs/README.md` as a target, and all nine sibling READMEs plus `docs/coverage.md` were regenerated and committed one repo at a time. lazily-spec CI is green; the sibling README-only runs were still in progress and are not gating.
 
 Pushed: `lazily-cs` (new), `lazily-spec`, nine sibling READMEs, and the superproject gitlinks.
-<!-- agent:boundary:1015e4db -->
+<!-- agent:boundary:7dd4a0bd -->
 <!-- /agent:exchange -->
 
 ## Queue

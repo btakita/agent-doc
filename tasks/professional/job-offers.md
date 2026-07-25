@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: stop
+queue: start
 ---
 
 ## Status
@@ -359,7 +359,38 @@ Why it's the number that matters here: a "1.0%" offer means nothing until you kn
 Concretely: if Haiven has 10M shares outstanding but 13M fully diluted (after a 20% option pool + existing SAFEs convert), then "1.0%" means 100,000 shares if he's quoting outstanding vs. 130,000 shares if he's quoting fully-diluted... same headline number, real difference in what you actually own.
 
 One thing fully-diluted-*today* does **not** protect you from: future dilution. It fixes the denominator as of now, but the next funding round (their still-unraised other half of Seed) issues new shares and dilutes everyone, including you, unless the grant carries anti-dilution/pro-rata protection... which it almost certainly won't at this stage. That's consistent with the EV math already in this doc: even a good outcome dilutes a 1.0% grant down to something like 0.3-0.5% by the time it's worth anything. So "fully diluted" tells you Craig isn't lowballing the *current* percentage; it doesn't promise the percentage stays that size.
-<!-- agent:boundary:701c844f -->
+I suspect that this offer will be too much for Haiven. I feel a bit bad about it. Could we be compassionate, explaining that I did the math and weighed the options with the competing offer?
+
+### Re: compassionate framing for the Haiven ask — fable
+
+Done... the draft is revised with exactly that framing (commit `e8fdca5`), and I want to give you both the change and a gentle counterweight to the guilt.
+
+**What the email now says.** Three moves:
+
+1. **The numbers paragraph now leads with acknowledgment**: "I know an ask like this lands heavily on a seed-stage budget, and I don't make it lightly"... followed by the math transparency: you ran both paths against the $205k+ alternative, you're aware cash is their tight constraint, and that awareness is *why* the ask leans on equity and structure instead of cash parity. The ask reads as arithmetic, not appetite.
+2. **The closing is warm and collaborative**: "I hope the math works, because I'd rather build with you. If parts of this framework don't fit where Haiven is right now, tell me which ones... I listed the pieces separately precisely so we can solve it together." Plus genuine appreciation for how Craig has engaged. This gives them a dignified path to counter on specific components instead of feeling they must accept or reject a package.
+3. **What it deliberately does not do**: apologize for the ask, pre-concede a number, or blanket-label the ask "flexible." That's the line between compassion and negotiating against yourself. Empathy invites a collaborative counter; apology tells them the discount is available before they've asked for one.
+
+**On feeling bad... a reframe you've earned.** Look at what the numbers actually say: your ask leans *away* from their scarce resource (cash) and *toward* the thing a seed company mints to attract exactly this hire (equity). A $185k base against a $205k+ alternative is you *donating* $20k+/year of expected cash for the privilege of believing in their mission... the 1.0% and the structural protections are just making that donation rational instead of reckless. Craig is a decades-deep operator who has sat on the other side of this table at Wargaming and BioWare scale; a candidate who does the math openly and shows their work is the *easy* kind of negotiation for him, not an affront. And if the honest answer is that Haiven can't reach the framework... that's not you hurting them, that's the two of you discovering early and kindly that the timing doesn't work, which is precisely what this process is for. The unkind version is the one where you suppress the math, take $160k with vague equity, and resent it by month six.
+
+The email holds the floor from the negotiation notes while being genuinely gracious about it. Send it when you're ready (`#haivensend`)... and the same warmth costs nothing with the Acadian recruiter, who has also been straight with you.
+### Re: is this ask too much for Haiven — fable
+
+Short answer: **no, and here's the arithmetic that backs that up... plus the draft is now revised with the compassionate framing you asked for.**
+
+**What this package actually costs Haiven in cash, this year:** $185k base + $20k signing = **$205k cash**. That's it for hard cash. Everything else you're asking for is cheap-or-free for a company in their position:
+
+- **1.0% options**: zero cash cost. Dilution, not burn... and it's the standard instrument for exactly this kind of hire.
+- **Clawback scoping** (repay only on voluntary exit/for-cause): zero cost if they intend to keep you, which they clearly do.
+- **Cliff-waiver / prorated vesting credit**: costs equity, not cash, and only if they fire you early.
+- **2 months severance**: the one real contingent cash liability, but it's *contingent*... it only ever gets paid if they let you go, and it's explicitly framed in the draft as flexible/tradeable, listed last.
+
+So the actual "ask" Craig has to say yes to today is $205k in cash for an engineer building the exact SDK (Unreal/Unity/game-engine integrations) that's core to their product, from someone with a documented $205k+ alternative in hand. That's not a stretch ask for a team that just told you, unprompted, they're funded through launch and beyond and explicitly invited you to name a number. If anything, the earlier reassessment already flagged the risk running the other direction: pushing too hard on *equity percentage* against a company that's likely to stay private is where the real overreach risk lives, not the cash lines.
+
+**The feeling worth separating from the numbers:** it's natural to feel bad asking a scrappy team for real money... but Craig's email did the inviting, the funding disclosure was volunteered (not extracted), and a company that can't afford a documented, well-justified ask from a strong candidate is telling you something important about the offer *before* you accept it, not after. Compassion here means being honest and transparent about your reasoning, not discounting the ask.
+
+**What I changed in the draft** (`tasks/recruit/haiven/compensation-reply-draft.md`, commit `81cb506db`): added a short paragraph right after the funding-transparency thank-you, making explicit that these numbers came from running the math against your other offer rather than picking a target cold, and that the cash-light/equity-heavy shape is deliberate given their raise stage... not padding. It reads as considerate without softening any of the actual numbers. No changes to the ask itself... the floor, trade, and negotiation notes at the bottom of the draft are unchanged.
+<!-- agent:boundary:df7a0891 -->
 <!-- /agent:exchange -->
 
 ## Queue

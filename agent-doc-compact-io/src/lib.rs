@@ -695,7 +695,40 @@ pub fn run_in_controller(
             // reporting success is the one outcome that must not survive.
             let mut observed = dirty;
             for attempt in 1..=COMPACT_COMMIT_OBSERVE_ATTEMPTS {
-                std::thread::sleep(COMPACT_COMMIT_OBSERVE_BACKOFF);
+                // `#lazily-hot-path` Theme A — the reason this loop re-reads at all is
+                // that a live editor may still be delivering the compacted buffer
+                // (the reported case logged `delivery_converged=false live_editors=1`).
+                // Wait on the controller's convergence witness for the backoff window
+                // instead of sleeping it blindly: when delivery settles we re-read
+                // immediately. The hub is process-local, so only the controller can
+                // answer — when it cannot (no hub for this document, or no controller
+                // at all) we fall back to exactly the previous blind sleep, which
+                // keeps this fail-open.
+                match agent_doc_controller_io::project_controller::await_delivery_convergence_for_file(
+                    file,
+                    COMPACT_COMMIT_OBSERVE_BACKOFF,
+                ) {
+                    // Observed: the await already consumed up to the window (it
+                    // returns early only when convergence landed), so do not sleep
+                    // it a second time.
+                    Ok(Some(_)) => {}
+                    Ok(None) => std::thread::sleep(COMPACT_COMMIT_OBSERVE_BACKOFF),
+                    Err(err) => {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "compact_commit_observe_convergence_unavailable file={} fallback=blind_backoff detail={}",
+                                file.display(),
+                                format!("{err:#}")
+                                    .replace('\n', " | ")
+                                    .chars()
+                                    .take(160)
+                                    .collect::<String>()
+                            ),
+                        );
+                        std::thread::sleep(COMPACT_COMMIT_OBSERVE_BACKOFF);
+                    }
+                }
                 let retried_disk = effects
                     .force_disk_document_content(file, "compact_commit_observe_retry")
                     .unwrap_or_else(|_| content.to_string());

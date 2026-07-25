@@ -31,6 +31,11 @@ const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
 /// legitimately long, so the client's real deadline (not a global hang budget)
 /// governs, chunked into awaits no longer than this.
 const CONTROLLER_VISIBLE_WRITE_AWAIT_MAX: Duration = Duration::from_secs(120);
+/// `#lazily-hot-path` Theme A — ceiling and cadence for a delivery-convergence await.
+/// The cadence is the controller's own in-memory hub poll; it is deliberately much
+/// finer than the filesystem re-reads it replaces, because it costs a map lookup.
+const CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX: Duration = Duration::from_secs(120);
+const CONTROLLER_DELIVERY_CONVERGENCE_POLL: Duration = Duration::from_millis(20);
 const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
 const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
 /// A CP-owned git commit (barrier + stage + commit + boundary reposition) can run
@@ -3372,6 +3377,20 @@ pub(crate) struct VisibleWriteCommitCandidatePatchStatus {
     proof: Option<agent_doc_state_backbone::VisibleWriteCommitCandidateProjection>,
 }
 
+/// `#lazily-hot-path` Theme A — answer to a delivery-convergence await.
+///
+/// `observed` is the honest third state: the relay hub lives in a process-local
+/// registry, so a controller that hosts no hub for the document cannot report
+/// convergence at all. Collapsing that into `converged: true` (the way
+/// `delivery_converged_for_file` defaults for a local caller) would let a waiter
+/// treat "I cannot see this document" as "delivery finished".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryConvergenceStatus {
+    pub observed: bool,
+    pub converged: bool,
+    pub version: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct VisibleWriteMaterializedCarryForwardPayload {
     model_revision: u64,
@@ -3596,6 +3615,47 @@ pub fn await_visible_write_commit_candidate_for_patch_file(
     let status: VisibleWriteCommitCandidatePatchStatus =
         request_existing_controller_with_timeout(&project_root, request, recv_timeout)?;
     Ok(status.proof)
+}
+
+/// `#lazily-hot-path` Theme A — wait (up to `wait`) for the controller's relay hub to
+/// report delivery convergence for `file`.
+///
+/// This is the cross-process half of [`agent_doc_crdt_relay_io::delivery_convergence_witness_for_file`]:
+/// the hub registry is process-local, so a CLI process asking its *own* registry
+/// learns nothing. Returns `Ok(None)` when the controller hosts no hub for the
+/// document (nothing to wait for), and `Err` when the controller could not be asked —
+/// callers must treat both as "proceed with your own bounded checks", never as
+/// "delivery finished".
+pub fn await_delivery_convergence_for_file(
+    file: &Path,
+    wait: std::time::Duration,
+) -> Result<Option<DeliveryConvergenceStatus>> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let wait = wait.min(CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX);
+    let payload = serde_json::json!({
+        "wait_ms": u64::try_from(wait.as_millis()).unwrap_or(u64::MAX),
+    });
+    let request = ControllerRequest {
+        command: "delivery_convergence_await".to_string(),
+        file: Some(canonical.to_path_buf()),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("delivery_convergence".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(payload.to_string()),
+    };
+    let recv_timeout = wait.saturating_add(CONTROLLER_RPC_TIMEOUT);
+    let status: DeliveryConvergenceStatus =
+        request_existing_controller_with_timeout(&project_root, request, recv_timeout)?;
+    Ok(status.observed.then_some(status))
 }
 
 pub fn record_visible_write_materialized_carry_forward_for_file(
@@ -9017,6 +9077,11 @@ pub(crate) fn handle_request_locked(
                 request,
             ))
         }
+        "delivery_convergence_await" => controller_envelope(handle_delivery_convergence_await(
+            &bootstrap_snapshot,
+            runtime.as_ref(),
+            request,
+        )),
         "visible_write_commit_candidate_patch_await" => {
             controller_envelope(handle_visible_write_commit_candidate_patch_await(
                 &bootstrap_snapshot,
@@ -11514,6 +11579,63 @@ pub(crate) fn handle_visible_write_commit_candidate_patch_await(
             wait,
         ),
     })
+}
+
+/// `#lazily-hot-path` Theme A — bounded server-side await for delivery convergence.
+///
+/// The relay hub is process-local, so only the process hosting it can observe
+/// convergence; every CLI-side consumer (compact's commit-observe and CRDT-merge
+/// retries) would otherwise re-derive a *proxy* for it by re-reading disk and the
+/// snapshot on its own timer. This publishes the fact once, from the owner: a single
+/// in-memory poll here replaces N filesystem re-reads out there (rubric #3).
+///
+/// The hub exposes a witness, not a notification, so this polls it — but in memory,
+/// in one process, and it returns the instant convergence lands.
+pub(crate) fn handle_delivery_convergence_await(
+    _bootstrap: &ControllerBootstrap,
+    _runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<DeliveryConvergenceStatus> {
+    let file = request_file(&request)?;
+    let canonical = file.canonicalize().unwrap_or(file);
+    let wait = request
+        .diagnostic_payload
+        .as_deref()
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+        .and_then(|payload| payload.get("wait_ms").and_then(serde_json::Value::as_u64))
+        .map(Duration::from_millis)
+        .unwrap_or(CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX)
+        .min(CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX);
+
+    let started = Instant::now();
+    let mut last = DeliveryConvergenceStatus {
+        observed: false,
+        converged: false,
+        version: 0,
+    };
+    loop {
+        match agent_doc_crdt_relay_io::delivery_convergence_witness_for_file(&canonical)? {
+            Some(witness) => {
+                last = DeliveryConvergenceStatus {
+                    observed: true,
+                    converged: witness.converged,
+                    version: witness.version,
+                };
+                if last.converged {
+                    return Ok(last);
+                }
+            }
+            // No hub here: report that plainly rather than waiting out the deadline
+            // for a document this process cannot see.
+            None => return Ok(last),
+        }
+        if started.elapsed() >= wait {
+            return Ok(last);
+        }
+        std::thread::sleep(
+            CONTROLLER_DELIVERY_CONVERGENCE_POLL.min(wait.saturating_sub(started.elapsed())),
+        );
+    }
 }
 
 pub(crate) fn handle_visible_write_materialized_carry_forward_observed(
@@ -19940,6 +20062,41 @@ mod tests {
         .expect("await handler ok");
         assert!(missing.proof.is_none());
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// `#lazily-hot-path` Theme A — a controller that hosts no hub for the document
+    /// must say "not observed" immediately, not wait out the deadline and not claim
+    /// convergence. This is the failure the `Option` return exists to prevent: a
+    /// waiter told `converged` about a document nobody can see would stop waiting for
+    /// a delivery that is still in flight somewhere else.
+    #[test]
+    fn delivery_convergence_await_reports_unobserved_without_burning_the_deadline() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("no-hub.md");
+        std::fs::write(&file, "# no hub\n").unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new(bootstrap.clone()).unwrap();
+
+        let mut request = empty_controller_request("delivery_convergence_await");
+        request.file = Some(file.clone());
+        request.diagnostic_payload = Some(serde_json::json!({ "wait_ms": 30_000 }).to_string());
+
+        let started = Instant::now();
+        let status = handle_delivery_convergence_await(&bootstrap, &runtime, request)
+            .expect("await handler ok");
+
+        assert!(
+            !status.observed,
+            "this process hosts no hub for the document"
+        );
+        assert!(
+            !status.converged,
+            "an unobservable document must never be reported as converged"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "an absent hub is known immediately; it must not wait out the deadline"
+        );
     }
 
     /// Carry-forward guardrail for this migrated seam (`#lazily-hot-path`): once a

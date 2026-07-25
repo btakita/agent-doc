@@ -1126,6 +1126,19 @@ pub fn pane_composer_draft(harness: &HarnessConfig, content: &str) -> Option<Str
     if !harness.is_prompt_line(&candidate) || harness.is_dispatch_ready_prompt_line(&candidate) {
         return None;
     }
+    // Ghost/placeholder text is an EMPTY composer wearing a hint, not unsent
+    // operator input. Harnesses render it dim/faint while real keystrokes render
+    // at normal intensity, so the styling — not the wording — is the signal.
+    // This is what generalizes past `is_*_idle_placeholder_prompt`'s static
+    // allow-lists: Claude Code's autosuggest hint is *dynamic* (e.g.
+    // `❯ yes, compact it`), so no enumerated list can cover it. Reporting it as a
+    // draft strands route with `unblocker=submit_or_clear_pane_draft`, which the
+    // operator cannot satisfy — there is nothing to submit or clear.
+    if agent_doc_turn_executor_tmux::prompt::prompt_candidate_is_dim_placeholder(
+        content, &candidate,
+    ) {
+        return None;
+    }
     protected_prompt_draft_preview(harness, content)
 }
 
@@ -2087,6 +2100,37 @@ mod tests {
                 "────────\n❯ describe a task for a new session\n⏵⏵ bypass permissions on · 1 shell\n"
             ),
             None
+        );
+    }
+
+    /// A *populated, dynamic* Claude autosuggest hint (dim SGR `2`) is an empty
+    /// composer, not unsent operator input. The static placeholder allow-list
+    /// cannot cover this — the suggested text varies with context — so the dim
+    /// styling is the discriminator. Real (normal-intensity) operator input at
+    /// the same prompt must still be protected as a draft.
+    #[test]
+    fn dim_autosuggest_ghost_text_is_not_an_operator_draft() {
+        let h = HarnessConfig::claude();
+        let ghost = concat!(
+            "────────\n",
+            "\x1b[2m❯ yes, compact it\x1b[22m\n",
+            "⏵⏵ bypass permissions on · 1 shell\n",
+        );
+        assert_eq!(
+            pane_composer_draft(&h, ghost),
+            None,
+            "dim autosuggest ghost text must not be reported as an unsent draft"
+        );
+
+        // Same wording at normal intensity = genuine operator input: still a draft.
+        let typed = concat!(
+            "────────\n",
+            "❯ yes, compact it\n",
+            "⏵⏵ bypass permissions on · 1 shell\n",
+        );
+        assert!(
+            pane_composer_draft(&h, typed).is_some(),
+            "real (non-dim) operator input must still be protected as a draft"
         );
     }
 

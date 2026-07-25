@@ -440,6 +440,19 @@ pub fn codex_idle_placeholder_candidate(output: &str) -> Option<String> {
 }
 
 pub fn codex_prompt_candidate_is_dim_placeholder(output: &str, candidate: &str) -> bool {
+    prompt_candidate_is_dim_placeholder(output, candidate)
+}
+
+/// Harness-agnostic ghost/placeholder detection: true when `candidate`'s composer
+/// body renders **dim/faint** (SGR `2`) in the raw captured `output`.
+///
+/// Every TUI harness renders composer hint text — Codex's idle placeholder,
+/// Claude Code's `describe a task for a new session` and its *autosuggest* — in a
+/// faint style, while real operator keystrokes render at normal intensity. That
+/// styling is the only signal that generalizes: autosuggest text is **dynamic**
+/// (e.g. `yes, compact it`), so a static allow-list can never enumerate it. The
+/// underlying scanner already accepts `>`/`›`/`❯`, so this is not Codex-specific.
+pub fn prompt_candidate_is_dim_placeholder(output: &str, candidate: &str) -> bool {
     let Some(raw_line) = output.lines().rev().find(|line| {
         let stripped = strip_ansi(line);
         stripped.trim() == candidate

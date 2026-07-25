@@ -168,14 +168,26 @@ The cause was split authority during the unsynchronized window: `explicit_queue_
 Added unit and production-backed SimWorld coverage for marker-to-frontmatter, frontmatter-to-marker, two-sided conflicts, bounded edit sequences, and second-pass no-ops. `make check` and `make tmux-ci` pass. Commit `89abf3e8c` is on `main`; v0.35.26 is installed, PyPI-published, tagged, and available from the GitHub release. Controller and route-owned supervisor recycling is scheduled at safe idle boundaries.
 
 The only remaining step is the required human live-editor eyeball, recorded as non-blocking `#qactsync-live` `[operator-verify]` work.
-<!-- agent:boundary:ade8272b -->
+
+### Re: Response
+
+No duplicate supervisors were found—one route-owned supervisor per document. The thrash came from duplicate focus/layout effects plus a 3-second focus lease expiring during 16-second controller operations.
+
+Fixed and pushed:
+
+- `agent-doc`: `6bd02b682`
+- Superproject gitlink: `83dea33e8`
+- `make check`, `make tmux-ci`, Rust tests, and JetBrains plugin build pass.
+- CI is currently in progress.
+- Installed the fixed binary and IntelliJ IDEA 2026.1 plugin.
+
+Please restart IDEA once more to activate the newly installed plugin and allow the queued supervisor replacement to finish. Then reply `ready`; I’ll retry only `session-check` for the retained closeout.
+<!-- agent:boundary:b7cbf8ab -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#qactsync-live]
-- ~~do [#fmgcverify]~~
-- ~~📌 do [#qactsync]~~
+- ⏭️ do [#qactsync-live]
 - ⏭️ 📌 do [#ftimmediate]
 - 📌 do [#qeditrace]
 - 📌 do [#jbcompactcommit]
@@ -231,7 +243,6 @@ This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack wa
 - [ ] [#ipcauthority] [focused-cycle] #agent-doc-bug IPC root-cause A (data-loss authority ambiguity). SUPERSEDED PREMISE: the prior "DONE this pass" durable recovery sidecar (commit 317a336f, write_policy::content_ours_drops_operator_text + agent_doc_fs::preserve_dropped_operator_buffer -> .agent-doc/recovery/) has since been REMOVED with the sidecar retirement; do not treat it as landed safety net. REMAINING (now the whole item): make the CRDT/reliable-sync plane the single closeout authority and demote content_ours/snapshot to audit-only, so the operator-wins merge needs no sidecar fallback. Relates to #sidecarstate.
 - [ ] [#ipcliveness] [focused-cycle] #agent-doc-bug IPC root-cause D (transport/state liveness). DONE this pass: corrupt controller-state auto-quarantine (commit e06301e6) — agent_doc_fs::read_valid_or_quarantine wired into project_controller::read_bootstrap; a 0-byte/unparseable controller-state.json is moved aside + re-bootstrapped instead of wedging start (class 11 auto-recovery). REMAINING (blocked on decomposition landing, dirty files): editor IPC listener read_line no timeout (fd/thread leak on half-open client), connect_sync no connect timeout, file-IPC no negative-ack. Touches ipc_socket.rs, write/ipc/transport.rs, agent-doc-ipc-io, editor plugins.
 - [ ] [#ipcverhandshake] [focused-cycle] #agent-doc-bug IPC root-cause B: cross-process version skew has no negotiation (staleness inferred from mtime/inode; drives stale_install + stale-supervisor CRDT corruption). Extends the shipped #stale-plugin-detect. Fix: add a build-id/protocol-version field to the IPC handshake (agent-doc-ipc-protocol) so a newer finalize client refuses or forces-reload on mismatch. status.rs already carries injected_binary_version to extend to the wire.
-- [ ] [#ftimmediate] [focused-cycle] #agent-doc-feature Free-text prompts begin work immediately — ROOT GAP IDENTIFIED 2026-07-19. The run-after-clear route the item wants ALREADY EXISTS for id-backed items: DrainScope::Supervisor defers only [operator-verify], and ExecutionContext::loop_undrainable's own doc says a [focused-cycle] item is deferred by the in-session loop but DRAINED by the supervisor clear-and-continue path (#qfocsup). The gap is that partition_drainable_backlog_ids takes backlog IDS and ExecutionContext is a HashMap keyed by id, so a FREE-TEXT head has no carrier for the tag and can never be routed there — leaving the agent to park it in prose, which is the reported behavior. FIX: give free-text heads an execution context (inline marker parsed off the head text, or a synthesized id at queue-materialization time so every head is id-backed) so an agent judging 'this needs fresh context' can route it to the supervisor clear-and-continue drain instead of handing it back. Note #multilineheadbullet and #qconsumenostrike point the same way: free-text heads lacking a stable identity is the shared root.
 - [ ] [#qeditrace] [focused-cycle] #agent-doc-bug Pre-run queue edits partially reverted: when the operator adds multiple queue heads before a run (or JB Run Agent Doc) with no active turn, only the FIRST added head survives and the rest revert to the pre-edit queue. Distinct from the during-turn race - the preflight queue-maintenance reconcile drops all-but-first operator addition. Investigate preflight/maintenance.rs: queue_journal record + record_live_buffer (#qftloss mode-6), #mirrorall backlog-to-queue mirror, #rz3a freshly-added hold-out, #7r2s manual-add pin, #qdedupsync dedup - hypothesis is convergence keeps the first new head (pin/anchor match) but journals-without-replaying the rest. Repro 2026-07-01 reitrades.md; live dup heads in bugs2 (do #tmuxsynccrashlog x2, do #60ev x2). Add SimWorld coverage for multi-line pre-run operator-add survival + fail-closed recoverable artifact. Plan: tasks/agent-doc/plan-queue-edit-race-consolidated.md
 - [ ] [#jbcompactcommit] [operator-verify] Live JB Compact Exchange no-uncommitted-changes proof: after the fixed binary is installed + recycled, run JB Compact Exchange on a large session doc and confirm HEAD lands the compacted content (no green git gutter / no snapshot>visible drift on next preflight). Grep ops.log for compact_commit_head_mismatch (must be ABSENT on success; present = the new fail-closed guard fired with a reset --from-current recovery). Rust fix shipped in agent-doc-orchestration/src/compact.rs commit_compacted_authoritative (#jb-compact-commit-left-uncommitted).
 - [ ] [#tmuxsynccrashlog] [operator-verify] Replacement for #tmuxsynccrash: JB Sync Tmux Layout live repro log review. After the operator runs repeated JB Sync Tmux Layout against the repro layout, inspect idea.log, agent-doc ops.log, and tmux server pid/session evidence; close only if the server pid stays stable with repair_layout no-op/passive supersede markers, otherwise file a follow-up bug with the failing log markers. Plan: tasks/agent-doc/plan-sync-tmux-layout-crash.md

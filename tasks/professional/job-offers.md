@@ -2,12 +2,13 @@
 agent_doc_session: a7cd84b1-f38d-4554-92b9-1fbe207b6f9e
 resume: c00f9a95-29de-4ded-8b3c-3df9edebe6f3
 agent: claude
-claude_model: opus
+claude_model: fable
 agent_doc_format: template
 agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
+queue: start
 ---
 
 ## Status
@@ -187,17 +188,51 @@ Your instinct that they *could* reach $10M/yr isn't crazy; the issue is that **$
 So the assessment *reinforces* the negotiation posture from the last cycle rather than changing it: **the expected value of the equity is real but modest and heavily back-loaded, so it cannot be vague.** Push for 1.0%, and — given the Richeys' history points to a "stays-private, profitable, mid-size" outcome more than an acquisition — **weight the revenue-share definition at least as heavily as the equity percentage**, because in the most likely good scenario (private + profitable, no exit) the revenue-share is the only thing that pays you. If they'll define the revenue-share mechanics crisply and put 1.0% on paper, that's genuine upside on top of a credible team. If they keep it hand-wavy, treat the equity as ~$0 and let Acadian's $208-225k cash win.
 
 *Sources: [haiven.gg](https://haiven.gg/), [Child Safe Tech Alliance profile](https://www.childsafetechalliance.org/blog/designing-safety-from-the-start-how-haiven-is-reimagining-gaming-for-kids), [Luke Richey LinkedIn](https://www.linkedin.com/in/lukerichey/), [Craig Fryar LinkedIn](https://www.linkedin.com/in/craigfryar/), [Gravity Jack / Spokane Journal](https://www.spokanejournal.com/articles/15619-gravity), [Gravity Jack Crunchbase](https://www.crunchbase.com/organization/gravity-jack). Company financials/funding are not publicly disclosed; revenue-model details are drawn from Haiven's own and the Child Safe Tech Alliance's descriptions.*
-<!-- agent:boundary:f1787e6d -->
+❯ 🚧 Please reassess Opus' answers. What do you think the likelihood to reach $100M ARR?
+
+### Re: reassessment + $100M ARR odds — fable
+
+> **Queue prompt:** do [#reassessopusanswers]
+
+I re-examined the prior assessment line by line. Most of it holds; two numbers deserve adjustment, one detail was under-weighted, and then the $100M question has a pretty crisp answer.
+
+**Where the prior analysis holds up**
+
+- Founder read: correct and well-calibrated. Gravity Jack ($22M *cumulative* over ~15 years, no exit) is the single most predictive datapoint on the table... it says "durable mid-size builder," not "rocket." Fryar at Wargaming/Tableau is a genuinely strong CTO signal.
+- $10M at **8-18%**: I'd keep this range. It brackets the honest uncertainty between "credible team in a tailwind category" and "unproven two-sided model without disclosed venture capital."
+- The equity/revenue-share framing (paper equity is exit-gated; revenue-share is what pays in the most-likely good scenario) is the right decision lens and I re-endorse it as the core of the negotiation posture.
+
+**Where I'd revise**
+
+1. **$1M odds: trim from 45-60% to ~40-55%.** The prior analysis leaned on "sell the safety SDK B2B" as the reachable wedge, but under-weighted Haiven's own positioning: the SDK is marketed as **"zero cost" to developers**. If the SDK is genuinely free, the B2B wedge isn't the plan... the *ecosystem subscription* is the only revenue line, and that's the moonshot half with the cold-start problem. The 40-55% still assumes they'd pivot to charging platforms/studios if subscriptions stall (teams this experienced usually do), but the stated model starts revenue later than the prior estimate implied. **This is resolvable with one interview question: "Who pays, and when does the first dollar arrive?"** Their answer moves this number more than any research can.
+2. **Valuation multiple: 3-5x is conservative.** A growing safety-infra SaaS could fetch 5-8x. Bumps the 1.0%-at-$10M paper value toward $500k-800k pre-dilution. Directionally friendlier to Haiven, but it doesn't change any conclusion because it's still exit-gated.
+3. **Under-weighted factor: the faith-mission positioning cuts both ways.** Jesus.net partnership + Child Safe Tech Alliance gives real distribution into faith/family networks and brand trust with parents — a genuine wedge for the subscription model. It also niches the brand in a way that may cap mainstream studio adoption of the SDK. It widens the variance in both directions more than the prior text acknowledged.
+
+**$100M ARR likelihood: ~0.5-2%. Call it ~1% over a decade, and well under 1% "within a few years."**
+
+Reasoning from base rates and category evidence, not vibes:
+
+- **Category ceiling:** no gaming trust-&-safety pure-play has publicly reached $100M ARR. The category's best-funded leaders (ActiveFence, Modulate, GGWP, Hive's gaming slice) are estimated in the $10-50M range, and the biggest buyers (Microsoft, Roblox, Discord) keep acquiring or building in-house rather than paying at scale. Hitting $100M via B2B safety means becoming bigger than everyone who has ever tried in this category, against incumbents with 9-figure war chests.
+- **The consumer path:** $100M ARR via the ecosystem subscription means ~1-1.5M paying households at ~$6-8/mo across *indie* titles — effectively building a "Netflix of safe indie gaming." Consumer subscription platforms at that scale are ~1%-conditional-success bets even *with* major VC backing, which Haiven has not disclosed.
+- **Capital reality:** $100M ARR companies almost universally burn $50-150M getting there. A company with no disclosed institutional round doesn't have the fuel; reaching it would require multiple large future raises (diluting your 0.5-1.0% substantially along the way, likely 2-3x) *and* the model working.
+- **Founder-prior:** the Richeys' revealed style (profitable, patient, mission-first, 15 years to $22M cumulative) is close to the opposite of the burn-to-$100M playbook.
+
+**Does the $100M scenario change your decision? No — and here's the EV math that proves it.** Suppose $100M ARR happens: valuation perhaps $500M-1B; your 1.0% diluted through the raises that funded the run is realistically 0.3-0.5%, worth ~$1.5-5M. Multiply by ~1%: **expected value ~$15-50k.** That's roughly one signing bonus. The tail is real enough to want the equity *on paper with clean terms*, but nowhere near big enough to accept a cash discount for it, work unpaid overtime for it, or skip the revenue-share definition. Every prior conclusion survives the reassessment: equity-forward ask (1.0%, written terms, revenue-share mechanics precisely defined), signing bonus does the cash bridging, and Acadian remains the stronger default that Haiven must beat on conviction.
+
+One framing note for your own head: you don't need to *believe* in the $100M case to take Haiven, and you shouldn't take Haiven *because* of it. The bet you'd actually be making is the 40-60% world where they build a real $1-10M mission business you enjoy working in, with a revenue-share that pays something and a small chance of more. Price the offer against that world, not the tail.
+<!-- agent:boundary:d9a62bc8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue priority -->
+- 🚧 do [#reassessopusanswers]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog -->
+- [ ] 🚧 [#reassessopusanswers] Please reassess Opus' answers. What do you think the likelihood to reach $100M ARR?
 - [ ] [#haivenask] #haivenask Draft the Haiven compensation reply (equity-forward frame: base $180-185k anchor $190k + signing $20-25k + 1.0% primary equity ask with clean terms; cash parity with $208k+ alternative explicitly not expected) as an email/message draft for review
 - [ ] [#ipcarveout] Prepare an open-source IP carve-out exhibit (lazily, tsift, agent-doc, patchboard, tmux-router, corky, etc.) to attach to whichever agreement is signed
 <!-- /agent:backlog -->

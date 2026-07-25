@@ -244,6 +244,38 @@ pub struct RelayHub {
     /// `count(present_keys whose cell is true)` whenever the epoch or any observed
     /// liveness cell changes. [`Self::live_count`] is a reactive read of this slot.
     live_editor_count: Computed<usize>,
+    /// `#lazily-hot-path` Theme A — monotonic version of every input to the
+    /// delivery-convergence fold: the member set, each member's `pending` queue, and
+    /// liveness. Bumped by [`Self::bump_delivery_epoch`] at each of those writes.
+    ///
+    /// This exists so a consumer can ask *"has convergence changed since I looked?"*
+    /// instead of re-running an expensive re-read on a timer — the
+    /// [`EditorReplicaLivenessWitness`] idiom, where suppression tracks the fact
+    /// rather than a clock. The fold itself ([`Self::delivery_converged`]) stays
+    /// authoritative; the epoch only says when re-folding could produce a new answer.
+    delivery_epoch: Source<u64>,
+}
+
+/// The reactive core shared by every [`RelayHub`] constructor. A named struct rather
+/// than a tuple so adding an input to the graph stays readable at the call site.
+struct LivenessCore {
+    ctx: ThreadSafeContext,
+    liveness: ThreadSafeCellMap<u64, bool>,
+    membership_epoch: Source<u64>,
+    live_editor_count: Computed<usize>,
+    delivery_epoch: Source<u64>,
+}
+
+/// `#lazily-hot-path` Theme A — a point-in-time reading of delivery convergence
+/// together with the version of the inputs that produced it.
+///
+/// Two witnesses with the same `version` were computed from identical inputs, so a
+/// consumer holding an unchanged version can skip its retry work outright. A changed
+/// version means only that an input moved — `converged` still carries the answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DeliveryConvergenceWitness {
+    pub version: u64,
+    pub converged: bool,
 }
 
 impl RelayHub {
@@ -285,14 +317,10 @@ impl RelayHub {
     /// remaining process-lifetime growth is one hub per document in
     /// `agent-doc-crdt-relay-io`'s `hub_registry`, which is a registry-eviction
     /// question, not a reactive-scope one.
-    fn build_liveness_core() -> (
-        ThreadSafeContext,
-        ThreadSafeCellMap<u64, bool>,
-        Source<u64>,
-        Computed<usize>,
-    ) {
+    fn build_liveness_core() -> LivenessCore {
         let ctx = ThreadSafeContext::new();
         let membership_epoch = ctx.source(0u64);
+        let delivery_epoch = ctx.source(0u64);
         // Cells materialize on `register`; the factory value (`true` = live-on-register)
         // only applies before the explicit `set` in `set_live`.
         let liveness: ThreadSafeCellMap<u64, bool> = ThreadSafeCellMap::new(&ctx);
@@ -309,7 +337,13 @@ impl RelayHub {
                     .count()
             })
         };
-        (ctx, liveness, membership_epoch, live_editor_count)
+        LivenessCore {
+            ctx,
+            liveness,
+            membership_epoch,
+            live_editor_count,
+            delivery_epoch,
+        }
     }
 
     /// Materialize (if needed) and set member `client_id`'s liveness cell. Never holds
@@ -317,6 +351,21 @@ impl RelayHub {
     /// touching `ctx`), so there is no lock-order cycle with the registry mutex.
     fn set_live(&self, client_id: u64, live: bool) {
         self.liveness.set(&self.ctx, client_id, live);
+        // Liveness selects which members the convergence fold considers, so a
+        // transition changes the answer even with no queue mutation.
+        self.bump_delivery_epoch();
+    }
+
+    /// Advance the delivery-convergence input version (see [`Self::delivery_epoch`]).
+    ///
+    /// Called at every write that can change [`Self::delivery_converged`]: a member
+    /// registering or leaving, a liveness transition, and each mutation of a member's
+    /// `pending` queue. Missing a call here does not corrupt the fold — it only makes
+    /// a consumer suppress a re-check it should have made — so the bumps are placed at
+    /// the mutation sites themselves rather than inferred by a caller.
+    fn bump_delivery_epoch(&self) {
+        let epoch = self.ctx.get(&self.delivery_epoch);
+        self.ctx.set(&self.delivery_epoch, epoch.wrapping_add(1));
     }
 
     /// Bump the membership epoch so `live_editor_count` recomputes and counts a
@@ -325,6 +374,8 @@ impl RelayHub {
     fn bump_membership_epoch(&self) {
         let epoch = self.ctx.get(&self.membership_epoch);
         self.ctx.set(&self.membership_epoch, epoch.wrapping_add(1));
+        // The member set is an input to the convergence fold too.
+        self.bump_delivery_epoch();
     }
 
     /// Reactive read of member `client_id`'s liveness (the single source of truth that
@@ -338,7 +389,13 @@ impl RelayHub {
     /// Create a hub whose canonical replica uses `canonical_id` as its CRDT peer
     /// peer id. `canonical_id` is reserved — no member may register with it.
     pub fn new(canonical_id: u64) -> Self {
-        let (ctx, liveness, membership_epoch, live_editor_count) = Self::build_liveness_core();
+        let LivenessCore {
+            ctx,
+            liveness,
+            membership_epoch,
+            live_editor_count,
+            delivery_epoch,
+        } = Self::build_liveness_core();
         Self {
             canonical: ReplicaState::new(canonical_id),
             canonical_id,
@@ -352,6 +409,7 @@ impl RelayHub {
             liveness,
             membership_epoch,
             live_editor_count,
+            delivery_epoch,
         }
     }
 
@@ -516,6 +574,7 @@ impl RelayHub {
             None => false,
         };
         if existed {
+            // `set_live` bumps the delivery epoch for both writes.
             self.set_live(client_id, false);
         }
         existed
@@ -910,6 +969,8 @@ impl RelayHub {
                 update: packet.update.clone(),
             });
         }
+        // Queueing work for any live member un-converges delivery.
+        self.bump_delivery_epoch();
     }
 
     /// Pull pending supervisor-to-editor updates for `client_id`. Updates remain in
@@ -978,11 +1039,28 @@ impl RelayHub {
             member.pending.drain(..=matched_pos);
             member.last_ack_generation = member.last_ack_generation.max(acknowledged_generation);
             self.pending_rebootstrap.remove(&client_id);
+            // Draining an ACKed run can be the write that converges delivery.
+            self.bump_delivery_epoch();
             return Ok(true);
         }
         member.pending.remove(pos);
         member.last_ack_generation = member.last_ack_generation.max(generation);
+        self.bump_delivery_epoch();
         Ok(true)
+    }
+
+    /// `#lazily-hot-path` Theme A — convergence together with the version of the
+    /// inputs it was folded from.
+    ///
+    /// Consumers that today re-run an expensive check on a timer (compact's
+    /// commit-observe and CRDT-merge retries) can instead hold the previous witness
+    /// and skip the work while `version` is unchanged: equal versions mean no member,
+    /// queue, or liveness write has happened, so re-folding cannot yield a new answer.
+    pub fn delivery_convergence_witness(&self) -> DeliveryConvergenceWitness {
+        DeliveryConvergenceWitness {
+            version: self.ctx.get(&self.delivery_epoch),
+            converged: self.delivery_converged(),
+        }
     }
 
     /// True when every currently-live editor has ACKed all queued fan-out updates.
@@ -1681,6 +1759,103 @@ mod tests {
         // Idempotent: a duplicate frame (at-least-once redelivery) is a no-op.
         hub.apply_document_op_delta(&delta).unwrap();
         assert_eq!(hub.canonical_text(), "hello world\n");
+    }
+
+    /// `#lazily-hot-path` Theme A — THE property that makes the witness usable as a
+    /// suppression key: with no member, queue, or liveness write, repeated reads
+    /// report the same version. A witness whose version moved on every read would
+    /// still be "correct" but would suppress nothing, leaving the retry loops it
+    /// exists to replace exactly as expensive as before.
+    #[test]
+    fn delivery_convergence_witness_version_is_stable_while_nothing_changes() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+
+        let first = hub.delivery_convergence_witness();
+        let second = hub.delivery_convergence_witness();
+        // Reads that go through the fold (and therefore through the liveness cells)
+        // must not themselves count as changes.
+        let _ = hub.delivery_converged();
+        let _ = hub.live_count();
+        let third = hub.delivery_convergence_witness();
+
+        assert_eq!(first, second);
+        assert_eq!(first, third);
+        assert!(first.converged, "a registered member with no pending work");
+    }
+
+    /// The version advances at every write that can change the fold's answer, so a
+    /// consumer holding an old witness is never told "nothing changed" while
+    /// convergence actually moved.
+    #[test]
+    fn delivery_convergence_witness_version_advances_on_every_fold_input() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        let after_register = hub.delivery_convergence_witness();
+        assert!(after_register.converged);
+
+        let editor2 = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        editor2.apply_local_edit(0, 0, "needs-ack");
+        let update = editor2.diff(&ReplicaState::new(99).state_vector()).unwrap();
+        hub.relay_update(2, &update).unwrap();
+
+        let after_enqueue = hub.delivery_convergence_witness();
+        assert_ne!(
+            after_enqueue.version, after_register.version,
+            "queueing an unacked update must advance the version"
+        );
+        assert!(!after_enqueue.converged);
+        assert_eq!(after_enqueue.converged, hub.delivery_converged());
+
+        let pending = hub.pending_updates(3).unwrap();
+        hub.ack_delivery(3, &pending[0].patch_id, pending[0].generation)
+            .unwrap();
+
+        let after_ack = hub.delivery_convergence_witness();
+        assert_ne!(
+            after_ack.version, after_enqueue.version,
+            "draining an ACKed update must advance the version"
+        );
+        assert!(after_ack.converged);
+
+        // A liveness transition changes which members the fold considers, so it is a
+        // fold input even though no queue moved.
+        hub.disconnect(3);
+        let after_disconnect = hub.delivery_convergence_witness();
+        assert_ne!(
+            after_disconnect.version, after_ack.version,
+            "a liveness transition must advance the version"
+        );
+        assert_eq!(after_disconnect.converged, hub.delivery_converged());
+    }
+
+    /// An unacked delivery to a member that then disconnects converges (the fold cuts
+    /// to live members) — and the witness must report that transition, not a stale
+    /// "still waiting" answer.
+    #[test]
+    fn delivery_convergence_witness_tracks_the_live_cut_not_the_queue_alone() {
+        let mut hub = RelayHub::new(1);
+        hub.register(2).unwrap();
+        hub.register(3).unwrap();
+
+        let editor2 = ReplicaState::from_encoded(2, &hub.canonical_encoded_state()).unwrap();
+        editor2.apply_local_edit(0, 0, "unacked");
+        let update = editor2.diff(&ReplicaState::new(99).state_vector()).unwrap();
+        hub.relay_update(2, &update).unwrap();
+
+        let blocked = hub.delivery_convergence_witness();
+        assert!(!blocked.converged);
+
+        hub.disconnect(3);
+        let after = hub.delivery_convergence_witness();
+        assert_ne!(after.version, blocked.version);
+        assert!(
+            after.converged,
+            "a disconnected member is outside the live convergence cut"
+        );
+        assert_eq!(after.converged, hub.delivery_converged());
     }
 
     #[test]

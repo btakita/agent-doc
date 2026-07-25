@@ -777,15 +777,22 @@ fn current_text_for_file_with_authority_inner(
     } else {
         hub.commit_barrier_ready()?
     };
-    let delivery_converged = hub.delivery_converged();
+    // `#lazily-hot-path` Theme A — carry the convergence *version* alongside the
+    // boolean. `delivery_converged=false` repeated across a wedge cannot distinguish
+    // "deliveries are churning and never settling" from "nothing has moved at all";
+    // a frozen `delivery_version` says the latter outright, which is the difference
+    // between suspecting the editor and suspecting the relay.
+    let delivery = hub.delivery_convergence_witness();
+    let delivery_converged = delivery.converged;
     if !ready {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_current_text_unavailable file={} authority=multi_replica reason=sync_pending live_editors={} delivery_converged={}",
+                "crdt_current_text_unavailable file={} authority=multi_replica reason=sync_pending live_editors={} delivery_converged={} delivery_version={}",
                 file.display(),
                 hub.live_count(),
                 delivery_converged,
+                delivery.version,
             ),
         );
         return Ok(CurrentText::EditorSyncPending);
@@ -3037,6 +3044,23 @@ fn reconcile_replicas_against_liveness_with(
 /// (`#deliveryackcut`). `Ok(true)` when no hub exists — nothing to block on.
 pub fn delivery_converged_for_file(file: &Path) -> Result<bool> {
     Ok(with_existing_hub(file, |hub| hub.delivery_converged())?.unwrap_or(true))
+}
+
+/// `#lazily-hot-path` Theme A — [`RelayHub::delivery_convergence_witness`] for `file`,
+/// or `None` when this process hosts no hub for it.
+///
+/// Deliberately **not** defaulted to "converged" the way
+/// [`delivery_converged_for_file`] is: a witness is a suppression key, and inventing
+/// a version for a hub that does not exist here would let a caller conclude "nothing
+/// changed" about a document it cannot observe at all. `hub_registry` is a
+/// process-local static, so an absent hub means *ask the process that owns it* — the
+/// CLI-side retry loops (compact's commit-observe and CRDT-merge retries) therefore
+/// need a controller-side await, exactly like the visible-write receipt push, rather
+/// than a direct call to this function.
+pub fn delivery_convergence_witness_for_file(
+    file: &Path,
+) -> Result<Option<agent_doc_document_realtime::crdt_relay::DeliveryConvergenceWitness>> {
+    with_existing_hub(file, |hub| hub.delivery_convergence_witness())
 }
 
 pub fn signal_crdt_replica_event(

@@ -28,6 +28,12 @@ Thank you for the transparency on the funding position... that kind of candor is
 exactly why this team is attractive, and congratulations on the seed progress and the
 path to the August beta.
 
+I want to be upfront about how I got to these numbers: I ran them against my other
+offer rather than picking a target cold, and I'm mindful that a half-raised seed means
+cash is the tight constraint right now. That's exactly why the ask below leans on
+equity and structure instead of cash parity... it's the minimum that makes the math
+work on my side, not an opening bid to negotiate down from.
+
 Here's where I need to be, stated plainly. My alternative is a contract seat that
 annualizes above $205k in cash. I'm not asking Haiven to match cash... I'm asking for a
 package where the equity and structure make the gap rational:

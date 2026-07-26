@@ -46,6 +46,7 @@ mod auto_dag;
 mod autoclaim;
 mod clean;
 mod cleanup_cmd;
+mod preflight_hook;
 mod commands;
 mod convert;
 mod crash_resilience;
@@ -3309,6 +3310,10 @@ enum HookAction {
     /// Block a tool call that would write an untracked `#id` into source or a
     /// commit message (`PreToolUse` stdin JSON hook payload)
     CoinedIdPreToolUse,
+    /// Run preflight in-binary when an `agent-doc <FILE>` prompt arrives, so the
+    /// cycle contract reaches the agent with the prompt instead of via a
+    /// round trip (`UserPromptSubmit` stdin JSON hook payload)
+    PreflightUserPromptSubmit,
 }
 
 #[derive(Subcommand)]
@@ -5427,6 +5432,9 @@ fn try_main() -> anyhow::Result<()> {
             HookAction::CodexStop => agent_doc_codex_stop_io::handle_stop(),
             HookAction::CoinedIdPreToolUse => {
                 agent_doc_hooks_io::coined_id_pretooluse::handle_pretooluse()
+            }
+            HookAction::PreflightUserPromptSubmit => {
+                preflight_hook::handle_user_prompt_submit()
             }
         },
         Commands::Cleanup {

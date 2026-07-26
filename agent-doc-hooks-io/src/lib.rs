@@ -1,6 +1,7 @@
 //! Hook registry and document-hook I/O adapters for agent-doc.
 
 pub mod coined_id_pretooluse;
+pub mod preflight_user_prompt_submit;
 
 use std::path::Path;
 

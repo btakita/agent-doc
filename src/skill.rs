@@ -1055,6 +1055,14 @@ fn merge_codex_hooks_json(path: &Path) -> Result<()> {
 /// post-commit `session-check` warning can only report damage already done.
 const COINED_ID_PRETOOLUSE_COMMAND: &str = "agent-doc hook coined-id-pre-tool-use";
 
+/// `#preflightinbinary`. `UserPromptSubmit` fires when the `agent-doc <FILE>`
+/// trigger arrives, so the binary runs its own preflight and its stdout becomes
+/// the injected cycle contract — the agent gets the contract *with* the prompt
+/// instead of having to remember to shell back for it. The handler recognizes
+/// only a bare `agent-doc <FILE>` first line and no-ops on everything else, so
+/// it cannot perturb an ordinary prompt.
+const PREFLIGHT_USER_PROMPT_COMMAND: &str = "agent-doc hook preflight-user-prompt-submit";
+
 const TURN_STATUS_ACTIVE_COMMAND: &str = "agent-doc turn-status active";
 const TURN_STATUS_IDLE_COMMAND: &str = "agent-doc turn-status idle";
 
@@ -1246,6 +1254,14 @@ fn merge_claude_turn_status_hooks(path: &Path) -> Result<()> {
     // No matcher: the handler filters by tool name itself and allows everything
     // it does not recognize, so the guard cannot wedge a turn on an unknown tool.
     ensure_codex_hook_command(hooks_map, "PreToolUse", COINED_ID_PRETOOLUSE_COMMAND, None);
+    // `#preflightinbinary`: run preflight in-binary on the trigger prompt so the
+    // cycle contract arrives with the prompt rather than a round trip later.
+    ensure_codex_hook_command(
+        hooks_map,
+        "UserPromptSubmit",
+        PREFLIGHT_USER_PROMPT_COMMAND,
+        None,
+    );
 
     let rendered = serde_json::to_string_pretty(&root)?;
     std::fs::write(path, rendered).with_context(|| format!("write {}", path.display()))?;

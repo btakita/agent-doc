@@ -658,7 +658,23 @@ Bumps run inside one `Batch` so a subscriber cannot observe a partial transition
 One correction against myself: my positive-proof guard guessed ≥100 invalidation checks and the real count is 85. It failed on the first run for that reason alone — every genuine assertion had passed. I set it to the measured number rather than leaving a threshold that happened to be wrong in the safe direction; a guard that fires on its own arithmetic teaches the next reader to weaken it.
 
 `make check` green, pushed as `01d2cf3`. Remaining in cs: 82 fixtures, all genuinely missing surfaces — TopicCell (4) and WorkQueueCell (2) are the next coherent slices in the same row.
-<!-- agent:boundary:1231f956 -->
+
+### Re: do [#lazilycppsignalingroom] — opus-5
+
+Fixed and pinned. `SignalingRoom::forward` now reports non-delivery and the dispatch answers the sender with `unknown_target`, on the same channel `not_joined` and `permission_denied` already use.
+
+**Why this survived is the interesting part.** The fixture was listed as *deliberately absent* precisely **because** the library was known-wrong — "a faithful runner is red until this is fixed". That reasoning is backwards in a way worth naming: the fixture that would have caught the bug was excluded on the grounds that it would catch the bug. The gap was documented honestly and that documentation is exactly what kept it open. The runner lands with the fix, so the reason no longer justifies its own absence.
+
+**The invariant it pins is anti-spoof**, not routing. A client sends a directed frame carrying `to`; the server must forward it with `from` set to the **sender's server-registered** peer id, never a client-supplied value. A room that echoed a client-supplied `from` produces the right frame types, the right routing and the right roster at every step — only comparing `from` against the registered id catches it. Roster checks (excludes self, ascending) come along for free.
+
+**Writing the runner exposed a second defect neither of us was looking for.** `signaling.hpp` calls `std::sort` without including `<algorithm>`, and compiled only because every existing translation unit happened to pull it in first. No test had ever included that header on its own — the absence of a runner was hiding a header that could not stand alone. Fixed.
+
+`frames.json` stays declared-absent: it needs signaling wire serde this binding does not have. I kept the reason rather than quietly improving the count, since asserting one of two fixtures and calling the area covered is the marker-only failure this whole line of work exists to prevent.
+
+Mutation-checked both ways: restoring the original drop fails with "expected an error frame to conn a but nothing was delivered" — the exact defect — and forwarding a client-supplied `from` fails the anti-spoof assertion naming the registered id.
+
+`make check` green, 94 canonical fixtures replayed, up from 93. Pushed as `a0f390e`.
+<!-- agent:boundary:81f17509 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -693,7 +709,7 @@ One correction against myself: my positive-proof guard guessed ≥100 invalidati
 - ⏭️ do [#signalgetsignallive]
 - ⏭️ do [#recommendeddecidewhether]
 - ⏭️ do [#lazilycppconformance]
-- do [#lazilycppsignalingroom]
+- ~~do [#lazilycppsignalingroom]~~
 - do [#lazilycppcollections]
 - do [#trackedcopieslazily]
 - do [#firstunificationwire]
@@ -735,7 +751,6 @@ One correction against myself: my positive-proof guard guessed ≥100 invalidati
 - [ ] [#lazilydartcomputedmap] lazily-dart: ComputedMap entries are Slot, not Computed (collections.dart:430). Post-v2 Slot is the UNGUARDED pass-through while Computed carries the == memo guard — so ComputedMap does not have the guard its name implies, and this leaks publicly through handle(). Decide whether the handle becomes Computed.
 - [ ] [#recommendedspecdecision] [recommended] Spec decision for lazily-spec, blocking the family unification: (1) does the atomic-move contract in cell-model.md:275 bind EVERY flavor or only the source map? All nine bindings fail it on thread-safe and async, yet coverage.json marks all three rows green for every binding. (2) Is a thread-safe flavor meaningful on single-threaded runtimes? dart ships a 182-line duplicate family the spec marks N/A, and js README:633-640 argues the opposite of its own source comment at thread-safe.js:134-137.
 - [ ] [#lazilycppconformance] lazily-cpp: 10 conformance runners are MARKER-ONLY — they open the canonical fixture but only assert its `"model"` string, then replay hand-transcribed steps (rateshape 6, coordination 5, temporal/windowing/service/resilience 4 each, presence 3, membership/crdt-tree 1 each = 33 fixtures). They pass a did-you-load-fixtures check while being blind to any change in the corpus steps or expectations. Convert to real replays; the coverage guard counts them as covered today.
-- [ ] [#lazilycppsignalingroom] lazily-cpp SignalingRoom::forward (include/lazily/signaling.hpp:203) silently drops frames addressed to an unknown peer, but conformance/signaling/anti_spoof_session.json requires an `unknown_target` error frame back to the sender. A faithful signaling runner stays red until this is fixed. The second signaling fixture (frames.json) additionally needs signaling wire serde, which lazily-cpp does not have.
 - [ ] [#lazilycppcollections] lazily-cpp: 15 collections fixtures still uncovered — 9 with no coverage at all (cellmap_atomic_move, cellmap_independence, keyed_reconciliation_lis, semtree_incremental, stableid_alignment, textcrdt_convergence, textcrdt_delta_sync, workqueue_competing_delivery, workqueue_lease_deadletter) and 6 hand-transcribed (mergecell_algebra, 5x queuecell_*). Largest single body of remaining conformance work; spans five separate primitives. Tracked in the KNOWN_UNCOVERED ledger.
 - [ ] [#trackedcopieslazily] The tracked copies of lazily-spec conformance fixtures inside lazily-py (tests/conformance), lazily-dart (test/conformance), lazily-rs (tests/conformance) and lazily-go (test/conformance) are kept byte-identical to canonical BY HAND with no sync script or drift check. This cycle had to flip the same fixture in three places. Add a sync/verify script (or make the runners read the sibling checkout) so a canonical edit cannot silently miss a vendored copy.
 - [ ] [#asyncplanenever] Async plane never migrated to the v2 kernel: AsyncCellHandle / AsyncSlotHandle / AsyncSlotState survive in cpp, go, js, kt, py, zig, cs. Sharpest case is lazily-cpp `AsyncContext::memo()` (async_context.hpp:144), still live and undeprecated while the sync `Context::memo` is DELETED. Migrate to Async{Source,Computed} with deprecated aliases.

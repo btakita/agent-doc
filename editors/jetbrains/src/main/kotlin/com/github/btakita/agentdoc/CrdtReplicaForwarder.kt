@@ -219,7 +219,11 @@ class CrdtReplicaForwarder(
      * visible editor buffer. The content hash turns the ACK into convergence
      * proof; a generation alone proves only that a frame was handled.
      */
-    fun ackRemoteUpdate(update: ReplicaRemoteUpdate, appliedText: String?): Boolean {
+    fun ackRemoteUpdate(
+        update: ReplicaRemoteUpdate,
+        appliedText: String?,
+        appliedAtMs: Long = 0L,
+    ): Boolean {
         if (!attached) return false
         val started = System.nanoTime()
         val appliedContentHash = appliedText?.let(::sha256Text)
@@ -229,6 +233,7 @@ class CrdtReplicaForwarder(
             update.patchId,
             update.generation,
             appliedContentHash,
+            ReplicaAckStamps(pulledAtMs = update.pulledAtMs, appliedAtMs = appliedAtMs),
         ).also {
             logSlow(
                 "transport.ackUpdate",
@@ -294,7 +299,38 @@ data class ReplicaRemoteUpdate(
     val generation: Long,
     val expectedContentHash: String? = null,
     val update: ByteArray,
+    /**
+     * Wall-clock ms at which this replica RECEIVED the intent, stamped where the
+     * pull response is parsed. First of the four ACK round-trip stamps
+     * (`#ackeditorstamps`): received -> applied to buffer -> receipt emitted ->
+     * binary observes the receipt. Without it, a `delivery_ack_pending=11000ms`
+     * profile cannot tell a late delivery from a slow apply from a slow receipt.
+     * `0` means unstamped (a test transport, or a path with no pull).
+     */
+    val pulledAtMs: Long = 0L,
 )
+
+/**
+ * Editor-side halves of the delivery-ACK round trip (`#ackeditorstamps`).
+ *
+ * The binary already profiles its own wait states, so an 11s
+ * `delivery_ack_pending` is attributed to the wait but not decomposed: it cannot
+ * distinguish "the plugin received the intent late" from "applied it slowly"
+ * from "applied it fast and was slow to emit the receipt". These are wall-clock
+ * epoch ms because the two ends are different processes; the controller stamps
+ * the fourth (observed) moment when the ACK lands.
+ *
+ * `0` means unstamped and is rendered as unknown rather than as a delta from the
+ * epoch — a fabricated 1.7-trillion-ms delta is worse than a gap.
+ */
+data class ReplicaAckStamps(
+    val pulledAtMs: Long = 0L,
+    val appliedAtMs: Long = 0L,
+) {
+    companion object {
+        val UNSTAMPED = ReplicaAckStamps()
+    }
+}
 
 private fun sha256Text(text: String): String =
     MessageDigest.getInstance("SHA-256")
@@ -362,6 +398,7 @@ interface ReplicaTransport {
         patchId: String,
         generation: Long,
         contentHash: String? = null,
+        stamps: ReplicaAckStamps = ReplicaAckStamps.UNSTAMPED,
     ): Boolean = false
 
     /** `replica_deregister`. */
@@ -481,6 +518,9 @@ class CpSocketReplicaTransport(
 
     private fun parseUpdates(data: JsonObject?): List<ReplicaRemoteUpdate> {
         val updates = data?.getAsJsonArray("updates") ?: return emptyList()
+        // `#ackeditorstamps`: stamp receipt-of-intent here rather than at the call
+        // site, so every pull path (delta pull, legacy pullUpdates) carries it.
+        val pulledAtMs = System.currentTimeMillis()
         return updates.mapNotNull { element ->
             val item = element.asJsonObject
             val patchId = item.get("patch_id")?.asString ?: return@mapNotNull null
@@ -492,6 +532,7 @@ class CpSocketReplicaTransport(
                 generation = item.get("generation")?.asLong ?: return@mapNotNull null,
                 expectedContentHash = item.get("expected_content_hash")?.asString,
                 update = decodeBase64(updateB64) ?: return@mapNotNull null,
+                pulledAtMs = pulledAtMs,
             )
         }
     }
@@ -502,11 +543,18 @@ class CpSocketReplicaTransport(
         patchId: String,
         generation: Long,
         contentHash: String?,
+        stamps: ReplicaAckStamps,
     ): Boolean {
+        // `#ackeditorstamps`: the receipt moment is stamped here, at the send, not
+        // by the caller — this is the last instant the editor half owns.
+        val receiptAtMs = System.currentTimeMillis()
         val request = controllerRequest("replica_ack", filePath, identity) {
             it.addProperty("patch_id", patchId)
             it.addProperty("generation", generation)
             if (contentHash != null) it.addProperty("content_hash", contentHash)
+            if (stamps.pulledAtMs > 0L) it.addProperty("pulled_at_ms", stamps.pulledAtMs)
+            if (stamps.appliedAtMs > 0L) it.addProperty("applied_at_ms", stamps.appliedAtMs)
+            it.addProperty("receipt_at_ms", receiptAtMs)
         }
         val response = send(request) ?: return false
         return response.ok && (response.data?.get("acknowledged")?.asBoolean ?: false)

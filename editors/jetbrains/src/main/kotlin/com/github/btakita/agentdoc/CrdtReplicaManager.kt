@@ -913,6 +913,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
         filePath: String,
         forwarder: CrdtReplicaForwarder,
         knownVisibleText: String? = null,
+        appliedAtMs: Long = 0L,
     ): Int {
         val pending = pendingRemoteAckReplays[filePath] ?: return 0
         // A completed EDT apply may race a forced member replacement. Drop
@@ -930,7 +931,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             pending.values.map { it.update },
             contentHash(visibleText),
         ) ?: return 0
-        if (!forwarder.ackRemoteUpdate(plan.candidate, visibleText)) return 0
+        if (!forwarder.ackRemoteUpdate(plan.candidate, visibleText, appliedAtMs)) return 0
 
         var acknowledged = 0
         for ((key, ack) in pending.entries) {
@@ -1466,6 +1467,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
             details = "target_chars=${pending.targetText.length} visible=$projectionVisible disk_persisted=${outcome.diskPersisted} coalesced_updates=${pending.acknowledgements.size}",
         )
         if (disposed.get()) return
+        // `#ackeditorstamps`: the buffer apply is complete here — the second of the
+        // four ACK stamps. Taken before the executor hop so the hop's own latency
+        // lands in the applied->receipt leg where it belongs, not inside the apply.
+        val appliedAtMs = System.currentTimeMillis()
         if (projectionVisible) {
             // Retain before crossing back to the worker. If executor submission or
             // the socket ACK fails, the next drain replays it idempotently.
@@ -1482,6 +1487,7 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                             pending.filePath,
                             activeForwarder,
                                 outcome.editorText,
+                                appliedAtMs,
                             )
                         }
                     }

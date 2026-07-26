@@ -5499,6 +5499,15 @@ struct ControllerCrdtReplicaPayload {
     content_hash: Option<String>,
     awareness_b64: Option<String>,
     source: Option<String>,
+    /// `#ackeditorstamps`: editor-side wall-clock epoch ms for the first three
+    /// moments of the delivery-ACK round trip. Absent from any replica that has
+    /// not been updated, so every consumer must treat them as optional.
+    #[serde(default)]
+    pulled_at_ms: Option<u64>,
+    #[serde(default)]
+    applied_at_ms: Option<u64>,
+    #[serde(default)]
+    receipt_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -6646,6 +6655,16 @@ fn controller_crdt_replica_data(
             let generation = payload
                 .generation
                 .context("CRDT replica ack payload missing generation")?;
+            // `#ackeditorstamps`: stamp the fourth moment — the binary observing
+            // the receipt — before the ack is applied, so the reported leg is the
+            // transport, not the relay's own bookkeeping.
+            let observed_at_ms = editor_ack_observed_at_ms();
+            let editor_profile = render_editor_ack_profile(
+                payload.pulled_at_ms,
+                payload.applied_at_ms,
+                payload.receipt_at_ms,
+                observed_at_ms,
+            );
             match agent_doc_crdt_relay_io::ack_replica_update_for_file_with_content_hash(
                 canonical,
                 identity,
@@ -6653,7 +6672,18 @@ fn controller_crdt_replica_data(
                 generation,
                 payload.content_hash.as_deref(),
             )? {
-                Some(acknowledged) => Ok(serde_json::json!({ "acknowledged": acknowledged })),
+                Some(acknowledged) => {
+                    if let Some(profile) = editor_profile {
+                        agent_doc_ops_log_io::log_op(
+                            canonical,
+                            &format!(
+                                "crdt_replica_ack_editor_profile file={} patch_id={patch_id} generation={generation} acknowledged={acknowledged} profile=[{profile}]",
+                                canonical.display(),
+                            ),
+                        );
+                    }
+                    Ok(serde_json::json!({ "acknowledged": acknowledged }))
+                }
                 None => Ok(crdt_replica_refused_data("detached_authority")),
             }
         }
@@ -6689,6 +6719,62 @@ fn controller_crdt_replica_data(
         }
         other => anyhow::bail!("unsupported CRDT replica method `{other}`"),
     }
+}
+
+fn editor_ack_observed_at_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
+}
+
+/// Decompose the delivery-ACK round trip into its three editor-side legs
+/// (`#ackeditorstamps`).
+///
+/// The binary's own `profile=[state=Nms]` breakdown attributes a wait among the
+/// states the binary can see, which leaves the editor opaque: an
+/// `delivery_ack_pending=11000ms` could be a late delivery, a slow apply, or a
+/// fast apply with a slow receipt, and those have nothing in common as fixes.
+/// Two hypotheses about this same latency were each disproved the instant a log
+/// line carried an attribution field, so emit the legs rather than a total.
+///
+/// Legs are only rendered when both of their endpoints are stamped. An
+/// unstamped end (an older plugin, or a self-echo ACK that never went through
+/// the buffer) renders nothing for that leg — a missing leg is a fact, whereas
+/// substituting `0` would silently report the epoch as a timestamp. The whole
+/// profile is `None` when no leg is derivable, so an un-updated replica adds no
+/// log noise.
+///
+/// The two ends are different processes, so a leg can be negative under clock
+/// skew; it is reported as `skew` rather than clamped to `0`, because a clamped
+/// zero reads as "instant" and would be the wrong conclusion.
+fn render_editor_ack_profile(
+    pulled_at_ms: Option<u64>,
+    applied_at_ms: Option<u64>,
+    receipt_at_ms: Option<u64>,
+    observed_at_ms: u64,
+) -> Option<String> {
+    fn leg(name: &str, from: Option<u64>, to: Option<u64>) -> Option<String> {
+        let (from, to) = (from?, to?);
+        Some(match to.checked_sub(from) {
+            Some(delta) => format!("{name}={delta}ms"),
+            None => format!("{name}=skew"),
+        })
+    }
+
+    let legs: Vec<String> = [
+        leg("received_to_applied", pulled_at_ms, applied_at_ms),
+        leg("applied_to_receipt", applied_at_ms, receipt_at_ms),
+        leg("receipt_to_observed", receipt_at_ms, Some(observed_at_ms)),
+        // The end-to-end editor leg, so a profile missing its middle stamp
+        // (self-echo ACK) still bounds the editor half.
+        leg("received_to_observed", pulled_at_ms, Some(observed_at_ms)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    (!legs.is_empty()).then(|| legs.join(" "))
 }
 
 fn base64_standard_encode(bytes: &[u8]) -> String {
@@ -15579,6 +15665,43 @@ mod tests {
     // `state_store` re-export already in scope via `super::*`.
     use agent_doc_sqlite::state_store::{load_actor_transitions_from_db, sqlite_i64};
     use lazily::DurableOutbox;
+
+    #[test]
+    fn the_editor_ack_profile_reports_legs_it_can_derive_and_omits_the_rest() {
+        // #ackeditorstamps: the whole point is attribution, so each leg must be
+        // separately readable — a total would not distinguish a late delivery
+        // from a slow apply from a slow receipt.
+        let profile = render_editor_ack_profile(Some(1_000), Some(1_400), Some(1_450), 1_600)
+            .expect("fully stamped ack renders a profile");
+        assert_eq!(
+            profile,
+            "received_to_applied=400ms applied_to_receipt=50ms receipt_to_observed=150ms received_to_observed=600ms"
+        );
+
+        // A self-echo ACK never crosses the buffer, so its middle stamp is absent.
+        // The legs that touch it must be omitted, NOT computed against 0 — an
+        // epoch-relative delta would report a ~55-year apply.
+        let profile = render_editor_ack_profile(Some(1_000), None, Some(1_050), 1_100)
+            .expect("partially stamped ack still bounds the editor half");
+        assert_eq!(
+            profile, "receipt_to_observed=50ms received_to_observed=100ms",
+            "unstamped endpoints must drop their legs, not fabricate them"
+        );
+
+        // An un-updated replica sends no stamps at all: emit nothing rather than
+        // a line whose only content is the controller's own clock.
+        assert!(render_editor_ack_profile(None, None, None, 1_100).is_none());
+
+        // Two processes, two clocks. A negative leg is real information about
+        // skew; clamping it to 0 would read as "instant" and mislead the next
+        // person profiling this path.
+        let profile = render_editor_ack_profile(Some(2_000), Some(1_000), None, 3_000)
+            .expect("skewed stamps still render");
+        assert!(
+            profile.contains("received_to_applied=skew"),
+            "backwards leg must be named, not clamped: {profile}"
+        );
+    }
 
     #[test]
     fn native_reload_policy_requires_an_explicit_safe_adapter() {

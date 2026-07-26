@@ -17,7 +17,7 @@ agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.28"
 # host IDE, but that unwind passes THROUGH any live guard, so a poisoning mutex
 # turns a survivable panic into a permanent process-wide outage.
 parking_lot = "0.12"
-lazily = "0.50.0"
+lazily = "0.51.0"
 agent-doc-cycle-state-io = { path = "../agent-doc-cycle-state-io", version = "0.35.28" }
 agent-doc-frontmatter = { path = "../agent-doc-frontmatter", version = "0.35.28" }
 agent-doc-git-io = { path = "../agent-doc-git-io", version = "0.35.28" }

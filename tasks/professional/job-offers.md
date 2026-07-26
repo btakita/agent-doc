@@ -644,7 +644,49 @@ Three things in this cycle: what to do about the stalled thread, whether a text 
 **3. Gravity Jack backing: a real update, and it moves the left tail, not the right one.** You're right to correct the model, in both directions. PresenceAI followed the normal startup script... unprofitable, shut down... and a profitable backer genuinely breaks that script: Gravity Jack's agency + patent-licensing revenue means Haiven likely doesn't die abruptly when the seed cash runs low. The Richeys can slow-burn it. Concretely that raises: the odds Haiven *exists* in 3-5 years, the odds your prototype fee gets paid, the odds a revenue-share-if-private ever has a company attached to it, and the durability of the ally relationship you're investing in. What it does **not** move: the $10M/$100M odds. A $1-3M/yr-scale agency can subsidize a small team's payroll; it cannot fund a growth run... that still requires the seed completing and the milestones landing. And there's a subtle downside scenario worth naming: backer-subsidized survival is also how companies persist for years in low-cash grind mode *without* the traction that makes equity or revenue-share worth anything... which is precisely the "long haul I don't have the stomach for" future you declined. So the update is net-positive *for the path you chose*... bounded prototype, ally relationship, door open... and neutral-to-negative for the path you didn't. It confirms rather than reopens the decision.
 
 Sequence for today: Acadian acceptance + questions (if outstanding), Haiven v3 letter, then the text. All three artifacts are committed and ready; the only remaining ingredient is send.
-<!-- agent:boundary:bfdf895d -->
+❯ 🚧 Here is Craig's response. I confirmed that the time is good. I don't think they can match my initial offer. They may be close however. My concern now is I don't want to be the only person getting full salary while everyone else is getting a discount. That is not fair for the team. So I would have to give something up, most likely equity. I was thinking of floating the option of me taking Acadian for financial stability with my family (both Luke + Craig are better off than me financially)...and doing the prototype while with Acadian. I believe they would be receptive to that.
+
+```
+You're very welcome, BrIan.
+
+FYI, I have a personal practice of taking time away from all-things-work on Sundays. I'm making an exception in order to briefly reply.
+
+I also forwarded your thoughtful email to Luke for his perusal. You mentioned to me on Friday that the two of you were planning to speak again today. If so, I would like to join you to discuss how we get aligned on comp.
+
+Short answer: yes, I believe we can find a mutually agreeable path.
+
+For context: we are not currently paying market rates (I'm at ~50%), and will be adjusting this once revenue and funding allow us to do so.
+
+Having said that, let's talk this afternoon or early evening and get to a place of mutual agreement.
+
+Thank you for your stated interest. You clearly understand the importance of what we're doing. We believe you have the experience and mindset to help us achieve and accelerate our objectives.
+
+Our resulting offer will be a blend that attempts to balance money with mission, meaning, and merit including both short and long-term conditions (as you have noted) and significant upside. Please work with us to achieve this.
+
+I'd like to propose that the 3 of us talk today at (or after) 8pm ET / 7pm CT / 5pm PT.
+
+We can do so by Meet or phone, whatever is most convenient. Please let me know.
+
+Thanks again, 
+Craig
+craig@haiven.gg 
+512-848-8488 mobile 
+```
+
+### Re: Craig's reply, the 50% revelation, and tonight's call — fable
+
+This is a very good reply... and it contains one fact that reorganizes the whole negotiation. Call-prep playbook is committed at **`tasks/recruit/haiven/call-prep-2026-07-26.md`** (commit `c1c8a82`). The essentials:
+
+**Reading Craig's email.** Every signal is a close-signal: he broke his Sunday no-work practice to reply, forwarded your email to Luke, said "yes, I believe we can find a mutually agreeable path," and wants synchronous alignment tonight. They are trying to hire you, not deflect you. And "our resulting offer will be a blend that attempts to balance money with mission, meaning, and merit... and significant upside" tells you exactly what's coming: **a below-ask cash number wrapped in equity and future promises.** The pivotal disclosure: the team, including Craig, is at ~50% of market "until revenue and funding allow." You were right that they can't match your initial ask... and now you know the structural reason.
+
+**Your fairness instinct is right; your remedy is backwards.** Not wanting to be the only full-salary person on a half-salary team is honorable AND tactically correct... new-hire-paid-most is corrosive to exactly the working relationship you flagged as your residual uncertainty. But the fair structure is **not** "give something up, most likely equity." Below-market cash is a loan you're making the company; equity and triggers are the interest. Give up cash AND equity and you're not being fair... you're donating. The startup-standard fairness trade is the opposite: **team-parity-ish cash now + MORE equity (1.5-2.0%+ if cash drops materially) + a WRITTEN salary-normalization trigger** ("base adjusts to $X upon seed close / revenue milestone, stated in the offer letter"). Craig's "once revenue and funding allow" is a promise; tonight's job is making it a term. At 50% of market, everyone at Haiven is being paid in upside... if you join that structure, you should be too. Note also: the protections (clawback scoping, pre-cliff vesting credit) matter MORE at discounted cash, not less... underpaid AND unvested is the worst square on the board.
+
+**Before 8pm, one non-negotiable homework item: compute your real family cashflow floor ($F).** The $180k floor was a *comparison* floor against Acadian; it is not your survival number. Tonight's decision axis is "can the blend clear what my family actually needs for ~12 months"... and everything between $F and $185k is trade-space you can convert into equity and triggers. Do not get on the call without knowing $F.
+
+**On floating the Acadian+prototype path: yes, but LAST, not first.** Your instinct that they'd be receptive is probably right... it's cheap for them and keeps you involved. That's precisely why you must not open with it: offered early, it invites Luke and Craig to take the inexpensive option *before* trying to close you on the role, and tonight is their attempt to close you. Sequencing from the playbook: (1) let them present the blend first... Craig has one prepared; don't bid against yourself. (2) Ask the definition questions live: Founder's Package instrument, fully-diluted basis, vesting, team size, runway, and *what trigger normalizes salaries, to what number*. (3) State the family constraint plainly and without apology... they are better-positioned financially than you; that's a constraint, not a grievance: "I have a family cashflow reality that sets a floor on near-term cash; above it I'm genuinely flexible and happy to be paid in the same upside you are." (4) If the blend clears $F, negotiate the trigger + equity bump + protections into it... and this is where your saved line finally gets played: "the work and what I'd learn here matter to me... that's why I can meet you at ___." (5) **Only if the blend cannot clear $F**, offer Acadian+prototype as a *bridge, not an exit*: "then here's how I can still help while the finances mature... I take the contract seat for family stability, build you the SDK prototype on a bounded basis, and when the salary adjustment lands we revisit this with the prototype already shipped." The superseded decline letter and the SDK contract structure are both ready if that's where it lands.
+
+**And the single most important rule for tonight: do not accept a number on the call.** Close warmly with "let me run this against my family budget tonight; you'll have my answer tomorrow." Twenty-four hours is normal, expected, and the only defense against live-accepting a discounted package in the glow of two founders telling you... accurately... that you understand the importance of what they're doing. Luke will be there: the mission language you put in the email (kids safe, communities positive, matching people for fun, built into the infrastructure) is shared vocabulary now... use it once, sincerely, and then be crisp. Tracked as `#haivencall`.
+<!-- agent:boundary:258f25d8 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -655,6 +697,7 @@ Sequence for today: Acadian acceptance + questions (if outstanding), Haiven v3 l
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#haivencall] Tonight 8pm ET: 3-way comp call with Luke + Craig; playbook at tasks/recruit/haiven/call-prep-2026-07-26.md; compute family cashflow floor $F BEFORE the call; do not accept a number live
 - [ ] [#sdkcontract] #sdkcontract [on-hold] Prototype/contract path superseded by the decision to pursue the Haiven role; revive only if the package negotiation falls through (structure preserved in tasks/recruit/haiven/sdk-contract-structure.md)
 - [ ] [#acadiansend] #acadiansend [operator-verify] HOLD Acadian (neither accept nor decline) until the Haiven package is agreed + signed; if the recruiter pings: 'finalizing another conversation, need a few days'; decline graciously only after Haiven signs
 <!-- /agent:backlog -->

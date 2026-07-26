@@ -267,21 +267,49 @@ Rows 2 and 3 done and pushed. Row 4 is a different plane and is now its own item
 **Verification.** `make check` green (65 tests, up from 63 — the two extra are the new model theories), `dotnet format --verify-no-changes` clean. Rows 2 and 3 flipped, table regenerated and committed one repo at a time across the spec and all nine sibling READMEs. lazily-cs CI queued at closeout, recorded rather than waited on.
 
 **Row 4 is split out into its own backlog item.** It is not a materialization row: the `familysync` corpus is a sync plane — per-key LWW registers, materialize-on-ingest for keys the local replica has never seen, epoch bumping, idempotent re-ingest, and a derived aggregate over the family. Keeping it inside a phase named for keyed-map materialization is what made the parent item mis-shaped in the first place, so it gets its own id rather than a fourth row bolted onto this one.
-<!-- agent:boundary:f75d8af2 -->
+
+### Re: keyed-map sync with materialize-on-ingest — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzcsfamilysync]
+
+
+Row 4 done and pushed. That completes every keyed-collection row of the phase — rows 1–4 and 9–11 are all shipped, and lazily-cs is at 9 of 48.
+
+**The defect this plane closes is invisible from one replica**, which is exactly why it survives in a plain CRDT plane. A keyed op for an entry the local replica never registered has no node to merge into, so it gets dropped — and the *origin's* view stays perfectly correct, because the origin wrote the key and therefore has it. Every peer silently lacks the membership, and every aggregate over the family disagrees forever. So the runner drives **two replicas** and asserts on the target, not the writer.
+
+**Seeding from the op's own converged register IS the pointwise merge**, so materialize-on-ingest inherits semilattice convergence rather than bolting a special case onto it. Re-ingest is a no-op because last-writer-wins accepts only a *strictly* greater stamp, and the HLC absorbs remote stamps so a later local write orders after everything already seen.
+
+**Two places where the obvious assertion would have proved nothing.**
+
+Idempotence is asserted on the **apply count**, not the resulting state. A binding that re-applied every op lands on identical values — the ops are the same — so state alone cannot separate "converged" from "idempotent".
+
+The aggregate is a real reactive derived over the membership epoch, and it is wired **before any op arrives**. Counting after the fact would demonstrate that the runner can scan a dictionary; the fixture's claim is that a live count converges, which only means something if the derivation predates the sync. The runner also asserts the aggregate actually recomputed, so a constant would fail.
+
+The epoch bumps on membership growth alone — flipping a value must not recompute an aggregate that depends only on which keys exist. Same plane separation the keyed maps keep.
+
+**Mutation-checked three ways, each restored.** Dropping an unknown key fails the materialize scenarios; accepting an equal stamp fails `reingest_applied`; removing the aggregate's membership dependency fails `aggregate_is_reactive`. The first attempt at the drop mutation did not compile — unreachable code after an early return — and produced no failures rather than a green pass, which is the harmless version of the trap that bit twice earlier in this phase.
+
+**Verification.** `make check` green (66 tests), `dotnet format --verify-no-changes` clean. Row 4 flipped, table regenerated and committed one repo at a time across the spec and all nine sibling READMEs. lazily-cs CI queued at closeout, recorded rather than waited on.
+
+Next in the plan is the statechart phase — flat state machines and Harel statecharts over a seven-fixture corpus (entry/exit actions, guards, hierarchy, shallow and deep history, parallel regions).
+<!-- agent:boundary:01b20db8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~do [#lzcsfamilysync]~~
 - ~~do [#lzcsreactivemapfx]~~
 - ~~do [#lzcssemtree]~~
 - ~~do [#lzzigcitoolchain]~~
 - ~~do [#lzgoerrorretry]~~
 - ~~do [#lzasyncerrfixture]~~
-- ~~⏭️ do [#lzcscollections]~~
+- ~~do [#lzcscollections]~~
 - ⏭️ do [#lzcsstatechart]
 - ⏭️ do [#lzcsqueues]
-- 🚧 do [#lzcscrdt]
+- ⏭️ do [#lzcscrdt]
 - do [#lzcsipc]
 - do [#lzcssync]
 - do [#lzcstemporal]
@@ -293,10 +321,9 @@ Rows 2 and 3 done and pushed. Row 4 is a different plane and is now its own item
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsfamilysync] lazily-cs: row 4 — keyed-map sync. Per-key LWW registers, materialize-on-ingest (a keyed op for an entry the local replica never registered must MATERIALIZE it from the op's converged register rather than drop it), epoch bumping, idempotent re-ingest, membership-only-grows, and a derived aggregate over the family; replay conformance/familysync/materialize_on_ingest.json — plan: tasks/software/lazily-cs-parity-plan.md
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
-- [ ] 🚧 [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)
+- [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)
 - [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
 - [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)
 - [ ] [#lzcstemporal] lazily-cs: TimerCell/IntervalCell/CronCell/DeadlineCell over a logical clock, debounce/throttle/sample/probabilistic-sample, tumbling/sliding/session windows; replay temporal + rateshape + windowing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 40, 41, 45)
@@ -320,4 +347,5 @@ Rows 2 and 3 done and pushed. Row 4 is a different plane and is now its own item
 - 2026-07-25 [#lzcsreactivemapfx] lazily-cs: row 9 — CellTree + reconcile on top of the shipped ReactiveMap core; replay collections/cellmap_atomic_move.json, cellmap_independence.json, keyed_reconciliation_lis.json (an atomic move must bump order only and keep the entry handle, which is what separates a reorder from a remove+re-mint) — plan: tasks/software/lazily-cs-parity-plan.md
 - 2026-07-25 [#lzcssemtree] lazily-cs: rows 10-11 — memoized semantic tree (SemTree) and stable-id alignment (manufactured identity); replay collections/semtree_incremental.json and collections/stableid_alignment.json — plan: tasks/software/lazily-cs-parity-plan.md
 - 2026-07-25 [#lzcscollections] lazily-cs: rows 2-4 — ThreadSafeSlotMap + AsyncSlotMap materialization and keyed-map sync (membership propagation, materialize-on-ingest, derived alignment); replay the familysync corpus. Row 1 (ReactiveMap core + CellMap/SlotMap + materialization corpus) shipped 2026-07-25 — plan: tasks/software/lazily-cs-parity-plan.md
+- 2026-07-25 [#lzcsfamilysync] lazily-cs: row 4 — keyed-map sync. Per-key LWW registers, materialize-on-ingest (a keyed op for an entry the local replica never registered must MATERIALIZE it from the op's converged register rather than drop it), epoch bumping, idempotent re-ingest, membership-only-grows, and a derived aggregate over the family; replay conformance/familysync/materialize_on_ingest.json — plan: tasks/software/lazily-cs-parity-plan.md
 <!-- /agent:done -->

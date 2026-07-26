@@ -115,13 +115,47 @@ Created a coordinated plan set for one cross-language network suite:
 The contract and plans are committed locally as `784719be3` (`lazily: plan cross-binding network interop suite`). All four Markdown files parse successfully and the staged diff passed whitespace validation. The root `make check` reached an unrelated pre-existing Corky parallel-test port-allocation race: four loopback tests failed with `AddrInUse`, while that exact test group passed in isolation. I left the unrelated public subrepo unchanged; the in-scope C++ full suite is green.
 
 Queued implementation in four explicit phases: `#lzinteropcore`, `#lzinteropeers`, `#lzinteropchannels`, then dependency-bound `#lzinteropcs`.
-<!-- agent:boundary:dd948485 -->
+
+### Re: do [#lzinteropcore] — gpt-5
+
+Implemented Phase 0-1 as a standalone Rust workspace in `src/lazily-interop`, with no `lazily-rs` dependency. The deliverable includes:
+
+- frozen Draft 2020-12 control, scenario, and result schemas plus local validation of `lazily-spec/schemas/distributed.json`;
+- a versioned NDJSON peer supervisor with command and shutdown deadlines, stderr capture, fail-closed capability validation, and a `peers.toml` registry;
+- a deterministic semantic scenario engine that validates each emitted frame, relays explicit delivery order/duplicates, checks `applied`, and compares canonical expected snapshots;
+- JSON, JUnit, and concise console reports with pinned categories, culprit/plane diagnostics, staged-peer visibility, and shell-safe replay commands;
+- an intentionally independent Rust reference peer with canonical LWW semantics and a real Unix length-prefixed IPC link;
+- a mutation runner proving all eight required defect classes go red with the expected culprit: wrong frontier object, omitted null key, reversed stamp comparison, false `applied`, truncated frame, merged frames, swallowed unsupported channel, and non-flushed control output.
+
+Changed paths are the new crate under `src/lazily-interop` (excluding the preserved pre-existing untracked `src/lazily-interop/src/lazily_interop/peer.py`) and the three plan files under `tasks/software/plan-lazily-interop-*.md`. The implementation and plan-status update are committed locally as `ff7d4e17b` (`lazily: add interop orchestrator mutation gate`).
+
+Verification:
+
+- `src/lazily-interop/make check` passed: formatting, Clippy with `-D warnings`, 8 unit tests, 2 CLI integration tests, doc tests, schema checks, and the mutation command.
+- The normal strict run passed with two eligible reference peers, 2 emitted frames, 3 deliveries, and C# explicitly reported as staged.
+- `cargo run --quiet -- mutation-check` caught 8/8 required mutations with the expected categories and culprits.
+- `cargo tree --edges normal` confirms the orchestrator imports no Lazily implementation.
+- Scoped `git diff --check` passed.
+
+Confidence: high for the Phase 0-1 gate and its feature/staging semantics. Escalation: the workspace umbrella `make check` remains red outside this change in concurrent `src/agent-doc` work because `ClassifiedEvent.event_name` is unused under `-D warnings`; I preserved that other session's dirty subrepo. The earlier umbrella run also exposed Corky's pre-existing parallel loopback-port race, whose exact test group passes in isolation. The interop crate's own complete gate is green.
+
+### Re: stage unsupported peers by feature — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzinteropcore]
+
+
+Implemented capability-driven peer groups. `hello.features` advertises only production-backed surfaces. A scenario includes peers that support its required feature; unsupported implementations remain visible in `staged_peers`, receive no green credit, and are excluded from the active group. Required codecs and channels still fail closed within that eligible group, and fewer than two eligible peers is red, so feature filtering cannot produce a vacuous pass.
+
+`lazily-cs` is checked into the registry as staged with no executable command. It will join CRDT feature scenarios only after `#lzcsipc` and `#lzcssync` provide the real library surfaces; the plans and peer contract now state this explicitly.
+<!-- agent:boundary:28b469cb -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lzinteropcore]
+- ~~do [#lzinteropcore]~~
 - do [#lzinteropeers]
 - do [#lzinteropchannels]
 - do [#lzinteropcs]
@@ -170,7 +204,6 @@ Queued implementation in four explicit phases: `#lzinteropcore`, `#lzinteropeers
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzinteropcore] Implement Phase 0-1 of `tasks/software/plan-lazily-interop-network-suite.md`: freeze schemas/results, build the Rust orchestrator, and prove the harness with mutation tests.
 - [ ] [#lzinteropeers] Implement the Rust+Zig reference pair and the Python/Kotlin/JavaScript/Dart/Go/C++ peer rollout from `tasks/software/plan-lazily-interop-peer-rollout.md`.
 - [ ] [#lzinteropchannels] Implement the five data-channel profiles, fault scenarios, and PR/merge/nightly CI matrix from `tasks/software/plan-lazily-interop-channel-matrix.md`.
 - [ ] [#lzinteropcs] Add the C# peer to the single network suite after `#lzcsipc` and `#lzcssync` provide real IPC/CRDT surfaces, following `tasks/software/plan-lazily-interop-peer-rollout.md`.

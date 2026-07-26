@@ -315,12 +315,29 @@ Completed and released as agent-doc 0.35.29.
 - Published the manylinux wheel to PyPI, pushed `v0.35.29`, and created the [GitHub release](https://github.com/btakita/agent-doc/releases/tag/v0.35.29) with the verified release binary (`SHA-256 94a4580aba681e3cbee711a02973bdab48ddc49c11eb36f594b1f55c8c1927b0`). The session controller is marked to recycle onto 0.35.29 at its next idle boundary.
 
 No actionable follow-up remains for this item.
-<!-- agent:boundary:c25d4f72 -->
+
+### Re: do [#sessionwedgeband] — gpt-5
+
+> **Queue prompt:** do [#sessionwedgeband]
+
+Decision: keep `reset --from-current --preserve-session` operator-initiated, and close this item with no code change.
+
+The reset preserves session continuity, but it is still an authority decision: it rebases the snapshot and active replay hashes onto the current visible document. In the committed-historical refusal shape, the visible document carries content beyond HEAD and may be an operator edit, a stale editor projection, or a mixed state. Auto-running the reset would silently accept that ambiguity and remove the fail-closed observation point designed to protect operator text.
+
+The current boundary is the correct one:
+
+- Provably benign drift already auto-heals when the visible document normalizes equal to HEAD.
+- Any response-body overlap beyond HEAD remains fail-closed.
+- The previously opaque failure now prints the exact non-destructive recovery command.
+- The baseline-drift runbook tells the operator to inspect the visible markdown, run the command only when that is the state to keep, then rerun preflight.
+
+Changed paths: none. Evidence inspected: `agent-doc-commit-io/src/lib.rs` historical-patchback guard and `runbooks/baseline-drift.md` recovery contract/operator path. Verification: the shipped 0.35.29 full suite already passed this turn; no implementation changed after that gate. Confidence: high. Escalation: none. No actionable follow-up remains.
+<!-- agent:boundary:2d3faf0e -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#sessionwedgeband]
+- ~~do [#sessionwedgeband]~~
 - ~~do [#adopseventenum]~~
 - do [#crdtwaitsubscribe]
 - do [#crdtwaitsplit]
@@ -368,7 +385,6 @@ No actionable follow-up remains for this item.
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#sessionwedgeband] [operator-verify] Should preflight auto-run the non-destructive `reset --from-current --preserve-session` when a committed-historical patchback refusal is detected, or stay operator-initiated? NARROWED 2026-07-26 (8346f4d1a). Widening repair_committed_historical_snapshot_drift is REJECTED with reason: it rebases onto HEAD only when the visible document normalizes equal to HEAD, and once the live file carries content beyond HEAD, adopting HEAD would drop exactly the operator content the guard protects. The real defect (opaque refusal) is FIXED — commit-io now prints the verbatim recovery commands. What remains is a UX call for the operator, not a correctness fix: auto-healing a state whose purpose is to stop and be noticed. Decide, then implement or close.
 - [ ] [#crdtwaitsubscribe] #agent-doc-feature Replace the CRDT convergence poll with a subscription to the convergence cell. MEASURED: the wait loop issues ~2 controller reads per iteration and ~18 per write (6,983 write-path controller_crdt_current_text reads across 390 acknowledged writes), so an 11s wait generates ~18 round trips against the very controller it is waiting on - structurally the same self-feeding loop as the idle-watch storm fixed in 511527103/f170067bb, and a plausible source of the controller_model_backpressure that is 10% of all waits. NOT justified by poll oversleep: CRDT_WRITE_BACKOFF_POLICY is 25ms initial / 250ms max, which is <=2% of an 11,000ms wait - do not sell this fix on latency-per-sleep, sell it on removing generated load. Doctrine already says so (#closeoutterminalreactive: 'every waiter re-probes on a clock instead of subscribing'), and ThreadSafeContext runs Computed/Effect bodies with NO state lock held (verified: recompute_slot_now clones the closure, runs compute(self) unlocked, and takes the write lock only to publish), so there is no throughput objection. CAUTION: this is the write path, the one place where being wrong loses operator text - keep the deadline/retained-intent fallback intact.
 - [ ] [#crdtwaitsplit] #agent-doc-feature Separate controller backpressure from CRDT delivery convergence in the write wait. ControllerModelBackpressure and DeliveryAckPending are different conditions with different remedies (back off the controller vs wait on the editor) but currently share one loop, one backoff schedule and one 60s budget, so the wrong remedy is applied to whichever one is actually blocking. Partial coalescing already exists and must be preserved: #crdtcasraced added the `advanced` flag so a non-advancing apply does not reset the backoff floor - without it a contended write pinned at 25ms for the whole 60s budget (~2400 merge+CAS attempts, each worsening the contention it retried). Land after #crdtwaitsubscribe, whose per-condition subscription makes the split natural rather than two parallel poll loops.
 - [ ] [#sessioncheckguardsweep] #agent-doc-bug session_check is the second-largest closeout phase - a flat 2.9-4.2s, observed once at 11,271ms - and it is a per-invocation ~30-guard sweep. Measured attribution from one run: inspect_with_warnings 2665ms (the nesting parent), guard_partial_staging_closeout 817ms, inspect_core 607ms, self_heal_response_replay_duplication 385ms, resolve_current_document_content 350ms/13x. The partial-staging guard is the concrete target: companion_findings iterates candidate_repos, which on this superproject enumerates every dirty submodule and then runs several git diffs per repo. candidate_repos legitimately needs --ignore-submodules=none (it is hunting dirty submodule repos, 341ms) and narrowing it with --untracked-files=no was measured at only 13ms and discarded, so the real question is a SEMANTICS decision: must a WARN-only narrow guard run on every closeout, or only when the cycle actually staged something beyond the session document? Related: #closeoutgitsubmodulescan (9e7ce2f79 fixed two 47x submodule scans in tracked_modified_paths that were NOT the dominant cost).

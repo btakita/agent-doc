@@ -40,17 +40,43 @@ done
 Compacted content:
 - Archived 10 response topic(s): #retainedsettlereactive; #reactivemap; complete the settle_retained_write_through_derived_verdict change; 7 more
 - Prior summary/context: prior compacted content: Archived 5 response topic(s): do #missingreplicarebuild; complete all 3 tiers; #stategraphjo...
-<!-- agent:boundary:2e300111 -->
+
+### Re: #jbsurfaceswap — opus-5
+
+> **Queue prompt:**
+>
+> do [#jbsurfaceswap]
+
+
+Done and pushed (`27beeae2e`, JB plugin `0.2.296`). Both plugins now report; neither plans.
+
+**JetBrains.** `EditorTabSyncListener` went from 701 lines to ~300. `selectionChanged` and `onEditorFocusGained` each build one `EditorSurface` (focused / visible / columns / `force_reconcile`) and hand it to `agent_doc_editor_surface_observe_json` through new `NativeAdminControls.editorSurfaceObserve`. Deleted: `AutomaticCommandPlanner` in full — `plan`, `shouldReconcileFocusedFile`, `visibleSignature`, `analyzeCommandResult`, `shouldQueuePostSyncFocus`, the replay/deferred-retry/timeout-backoff ladder — plus `lastVisibleSignature`, `lastFocusedFile`, `lastFocusRequestedFile`, and the `CpRouteClient` focus/sync/sync-state calls. `EditorTabSyncListener.install(project)` / `disposeProject(project)` now own the instance, so project close calls `agent_doc_editor_surface_forget` for every observed root and shuts the debounce executor down. The debounce generation also moved from `companion object` to the instance — it was static, so one project's tab churn superseded another project's pending reconcile.
+
+**VS Code.** `tabSync.ts` lost `buildTabChangeCommand`, `TabSyncState`, `visibleSignatureFromColumns`, `analyzeTabSyncCommandResult`, and the four replay/backoff helpers; it gained `buildEditorSurface` plus receipt readers. `extension.ts` lost ~230 lines of `drainTabSync` retry machinery and `focusExistingPaneForActiveEditor`; `onTabChanged` is now one `requestSurfaceObservation()`. Columns are absolutized before reporting so a derived `Focus` can address the document — `collectVisibleMarkdownColumns` returns workspace-relative paths because the CLI took them that way, which would have made focus unaddressable.
+
+**The gap the swap opened, and the fix.** Nothing wrote the tmux side of the mirror in an editor process. `observe_tmux` is the push form and only the controller calls it; a plugin holds its own process-local `Registry`, so `layout_matches` would have been permanently `None` and proven drift would never reconcile — the plugin would emit `Focus` for a layout tmux no longer shows. That is exactly what the JetBrains `queryLayoutSyncState` round trip was buying (`#tmuxsyncstate`), and deleting it without a replacement would have been a silent regression. So:
+
+- `Registry::with_tmux_probe` takes a `TmuxLayoutProbe` that pulls the **controller's own** observation. The editor still never reports whether tmux agrees with it; the fact just arrives by pull instead of push.
+- `project_controller::tmux_layout_sync_state` is a new rpc client fn. Its `actual_documents` — the documents the controller's panes hold, in pane order — is the tmux layout.
+- Probed only when the surface has ≥2 columns; column *arrangement* is what drifts and this sits on the editor's event path. A skipped probe answers `None` (unknown), not `Some(matching)` — claiming a match nobody checked is the `#idlerevisionreactive` inversion. An unreachable controller is likewise unknown, never drift, or every editor event would reconcile while the controller is down.
+- `EditorSurfaceState::observe_with_tmux` writes both sources and folds **once**. Writing them separately folds twice, and the first fold compares the new tmux layout against the *previous* editor surface — a comparison neither side ever made, which can derive a `Sync` nothing observed.
+- The probe runs before the registry mutex, so one root's round trip does not serialize every other root's observations.
+
+**Verification.** `make check` green; `cargo test -p agent-doc-editor-surface-io -p agent-doc-editor-surface` 34 passed with four new tests (pulled drift reconciles an unchanged surface; a pulled matching layout stays idle; an unanswered probe is unknown not drift; the default registry never probes). VS Code `npm test` 155 passed — `tabSync.test.ts` rewritten around `buildEditorSurface` and the receipt readers, with wiring assertions that the planner names stay *absent* from `extension.ts`. JetBrains suite green with `EditorTabSyncListenerTest` rewritten around the observation wire shape. `gh run list --workflow CI` green. `make install` + `admin recycle` done.
+
+`editors/SPEC.md` § 4 was normative for the behavior I deleted, so it is rewritten: what to report, and an explicit list of what a plugin must **not** do (choose focus-vs-sync, hold a previous-signature field, dedup repeats, run a retry ladder, report drift).
+
+Gated on the live eyeball only — the debounce/generation interaction with real editor event storms is not reproducible headless. The five checks are in the item.
+<!-- agent:boundary:94dca7ea -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#syncownerreactive]~~
-- ~~⏭️ do [#jbpluginlazilyeffects]~~
+- ~~do [#jbsurfaceswap]~~
 - ⏭️ do [#ctrlkillreregister]
 - ⏭️ do [#steergateidle]
 - ⏭️ 📌 do [#jbcompactcommit]
-- 📌 do [#tmuxsynccrashlog]
+- ⏭️ 📌 do [#tmuxsynccrashlog]
 - 📌 do [#60ev]
 - 📌 do [#2y8j]
 - 📌 do [#cdtcutover]
@@ -84,7 +110,6 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#jbsurfaceswap] [operator-verify] Swap both editor plugins onto agent_doc_editor_surface_observe_json and delete their planners. The Rust half landed in 90a3705e1: EditorSurface/SurfaceTracking/SurfaceIntent, the state-machine + Computed + Effect graph, the per-project-root registry, and the FFI entry points. Remaining: JetBrains EditorTabSyncListener reports one observation per selectionChanged/focusGained instead of captureSnapshot + buildExecutionPlan + CpRouteClient, deleting AutomaticCommandPlanner.plan/shouldReconcileFocusedFile and the lastFocusRequestedFile/previousVisibleSignature fields; the VS Code extension does the same with its copy; agent_doc_editor_surface_forget on project close. Needs a live IDE eyeball (split navigation moves the tmux pane, layout change reconciles, repeat events cost nothing) because the debounce/generation interaction with real editor event storms is not reproducible headless.
 - [ ] [#ctrlkillreregister] #agent-doc-bug Killing the controller strands a live editor. Hydration restores the durable liveness plane so the editor still reads as registered, but the relay hub holding its replica is process-local, died with the previous controller, and nothing rehydrates it — leaving attached-with-missing-replica until the plugin happens to re-register, which is why operators reach for an IDE restart. DONE: Tier 1 restart fan-out (34546de4f); Tier 3 replicated derivation registrations_missing_replica/peer_registrations_missing_replica (46f2321ad), controller command peer_replicas_missing, and FFI export agent_doc_peer_replicas_missing so the editor asks about itself and repairs instead of being pushed at. Tier 2 (controller-side Effect) intentionally skipped: it still owns a cross-process push, the failure behind 'reload-lib reached 1/4 endpoints'. REMAINING: have the JetBrains and VS Code plugins call agent_doc_peer_replicas_missing on reconnect/startup, then retire the Tier 1 fan-out as a compatibility shim.
 - [ ] [#steergateidle] #agent-doc-bug Selected-text turn steering is gated on an active turn and rejects otherwise ('requires the authoritative pane to have an active turn (actor_state=ready)'). Both halves are wrong per operator: (a) an active turn should not be required — an idle pane should dispatch the selection as a normal trigger, not error; (b) detection was incorrect, a turn WAS active while it reported ready. (b) is corroborated by repeated 'timed out after 5.0s waiting for project controller response' on admin inspect in the same window, so a failed actor-state read may be surfacing as authoritative 'ready'. Fix both: idle becomes a dispatch path, and a failed read fails closed or retries instead of reporting ready. Related #selectedturnsteering.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
@@ -120,6 +145,7 @@ This remains an operator/live-editor v ] [#fmgc] [focused-cycle] Per-peer ack wa
 ## Review
  
 <!-- agent:review -->
+- [/] [#jbsurfaceswap] [operator-verify] Live IDE proof for #jbsurfaceswap (agent-doc 27beeae2e, JB plugin 0.2.296). Both plugins now report one EditorSurface observation per event and the graph derives the intent; the planners are deleted. With the IDE restarted onto 0.2.296, confirm in a real session: (a) clicking between two side-by-side split editors moves the tmux active pane (derived Focus); (b) changing the editor split layout reconciles tmux (derived Sync) and shows the 'Sync: --col ... [focus: ...]' hint exactly once; (c) repeat focus events on the same editor cost nothing — the JB log line '[layout-sync] observe: ... intent=idle' with no controller command; (d) swap two tmux panes by hand, then click an editor tab WITHOUT changing the split, and confirm the pulled tmux probe reconciles the layout instead of only moving focus (#tmuxsyncstate); (e) closing the project releases the root (no growth in surface graphs across open/close cycles). Headless tests cover the fold, the probe seam, and the observation wire shape, but not the debounce/generation interaction with real editor event storms.
 - [/] [#jbpluginlazilyeffects] #agent-doc-feature The JetBrains/VS Code plugin should drive lazily state + Effects, not one-shot CLI commands. Today every editor action (file selected, layout changed, Sync Tmux Pane) shells a fresh agent-doc process that re-observes the world from scratch and returns one answer that is already stale, with no subscription and no invalidation. Keep the CLI supported as an entrypoint, but the plugin path should be: plugin reports an event -> FFI sets a Source in the document scope -> an Effect drives the tmux/pane consequence. Same Shared Foundation rule already in AGENTS.md, applied to observation rather than business logic. Consumes the derived owner map from syncownerreactive, so order it after that.
 - [/] [#boundaryaccumverify] [operator-verify] After restarting any JetBrains IDE still on the older package generation, reproduce a wedged finalize/direct-commit handoff and confirm visible document, snapshot, and committed HEAD each retain exactly one agent:boundary marker; report any boundary_invariant_violation that does not self-heal.
 - [/] [#r4gq] [operator-verify] Live JB Run Agent Doc dispatch-hang proof (#kjw0 fix, shipped 0.34.66 build): after the recycled build is running, trigger Run Agent Doc into a BUSY codex pane (mid-turn, 'esc to interrupt' visible) and confirm it returns FAST with a queued-behind-active-turn outcome (pane shows queued status) instead of hanging ~21s then a dispatch-start-unproven notification. Grep ops.log for route_dispatch_start_queued_behind_active_turn (present on success) and confirm accepted_without_dispatch_start_proof is ABSENT for the busy case. Root cause: route injected the trigger into a mid-turn pane; codex queued it behind the active turn so the UserPromptSubmit hook could not advance within the 10s proof budget, and the direct-pane path paid TWO 10s waits (initial + late-resubmit) then filed a false bug. Fix: short_circuit_dispatch_start_when_pane_busy in route/dispatch.rs detects busy_proof_line and returns RoutedDispatchStartProof::AcceptedQueuedBehindActiveTurn (accepted, not fail-closed).

@@ -661,7 +661,7 @@ of nine bindings already have a synchronous async-map read, so `pop` is likely
 uncoloured — verify before writing it down); and whether `reap_expired` stays
 caller-driven under async (recommend yes, it keeps lease expiry deterministic and
 fixture-replayable).
-<!-- agent:boundary:d0492828 -->
+<!-- agent:boundary:91fcfd74 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -669,7 +669,7 @@ fixture-replayable).
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - /goal complete tasks/plan-lazily-queue-family-flavors.md
 - ⏭️ do [#asynccontextthreadsafeco]
-- 🚧 do [#maphandlecleardependents]
+- ⏭️ do [#maphandlecleardependents]
 - do [#lazilycellfamily]
 - do [#lazilyspecdisagrees]
 - ⏭️ do [#lzjsnpmtrustedpub]
@@ -714,7 +714,7 @@ fixture-replayable).
 - [ ] [#asynccontextthreadsafeco] Add AsyncContext + ThreadSafeContext support to QueueCell + TopicCell + WorkQueueCell. Start with spec + formal +  conformance. Then subagents for implentations. Please ensure consistency across sync + thread + async apis.
 - [ ] [#portmembershiporder] Port the membership/order plane to the other 8 bindings thread-safe + async maps (py, js, kt, go, cpp, cs, dart, zig). lazily-rs is done (commit ffc0d83): each flavor mints its own membership + order signal cells on its own graph, with bumps run outside the map lock. Every other binding has the same hole — reactive keys/len/contains_key exist only on the sync map. Note go and dart async maps are not connected to their async graph at all (no context field / _ctx annotated unused_field), so they need wiring before they can carry a signal plane. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. The membership/order reads are now generic over the read surface (AsyncSource<u64>: Read<C>) and track correctly with an AsyncComputeContext — apply the same genericity to AsyncMapHandle::observe so entry-value reads can track too. This is the read-side twin of the discarded-factory-view defect.
-- [ ] 🚧 [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook at all. Any flavor-level `remove` — and the fix for lazily-cs AsyncComputedMap.Remove not disposing its node — requires adding one. Handle-trait surgery, not an additive method. Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook at all. Any flavor-level `remove` — and the fix for lazily-cs AsyncComputedMap.Remove not disposing its node — requires adding one. Handle-trait surgery, not an additive method. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md

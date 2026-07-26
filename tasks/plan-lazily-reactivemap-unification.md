@@ -4,6 +4,36 @@ Status: **scoping**, nothing implemented. Supersedes the narrower "expose a
 ctx-taking factory on ReactiveMap" recommendation, which is a symptom of the
 structure this plan addresses.
 
+> ## Corrections after adversarial review
+>
+> An independent review refuted four load-bearing claims in earlier drafts.
+> Corrected below; recorded here because the errors shaped the plan's framing.
+>
+> 1. **"Nine of nine bindings VIOLATE the spec" — withdrawn.** `cell-model.md:406-408`
+>    scopes flavor obligations: "A flavor MUST preserve the **entry-kind and
+>    materialization laws** above; it only adds the context-specific guarantee."
+>    Ordering and atomic move are not flavor obligations, and `:454-458` requires
+>    "**at least** its `SourceMap` specialization". The capability gap is real; it
+>    is **not** a spec violation. Whether it *should* bind every flavor is the open
+>    spec question at the end of this document — it was never settled text.
+> 2. **"All three families store the same closure-free state" — false.** Sync
+>    `ReactiveMapInner` additionally holds `membership: Source<u64>` (`cell_family.rs:210`)
+>    and `order_signal: Source<u64>` (`:218`) — **graph-bound reactive handles**.
+>    TS and async hold only `materialized + order`.
+> 3. **"The ordering plane touches no handle" — false.** `move_*` never touch `H`,
+>    but the version bump is `ctx.set(&self.inner.order_signal, …)` (`:255-259`,
+>    called from `move_to` at `:389`) — a handle write, sync-context-typed. So a
+>    *graph-agnostic* ordering core is not achievable; a graph-agnostic core is
+>    precisely what zig's sync map already is, which this document catalogues as a
+>    defect ("u64 counters callers must poll").
+> 4. **The `remove` exclusion was over-cautious with wrong formal backing.**
+>    `materialize_present_comm` is *confluence*; monotonicity is
+>    `materialize_present_monotone`. The Lean models contain **no remove operation
+>    at all**, so no theorem constrains adding one. The same fixture replays
+>    against the sync map, which ships `remove`. And lazily-cs's
+>    `AsyncComputedMap.Remove` already exists. Monotonicity is a materialization-plane
+>    law (lazy allocation never *silently* drops), not a ban on an explicit removal API.
+
 ## Why
 
 `get_or_insert_with` hands its factory only `&K`. Two of the three lazily-rs map
@@ -29,28 +59,39 @@ Public method surface per family:
 | `ThreadSafeReactiveMap` | 11 | **absent** |
 | `AsyncReactiveMap` | 10 | **absent** |
 
-`lazily-spec/cell-model.md:275` requires collections **and their atomic-move
-invariants** "of every binding"; `:469` makes pure reorder a MUST. The
-thread-safe and async maps do not satisfy that contract, and no fixture caught
-it because the ordering fixtures only ever replay the single-threaded flavor.
+`cell-model.md:272-276` requires collections of every *binding* — satisfied by
+each binding's sync map. It does **not** require ordering of every *flavor*:
+`:406-408` scopes flavor obligations to the entry-kind and materialization laws
+plus one context-specific guarantee, and `:454-458` sets the floor at "at least
+its `SourceMap` specialization".
 
-This is the same failure mode as the marker-only conformance runners found in
-the EntryKind cycle: the matrix reads OK because *a* flavor passes.
+So this is a **capability gap, not a spec violation**. It went unnoticed because
+the ordering fixtures only ever replay the single-threaded flavor — the same
+blind spot as the marker-only conformance runners found in the EntryKind cycle:
+the matrix reads OK because *a* flavor passes. Whether the contract *should*
+bind every flavor is an open spec question (see the end of this document).
 
 ## Key structural fact
 
-All three families store the same **closure-free** state:
+All three families retain **no closure, factory, or context**. But the state is
+**not** identical, and the difference is load-bearing:
 
-```
-MapState<K, H> { entries/materialized: Map<K, H>, order: Vec<K> }
-```
+| family | state |
+|---|---|
+| sync (`cell_family.rs:207-221`) | `entries`, `order`, **`membership: Source<u64>`**, **`order_signal: Source<u64>`**, + two `StdCell<u64>` mirrors |
+| thread-safe (`:112-118`) | `materialized`, `order` |
+| async (`:103-106`) | `materialized`, `order` |
 
-`H` is a `Copy` handle id. No factory, no context, no closure is retained. The
-families differ only in the interior-mutability wrapper — `RefCell` (sync) vs
-`Mutex` (thread-safe, async) — and in `materialize` / `observe`.
+The sync map's two extra fields are **graph-bound reactive handles**. Membership
+and order *invalidation* is `ctx.set` on them (`:255-271`), and the reactive
+reads `keys` / `len` / `contains_key` subscribe through them (`:339-341`,
+`:431-434`, `:443-446`).
 
-**Everything in the capability gap (ordering, membership, present-set, atomic
-move) lives entirely in the closure-free half.**
+**Consequence:** the bookkeeping half (the key list, `position`, the move
+algebra) is genuinely graph-agnostic, but *reactivity* over it is not. A core
+that is graph-agnostic all the way is exactly zig's sync map — which this
+document catalogues as a defect, because its "signals" are `u64` counters
+callers must poll.
 
 ## Why not unify over `SyncReactiveGraph`
 
@@ -79,10 +120,13 @@ single-threaded map values and factories. A single-threaded caller capturing an
 `Rc` — the normal case — stops compiling. An impl cannot weaken a trait's
 bounds, so this cannot be patched at the impl.
 
-Corroborating: **nothing in `src/` consumes `SyncReactiveGraph` generically
-today.** Its only generic consumer is the conformance harness
-(`tests/reactive_graph/model.rs:226`). The bound compromise has never been
-load-bearing, which is why the mismatch has gone unnoticed.
+Corroborating, and stronger than an earlier draft claimed: `SyncReactiveGraph`
+has **zero** generic consumers anywhere in `src/` or `tests/` — only the trait
+definition, two impls, and a `lib.rs` re-export. (A draft cited
+`tests/reactive_graph/model.rs:226` as a consumer; that line is a *comment*
+saying a single engine cannot be generic over both, and `GraphModel` bounds
+`ReactiveGraph`, not `SyncReactiveGraph`.) The bound compromise has never been
+load-bearing, which is why the mismatch went unnoticed.
 
 ## Phase A — extract the closure-free core
 
@@ -96,21 +140,42 @@ applied.
    `len`, `contains_key`, and `move_to` / `move_before` / `move_after` with the
    LIS-preserving atomic-move semantics.
 
-   **`remove` stays out of the shared core.** The thread-safe and async present
-   sets are documented as monotone — "deferral, not de-allocation" — and that
-   invariant is backed by the shared `conformance/materialization/deferral_not_deallocation.json`
-   fixture and by named Lean theorems (`materialize_present_comm`). Granting
-   those families `remove` is a spec and formal-model change, not an additive
-   API change. The sync map keeps `remove` as a shell method.
+   **`remove` — earlier exclusion withdrawn.** A draft barred it from the shared
+   core on monotonicity grounds. That was wrong: the cited theorem
+   (`materialize_present_comm`) is *confluence*, not monotonicity; the Lean
+   models contain **no remove operation at all**, so nothing constrains adding
+   one; the same fixture already replays against the sync map, which ships
+   `remove`; and lazily-cs's `AsyncComputedMap.Remove` exists today. The
+   "present set only grows" line also appears on the **sync** map
+   (`cell_family.rs:344-345`) ten lines above a `remove` that shrinks it — the
+   doc does not discriminate the flavors. Monotonicity is a materialization-plane
+   law (lazy allocation never *silently* drops), not a ban on explicit removal.
+
+   Real blocker instead: `MapHandle::clear_dependents` exists only on the **sync**
+   handle trait (`cell_family.rs:134`). The TS and async handle traits have no
+   disposal hook at all, so a flavor `remove` is handle-trait surgery.
 2. Each family keeps a thin shell holding its own interior-mutability wrapper
    and its own `materialize` / `observe` — the only genuinely per-model parts.
-3. Thread-safe and async **gain ordering and atomic move** by construction,
-   closing the spec gap. Purely additive for them.
+3. Thread-safe and async gain the **bookkeeping** half (key list, `position`,
+   move algebra) from the core. They do **not** gain reactivity for free — see
+   below.
 4. The ctx-taking factory becomes a small independent change per family: pass
    `move |ctx| factory(ctx, &k)` instead of `move |_ctx| factory(&k)`.
 
-This sidesteps the `Send + Sync` problem entirely, because the core never holds
-a factory or a tracking view.
+This sidesteps the `Send + Sync` problem, because the core never holds a factory
+or a tracking view.
+
+### The membership/order-signal plane — the largest unbudgeted piece
+
+TS and async have **no reactive `keys` / `len` / `contains_key` at all**, only
+non-reactive `present_keys` / `present_count`. The gap is wider than ordering:
+*membership reactivity itself* is absent, and it is what `cell-model.md`
+clause 8 means by "a dedicated membership cell tracks the key set".
+
+Closing it requires each flavor to **mint its own membership and order `Source`
+cells on its own graph** and route bumps through its own `set`. That is
+per-context work the shared core cannot supply, and it is the bulk of the real
+effort. "Purely additive, by construction" was wrong.
 
 ### What breaks
 
@@ -242,16 +307,17 @@ A targeted verification pass across all nine found:
 | py | `V \| None` | `resolve` only | map **bypasses `AsyncContext`** — takes `ctx: dict`, mints raw `Cell`/`AsyncSlot` |
 | js | `V \| undefined` | `resolve` only | map is wired to `AsyncContext`; runtime flattens Promise factories |
 | kt | `V?` | `observeAsync` only | disposal is on the *context*, never the map |
-| go | `(V, bool)` | **none** | struct has **no context field**; `Drive` calls the caller's factory inline |
+| go | `(V, bool)` — but **not a pure read**: `Observe` takes a factory and *mints*, running it inline for a source map (`async_reactive_map.go:101-110`, `:88`) | **none** | struct has **no context field** |
 | dart | `(V?, bool)` | **none** | `_ctx` is annotated `// ignore: unused_field` — dead |
 | zig | `?V` | **none** (no language async) | *is* wired to real async nodes; `drive` is a sync queue drain |
 | cpp | `optional<V>` | via handle `std::future<T>` | the only genuine awaitability, and it is off the map |
-| cs | `TryGet` exists one layer down, unsurfaced | `Task`, pending-in-form via `Task.Run` | all work is `Task.FromResult` underneath |
+| cs | `TryGet` exists one layer down, **unsurfaced on the map** | `Task` — **two** methods (`GetOrInsertWithAsync`, `TryObserveAsync`) | all work is `Task.FromResult` underneath |
 
-**Every binding already has a synchronous, non-driving read**, and every binding
-that has awaitability already confines it to exactly one method. The proposed
-split is therefore not a change — it is a codification of what 8 of 9 already
-do, plus a two-line surfacing in cs.
+**Seven of nine have a pure synchronous, non-driving map read.** cs has one a
+layer down but does not surface it on the map; **go has none** — its `Observe`
+takes a factory and mints, so it is not a pure read and needs a *new method with
+different semantics*, not a rename. An earlier draft said "codification of what
+8 of 9 already do"; that overstated it.
 
 The reason is not language power. **These families were never genuinely async.**
 The per-key factory is sync-typed in all nine, and five of nine are not even
@@ -348,11 +414,13 @@ applied to the library.
    inventing the surface rather than converging one — it cannot surface what
    breaks, because nothing is there to break. Its zero-compat-cost property is
    real but buys much less than it appears to.
-4. **go before it hits v1** — still v0.22.0 on an unversioned module path, so
+3. **go before it hits v1** — still v0.22.0 on an unversioned module path, so
    breaking now costs nothing; after v1 it costs a `/v2` path and every import.
-5. **rs, py, js, dart** — sync + thread-safe only.
-6. **kt last** — `suspend` colours construction, read *and* disposal; no default
-   type arguments; Kotlin 2.0.21 without context parameters.
+4. **rs, py, js, dart** — sync + thread-safe only.
+5. **kt** — no longer last on async grounds. Verification showed its map read is
+   **not** suspend-coloured (`AsyncMap.kt:120`) and disposal lives on the
+   context, never the map. Its remaining costs are ordinary: no default type
+   arguments, and Kotlin 2.0.21 without context parameters.
 
 ### Open question for the spec
 

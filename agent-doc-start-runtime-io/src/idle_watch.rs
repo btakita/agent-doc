@@ -49,6 +49,65 @@ static ZERO_REPLICA_IDLE_WATCH_LAST_PROBE: std::sync::LazyLock<
     parking_lot::Mutex<std::collections::HashMap<std::path::PathBuf, std::time::Instant>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
 
+/// `#idlewatchrevisiongate` — the last queue-head observation and the revision it
+/// was derived from, per document.
+///
+/// [`agent_doc_crdt_relay_io::CurrentRevision`]'s own doc comment states the
+/// contract: "The idle supervisor compares this value before asking the relay to
+/// materialize the canonical markdown. It therefore keeps full-text queue parsing
+/// lazy." Both halves shipped — the `crdt_revision` RPC, and `PartialEq` on the
+/// revision so it can be compared — but [`idle_watch_active_queue_head`] never
+/// made the comparison. It asked for the full canonical text on **every** tick.
+///
+/// Measured cost of that gap on this project (26 MB `ops.log`, 20k-line window):
+/// `crdt_current_text` + `controller_crdt_current_text` were **63% of all
+/// controller operations**, peaking at 11/second, and `idle_watch_active_queue_head`
+/// plus `current_transition_for_idle_queue` accounted for 56% of them. Each one
+/// materializes the whole document (90-128 KB here), SHA-256s it, holds the
+/// document's relay-hub lock while doing so, and writes an `ops.log` line — every
+/// 500 ms, per attached document, whether or not anything changed.
+///
+/// The revision is read *before* the text on a miss, so a document that changes
+/// between the two reads stores the older revision and simply misses again next
+/// tick. Storing the revision observed after the text could pair a new revision
+/// with stale text, which is the one ordering that would be wrong.
+static IDLE_WATCH_QUEUE_HEAD_BY_REVISION: std::sync::LazyLock<
+    parking_lot::Mutex<
+        std::collections::HashMap<
+            std::path::PathBuf,
+            (agent_doc_crdt_relay_io::CurrentRevision, QueueHeadObservation),
+        >,
+    >,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
+
+/// The memoized observation for `canonical`, if `revision` still matches.
+fn memoized_queue_head(
+    canonical: &Path,
+    revision: &agent_doc_crdt_relay_io::CurrentRevision,
+) -> Option<QueueHeadObservation> {
+    IDLE_WATCH_QUEUE_HEAD_BY_REVISION
+        .lock()
+        .get(canonical)
+        .filter(|(cached_revision, _)| cached_revision == revision)
+        .map(|(_, observation)| observation.clone())
+}
+
+fn memoize_queue_head(
+    canonical: &Path,
+    revision: Option<agent_doc_crdt_relay_io::CurrentRevision>,
+    observation: &QueueHeadObservation,
+) {
+    let Some(revision) = revision else {
+        // No cheap revision to key on: drop any stale entry rather than let a
+        // later probe match against a revision this observation never had.
+        IDLE_WATCH_QUEUE_HEAD_BY_REVISION.lock().remove(canonical);
+        return;
+    };
+    IDLE_WATCH_QUEUE_HEAD_BY_REVISION
+        .lock()
+        .insert(canonical.to_path_buf(), (revision, observation.clone()));
+}
+
 fn show_pane_message(
     pane: &str,
     delay: &str,
@@ -512,6 +571,31 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
         }
         probes.remove(&canonical);
     }
+    // `#idlewatchrevisiongate`: honour the contract `CurrentRevision` already
+    // documents — compare the compact revision before asking the relay to
+    // materialize canonical markdown. A quiescent document (the common case at a
+    // 500 ms poll) now costs one small state-vector comparison instead of a
+    // full-document materialization, SHA-256, hub-lock hold, and `ops.log` write.
+    //
+    // Read first, on purpose: on a miss the revision observed *before* the text
+    // is what gets stored, so a document that changes between the two reads
+    // simply misses again next tick. Storing the revision observed after the
+    // text could pair a fresh revision with stale text.
+    let revision = match agent_doc_controller_io::project_controller::revision_via_controller_model_read_for_doc(
+        file,
+        "idle_watch_queue_head_revision_gate",
+    ) {
+        Ok(Some(revision @ agent_doc_crdt_relay_io::CurrentRevision::Current { .. })) => {
+            if let Some(cached) = memoized_queue_head(&canonical, &revision) {
+                return cached;
+            }
+            Some(revision)
+        }
+        // Detached / missing-replica / unavailable: fall through to the full read,
+        // which owns those cases and their backoff bookkeeping. Failing open keeps
+        // a degraded revision probe from changing the supervisor's decisions.
+        _ => None,
+    };
     let current =
         agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
             file,
@@ -537,7 +621,7 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
         })) => {
             ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
                 .lock()
-                .insert(canonical, std::time::Instant::now());
+                .insert(canonical.clone(), std::time::Instant::now());
             (
                 text,
                 IdleQueueTransition::from_converged(delivery_converged),
@@ -554,17 +638,19 @@ fn idle_watch_active_queue_head(file: &Path) -> QueueHeadObservation {
         | Err(_) => {
             ZERO_REPLICA_IDLE_WATCH_LAST_PROBE
                 .lock()
-                .insert(canonical, std::time::Instant::now());
+                .insert(canonical.clone(), std::time::Instant::now());
             return QueueHeadObservation::AuthorityUnavailable;
         }
     };
-    QueueHeadObservation::Observed {
+    let observation = QueueHeadObservation::Observed {
         head: agent_doc_queue::queue_continuation::live_drainable_continuation_head(
             &content,
             agent_doc_queue::queue_continuation::DrainScope::Supervisor,
         ),
         transition,
-    }
+    };
+    memoize_queue_head(&canonical, revision, &observation);
+    observation
 }
 
 /// Resolve the drainable active-queue continuation head straight from the
@@ -3860,6 +3946,62 @@ pub(super) fn spawn_idle_queue_watch_thread(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#idlewatchrevisiongate`: the memo answers only for the revision it was
+    /// built from.
+    ///
+    /// `CurrentRevision`'s doc comment already promised this ("the idle
+    /// supervisor compares this value before asking the relay to materialize the
+    /// canonical markdown"), and the RPC and `PartialEq` both shipped — the call
+    /// site just never compared. This pins the comparison itself: same revision
+    /// serves the cached head, any moved field forces a fresh read.
+    #[test]
+    fn the_queue_head_memo_only_answers_for_the_revision_it_was_built_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = dir.path().join("memo.md");
+        std::fs::write(&doc, "# memo\n").unwrap();
+
+        let revision = |sv: &[u8], live: usize, converged: bool| {
+            agent_doc_crdt_relay_io::CurrentRevision::Current {
+                state_vector: sv.to_vec(),
+                live_editors: live,
+                delivery_converged: converged,
+            }
+        };
+        let observed = QueueHeadObservation::Observed {
+            head: Some("do [#alpha]".to_string()),
+            transition: IdleQueueTransition::Converged,
+        };
+
+        let base = revision(b"sv-1", 1, true);
+        memoize_queue_head(&doc, Some(base.clone()), &observed);
+        assert_eq!(
+            memoized_queue_head(&doc, &base),
+            Some(observed.clone()),
+            "an unchanged revision must be served from the memo, not a full-text read"
+        );
+
+        // Every field of the revision is part of the identity: the state vector
+        // is the text, and `live_editors` / `delivery_converged` change the
+        // transition the drain acts on even when the text has not moved.
+        for moved in [
+            revision(b"sv-2", 1, true),
+            revision(b"sv-1", 2, true),
+            revision(b"sv-1", 1, false),
+        ] {
+            assert_eq!(
+                memoized_queue_head(&doc, &moved),
+                None,
+                "a moved revision must force a fresh read: {moved:?}"
+            );
+        }
+
+        // Without a cheap revision to key on, the entry is dropped rather than
+        // left where a later probe could match it against a revision this
+        // observation never had.
+        memoize_queue_head(&doc, None, &observed);
+        assert_eq!(memoized_queue_head(&doc, &base), None);
+    }
 
     #[test]
     fn idle_queue_transition_maps_delivery_convergence() {

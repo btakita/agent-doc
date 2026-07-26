@@ -34,65 +34,44 @@ Calibration notes:
 
 ---
 
-Subject: Re: [Craig's email] — Compensation
+Subject: (reply in Craig's thread)
 
 Hi Craig,
 
-Thank you for the transparency on the funding position... that kind of candor is
-exactly why this team is attractive, and congratulations on the seed progress and the
-path to the August beta. Apologies for the slow reply: your email deserved a considered
-answer, and I wanted to be certain of mine before giving it to you.
+Thank you for the candor about the funding position... and apologies for the slow
+reply: your email deserved a considered answer, and I wanted to be certain of mine.
 
-Before the numbers, briefly, the work: this is the role I'd choose on its merits. The
-SDK problem is the same shape as my own cross-language work (one API surface across 8
-language bindings with shared spec and conformance suites, public at
-github.com/lazily-hub... and the binding I'm writing right now happens to be C#), and
-chat and presence at scale is distributed state synchronization... the problem space I
-care most about. The mission gives it weight: kids safe from predation, communities
-kept positive, and compatible people matched so games are actually fun... built into
-the infrastructure rather than bolted on after the harm.
+Briefly, on the work: this is the role I'd choose on its merits. The SDK problem is
+the same shape as my cross-language work (one API surface across 8 language bindings
+with shared spec + conformance suites, public at github.com/lazily-hub... and the
+binding I'm writing right now happens to be C#), and chat and presence at scale is
+distributed state synchronization, the problem space I care most about. The mission
+gives it weight: kids safe from predation, communities kept positive, and compatible
+people matched so games are actually fun... built into the infrastructure, not bolted
+on after the harm.
 
-I want to be upfront about how I got to these numbers, because I know an ask like this
-lands heavily on a seed-stage budget, and I don't make it lightly. My alternative is a
-contract seat that annualizes above $205k (they raised their offer to $100/hr) in cash.
-I sat down and ran the math on both paths...
-and I'm mindful that cash is your tight constraint right now, which
-is exactly why this leans on equity and structure instead of asking you to match cash.
-This is the package where choosing Haiven becomes rational on my side of the ledger,
-not an opening bid:
+Here's where I need to be. My alternative annualizes above $205k in cash (they raised
+to $100/hr on Friday), so this leans on equity and structure rather than asking you to
+match cash:
 
 - **Base: $185,000**
-- **Signing bonus: $20,000** ... thank you for putting this on the table; a one-time
-  bridge for the year-one gap against my alternative
+- **Signing bonus: $20,000** ... thank you for putting this on the table
 - **Options: 1.0%** of fully diluted shares, standard 4-year vesting
 
-On the Founder's Package specifically... help me make sure I understand it precisely,
-since your note also references Founder's Pack revenue as a launch milestone. Is the
-package a stock-option grant, and separately, is there a revenue-linked component? A
-short written summary of the instrument, the fully-diluted basis, vesting, and any
-revenue-share mechanics would let me evaluate it properly... those specifics matter
-more to me than the headline percentage.
+Three specifics for the offer letter: (1) a short written summary of the Founder's
+Package... instrument, fully-diluted basis, vesting, and any revenue-linked component,
+since your note also mentions Founder's Pack revenue as a milestone... those specifics
+matter more to me than the headline number; (2) signing-bonus clawback limited to
+voluntary exit or cause, and prorated vesting credit if I'm terminated without cause
+before the cliff (modest severance there would complete the picture)... I'm committing
+through launch and beyond, this just makes the downside symmetric; (3) an IP carve-out
+for my pre-existing open-source and independent side work... I'll provide the list and
+language. I'm Eastern and will hold a 12-5pm ET overlap with the team.
 
-Two structural items, which the funding timeline itself motivates: (1) signing-bonus
-clawback limited to voluntary resignation or termination for cause; (2) vesting
-continuity if I'm terminated without cause before the cliff... a prorated credit is
-fine. I'm committing to Haiven through launch and beyond; these just make the downside
-symmetric. If there's room for modest severance (2 months) on a without-cause
-termination, that completes the picture, and I'm flexible on how we get there.
-
-Also for the offer letter: an IP carve-out covering my pre-existing open-source
-projects and future independent side work (I'll provide the list and language), and
-core collaboration hours... I'm Eastern and will hold a 12-5pm ET overlap with the
-team, flexing around it.
-
-On timing: I'm ready to move quickly. If this framework works for you... even an
-informal "yes, we can get there" is enough... I can give you a final answer today or tomorrow.
-
-I'll be honest, Craig: I hope the math works, because I'd rather build with you. If
-parts of this framework don't fit where Haiven is right now, tell me which ones... I
-listed the pieces separately precisely so we can solve it together.
-However it lands, I'm grateful for how you've engaged through this...
-it says good things about the company you're building.
+I'm ready to move fast: even an informal "we can get there" is enough, and I'll give
+you a final answer within a day. If parts of this don't fit where Haiven is right now,
+tell me which ones... I listed the pieces separately so we can solve it together. I'd
+rather build with you.
 
 Best,
 Brian

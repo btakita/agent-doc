@@ -46,13 +46,58 @@ Two build-system traps worth recording: `zig build test` **caches Run steps**, s
 Also closing `#lazilythreadsafetopiccel` and `#lazilythreadsafeworkqueu` — both shipped earlier today in lazily-rs 0.51.0 with all eleven canonical fixtures replayed per flavor and ten mutation probes confirmed.
 
 **One finding I am not closing.** The rs agent hit `concurrent_push_and_read_do_not_deadlock` failing with `left: 199, right: 200` mid-run. It is not a deadlock — it is a lost or stale reactive read in `ThreadSafeQueueCell`, and it is pre-existing: 0/25 in isolation, but 2/30 on the working tree and 1/30 on stashed HEAD under saturating CPU load. That is a correctness defect in code released as 0.51.0, on the exact surface the thread-safe flavor exists to provide, so it goes to the top of the backlog rather than into this item.
-<!-- agent:boundary:81da89b5 -->
+
+### Re: do [#lazilyzigconformance] — opus-5
+
+Done, and it was worth more than the ledger line suggests. **86/124 → 94/124 opened, `KNOWN_UNCOVERED` 38 → 30**, all eight mirrors gone. Committed and pushed as `ff00d3f`; both gating toolchains green (nightly 786/786, 0.16.0 771/771) and `make check` clean.
+
+**Replaying them found three real wire defects.** Every mirror had been transcribed from *this implementation* rather than from the corpus, so each one certified the bug it was standing next to:
+
+- **The stamp frontier was the wrong shape on the wire.** `schemas/distributed.json#/$defs/StampFrontierEntry` pins a 2-element `[peer, stamp]` tuple; lazily-rs models it as `Vec<(u64, WireStamp)>`. lazily-zig encoded *and* decoded `{peer, stamp}` — so it round-tripped against itself perfectly and its frontier advertisement was unreadable by every other binding.
+- **`CrdtOp.key` was omitted when null and rejected when explicitly null**, though the schema lists it in `required` and documents the nullable-but-present rule as the deliberate difference from `NodeSnapshot`/`NodeAdd`. A keyless op could be neither produced nor read the way the corpus spells one.
+- **`welcome.peers` came out of hash-map iteration order** against an explicit `roster_sorted_ascending` assertion (so a multi-peer room was not reproducible run to run), and the unknown-target error text did not match the transcript — a client matching on the documented message would never have matched.
+
+The mirrors had also already drifted on their own terms: the idempotence mirror used stamps `(10,0,1)`/`(11,0,1)` where the fixture uses `(10,0,1)`/`(12,0,2)`; the reverse-order mirror dropped the third op, the one that makes "same winner regardless of order" non-trivial; and all three semtree scenarios shared one hand-built tree, including the removal scenario whose canonical tree is a different shape with coincidentally identical totals.
+
+**Every new runner was mutation-checked** — break exactly the behaviour one fixture pins, require the suite to fail *and* name the right runner. 10 probes, 10/10 discriminated. Three of them initially came back `MISATTRIB` because the mutation broke the *build*; a compile error proves nothing about a runner, so the probes were rewritten to be behaviour-only and the harness now reports a build break as an invalid probe rather than a pass.
+
+Two things outside the item that were blocking it. **CI never ran this guard at all**: it invoked bare `zig build test`, so the recorder collected no evidence and `check-conformance-coverage.sh` only ever ran under a local `make check` — the ledger was enforced by whoever remembered. It now runs in CI, and the fixture-presence assertion covers `collections`/`distributed`/`signaling` so a missing corpus cannot let the new replays skip into a green run. And **the 0.16.0 leg was already red before I touched anything**: `Step.tag` is nightly-only (`id` on 0.16.0), and pinning it made the build *script* fail to compile, so every `zig build` on that gating toolchain died before reaching a test. Fixed with the `@hasField` shim this repo already uses for `normalizeCompute`.
+
+CI run `30219366377` is queued; recording that and not waiting.
+
+### Re: should the JSON `type` field be an enum?
+
+Yes — done. The union tag already *was* the enum; what was duplicated was the wire spelling. `"peer-joined"` appeared as a literal in the encoder and again in the decoder I had just written, which is exactly how a rename becomes a silently dropped frame.
+
+`ClientMessage`/`ServerMessage` are now `union(ClientTag)` / `union(ServerTag)`, with one `wireName` table both halves read and a `fromWireName` derived from it over `std.meta.tags`. So the encoder and decoder cannot disagree about a spelling, and a variant added to the union appears in the decoder without being retyped. It follows `reactive_map.EntryKind`'s existing `wireName`/`fromWireName` convention. The mutation probe that renames `"peer-joined"` → `"peerJoined"` now fails the frames replay, so the table is load-bearing.
+
+### Re: should `ClientTag` go to spec + formal + conformance + implementations?
+
+> **Queue prompt:**
+>
+> do [#lazilyzigconformance]
+
+
+Split it in two, because the answer differs:
+
+**The tag set — already spec-level, nothing to add.** `schemas/signaling.json` is a `oneOf` over 14 branches, each with `"type": {"const": ...}` and `additionalProperties: false`. The closed set is pinned, and `frames.json` enumerates it with a `variant` field. `ClientTag` is just the Zig-idiomatic realization of something the spec already owns.
+
+**`ClientTag` as a named type — no, don't propagate it.** That is implementation shape, not wire contract. Kotlin reaches for a sealed class, Rust for `#[serde(tag = "type")]`, Python for a `Literal` union; mandating a named tag enum in nine bindings buys no interop and costs nine deprecation surfaces on public types. The spec deliberately does not prescribe this elsewhere — `EntryKind.wireName` is a zig-ism too.
+
+**Formal: no.** A finite tag set already pinned by a schema has no theorem in it. Lean earns its keep on confluence, memo suppression, move-minimization — not on an enum.
+
+**Conformance: yes, and this is the real gap.** What `ClientTag` actually buys is *rejection* — an unknown `type` is an error, never a silent default. Nothing in the corpus tests that, in any binding. Filed as `#lzsignalingnegative`: a `rejects` block covering unknown `type`, `to` and `from` both present, a client frame carrying `from`, and a `welcome` roster containing the joining peer. That is the portable version of your question, and unlike a type it applies to all nine.
+
+Also filed `#lzwirefrontier` — the two wire defects above are exactly the kind a hand-transcribed frames test cannot see, so the other seven bindings need the same encoder/decoder audit. rs is already correct on both. Both items are at the top of the backlog.
+<!-- agent:boundary:55ee267a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 do [#lazilyzigconformance]
+- do [#lzwirefrontier]
+- do [#lzsignalingnegative]
+- ~~do [#lazilyzigconformance]~~
 - do [#lazilyzigport]
 - do [#lazilyconformancecoverag]
 - do [#lazilybenchmarkregressio]
@@ -95,7 +140,8 @@ Also closing `#lazilythreadsafetopiccel` and `#lazilythreadsafeworkqueu` — bot
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lazilyzigconformance] lazily-zig: 8 conformance fixtures are asserted by INLINE MIRROR tests — values typed into the .zig source with the fixture name only in a comment, so upstream can change the fixture and the mirror stays green. Same defect class as lazily-cpp's hand-transcribed queue tests. The runtime manifest now names each one in KNOWN_UNCOVERED with its mirroring file: keyed_reconciliation_lis (reconcile.zig), mergecell_algebra (merge.zig), semtree_incremental (sem_tree.zig), stableid_alignment (stable_id.zig), anti_entropy_converge (crdt_plane.zig), crdt_sync_frames (crdt_plane.zig + ipc.zig), anti_spoof_session and frames (signaling.zig). Replace each mirror with a real fixture replay and shrink the ledger
+- [ ] [#lzwirefrontier] lazily cpp/dart/go/js/kt/py/cs: audit the CrdtSync wire encoding for the two defects lazily-zig was carrying undetected. (1) schemas/distributed.json#/$defs/StampFrontierEntry pins a 2-element [peer, WireStamp] tuple (prefixItems, minItems/maxItems 2); zig encoded AND decoded {peer, stamp}, so its frontier advertisement was unreadable by every other binding. (2) CrdtOp.key is in the schema's required list and is nullable — always present, null when unset, explicitly unlike NodeSnapshot/NodeAdd which omit it; zig omitted it when null and rejected an incoming explicit null. rs is CORRECT on both (Vec<(u64, WireStamp)> and a derived struct). Neither was visible until distributed/crdt_sync_frames.json was replayed rather than mirrored, so any binding whose frames coverage is hand-transcribed could have the same pair. Check the encoder and the decoder separately: zig was wrong in both directions and round-tripped against itself cleanly
+- [ ] [#lzsignalingnegative] lazily-spec + all bindings: signaling/frames.json and anti_spoof_session.json have no NEGATIVE cases, so nothing anywhere pins that a malformed frame is REJECTED rather than silently defaulted. The schema already closes the tag set (oneOf over 14 branches, each type: {const}, additionalProperties: false), but no fixture drives it. Add a rejects block covering: unknown type value; to and from both present on one frame (the description says they never are); a client frame carrying from (the anti-spoof surface itself); welcome.peers containing the joining peer. This is the portable form of the tag-enum question — the wire contract is the closed tag set plus rejection, not any binding's type shape
 - [ ] [#lazilyzigport] lazily go/rs/zig: port lazily-dart's corrupt-manifest-id check into the other runtime conformance guards. dart found that a recorder can mangle its own evidence (severed ids like sure.json) and make the guard report INTACT fixtures as never opened — a guard that cries wolf gets switched off. Its guard now rejects any recorded id that names no file in the corpus. go, rs and zig all lack that check. Cheap: one loop over the manifest before the coverage comparison
 - [ ] [#lazilyconformancecoverag] lazily-cs: 87 of 124 canonical fixtures unreplayed (cs opens 37). MEASURED via the runtime manifest 2026-07-26. CORRECTION — an earlier note on this item claimed the 7 statechart fixtures were a cheap "runner gap"; that was derived from the STATIC grep and is WRONG. cs enumerates its corpus, so no fixture filename appears in its sources, and the static count under-reported every area. Runtime truth: cs FULLY replays reactive-graph 21/21, statechart 7/7, materialization 3/3, familysync 1/1. There is NO runner-gap win anywhere in cs — every one of the 87 is a genuinely missing surface, each already declared in a per-runner Unsupported ledger with the blocking surface named. Unreplayed by area: collections 15, lossless-tree 9, root 8, message-passing 8, reliable-sync 8, rateshape 6, coordination 5, resilience/service/temporal/windowing 4 each, presence 3, agent-doc/distributed/signaling 2 each, crdt-tree/membership/receipts 1 each. Work it down against tasks/software/lazily-cs-parity-plan.md by SHIPPING SURFACES, not by wiring runners
 - [ ] [#lazilybenchmarkregressio] lazily-rs: the benchmark regression budgets have NO CI enforcement. ci.yml enumerates individual cargo test invocations and never runs `make check` or `benchmark-check`; regressions.yml runs only the loom model. So every budget in BENCHMARKS.md is enforced solely by whoever remembers to run `make benchmark-check` locally with a populated target/criterion — which, until #lazilyfailstarget, was nobody, because the gate hard-failed on a pruned target dir. Add a scheduled job (regressions.yml already has a nightly cron and is the natural home) that runs `cargo bench` then `make benchmark-check-strict`, so a real regression fails somewhere other than one developer machine. Note the numbers are machine-specific, so the job needs a stable runner class or relative-delta budgets rather than absolute ones

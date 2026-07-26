@@ -1,0 +1,12 @@
+[peers.left]
+command = ["{self}", "reference-peer"]
+
+[peers.middle]
+command = ["{self}", "reference-peer"]
+
+[peers.right]
+command = ["{self}", "reference-peer"]
+
+[peers.lazily-cs]
+command = []
+staged = true

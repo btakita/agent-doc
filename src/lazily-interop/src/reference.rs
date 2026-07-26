@@ -4,6 +4,8 @@ use std::io::{self, BufRead, BufWriter, Write};
 #[cfg(unix)]
 use std::io::{ErrorKind, Read};
 #[cfg(unix)]
+use std::net::Shutdown;
+#[cfg(unix)]
 use std::os::unix::net::{UnixListener, UnixStream};
 #[cfg(unix)]
 use std::sync::{Arc, Condvar, Mutex};
@@ -29,6 +31,9 @@ enum Mutation {
     MergedFrames,
     SwallowedUnsupported,
     NonFlushed,
+    CloseAfterPrefix,
+    CorruptPayload,
+    ReorderedFrames,
 }
 
 impl Mutation {
@@ -42,6 +47,9 @@ impl Mutation {
             Ok("merged_frames") => Self::MergedFrames,
             Ok("swallowed_unsupported") => Self::SwallowedUnsupported,
             Ok("non_flushed") => Self::NonFlushed,
+            Ok("close_after_prefix") => Self::CloseAfterPrefix,
+            Ok("corrupt_payload") => Self::CorruptPayload,
+            Ok("reordered_frames") => Self::ReorderedFrames,
             _ => Self::None,
         }
     }
@@ -68,6 +76,8 @@ struct ReferencePeer {
     last_stamp: Option<Stamp>,
     #[cfg(unix)]
     links: HashMap<u64, SharedSocket>,
+    #[cfg(unix)]
+    link_options: HashMap<u64, Value>,
 }
 
 impl ReferencePeer {
@@ -80,6 +90,8 @@ impl ReferencePeer {
             last_stamp: None,
             #[cfg(unix)]
             links: HashMap::new(),
+            #[cfg(unix)]
+            link_options: HashMap::new(),
         }
     }
 
@@ -123,11 +135,23 @@ impl ReferencePeer {
         self.peer_id = Some(peer_id);
 
         #[cfg(unix)]
-        let channels = vec!["ipc_socket"];
+        let channels = vec![
+            "in_process_ffi",
+            "shared_memory",
+            "ipc_socket",
+            "websocket",
+            "webrtc_datachannel",
+        ];
         #[cfg(not(unix))]
         let channels: Vec<&str> = Vec::new();
         #[cfg(unix)]
-        let channel_variants = json!({"ipc_socket": ["unix_stream_length_prefix"]});
+        let channel_variants = json!({
+            "in_process_ffi": ["reference_c_abi_loopback"],
+            "shared_memory": ["reference_mmap_control_loopback"],
+            "ipc_socket": ["unix_stream_length_prefix"],
+            "websocket": ["reference_ws_frame_loopback"],
+            "webrtc_datachannel": ["reference_reliable_ordered_loopback"]
+        });
         #[cfg(not(unix))]
         let channel_variants = json!({});
 
@@ -275,7 +299,15 @@ impl ReferencePeer {
             .get("channel")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        if channel != "ipc_socket" {
+        if ![
+            "in_process_ffi",
+            "shared_memory",
+            "ipc_socket",
+            "websocket",
+            "webrtc_datachannel",
+        ]
+        .contains(&channel)
+        {
             if self.mutation == Mutation::SwallowedUnsupported {
                 return json!({"ok": true});
             }
@@ -329,6 +361,7 @@ impl ReferencePeer {
         #[cfg(unix)]
         if let Some(link) = request.get("link").and_then(Value::as_u64) {
             self.links.remove(&link);
+            self.link_options.remove(&link);
         }
         json!({"ok": true})
     }
@@ -383,6 +416,10 @@ impl ReferencePeer {
             _ => anyhow::bail!("invalid link role {role:?}"),
         }
         self.links.insert(link, shared);
+        self.link_options.insert(
+            link,
+            request.get("options").cloned().unwrap_or_else(|| json!({})),
+        );
         Ok(())
     }
 
@@ -393,15 +430,47 @@ impl ReferencePeer {
             .and_then(Value::as_u64)
             .context("link_send requires link")?;
         let frame = request.get("frame").context("link_send requires frame")?;
-        let payload = serde_json::to_vec(frame)?;
+        let mut payload = serde_json::to_vec(frame)?;
         let length = u32::try_from(payload.len()).context("frame exceeds u32 length prefix")?;
         let mut stream = self
             .links
             .get(&link)
             .context("unknown link")?
             .stream(Duration::from_secs(2))?;
-        stream.write_all(&length.to_be_bytes())?;
-        stream.write_all(&payload)?;
+        let fault = self
+            .link_options
+            .get(&link)
+            .and_then(|options| options.get("fault"))
+            .and_then(Value::as_str);
+        let prefix = length.to_be_bytes();
+        if fault == Some("split_prefix") {
+            stream.write_all(&prefix[..1])?;
+            stream.flush()?;
+            thread::yield_now();
+            stream.write_all(&prefix[1..])?;
+        } else {
+            stream.write_all(&prefix)?;
+        }
+        if self.mutation == Mutation::CloseAfterPrefix {
+            stream.shutdown(Shutdown::Write)?;
+            return Ok(4);
+        }
+        if self.mutation == Mutation::CorruptPayload && !payload.is_empty() {
+            payload[0] = b'[';
+        }
+        if matches!(
+            fault,
+            Some("split_body" | "fragment" | "chunk" | "backpressure")
+        ) && payload.len() > 1
+        {
+            for chunk in payload.chunks(payload.len().div_ceil(3)) {
+                stream.write_all(chunk)?;
+                stream.flush()?;
+                thread::yield_now();
+            }
+        } else {
+            stream.write_all(&payload)?;
+        }
         stream.flush()?;
         Ok(4 + payload.len())
     }
@@ -441,6 +510,9 @@ impl ReferencePeer {
         }
         if self.mutation == Mutation::MergedFrames && frames.len() > 1 {
             frames = vec![json!({"Merged": frames})];
+        }
+        if self.mutation == Mutation::ReorderedFrames {
+            frames.reverse();
         }
         Ok((frames, bytes))
     }

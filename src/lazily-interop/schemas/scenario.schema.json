@@ -63,13 +63,81 @@
         ]
       }
     },
+    "frame_sets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": {"type": "object"}
+      }
+    },
     "steps": {
       "type": "array",
       "minItems": 1,
       "items": {
         "oneOf": [
-          {
-            "type": "object",
+        {
+          "type": "object",
+          "required": ["op", "channel", "codec", "frame_set"],
+          "additionalProperties": false,
+          "properties": {
+            "op": {"const": "transport_matrix"},
+            "channel": {
+              "enum": [
+                "in_process_ffi",
+                "shared_memory",
+                "ipc_socket",
+                "websocket",
+                "webrtc_datachannel"
+              ]
+            },
+            "codec": {"enum": ["json", "msgpack", "postcard"]},
+            "frame_set": {"type": "string", "minLength": 1},
+            "fault": {
+              "enum": [
+                "split_prefix",
+                "split_body",
+                "fragment",
+                "chunk",
+                "backpressure"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["op", "from", "to", "channel", "variant", "codec", "frame_set"],
+          "additionalProperties": false,
+          "properties": {
+            "op": {"const": "transport"},
+            "from": {"type": "string", "minLength": 1},
+            "to": {"type": "string", "minLength": 1},
+            "channel": {
+              "enum": [
+                "in_process_ffi",
+                "shared_memory",
+                "ipc_socket",
+                "websocket",
+                "webrtc_datachannel"
+              ]
+            },
+            "variant": {"type": "string", "minLength": 1},
+            "codec": {"enum": ["json", "msgpack", "postcard"]},
+            "frame_set": {"type": "string", "minLength": 1},
+            "fault": {
+              "enum": [
+                "split_prefix",
+                "split_body",
+                "fragment",
+                "chunk",
+                "backpressure"
+              ]
+            },
+            "bidirectional": {"type": "boolean"}
+          }
+        },
+        {
+          "type": "object",
             "required": ["op", "peer", "node", "key", "state", "at", "save_as"],
             "additionalProperties": false,
             "properties": {

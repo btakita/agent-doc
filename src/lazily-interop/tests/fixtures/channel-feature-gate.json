@@ -1,0 +1,57 @@
+{
+  "name": "channel-feature-gate",
+  "seed": 17,
+  "peers": [
+    {"name": "left", "peer_id": 1},
+    {"name": "middle", "peer_id": 2},
+    {"name": "right", "peer_id": 3},
+    {"name": "lazily-cs", "peer_id": 4}
+  ],
+  "required_features": ["transport_links"],
+  "required_codecs": ["json"],
+  "required_channels": [
+    "in_process_ffi",
+    "shared_memory",
+    "ipc_socket",
+    "websocket",
+    "webrtc_datachannel"
+  ],
+  "frame_sets": {
+    "smoke": [
+      {"Snapshot": {"epoch": 0, "nodes": [], "edges": [], "roots": []}}
+    ]
+  },
+  "steps": [
+    {
+      "op": "transport_matrix",
+      "channel": "in_process_ffi",
+      "codec": "json",
+      "frame_set": "smoke"
+    },
+    {
+      "op": "transport_matrix",
+      "channel": "shared_memory",
+      "codec": "json",
+      "frame_set": "smoke"
+    },
+    {
+      "op": "transport_matrix",
+      "channel": "ipc_socket",
+      "codec": "json",
+      "frame_set": "smoke"
+    },
+    {
+      "op": "transport_matrix",
+      "channel": "websocket",
+      "codec": "json",
+      "frame_set": "smoke"
+    },
+    {
+      "op": "transport_matrix",
+      "channel": "webrtc_datachannel",
+      "codec": "json",
+      "frame_set": "smoke"
+    }
+  ],
+  "expected_snapshot": []
+}

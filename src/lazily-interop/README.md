@@ -10,6 +10,7 @@ From this directory:
 ```sh
 make check
 cargo run -- run
+make network-suite
 ```
 
 The default run launches two instances of the intentionally independent
@@ -24,6 +25,15 @@ staged until Lazily C# ships real IPC and CRDT surfaces. Feature-only scenarios
 may leave `required_codecs` and `required_channels` empty; codec and channel
 scenarios name those requirements and select the narrower supporting peer group.
 
-`cargo run -- mutation-check` must report all eight required defect classes as
+`make network-suite` is the single local entrypoint for the implemented network
+matrix. It runs the eight-binding semantic cohort, then the five direct-link
+profiles over every ordered pair of eligible peers. A peer joins those cells
+automatically after advertising the required production feature, codec, channels,
+and variants; otherwise it remains visible as staged and receives no pass credit.
+`network-suite-pr`,
+`network-suite-merge`, and `network-suite-nightly` pin the CI seed schedules and
+write machine-readable reports under `reports/`.
+
+`cargo run -- mutation-check` must report all eleven required defect classes as
 caught. This is the gate proving the harness can go red before any production
 binding receives interop credit.

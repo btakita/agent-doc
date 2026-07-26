@@ -12,6 +12,9 @@ pub struct Schemas {
     scenario: Validator,
     result: Validator,
     distributed: Validator,
+    snapshot: Validator,
+    delta: Validator,
+    reliable_sync: Validator,
 }
 
 impl Schemas {
@@ -28,14 +31,25 @@ impl Schemas {
 
         let mut distributed = read_json(&spec_root.join("schemas/distributed.json"))?;
         let defs = read_json(&spec_root.join("schemas/defs.json"))?;
-        inline_distributed_defs(&mut distributed, &defs)?;
+        inline_shared_defs(&mut distributed, &defs)?;
         let distributed = compile_schema(&distributed)?;
+        let mut snapshot = read_json(&spec_root.join("schemas/snapshot.json"))?;
+        inline_shared_defs(&mut snapshot, &defs)?;
+        let snapshot = compile_schema(&snapshot)?;
+        let mut delta = read_json(&spec_root.join("schemas/delta.json"))?;
+        inline_shared_defs(&mut delta, &defs)?;
+        let delta = compile_schema(&delta)?;
+        let reliable_sync =
+            compile_schema(&read_json(&spec_root.join("schemas/reliable-sync.json"))?)?;
 
         Ok(Self {
             control,
             scenario,
             result,
             distributed,
+            snapshot,
+            delta,
+            reliable_sync,
         })
     }
 
@@ -73,13 +87,42 @@ impl Schemas {
     }
 
     pub fn validate_frame(&self, value: &Value, culprit: &str) -> Result<(), Failure> {
+        self.validate_frame_on_plane(value, culprit, Plane::Semantic)
+    }
+
+    pub fn validate_transport_frame(&self, value: &Value, culprit: &str) -> Result<(), Failure> {
+        self.validate_frame_on_plane(value, culprit, Plane::Transport)
+    }
+
+    fn validate_frame_on_plane(
+        &self,
+        value: &Value,
+        culprit: &str,
+        plane: Plane,
+    ) -> Result<(), Failure> {
+        let (validator, label) = if value.get("CrdtSync").is_some() {
+            (&self.distributed, "CrdtSync frame")
+        } else if value.get("Snapshot").is_some() {
+            (&self.snapshot, "Snapshot frame")
+        } else if value.get("Delta").is_some() {
+            (&self.delta, "Delta frame")
+        } else if value.get("ResyncRequest").is_some() || value.get("OutboxAck").is_some() {
+            (&self.reliable_sync, "reliable-sync frame")
+        } else {
+            return Err(Failure::new(
+                ErrorCategory::SchemaViolation,
+                plane,
+                culprit,
+                "unknown externally tagged frame variant",
+            ));
+        };
         validate(
-            &self.distributed,
+            validator,
             value,
             ErrorCategory::SchemaViolation,
-            Plane::Semantic,
+            plane,
             culprit,
-            "distributed frame",
+            label,
         )
     }
 }
@@ -138,20 +181,20 @@ fn validate(
     ))
 }
 
-fn inline_distributed_defs(distributed: &mut Value, defs: &Value) -> Result<()> {
+fn inline_shared_defs(schema: &mut Value, defs: &Value) -> Result<()> {
     let shared_defs = defs
         .get("$defs")
         .and_then(Value::as_object)
         .context("defs.json has no object $defs")?;
-    let distributed_defs = distributed
+    let schema_defs = schema
         .get_mut("$defs")
         .and_then(Value::as_object_mut)
-        .context("distributed.json has no object $defs")?;
+        .context("frame schema has no object $defs")?;
 
     for (name, definition) in shared_defs {
-        distributed_defs.insert(name.clone(), definition.clone());
+        schema_defs.insert(name.clone(), definition.clone());
     }
-    rewrite_shared_refs(distributed);
+    rewrite_shared_refs(schema);
     Ok(())
 }
 
@@ -201,7 +244,7 @@ mod tests {
                 "IpcValue": {"type": "object"}
             }
         });
-        inline_distributed_defs(&mut distributed, &defs).unwrap();
+        inline_shared_defs(&mut distributed, &defs).unwrap();
         assert_eq!(distributed["$defs"]["NodeId"]["type"], "integer");
     }
 }

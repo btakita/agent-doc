@@ -26,6 +26,50 @@ fn feature_group_runs_supported_peers_and_reports_staged_csharp() {
 }
 
 #[test]
+fn transport_matrix_includes_every_supported_peer_and_stages_csharp() {
+    let output = Command::new(binary())
+        .args([
+            "run",
+            "--registry",
+            "tests/fixtures/channel-feature-gate-peers.toml",
+            "--scenario",
+            "tests/fixtures/channel-feature-gate.json",
+            "--format",
+            "json",
+            "--require-channels",
+        ])
+        .output()
+        .expect("run transport matrix");
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).expect("JSON result");
+    let cells = report["coverage"]["transport_cells"]
+        .as_array()
+        .expect("transport cells");
+
+    assert_eq!(report["status"], "pass");
+    assert_eq!(
+        report["peers"],
+        serde_json::json!(["left", "middle", "right"])
+    );
+    assert_eq!(report["staged_peers"][0]["peer"], "lazily-cs");
+    assert_eq!(cells.len(), 30);
+    for peer in ["left", "middle", "right"] {
+        assert!(cells.iter().any(|cell| cell["sender"] == peer));
+        assert!(cells.iter().any(|cell| cell["receiver"] == peer));
+    }
+    assert!(
+        cells
+            .iter()
+            .all(|cell| cell["bytes_sent"] == cell["bytes_received"])
+    );
+}
+
+#[test]
 fn all_required_mutants_are_caught() {
     let output = Command::new(binary())
         .args(["mutation-check", "--json"])
@@ -38,6 +82,6 @@ fn all_required_mutants_are_caught() {
         String::from_utf8_lossy(&output.stderr)
     );
     let proofs: Vec<Value> = serde_json::from_slice(&output.stdout).expect("mutation JSON");
-    assert_eq!(proofs.len(), 8);
+    assert_eq!(proofs.len(), 11);
     assert!(proofs.iter().all(|proof| proof["caught"] == true));
 }

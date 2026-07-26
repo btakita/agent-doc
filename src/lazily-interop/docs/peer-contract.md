@@ -125,15 +125,26 @@ A **link** is one channel instance connecting exactly two peers. The orchestrato
 opens it, tells each side its role, then asks one side to send and the other to
 receive. The orchestrator never carries the payload — that is the point.
 
+The independent `lazily-interop-reference` peer advertises `reference_*`
+variants for profile-level harness and fault-scheduler tests. Those variants
+prove the supervisor goes red and preserve frame boundaries, but they never give
+a production binding credit for FFI, shared-memory, WebSocket, or WebRTC support.
+Production credit requires that binding's own peer to advertise and execute its
+production-backed variant.
+
 ### `link_open`
 
 ```json
-{"cmd": "link_open", "link": 1, "channel": "ipc_socket", "codec": "msgpack", "role": "listen", "endpoint": "/tmp/lazily-interop-xyz/link1.sock", "options": {}}
+{"cmd": "link_open", "link": 1, "channel": "ipc_socket", "codec": "msgpack", "role": "listen", "endpoint": "/tmp/lazily-interop-xyz/link1.sock", "options": {"variant": "unix_stream_length_prefix"}}
 ```
 
 `codec` MUST be one advertised by both peers. `role` is `"listen"` or
 `"connect"`; the orchestrator opens the listener first and waits for its `ok`
 before opening the connector. `endpoint` is channel-specific (see below). A peer
+MUST execute the concrete implementation named by `options.variant`; the
+orchestrator selects that value from the peer's own `channel_variants`
+advertisement, so two bindings may use differently named compatible
+implementations in one cell. A peer
 that does not implement `channel` MUST answer
 `{"ok": false, "error": "unsupported channel", "unsupported": true}` — the
 `unsupported` flag is what lets the harness report an honest gap instead of a
@@ -206,6 +217,12 @@ and a real-stack smoke set only where a real stack exists.
 A scenario first names the feature whose peer group it exercises. Unsupported
 bindings remain visible as staged and are excluded from that group. C# therefore
 does not join CRDT scenarios until its real IPC and CRDT surfaces ship.
+
+For a transport matrix, the harness expands every named channel over every
+ordered pair in the eligible group. Once a peer advertises the production
+feature, codec, channels, and variants, it joins automatically as both sender and
+receiver; there is no binding-specific scenario edit that can accidentally omit
+it.
 
 The scenario then names the channels its eligible peer group must run on. If a
 peer in that group declares it does not implement one, the run records

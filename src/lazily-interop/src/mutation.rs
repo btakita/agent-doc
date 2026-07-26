@@ -59,7 +59,25 @@ pub fn run_mutation_check(
         "merged_frames",
         ErrorCategory::FrameCount,
         "receiver",
-        merged_frames_mutation(&command, schemas, timeout),
+        transport_mutation(&command, None, Some("merged_frames"), schemas, timeout),
+    ));
+    proofs.push(proof(
+        "close_after_prefix",
+        ErrorCategory::PeerProtocol,
+        "sender",
+        transport_mutation(&command, Some("close_after_prefix"), None, schemas, timeout),
+    ));
+    proofs.push(proof(
+        "corrupt_payload",
+        ErrorCategory::PeerProtocol,
+        "receiver",
+        transport_mutation(&command, Some("corrupt_payload"), None, schemas, timeout),
+    ));
+    proofs.push(proof(
+        "reordered_frames",
+        ErrorCategory::FrameTruncated,
+        "receiver",
+        transport_mutation(&command, None, Some("reordered_frames"), schemas, timeout),
     ));
     proofs.push(proof(
         "swallowed_unsupported",
@@ -106,8 +124,10 @@ fn semantic_mutation(
     }
 }
 
-fn merged_frames_mutation(
+fn transport_mutation(
     command: &[String],
+    sender_mutation: Option<&str>,
+    receiver_mutation: Option<&str>,
     schemas: &Schemas,
     timeout: Duration,
 ) -> Result<(), Failure> {
@@ -122,14 +142,14 @@ fn merged_frames_mutation(
 
     let mut sender = PeerProcess::start(
         "sender",
-        &peer_config(command.to_vec(), None),
+        &peer_config(command.to_vec(), sender_mutation),
         1,
         timeout,
         schemas,
     )?;
     let mut receiver = PeerProcess::start(
         "receiver",
-        &peer_config(command.to_vec(), Some("merged_frames")),
+        &peer_config(command.to_vec(), receiver_mutation),
         2,
         timeout,
         schemas,
@@ -210,7 +230,7 @@ fn unsupported_mutation(
         &json!({
             "cmd": "link_open",
             "link": 1,
-            "channel": "websocket",
+            "channel": "carrier_pigeon",
             "codec": "json",
             "role": "listen",
             "endpoint": "ws://127.0.0.1:0/interop",
@@ -222,7 +242,7 @@ fn unsupported_mutation(
         .capabilities()
         .channels
         .iter()
-        .any(|channel| channel == "websocket");
+        .any(|channel| channel == "carrier_pigeon");
     let _ = peer.close(schemas);
     if !claimed && response.get("ok") == Some(&Value::Bool(true)) {
         Err(Failure::new(

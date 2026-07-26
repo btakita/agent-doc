@@ -122,6 +122,27 @@ pub struct Coverage {
     pub frames_emitted: usize,
     pub frames_delivered: usize,
     pub channels_run: usize,
+    pub transport_cells: Vec<TransportCell>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TransportCell {
+    pub sender: String,
+    pub receiver: String,
+    pub direction: String,
+    pub profile: String,
+    pub plane: Plane,
+    pub channel: String,
+    pub variant: String,
+    pub codec: String,
+    pub frame_family: String,
+    pub scenario: String,
+    pub seed: u64,
+    pub status: RunStatus,
+    pub unsupported_reason: Option<String>,
+    pub bytes_sent: usize,
+    pub bytes_received: usize,
+    pub first_divergence: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -214,6 +235,8 @@ pub struct Scenario {
     pub required_features: Vec<String>,
     pub required_codecs: Vec<String>,
     pub required_channels: Vec<String>,
+    #[serde(default)]
+    pub frame_sets: BTreeMap<String, Vec<Value>>,
     pub steps: Vec<ScenarioStep>,
     pub expected_snapshot: Vec<Value>,
 }
@@ -240,6 +263,25 @@ pub enum ScenarioStep {
         to: Vec<String>,
         at: u64,
         expect_applied: usize,
+    },
+    Transport {
+        from: String,
+        to: String,
+        channel: String,
+        variant: String,
+        codec: String,
+        frame_set: String,
+        #[serde(default)]
+        fault: Option<String>,
+        #[serde(default)]
+        bidirectional: bool,
+    },
+    TransportMatrix {
+        channel: String,
+        codec: String,
+        frame_set: String,
+        #[serde(default)]
+        fault: Option<String>,
     },
     AssertConverged,
 }

@@ -1,0 +1,144 @@
+{
+  "name": "channel-matrix",
+  "seed": 17,
+  "peers": [
+    {"name": "left", "peer_id": 1},
+    {"name": "right", "peer_id": 2},
+    {"name": "lazily-rs", "peer_id": 3},
+    {"name": "lazily-zig", "peer_id": 4},
+    {"name": "lazily-py", "peer_id": 5},
+    {"name": "lazily-kt", "peer_id": 6},
+    {"name": "lazily-js", "peer_id": 7},
+    {"name": "lazily-dart", "peer_id": 8},
+    {"name": "lazily-go", "peer_id": 9},
+    {"name": "lazily-cpp", "peer_id": 10},
+    {"name": "lazily-cs", "peer_id": 11}
+  ],
+  "required_features": ["transport_links"],
+  "required_codecs": ["json"],
+  "required_channels": [
+    "in_process_ffi",
+    "shared_memory",
+    "ipc_socket",
+    "websocket",
+    "webrtc_datachannel"
+  ],
+  "frame_sets": {
+    "canonical-ipc": [
+      {"Snapshot": {"epoch": 0, "nodes": [], "edges": [], "roots": []}},
+      {
+        "Snapshot": {
+          "epoch": 7,
+          "nodes": [
+            {"node": 1, "type_tag": "i32", "state": {"Payload": [1, 2, 3]}},
+            {"node": 2, "type_tag": "opaque-type", "state": "Opaque", "key": "doc/title"}
+          ],
+          "edges": [{"dependent": 2, "dependency": 1}],
+          "roots": [1]
+        }
+      },
+      {
+        "Delta": {
+          "base_epoch": 40,
+          "epoch": 41,
+          "ops": [
+            {"CellSet": {"node": 1, "payload": {"Inline": [10]}}},
+            {"SlotValue": {"node": 2, "payload": {"Inline": [20]}}},
+            {"Invalidate": {"node": 3}},
+            {"NodeAdd": {"node": 4, "type_tag": "u64", "state": {"Payload": [64]}}},
+            {"NodeRemove": {"node": 5}},
+            {"EdgeAdd": {"dependent": 2, "dependency": 1}},
+            {"EdgeRemove": {"dependent": 3, "dependency": 1}}
+          ]
+        }
+      },
+      {
+        "Delta": {
+          "base_epoch": 8,
+          "epoch": 9,
+          "ops": [
+            {
+              "SlotValue": {
+                "node": 7,
+                "payload": {
+                  "SharedBlob": {
+                    "offset": 40,
+                    "len": 17,
+                    "generation": 2,
+                    "epoch": 9,
+                    "checksum": 987654321
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "CrdtSync": {
+          "frontier": [[1, {"wall_time": 10, "logical": 1, "peer": 1}]],
+          "ops": [
+            {
+              "node": 7,
+              "key": null,
+              "stamp": {"wall_time": 10, "logical": 1, "peer": 1},
+              "state": {"Inline": []}
+            },
+            {
+              "node": 8,
+              "key": "doc/title",
+              "stamp": {"wall_time": 11, "logical": 0, "peer": 1},
+              "state": {
+                "Inline": [
+                  0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                  16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+                  32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+                  48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {"ResyncRequest": {"from_epoch": 41}},
+      {"OutboxAck": {"through_epoch": 42}}
+    ]
+  },
+  "steps": [
+    {
+      "op": "transport_matrix",
+      "channel": "in_process_ffi",
+      "codec": "json",
+      "frame_set": "canonical-ipc"
+    },
+    {
+      "op": "transport_matrix",
+      "channel": "shared_memory",
+      "codec": "json",
+      "frame_set": "canonical-ipc",
+      "fault": "split_body"
+    },
+    {
+      "op": "transport_matrix",
+      "channel": "ipc_socket",
+      "codec": "json",
+      "frame_set": "canonical-ipc",
+      "fault": "split_prefix"
+    },
+    {
+      "op": "transport_matrix",
+      "channel": "websocket",
+      "codec": "json",
+      "frame_set": "canonical-ipc",
+      "fault": "fragment"
+    },
+    {
+      "op": "transport_matrix",
+      "channel": "webrtc_datachannel",
+      "codec": "json",
+      "frame_set": "canonical-ipc",
+      "fault": "backpressure"
+    }
+  ],
+  "expected_snapshot": []
+}

@@ -43,13 +43,43 @@
     },
     "coverage": {
       "type": "object",
-      "required": ["peers_started", "frames_emitted", "frames_delivered", "channels_run"],
+      "required": ["peers_started", "frames_emitted", "frames_delivered", "channels_run", "transport_cells"],
       "additionalProperties": false,
       "properties": {
         "peers_started": {"type": "integer", "minimum": 0},
         "frames_emitted": {"type": "integer", "minimum": 0},
         "frames_delivered": {"type": "integer", "minimum": 0},
-        "channels_run": {"type": "integer", "minimum": 0}
+        "channels_run": {"type": "integer", "minimum": 0},
+        "transport_cells": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "sender", "receiver", "direction", "profile", "plane", "channel",
+              "variant", "codec", "frame_family", "scenario", "seed", "status",
+              "unsupported_reason", "bytes_sent", "bytes_received", "first_divergence"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "sender": {"type": "string", "minLength": 1},
+              "receiver": {"type": "string", "minLength": 1},
+              "direction": {"type": "string", "minLength": 1},
+              "profile": {"enum": ["portable", "native", "browser", "real-webrtc", "sanitizer", "race"]},
+              "plane": {"const": "transport"},
+              "channel": {"enum": ["in_process_ffi", "shared_memory", "ipc_socket", "websocket", "webrtc_datachannel"]},
+              "variant": {"type": "string", "minLength": 1},
+              "codec": {"enum": ["json", "msgpack", "postcard"]},
+              "frame_family": {"type": "string", "minLength": 1},
+              "scenario": {"type": "string", "minLength": 1},
+              "seed": {"type": "integer", "minimum": 0},
+              "status": {"enum": ["pass", "fail"]},
+              "unsupported_reason": {"type": ["string", "null"]},
+              "bytes_sent": {"type": "integer", "minimum": 0},
+              "bytes_received": {"type": "integer", "minimum": 0},
+              "first_divergence": {"type": ["string", "null"]}
+            }
+          }
+        }
       }
     },
     "failures": {

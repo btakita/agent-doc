@@ -230,19 +230,70 @@ Therefore: **async can have atomic move in every binding today.** Async's real
 blocker is only the *read* surface (eventual transparency, `Task`/`Future`/
 `Promise` colouring) — which Phase A does not touch.
 
+### Verified: the async read surface is already synchronous in 8 of 9
+
+An earlier draft of this plan said only zig and cpp could unify all three
+families, and that the rest were blocked by async colouring. **That was wrong.**
+A targeted verification pass across all nine found:
+
+| binding | sync `observe` | genuinely awaitable read | notes |
+|---|---|---|---|
+| rs | `Option<V>` | **none on the map** | drives via `AsyncContext::get_async` |
+| py | `V \| None` | `resolve` only | map **bypasses `AsyncContext`** — takes `ctx: dict`, mints raw `Cell`/`AsyncSlot` |
+| js | `V \| undefined` | `resolve` only | map is wired to `AsyncContext`; runtime flattens Promise factories |
+| kt | `V?` | `observeAsync` only | disposal is on the *context*, never the map |
+| go | `(V, bool)` | **none** | struct has **no context field**; `Drive` calls the caller's factory inline |
+| dart | `(V?, bool)` | **none** | `_ctx` is annotated `// ignore: unused_field` — dead |
+| zig | `?V` | **none** (no language async) | *is* wired to real async nodes; `drive` is a sync queue drain |
+| cpp | `optional<V>` | via handle `std::future<T>` | the only genuine awaitability, and it is off the map |
+| cs | `TryGet` exists one layer down, unsurfaced | `Task`, pending-in-form via `Task.Run` | all work is `Task.FromResult` underneath |
+
+**Every binding already has a synchronous, non-driving read**, and every binding
+that has awaitability already confines it to exactly one method. The proposed
+split is therefore not a change — it is a codification of what 8 of 9 already
+do, plus a two-line surfacing in cs.
+
+The reason is not language power. **These families were never genuinely async.**
+The per-key factory is sync-typed in all nine, and five of nine are not even
+connected to their own async graph.
+
+**So all nine can unify.** kt — the binding an earlier draft ruled out — already
+ships the target design.
+
+### Divergences to pin in the spec before standardising
+
+1. **Source maps: `resolve` is pure decoration.** py suspends 0 event-loop
+   turns, js 1 microtask. Decide whether a source map should expose `resolve`
+   at all.
+2. **Absent vs pending is conflated** in py and js (`None`/`undefined` for
+   both), but distinguishable in go `(V, bool)`, dart `(V?, bool)`, and cs
+   `TryObserve`. Pick one.
+3. **`resolve`'s factory** is required in py, optional in js (drive-only on a
+   present key).
+4. **js alone flattens a Promise-returning factory** and genuinely awaits it —
+   verified at runtime, undeclared in its `.d.ts`. py stores the un-awaited
+   coroutine instead. This is a portability hazard, not a feature.
+5. **go's `Observe` mints** — it takes a factory and allocates. A pure
+   `observe(key) -> Maybe<V>` drops both the parameter and the side effect.
+6. **Invalidation semantics differ**: kt clears the cache on invalidate
+   (`state = Empty; value = null`), so `observe` returns absent rather than a
+   stale value; cs retains `Value` but gates on `State is Resolved`, so
+   last-known-while-stale is unreadable either way. Decide whether eventual
+   transparency means "last known" or "currently resolved".
+
 ### Language feasibility, easiest first
 
-| binding | mechanism | can all 3 unify? |
+| binding | mechanism | notes (all 9 CAN unify — see verification above) |
 |---|---|---|
 | zig | `fn ReactiveMap(comptime Ctx, K, V, kind)`; projections are `Ctx.Handle` / `Ctx.Observed` / `Ctx.Lock` | **yes** — async is a *resolution axis* (`Observed = ?V`), not a colour; Zig has no language async |
 | cpp | traits class + the existing duck-typed `Cx` template param; repo already parameterises its TS context on a lock policy | **yes** — needs one added `clear_dependents` on `AsyncSlotHandle` |
-| cs | sync↔TS is free (`Context` identity); order core is plain generic delegates | no — `Task` colouring, no HKT |
-| dart | one extra bounded type param; `Compute` is non-generic so no GAT needed | latent — `drive` is sync today |
-| js | duck typing; `ComputeOps` already satisfied by all three contexts | no — `computedAsync`, dual `get`/`getAsync`, `resolve(): Promise` |
-| py | `ctx: Any` already type-erases the projection | no — `async def resolve` |
-| go | closure fields (already proven in-repo) or one extra type param | no — async returns `(V, bool)` |
-| rs | `SyncReactiveGraph::Compute<'a>` GAT — but see the `Send + Sync` mismatch above | not via the GAT — `AsyncReactiveGraph` is a separate trait with `Option<T>` reads; but async *does* have a compute view (`AsyncComputeContext`), so the factory fix applies to all three |
-| kt | extra type param + self-bound; `ComputeOps` is hard-bound to `Context` | no — `suspend` colours construction, read, *and* disposal |
+| cs | sync↔TS is free (`Context` identity); order core is plain generic delegates| yes — its async read is already sync |
+| dart | one extra bounded type param; `Compute` is non-generic so no GAT needed | yes — verified: no `Future` in the async map file at all, and `_ctx` is dead |
+| js | duck typing; `ComputeOps` already satisfied by all three contexts| yes — its async read is already sync |
+| py | `ctx: Any` already type-erases the projection| yes — its async read is already sync |
+| go | closure fields (already proven in-repo) or one extra type param| yes — its async read is already sync |
+| rs | closure-free core (NOT the GAT — see the `Send + Sync` mismatch above) | yes — async `observe` returns `Option<V>`, no future on the map at all |
+| kt | extra type param + self-bound; `ComputeOps` is hard-bound to `Context`| yes — its async read is already sync |
 
 **zig already contains the proof.** `Engine(comptime Model: type)`
 (`reactive_graph_conformance.zig:1206`) is one generic replay engine written

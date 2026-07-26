@@ -198,21 +198,23 @@ That also gives the sharpest live check, which is in the item: after the flip, `
 **Budget guard** raised 150 → 152 for the one added digest bullet, and deliberately kept tight — that bullet is what flips the default, and a generous ceiling stops the guard catching drift. I trimmed step 0 from three lines to one rather than raise it further.
 
 `make check` green, install + recycle done, skill + hooks installed, pushed.
-<!-- agent:boundary:bc241c12 -->
+
+### Re: #7h6r — opus-5
+
+Record repair. The `do [#preflightinbinary]` directive was reaped into `agent:done` as `#7h6r`, but the answering block's header (`### Re: preflight in the binary — opus-5`, plus the follow-on `### Re: flip the default — opus-5`) carried the plan tag rather than the hash-prefixed queue id, so the directive-response materializer never matched it and left a retained document-write effect that blocked `preflight` in a loop with `session-check`.
+
+The substantive answer is unchanged and already in this exchange: `#preflightinbinary` shipped in `89669d51d` (in-process `agent-doc hook preflight-user-prompt-submit` on `UserPromptSubmit`), and the default flip landed in `5ce9b06e6` (SKILL.md + `runbooks/harness-invocation.md` now tell the agent to read the injected contract instead of shelling back to `agent-doc preflight`). No new work was performed for this block.
+<!-- agent:boundary:84c5869a -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ⏭️ do [#retainedclearreactive]
 - ⏭️ do [#preflightreactive]
-- ~~do [#7h6r]~~
 - do [#f5gn]
 - do [#snq8]
-- ~~do [#closeoutterminalreactive]~~
-- ~~do [#preflightinbinary]~~
 - do [#sessioncheckturnreactive]
 - do [#closeoutwaitchurn]
-- ~~do [#jbsurfaceswap]~~
 - ⏭️ do [#ctrlkillreregister]
 - ⏭️ do [#steergateidle]
 - ⏭️ 📌 do [#jbcompactcommit]

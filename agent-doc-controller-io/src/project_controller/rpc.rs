@@ -10628,6 +10628,35 @@ fn run_closeout_owner_claim(
                 && claim.allow_dead_owner_takeover)
                 .then(|| process_is_alive(owner.owner_pid))
         });
+        // `#closeoutterminalreactive`: the same derived gate the reactive
+        // `CloseoutGateState` exposes, read here so the live path and the graph
+        // cannot drift. Its value is the *reason* the incumbent stopped
+        // blocking, and a `lease_expired` reason is the stopgap firing — a
+        // derived fact should have released this claim earlier and none did.
+        // Logged as feedback rather than swallowed, because in a healthy system
+        // this never appears.
+        let displaced = agent_doc_state_backbone::closeout_gate::closeout_gate(
+            current.cycle_id.as_deref(),
+            current.owner.as_ref(),
+            claim.now_secs,
+            current_owner_alive,
+            claim.allow_dead_owner_takeover,
+        );
+        if displaced.released_by_stopgap()
+            && let Some(owner) = displaced.owner()
+        {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "closeout_owner_released_by_stopgap file={} cycle_id={} owner_id={} owner_pid={} role={} reason=lease_expired",
+                    file.display(),
+                    owner.cycle_id,
+                    owner.owner_id,
+                    owner.owner_pid,
+                    owner.role,
+                ),
+            );
+        }
         let outcome = current.decide_owner_claim(&claim, current_owner_alive);
         if let CloseoutOwnerClaimOutcome::Acquired(owner) = &outcome {
             let event = agent_doc_state_backbone::StateEvent::new(

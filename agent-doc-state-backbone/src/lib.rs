@@ -20,6 +20,7 @@ use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
 
 /// Phase E (`#adstatechart`) local-process Harel state chart consolidation.
 pub mod adstatechart;
+pub mod closeout_gate;
 pub mod retained_write;
 pub mod write_pipeline;
 
@@ -3484,10 +3485,22 @@ impl CloseoutProjection {
             return CloseoutOwnerClaimOutcome::CycleSuperseded;
         }
 
+        // `#closeoutterminalreactive`: ask the derived facts before the clock.
+        // `release_reason` answers "superseded by a new turn" and "owner process
+        // is gone" first, and only falls through to lease expiry as the stopgap.
+        // Previously this consulted `is_active_at` directly, so an owner claimed
+        // during a turn that had since closed still blocked the next turn for
+        // the full lease — a timeout standing in for a fact already known.
         if let Some(owner) = self.owner.as_ref()
             && owner.owner_id != request.owner_id
-            && owner.is_active_at(request.now_secs)
-            && !(request.allow_dead_owner_takeover && current_owner_alive == Some(false))
+            && owner
+                .release_reason(
+                    cycle_id,
+                    request.now_secs,
+                    current_owner_alive,
+                    request.allow_dead_owner_takeover,
+                )
+                .is_none()
         {
             return CloseoutOwnerClaimOutcome::HeldByOther(owner.clone());
         }
@@ -3696,9 +3709,81 @@ pub struct CloseoutOwnerProjection {
     pub expires_secs: u64,
 }
 
+/// Why an incumbent closeout owner stopped blocking a new claim.
+///
+/// `#closeoutterminalreactive`: the release reason is part of the decision, not
+/// a log line reconstructed afterwards, because the two reasons mean opposite
+/// things. `SupersededByNewTurn` is the system working — the turn advanced and
+/// the old settlement is moot. `LeaseExpired` is the **stopgap firing**: a clock
+/// released something a derived fact should have released first. Surfacing them
+/// as distinct values is what lets the timeout be feedback rather than the
+/// mechanism.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CloseoutOwnerRelease {
+    /// The owner belongs to a turn that is no longer the open one.
+    SupersededByNewTurn,
+    /// The owner's process is gone and takeover was permitted.
+    OwnerProcessGone,
+    /// The lease ran out. The backstop — should never be the reason in a
+    /// healthy system.
+    LeaseExpired,
+}
+
+impl CloseoutOwnerRelease {
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::SupersededByNewTurn => "superseded_by_new_turn",
+            Self::OwnerProcessGone => "owner_process_gone",
+            Self::LeaseExpired => "lease_expired",
+        }
+    }
+
+    /// True when the clock, rather than a derived fact, is what freed the claim.
+    ///
+    /// A healthy system never answers `true` here; when it does, that is the
+    /// feedback signal that a supersession path is missing.
+    pub const fn is_stopgap(self) -> bool {
+        matches!(self, Self::LeaseExpired)
+    }
+}
+
 impl CloseoutOwnerProjection {
     pub fn is_active_at(&self, now_secs: u64) -> bool {
         now_secs < self.expires_secs
+    }
+
+    /// Whether this owner's claim still belongs to the open turn.
+    pub fn belongs_to_cycle(&self, open_cycle_id: &str) -> bool {
+        self.cycle_id == open_cycle_id
+    }
+
+    /// Why this owner does **not** block a new claim, or `None` if it does.
+    ///
+    /// Ordered so the derived facts answer first and the clock answers last
+    /// (`#closeoutterminalreactive`). The turn check is the one that matters:
+    /// an owner claimed during a turn that has since closed is moot the instant
+    /// the next turn opens, and waiting out its lease is waiting on a guess for
+    /// a fact already known. That is the 2026-07-26 wedge — a `session-check`
+    /// probe from a superseded turn blocked every later probe until its lease
+    /// ran out, and the refusal it produced told the operator to re-run the
+    /// blocked command.
+    pub fn release_reason(
+        &self,
+        open_cycle_id: &str,
+        now_secs: u64,
+        owner_alive: Option<bool>,
+        allow_dead_owner_takeover: bool,
+    ) -> Option<CloseoutOwnerRelease> {
+        if !self.belongs_to_cycle(open_cycle_id) {
+            return Some(CloseoutOwnerRelease::SupersededByNewTurn);
+        }
+        if allow_dead_owner_takeover && owner_alive == Some(false) {
+            return Some(CloseoutOwnerRelease::OwnerProcessGone);
+        }
+        if !self.is_active_at(now_secs) {
+            return Some(CloseoutOwnerRelease::LeaseExpired);
+        }
+        None
     }
 }
 
@@ -5265,6 +5350,96 @@ pub fn transition_proof_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn owner_at(cycle_id: &str, claimed: u64, lease: u64) -> CloseoutOwnerProjection {
+        CloseoutOwnerProjection {
+            cycle_id: cycle_id.to_string(),
+            owner_id: "owner-old".to_string(),
+            owner_pid: 4242,
+            role: CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY.to_string(),
+            claimed_secs: claimed,
+            expires_secs: claimed + lease,
+        }
+    }
+
+    #[test]
+    fn an_owner_from_a_closed_turn_is_superseded_without_waiting_for_its_lease() {
+        // #closeoutterminalreactive: the turn advanced, so the old settlement is
+        // moot the instant the new turn opens. Waiting out its lease is waiting
+        // on a guess for a fact already known. This is the 2026-07-26 wedge: a
+        // session-check probe from a superseded turn blocked every later probe
+        // until expiry, while its own refusal said to re-run the blocked command.
+        let owner = owner_at("cycle-old", 1_000, CLOSEOUT_OWNER_LEASE_SECS);
+
+        // Mid-lease, process alive: the clock alone would still be blocking.
+        assert!(owner.is_active_at(1_010));
+        assert_eq!(
+            owner.release_reason("cycle-new", 1_010, Some(true), false),
+            Some(CloseoutOwnerRelease::SupersededByNewTurn),
+            "a new turn must release the old turn's claim without consulting the clock"
+        );
+    }
+
+    #[test]
+    fn an_owner_of_the_open_turn_still_blocks_while_its_lease_is_live() {
+        // The other half: supersession must not become a way to steal a live
+        // closeout out from under the process actually writing it.
+        let owner = owner_at("cycle-open", 1_000, CLOSEOUT_OWNER_LEASE_SECS);
+
+        assert_eq!(owner.release_reason("cycle-open", 1_010, Some(true), true), None);
+        assert_eq!(
+            owner.release_reason("cycle-open", 1_010, Some(false), true),
+            Some(CloseoutOwnerRelease::OwnerProcessGone),
+            "a dead owner is released by liveness evidence, not by its lease"
+        );
+    }
+
+    #[test]
+    fn lease_expiry_is_the_stopgap_and_is_reported_as_such() {
+        // The timeout stays as a backstop, but it is distinguishable so it can
+        // drive feedback: if this is ever the release reason in production, a
+        // supersession path is missing.
+        let owner = owner_at("cycle-open", 1_000, CLOSEOUT_RECOVERY_LEASE_SECS);
+        let expired = 1_000 + CLOSEOUT_RECOVERY_LEASE_SECS;
+
+        let reason = owner
+            .release_reason("cycle-open", expired, Some(true), true)
+            .expect("an expired lease must release");
+        assert_eq!(reason, CloseoutOwnerRelease::LeaseExpired);
+        assert!(reason.is_stopgap(), "the clock path must be flagged as the stopgap");
+        assert!(!CloseoutOwnerRelease::SupersededByNewTurn.is_stopgap());
+        assert!(!CloseoutOwnerRelease::OwnerProcessGone.is_stopgap());
+    }
+
+    #[test]
+    fn a_stale_turn_owner_does_not_block_a_new_claim() {
+        // End to end through the claim decision, which is what actually wedged.
+        let mut closeout = CloseoutProjection {
+            cycle_id: Some("cycle-new".to_string()),
+            phase: Some(CyclePhase::PreflightStarted),
+            ..Default::default()
+        };
+        closeout.owner = Some(owner_at("cycle-old", 1_000, CLOSEOUT_OWNER_LEASE_SECS));
+
+        let outcome = closeout.decide_owner_claim(
+            &CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some("cycle-new".to_string()),
+                owner_id: "owner-new".to_string(),
+                owner_pid: 5,
+                role: CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY.to_string(),
+                now_secs: 1_010,
+                lease_secs: CLOSEOUT_RECOVERY_LEASE_SECS,
+                allow_dead_owner_takeover: true,
+            },
+            // The old owner's process is still alive; only the turn moved on.
+            Some(true),
+        );
+
+        assert!(
+            matches!(outcome, CloseoutOwnerClaimOutcome::Acquired(_)),
+            "expected Acquired, got {outcome:?}"
+        );
+    }
 
     #[test]
     fn a_status_only_recovery_probe_does_not_hold_the_write_closeout_lease() {

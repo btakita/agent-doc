@@ -447,7 +447,31 @@ Then two gaps that would have let this pass while under-testing.
 Mutation-checked overall: dropping head invalidation on pop turns the corpus replay red; non-atomic invalidation turns the glitch test red. `make check` green, pushed as `46d81e4`, gitlink `20b460e81`.
 
 The item is now narrowed to `AsyncQueueCell` alone, which is genuinely blocked: it cannot mint memoized-derive reader kinds until `AsyncContext` has a synchronous-compute `computed` and a `clear` — the remaining `#lzqfrs` prerequisite. I also recorded that the async replay will need a settle step, since derived async reads return `Option<T>` until resolved.
-<!-- agent:boundary:008fe51a -->
+
+### Re: AsyncContext prerequisites + AsyncQueueCell — opus-5
+
+Both done. The reference queue pair is complete and all three flavors replay the canonical corpus.
+
+**`AsyncContext::computed` — a synchronous-compute derived cell.** `computed_async` resolves through a spawned task, so a read before resolution is `None`. That is right for a compute that awaits and wrong for one that cannot: a queue's `len`, `head` and `is_full` derive from out-of-graph storage and have nothing to await. Routing them through the task machinery would make every such read return `Option` and need a settle step to observe a value that was already known synchronously. These resolve inline on read.
+
+The compute runs with `inner` **unlocked**, and that is load-bearing rather than an optimization. It is user code that reads sources, and those reads re-lock `inner` — running it under the lock deadlocks the context on its own reader. On completion the slot is re-checked instead of overwritten, since a concurrent reader may have resolved it first and both values are equal.
+
+**`AsyncContext::clear` / `clear_slots`.** Invalidation was already multi-root internally — `invalidate_frontier_async` takes a slice — the context simply never exposed a way to hand it more than one root. That is the same shape as the ThreadSafeContext finding: the capability existed, the surface did not. `AsyncComputed::id()` is public because the roots of one invalidation are usually different types (`Option<T>`, `usize`, `bool`) and no single handle type spans them.
+
+**`AsyncQueueCell`** then mirrors the thread-safe shell: `Arc<Mutex<S>>` storage with invalidation run outside the lock, memoized-derive reader kinds on its own graph, one multi-root clear per op.
+
+Ordering is not async-coloured, and I made that claim falsifiable rather than asserting it: `reader_kinds_resolve_without_being_driven` reads every kind with nothing driven and nothing awaited. The corpus replay contains no settle step for the same reason — if those reads ever return `None`, that is the regression, not a cue to add an await.
+
+### Re: what the mutations found — opus-5
+
+**A gap none of the existing tests could see.** Dropping the forward `dependencies` list left all 34 async tests green, including the one I had just written to prove edges are registered. Invalidation travels the *reverse* edge, which `AsyncComputeContext::get` registers on the source itself — so my "does it subscribe?" test was satisfied by machinery I had not written. The forward list is what disposal walks to detach those reverse edges, so without it the graph invalidates correctly and then leaks a dangling dependent on every dispose. `sync_computed_records_the_edge_in_both_directions` now pins the direction nothing else was watching. I would not have found this by reading; only the mutation showed the test was weaker than its name.
+
+**The feature-gate trap, twice in two cycles.** The make target needed `async` as well as `thread-safe`. Both flavors are cfg-gated, so the gate runs 3 tests with neither feature, 6 with thread-safe alone, and 8 with both — **exit 0 in all three cases**. I verified each count rather than trusting the exit code, which is the only reason it surfaced. That makes four times this session a gate could report success while running less than it claims.
+
+Ledger flags flipped only alongside replays that actually run, both times. Mutation-checked: removing head invalidation on pop turns both async tests red. `make check` green — `21bce99`, gitlink `00ecc9273`.
+
+Remaining in the family: `#lazilythreadsafetopiccel` and `#lazilythreadsafeworkqueu`. Both are now fully unblocked — the pattern they say to follow exists in `thread_safe_queue.rs` and `async_queue.rs`, and the context prerequisites they would have hit are gone.
+<!-- agent:boundary:90f0ec1b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -455,7 +479,7 @@ The item is now narrowed to `AsyncQueueCell` alone, which is genuinely blocked: 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ⏭️ do [#lazilythreadsafetopiccel]
 - ⏭️ do [#lazilythreadsafeworkqueu]
-- 🚧 do [#lazilythreadsafequeuecel]
+- ⏭️ do [#lazilythreadsafequeuecel]
 - ⏭️ do [#lazilybenchmarkregressio]
 - ~~do [#lazilyfailstarget]~~
 - ~~do [#lzqfcppfx]~~
@@ -487,7 +511,7 @@ The item is now narrowed to `AsyncQueueCell` alone, which is genuinely blocked: 
 - ~~do [#observerwordingcontradic]~~
 - ~~do [#renametreesource]~~
 - ⏭️ do [#recommendeddecidewhether]
-- do [#lazilycppconformance]
+- 🚧 do [#lazilycppconformance]
 - do [#portconformancecoverage]
 - do [#verifycrdtplaneruntimein]
 - do [#lazilycppsignalingroom]
@@ -510,8 +534,6 @@ The item is now narrowed to `AsyncQueueCell` alone, which is genuinely blocked: 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzqfrs] lazily-rs: Phase 3 prerequisite — AsyncContext needs a synchronous-compute `computed` and a multi-root `clear`. It has `source`, `computed_async` (async_context.rs:1195) and `batch()` (:1370) but neither of those two. RESOLVED 2026-07-26 and removed from this item: ThreadSafeContext does NOT need a multi-root clear_slots — batch() already coalesces clear roots into ONE frontier walk (clear_slot pushes into state.batched_slots while batch_depth > 0; finish_batch sorts/dedups and calls flush_batched_invalidations exactly once), pinned + mutation-checked by thread_safe::tests::batch_gives_clear_a_single_multi_root_frontier. Thread-safe queue primitives wrap reader-kind bumps in batch() and need no new context API. The six primitives are #lazilythreadsafequeuecel (reference), #lazilythreadsafetopiccel and #lazilythreadsafeworkqueu — plan: tasks/plan-lazily-queue-family-flavors.md
-- [ ] 🚧 [#lazilythreadsafequeuecel] lazily-rs: AsyncQueueCell — the remaining half of the reference queue pair. ThreadSafeQueueCell SHIPPED 2026-07-26 (commit 46d81e4): memoized-derive reader kinds on its own graph, Arc<Mutex<S>> storage with invalidation outside the lock (an op invalidating while holding storage inverts lock order against readers and deadlocks — guarded by concurrent_push_and_read_do_not_deadlock), multi-root invalidation via batch(). Ledger flipped to shipped in the same change as a real corpus replay. AsyncQueueCell is BLOCKED on the AsyncContext prerequisites in #lzqfrs (no synchronous-compute computed, no clear) — it cannot mint memoized-derive reader kinds without them. Mirror the thread-safe shell once those land, and note the async replay needs a settle step since derived reads return Option<T> until resolved — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lazilythreadsafetopiccel] lazily-rs: ThreadSafeTopicCell + AsyncTopicCell. Same per-flavor rules as #lazilythreadsafequeuecel: own graph, own reader handles, bumps outside the lock, batch() for multi-root invalidation. Topic Core reader kinds per cell-model.md are subscribe/reconnect/disconnect/publish/read/read_stream/advance. Update the flavor ledger in the SAME change, and make the corpus replay against the new flavor rather than only flipping the flag — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lazilythreadsafeworkqueu] lazily-rs: ThreadSafeWorkQueueCell + AsyncWorkQueueCell. Core surface is push/claim/ack/nack/reap_expired plus the three independent reader kinds (pending / in-flight / dead-letter). Visibility-timeout redelivery needs a clock seam, which is NOT flavor-specific — reuse the sync one rather than minting a per-flavor clock. Update the flavor ledger in the SAME change and make the corpus replay against the new flavor. KEPT OPEN 2026-07-26: this reached the queue head before its own stated prerequisite existed — it says "same rules as the reference pair", and that pair had not been built. ThreadSafeQueueCell now ships (46d81e4) and IS the pattern to copy: memoized-derive reader kinds on its own graph, Arc<Mutex<S>> storage with invalidation OUTSIDE the lock (holding storage while invalidating inverts lock order against readers and deadlocks), multi-root invalidation via batch(), ledger flag flipped only alongside a real replay, plus an effect-based atomicity test because a step replay cannot see non-atomic invalidation. The THREAD-SAFE half is unblocked now; the async half waits on the AsyncContext prerequisites in #lzqfrs — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lazilybenchmarkregressio] lazily-rs: the benchmark regression budgets have NO CI enforcement. ci.yml enumerates individual cargo test invocations and never runs `make check` or `benchmark-check`; regressions.yml runs only the loom model. So every budget in BENCHMARKS.md is enforced solely by whoever remembers to run `make benchmark-check` locally with a populated target/criterion — which, until #lazilyfailstarget, was nobody, because the gate hard-failed on a pruned target dir. Add a scheduled job (regressions.yml already has a nightly cron and is the natural home) that runs `cargo bench` then `make benchmark-check-strict`, so a real regression fails somewhere other than one developer machine. Note the numbers are machine-specific, so the job needs a stable runner class or relative-delta budgets rather than absolute ones
@@ -532,7 +554,7 @@ The item is now narrowed to `AsyncQueueCell` alone, which is genuinely blocked: 
 - [ ] [#lazilytwoimplementations] lazily-js: two implementations disagree on moveTo with a negative index — reactive-family.js:270 uses Math.min(index, Math.max(len-1,0)) with no lower clamp, collections.js:196 uses Math.max(0, Math.min(index, len-1)). moveTo(key,-1) splices before the last element in one and at 0 in the other. Untested in both; pick one before any unification silently changes a published surface.
 - [ ] [#lazilydartcomputedmap] lazily-dart: ComputedMap entries are Slot, not Computed (collections.dart:430). Post-v2 Slot is the UNGUARDED pass-through while Computed carries the == memo guard — so ComputedMap does not have the guard its name implies, and this leaks publicly through handle(). Decide whether the handle becomes Computed.
 - [ ] [#recommendedspecdecision] [recommended] Spec decision for lazily-spec, blocking the family unification: (1) does the atomic-move contract in cell-model.md:275 bind EVERY flavor or only the source map? All nine bindings fail it on thread-safe and async, yet coverage.json marks all three rows green for every binding. (2) Is a thread-safe flavor meaningful on single-threaded runtimes? dart ships a 182-line duplicate family the spec marks N/A, and js README:633-640 argues the opposite of its own source comment at thread-safe.js:134-137.
-- [ ] [#lazilycppconformance] lazily-cpp: 10 conformance runners are MARKER-ONLY — they open the canonical fixture but only assert its `"model"` string, then replay hand-transcribed steps (rateshape 6, coordination 5, temporal/windowing/service/resilience 4 each, presence 3, membership/crdt-tree 1 each = 33 fixtures). They pass a did-you-load-fixtures check while being blind to any change in the corpus steps or expectations. Convert to real replays; the coverage guard counts them as covered today.
+- [ ] 🚧 [#lazilycppconformance] lazily-cpp: 10 conformance runners are MARKER-ONLY — they open the canonical fixture but only assert its `"model"` string, then replay hand-transcribed steps (rateshape 6, coordination 5, temporal/windowing/service/resilience 4 each, presence 3, membership/crdt-tree 1 each = 33 fixtures). They pass a did-you-load-fixtures check while being blind to any change in the corpus steps or expectations. Convert to real replays; the coverage guard counts them as covered today.
 - [ ] [#portconformancecoverage] Port a conformance-coverage guard to the 7 bindings that lack one. Only lazily-kt (scripts/check-conformance-coverage.sh) and now lazily-cpp fail the build when a canonical fixture is not actually replayed. rs, py, js, go, dart, zig, cs have no such guard, so the same marker-only / hand-transcribed drift found in cpp is undetected there. Audit each the same three ways: real replay vs marker-only vs absent.
 - [ ] [#verifycrdtplaneruntimein] Verify CrdtPlaneRuntime ingest-op counting in the 7 bindings not yet checked. lazily-cpp returned the count of ops that CHANGED THE WINNER rather than ops accepted into the log (4 vs 5 on lww_last_writer_wins), breaking the spec rule that redelivery applies 0 new ops. lazily-kt (CrdtPlane.kt:148) is correct and cpp is now fixed; rs, py, js, go, dart, zig, cs are unaudited for the same divergence.
 - [ ] [#lazilycppsignalingroom] lazily-cpp SignalingRoom::forward (include/lazily/signaling.hpp:203) silently drops frames addressed to an unknown peer, but conformance/signaling/anti_spoof_session.json requires an `unknown_target` error frame back to the sender. A faithful signaling runner stays red until this is fixed. The second signaling fixture (frames.json) additionally needs signaling wire serde, which lazily-cpp does not have.

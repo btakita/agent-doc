@@ -1,0 +1,56 @@
+{
+  "name": "reference-convergence",
+  "seed": 1,
+  "peers": [
+    {"name": "left", "peer_id": 1},
+    {"name": "right", "peer_id": 2}
+  ],
+  "required_features": ["distributed_crdt"],
+  "required_codecs": ["json"],
+  "required_channels": [],
+  "steps": [
+    {
+      "op": "local_set",
+      "peer": "left",
+      "node": 7,
+      "key": null,
+      "state": {"Inline": [65, 66]},
+      "at": 10,
+      "save_as": "left-write"
+    },
+    {
+      "op": "local_set",
+      "peer": "right",
+      "node": 7,
+      "key": null,
+      "state": {"Inline": [67, 68]},
+      "at": 10,
+      "save_as": "right-write"
+    },
+    {
+      "op": "deliver",
+      "frame": "right-write",
+      "to": ["left"],
+      "at": 11,
+      "expect_applied": 1
+    },
+    {
+      "op": "deliver",
+      "frame": "left-write",
+      "to": ["right"],
+      "at": 11,
+      "expect_applied": 0
+    },
+    {
+      "op": "deliver",
+      "frame": "right-write",
+      "to": ["left"],
+      "at": 12,
+      "expect_applied": 0
+    },
+    {"op": "assert_converged"}
+  ],
+  "expected_snapshot": [
+    {"node": 7, "key": null, "state": {"Inline": [67, 68]}}
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lazily.dev/interop/control-v1.schema.json",
+  "title": "Lazily interop peer control protocol v1",
+  "oneOf": [
+    {"$ref": "#/$defs/Request"},
+    {"$ref": "#/$defs/Response"}
+  ],
+  "$defs": {
+    "Codec": {
+      "type": "string",
+      "enum": ["json", "msgpack", "postcard"]
+    },
+    "Channel": {
+      "type": "string",
+      "enum": [
+        "in_process_ffi",
+        "shared_memory",
+        "ipc_socket",
+        "websocket",
+        "webrtc_datachannel"
+      ]
+    },
+    "PlatformProfile": {
+      "type": "string",
+      "enum": ["portable", "unix", "windows", "wasm"]
+    },
+    "Feature": {
+      "type": "string",
+      "enum": [
+        "distributed_crdt",
+        "reliable_sync",
+        "causal_receipts",
+        "signaling",
+        "transport_links"
+      ]
+    },
+    "Request": {
+      "type": "object",
+      "required": ["cmd"],
+      "properties": {
+        "cmd": {
+          "enum": [
+            "hello",
+            "local_set",
+            "deliver",
+            "snapshot",
+            "bye",
+            "link_open",
+            "link_send",
+            "link_recv",
+            "link_close",
+            "link_stats"
+          ]
+        }
+      }
+    },
+    "Response": {
+      "type": "object",
+      "required": ["ok"],
+      "properties": {
+        "ok": {"type": "boolean"},
+        "binding": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "protocol_version": {"const": 1},
+        "codecs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Codec"},
+          "uniqueItems": true
+        },
+        "features": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Feature"},
+          "uniqueItems": true
+        },
+        "channels": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/Channel"},
+          "uniqueItems": true
+        },
+        "channel_variants": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          }
+        },
+        "platform_profile": {"$ref": "#/$defs/PlatformProfile"},
+        "carve_outs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "unsupported": {"type": "boolean"},
+        "error": {"type": "string"}
+      }
+    }
+  }
+}

@@ -1,0 +1,43 @@
+use std::process::Command;
+
+use serde_json::Value;
+
+fn binary() -> &'static str {
+    env!("CARGO_BIN_EXE_lazily-interop")
+}
+
+#[test]
+fn feature_group_runs_supported_peers_and_reports_staged_csharp() {
+    let output = Command::new(binary())
+        .args(["run", "--format", "json", "--require-channels"])
+        .output()
+        .expect("run orchestrator");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).expect("JSON result");
+    assert_eq!(report["status"], "pass");
+    assert_eq!(report["peers"], serde_json::json!(["left", "right"]));
+    assert_eq!(report["staged_peers"][0]["peer"], "lazily-cs");
+    assert_eq!(report["coverage"]["peers_started"], 2);
+    assert_eq!(report["coverage"]["frames_emitted"], 2);
+}
+
+#[test]
+fn all_required_mutants_are_caught() {
+    let output = Command::new(binary())
+        .args(["mutation-check", "--json"])
+        .output()
+        .expect("run mutation check");
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let proofs: Vec<Value> = serde_json::from_slice(&output.stdout).expect("mutation JSON");
+    assert_eq!(proofs.len(), 8);
+    assert!(proofs.iter().all(|proof| proof["caught"] == true));
+}

@@ -1,6 +1,6 @@
 # Plan: one Lazily cross-binding network conformance suite
 
-Status: proposed
+Status: Phase 0-1 implemented; production peer rollout pending
 Owner: `src/lazily-interop`
 Contract: `src/lazily-interop/docs/peer-contract.md`
 Companion plans:
@@ -53,6 +53,7 @@ test. A peer advertises:
 
 - binding and version;
 - peer-contract version;
+- production-backed feature capabilities;
 - supported frame codecs (`json`, `msgpack`, optional `postcard`);
 - supported channels and channel variants;
 - platform carve-outs such as `ffi = none`;
@@ -61,6 +62,13 @@ test. A peer advertises:
 The peer contract stays deliberately small. It exposes local writes, frame
 delivery, canonical snapshots, direct-link lifecycle, send/receive, statistics,
 and shutdown. It does not expose binding internals.
+
+Feature scenarios build their peer group from bindings that advertise the
+required production feature. Unsupported implementations stay visible as
+staged, are excluded from that feature's run, and receive no pass credit. Once a
+peer is eligible, required codec/channel gaps fail closed. Fewer than two
+eligible peers is red, preventing capability filtering from producing a vacuous
+green.
 
 ### Two planes, two failure domains
 
@@ -139,6 +147,12 @@ becoming the de facto oracle.
 
 ### Phase 0 — freeze the contract and result schema
 
+Implemented in `src/lazily-interop`:
+
+- Draft 2020-12 control, scenario, and result schemas;
+- codec, feature, channel, variant, platform-profile, and carve-out negotiation;
+- pinned failure categories and shell-safe replay commands.
+
 - Review `docs/peer-contract.md` against `protocol.md`.
 - Add codec negotiation to `hello` and `link_open`.
 - Define platform profiles and honest capability/carve-out reporting.
@@ -149,6 +163,16 @@ Gate: malformed peer output, unknown capability values, missing required
 channels, and unsupported contract versions all fail closed.
 
 ### Phase 1 — orchestrator plus an intentionally independent reference peer
+
+Implemented in `src/lazily-interop`:
+
+- standalone Rust CLI with no `lazily-rs` dependency;
+- deadline-enforced NDJSON process supervision;
+- sibling `lazily-spec` schema validation;
+- deterministic semantic relay and canonical expected snapshots;
+- JSON, JUnit, and console reporting;
+- real Unix IPC length-prefix link used by the framing mutation;
+- an independent reference peer and eight-of-eight mutation gate.
 
 - Implement process supervision, schema validation, semantic relay, reports, and
   replay.
@@ -185,6 +209,10 @@ passes all semantic scenarios and every applicable required channel profile.
 C# joins only after `#lzcsipc` and `#lzcssync` ship the real wire and runtime
 surfaces. The peer MUST wrap Lazily library code; it may not reimplement the
 protocol inside the test executable.
+
+Until then, the registry reports C# as staged and excludes it from CRDT feature
+groups. That is neither a failure nor a pass for C#; the full nine-binding
+completion criterion remains open.
 
 Gate: C# passes the same mutation probes and network scenarios with no
 binding-specific fixture relaxation.

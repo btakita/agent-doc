@@ -20,6 +20,12 @@ an `IpcMessage` over a control channel. Reports therefore identify all three
 dimensions and never collapse "msgpack over WebSocket" into a generic
 "WebSocket passed".
 
+Before selecting matrix cells, the orchestrator forms a feature-eligible peer
+group from live `hello.features`. Bindings without the required production
+surface remain visible as staged and receive no pass credit. Required channel
+and codec cells are then strict within the eligible group; feature staging never
+turns a claimed-but-missing channel into a skip.
+
 ## Required channel profiles
 
 | Channel id | Variants | Required proof | Faults injected |

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lazily.dev/interop/result-v1.schema.json",
+  "title": "Lazily interop result v1",
+  "type": "object",
+  "required": [
+    "protocol_version",
+    "scenario",
+    "seed",
+    "status",
+    "plane",
+    "peers",
+    "staged_peers",
+    "coverage",
+    "failures",
+    "replay"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "protocol_version": {"const": 1},
+    "scenario": {"type": "string", "minLength": 1},
+    "seed": {"type": "integer", "minimum": 0},
+    "status": {"enum": ["pass", "fail"]},
+    "plane": {"enum": ["semantic", "transport", "harness"]},
+    "peers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "staged_peers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["peer", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "peer": {"type": "string", "minLength": 1},
+          "reason": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["peers_started", "frames_emitted", "frames_delivered", "channels_run"],
+      "additionalProperties": false,
+      "properties": {
+        "peers_started": {"type": "integer", "minimum": 0},
+        "frames_emitted": {"type": "integer", "minimum": 0},
+        "frames_delivered": {"type": "integer", "minimum": 0},
+        "channels_run": {"type": "integer", "minimum": 0}
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "category",
+          "plane",
+          "culprit",
+          "channel",
+          "codec",
+          "first_divergence",
+          "peer_stderr",
+          "exit_status",
+          "message"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "enum": [
+              "peer_launch",
+              "peer_timeout",
+              "peer_protocol",
+              "unsupported_contract",
+              "unknown_capability",
+              "missing_required_codec",
+              "missing_required_channel",
+              "insufficient_eligible_peers",
+              "schema_violation",
+              "convergence",
+              "duplicate_applied",
+              "frame_count",
+              "frame_truncated",
+              "unsupported_swallowed",
+              "process_exit"
+            ]
+          },
+          "plane": {"enum": ["semantic", "transport", "harness"]},
+          "culprit": {"type": "string", "minLength": 1},
+          "channel": {"type": ["string", "null"]},
+          "codec": {"type": ["string", "null"]},
+          "first_divergence": {"type": ["string", "null"]},
+          "peer_stderr": {"type": ["string", "null"]},
+          "exit_status": {"type": ["integer", "null"]},
+          "message": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "replay": {"type": "string", "minLength": 1}
+  }
+}

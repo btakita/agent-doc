@@ -41,17 +41,28 @@ the diagnostic.
 ```
 
 ```json
-{"ok": true, "binding": "lazily-rs", "version": "0.51.0", "channels": ["in_process_ffi", "shared_memory", "ipc_socket"]}
+{"ok": true, "binding": "lazily-rs", "version": "0.51.0", "protocol_version": 1, "features": ["distributed_crdt", "reliable_sync"], "codecs": ["json", "msgpack"], "channels": ["in_process_ffi", "shared_memory", "ipc_socket"], "channel_variants": {"ipc_socket": ["unix_stream_length_prefix"]}, "platform_profile": "unix", "carve_outs": []}
 ```
 
 `peer` is this peer's `PeerId` for the whole run — the identity its plane stamps
 ops with. The orchestrator assigns it; a peer that minted its own would make the
 transcript non-reproducible.
 
-`channels` declares which transports this peer implements. **Declaring fewer is
-always safe; declaring one you do not implement is a hard failure.** The harness
-never silently skips a channel a scenario asked for — see "No vacuous channels"
-below.
+`features` declares production surfaces the peer actually wraps:
+`distributed_crdt`, `reliable_sync`, `causal_receipts`, `signaling`, and
+`transport_links`. A feature scenario forms its peer group only from bindings
+that advertise the feature. A binding that does not implement the feature yet
+is reported as **staged** and receives no green credit for that scenario.
+
+`codecs` and `channels` declare which wire codecs and transports the peer
+implements. `channel_variants` names concrete implementations of each advertised
+channel. **Declaring fewer is always safe; declaring one you do not implement is
+a hard failure.** `platform_profile` is one of `portable`, `unix`, `windows`, or
+`wasm`; `carve_outs` records honest platform limitations. Unknown values fail
+closed.
+
+The harness never silently skips a channel an eligible peer group was required
+to run — see "No vacuous channels" below.
 
 Reject a `protocol_version` you do not implement rather than guessing:
 `{"ok": false, "error": "unsupported protocol_version 2"}`.
@@ -117,13 +128,14 @@ receive. The orchestrator never carries the payload — that is the point.
 ### `link_open`
 
 ```json
-{"cmd": "link_open", "link": 1, "channel": "ipc_socket", "role": "listen", "endpoint": "/tmp/lazily-interop-xyz/link1.sock", "options": {}}
+{"cmd": "link_open", "link": 1, "channel": "ipc_socket", "codec": "msgpack", "role": "listen", "endpoint": "/tmp/lazily-interop-xyz/link1.sock", "options": {}}
 ```
 
-`role` is `"listen"` or `"connect"`; the orchestrator opens the listener first
-and waits for its `ok` before opening the connector. `endpoint` is
-channel-specific (see below). A peer that does not implement `channel` MUST
-answer `{"ok": false, "error": "unsupported channel", "unsupported": true}` — the
+`codec` MUST be one advertised by both peers. `role` is `"listen"` or
+`"connect"`; the orchestrator opens the listener first and waits for its `ok`
+before opening the connector. `endpoint` is channel-specific (see below). A peer
+that does not implement `channel` MUST answer
+`{"ok": false, "error": "unsupported channel", "unsupported": true}` — the
 `unsupported` flag is what lets the harness report an honest gap instead of a
 crash or a pass.
 
@@ -191,14 +203,29 @@ and a real-stack smoke set only where a real stack exists.
 
 ## No vacuous channels
 
-A scenario names the channels it must run on. If a peer in the set declares it
-does not implement one, the run records `unsupported` **and says so in the
-result**. Under `--require-channels` — which is what CI uses — that is a failure.
+A scenario first names the feature whose peer group it exercises. Unsupported
+bindings remain visible as staged and are excluded from that group. C# therefore
+does not join CRDT scenarios until its real IPC and CRDT surfaces ship.
+
+The scenario then names the channels its eligible peer group must run on. If a
+peer in that group declares it does not implement one, the run records
+`unsupported` **and says so in the result**. Under `--require-channels` — which
+is what CI uses — that is a failure.
 
 This is deliberate and it is the same rule as the conformance-coverage guard in
 the bindings: a skip nobody asserts against reports green while testing nothing.
 The harness will happily tell you that four of five channels ran. It will not
-call that a pass.
+call that a pass. Likewise, a staged binding receives no pass for a scenario it
+did not enter, and fewer than two eligible peers is an
+`insufficient_eligible_peers` failure rather than a skipped green.
+
+## Failure and replay contract
+
+Every result pins one category from the result schema, including
+`schema_violation`, `convergence`, `duplicate_applied`, `frame_count`,
+`frame_truncated`, `unsupported_swallowed`, and `peer_timeout`. It also names the
+plane and culprit and carries a shell-safe replay command with the registry,
+scenario, spec checkout, seed, and strict-channel mode.
 
 ## What the orchestrator asserts
 
@@ -245,6 +272,8 @@ framing wrong. That is this repo's job.
 ## Adding a binding
 
 1. Implement Part 1 as an executable. Declare `"channels": []` at first.
+   Advertise only production-backed `features`; an unfinished binding stays
+   staged in the registry.
 2. Register it in `peers.toml`:
    ```toml
    [peers.lazily-rs]

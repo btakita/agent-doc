@@ -52,6 +52,11 @@ No binding is marked shipped from a self-round-trip.
 | C++ | `tools/interop_peer.cpp` | `CrdtPlaneRuntime`, keyed/positional codec, FFI/arena/channel adapters | ASan/UBSan ownership profile |
 | C# | `src/Lazily.InteropPeer` console project | only real Lazily IPC/CRDT/sync code after `#lzcsipc`/`#lzcssync` | blocked until those surfaces ship |
 
+Peer selection is feature-driven. A binding joins a scenario only after its
+`hello.features` advertises the production surface that scenario requires.
+Unsupported bindings remain explicit `staged_peers` in results; they are not
+silently omitted and do not receive green credit.
+
 Entrypoint names are part of the plan, not wire authority; a binding may choose
 the idiomatic package location as long as `peers.toml` is stable.
 

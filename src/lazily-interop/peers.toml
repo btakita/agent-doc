@@ -1,0 +1,11 @@
+[peers.left]
+command = ["{self}", "reference-peer"]
+
+[peers.right]
+command = ["{self}", "reference-peer"]
+
+# C# is visible to reports but is not eligible for any peer group until its
+# production IPC and CRDT surfaces exist.
+[peers.lazily-cs]
+command = []
+staged = true

@@ -411,21 +411,31 @@ fn run_with_options_inner(
     // A retained response replay can duplicate only semantic response cells or
     // protocol boundary markers. Collapse that narrow, lossless transient
     // before the generic gate so integrity does not block its own recovery.
-    crate::profile::timed("self_heal_response_replay_duplication", || {
+    // `#sccurrentpass`: invalidate the pass memo only when the self-heal
+    // ACTUALLY rewrote the document. It already reports that -- it returns
+    // `Ok(false)` the moment it finds nothing to dedupe -- and the call site was
+    // throwing the answer away and invalidating anyway. Every discarded `false`
+    // cost the next reader a fresh ~491ms authority resolve to observe a
+    // document that had not changed. This is `#idlerevisionreactive` at the call
+    // site: "might have changed" is not "changed".
+    let replay_healed = crate::profile::timed("self_heal_response_replay_duplication", || {
         self_heal_response_replay_duplication(file, effects)
     })?;
-    // Both self-heals can rewrite the document, so the pass memo must re-read
-    // afterwards instead of serving the pre-repair text (`#sccurrentpass`).
-    crate::invalidate_current_document_pass(file);
+    // Re-read only if it actually rewrote the document.
+    if replay_healed {
+        crate::invalidate_current_document_pass(file);
+    }
     // A retained delivery can be validly reconstructable even when a stale
     // post-replacement IPC delta duplicated the exchange. Repair that known,
     // evidence-backed overapplication before the generic integrity gate;
     // otherwise the duplicate boundary marker prevents the recovery routine
     // that knows how to remove it from ever running.
-    crate::profile::timed("self_heal_late_ipc_overapplication", || {
+    let late_ipc_healed = crate::profile::timed("self_heal_late_ipc_overapplication", || {
         self_heal_late_ipc_overapplication(file, effects)
     })?;
-    crate::invalidate_current_document_pass(file);
+    if late_ipc_healed {
+        crate::invalidate_current_document_pass(file);
+    }
     // `session-check` is the final proof boundary. It must not report a clean
     // cycle for a document whose component tree cannot be parsed, regardless
     // of lifecycle sidecar state.
@@ -469,7 +479,9 @@ fn run_with_options_inner(
     // response that owns the lossless replay recipe.
     let resumed_before_convergence =
         resume_captured_finalize_before_terminal_convergence(file, effects)?;
-    crate::invalidate_current_document_pass(file);
+    if resumed_before_convergence {
+        crate::invalidate_current_document_pass(file);
+    }
     if resumed_before_convergence {
         authority_content = validate_integrity_after_captured_resume(
             file,
@@ -482,11 +494,14 @@ fn run_with_options_inner(
         )?;
     }
     ensure_terminal_authority_disk_convergence(file, &authority_content, &disk_content, effects)?;
-    crate::profile::timed("self_heal_transiently_stale_committed_projection", || {
-        self_heal_transiently_stale_committed_projection(file, &authority_content, effects)
-    })?;
-    // Both converge/self-heal steps can project a new document image.
-    crate::invalidate_current_document_pass(file);
+    let stale_projection_healed =
+        crate::profile::timed("self_heal_transiently_stale_committed_projection", || {
+            self_heal_transiently_stale_committed_projection(file, &authority_content, effects)
+        })?;
+    // Re-read only if a new document image was actually projected.
+    if stale_projection_healed {
+        crate::invalidate_current_document_pass(file);
+    }
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
     // local-process four-region state, logged alongside the existing ops.log
     // markers. Never gates closeout — emitted regardless of the check outcome.

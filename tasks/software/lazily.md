@@ -729,7 +729,77 @@ unquoted the marker, which unblocked the cycle, and filed the parser bug as
 Also: the JetBrains plugin is 0.2.294 against an expected 0.2.296. `reload-lib`
 refreshes only the cdylib and cannot move the plugin version, so that one needs
 an IDE plugin update + reload from you.
-<!-- agent:boundary:30f21756 -->
+
+### Re: sequencing — ReactiveMap first, then the queue family — opus-5
+
+> **Queue prompt:** /goal complete tasks/plan-lazily-queue-family-flavors.md
+
+Deferred deliberately, and decomposed: that goal is now seven tracked phase ids
+(`#lzqfspec`, `#lzqfformal`, `#lzqffx`, `#lzqfrs`, `#lzqfzig`, `#lzqfjs`,
+`#lzqfports`) sitting **behind** the ReactiveMap cluster in both backlog and
+queue, per the answer below.
+
+**Yes — finish ReactiveMap first.** Four reasons, in order of weight:
+
+1. **The queue plan's Phase 3 is blocked on work the ReactiveMap plan already
+   scopes.** `#lzqfrs` needs `AsyncContext` to gain a synchronous-compute
+   `computed` and a multi-root clear. The ReactiveMap plan's "Async — corrected"
+   section already calls for widening the async compute type for
+   `AsyncMapHandle::materialize`. That is one `AsyncContext` change serving both.
+   Doing the queue family first means either paying for it twice or landing it
+   speculatively with only one consumer to validate it.
+2. **ReactiveMap is 2 of 9 with a proven reference shape.** rs (`325ee7d`,
+   `ffc0d83`) and zig (`5327635`, `529b20c`) are done and CI-green; seven
+   bindings have a committed diff to mirror. Stopping now leaves the coverage
+   matrix in its worst state — some flavors Core-conforming, some not, and
+   nothing in the scoring that tells you which without reading source.
+3. **The current queue head is a ReactiveMap prerequisite.**
+   `#maphandlecleardependents` is the disposal-hook question that flavor `remove`
+   depends on. It is already at the head and cheap to clear.
+4. **The per-flavor conformance gate is shared machinery.** Building it once
+   against the collections/ReactiveMap fixtures and then extending it to the nine
+   queue fixtures is strictly cheaper than designing two gates in parallel — and
+   the queue gate needs the same `invalidates`-nesting check that lazily-rs
+   already got wrong once.
+
+The one argument for going the other way is that the queue family has a *live
+false-green*: js and zig score `✅` while shipping no reactivity. That is real,
+but it is a reporting defect on a shipped surface, not a regression, and it is
+now filed as `#lzqfzig` / `#lzqfjs`. It does not justify preempting a family
+migration that is 2/9 through.
+
+**Order now in queue + backlog:**
+
+1. `#maphandlecleardependents` — disposal hook (ReactiveMap prereq)
+2. `#portmembershiporder` — port the membership/order plane to the remaining
+   7 bindings; rs reference is `ffc0d83`
+3. `#lazilycellfamily`, `#lazilyspecdisagrees` — remaining ReactiveMap items
+4. `#lzqfspec` → `#lzqfformal` → `#lzqffx` → `#lzqfrs` → `#lzqfzig` /
+   `#lzqfjs` → `#lzqfports` — the queue family, spec-first as you asked
+
+New queue-family items were appended rather than prepended so they do not
+preempt the ReactiveMap drain.
+
+**Three operational notes from this cycle.**
+
+The plan-write cycle's response committed (`36c263cd0`) but its backlog mutations
+did not — the controller timed out at 5 s mid-write, so the body crossed the CRDT
+plane and the `--done` / `--backlog-add` transaction was dropped. Re-applied here.
+
+Every preflight and session-check then hard-failed with `agent:done archive=…
+must point to a .done.md file`. The value **is** a `.done.md` path; the parser
+keeps the surrounding quotes, so it compares against a value ending in a quote
+character. This document was the only one carrying the quoted form — every other
+session doc uses the bare `archive=path`. Unquoting the marker unblocked the
+cycle; the parser bug is filed as `#lzdonequoteattr`.
+
+After that, tracked-work mutations were refused with `live editor buffer …
+lacks required capability operator_text_authority_v1`: the running JetBrains
+plugin was 0.2.294 against an expected 0.2.296, and `reload-lib` refreshes only
+the cdylib. The 0.2.296 jar was already installed on disk, so the operator IDE
+restart was the whole fix — done, and this cycle runs against the matching
+plugin.
+<!-- agent:boundary:52a8c801 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -786,6 +856,8 @@ an IDE plugin update + reload from you.
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook at all. Any flavor-level `remove` — and the fix for lazily-cs AsyncComputedMap.Remove not disposing its node — requires adding one. Handle-trait surgery, not an additive method. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
+- [ ] [#lzqfspec] lazily-spec: Phase 0 of the queue-family flavor plan — add a Core-surface section for QueueCell/TopicCell/WorkQueueCell mirroring the ReactiveMap Core/Extended split, pin ONE reader-kind design (recommend memoized-derive+invalidate over cpp's version cells, and say explicitly that polling a counter is not a reader-kind), define the per-flavor obligation (confluence for thread-safe, eventual transparency for async, plus single-frontier-walk atomicity), resolve the threading paragraph that promises ThreadSafeContext no binding can accept, and split coverage.json's three conflated queue rows into nine — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] [#lzqfformal] lazily-formal: Phase 1 — prove the queue reader-kind invalidation set is a pure function of (op, len_before, len_after), prove one op's invalidations are not observably interleaved, and cross-check ThreadSafe.lean for the confluence obligation. Do NOT add per-flavor Lean models; the algebra must not fork — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyphaseextract] lazily-rs Phase A: extract the closure-free KeyedOrder<K,H> core (entries + order + membership + present-set + position/keys/len/contains_key + move_to/move_before/move_after) shared by all three families; thin per-model shells keep materialize/observe. Do NOT route through SyncReactiveGraph — its Send+Sync bound is stricter than the concrete Context API and would break Rc-capturing callers. `remove` stays out of the core (monotone present set is fixture- and Lean-backed). Plan: tasks/plan-lazily-reactivemap-unification.md

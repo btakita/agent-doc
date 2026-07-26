@@ -111,18 +111,43 @@ Partial result, and I want to be exact about which part is real.
 What is actually known: `session_check.initial_integrity_detection` is ~507ms; the other ~1.7s is unattributed. Filed `#sessioncheckprofile` to profile it properly before optimizing anything, because I have now guessed wrong once on this exact question.
 
 Nothing else this cycle touched the repo. Earlier commits from this session — the retained-write settlement derivation, `observe_pending` becoming a derived slot, the read-must-not-claim-authority fix, and the lazily 0.49.0 migration — are all landed and green.
-<!-- agent:boundary:e185face -->
+
+### Re: #sessioncheckprofile — where session-check actually spends 2.5s — opus-5
+
+Profiled, and the answer is one operation.
+
+| operation | cost |
+|---|---|
+| **`resolve_current_document_content`** | **3929ms / 8 calls** (~491ms each) |
+| `self_heal_response_replay_duplication` | 3108ms / 1x |
+| `inspect_with_warnings` → `inspect_core` | 561 / 560ms |
+| `self_heal_late_ipc_overapplication` | 270ms |
+| run total | 4742ms |
+
+Labels nest (a self-heal contains its own resolves), so the sum exceeds wall time — reported as `nested=true` rather than as a fake residual.
+
+**Two things the instrumentation had to work around, both worth knowing.** `run_with_options_inner` calls `std::process::exit` from three branches, so reporting after it returns produced *nothing* for precisely the interrupted runs worth profiling — and `process::exit` skips destructors, so a scope guard cannot cover it either. And per-*phase* timing was the wrong instrument here: the tail is a branch tree hitting the same detectors from ~30 sites, so phase boundaries attribute cost to whichever branch ran rather than to the work. Timing each detector at its definition covers every site at once.
+
+**Why this mattered.** Last cycle I guessed the state-projection ledger replay was the cause — the controller answers in 3ms where an in-process replay of 8014 `state_events` takes 1860ms, which looked conclusive. It changed `session-check` timing not at all, and I reverted it. The replay was never on this path. That is the whole reason for measuring before optimizing, and it is now measured.
+
+**On your directive — yes, `resolve_current_document_content` should be a `Source`/`Computed`.** The interesting part is *why* the existing memo does not already achieve it. `#sccurrentpass` is a per-sweep `HashMap` memo, and it works — but `run_with_options_inner` calls `invalidate_current_document_pass` **five times, unconditionally**, after each `self_heal_*` that *can* mutate the document, whether or not it did. Hand-rolled invalidation cannot tell "might have changed" from "changed"; a reactive dependency can. In the lazily shape the input is a `Source` holding the document version and the resolution is a `Computed` over it, so a self-heal that changed nothing does not force a re-resolve.
+
+The blocker is not the cell shape, it is the missing signal: `self_heal_*` return `Result<()>` with no indication of whether they mutated. That signal is the actual fix; the `Computed` is how it gets expressed. Filed `#sccurrentpass-conditional` with that plan rather than converting the memo to cells and claiming a win that would measure identically.
+
+`make check` green. Committed `184235172`.
+<!-- agent:boundary:b0e80192 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#sessioncheckprofile]
+- do [#sccurrentpass-conditional]
+- ~~do [#sessioncheckprofile]~~
 - ~~do [#retainedsettlereactive]~~
 - ~~do [#reactivemap]~~
 - ~~When I run Compact Exchange, the JB editor hangs. Run Agent Doc is slow to add the prompt + slow to submit the prompt.~~
 - ⏭️ do [#syncownerreactive]
 - ⏭️ do [#jbpluginlazilyeffects]
-- do [#ctrlkillreregister]
+- ⏭️ do [#ctrlkillreregister]
 - do [#steergateidle]
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
@@ -159,7 +184,7 @@ Nothing else this cycle touched the repo. Earlier commits from this session — 
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#sessioncheckprofile] session-check takes ~2.2s per invocation and the JetBrains plugin shells out per action, which is what makes Run Agent Doc slow to add + submit a prompt. Attribution is NOT the state-projection ledger replay: routing load_state_backbone_projection through the live controller (3ms round-trip vs 1860ms in-process replay of 8014 state_events) changed session-check timing not at all, so that hypothesis is disproven and the change was reverted rather than shipped unproven. session_check.initial_integrity_detection accounts for ~507ms of it; the remaining ~1.7s is unattributed. Profile session-check properly (per-phase timing around initial_integrity_detection, content resolution, and git) before optimizing anything.
+- [ ] [#sccurrentpass-conditional] resolve_current_document_content runs 8x per session-check at ~491ms each (3929ms of a 4742ms run) — it should be a lazily Source/Computed, not the hand-rolled #sccurrentpass HashMap memo. The memo already exists; what defeats it is that run_with_options_inner calls invalidate_current_document_pass FIVE times unconditionally, after each self_heal that *can* mutate the document whether or not it did. Reactive shape: a Source holding the document version/content-hash, a Computed resolving over it, so a self-heal that changed nothing does not force a re-resolve. Requires the self_heal_* fns to report whether they actually mutated (they currently return Result<()> with no change signal) — that signal is the real fix, the Computed is how it is expressed.
 - [ ] [#syncownerreactive] #agent-doc-bug Owner resolution re-observes per call instead of deriving. Measured 2026-07-25 in ops.log while the pane swap was broken: sync_latency tmux_router elapsed_ms=45063 (budget 1000), gap_window_to_ownership 25620, prune_stash_panes 8027 (budget 250), window_resolution 4708, controller_actor_lookup 4297. Every decision re-shells ps/tmux, which is why observation_cache exists at all: it memoizes raw argv output, which is a cache, not a derivation (its invalidation is 'recreate the context', because there are no edges to invalidate along). Make pane observations Sources in a scope (see stategraphjoin) and the pane->document owner map a Computed over them, so a pane change invalidates the owner map instead of every caller recomputing it. Classification stays a pure function in command_line.rs; it is the OBSERVATION that belongs in the graph.
 - [ ] [#jbpluginlazilyeffects] #agent-doc-feature The JetBrains/VS Code plugin should drive lazily state + Effects, not one-shot CLI commands. Today every editor action (file selected, layout changed, Sync Tmux Pane) shells a fresh agent-doc process that re-observes the world from scratch and returns one answer that is already stale, with no subscription and no invalidation. Keep the CLI supported as an entrypoint, but the plugin path should be: plugin reports an event -> FFI sets a Source in the document scope -> an Effect drives the tmux/pane consequence. Same Shared Foundation rule already in AGENTS.md, applied to observation rather than business logic. Consumes the derived owner map from syncownerreactive, so order it after that.
 - [ ] [#ctrlkillreregister] #agent-doc-bug Killing the controller strands a live editor. Hydration restores the durable liveness plane so the editor still reads as registered, but the relay hub holding its replica is process-local, died with the previous controller, and nothing rehydrates it — leaving attached-with-missing-replica until the plugin happens to re-register, which is why operators reach for an IDE restart. DONE: Tier 1 restart fan-out (34546de4f); Tier 3 replicated derivation registrations_missing_replica/peer_registrations_missing_replica (46f2321ad), controller command peer_replicas_missing, and FFI export agent_doc_peer_replicas_missing so the editor asks about itself and repairs instead of being pushed at. Tier 2 (controller-side Effect) intentionally skipped: it still owns a cross-process push, the failure behind 'reload-lib reached 1/4 endpoints'. REMAINING: have the JetBrains and VS Code plugins call agent_doc_peer_replicas_missing on reconnect/startup, then retire the Tier 1 fan-out as a compatibility shim.

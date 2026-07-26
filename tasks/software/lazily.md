@@ -163,7 +163,81 @@ own source comment — is recorded as **still open** rather than silently answer
 
 Next head is `#lzqfformal` — Phase 1, the Lean theorems that justify
 flavor-neutrality instead of assuming it.
-<!-- agent:boundary:ff85667f -->
+
+### Re: Phase 1 — flavor-neutrality is proven, not assumed — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzqfformal]
+
+
+`#lzqfformal` done. `lazily-formal` `036d2a8` and `lazily-spec` `dad19e5`, both
+pushed; `make check` green in both, and lazily-rs's `make test-lazily-formal`
+cross-check green. Superproject bumped.
+
+**The gap.** `QueueCell.lean` already models storage — elements, closed,
+push/pop/close — and proves storage laws. It says nothing about reader kinds. Yet
+every binding's queue shell carries the same load-bearing comment: on a successful
+op it bumps *exactly* the reader kinds whose value provably changed, computed from
+the transition rather than by deriving each value. That claim is what makes the
+plane portable across flavors, and it was asserted in comments in lazily-rs,
+lazily-zig, and lazily-kt and **proven nowhere**.
+
+Eleven theorems in a new `QueueReaderKinds.lean`, rather than by editing
+`QueueCell.lean` — the storage theorems keep their shape and the reader-kind plane
+stays a separate concern.
+
+**The one that licenses the whole plan** is `invalidationSet_no_derive`: the set is
+a function of the bound, the pre-op length, emptiness, and the closed flag
+**alone**. Two queues agreeing on those agree on the set whatever their elements
+are. That is the "not by deriving the value" half stated formally, and it is
+precisely what makes running the *identical* rule on all three shells sound — the
+rule consumes only transition data, and no flavor colours transition data.
+
+The rest:
+
+- **Failed ops invalidate nothing, in both directions.** A rejected push and a pop
+  on empty emit the empty set *and* change nothing. A binding that invalidated on
+  a rejected push is over-invalidating against this.
+- **The reader kinds do not leak into each other.** `close` moves `closed` and
+  leaves the elements alone, so `head`/`len`/`isEmpty`/`isFull` cannot move; push
+  and pop never touch `closed`.
+- **`apply_atomic`** — a reader seeing post-op storage sees every kind in the set
+  cleared and every kind outside it untouched. There is no intermediate state
+  where storage advanced but only part of the set applied, which is exactly what
+  would let a subscriber observe `len` bumped while `isFull` had not yet flipped.
+- **`applyInvalidation_order_independent`** is the queue-family instance of the
+  thread-safe confluence obligation the plan asked me to cross-check. Invalidation
+  consults only *membership*, so two threads bumping the same set in different
+  orders converge — the set is a set, not a sequence. `ThreadSafe.lean`'s
+  `flushBatch` gives the analogous property for a graph batch; this states it over
+  the plane the queue rule actually emits, so the thread-safe shell needs no extra
+  machinery. Plus idempotence: replaying a transition cannot deepen the
+  invalidation, so at-least-once delivery of a bump is safe.
+
+**No per-flavor models**, as the plan requires. The point is that the algebra does
+not fork; a per-flavor copy would be the defect this module exists to rule out.
+One model, three shells.
+
+**Mutation-checked, because a Lean file that compiles is not evidence its theorems
+say anything.** Making `invalidationSet` read the elements breaks
+`invalidationSet_no_derive` (4 errors); letting a rejected push still invalidate
+breaks the not-applied pair (3 errors). Both restore clean. That is the same
+discipline the ReactiveMap gates needed — and there it caught four false greens.
+
+Two notes on getting there. This project is **core Lean 4 with no Mathlib**, so my
+first draft failed on Mathlib lemma names (`List.length_eq_zero`, `decide_False`)
+and I rewrote the proofs in the surrounding style. And `apply_atomic` initially
+left a bridge goal because `simp` normalises `List.contains` to `∈`; stating it
+with membership directly removed the friction rather than papering over it.
+
+`cell-model.md` now cites both models side by side, so a reader arriving at the
+storage-agnostic claim sees where the reader-kind half is pinned.
+
+Next head is `#lzqffx` — Phase 2, wiring the queue fixtures into every binding's
+runner against all three flavors. That one lands **before** any implementation, so
+the gap goes red first.
+<!-- agent:boundary:df011f73 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -172,7 +246,7 @@ flavor-neutrality instead of assuming it.
 - ~~do [#lzqfprep]~~
 - ~~do [#lzdonequoteattr]~~
 - ~~⏭️ do [#lzqfspec]~~
-- ⏭️ do [#lzqfformal]
+- ~~⏭️ do [#lzqfformal]~~
 - ⏭️ do [#lzqffx]
 - 🚧 do [#lzqfrs]
 - do [#lzqfjs]
@@ -224,7 +298,6 @@ flavor-neutrality instead of assuming it.
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
-- [ ] [#lzqfformal] lazily-formal: Phase 1 — prove the queue reader-kind invalidation set is a pure function of (op, len_before, len_after), prove one op's invalidations are not observably interleaved, and cross-check ThreadSafe.lean for the confluence obligation. Do NOT add per-flavor Lean models; the algebra must not fork — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqffx] lazily-spec + all binding runners: Phase 2 of the queue-family plan — replay the nine collections queue fixtures against all three flavors with a declared skip ledger (zig's reactive-graph runner is the reference: fails if everything skips, ledger must match observation). Add a positive assertion that fixtures ran, mutation-check each runner per flavor, and grep every queue runner for the invalidates-nesting trap (fixtures nest it under steps[].expected.invalidates; lazily-rs read it off the step and silently never asserted). Land this BEFORE any implementation so the gap goes red first. KEPT OPEN DELIBERATELY: this is Phase 2 and is gated on Phase 0 (#lzqfspec) settling the Core surface and the reader-kind design first — the plan's phases have a hard dependency order, and a queue drain that reaches this id before #lzqfspec is out of order, not ready work. Read the 'How these gates fail' section of the plan before writing any runner — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] 🚧 [#lzqfrs] lazily-rs: Phase 3 of the queue-family plan — context prerequisites + reference implementation. ThreadSafeContext needs a multi-root clear_slots equivalent (it has only single-handle clear at thread_safe.rs:3549 — four handles is four frontier walks; verify whether batch() already closes this, do not assume). AsyncContext needs a synchronous-compute computed and a multi-root clear (it has neither; only computed_async at async_context.rs:413). Then ship ThreadSafe/Async QueueCell + TopicCell + WorkQueueCell, each minting its own reader-kind handles on its own graph, Arc<Mutex<S>> storage with invalidation run outside the lock. KEPT OPEN DELIBERATELY: this is Phase 3 and is gated on Phase 1 (#lzqfformal) and Phase 2 (#lzqffx) — the plan requires the per-flavor fixture gate to land BEFORE implementation so the gap goes red first. A drain that reaches this id before those two is out of order, not ready work — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md

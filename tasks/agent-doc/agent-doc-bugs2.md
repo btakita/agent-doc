@@ -332,14 +332,32 @@ The current boundary is the correct one:
 - The baseline-drift runbook tells the operator to inspect the visible markdown, run the command only when that is the state to keep, then rerun preflight.
 
 Changed paths: none. Evidence inspected: `agent-doc-commit-io/src/lib.rs` historical-patchback guard and `runbooks/baseline-drift.md` recovery contract/operator path. Verification: the shipped 0.35.29 full suite already passed this turn; no implementation changed after that gate. Confidence: high. Escalation: none. No actionable follow-up remains.
-<!-- agent:boundary:2d3faf0e -->
+
+### Re: `#crdtwaitsubscribe` — gpt-5
+
+> **Queue prompt:**
+>
+> do [#crdtwaitsubscribe]
+
+
+Implemented, released, and installed agent-doc 0.35.30.
+
+The CRDT delivery path now publishes every convergence-fold revision through Lazily 0.51.1's `ThreadSafeQueueCell`. A condition-variable adapter closes the publish-before-park race while the one-slot queue coalesces to the latest revision. `CurrentText` carries the delivery revision through one long-lived controller await, replacing the 20 ms convergence poll and repeated controller round trips.
+
+The same subscription/recovery implementation now serves both controller RPC and embedded-relay callers. The pre-write current-transition guard also uses a quiet subscription, so it no longer polls a pending ACK before the main write loop can subscribe. The delayed-ACK regression dropped from 40 current-text observations to 8, with a <=10 bounded regression assertion. Normal delayed ACKs still avoid spurious recovery; stalled ACKs still get replay, force-refresh, retained-intent, and foreground-deadline behavior; an unavailable/older controller keeps the bounded compatibility fallback.
+
+Refactoring shipped with the fix: one public local convergence helper owns subscription plus recovery timers, and one transport selector chooses embedded versus controller delivery. Deliberately left separate for `#crdtwaitsplit`: splitting the remaining backpressure state machine. Useful later cleanups are to make the witness a typed `CurrentText` field instead of parallel boolean/version fields, and—if Lazily grows a native blocking await—to retire the small condition-variable adapter.
+
+Verification: focused subscription, publish-before-wait, parked-wakeup, bounded-timeout, delayed/stalled ACK, and controller absence regressions passed; full `make check` passed 8,181 tests with 241 skipped plus clippy, simulations, Lean, and TLA. The latest inspected CI run was green. Release commit `216600432`, tag `v0.35.30`, PyPI, GitHub Release, full local install, and idle-boundary controller/supervisor recycle are complete. Parent gitlink commit `8d8844401` is pushed.
+
+I also placed the reported `haiven-sdk.md` response-order/prefix regression at the top of the actionable queue for the next cycle.
+<!-- agent:boundary:52fcfc34 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~do [#sessionwedgeband]~~
-- ~~do [#adopseventenum]~~
-- do [#crdtwaitsubscribe]
+- do [#haivenresponseorder]
+- ~~do [#crdtwaitsubscribe]~~
 - do [#crdtwaitsplit]
 - do [#sessioncheckguardsweep]
 - do [#crdtdeliverybatch]
@@ -385,7 +403,7 @@ Changed paths: none. Evidence inspected: `agent-doc-commit-io/src/lib.rs` histor
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#crdtwaitsubscribe] #agent-doc-feature Replace the CRDT convergence poll with a subscription to the convergence cell. MEASURED: the wait loop issues ~2 controller reads per iteration and ~18 per write (6,983 write-path controller_crdt_current_text reads across 390 acknowledged writes), so an 11s wait generates ~18 round trips against the very controller it is waiting on - structurally the same self-feeding loop as the idle-watch storm fixed in 511527103/f170067bb, and a plausible source of the controller_model_backpressure that is 10% of all waits. NOT justified by poll oversleep: CRDT_WRITE_BACKOFF_POLICY is 25ms initial / 250ms max, which is <=2% of an 11,000ms wait - do not sell this fix on latency-per-sleep, sell it on removing generated load. Doctrine already says so (#closeoutterminalreactive: 'every waiter re-probes on a clock instead of subscribing'), and ThreadSafeContext runs Computed/Effect bodies with NO state lock held (verified: recompute_slot_now clones the closure, runs compute(self) unlocked, and takes the write lock only to publish), so there is no throughput objection. CAUTION: this is the write path, the one place where being wrong loses operator text - keep the deadline/retained-intent fallback intact.
+- [ ] [#haivenresponseorder] #agent-doc-bug Fix haiven-sdk.md response ordering/prefix loss: the assistant response was inserted above the operator prompt and the prompt lost its required prefix. Reproduce from session/runtime evidence, fix the patchback/normalization path, add regression coverage that preserves prompt-before-response ordering and prompt prefix, run full release workflow.
 - [ ] [#crdtwaitsplit] #agent-doc-feature Separate controller backpressure from CRDT delivery convergence in the write wait. ControllerModelBackpressure and DeliveryAckPending are different conditions with different remedies (back off the controller vs wait on the editor) but currently share one loop, one backoff schedule and one 60s budget, so the wrong remedy is applied to whichever one is actually blocking. Partial coalescing already exists and must be preserved: #crdtcasraced added the `advanced` flag so a non-advancing apply does not reset the backoff floor - without it a contended write pinned at 25ms for the whole 60s budget (~2400 merge+CAS attempts, each worsening the contention it retried). Land after #crdtwaitsubscribe, whose per-condition subscription makes the split natural rather than two parallel poll loops.
 - [ ] [#sessioncheckguardsweep] #agent-doc-bug session_check is the second-largest closeout phase - a flat 2.9-4.2s, observed once at 11,271ms - and it is a per-invocation ~30-guard sweep. Measured attribution from one run: inspect_with_warnings 2665ms (the nesting parent), guard_partial_staging_closeout 817ms, inspect_core 607ms, self_heal_response_replay_duplication 385ms, resolve_current_document_content 350ms/13x. The partial-staging guard is the concrete target: companion_findings iterates candidate_repos, which on this superproject enumerates every dirty submodule and then runs several git diffs per repo. candidate_repos legitimately needs --ignore-submodules=none (it is hunting dirty submodule repos, 341ms) and narrowing it with --untracked-files=no was measured at only 13ms and discarded, so the real question is a SEMANTICS decision: must a WARN-only narrow guard run on every closeout, or only when the cycle actually staged something beyond the session document? Related: #closeoutgitsubmodulescan (9e7ce2f79 fixed two 47x submodule scans in tracked_modified_paths that were NOT the dominant cost).
 - [ ] [#crdtdeliverybatch] #agent-doc-feature [recommended] Opportunistic client-side batching of CRDT deliveries. GATED ON #ackeditorstamps - do not start this until the profile says it applies. Current evidence points the other way: the measured shape is ONE delivery waiting a long time for a single ACK (delivery_ack_pending is 457 of 522 waits), and batching improves throughput across many writes rather than the latency of one, so it would not shorten the wait we actually have. It becomes the right lever only if the per-state profile shows delivery_ack_pending accumulating as many short delivery cycles instead of one long stretch. Filed to keep the option recorded with its precondition, not as agreed work.

@@ -584,12 +584,13 @@ The tests are mutation-checked rather than merely green, since this whole thread
 I also had to work around two known traps: `cargo build` reported "0 crates compiled" on freshly edited files (the RTK stale-digest issue), and a `cd` into a directory I was already in short-circuited a `&&` chain so a patch script silently never ran while the build still executed. Both caught by checking the file rather than the command's word.
 
 **Two follow-ups filed.** The eight other bindings need the same plane — and note go's and dart's async maps aren't connected to their async graph at all, so they need wiring before they can carry signals. Separately, `AsyncMapHandle::observe` is still hard-bound to the untracked `&AsyncContext`, so entry-value reads from inside a compute still can't subscribe. That's the read-side twin of the discarded-factory defect, and the fix is the genericity I just applied to the signal reads.
-<!-- agent:boundary:ea875918 -->
+<!-- agent:boundary:e2cd8d8a -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- 🚧 do [#asynccontextthreadsafeco]
 - ~~do [#closemembershiporder]~~
 - do [#maphandlecleardependents]
 - do [#lazilycellfamily]
@@ -607,7 +608,7 @@ I also had to work around two known traps: `cargo build` reported "0 crates comp
 - ⏭️ do [#lzcsplane]
 - ⏭️ do [#lzcspackage]
 - ⏭️ do [#asyncplanenever]
-- 🚧 do [#lazilyrenameinverted]
+- ⏭️ do [#lazilyrenameinverted]
 - do [#readmeexamplesreference]
 - do [#signalgetsignallive]
 - do [#observerwordingcontradic]
@@ -636,6 +637,7 @@ I also had to work around two known traps: `cargo build` reported "0 crates comp
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] 🚧 [#asynccontextthreadsafeco] Add AsyncContext + ThreadSafeContext support to QueueCell + TopicCell + WorkQueueCell. Start with spec + formal +  conformance. Then subagents for implentations. Please ensure consistency across sync + thread + async apis.
 - [ ] [#portmembershiporder] Port the membership/order plane to the other 8 bindings thread-safe + async maps (py, js, kt, go, cpp, cs, dart, zig). lazily-rs is done (commit ffc0d83): each flavor mints its own membership + order signal cells on its own graph, with bumps run outside the map lock. Every other binding has the same hole — reactive keys/len/contains_key exist only on the sync map. Note go and dart async maps are not connected to their async graph at all (no context field / _ctx annotated unused_field), so they need wiring before they can carry a signal plane. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. The membership/order reads are now generic over the read surface (AsyncSource<u64>: Read<C>) and track correctly with an AsyncComputeContext — apply the same genericity to AsyncMapHandle::observe so entry-value reads can track too. This is the read-side twin of the discarded-factory-view defect.
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook at all. Any flavor-level `remove` — and the fix for lazily-cs AsyncComputedMap.Remove not disposing its node — requires adding one. Handle-trait surgery, not an additive method. Plan: tasks/plan-lazily-reactivemap-unification.md
@@ -658,7 +660,7 @@ I also had to work around two known traps: `cargo build` reported "0 crates comp
 - [ ] [#lazilycppcollections] lazily-cpp: 15 collections fixtures still uncovered — 9 with no coverage at all (cellmap_atomic_move, cellmap_independence, keyed_reconciliation_lis, semtree_incremental, stableid_alignment, textcrdt_convergence, textcrdt_delta_sync, workqueue_competing_delivery, workqueue_lease_deadletter) and 6 hand-transcribed (mergecell_algebra, 5x queuecell_*). Largest single body of remaining conformance work; spans five separate primitives. Tracked in the KNOWN_UNCOVERED ledger.
 - [ ] [#trackedcopieslazily] The tracked copies of lazily-spec conformance fixtures inside lazily-py (tests/conformance), lazily-dart (test/conformance), lazily-rs (tests/conformance) and lazily-go (test/conformance) are kept byte-identical to canonical BY HAND with no sync script or drift check. This cycle had to flip the same fixture in three places. Add a sync/verify script (or make the runners read the sibling checkout) so a canonical edit cannot silently miss a vendored copy.
 - [ ] [#asyncplanenever] Async plane never migrated to the v2 kernel: AsyncCellHandle / AsyncSlotHandle / AsyncSlotState survive in cpp, go, js, kt, py, zig, cs. Sharpest case is lazily-cpp `AsyncContext::memo()` (async_context.hpp:144), still live and undeprecated while the sync `Context::memo` is DELETED. Migrate to Async{Source,Computed} with deprecated aliases.
-- [ ] 🚧 [#lazilyrenameinverted] [recommended] lazily-py keeps `Cell`/`CellSlot` as the native class names with `Source = Cell` / `SourceSlot = CellSlot` aliases (cell.py:35,191,219-220). This is NOT drift — it is documented and motivated: cell.py is inside the mypyc compilation unit (setup.py compiles slot/cell/signal/effect/batch as one unit for cross-file native-class inheritance BaseSlot -> CellSlot), and the docstring states Cell "stays the native class name (for mypyc native-struct reads and isinstance stability across the family)". Flipping would rename the native class and change isinstance identity. Do NOT flip without deciding whether mypyc native-struct naming or family-wide vocabulary consistency wins; that is a spec/ownership question, not a cleanup.
+- [ ] [#lazilyrenameinverted] [recommended] lazily-py keeps `Cell`/`CellSlot` as the native class names with `Source = Cell` / `SourceSlot = CellSlot` aliases (cell.py:35,191,219-220). This is NOT drift — it is documented and motivated: cell.py is inside the mypyc compilation unit (setup.py compiles slot/cell/signal/effect/batch as one unit for cross-file native-class inheritance BaseSlot -> CellSlot), and the docstring states Cell "stays the native class name (for mypyc native-struct reads and isinstance stability across the family)". Flipping would rename the native class and change isinstance identity. Do NOT flip without deciding whether mypyc native-struct naming or family-wide vocabulary consistency wins; that is a spec/ownership question, not a cleanup.
 - [ ] [#readmeexamplesreference] README examples reference types that no longer exist: lazily-go README:82 `lazily.NewCell` (never defined, example does not compile) and README:209 `*Cell[V]`; lazily-cpp README:54,280,387 + AGENTS.md:43 `CellHandle`/`SlotHandle` (deleted); lazily-dart README:38,329 claims a `Signal` back-compat alias that does not exist; lazily-py README:225 calls `CellSlot` canonical.
 - [ ] [#signalgetsignallive] signal/getSignal still live and UNDEPRECATED on the threadsafe/async planes after the sync plane retired them: lazily-kt ThreadSafeContext.kt:195,247 + AsyncContext.kt:624, lazily-js reactive-async.d.ts:85, lazily-zig root.zig:86,90. Deprecate or migrate to eager Computed.
 - [ ] [#observerwordingcontradic] "observer" wording contradicts the no-observers-only-Effects rule (#lzdartobservercow): lazily-cs Effect.cs:41,59 + Reactive.cs:119, lazily-dart core.dart:1386,1418 + state_chart.dart:13, lazily-zig effect.zig:12,202, lazily-js README:149, lazily-formal ThreadSafe.lean:9, lazily-kt ThreadSafeContext.kt:37. Effects are not observers; fix the prose.

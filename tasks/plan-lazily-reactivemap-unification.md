@@ -48,8 +48,53 @@ symptom of the structure this plan addresses.
 >    Reordering cannot need memory, so the move is a `std.mem.rotate` and there
 >    is no allocating error path left to desync on.
 >
-> **Remaining:** py, js, dart, cpp, cs, go, kt — Core surface per flavor, plus
-> the fixture replay. Sequencing below still holds, minus zig.
+> **Done — lazily-cpp** (`90767b1`, `make check` 44/44). `KeyedOrder<K,H>` in a
+> new `include/lazily/keyed_order.hpp`; thread-safe and async gained the full
+> Core surface with their own membership/order `Source<uint64_t>` cells, bumps
+> run off the map mutex, and their reads are generic over the read surface so a
+> `Compute&` registers the edge. `remove` needed no new primitive: both contexts
+> already project onto a real `Context`; `AsyncSlotHandle` gained a
+> `clear_dependents` that drops the cached value (it has no graph dependents).
+> Both fixtures replay against all three flavors, mutation-checked three ways.
+>
+> **A fifth correction — the canonical corpus cannot catch the zig `move_before`
+> defect.** `cellmap_atomic_move.json`'s only `move_before` step moves a key that
+> already *follows* its anchor (`from=2`, `anchor=0`), so it exercises only the
+> branch where the target is the anchor index. The branch where the key
+> **precedes** its anchor and the target must be `anchor - 1` is never replayed —
+> exactly the direction zig was wrong in. Deliberately breaking that branch in
+> lazily-cpp still scored **green** against the corpus alone. Every binding
+> therefore needs its own directional coverage until the corpus grows a step in
+> the other direction, and **the corpus should grow one**.
+>
+> **Done — lazily-go** (`867c7d6`, `make check` 446 tests). Three defects, one
+> shape. The thread-safe map stored `map[K]V` — plain values, no nodes, no
+> context; it is now graph-backed. The async map was the same plus a resolution
+> flag; entries are now `*AsyncCellHandle[V]` on the async graph, and driving a
+> pending slot keeps both identity and node. And **the single-threaded map's
+> reactive reads registered no edge at all** — `Keys`/`Len`/`ContainsKey` called
+> the zero-argument `Source.Get()`, which `core.go` documents as an untracked
+> read. Probed directly: after adding a third key a reader of `Keys()` still
+> reported 2 and never recomputed. Reads now take a `ComputeOps` surface.
+> Breaking, deliberately, while go is pre-v1. Mutation-checked six ways.
+>
+> **Done — lazily-py** (`f97e6ab`, `make check` 547 tests). `_keyed_order.py`
+> core; thread-safe and async gained the full Core surface with their own
+> membership/order cells. `move_to` clamped only the upper end, so a negative
+> index reached Python's insert-from-the-right semantics and `move_to(key, -1)`
+> landed the key second-to-last — the same missing lower clamp lazily-js has.
+> Mutation-checked six ways. Note: py has **no disposal hook on any flavor**, so
+> `remove` drops the orphaned node without teardown on all three, consistently.
+>
+> **A sixth correction — a mutation probe can itself be vacuous.** The obvious
+> negative-index probe (`move_to(key, -5)`) passes with *or* without a lower
+> clamp, because Python clamps a very negative `list.insert` to 0 on its own.
+> Only `-1` discriminates. A mutation check is only evidence if the mutation
+> actually changes observable behaviour — verify the mutation applied *and* that
+> the un-mutated case would differ.
+>
+> **Remaining:** js, dart, cs, kt — Core surface per flavor, plus the fixture
+> replay. Sequencing below still holds, minus zig, cpp, go, and py.
 >
 > **Sibling plan.** The same defect exists in the queue family — `QueueCell`,
 > `TopicCell`, and `WorkQueueCell` are hard-bound to the single-threaded context

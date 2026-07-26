@@ -1,7 +1,7 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
 resume: 68af54ca-b852-448f-95ed-24f29b695261
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -282,13 +282,30 @@ Fixed the part that was actually broken, and rejected the fix the item proposed.
 **Left open, narrowed to one question:** should preflight run that non-destructive reset *itself* on detecting this refusal, or stay operator-initiated so you actually see the wedge? It is safe either way — the reset does not discard operator text — so this is a UX call, not a correctness one, and it is yours. I did not want to make the binary silently self-heal a state whose whole purpose is to stop and be noticed.
 
 One correction to my own earlier work this session: I have been signing commits `Claude Opus 4.8`; the correct attribution here is Opus 5. Fixed from `8346f4d1a` onward.
-<!-- agent:boundary:961f694f -->
+
+### Re: do [#adwritesourceenum] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#adwritesourceenum]
+
+Resumed the interrupted Claude turn and completed `#adwritesourceenum`.
+
+- Replaced free-form document-write source strings with `DocumentWriteSource` and an ordered `CloseoutStage` model covering response write, queue mirror, and post-commit reposition. Canonical string serialization preserves the existing wire format, while `Unknown(String)` round-trips unfamiliar future/older values without failing.
+- Propagated the typed source through convergence and retained-write settlement, replacing string-prefix policy checks with typed predicates.
+- Added projection-local write ordinals and a strict supersession proof: an undeltaable retained intent may settle only from a later converged fact at a later closeout stage. Older facts and newer same-stage facts cannot falsely discharge it; exact-target, payload, and delta proofs retain priority.
+- Added focused enum, settlement, and projection regressions, including the interrupted turn's missing ordinal-plus-stage guard test.
+- Verification passed: the targeted regression, full `make check`, `git diff --check`, and one release-profile `make install-full`. The installed binary reports `agent-doc 0.35.28`; the controller recycle request was accepted for the next idle boundary.
+- Released `v0.35.28`: implementation commit `b76f7fde4`, PyPI manylinux wheel published, and GitHub release created with the verified prebuilt binary. The superproject gitlink is recorded in `57fc3cc87`.
+
+Pre-existing generated skill/config drift in the submodule was deliberately left unstaged and untouched.
+<!-- agent:boundary:e97ef2b9 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - do [#sessionwedgeband]
-- 🚧 do [#adwritesourceenum]
+- ~~do [#adwritesourceenum]~~
 - do [#adopseventenum]
 - do [#crdtwaitsubscribe]
 - do [#crdtwaitsplit]
@@ -337,7 +354,6 @@ One correction to my own earlier work this session: I have been signing commits 
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#sessionwedgeband] [operator-verify] Should preflight auto-run the non-destructive `reset --from-current --preserve-session` when a committed-historical patchback refusal is detected, or stay operator-initiated? NARROWED 2026-07-26 (8346f4d1a). Widening repair_committed_historical_snapshot_drift is REJECTED with reason: it rebases onto HEAD only when the visible document normalizes equal to HEAD, and once the live file carries content beyond HEAD, adopting HEAD would drop exactly the operator content the guard protects. The real defect (opaque refusal) is FIXED — commit-io now prints the verbatim recovery commands. What remains is a UX call for the operator, not a correctness fix: auto-healing a state whose purpose is to stop and be noticed. Decide, then implement or close.
-- [ ] 🚧 [#adwritesourceenum] #agent-doc-refactor Type the write-intent discriminant. DocumentWriteIntentProjection.source is a String and behavior already keys off it by prefix and equality in three crates - document-realtime-io gates post-commit reposition on source == 'post_commit_reposition' and starts_with('serialized_atomic_write'), write-ipc-io routes transport on starts_with('force_disk') - with no single place enumerating the values. That is why the 2026-07-26 retained-hash deadlock needed a content diff to answer a question the type should have answered: nothing says pending_write and pending_add_sync are consecutive stages of ONE closeout, so settlement could not ask 'was I superseded by my own successor' and had to infer it from added lines. Replace with an enum carrying the closeout STAGE (response cell -> pending write -> queue mirror -> post-commit reposition) plus force-disk/compact/stream as distinct variants, so supersession is an ordering comparison instead of an inference. Constraint: source is serialized into state.db projections, so the enum needs an Unknown(String) variant that round-trips unrecognized values rather than failing deserialization on an older or newer peer - a hard error there would wedge exactly the cross-version case this is meant to make safe. Keep the delta proof regardless: it covers operator rebases that no stage ordering can express.
 - [ ] [#adopseventenum] #agent-doc-refactor Type the ops.log event vocabulary. 812 distinct event names are emitted as free-text format! literals and 310 call sites match on log text with contains(...), so producer and consumer share no vocabulary and a renamed event silently stops matching - the failure is invisible because the matcher just returns false. This is a correctness surface, not just tidiness: autofix scans the last N ops.log lines to plan repairs, doctor and session-check classify recovery state from these strings, and the convergence-playback and digest paths parse them. Introduce a typed event enum (or at minimum shared const names) for the events that are PARSED rather than merely logged - start from the ~310 contains() sites and work backwards to their producers, since typing all 812 emitters at once is churn without payoff. Deliberately out of scope: events that are only ever read by humans.
 - [ ] [#crdtwaitsubscribe] #agent-doc-feature Replace the CRDT convergence poll with a subscription to the convergence cell. MEASURED: the wait loop issues ~2 controller reads per iteration and ~18 per write (6,983 write-path controller_crdt_current_text reads across 390 acknowledged writes), so an 11s wait generates ~18 round trips against the very controller it is waiting on - structurally the same self-feeding loop as the idle-watch storm fixed in 511527103/f170067bb, and a plausible source of the controller_model_backpressure that is 10% of all waits. NOT justified by poll oversleep: CRDT_WRITE_BACKOFF_POLICY is 25ms initial / 250ms max, which is <=2% of an 11,000ms wait - do not sell this fix on latency-per-sleep, sell it on removing generated load. Doctrine already says so (#closeoutterminalreactive: 'every waiter re-probes on a clock instead of subscribing'), and ThreadSafeContext runs Computed/Effect bodies with NO state lock held (verified: recompute_slot_now clones the closure, runs compute(self) unlocked, and takes the write lock only to publish), so there is no throughput objection. CAUTION: this is the write path, the one place where being wrong loses operator text - keep the deadline/retained-intent fallback intact.
 - [ ] [#crdtwaitsplit] #agent-doc-feature Separate controller backpressure from CRDT delivery convergence in the write wait. ControllerModelBackpressure and DeliveryAckPending are different conditions with different remedies (back off the controller vs wait on the editor) but currently share one loop, one backoff schedule and one 60s budget, so the wrong remedy is applied to whichever one is actually blocking. Partial coalescing already exists and must be preserved: #crdtcasraced added the `advanced` flag so a non-advancing apply does not reset the backoff floor - without it a contended write pinned at 25ms for the whole 60s budget (~2400 merge+CAS attempts, each worsening the contention it retried). Land after #crdtwaitsubscribe, whose per-condition subscription makes the split natural rather than two parallel poll loops.

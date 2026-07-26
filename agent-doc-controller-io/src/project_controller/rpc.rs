@@ -8868,6 +8868,21 @@ pub(crate) fn handle_request_locked(
     runtime: &Arc<ControllerRuntime>,
     should_stop: &mut bool,
 ) -> Result<String> {
+    // `#adturnscopehotloop`: memoize turn attribution for the life of this
+    // request. `log_op` resolves a `turn=` id per line, and outside a scope that
+    // resolution is `load_document_projection` — a SQLite ledger replay here in
+    // the controller (`in_controller_request()` suppresses the IPC branch), or a
+    // 5s-timeout controller round trip in every other process. `ops.log` carried
+    // 12,700 lines per 20k-op window on this project, so the diagnostic label on
+    // a log line was costing more than the operation it described. The memo the
+    // `#adturnscope` doc comment describes already existed; `route` was its only
+    // caller, and the two processes that emit almost all the lines — this one and
+    // the supervisor idle watch — never opened one.
+    //
+    // A request cannot span two turns, so the scope is exact rather than a TTL
+    // guess. Requests get their own thread and the scope is thread-local, so
+    // concurrent documents keep separate memos.
+    let _turn_attribution = agent_doc_ops_log_io::begin_turn_attribution_scope();
     let request_value = serde_json::from_str::<serde_json::Value>(line.trim())?;
     let request: ControllerRequest = serde_json::from_value(request_value.clone())?;
     // #af88 B enforcement: read the caller's stamped binary version (skew-safe;

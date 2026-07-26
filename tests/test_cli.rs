@@ -28721,6 +28721,40 @@ fn test_agent_doc_queue_owns_active_queue_head_projection_policy() {
         "queue_response should share active queue-head projection through queue_heads"
     );
 
+    // `#adturnscopehotloop`: the two processes that emit almost every `ops.log`
+    // line must memoize turn attribution per request / per tick.
+    //
+    // `log_op` resolves a `turn=` id for each line, and outside a
+    // `begin_turn_attribution_scope()` that resolution is
+    // `load_document_projection` — a SQLite ledger replay inside the controller,
+    // and a 5s-timeout controller IPC round trip everywhere else. Measured on
+    // agent-loop: 12,700 log lines per 20k-op window, so the diagnostic label on
+    // a line cost more than the operation it described, and the supervisor's
+    // round trips fed the very saturation that made them time out.
+    //
+    // The memo already existed (`#adturnscope`) with `route` as its only caller.
+    // Deleting either guard below silently restores the storm — nothing else
+    // fails — so pin them at the source.
+    let controller_rpc = fs::read_to_string(
+        manifest_dir.join("agent-doc-controller-io/src/project_controller/rpc.rs"),
+    )
+    .unwrap();
+    assert!(
+        controller_rpc.contains("agent_doc_ops_log_io::begin_turn_attribution_scope()"),
+        "the controller request handler must open a turn-attribution scope so `log_op` does not replay the state ledger once per log line (#adturnscopehotloop)"
+    );
+    let idle_watch_source =
+        fs::read_to_string(manifest_dir.join("agent-doc-start-runtime-io/src/idle_watch.rs"))
+            .unwrap();
+    assert!(
+        idle_watch_source.contains("agent_doc_ops_log_io::begin_turn_attribution_scope()"),
+        "the supervisor idle-watch tick must open a turn-attribution scope so `log_op` does not issue a controller IPC round trip per log line (#adturnscopehotloop)"
+    );
+    assert!(
+        idle_watch_source.contains("idle_watch_queue_head_revision_gate"),
+        "the idle watch must compare the cheap revision before materializing canonical text, which is the contract `CurrentRevision` documents (#idlewatchrevisiongate)"
+    );
+
     let plan_source = fs::read_to_string(manifest_dir.join("src/plan.rs")).unwrap();
     for forbidden_snippet in [
         "fn active_queue_prompt(",

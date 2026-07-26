@@ -1085,6 +1085,20 @@ pub(super) fn spawn_idle_queue_watch_thread(
                 if !sleep_with_stop(&stop, AUTO_TRIGGER_POLL_INTERVAL) {
                     return;
                 }
+                // `#adturnscopehotloop`: one turn-attribution memo per tick.
+                //
+                // Every `log_op` resolves a `turn=` id, and outside a scope that
+                // resolution is `load_document_projection` — which, from this
+                // process, is a **controller IPC round trip with a 5s timeout**.
+                // A poll loop that logs several lines per tick was therefore
+                // issuing several controller round trips per tick purely to
+                // decorate its own log lines, feeding the saturation that then
+                // made those round trips time out. Diagnostics must not perturb
+                // the system they measure.
+                //
+                // A tick cannot span two turns, so the scope is exact rather
+                // than a TTL guess, and it drops at the end of each iteration.
+                let _turn_attribution = agent_doc_ops_log_io::begin_turn_attribution_scope();
                 // `#idlequiet`: stale-binary convergence is the one check that
                 // must remain prompt at every stage of a turn. Keep it ahead of
                 // every quiescent fast-path gate; it is a local inode/stat probe

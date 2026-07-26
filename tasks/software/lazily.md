@@ -88,18 +88,93 @@ the release — all nine bindings published. The CI OIDC job for that repo will 
 `Release` run there as expected rather than a regression and check npm directly.
 
 Next head is `#lzqfspec` — Phase 0 of the queue-family plan.
-<!-- agent:boundary:d33ad72c -->
+
+### Re: Phase 0 — the queue family's Core surface is pinned — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzqfspec]
+
+
+`#lzqfspec` done. `lazily-spec` `63e07b4`, pushed, `make check` green; the ten
+sibling READMEs regenerated and pushed; superproject at `edf3d6774`.
+
+**The Core/Extended split is evidence-based, not taste.** Normalising for naming
+convention across the eight bindings that ship the family, nine `QueueCell`
+methods are present in **8 of 8** — `try_push`, `try_pop`, `close`, `head`, `len`,
+`is_empty`, `is_full`, `is_closed`, `capacity` — so they are laws. The rest are
+named Extended explicitly, which is what stops their absence being scoreable.
+
+Three Core entries carry weight that is easy to miss, so I said why in the spec:
+
+- **`is_empty` is Core here and Extended on `ReactiveMap`.** On the map it is
+  `len() == 0`. For a queue it is a named reactive observable the threading
+  section already requires, and the reader-kind independence law is stated over
+  the whole `head`/`len`/`is_empty`/`is_full`/`closed` set — drop one and the law
+  becomes unassertable. Called out so the difference does not read as sloppiness.
+- **A polled version counter is not a reader kind.** It registers no dependency
+  edge, so nothing can be invalidated by it and the independence law cannot be
+  observed. Snapshot diffing likewise. Both must be recorded as divergent rather
+  than green — which is exactly what zig and js were doing while scoring `✅`.
+- **`try_pop` must distinguish empty from closed**, or the closure lifecycle law
+  collapses into a bare optional.
+
+**Reader-kind derivation is pinned to memoized-derive with explicit
+invalidation** — settled by the precedent the ReactiveMap work established across
+all nine bindings, plus the fact that a version-cell design charges a graph write
+on every op even with no subscriber, which is precisely the cost the
+demand-driven clause exists to avoid. A version-cell implementation stays
+conformant if reads register an edge and the invalidation set is exact; polled
+counters never are.
+
+**Two flavor questions settled here rather than per binding.** `TopicCell`
+broadcast needs nothing extra under a thread-safe context — each subscriber owns a
+cursor, cursors only advance, so reads commute and retention is a monotone
+function of the cursor set; confluent by construction. And `WorkQueueCell` lease
+expiry stays caller-driven on every flavor: `reap_expired` takes the time as a
+parameter, and a flavor that grew its own clock would be unreplayable for no gain.
+
+**The third question answered itself empirically.** Across all eight bindings the
+queue-family sources contain **no** `async fn`, `suspend fun`, `Future`, `Task`,
+`Promise`, or `await` — anywhere. `pop` is uncoloured everywhere, so the spec now
+forbids a flavor from colouring it. That is measured, not argued.
+
+**The threading contract is now normative.** It named `ThreadSafeContext` as the
+route to cross-thread MPSC while no binding had a constructor that accepted one —
+so for the entire v1 line the only documented path to that guarantee was
+unimplementable. Recording a capability as absent is fine; documenting a route to
+it that does not exist is not.
+
+**`coverage.json`'s three conflated queue rows are now nine** (primitive ×
+flavor), and they say what is true rather than what is flattering: single-threaded
+ships in eight bindings but is **partial** in zig (reader kinds are `u64` counters
+callers poll) and js (no context at all — invalidation is a snapshot diff), and
+**no binding ships a thread-safe or async flavor of any queue primitive**. The gap
+is now visible in the matrix instead of hidden behind three green rows.
+
+**And the matrix stops contradicting itself about Dart.** `docs/coverage.md`
+declared the thread-safe context "not applicable" for JS and Dart while both
+shipped the layer and passed fixtures — I sharpened that contradiction last cycle
+by scoring dart's map flavor `✅`. The carve-out was a design argument, not a
+scoring fact, so it is withdrawn and the rows are scored as shipped. The *design*
+question — whether those bindings should expose the flavor at all, given Dart
+ships a duplicate weaker than what it duplicates and JS's README contradicts its
+own source comment — is recorded as **still open** rather than silently answered.
+
+Next head is `#lzqfformal` — Phase 1, the Lean theorems that justify
+flavor-neutrality instead of assuming it.
+<!-- agent:boundary:9ade6b5c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzqfprep]~~
-- ~~⏭️ do [#lzdonequoteattr]~~
-- ⏭️ do [#lzqfspec]
+- ~~do [#lzdonequoteattr]~~
+- ~~⏭️ do [#lzqfspec]~~
 - ⏭️ do [#lzqfformal]
-- 🚧 do [#lzqffx]
-- do [#lzqfrs]
+- ⏭️ do [#lzqffx]
+- 🚧 do [#lzqfrs]
 - do [#lzqfjs]
 - do [#lzqfports]
 - ⏭️ do [#lzqfzig]
@@ -149,10 +224,9 @@ Next head is `#lzqfspec` — Phase 0 of the queue-family plan.
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
-- [ ] [#lzqfspec] lazily-spec: Phase 0 of the queue-family flavor plan — add a Core-surface section for QueueCell/TopicCell/WorkQueueCell mirroring the ReactiveMap Core/Extended split, pin ONE reader-kind design (recommend memoized-derive+invalidate over cpp's version cells, and say explicitly that polling a counter is not a reader-kind), define the per-flavor obligation (confluence for thread-safe, eventual transparency for async, plus single-frontier-walk atomicity), resolve the threading paragraph that promises ThreadSafeContext no binding can accept, and split coverage.json's three conflated queue rows into nine — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfformal] lazily-formal: Phase 1 — prove the queue reader-kind invalidation set is a pure function of (op, len_before, len_after), prove one op's invalidations are not observably interleaved, and cross-check ThreadSafe.lean for the confluence obligation. Do NOT add per-flavor Lean models; the algebra must not fork — plan: tasks/plan-lazily-queue-family-flavors.md
-- [ ] 🚧 [#lzqffx] lazily-spec + all binding runners: Phase 2 of the queue-family plan — replay the nine collections queue fixtures against all three flavors with a declared skip ledger (zig's reactive-graph runner is the reference: fails if everything skips, ledger must match observation). Add a positive assertion that fixtures ran, mutation-check each runner per flavor, and grep every queue runner for the invalidates-nesting trap (fixtures nest it under steps[].expected.invalidates; lazily-rs read it off the step and silently never asserted). Land this BEFORE any implementation so the gap goes red first. KEPT OPEN DELIBERATELY: this is Phase 2 and is gated on Phase 0 (#lzqfspec) settling the Core surface and the reader-kind design first — the plan's phases have a hard dependency order, and a queue drain that reaches this id before #lzqfspec is out of order, not ready work. Read the 'How these gates fail' section of the plan before writing any runner — plan: tasks/plan-lazily-queue-family-flavors.md
-- [ ] [#lzqfrs] lazily-rs: Phase 3 — context prerequisites + reference implementation. ThreadSafeContext needs a multi-root clear_slots equivalent (it has only single-handle clear at thread_safe.rs:3549 — four handles is four frontier walks; verify whether batch() already closes this, do not assume). AsyncContext needs a synchronous-compute computed and a multi-root clear (it has neither; only computed_async at async_context.rs:413). Then ship ThreadSafe/Async QueueCell + TopicCell + WorkQueueCell, each minting its own reader-kind handles on its own graph, Arc<Mutex<S>> storage with invalidation run outside the lock — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] [#lzqffx] lazily-spec + all binding runners: Phase 2 of the queue-family plan — replay the nine collections queue fixtures against all three flavors with a declared skip ledger (zig's reactive-graph runner is the reference: fails if everything skips, ledger must match observation). Add a positive assertion that fixtures ran, mutation-check each runner per flavor, and grep every queue runner for the invalidates-nesting trap (fixtures nest it under steps[].expected.invalidates; lazily-rs read it off the step and silently never asserted). Land this BEFORE any implementation so the gap goes red first. KEPT OPEN DELIBERATELY: this is Phase 2 and is gated on Phase 0 (#lzqfspec) settling the Core surface and the reader-kind design first — the plan's phases have a hard dependency order, and a queue drain that reaches this id before #lzqfspec is out of order, not ready work. Read the 'How these gates fail' section of the plan before writing any runner — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] 🚧 [#lzqfrs] lazily-rs: Phase 3 — context prerequisites + reference implementation. ThreadSafeContext needs a multi-root clear_slots equivalent (it has only single-handle clear at thread_safe.rs:3549 — four handles is four frontier walks; verify whether batch() already closes this, do not assume). AsyncContext needs a synchronous-compute computed and a multi-root clear (it has neither; only computed_async at async_context.rs:413). Then ship ThreadSafe/Async QueueCell + TopicCell + WorkQueueCell, each minting its own reader-kind handles on its own graph, Arc<Mutex<S>> storage with invalidation run outside the lock — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfjs] lazily-js: QueueCell/TopicCell/WorkQueueCell are not reactive at all — src/queue.js takes no context, contains ZERO ctx references, and reports invalidation by diffing a private snapshot. It scores green on the coverage row. Bind the family to a context and mint real reader-kinds, and check whether the collections fixtures are being satisfied by a non-reactive model here the way test/collections.test.js drives src/collections.js instead of the reactive families — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfports] lazily: Phase 5 — port the queue-family flavors to cpp, dart, py, go, kt (and build cs flavor-complete from the start under #lzcsqueues). One subagent per binding, NEVER two against one repo. Dispatch only after #lzqfspec + #lzqffx + #lzqfrs are committed so each agent has a settled spec, a red per-flavor gate, and a reference diff. cpp additionally needs its Source<uint64_t> version cells migrated if Phase 0 picks memoized-derive — plan: tasks/plan-lazily-queue-family-flavors.md

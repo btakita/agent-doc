@@ -596,13 +596,36 @@ Mutation-checked: removing the manifest fails as missing evidence, and dropping 
 I did **not** delete the now-orphaned vendored copies, since nothing reads them and deleting files was not what this item asked for. I corrected the stale comment that still pointed at them and filed the decision: delete, or add a diff-against-canonical check so drift fails the build. Leaving a vendored copy that nothing reads is the trap that created this finding in the first place.
 
 Four of seven done (js, py, cs, go). rs, dart and zig remain, all with go's shape, and the item now carries the recipe and the effort estimate rather than just the goal.
-<!-- agent:boundary:82c9583d -->
+
+### Re: do [#lazilyvendoredfixture] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lazilyvendoredfixture]
+
+
+Resolved the second way the item offered, because my own framing of it was wrong.
+
+I filed that item saying the vendored copies were "read by NOTHING" after I repointed two direct reads at the canonical sibling. That was incorrect. `loadConformanceFixture` deliberately tries the lazily-spec sibling *first* and falls back to `test/conformance/` — the copies let the suite run offline. Deleting them, which is what I half-recommended, would have removed a working feature to satisfy a bookkeeping complaint. What I had actually fixed earlier were two reads that bypassed that fallback order and went straight to the vendored copy.
+
+So the copies stay and drift becomes a build failure. When the canonical corpus is present, every vendored file must be byte-identical to its counterpart. All 7 match today — that is now enforced rather than a coincidence nobody was checking.
+
+**Why the runtime manifest does not already cover this**, which is the part worth keeping: the manifest records that a file was **opened**, not that it was the **right** file. The two direct reads were opening the vendored copy, and both the source grep and the runtime manifest were perfectly satisfied. Three layers of coverage checking, and none of them could see that the bytes came from the wrong tree.
+
+It also catches a case I had not considered until writing it: a vendored file whose canonical counterpart was removed or renamed upstream, leaving the copy as the only surviving version of a fixture the spec no longer has.
+
+Absence of the canonical corpus **skips** rather than passes. With nothing to compare against, a pass would assert something it never checked — and the offline case is exactly when the copies are load-bearing and least verifiable. A walk that compares zero files is a hard failure, not a quiet success.
+
+Mutation-checked three ways: a drifted copy fails and names the byte counts (1118 vs 1280), a vendored file with no canonical counterpart fails, and an empty walk fails as vacuous. I also confirmed `make check` genuinely runs it by drifting a fixture and checking for exit 2 — `t.Logf` output is invisible without `-v`, so the green run I got first proved nothing about whether the gate had executed at all.
+
+Pushed as `08c8b00`.
+<!-- agent:boundary:4d31d4a3 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lazilyvendoredfixture]
+- ~~do [#lazilyvendoredfixture]~~
 - ~~do [#lazilyupgradeconformance]~~
 - do [#lazilyconformancecoverag]
 - ~~do [#lazilydistributedconform]~~
@@ -649,8 +672,7 @@ Four of seven done (js, py, cs, go). rs, dart and zig remain, all with go's shap
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilyvendoredfixture] lazily-go: the vendored fixture copies under test/conformance/ (crdt-tree/algebra.json, reliable-sync/outbox_store_protocol.json) are now read by NOTHING — both tests were repointed at the canonical sibling on 2026-07-26. They are byte-identical today, which is exactly why they are dangerous to keep: a vendored copy can silently drift from the spec and nobody learns. Delete them, or if they exist deliberately as an offline fallback, add a check that diffs them against the canonical corpus so drift fails the build. Do not just leave them
-- [ ] 🚧 [#lazilyupgradeconformance] lazily: upgrade the conformance-coverage guard from static to runtime in rs, dart, zig. DONE for js, py, cs and go. go was the one that paid off immediately — see below. Remaining three have the same shape as go did: no interception seam, no shared loader, 20-40 read sites spread across per-file helpers. The go recipe is the pattern: introduce ONE package-level `specReadFile`-style helper, substitute the raw read call token across the test files (they share a package/namespace, so one helper serves all), record ids relative to the conformance root, APPEND (several test binaries contribute), flush at exit, and make a MISSING manifest FAIL as missing evidence. The manifest path must be ABSOLUTE — several bindings run test binaries from a per-package working directory. Effort estimate from go: ~1 helper file + a mechanical single-token substitution across ~22 files
+- [ ] [#lazilyupgradeconformance] lazily: upgrade the conformance-coverage guard from static to runtime in rs, dart, zig. DONE for js, py, cs and go. go was the one that paid off immediately — see below. Remaining three have the same shape as go did: no interception seam, no shared loader, 20-40 read sites spread across per-file helpers. The go recipe is the pattern: introduce ONE package-level `specReadFile`-style helper, substitute the raw read call token across the test files (they share a package/namespace, so one helper serves all), record ids relative to the conformance root, APPEND (several test binaries contribute), flush at exit, and make a MISSING manifest FAIL as missing evidence. The manifest path must be ABSOLUTE — several bindings run test binaries from a per-package working directory. Effort estimate from go: ~1 helper file + a mechanical single-token substitution across ~22 files
 - [ ] [#lazilyconformancecoverag] lazily-cs: 87 of 124 canonical fixtures are unreplayed. MEASURED 2026-07-26 via the runtime manifest, not inferred: cs opens 37/124. The earlier figure of 30 came from the static grep and was an UNDERSTATEMENT — cs discovers fixtures by enumerating the corpus directory, so seven fixtures it genuinely replays never appear by name in its sources. Work the list down against tasks/software/lazily-cs-parity-plan.md; the guard is now runtime-backed, so the number can only move by actually replaying more. Biggest untouched areas: reactive-graph 11, lossless-tree 9, message-passing 8, reliable-sync 8, statechart 7 (statechart is notable because cs HAS StateChart.cs and a conformance runner, so those 7 are a runner gap rather than a missing feature — likely the cheapest win)
 - [ ] [#lazilythreadsafetopiccel] lazily-rs: ThreadSafeTopicCell + AsyncTopicCell. Same per-flavor rules as #lazilythreadsafequeuecel: own graph, own reader handles, bumps outside the lock, batch() for multi-root invalidation. Topic Core reader kinds per cell-model.md are subscribe/reconnect/disconnect/publish/read/read_stream/advance. Update the flavor ledger in the SAME change, and make the corpus replay against the new flavor rather than only flipping the flag — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lazilythreadsafeworkqueu] lazily-rs: ThreadSafeWorkQueueCell + AsyncWorkQueueCell. Core surface is push/claim/ack/nack/reap_expired plus the three independent reader kinds (pending / in-flight / dead-letter). Visibility-timeout redelivery needs a clock seam, which is NOT flavor-specific — reuse the sync one rather than minting a per-flavor clock. Update the flavor ledger in the SAME change and make the corpus replay against the new flavor. KEPT OPEN 2026-07-26: this reached the queue head before its own stated prerequisite existed — it says "same rules as the reference pair", and that pair had not been built. ThreadSafeQueueCell now ships (46d81e4) and IS the pattern to copy: memoized-derive reader kinds on its own graph, Arc<Mutex<S>> storage with invalidation OUTSIDE the lock (holding storage while invalidating inverts lock order against readers and deadlocks), multi-root invalidation via batch(), ledger flag flipped only alongside a real replay, plus an effect-based atomicity test because a step replay cannot see non-atomic invalidation. The THREAD-SAFE half is unblocked now; the async half waits on the AsyncContext prerequisites in #lzqfrs — plan: tasks/plan-lazily-queue-family-flavors.md

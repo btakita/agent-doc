@@ -748,6 +748,58 @@ pub trait PreflightCycleCompletionEffects {
     fn detect_bypassed_response_write(&self, file: &Path) -> Result<Option<String>>;
 }
 
+/// Whether a prior cycle is evidence about the head it carried
+/// (`#adpreflightreentryskip`).
+///
+/// `#queueskip`'s own rule is "dispatched last cycle and **came back**
+/// unconsumed". *Came back* is the load-bearing half: the turn ran and committed
+/// a response that simply did not resolve the id, so it left a capture, a
+/// response hash, or a terminal phase behind. A cycle that only ever reached
+/// `preflight_started` and was repaired away hosted nothing and proves nothing.
+///
+/// Accepting one anyway is what let a **second `agent-doc preflight` in the same
+/// turn** — a mid-turn re-check, a recovery pass, an agent reading the contract
+/// twice — "confirm" the current head as stalled. Repair closes the first
+/// preflight's cycle at step 1, so by the time the skip set is derived that
+/// seconds-old cycle *is* "the prior cycle". Each extra call then walked the
+/// queue forward one head, stamping `⏭️` on work nobody ran and re-pointing
+/// `pipeline.turn_id` at a head the turn never touched. Observed 2026-07-26 on
+/// `tasks/agent-doc/agent-doc-bugs2.md`: three preflight runs skipped two heads
+/// and mis-attributed the turn to a third.
+///
+/// The asymmetry settles the tie. A false skip silently drops real work; a false
+/// non-skip costs one re-dispatch of a dead ref, which the next *completed*
+/// cycle then skips for real. So require the evidence.
+fn prior_cycle_hosted_a_turn(prior: &agent_doc_cycle_state_io::CycleState) -> bool {
+    prior.capture_id.is_some()
+        || prior.response_sha256.is_some()
+        || matches!(prior.phase, agent_doc_turn::CyclePhase::Committed)
+}
+
+/// Fold the prior cycle's evidence into the carried skip set.
+///
+/// Pure so `#adpreflightreentryskip` is testable with fixed inputs instead of a
+/// live three-preflight session. `prior_dispatched` is already gated on
+/// [`prior_cycle_hosted_a_turn`]; passing `None` models both "no prior cycle"
+/// and "the prior cycle never ran".
+fn advance_skipped_queue_head_ids(
+    carried: std::collections::HashSet<String>,
+    prior_dispatched: Option<&str>,
+    prior_resolved: &std::collections::HashSet<String>,
+    current_live_ids: &std::collections::HashSet<String>,
+) -> std::collections::HashSet<String> {
+    let mut fresh = carried;
+    if let Some(id) = prior_dispatched
+        && !prior_resolved.contains(id)
+        && current_live_ids.contains(id)
+    {
+        fresh.insert(id.to_string());
+    }
+    // Clear ids that are no longer live heads or were just consumed.
+    fresh.retain(|id| current_live_ids.contains(id) && !prior_resolved.contains(id));
+    fresh
+}
+
 pub fn enforce_cycle_completion(
     file: &Path,
     effects: &impl PreflightCycleCompletionEffects,
@@ -763,10 +815,27 @@ pub fn enforce_cycle_completion(
             anyhow::bail!("{}", reason.replace('\n', " "));
         }
         if effects.retained_document_write(file) {
+            // `#adretainedcircle`: reaching here means `session_interruption`
+            // just returned `None` — `session-check` reports **ok**. Telling the
+            // operator to "retry session-check" from inside that branch is a
+            // closed loop with no exit, and it is one the binary can already
+            // see: preflight refuses, session-check succeeds, preflight refuses.
+            // Observed 2026-07-26 on tasks/agent-doc/agent-doc-bugs2.md, where
+            // the recovery took an out-of-band manual repair to escape.
+            //
+            // The reachable cause at this point is a reaped `do`-directive head
+            // whose `### Re:` block does not carry the hash-prefixed id, so the
+            // directive-response materializer never matched it and the intent
+            // stayed retained. `session-check` prints that as a warning while
+            // still returning ok, which is why it cannot clear it. Name the
+            // repair that can (`#closeoutwaitchurn`: a refusal must say what to
+            // run, not restate the fact).
             anyhow::bail!(
-                "retained document-write effect remains unsettled for {}; retry `agent-doc session-check {}` before starting another cycle",
-                file.display(),
-                file.display(),
+                "retained document-write effect remains unsettled for {file}, but `agent-doc session-check {file}` reports ok — re-running it cannot clear this. \
+                 The usual cause is a reaped `do [#id]` queue head whose answering `### Re:` block does not carry the hash-prefixed id, so the response record never matched the intent; \
+                 check `agent-doc session-check {file}` output for a `reaped ... without an assistant response` warning naming the id, then land one `agent-doc write --commit {file}` whose response header is `### Re: #<that-id>`. \
+                 See ops.log `retained_write_blocks_new_cycle` for the intent id and cause.",
+                file = file.display(),
             );
         }
     }
@@ -3918,22 +3987,21 @@ pub fn run_queue_maintenance(file: &Path, diff: Option<&str>) -> Result<QueueSta
             .unwrap_or_default();
         // The head the prior cycle actually dispatched: its first live id-backed
         // head that was not already skipped.
-        let prior_dispatched = prior.as_ref().and_then(|s| {
-            s.active_queue_heads
-                .iter()
-                .filter_map(|h| agent_doc_queue::queue_response::queue_prompt_done_id(h))
-                .find(|id| !carried.contains(id))
-        });
-        let mut fresh = carried;
-        if let Some(id) = prior_dispatched
-            && !prior_resolved.contains(&id)
-            && current_live_ids.contains(&id)
-        {
-            fresh.insert(id);
-        }
-        // Clear ids that are no longer live heads or were just consumed.
-        fresh.retain(|id| current_live_ids.contains(id) && !prior_resolved.contains(id));
-        fresh
+        let prior_dispatched = prior
+            .as_ref()
+            .filter(|s| prior_cycle_hosted_a_turn(s))
+            .and_then(|s| {
+                s.active_queue_heads
+                    .iter()
+                    .filter_map(|h| agent_doc_queue::queue_response::queue_prompt_done_id(h))
+                    .find(|id| !carried.contains(id))
+            });
+        advance_skipped_queue_head_ids(
+            carried,
+            prior_dispatched.as_deref(),
+            &prior_resolved,
+            &current_live_ids,
+        )
     } else {
         std::collections::HashSet::new()
     };
@@ -10054,6 +10122,114 @@ mod tests {
         // Read once for the gate, once after `session_interruption` returned
         // `None` — the fail-closed re-check.
         assert_eq!(effects.gate_reads.get(), 2);
+    }
+
+    fn id_set<const N: usize>(ids: [&str; N]) -> std::collections::HashSet<String> {
+        ids.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    fn prior_cycle_json(phase: &str, capture: Option<&str>) -> agent_doc_cycle_state_io::CycleState {
+        let capture = capture
+            .map(|c| format!(r#","capture_id":"{c}""#))
+            .unwrap_or_default();
+        serde_json::from_str(&format!(
+            r#"{{"cycle_id":"cycle-1","file":"session.md","phase":"{phase}","last_event":"x","started_at":0,"updated_at":0{capture}}}"#
+        ))
+        .expect("minimal cycle state")
+    }
+
+    #[test]
+    fn a_preflight_only_cycle_is_not_evidence_that_its_head_stalled() {
+        // #adpreflightreentryskip: repair closes the first preflight's cycle at
+        // step 1, so a second `agent-doc preflight` in the SAME turn sees a
+        // seconds-old `preflight_started` cycle as "the prior cycle". Treating
+        // that as a completed dispatch is what walked the queue forward one head
+        // per call on 2026-07-26, stamping ⏭️ on work nobody ran.
+        assert!(
+            !prior_cycle_hosted_a_turn(&prior_cycle_json("preflight_started", None)),
+            "a cycle that only opened proves nothing about its head"
+        );
+        // `#queueskip`'s real case still qualifies: the turn ran and came back.
+        assert!(prior_cycle_hosted_a_turn(&prior_cycle_json(
+            "preflight_started",
+            Some("cap-1")
+        )));
+        assert!(prior_cycle_hosted_a_turn(&prior_cycle_json(
+            "committed", None
+        )));
+    }
+
+    #[test]
+    fn a_head_is_skipped_only_when_a_completed_cycle_left_it_unconsumed() {
+        let live = id_set(["alpha", "beta"]);
+
+        // No qualifying prior cycle (re-entrant preflight): nothing is skipped.
+        let fresh = advance_skipped_queue_head_ids(
+            std::collections::HashSet::new(),
+            None,
+            &std::collections::HashSet::new(),
+            &live,
+        );
+        assert!(
+            fresh.is_empty(),
+            "a preflight re-entry must not advance the skip set: {fresh:?}"
+        );
+
+        // A completed cycle that left `alpha` unresolved: skip it.
+        let fresh = advance_skipped_queue_head_ids(
+            std::collections::HashSet::new(),
+            Some("alpha"),
+            &std::collections::HashSet::new(),
+            &live,
+        );
+        assert_eq!(fresh, id_set(["alpha"]));
+
+        // Resolved heads and heads that left the queue are cleared, so a skip
+        // never outlives the condition that justified it.
+        let fresh = advance_skipped_queue_head_ids(
+            id_set(["alpha", "gone"]),
+            Some("beta"),
+            &id_set(["alpha"]),
+            &live,
+        );
+        assert_eq!(fresh, id_set(["beta"]));
+    }
+
+    #[test]
+    fn a_blocked_gate_never_tells_the_operator_to_rerun_a_session_check_that_reports_ok() {
+        // #adretainedcircle: this branch is only reachable when
+        // `session_interruption` returned `None` — session-check reports ok. The
+        // old message said "retry `agent-doc session-check <FILE>`", which is a
+        // closed loop: preflight refuses, session-check succeeds, preflight
+        // refuses. Escaping it took an out-of-band manual repair on 2026-07-26.
+        // The binary can see both halves here, so the refusal must say so and
+        // name a command that can actually clear the intent.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let effects = TestPreflightCycleCompletionEffects {
+            retained_document_write: std::cell::Cell::new(true),
+            settle_satisfies: false,
+            // `None`: session-check is happy. That is the whole trap.
+            session_interruption: None,
+            ..Default::default()
+        };
+
+        let error = enforce_cycle_completion(&doc, &effects)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("reports ok") && error.contains("cannot clear this"),
+            "the refusal must state that session-check already succeeds: {error}"
+        );
+        assert!(
+            error.contains("write --commit") && error.contains("### Re: #"),
+            "the refusal must name a repair that can actually clear the intent: {error}"
+        );
+        assert!(
+            !error.contains("retry `agent-doc session-check"),
+            "must not send the operator back around the loop: {error}"
+        );
     }
 
     #[test]

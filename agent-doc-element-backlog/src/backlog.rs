@@ -2826,6 +2826,50 @@ fn assign_unique_id(text: &str, doc_id: &str, taken: &HashSet<String>) -> String
 /// Starts at width 4 and extends up to the spec §1 ceiling of 8. Counter
 /// cycles within each width before widening — at width 4 that's ~1M values
 /// before we touch width 5, so normal docs never widen in practice.
+/// True when `text` is nothing but a `do [#id]` queue directive.
+///
+/// `#adqueuelinephantomid`: this is the signature of an `agent:queue` line that
+/// landed in the backlog body — the splice shape `#capturebacklogatomic` tracks.
+/// A real backlog item describes work; a bare directive only points at an id
+/// that already has its own row, so there is nothing to mint an id *for*.
+///
+/// Deliberately strict. Any prose beyond the directive means the row carries
+/// its own content (a genuine item that happens to open with a directive, or a
+/// splice that ate a real item's text — both must keep their id rather than be
+/// silently dropped), so only an exact match qualifies.
+fn text_is_bare_queue_directive_reference(text: &str) -> bool {
+    let mut rest = text.trim();
+    // Priority markers are cosmetic and may ride along on an absorbed line.
+    for marker in [
+        "📌",
+        "📍",
+        "🚧",
+        "⏭️",
+        "⏭",
+        ":pushpin:",
+        "**pin**",
+        "**prioritized**",
+    ] {
+        while let Some(stripped) = rest.strip_prefix(marker) {
+            rest = stripped.trim_start();
+        }
+    }
+    let Some(rest) = rest.strip_prefix("do ").or_else(|| rest.strip_prefix("do\t")) else {
+        return false;
+    };
+    let rest = rest.trim();
+    let Some(rest) = rest.strip_prefix("[#") else {
+        return false;
+    };
+    let Some(id) = rest.strip_suffix(']') else {
+        return false;
+    };
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 fn assign_unique_hash(text: &str, doc_id: &str, taken: &HashSet<String>) -> String {
     // Per-width retry budget: small because a single widening step gives
     // another 5 bits of entropy, which is a much bigger win than continuing
@@ -2948,6 +2992,30 @@ pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (St
         // bug (#icebox-empty-item-phantom-id) — so remove it instead. This also
         // self-heals an already-cemented id-only empty item (`- [ ] [#hash]`).
         if item.text.trim().is_empty() && item.continuation.trim().is_empty() {
+            changed = true;
+            return None;
+        }
+        // Same class, different disguise (`#adqueuelinephantomid`). A row whose
+        // whole text is a bare `do [#other]` queue directive is an absorbed
+        // `agent:queue` line, not a work item — it describes nothing and points
+        // at an id that already has its own row. Backfilling it mints a
+        // synthetic id for a pointer, and the `queue` backlog attribute then
+        // mirrors that id back out as a head (`do [#7h6r]`) which NO response
+        // can ever answer: the agent sees and quotes the referenced prompt
+        // (`do [#preflightinbinary]`), so the directive-response materializer
+        // logs `found=false`, the reap strands a retained document-write
+        // intent, and `preflight` refuses every subsequent cycle while
+        // `session-check` reports ok — an unrecoverable circle observed
+        // 2026-07-26 on tasks/agent-doc/agent-doc-bugs2.md (#7h6r, #f5gn).
+        //
+        // Only ever a *mint*-time guard: an item that already carries an id may
+        // be referenced from `agent:done` or a queue head, so dropping it here
+        // would trade one silent loss for another. Repairing cemented rows is
+        // an explicit edit, not a backfill side effect.
+        if item.id.is_empty()
+            && item.continuation.trim().is_empty()
+            && text_is_bare_queue_directive_reference(&item.text)
+        {
             changed = true;
             return None;
         }
@@ -4518,6 +4586,58 @@ mod tests {
             items.is_empty(),
             "empty bullet should be dropped: {items:?}"
         );
+    }
+
+    #[test]
+    fn backfill_drops_an_absorbed_queue_directive_line_instead_of_minting_an_id() {
+        // #adqueuelinephantomid: the wedge of 2026-07-26. An `agent:queue` line
+        // spliced into the backlog body (`#capturebacklogatomic`) got a minted
+        // id, the `queue` attribute mirrored that id back out as a head, and no
+        // response could ever answer it — the agent quotes the *referenced*
+        // prompt, so the directive-response materializer logged `found=false`,
+        // the reap stranded a retained document-write intent, and preflight
+        // refused every cycle while session-check reported ok.
+        let body = "- [ ] [#real] a genuine item\n- do [#preflightinbinary]\n- 📌 do [#other]\n";
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed);
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(
+            items.len(),
+            1,
+            "absorbed queue lines must be dropped, not minted: {items:?}"
+        );
+        assert_eq!(items[0].id, "real");
+        assert!(
+            !new_body.contains("do [#preflightinbinary]"),
+            "a bare directive reference must not survive backfill: {new_body:?}"
+        );
+    }
+
+    #[test]
+    fn backfill_keeps_a_real_item_that_merely_mentions_a_directive() {
+        // The guard is strict on purpose: any prose beyond the directive means
+        // the row carries its own content — a genuine item, or a splice that ate
+        // a real item's text. Either way dropping it would trade one silent loss
+        // for another, so it keeps its id.
+        let body = "- do [#alpha] then rebuild the index and verify the gate\n";
+        let (new_body, changed) = backfill(body, DOC_ID, &ids());
+        assert!(changed, "the row still gains a checkbox and an id");
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(items.len(), 1, "a described item must survive: {items:?}");
+        assert!(!items[0].id.is_empty());
+        assert!(new_body.contains("then rebuild the index"));
+    }
+
+    #[test]
+    fn backfill_leaves_a_cemented_directive_row_alone() {
+        // Mint-time only. A row that already has an id may be referenced from
+        // `agent:done` or a live queue head, so silently dropping it here is a
+        // different silent loss. Repair is an explicit edit.
+        let body = "- [ ] [#f5gn] do [#sessioncheckturnreactive]\n";
+        let (new_body, _) = backfill(body, DOC_ID, &ids());
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(items.len(), 1, "a cemented row must not be dropped");
+        assert_eq!(items[0].id, "f5gn");
     }
 
     #[test]

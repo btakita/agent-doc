@@ -294,7 +294,24 @@ The epoch bumps on membership growth alone — flipping a value must not recompu
 **Verification.** `make check` green (66 tests), `dotnet format --verify-no-changes` clean. Row 4 flipped, table regenerated and committed one repo at a time across the spec and all nine sibling READMEs. lazily-cs CI queued at closeout, recorded rather than waited on.
 
 Next in the plan is the statechart phase — flat state machines and Harel statecharts over a seven-fixture corpus (entry/exit actions, guards, hierarchy, shallow and deep history, parallel regions).
-<!-- agent:boundary:01b20db8 -->
+### Re: flat state machines and Harel statecharts — opus-5
+
+Rows 7 and 8 done and pushed. All seven fixtures replay with an empty ledger — hierarchy with LCA-based exit/entry, guards, transition actions, shallow and deep history, and parallel regions.
+
+**The reactive part is the rejection.** The configuration lives behind a `Source` keyed on the configuration itself, so a reader inside a computation subscribes to *real* transitions. A rejected event — nothing enabled, or every candidate's guard failed — leaves the configuration untouched and invalidates nobody. The runner asserts that directly, because an unhandled event and a self-transition land on **identical active states**; only the acceptance flag and the reader's recompute count separate them.
+
+**Two mutations did not go red, and they mean different things.**
+
+*Fail-open guards left the whole corpus green.* The guard fixture always supplies every guard it names, so the absent-guard path is never exercised — a real gap in the corpus, not in this binding. It now has native tests: no guard map at all, a map naming a *different* guard, and the guard supplied and passing. Fail-open would make a guarded transition indistinguishable from an unguarded one for any caller who forgot the map, which is the failure mode where a door labelled "only open when allowed" opens because nobody said otherwise.
+
+*Dropping the innermost-first `break` also left everything green — including the native test I wrote to catch it.* That one is not a hole in the tests: conflict resolution independently sorts candidates by source depth descending and skips an outer candidate whose exit set overlaps the inner one's, so the rule is enforced twice and no behavioural test can distinguish the two paths. The `break` is an optimization that avoids building candidates that would be discarded, and its comment now says exactly that instead of claiming to be the mechanism. I would rather record a redundancy honestly than leave a comment asserting a guarantee it does not provide.
+
+**Mutations that did go red**, each restored: deep history recording only the region's direct child (fails `history_deep` — it resumes `playing`'s initial instead of the nested leaf), the exit set including the LCA itself (fails the entry/exit action trace, since `a` gets exited when only `a1` should), and fail-open guards once the native tests existed.
+
+**Verification.** `make check` green (72 tests, up from 66), `dotnet format --verify-no-changes` clean. Rows 7 and 8 flipped, table regenerated and committed one repo at a time across the spec and all nine sibling READMEs. lazily-cs CI queued at closeout, recorded rather than waited on.
+
+That puts lazily-cs at 11 of 48 rows. Remaining phases are the queue/topic/work-queue family, the CRDT plane, IPC, reliable sync, temporal, cluster, the projection plane, and packaging.
+<!-- agent:boundary:cc9a9177 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -307,10 +324,11 @@ Next in the plan is the statechart phase — flat state machines and Harel state
 - ~~do [#lzgoerrorretry]~~
 - ~~do [#lzasyncerrfixture]~~
 - ~~do [#lzcscollections]~~
-- ⏭️ do [#lzcsstatechart]
+- Rename CellMap to SourceMap + SlotMap to ComputedMap + ThreadSafeCellMap to ThreadSafeSourceMap + ThreadSafeSlotMap to ThreadSafeComputedMap + AsyncCellMap to AsyncSourceMap + AsyncSlotMap to AsyncComputedMap. Deprecate the old names. Do this across spec + formal first then implementations in subagents. Release + publish spec + formal + all implementations except lazily-cs.
+- ~~do [#lzcsstatechart]~~
 - ⏭️ do [#lzcsqueues]
 - ⏭️ do [#lzcscrdt]
-- do [#lzcsipc]
+- 🚧 do [#lzcsipc]
 - do [#lzcssync]
 - do [#lzcstemporal]
 - do [#lzcscluster]
@@ -321,10 +339,9 @@ Next in the plan is the statechart phase — flat state machines and Harel state
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
 - [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)
-- [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
+- [ ] 🚧 [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
 - [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)
 - [ ] [#lzcstemporal] lazily-cs: TimerCell/IntervalCell/CronCell/DeadlineCell over a logical clock, debounce/throttle/sample/probabilistic-sample, tumbling/sliding/session windows; replay temporal + rateshape + windowing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 40, 41, 45)
 - [ ] [#lzcscluster] lazily-cs: MembershipCell (SWIM + Phi-accrual), LeaseCell/LeaderCell/LockCell/SemaphoreCell/BarrierCell, presence/awareness/ephemeral, circuit breaker/retry/bulkhead/timeout, health/readiness/discovery/registry; replay membership + coordination + presence + resilience + service corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 42-44, 46-47)
@@ -348,4 +365,5 @@ Next in the plan is the statechart phase — flat state machines and Harel state
 - 2026-07-25 [#lzcssemtree] lazily-cs: rows 10-11 — memoized semantic tree (SemTree) and stable-id alignment (manufactured identity); replay collections/semtree_incremental.json and collections/stableid_alignment.json — plan: tasks/software/lazily-cs-parity-plan.md
 - 2026-07-25 [#lzcscollections] lazily-cs: rows 2-4 — ThreadSafeSlotMap + AsyncSlotMap materialization and keyed-map sync (membership propagation, materialize-on-ingest, derived alignment); replay the familysync corpus. Row 1 (ReactiveMap core + CellMap/SlotMap + materialization corpus) shipped 2026-07-25 — plan: tasks/software/lazily-cs-parity-plan.md
 - 2026-07-25 [#lzcsfamilysync] lazily-cs: row 4 — keyed-map sync. Per-key LWW registers, materialize-on-ingest (a keyed op for an entry the local replica never registered must MATERIALIZE it from the op's converged register rather than drop it), epoch bumping, idempotent re-ingest, membership-only-grows, and a derived aggregate over the family; replay conformance/familysync/materialize_on_ingest.json — plan: tasks/software/lazily-cs-parity-plan.md
+- 2026-07-25 [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 <!-- /agent:done -->

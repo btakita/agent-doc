@@ -1143,6 +1143,7 @@ mod tests {
                     text: "live".to_string(),
                     live_editors: 1,
                     delivery_converged: true,
+                    delivery_version: 1,
                 }
             ),
             None

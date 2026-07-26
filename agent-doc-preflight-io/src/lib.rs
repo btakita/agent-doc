@@ -5045,6 +5045,7 @@ mod tests {
                         text: "doc".to_string(),
                         live_editors: 1,
                         delivery_converged: true,
+                        delivery_version: 1,
                     },
                     already_ensured,
                 ),
@@ -5347,6 +5348,7 @@ mod tests {
                     text: "recovered".to_string(),
                     live_editors: 1,
                     delivery_converged: true,
+                    delivery_version: 1,
                 }))
             }
         });

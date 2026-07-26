@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.30
+
+_JetBrains plugin 0.2.297; VS Code extension 0.2.57._
+
+- **CRDT delivery convergence is now subscription-driven instead of controller-polled (`#crdtwaitsubscribe`).** Every relay delivery-fold input publishes its monotonic revision through Lazily 0.51.1's `ThreadSafeQueueCell`; a condition-variable adapter closes the publish-before-park race while retaining only the latest revision. Current-text reads carry that cursor through one long-lived controller await, and both the RPC-hosted and embedded-relay paths share the same convergence/recovery timer implementation. The pre-write current-transition guard uses the same quiet subscription, cutting the delayed-ACK regression from 40 repeated current-text observations to 8 while preserving retained intent, the absolute foreground deadline, ACK replay/force-refresh recovery, and the bounded compatibility fallback when no owning controller can be reached.
+
 ## 0.35.29
 
 _JetBrains plugin 0.2.297; VS Code extension 0.2.56._

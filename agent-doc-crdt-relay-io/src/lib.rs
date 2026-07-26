@@ -703,6 +703,9 @@ pub enum CurrentText {
         text: String,
         live_editors: usize,
         delivery_converged: bool,
+        /// Monotonic cursor for the member/liveness/pending-delivery inputs
+        /// represented by `delivery_converged`.
+        delivery_version: u64,
     },
 }
 
@@ -893,12 +896,13 @@ fn current_text_for_file_with_authority_inner(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_current_text file={} authority=multi_replica len={} hash={} live_editors={} delivery_converged={} process_pid={}",
+            "crdt_current_text file={} authority=multi_replica len={} hash={} live_editors={} delivery_converged={} delivery_version={} process_pid={}",
             file.display(),
             text.len(),
             agent_doc_hash::content_hash(&text),
             live_editors,
             delivery_converged,
+            delivery.version,
             std::process::id(),
         ),
     );
@@ -906,6 +910,7 @@ fn current_text_for_file_with_authority_inner(
         text,
         live_editors,
         delivery_converged,
+        delivery_version: delivery.version,
     })
 }
 
@@ -3166,6 +3171,51 @@ pub fn delivery_convergence_witness_for_file(
     with_existing_hub(file, |hub| hub.delivery_convergence_witness())
 }
 
+/// Await the delivery-convergence cell without polling the per-document hub.
+///
+/// With `after_version`, this is a revision-cursor subscription: it returns as
+/// soon as the cell differs from the caller's observation (or is converged).
+/// Without a cursor, it preserves the older "await convergence until deadline"
+/// contract used by compact/preflight. `None` remains the honest answer when
+/// this process does not host the document hub.
+pub fn await_delivery_convergence_for_file(
+    file: &Path,
+    after_version: Option<u64>,
+    wait: std::time::Duration,
+) -> Result<Option<agent_doc_document_realtime::crdt_relay::DeliveryConvergenceWitness>> {
+    let document_hash = agent_doc_fs::document_state_hash(file)?;
+    let deadline = std::time::Instant::now().checked_add(wait);
+
+    loop {
+        let Some(handle) = hub_handle(&document_hash) else {
+            return Ok(None);
+        };
+        let (witness, subscription) = {
+            let hub = handle.lock();
+            (
+                hub.delivery_convergence_witness(),
+                hub.delivery_convergence_subscription(),
+            )
+        };
+
+        if witness.converged
+            || after_version.is_some_and(|after| witness.version != after)
+            || wait.is_zero()
+        {
+            return Ok(Some(witness));
+        }
+
+        let Some(deadline) = deadline else {
+            subscription.wait_for_change(witness.version, wait);
+            continue;
+        };
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() || !subscription.wait_for_change(witness.version, remaining) {
+            return delivery_convergence_witness_for_file(file);
+        }
+    }
+}
+
 pub fn signal_crdt_replica_event(
     file: &Path,
     reason: CrdtReplicaEventReason,
@@ -3302,6 +3352,82 @@ mod tests {
     use super::*;
     use parking_lot::Mutex;
     use std::io::Write;
+
+    #[test]
+    fn convergence_await_wakes_on_one_cell_transition() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("convergence-subscription.md");
+        std::fs::write(&file, "# subscription\n").unwrap();
+        with_hub_seeded_from_file(&file, |_| ()).unwrap();
+        let pending = with_existing_hub(&file, |hub| {
+            hub.register(42).unwrap();
+            hub.apply_canonical_replace("# subscription\n", "# changed\n")
+                .unwrap();
+            hub.pending_updates(42).unwrap().remove(0)
+        })
+        .unwrap()
+        .unwrap();
+        let before = delivery_convergence_witness_for_file(&file)
+            .unwrap()
+            .expect("seeded hub");
+        assert!(!before.converged);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let waiter_file = file.clone();
+        let waiter = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            await_delivery_convergence_for_file(
+                &waiter_file,
+                Some(before.version),
+                std::time::Duration::from_secs(5),
+            )
+            .unwrap()
+            .expect("hub remains observed")
+        });
+
+        ready_rx.recv().unwrap();
+        with_existing_hub(&file, |hub| {
+            hub.ack_delivery(42, &pending.patch_id, pending.generation)
+                .unwrap()
+        })
+        .unwrap();
+        let after = waiter.join().unwrap();
+
+        assert_ne!(after.version, before.version);
+        assert!(
+            after.converged,
+            "the registration transition converges the empty queue"
+        );
+    }
+
+    #[test]
+    fn convergence_await_is_bounded_when_the_cell_does_not_change() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("convergence-deadline.md");
+        std::fs::write(&file, "# deadline\n").unwrap();
+        with_hub_seeded_from_file(&file, |_| ()).unwrap();
+        with_existing_hub(&file, |hub| {
+            hub.register(43).unwrap();
+            hub.apply_canonical_replace("# deadline\n", "# still pending\n")
+                .unwrap();
+        })
+        .unwrap();
+        let before = delivery_convergence_witness_for_file(&file)
+            .unwrap()
+            .expect("seeded hub");
+        assert!(!before.converged);
+        let started = std::time::Instant::now();
+
+        let after = await_delivery_convergence_for_file(
+            &file,
+            Some(before.version),
+            std::time::Duration::from_millis(40),
+        )
+        .unwrap()
+        .expect("hub remains observed");
+
+        assert_eq!(after, before);
+        assert!(started.elapsed() >= std::time::Duration::from_millis(35));
+    }
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -4503,6 +4629,7 @@ mod tests {
                     text: "live editor text".to_string(),
                     live_editors: 1,
                     delivery_converged: true,
+                    delivery_version: 1,
                 })
             },
         )

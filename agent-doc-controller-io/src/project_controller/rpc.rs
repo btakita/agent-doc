@@ -31,11 +31,10 @@ const CONTROLLER_CRDT_CURRENT_TEXT_TIMEOUT: Duration = Duration::from_secs(120);
 /// legitimately long, so the client's real deadline (not a global hang budget)
 /// governs, chunked into awaits no longer than this.
 const CONTROLLER_VISIBLE_WRITE_AWAIT_MAX: Duration = Duration::from_secs(120);
-/// `#lazily-hot-path` Theme A — ceiling and cadence for a delivery-convergence await.
-/// The cadence is the controller's own in-memory hub poll; it is deliberately much
-/// finer than the filesystem re-reads it replaces, because it costs a map lookup.
+/// `#lazily-hot-path` Theme A — ceiling for one delivery-convergence subscription.
+/// The controller parks on the hub's Lazily convergence cell; there is no polling
+/// cadence and no repeated RPC while the observed revision is unchanged.
 const CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX: Duration = Duration::from_secs(120);
-const CONTROLLER_DELIVERY_CONVERGENCE_POLL: Duration = Duration::from_millis(20);
 const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
 const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
 /// A CP-owned git commit (barrier + stage + commit + boundary reposition) can run
@@ -1046,17 +1045,16 @@ impl RetainedWriteObservations {
         Option<agent_doc_state_backbone::retained_write::ContentObservation>,
         Option<agent_doc_state_backbone::retained_write::ContentObservation>,
     ) {
-        let plane = |hash: Option<String>,
-                     payload_materialized: bool,
-                     intent_delta_materialized: bool| {
-            hash.map(
-                |content_hash| agent_doc_state_backbone::retained_write::ContentObservation {
-                    content_hash,
-                    payload_materialized,
-                    intent_delta_materialized,
-                },
-            )
-        };
+        let plane =
+            |hash: Option<String>, payload_materialized: bool, intent_delta_materialized: bool| {
+                hash.map(|content_hash| {
+                    agent_doc_state_backbone::retained_write::ContentObservation {
+                        content_hash,
+                        payload_materialized,
+                        intent_delta_materialized,
+                    }
+                })
+            };
         (
             plane(
                 self.authority_hash,
@@ -3529,6 +3527,20 @@ pub struct DeliveryConvergenceStatus {
     pub observed: bool,
     pub converged: bool,
     pub version: u64,
+    #[serde(default)]
+    pub recovery_signal_observed: bool,
+    #[serde(default)]
+    pub force_refresh_sent: bool,
+}
+
+/// Replica-wakeup policy carried by one long-lived convergence subscription.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DeliveryConvergenceRecovery {
+    pub live_editors: usize,
+    pub elapsed_ms: u64,
+    pub signal_interval_ms: u64,
+    pub force_refresh_after_ms: u64,
+    pub force_refresh_sent: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3770,12 +3782,123 @@ pub fn await_delivery_convergence_for_file(
     file: &Path,
     wait: std::time::Duration,
 ) -> Result<Option<DeliveryConvergenceStatus>> {
+    request_delivery_convergence_for_file(file, None, wait, None)
+}
+
+/// Await the first delivery-convergence input change after `after_version`.
+///
+/// This is the write-loop subscription path: the revision cursor closes the
+/// gap between its current-text observation and the controller-side park.
+pub fn await_delivery_convergence_change_for_file(
+    file: &Path,
+    after_version: u64,
+    wait: std::time::Duration,
+    recovery: Option<DeliveryConvergenceRecovery>,
+) -> Result<Option<DeliveryConvergenceStatus>> {
+    request_delivery_convergence_for_file(file, Some(after_version), wait, recovery)
+}
+
+/// Await delivery convergence in the process that owns the relay hub.
+///
+/// Both the controller RPC handler and embedded-relay callers use this helper,
+/// so the subscription and ACK-recovery timers have one implementation.
+pub fn await_local_delivery_convergence_change_for_file(
+    file: &Path,
+    after_version: Option<u64>,
+    wait: std::time::Duration,
+    recovery: Option<DeliveryConvergenceRecovery>,
+) -> Result<Option<DeliveryConvergenceStatus>> {
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let wait = wait.min(CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX);
+    let started = Instant::now();
+    let deadline = started.checked_add(wait);
+    let mut recovery_signal_observed = false;
+    let mut force_refresh_sent = recovery.is_some_and(|recovery| recovery.force_refresh_sent);
+    let mut next_signal = recovery
+        .map(|recovery| started + Duration::from_millis(recovery.signal_interval_ms.max(1)));
+    let mut force_refresh_at = recovery.and_then(|recovery| {
+        (!recovery.force_refresh_sent).then(|| {
+            started
+                + Duration::from_millis(
+                    recovery
+                        .force_refresh_after_ms
+                        .saturating_sub(recovery.elapsed_ms),
+                )
+        })
+    });
+
+    loop {
+        let now = Instant::now();
+        let slice_deadline = [deadline, next_signal, force_refresh_at]
+            .into_iter()
+            .flatten()
+            .min();
+        let slice = slice_deadline
+            .map(|deadline| deadline.saturating_duration_since(now))
+            .unwrap_or(wait);
+        let Some(witness) = agent_doc_crdt_relay_io::await_delivery_convergence_for_file(
+            &canonical,
+            after_version,
+            slice,
+        )?
+        else {
+            return Ok(None);
+        };
+        if witness.converged
+            || after_version.is_some_and(|after| witness.version != after)
+            || deadline.is_some_and(|deadline| Instant::now() >= deadline)
+            || recovery.is_none()
+        {
+            return Ok(Some(DeliveryConvergenceStatus {
+                observed: true,
+                converged: witness.converged,
+                version: witness.version,
+                recovery_signal_observed,
+                force_refresh_sent,
+            }));
+        }
+
+        let now = Instant::now();
+        let force_refresh_due =
+            !force_refresh_sent && force_refresh_at.is_some_and(|deadline| now >= deadline);
+        let signal_due = force_refresh_due || next_signal.is_some_and(|deadline| now >= deadline);
+        if signal_due {
+            let recovery = recovery.expect("signal timers require recovery policy");
+            let reason = if force_refresh_due {
+                force_refresh_sent = true;
+                force_refresh_at = None;
+                agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckRecoveryForceRefresh
+            } else {
+                agent_doc_crdt_relay_io::CrdtReplicaEventReason::AckReplay
+            };
+            if agent_doc_crdt_relay_io::signal_crdt_replica_event(
+                &canonical,
+                reason,
+                recovery.live_editors,
+            )
+            .is_ok()
+            {
+                recovery_signal_observed = true;
+            }
+            next_signal = Some(now + Duration::from_millis(recovery.signal_interval_ms.max(1)));
+        }
+    }
+}
+
+fn request_delivery_convergence_for_file(
+    file: &Path,
+    after_version: Option<u64>,
+    wait: std::time::Duration,
+    recovery: Option<DeliveryConvergenceRecovery>,
+) -> Result<Option<DeliveryConvergenceStatus>> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let wait = wait.min(CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX);
     let payload = serde_json::json!({
         "wait_ms": u64::try_from(wait.as_millis()).unwrap_or(u64::MAX),
+        "after_version": after_version,
+        "recovery": recovery,
     });
     let request = ControllerRequest {
         command: "delivery_convergence_await".to_string(),
@@ -5417,10 +5540,15 @@ fn controller_current_text_from_data(
                 .get("delivery_converged")
                 .and_then(|value| value.as_bool())
                 .unwrap_or(false);
+            let delivery_version = data
+                .get("delivery_version")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
             Ok(agent_doc_crdt_relay_io::CurrentText::Current {
                 text,
                 live_editors,
                 delivery_converged,
+                delivery_version,
             })
         }
         Some(status) => anyhow::bail!("unknown controller current text status `{status}`"),
@@ -5445,6 +5573,7 @@ fn controller_current_text_response(
             text,
             live_editors,
             delivery_converged,
+            delivery_version,
         } => serde_json::json!({
             "status": "current",
             "text_len": text.len(),
@@ -5452,6 +5581,7 @@ fn controller_current_text_response(
             "text": text,
             "live_editors": live_editors,
             "delivery_converged": delivery_converged,
+            "delivery_version": delivery_version,
         }),
     }
 }
@@ -5492,16 +5622,18 @@ fn log_controller_current_text_result(
             text,
             live_editors,
             delivery_converged,
+            delivery_version,
         } => agent_doc_ops_log_io::log_op(
             canonical,
             &format!(
-                "controller_crdt_current_text file={} source={} status=current authority=cp_model text_len={} text_hash={} live_editors={} delivery_converged={}",
+                "controller_crdt_current_text file={} source={} status=current authority=cp_model text_len={} text_hash={} live_editors={} delivery_converged={} delivery_version={}",
                 canonical.display(),
                 source,
                 text.len(),
                 agent_doc_hash::content_hash(text),
                 live_editors,
                 delivery_converged,
+                delivery_version,
             ),
         ),
     }
@@ -8219,10 +8351,7 @@ impl OrphanDrainHead {
 /// Bounded by the number of documents with a live actor; an entry is replaced
 /// whenever the revision moves, so it never grows with time.
 fn orphan_drain_head_memo() -> &'static Mutex<
-    std::collections::HashMap<
-        PathBuf,
-        (agent_doc_crdt_relay_io::CurrentRevision, OrphanDrainHead),
-    >,
+    std::collections::HashMap<PathBuf, (agent_doc_crdt_relay_io::CurrentRevision, OrphanDrainHead)>,
 > {
     static MEMO: OnceLock<
         Mutex<
@@ -10281,7 +10410,11 @@ fn request_editor_replica_rebuild_after_restart(project_root: &Path) {
                     registration.path,
                     registration.pid,
                     registration.editor_id,
-                    format!("{err:#}").replace('\n', " | ").chars().take(160).collect::<String>()
+                    format!("{err:#}")
+                        .replace('\n', " | ")
+                        .chars()
+                        .take(160)
+                        .collect::<String>()
                 ),
             ),
         }
@@ -12269,44 +12402,42 @@ pub(crate) fn handle_delivery_convergence_await(
 ) -> Result<DeliveryConvergenceStatus> {
     let file = request_file(&request)?;
     let canonical = file.canonicalize().unwrap_or(file);
-    let wait = request
+    let payload = request
         .diagnostic_payload
         .as_deref()
-        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok())
+        .and_then(|payload| serde_json::from_str::<serde_json::Value>(payload).ok());
+    let wait = payload
+        .as_ref()
         .and_then(|payload| payload.get("wait_ms").and_then(serde_json::Value::as_u64))
         .map(Duration::from_millis)
         .unwrap_or(CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX)
         .min(CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX);
-
-    let started = Instant::now();
-    let mut last = DeliveryConvergenceStatus {
-        observed: false,
-        converged: false,
-        version: 0,
-    };
-    loop {
-        match agent_doc_crdt_relay_io::delivery_convergence_witness_for_file(&canonical)? {
-            Some(witness) => {
-                last = DeliveryConvergenceStatus {
-                    observed: true,
-                    converged: witness.converged,
-                    version: witness.version,
-                };
-                if last.converged {
-                    return Ok(last);
-                }
-            }
-            // No hub here: report that plainly rather than waiting out the deadline
-            // for a document this process cannot see.
-            None => return Ok(last),
-        }
-        if started.elapsed() >= wait {
-            return Ok(last);
-        }
-        std::thread::sleep(
-            CONTROLLER_DELIVERY_CONVERGENCE_POLL.min(wait.saturating_sub(started.elapsed())),
-        );
-    }
+    let after_version = payload.as_ref().and_then(|payload| {
+        payload
+            .get("after_version")
+            .and_then(serde_json::Value::as_u64)
+    });
+    let recovery = payload
+        .as_ref()
+        .and_then(|payload| payload.get("recovery"))
+        .cloned()
+        .filter(|value| !value.is_null())
+        .and_then(|value| serde_json::from_value::<DeliveryConvergenceRecovery>(value).ok());
+    Ok(
+        await_local_delivery_convergence_change_for_file(
+            &canonical,
+            after_version,
+            wait,
+            recovery,
+        )?
+        .unwrap_or(DeliveryConvergenceStatus {
+            observed: false,
+            converged: false,
+            version: 0,
+            recovery_signal_observed: false,
+            force_refresh_sent: recovery.is_some_and(|recovery| recovery.force_refresh_sent),
+        }),
+    )
 }
 
 pub(crate) fn handle_visible_write_materialized_carry_forward_observed(
@@ -14169,8 +14300,9 @@ pub(crate) fn handle_focus_document_pane(
             not_alive_reason,
         } => (pane_id.to_string(), focused_reason, not_alive_reason),
         FocusPaneCandidateDecision::Reject { reason, pane_id } => {
-            let pane_owner_document = pane_id
-                .and_then(|pane| active_pane_process_owner_document(&tmux, pane, &bootstrap.project_root));
+            let pane_owner_document = pane_id.and_then(|pane| {
+                active_pane_process_owner_document(&tmux, pane, &bootstrap.project_root)
+            });
             if let Some(pane) = focus_reject_rescued_by_live_pane_owner(
                 reason,
                 pane_id,
@@ -15756,8 +15888,8 @@ mod tests {
     /// converges, while an old plugin in another IDE keeps the compatibility push.
     #[test]
     fn restart_fan_out_skips_peers_that_pull_their_own_missing_replicas() {
-        let registration = |capabilities: Vec<String>| {
-            agent_doc_reliable_sync_io::liveness::EditorRegistration {
+        let registration =
+            |capabilities: Vec<String>| agent_doc_reliable_sync_io::liveness::EditorRegistration {
                 document_hash: "doc".into(),
                 pid: 42,
                 path: "/proj/plan.md".into(),
@@ -15766,15 +15898,16 @@ mod tests {
                 editor_version: "0.2.283".into(),
                 capabilities,
                 timestamp_ms: 1,
-            }
-        };
+            };
 
         assert!(
             !peer_repairs_itself(&registration(vec![])),
             "a plugin predating the pull still needs the compatibility push"
         );
         assert!(
-            !peer_repairs_itself(&registration(vec!["operator_text_authority_v1".to_string()])),
+            !peer_repairs_itself(&registration(vec![
+                "operator_text_authority_v1".to_string()
+            ])),
             "an unrelated capability must not retire the push"
         );
         assert!(
@@ -16316,7 +16449,12 @@ mod tests {
         );
         // No live owner proof at all (bare shell / dead) also stands.
         assert_eq!(
-            focus_reject_rescued_by_live_pane_owner("actor_not_focusable", Some("%59"), None, "doc-bugs2"),
+            focus_reject_rescued_by_live_pane_owner(
+                "actor_not_focusable",
+                Some("%59"),
+                None,
+                "doc-bugs2"
+            ),
             None,
         );
         // Only `actor_not_focusable` is rescuable; other rejects are untouched.

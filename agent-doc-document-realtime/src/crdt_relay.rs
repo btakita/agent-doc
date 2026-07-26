@@ -38,9 +38,14 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow};
-use lazily::{Computed, EphemeralMapCore, Source, ThreadSafeSourceMap, ThreadSafeContext};
+use lazily::{
+    Computed, EphemeralMapCore, Source, ThreadSafeContext, ThreadSafeQueueCell, ThreadSafeSourceMap,
+};
+use parking_lot::{Condvar, Mutex};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -254,6 +259,14 @@ pub struct RelayHub {
     /// rather than a clock. The fold itself ([`Self::delivery_converged`]) stays
     /// authoritative; the epoch only says when re-folding could produce a new answer.
     delivery_epoch: Source<u64>,
+    /// Race-free blocking subscription for changes to [`Self::delivery_epoch`].
+    ///
+    /// Lazily's thread-safe queue supplies the reactive notification cell. The
+    /// one-element queue always retains the newest published epoch, while the
+    /// condition variable parks non-reactive RPC threads without polling the
+    /// graph. Publication and the pre-wait observation share one gate, so a
+    /// transition cannot land between "unchanged" and sleeping.
+    delivery_subscription: DeliveryConvergenceSubscription,
 }
 
 /// The reactive core shared by every [`RelayHub`] constructor. A named struct rather
@@ -264,6 +277,7 @@ struct LivenessCore {
     membership_epoch: Source<u64>,
     live_editor_count: Computed<usize>,
     delivery_epoch: Source<u64>,
+    delivery_subscription: DeliveryConvergenceSubscription,
 }
 
 /// `#lazily-hot-path` Theme A — a point-in-time reading of delivery convergence
@@ -276,6 +290,73 @@ struct LivenessCore {
 pub struct DeliveryConvergenceWitness {
     pub version: u64,
     pub converged: bool,
+}
+
+/// A cloneable, race-free subscription to delivery-convergence input changes.
+///
+/// `ThreadSafeQueueCell` is intentionally bounded to one element: subscribers
+/// need the newest invalidation version, not a replay of every intermediate
+/// member/queue write. The queue is the reactive notification source; the
+/// condition variable is only the blocking adapter for controller RPC threads.
+#[derive(Clone)]
+pub struct DeliveryConvergenceSubscription {
+    ctx: ThreadSafeContext,
+    notifications: ThreadSafeQueueCell<u64>,
+    wait_gate: Arc<(Mutex<()>, Condvar)>,
+}
+
+impl DeliveryConvergenceSubscription {
+    fn new(ctx: &ThreadSafeContext) -> Self {
+        Self {
+            ctx: ctx.clone(),
+            notifications: ThreadSafeQueueCell::with_capacity(ctx, 1),
+            wait_gate: Arc::new((Mutex::new(()), Condvar::new())),
+        }
+    }
+
+    fn publish(&self, version: u64) {
+        let (gate, changed) = &*self.wait_gate;
+        let _guard = gate.lock();
+
+        // Keep one coalesced latest-version notification. All queue operations
+        // run under the same gate as wait registration, while lazily itself
+        // releases queue storage before invalidating the ThreadSafeContext.
+        if self.notifications.try_push(&self.ctx, version).is_err() {
+            let _ = self.notifications.try_pop(&self.ctx);
+            self.notifications
+                .try_push(&self.ctx, version)
+                .expect("coalesced convergence queue must accept its replacement");
+        }
+        changed.notify_all();
+    }
+
+    /// Block until the published convergence version differs from `after`, or
+    /// until `timeout` elapses. Returns `true` for a changed version.
+    pub fn wait_for_change(&self, after: u64, timeout: Duration) -> bool {
+        let deadline = Instant::now().checked_add(timeout);
+        let (gate, changed) = &*self.wait_gate;
+        let mut guard = gate.lock();
+
+        loop {
+            if self
+                .notifications
+                .head(&self.ctx)
+                .is_some_and(|version| version != after)
+            {
+                return true;
+            }
+            let Some(deadline) = deadline else {
+                changed.wait(&mut guard);
+                continue;
+            };
+            if changed.wait_until(&mut guard, deadline).timed_out() {
+                return self
+                    .notifications
+                    .head(&self.ctx)
+                    .is_some_and(|version| version != after);
+            }
+        }
+    }
 }
 
 impl RelayHub {
@@ -329,6 +410,7 @@ impl RelayHub {
         // Cells materialize on `register`; the factory value (`true` = live-on-register)
         // only applies before the explicit `set` in `set_live`.
         let liveness: ThreadSafeSourceMap<u64, bool> = ThreadSafeSourceMap::new(&ctx);
+        let delivery_subscription = DeliveryConvergenceSubscription::new(&ctx);
         let live_editor_count = {
             let liveness = liveness.clone();
             ctx.computed(move |ctx| {
@@ -348,6 +430,7 @@ impl RelayHub {
             membership_epoch,
             live_editor_count,
             delivery_epoch,
+            delivery_subscription,
         }
     }
 
@@ -370,7 +453,9 @@ impl RelayHub {
     /// the mutation sites themselves rather than inferred by a caller.
     fn bump_delivery_epoch(&self) {
         let epoch = self.ctx.get(&self.delivery_epoch);
-        self.ctx.set(&self.delivery_epoch, epoch.wrapping_add(1));
+        let next = epoch.wrapping_add(1);
+        self.ctx.set(&self.delivery_epoch, next);
+        self.delivery_subscription.publish(next);
     }
 
     /// Bump the membership epoch so `live_editor_count` recomputes and counts a
@@ -400,6 +485,7 @@ impl RelayHub {
             membership_epoch,
             live_editor_count,
             delivery_epoch,
+            delivery_subscription,
         } = Self::build_liveness_core();
         Self {
             canonical: ReplicaState::new(canonical_id),
@@ -415,6 +501,7 @@ impl RelayHub {
             membership_epoch,
             live_editor_count,
             delivery_epoch,
+            delivery_subscription,
         }
     }
 
@@ -1066,6 +1153,14 @@ impl RelayHub {
             version: self.ctx.get(&self.delivery_epoch),
             converged: self.delivery_converged(),
         }
+    }
+
+    /// Clone the blocking adapter for the delivery-convergence cell.
+    ///
+    /// The clone is independent of the hub mutex, so a waiter never holds the
+    /// hub while the editor/controller path publishes the transition it needs.
+    pub fn delivery_convergence_subscription(&self) -> DeliveryConvergenceSubscription {
+        self.delivery_subscription.clone()
     }
 
     /// True when every currently-live editor has ACKed all queued fan-out updates.
@@ -1790,6 +1885,60 @@ mod tests {
         assert_eq!(first, second);
         assert_eq!(first, third);
         assert!(first.converged, "a registered member with no pending work");
+    }
+
+    #[test]
+    fn delivery_convergence_subscription_coalesces_to_the_latest_epoch() {
+        let hub = RelayHub::new(1);
+        let subscription = hub.delivery_convergence_subscription();
+        let before = hub.delivery_convergence_witness().version;
+
+        hub.bump_delivery_epoch();
+        hub.bump_delivery_epoch();
+        let after = hub.delivery_convergence_witness().version;
+
+        assert_ne!(after, before);
+        assert!(
+            subscription.wait_for_change(before, Duration::ZERO),
+            "the coalesced ThreadSafeQueue notification must retain the newest epoch"
+        );
+        assert!(
+            !subscription.wait_for_change(after, Duration::ZERO),
+            "an unchanged cursor must not manufacture a notification"
+        );
+    }
+
+    #[test]
+    fn delivery_convergence_subscription_cannot_miss_publish_before_wait() {
+        let hub = RelayHub::new(1);
+        let subscription = hub.delivery_convergence_subscription();
+        let before = hub.delivery_convergence_witness().version;
+        hub.bump_delivery_epoch();
+
+        assert!(
+            subscription.wait_for_change(before, Duration::from_secs(1)),
+            "the retained queue head closes the observe-then-park race"
+        );
+    }
+
+    #[test]
+    fn delivery_convergence_subscription_wakes_a_parked_waiter() {
+        let hub = RelayHub::new(1);
+        let subscription = hub.delivery_convergence_subscription();
+        let before = hub.delivery_convergence_witness().version;
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            subscription.wait_for_change(before, Duration::from_secs(1))
+        });
+
+        ready_rx.recv().unwrap();
+        hub.bump_delivery_epoch();
+
+        assert!(
+            waiter.join().unwrap(),
+            "the convergence-cell publish must wake the waiter"
+        );
     }
 
     /// The version advances at every write that can change the fold's answer, so a

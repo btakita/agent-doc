@@ -1904,6 +1904,7 @@ mod controller_commit_scope_tests {
             text: "authoritative compacted text".to_string(),
             live_editors: 1,
             delivery_converged: true,
+            delivery_version: 1,
         };
         let content = controller_local_relay_text(current);
 

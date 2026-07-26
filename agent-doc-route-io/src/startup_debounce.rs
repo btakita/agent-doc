@@ -194,12 +194,14 @@ mod tests {
                         text: "prompt".to_owned(),
                         live_editors: 1,
                         delivery_converged: false,
+                        delivery_version: 1,
                     }))
                 } else {
                     Ok(Some(CurrentText::Current {
                         text: "prompt".to_owned(),
                         live_editors: 1,
                         delivery_converged: true,
+                        delivery_version: 2,
                     }))
                 }
             },
@@ -246,12 +248,14 @@ mod tests {
                         text: format!("prompt {n}"),
                         live_editors: 1,
                         delivery_converged: false,
+                        delivery_version: n as u64,
                     }))
                 } else {
                     Ok(Some(CurrentText::Current {
                         text: "prompt final".to_owned(),
                         live_editors: 1,
                         delivery_converged: true,
+                        delivery_version: n as u64,
                     }))
                 }
             },
@@ -284,6 +288,7 @@ mod tests {
                     text: "frozen".to_owned(),
                     live_editors: 1,
                     delivery_converged: false,
+                    delivery_version: 1,
                 }))
             },
             |_file, _reason, _targets| Ok(()),
@@ -321,6 +326,7 @@ mod tests {
                     text: "prompt".to_owned(),
                     live_editors: 2,
                     delivery_converged: false,
+                    delivery_version: 1,
                 }))
             },
             |_file, reason, targets| {

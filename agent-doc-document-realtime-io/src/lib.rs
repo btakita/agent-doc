@@ -521,9 +521,60 @@ enum AckRecoveryWait {
     ForegroundDeadline,
 }
 
+struct DeliveryChangeWait<'a> {
+    file: &'a Path,
+    source: &'a str,
+    live_editors: usize,
+    delivery_version: u64,
+    total_remaining_ms: u64,
+    fallback_backoff_ms: u64,
+    signal_immediately: bool,
+}
+
+fn await_delivery_change(
+    file: &Path,
+    delivery_version: u64,
+    wait: std::time::Duration,
+    recovery: Option<agent_doc_controller_io::project_controller::DeliveryConvergenceRecovery>,
+) -> Result<Option<agent_doc_controller_io::project_controller::DeliveryConvergenceStatus>> {
+    if agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(file) {
+        agent_doc_controller_io::project_controller::
+            await_local_delivery_convergence_change_for_file(
+                file,
+                Some(delivery_version),
+                wait,
+                recovery,
+            )
+    } else {
+        agent_doc_controller_io::project_controller::await_delivery_convergence_change_for_file(
+            file,
+            delivery_version,
+            wait,
+            recovery,
+        )
+    }
+}
+
 impl AckRecoveryState {
     fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    fn elapsed_ms(&self) -> u64 {
+        self.started
+            .map(|started| started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
+            .unwrap_or(0)
+    }
+
+    fn observe_subscription_status(
+        &mut self,
+        status: &agent_doc_controller_io::project_controller::DeliveryConvergenceStatus,
+    ) {
+        self.recovery_signal_observed |= status.recovery_signal_observed;
+        self.force_refresh_sent |= status.force_refresh_sent;
+        if status.recovery_signal_observed {
+            self.last_signal = Some(std::time::Instant::now());
+        }
     }
 
     fn wait(&mut self, file: &Path, source: &str, live_editors: usize) -> Result<AckRecoveryWait> {
@@ -575,6 +626,63 @@ impl AckRecoveryState {
         }
         if elapsed_ms >= CRDT_ACK_RECOVERY_TIMEOUT_MS {
             return Ok(AckRecoveryWait::ForegroundDeadline);
+        }
+        Ok(AckRecoveryWait::Continue)
+    }
+
+    fn wait_for_delivery_change(
+        &mut self,
+        request: DeliveryChangeWait<'_>,
+    ) -> Result<AckRecoveryWait> {
+        let DeliveryChangeWait {
+            file,
+            source,
+            live_editors,
+            delivery_version,
+            total_remaining_ms,
+            fallback_backoff_ms,
+            signal_immediately,
+        } = request;
+        if signal_immediately {
+            if self.wait(file, source, live_editors)? == AckRecoveryWait::ForegroundDeadline {
+                return Ok(AckRecoveryWait::ForegroundDeadline);
+            }
+        } else {
+            self.started.get_or_insert_with(std::time::Instant::now);
+            if self.elapsed_ms() >= CRDT_ACK_RECOVERY_TIMEOUT_MS {
+                return Ok(AckRecoveryWait::ForegroundDeadline);
+            }
+        }
+
+        let elapsed_ms = self.elapsed_ms();
+        let recovery_remaining_ms = CRDT_ACK_RECOVERY_TIMEOUT_MS.saturating_sub(elapsed_ms);
+        let wait_ms = recovery_remaining_ms.min(total_remaining_ms);
+        if wait_ms == 0 {
+            return Ok(AckRecoveryWait::ForegroundDeadline);
+        }
+        let recovery = agent_doc_controller_io::project_controller::DeliveryConvergenceRecovery {
+            live_editors,
+            elapsed_ms,
+            signal_interval_ms: CRDT_ACK_REPLAY_SIGNAL_INTERVAL_MS,
+            force_refresh_after_ms: CRDT_ACK_FORCE_REFRESH_AFTER_MS,
+            force_refresh_sent: self.force_refresh_sent,
+        };
+        let status = await_delivery_change(
+            file,
+            delivery_version,
+            std::time::Duration::from_millis(wait_ms),
+            Some(recovery),
+        );
+        match status {
+            Ok(Some(status)) => self.observe_subscription_status(&status),
+            Ok(None) | Err(_) => {
+                // Preserve the existing fail-closed fallback when the owning
+                // controller disappears: the accepted intent remains durable
+                // and the caller's absolute deadline still governs.
+                std::thread::sleep(std::time::Duration::from_millis(
+                    fallback_backoff_ms.min(wait_ms),
+                ));
+            }
         }
         Ok(AckRecoveryWait::Continue)
     }
@@ -1101,10 +1209,11 @@ fn request_native_editor_save_for_canonical_projection(
             if matches!(
                 current,
                 agent_doc_crdt_relay_io::CurrentText::Current {
-                    ref text,
-                    live_editors,
-                    delivery_converged: true,
-                } if live_editors > 0 && text == canonical
+                        ref text,
+                        live_editors,
+                        delivery_converged: true,
+                        ..
+                    } if live_editors > 0 && text == canonical
             ) {
                 agent_doc_ops_log_io::log_op(
                     path,
@@ -1157,6 +1266,7 @@ pub fn settle_live_editor_projection_through_authority(path: &Path, source: &str
         text,
         live_editors,
         delivery_converged: true,
+        ..
     } = observe_live_editor_authority_after_model_ensure(path, source)?
     else {
         return Ok(false);
@@ -2123,6 +2233,7 @@ pub fn apply_canonical_replace_if_attached(
             )));
         }
 
+        let mut delivery_wait_cursor: Option<(u64, usize)> = None;
         let observed = match observe_live_editor_authority_after_model_ensure(file, source) {
             Ok(current) => Some(current),
             Err(err) if transient_convergence_backpressure_error(&err) => {
@@ -2148,7 +2259,9 @@ pub fn apply_canonical_replace_if_attached(
                     text: relay_text,
                     live_editors,
                     delivery_converged,
+                    delivery_version,
                 } => {
+                    delivery_wait_cursor = Some((delivery_version, live_editors));
                     if let Some(applied_target) = pending_target.as_ref() {
                         if delivery_converged && relay_text == *applied_target {
                             // A vanished replica makes the relay quorum
@@ -2199,8 +2312,16 @@ pub fn apply_canonical_replace_if_attached(
                             // this poll applies backpressure until that frontier is
                             // visible and ACKed.
                             wait_state = CrdtConvergenceState::DeliveryAckPending;
-                            if ack_recovery.wait(file, source, live_editors)?
-                                == AckRecoveryWait::ForegroundDeadline
+                            if ack_recovery.wait_for_delivery_change(DeliveryChangeWait {
+                                file,
+                                source,
+                                live_editors,
+                                delivery_version,
+                                total_remaining_ms: CRDT_WRITE_CONVERGENCE_TIMEOUT_MS
+                                    .saturating_sub(elapsed_ms),
+                                fallback_backoff_ms: backoff_ms,
+                                signal_immediately: true,
+                            })? == AckRecoveryWait::ForegroundDeadline
                             {
                                 let relay_write = pending_write
                                     .take()
@@ -2272,6 +2393,7 @@ pub fn apply_canonical_replace_if_attached(
                                     }
                                 }
                             }
+                            continue;
                         } else if delivery_converged {
                             // The editor may publish queue consumption, a new prompt,
                             // or other operator-owned bytes while ACKing our retained
@@ -2451,8 +2573,16 @@ pub fn apply_canonical_replace_if_attached(
                                 source,
                             )?;
                             wait_state = CrdtConvergenceState::DeliveryAckPending;
-                            if ack_recovery.wait(file, source, live_editors)?
-                                == AckRecoveryWait::ForegroundDeadline
+                            if ack_recovery.wait_for_delivery_change(DeliveryChangeWait {
+                                file,
+                                source,
+                                live_editors,
+                                delivery_version,
+                                total_remaining_ms: CRDT_WRITE_CONVERGENCE_TIMEOUT_MS
+                                    .saturating_sub(elapsed_ms),
+                                fallback_backoff_ms: backoff_ms,
+                                signal_immediately: true,
+                            })? == AckRecoveryWait::ForegroundDeadline
                             {
                                 reconcile_stalled_replicas(file, source)?;
                                 let mut relay_write =
@@ -2470,16 +2600,6 @@ pub fn apply_canonical_replace_if_attached(
                                 );
                                 return Ok(Some(relay_write));
                             }
-                            let elapsed_ms =
-                                started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-                            let remaining_ms =
-                                CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(elapsed_ms);
-                            let sleep_for =
-                                std::time::Duration::from_millis(backoff_ms.min(remaining_ms));
-                            if !sleep_for.is_zero() {
-                                std::thread::sleep(sleep_for);
-                            }
-                            backoff_ms = CRDT_WRITE_BACKOFF_POLICY.next_ms(backoff_ms, false);
                             continue;
                         }
 
@@ -2646,6 +2766,20 @@ pub fn apply_canonical_replace_if_attached(
         }
         let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
         let remaining_ms = CRDT_WRITE_CONVERGENCE_TIMEOUT_MS.saturating_sub(elapsed_ms);
+        if wait_state == CrdtConvergenceState::DeliveryAckPending
+            && let Some((delivery_version, live_editors)) = delivery_wait_cursor
+        {
+            let _ = ack_recovery.wait_for_delivery_change(DeliveryChangeWait {
+                file,
+                source,
+                live_editors,
+                delivery_version,
+                total_remaining_ms: remaining_ms,
+                fallback_backoff_ms: backoff_ms,
+                signal_immediately: false,
+            })?;
+            continue;
+        }
         let sleep_for = std::time::Duration::from_millis(backoff_ms.min(remaining_ms));
         if !sleep_for.is_zero() {
             std::thread::sleep(sleep_for);
@@ -4621,25 +4755,25 @@ pub fn guard_visible_write_current_transition_with_budget(
             query_live_editor_authority(file, source),
             Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
         );
-        let (ready, state) = if missing_model {
-            (true, "missing_replica_defer")
+        let (ready, state, delivery_version) = if missing_model {
+            (true, "missing_replica_defer", None)
         } else {
             match query_live_editor_authority_after_model_ensure(file, source) {
-                Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => (true, "detached"),
+                Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => (true, "detached", None),
                 Ok(agent_doc_crdt_relay_io::CurrentText::Current {
                     delivery_converged: true,
                     ..
-                }) => (true, "lazily_current"),
-                Ok(agent_doc_crdt_relay_io::CurrentText::Current { .. }) => {
-                    (false, "delivery_pending")
-                }
+                }) => (true, "lazily_current", None),
+                Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                    delivery_version, ..
+                }) => (false, "delivery_pending", Some(delivery_version)),
                 Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
-                    (false, "missing_replica")
+                    (false, "missing_replica", None)
                 }
                 Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => {
-                    (false, "current_pending")
+                    (false, "current_pending", None)
                 }
-                Err(_) => (false, "authority_unavailable"),
+                Err(_) => (false, "authority_unavailable", None),
             }
         };
         if ready {
@@ -4686,6 +4820,18 @@ pub fn guard_visible_write_current_transition_with_budget(
                 timeout_ms,
                 recovery
             );
+        }
+        if let Some(delivery_version) = delivery_version {
+            let remaining =
+                std::time::Duration::from_millis(timeout_ms).saturating_sub(start.elapsed());
+            match await_delivery_change(file, delivery_version, remaining, None) {
+                Ok(Some(_)) => continue,
+                Ok(None) | Err(_) => {
+                    // An older or unavailable controller cannot host the
+                    // subscription. Preserve the bounded compatibility
+                    // fallback without weakening the write deadline.
+                }
+            }
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
@@ -4752,6 +4898,7 @@ pub fn guard_visible_write_reconcile_with_target(
             text: relay_text,
             live_editors,
             delivery_converged,
+            ..
         }) => {
             let relay_hash = agent_doc_hash::content_hash(&relay_text);
             if live_editors == 0 {
@@ -4965,6 +5112,7 @@ pub fn durable_buffer_state(file: &std::path::Path, disk: &str) -> Option<Buffer
             text,
             live_editors: 0,
             delivery_converged,
+            ..
         })) if text != disk => {
             agent_doc_ops_log_io::log_op(
                 file,
@@ -5539,6 +5687,7 @@ fn try_resolve_current_doc_with_disk_inner(
             text,
             live_editors,
             delivery_converged,
+            ..
         } => {
             if live_editors == 0 {
                 // #live-editor-reactive (S2b/S3): route the zero-live-replica decision
@@ -5738,6 +5887,7 @@ fn resolve_editor_unavailable_disk_read_fallback(
                 text,
                 live_editors,
                 delivery_converged,
+                ..
             }) => {
                 agent_doc_ops_log_io::log_op(
                     file,
@@ -5842,6 +5992,7 @@ fn resolve_editor_unavailable_disk_read_fallback(
                     text,
                     live_editors,
                     delivery_converged,
+                    ..
                 }) => {
                     agent_doc_ops_log_io::log_op(
                         file,
@@ -7081,6 +7232,15 @@ mod tests {
                 && log.contains("compact_crdt_relay_acknowledged")
                 && !log.contains("compact_crdt_ack_recovery_signal"),
             "compact should converge the retained target through the cumulative Lazily ACK:\n{log}"
+        );
+        let current_text_observations = log
+            .lines()
+            .filter(|line| line.contains("crdt_current_text file="))
+            .count();
+        assert!(
+            current_text_observations <= 10,
+            "one delayed ACK must not trigger a current-text polling storm \
+             (observations={current_text_observations}):\n{log}"
         );
     }
 

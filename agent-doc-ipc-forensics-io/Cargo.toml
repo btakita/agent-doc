@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-ipc-forensics-io"
-version = "0.35.29"
+version = "0.35.30"
 edition = "2024"
 description = "IPC full-prompt forensic capture sidecar I/O for agent-doc"
 license = "MIT"
@@ -11,7 +11,7 @@ publish = false
 name = "agent_doc_ipc_forensics_io"
 
 [dependencies]
-agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.29" }
+agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.30" }
 
 [dev-dependencies]
 tempfile = "3"

@@ -13,7 +13,7 @@ families already receive a tracking view and **explicitly discard it**:
 |---|---|---|---|
 | sync | `src/cell_family.rs` | `Fn(&Compute) -> V` | `move \|_ctx\| factory(&k)` — `:305` |
 | thread-safe | `src/thread_safe_reactive_family.rs` | `Fn(&ThreadSafeContext) -> V` | `move \|_ctx\| factory(&k)` — `:203` |
-| async | `src/async_reactive_family.rs` | `Arc<dyn Fn() -> V>` — **nullary** | nothing to discard |
+| async | `src/async_reactive_family.rs` | `Arc<dyn Fn() -> V>` — **nullary** | `move \|_actx\| …` — one layer lower, in the handle impl (see "Async — corrected") |
 
 So a derived entry's factory cannot read another reactive and have the read
 register a dependency edge. The fix is to stop dropping the parameter — but the
@@ -118,16 +118,36 @@ a factory or a tracking view.
   thread-safe. Published API — every caller updates.
 - Nothing else. The core extraction is internal; ordering additions are new API.
 
-### What async does *not* get
+### Async — corrected
 
-Async still cannot take a ctx-passing factory: `AsyncMapHandle::materialize`
-accepts `Arc<dyn Fn() -> V>` with no parameter at all. Giving it one means
-threading a value-threaded compute view through `AsyncContext` — the same
-ambient-removal the v2 cell kernel already did for the sync kernel. Async is the
-last holdout. That is **Phase B**, and it is worth doing on its own merits: it
-is what makes async derived entries track dependencies at all.
+An earlier draft of this plan claimed async "has nothing to discard" and that
+fixing it required giving `AsyncContext` a compute view it lacked. **Both are
+wrong.** The discard is real; it just sits one layer lower:
 
-Async still gains the ordering/atomic-move core in Phase A.
+| layer | code | what happens |
+|---|---|---|
+| map | `Arc::new(move \|\| factory(&k))` | nullary closure — nothing to discard *here* |
+| trait | `AsyncMapHandle::materialize(ctx, compute: Arc<dyn Fn() -> V + Send + Sync>)` | **the severing point** — the nullary type stops any view reaching the map |
+| handle impl | `ctx.computed_async(move \|_actx\| { let v = compute(); async move { v } })` | **the view exists and is discarded here** |
+
+`AsyncContext::computed_async` takes `F: Fn(AsyncComputeContext) -> Fut`
+(`async_context.rs:413`), and `AsyncComputeContext` (`:597`) is a genuine
+value-threaded tracking view: it carries `_node_id: SlotId`, a
+`dependencies: Arc<Mutex<HashSet<SlotId>>>` edge set, a generation stamp for
+disposal safety, and a tracked `get<H: Read<Self>>`.
+
+So async is the **same defect with the same fix shape** as sync and thread-safe.
+Phase B is not ambient-removal — it is widening `AsyncMapHandle::materialize`'s
+compute type from `Arc<dyn Fn() -> V>` to a view-taking form and no longer
+binding `_actx`.
+
+One genuine async wrinkle remains: the wrapper builds a *ready* future
+(`let v = compute(); async move { v }`), so a derived entry's compute is
+synchronous inside an async shell. Given the view it can **track**; it still
+cannot **await**. Those are separable concerns and only the first is needed for
+dependency edges.
+
+Async also gains the ordering/atomic-move core in Phase A.
 
 ### Verification
 
@@ -221,7 +241,7 @@ blocker is only the *read* surface (eventual transparency, `Task`/`Future`/
 | js | duck typing; `ComputeOps` already satisfied by all three contexts | no — `computedAsync`, dual `get`/`getAsync`, `resolve(): Promise` |
 | py | `ctx: Any` already type-erases the projection | no — `async def resolve` |
 | go | closure fields (already proven in-repo) or one extra type param | no — async returns `(V, bool)` |
-| rs | `SyncReactiveGraph::Compute<'a>` GAT — but see the `Send + Sync` mismatch above | no — async has no compute view |
+| rs | `SyncReactiveGraph::Compute<'a>` GAT — but see the `Send + Sync` mismatch above | not via the GAT — `AsyncReactiveGraph` is a separate trait with `Option<T>` reads; but async *does* have a compute view (`AsyncComputeContext`), so the factory fix applies to all three |
 | kt | extra type param + self-bound; `ComputeOps` is hard-bound to `Context` | no — `suspend` colours construction, read, *and* disposal |
 
 **zig already contains the proof.** `Engine(comptime Model: type)`

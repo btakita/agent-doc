@@ -213,6 +213,26 @@ where
     })
 }
 
+
+/// Report a context read that is slow enough to matter (`#sessioncheckprofile`).
+///
+/// The slots behind these accessors are memoized, so each cost is paid once per
+/// context — but "once" is still the whole cost when a sweep touches a dozen of
+/// them for the first time. Attribution has to happen here, because a caller
+/// only ever sees a hit or a miss, never which value it paid for.
+fn timed_read<T>(label: &'static str, read: impl FnOnce() -> T) -> T {
+    let started = std::time::Instant::now();
+    let out = read();
+    let elapsed = started.elapsed();
+    if elapsed >= std::time::Duration::from_millis(25) {
+        eprintln!(
+            "[perf] run_context.read label={label} elapsed_ms={}",
+            elapsed.as_millis()
+        );
+    }
+    out
+}
+
 fn components_slot<C>(ctx: &C) -> ComponentsSlot<C::Schema>
 where
     C: TypedFactoryContext + ?Sized,
@@ -466,31 +486,31 @@ impl<Schema: 'static> AgentDocContextExt for TypedContext<Schema> {
     }
 
     fn canonical_path(&self) -> PathBuf {
-        self.get(canonical_path_slot(self))
+        timed_read("canonical_path", || self.get(canonical_path_slot(self)))
     }
 
     fn project_root(&self) -> Option<PathBuf> {
-        self.get(project_root_slot(self))
+        timed_read("project_root", || self.get(project_root_slot(self)))
     }
 
     fn config_path(&self) -> Option<PathBuf> {
-        self.get(config_path_slot(self))
+        timed_read("config_path", || self.get(config_path_slot(self)))
     }
 
     fn project_config(&self) -> Arc<ProjectConfig> {
-        self.get(project_config_slot(self))
+        timed_read("project_config", || self.get(project_config_slot(self)))
     }
 
     fn snapshot_path(&self) -> Option<PathBuf> {
-        self.get(snapshot_path_slot(self))
+        timed_read("snapshot_path", || self.get(snapshot_path_slot(self)))
     }
 
     fn doc_relative(&self) -> Option<String> {
-        self.get(doc_relative_slot(self))
+        timed_read("doc_relative", || self.get(doc_relative_slot(self)))
     }
 
     fn ssh_context(&self) -> Arc<ResolvedSshContext> {
-        self.get(ssh_context_slot(self))
+        timed_read("ssh_context", || self.get(ssh_context_slot(self)))
     }
 
     fn doc_content(&self) -> String {
@@ -517,43 +537,43 @@ impl<Schema: 'static> AgentDocContextExt for TypedContext<Schema> {
     }
 
     fn frontmatter(&self) -> Arc<Frontmatter> {
-        self.get(frontmatter_slot(self))
+        timed_read("frontmatter", || self.get(frontmatter_slot(self)))
     }
 
     fn components(&self) -> Arc<Vec<Component>> {
-        self.get(components_slot(self))
+        timed_read("components", || self.get(components_slot(self)))
     }
 
     fn doc_hash(&self) -> String {
-        self.get(doc_hash_slot(self))
+        timed_read("doc_hash", || self.get(doc_hash_slot(self)))
     }
 
     fn cycle_state(&self) -> Option<Arc<CycleState>> {
-        self.get(cycle_state_slot(self))
+        timed_read("cycle_state", || self.get(cycle_state_slot(self)))
     }
 
     fn snapshot_content(&self) -> Option<Arc<String>> {
-        self.get(snapshot_content_slot(self))
+        timed_read("snapshot_content", || self.get(snapshot_content_slot(self)))
     }
 
     fn head_content(&self) -> Option<Arc<String>> {
-        self.get(head_content_slot(self))
+        timed_read("head_content", || self.get(head_content_slot(self)))
     }
 
     fn snapshot_commit_status(&self) -> agent_doc_snapshot_io::SnapshotCommitStatus {
-        self.get(snapshot_commit_status_slot(self))
+        timed_read("snapshot_commit_status", || self.get(snapshot_commit_status_slot(self)))
     }
 
     fn harness(&self) -> String {
-        self.get(harness_slot(self))
+        timed_read("harness", || self.get(harness_slot(self)))
     }
 
     fn global_config(&self) -> Arc<agent_doc_config::Config> {
-        self.get(global_config_slot(self))
+        timed_read("global_config", || self.get(global_config_slot(self)))
     }
 
     fn session_registry(&self) -> Arc<tmux_router::Registry> {
-        self.get(session_registry_slot(self))
+        timed_read("session_registry", || self.get(session_registry_slot(self)))
     }
 
     fn invalidate_cycle_state(&self) {

@@ -976,13 +976,13 @@ fn inspect_with_warnings_inner(
             crate::profile::timed("guard_coined_ids", || crate::check_coined_ids_guard(file, &rc))?,
             crate::profile::timed("guard_pending_done", || crate::check_pending_done_guard(file, &rc))?,
             crate::profile::timed("guard_expect_done_or_gate", || crate::check_expect_done_or_gate_guard(file, &rc))?,
-            crate::check_partial_closeout_state_guard(file)?,
-            crate::check_partial_staging_closeout_guard(file)?,
+            crate::profile::timed("guard_partial_closeout_state", || crate::check_partial_closeout_state_guard(file))?,
+            crate::profile::timed("guard_partial_staging_closeout", || crate::check_partial_staging_closeout_guard(file))?,
             crate::profile::timed("guard_blocked_closeout_followup", || crate::check_blocked_closeout_followup_guard(file, &rc))?,
             crate::profile::timed("guard_gated_phase_split", || crate::check_gated_phase_split_guard(file, &rc))?,
-            crate::check_queue_audit_partial_completion_guard(file)?,
+            crate::profile::timed("guard_queue_audit_partial_completion", || crate::check_queue_audit_partial_completion_guard(file))?,
             crate::profile::timed("guard_queue_head_removal", || crate::check_queue_head_removal_guard(file, &rc))?,
-            crate::check_free_text_queue_head_provenance(file, &rc)?,
+            crate::profile::timed("guard_free_text_queue_head_provenance", || crate::check_free_text_queue_head_provenance(file, &rc))?,
         ] {
             match guard {
                 GuardResult::None => {}

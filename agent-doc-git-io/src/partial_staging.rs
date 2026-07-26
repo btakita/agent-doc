@@ -79,6 +79,28 @@ pub fn candidate_repos(file: &Path) -> Result<Vec<PathBuf>> {
     Ok(repos)
 }
 
+
+/// Deduplicated pathspec operands for a diff, so a path listed twice (dirty and
+/// staged) is not passed twice.
+fn pathspec_args(paths: &[String]) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    paths
+        .iter()
+        .filter(|path| seen.insert((*path).clone()))
+        .cloned()
+        .collect()
+}
+
+/// `base` followed by `-- <paths>`, or `base` alone when there are no paths.
+fn diff_args<'a>(base: &[&'a str], paths: &'a [String]) -> Vec<&'a str> {
+    let mut args: Vec<&str> = base.to_vec();
+    if !paths.is_empty() {
+        args.push("--");
+        args.extend(paths.iter().map(String::as_str));
+    }
+    args
+}
+
 pub fn diff_evidence(repo: &Path) -> Result<Option<PartialStagingDiffEvidence>> {
     if git_stdout(repo, &["rev-parse", "--verify", "HEAD^"])?.is_none() {
         return Ok(None);
@@ -101,10 +123,38 @@ pub fn diff_evidence(repo: &Path) -> Result<Option<PartialStagingDiffEvidence>> 
         &["diff", "--cached", "--name-only", "--diff-filter=ACMRT"],
     )?);
 
-    let committed_diff =
-        git_stdout(repo, &["diff", "--unified=0", "HEAD^", "HEAD"])?.unwrap_or_default();
-    let mut dirty_diff = git_stdout(repo, &["diff", "--unified=0"])?.unwrap_or_default();
-    if let Some(cached) = git_stdout(repo, &["diff", "--cached", "--unified=0"])? {
+    // A partial-staging finding needs BOTH a committed change and an uncommitted
+    // companion; `partial_staging_companion_finding` returns `None` the moment
+    // either side is empty. The three `--unified=0` diffs below are the whole
+    // cost of this guard -- full patch text for the repo -- so paying them to
+    // then discard the result is pure waste (`#idlerevisionreactive`: gate the
+    // expensive work on the cheap probe that already ran).
+    //
+    // On a superproject with ~25 submodules, most repos have one side empty on
+    // any given sweep, so this skips the expensive diffs for nearly all of them.
+    if committed_paths.is_empty() || dirty_paths.is_empty() {
+        return Ok(None);
+    }
+
+    // Scope each diff to the paths it will actually be read for. The finding is
+    // computed from `committed_paths`/`dirty_paths` and the hunks belonging to
+    // them, so a whole-repo patch just produces text that is filtered away --
+    // and on a repo with many dirty files that text is the bulk of the guard's
+    // runtime.
+    let committed_pathspec = pathspec_args(&committed_paths);
+    let dirty_pathspec = pathspec_args(&dirty_paths);
+
+    let committed_diff = git_stdout(
+        repo,
+        &diff_args(&["diff", "--unified=0", "HEAD^", "HEAD"], &committed_pathspec),
+    )?
+    .unwrap_or_default();
+    let mut dirty_diff =
+        git_stdout(repo, &diff_args(&["diff", "--unified=0"], &dirty_pathspec))?.unwrap_or_default();
+    if let Some(cached) = git_stdout(
+        repo,
+        &diff_args(&["diff", "--cached", "--unified=0"], &dirty_pathspec),
+    )? {
         if !dirty_diff.is_empty() && !cached.is_empty() {
             dirty_diff.push('\n');
         }

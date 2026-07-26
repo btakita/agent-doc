@@ -150,7 +150,25 @@ The evidence from `state.db` is unambiguous — `caller=tmux-router reason=regis
 This is the fourth instance today of the same underlying shape — a fact recorded for an event that did not happen, which then defeats a downstream decision. The phantom backlog id, the mislabeled `git_commit` phase, the anonymous relay read, and now a no-op transition that made a retention policy unreachable.
 
 agent-doc: 8153/8153, clippy clean. tmux-router: 135 lib tests, clippy clean. Only `src/registry.rs` staged there — `src/tmux.rs` is a concurrent session's edit.
-<!-- agent:boundary:b5c06e15 -->
+
+### Re: should we background commit_authority off the hot path? — opus-5
+
+No — and I want to give you the reasoning rather than just the answer, because there is a version of backgrounding that is already happening and a version that would be dangerous.
+
+**It is already backgrounded on the slow path.** When the convergence budget expires, the write intent is retained in `state.db` and the supervisor/session-check resumes it. That path ran repeatedly today: `respond` refuses, the intent persists, and the closeout settles minutes later without losing the response. So backgrounding is the existing *fallback*. The question is whether to make it the default.
+
+**Making it the default trades a measured latency for an unmeasured risk.** Three specific reasons:
+
+1. **The commit is the closeout boundary.** `respond` is specified to reach `committed`; if it returns before committing, "captured but not committed" becomes the normal state instead of the exceptional one. Nearly every wedge I fixed today lived in exactly that gap — a reaped id with no response record, a retained intent blocking preflight while session-check reported ok, a phase that looked terminal but was not.
+2. **Queue-drain correctness depends on it.** The auto-loop continues only after a proven closeout. Backgrounding means item N+1 begins while N's commit is still in flight — concurrent cycles against one document, which is precisely the generator of the `#capturebacklogatomic` splice whose damage I spent part of today repairing.
+3. **It would hide the signal.** The 11s is currently visible and attributable. Moved off the hot path it becomes invisible latency in a supervisor, and today demonstrated twice that an unattributable cost is the expensive kind.
+
+**What the data says the real fix is.** Across 522 convergence waits: `delivery_ack_pending` 457 (88%), `controller_model_backpressure` 53 (10%), `compare_and_swap_raced` 12 (2%). So `commit_authority` is the editor confirming delivery — not git (internal timer 9-19ms), not the controller baseline round trip (72-88ms), and not poll oversleep (backoff is 25ms initial / 250ms max, so at most 250ms of added latency).
+
+**And I need to correct myself.** I filed `#replicareloadincremental` as *the* cause. It is not: only 64 of 210 waits had a `crdt_replica_register` within 8s, so full-bootstrap-on-reload accounts for roughly 30%. That is a real contributor and worth fixing, but I overstated it, and I have updated the item to say so with the numbers.
+
+The remaining ~70% is genuinely unexplained, and the correct next step is instrumentation rather than a fourth hypothesis: decompose the ACK round trip with editor-side timestamps — plugin receives the intent, applies it to the buffer, emits the visible receipt, binary observes it. Both of today's wrong guesses cost a build-install-recycle each and both collapsed instantly once a log line carried an attribution field. I would rather hand you that than a speculative change to the write path, which is the one place in this system where being wrong loses operator text.
+<!-- agent:boundary:f1e1c3ef -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -799,13 +799,28 @@ plugin was 0.2.294 against an expected 0.2.296, and `reload-lib` refreshes only
 the cdylib. The 0.2.296 jar was already installed on disk, so the operator IDE
 restart was the whole fix — done, and this cycle runs against the matching
 plugin.
-<!-- agent:boundary:52a8c801 -->
+
+### Re: queue-family phases filed — opus-5
+
+All seven phase ids are now tracked and sequenced behind the ReactiveMap cluster:
+`#lzqfspec` → `#lzqfformal` → `#lzqffx` → `#lzqfrs` → `#lzqfzig` / `#lzqfjs` →
+`#lzqfports`, appended so they do not preempt the current drain.
+`#asynccontextthreadsafeco` is reaped — the ask was plan capture, and the plan is
+committed at `tasks/plan-lazily-queue-family-flavors.md` (`56961cce5`).
+
+The write pipeline needed several passes: the earlier cycles landed the ids
+incrementally while a retained document-write effect held the prior captured
+response, which also left the sequencing answer duplicated in the exchange. This
+`--stream` pass merges against the live editor buffer to collapse it.
+
+Next up is `#maphandlecleardependents`, then `#portmembershiporder`.
+<!-- agent:boundary:7221f050 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~/goal complete tasks/plan-lazily-queue-family-flavors.md~~ — auto-struck: answered this cycle (#ftstrike)
+- ~~/goal complete tasks/plan-lazily-queue-family-flavors.md~~
 - ⏭️ do [#asynccontextthreadsafeco]
 - ⏭️ do [#maphandlecleardependents]
 - ⏭️ do [#lazilycellfamily]
@@ -844,6 +859,8 @@ plugin.
 - do [#recommendedspecdecision]
 - do [#portmembershiporder]
 - do [#lazilyasyncmap]
+- do [#lzqffx]
+- do [#lzqfrs]
 <!-- /agent:queue -->
 
 ## Backlog
@@ -858,6 +875,9 @@ plugin.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
 - [ ] [#lzqfspec] lazily-spec: Phase 0 of the queue-family flavor plan — add a Core-surface section for QueueCell/TopicCell/WorkQueueCell mirroring the ReactiveMap Core/Extended split, pin ONE reader-kind design (recommend memoized-derive+invalidate over cpp's version cells, and say explicitly that polling a counter is not a reader-kind), define the per-flavor obligation (confluence for thread-safe, eventual transparency for async, plus single-frontier-walk atomicity), resolve the threading paragraph that promises ThreadSafeContext no binding can accept, and split coverage.json's three conflated queue rows into nine — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfformal] lazily-formal: Phase 1 — prove the queue reader-kind invalidation set is a pure function of (op, len_before, len_after), prove one op's invalidations are not observably interleaved, and cross-check ThreadSafe.lean for the confluence obligation. Do NOT add per-flavor Lean models; the algebra must not fork — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] [#lzqffx] lazily-spec + all binding runners: Phase 2 — replay the nine collections queue fixtures against all three flavors with a declared skip ledger (zig's reactive-graph runner is the reference: fails if everything skips, ledger must match observation). Add a positive assertion that fixtures ran, mutation-check each runner per flavor, and grep every queue runner for the invalidates-nesting trap (fixtures nest it under steps[].expected.invalidates; lazily-rs read it off the step and silently never asserted). Land this BEFORE any implementation so the gap goes red first — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] [#lzqfrs] lazily-rs: Phase 3 — context prerequisites + reference implementation. ThreadSafeContext needs a multi-root clear_slots equivalent (it has only single-handle clear at thread_safe.rs:3549 — four handles is four frontier walks; verify whether batch() already closes this, do not assume). AsyncContext needs a synchronous-compute computed and a multi-root clear (it has neither; only computed_async at async_context.rs:413). Then ship ThreadSafe/Async QueueCell + TopicCell + WorkQueueCell, each minting its own reader-kind handles on its own graph, Arc<Mutex<S>> storage with invalidation run outside the lock — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyphaseextract] lazily-rs Phase A: extract the closure-free KeyedOrder<K,H> core (entries + order + membership + present-set + position/keys/len/contains_key + move_to/move_before/move_after) shared by all three families; thin per-model shells keep materialize/observe. Do NOT route through SyncReactiveGraph — its Send+Sync bound is stricter than the concrete Context API and would break Rc-capturing callers. `remove` stays out of the core (monotone present set is fixture- and Lean-backed). Plan: tasks/plan-lazily-reactivemap-unification.md

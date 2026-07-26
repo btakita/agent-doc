@@ -48,8 +48,9 @@ Briefly, on the work: this is the role I'd choose on its merits. The SDK problem
 the same shape as my cross-language work (one API surface across 8 language bindings
 with shared spec + conformance suites, public at github.com/lazily-hub... and the
 binding I'm writing right now happens to be C#), and chat and presence at scale is
-distributed state synchronization, the problem space I care most about. The mission
-gives it weight: kids safe from predation, communities kept positive, and compatible
+distributed state synchronization, the problem space I care most about. I'd also be
+learning a lot at Haiven... the engine platforms are newer ground for me, and that's
+honestly part of the draw. The mission gives it weight: kids safe from predation, communities kept positive, and compatible
 people matched so games are actually fun... built into the infrastructure, not bolted
 on after the harm.
 

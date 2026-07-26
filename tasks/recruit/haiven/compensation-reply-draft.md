@@ -49,9 +49,11 @@ and the other platforms... is the same shape as my own cross-language work, wher
 maintain one reactive-state API across 8 language bindings with a shared spec, formal
 model, and conformance suite (public at github.com/lazily-hub... and the binding I'm
 implementing right now is C#, which happens to be exactly what a Unity SDK is written
-in). The realtime backend side... WebSocket fan-out, presence, connection lifecycle...
-is where I've spent much of my career. I'm not guessing at this work; I've been
-rehearsing it for years.
+in). And the realtime side is familiar ground: I've shipped production realtime
+systems at Presence AI (WebRTC avatar pipeline) and Milyoni (live video social events
+for major studios), my current open-source work centers on realtime multi-replica
+sync, and your WebSocket-hub design exercise was genuinely fun. I'm not guessing at
+this work.
 
 I want to be upfront about how I got to these numbers, because I know an ask like this
 lands heavily on a seed-stage budget, and I don't make it lightly. My alternative is a

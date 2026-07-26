@@ -178,7 +178,27 @@ And the pattern held across all of it: `#retainedsettlereactive` fixed two consu
 Still queued: `#retainedclearreactive`, `#preflightreactive`, `#sessioncheckturnreactive`, `#closeoutwaitchurn`.
 
 `make check` green, install + recycle done, pushed.
-<!-- agent:boundary:163416eb -->
+
+### Re: flip the default — opus-5
+
+Flipped and live (`5ce9b06e6`). The agent no longer runs preflight.
+
+**The instruction.** SKILL.md's hot-path digest and step 0 now say: when the `[agent-doc] cycle contract ...` marker is present, do **not** run `agent-doc preflight <FILE>` — read the injected contract. Run it yourself only when the marker is absent: a harness without the hook (Codex `hooks.json`, OpenCode), a mid-turn re-check, or recovery. The hook prints `CONTRACT_MARKER` ahead of the contract, so "a contract is present" is a **fact the agent tests**, not something it infers — the conditional degrades correctly on hookless harnesses instead of leaving them with no preflight at all. `runbooks/harness-invocation.md` carries the same rule for the matrix.
+
+Verified end to end: `.claude/settings.json` now lists `agent-doc hook preflight-user-prompt-submit` under `UserPromptSubmit`, the installed skill carries the flip, and the hook emits the marker then the contract.
+
+**I made the binary safe before trusting the instruction,** because "the agent will follow it" is the assumption this whole session has been dismantling. `start_preflight_with_task` minted `cycle-{now_millis}` unconditionally, so a second preflight in one turn *replaced* the first — discarding its identity along with `active_queue_heads`, the carried semantic-merge acks, and the skipped-head accumulator, with nothing downstream able to tell it had happened.
+
+It now keeps the turn's **identity** (cycle id, `started_at`) on re-entry and recomputes everything else. My first draft returned the stored state instead, and two existing ack-carry-forward tests caught it immediately — a re-entrant preflight would have reported a document as it looked when the turn opened. That distinction is the whole rule: identity persists, the contract must not. A stalled open cycle is excluded via the same policy the supervisor force-abandons on, so a crashed turn is never inherited by a new one.
+
+**One thing I checked rather than assumed, and it changes the claim.** I tested the double-open live and got two different cycle ids, so I traced it: `start_preflight` runs at **step 4**, after repair at **step 1**. Repair closes any prior open cycle before my guard ever sees it. So the guard is defence in depth for paths that call `start_preflight` twice without repair between them — **what actually removes the double-open is the flip itself.** With the agent no longer running preflight, only one runs. I'd have been wrong to describe the guard as what makes the flip safe, so the commit message and the review item both say this plainly.
+
+That also gives the sharpest live check, which is in the item: after the flip, `repaired stale preflight_started cycle` should **stop** appearing once per turn. If it still appears, the agent is still running preflight and the round trip has only been hidden.
+
+**Budget guard** raised 150 → 152 for the one added digest bullet, and deliberately kept tight — that bullet is what flips the default, and a generous ceiling stops the guard catching drift. I trimmed step 0 from three lines to one rather than raise it further.
+
+`make check` green, install + recycle done, skill + hooks installed, pushed.
+<!-- agent:boundary:aa468a2e -->
 <!-- /agent:exchange -->
 ## Queue
 

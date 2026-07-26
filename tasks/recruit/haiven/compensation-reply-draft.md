@@ -39,7 +39,10 @@ Subject: (reply in Craig's thread)
 Hi Craig,
 
 Thank you for the candor about the funding position... and apologies for the slow
-reply: your email deserved a considered answer, and I wanted to be certain of mine.
+reply. This has been a genuinely challenging decision between two great possibilities,
+and I used the time to dig deeper into Haiven and the Gravity Jack track record behind
+it... which is exactly what firmed up my conviction. I wanted to be certain of my
+answer before giving it to you.
 
 Briefly, on the work: this is the role I'd choose on its merits. The SDK problem is
 the same shape as my cross-language work (one API surface across 8 language bindings

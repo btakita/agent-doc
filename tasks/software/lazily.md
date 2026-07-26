@@ -237,7 +237,7 @@ storage-agnostic claim sees where the reader-kind half is pinned.
 Next head is `#lzqffx` — Phase 2, wiring the queue fixtures into every binding's
 runner against all three flavors. That one lands **before** any implementation, so
 the gap goes red first.
-<!-- agent:boundary:df011f73 -->
+<!-- agent:boundary:c4f1f513 -->
 <!-- /agent:exchange -->
 
 ## Queue

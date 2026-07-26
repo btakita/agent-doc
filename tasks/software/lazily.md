@@ -251,7 +251,23 @@ Rows 10 and 11 both done, pushed, coverage flipped. I did them in one cycle rath
 **Verification.** `make check` green (63 tests, up from 61), `dotnet format --verify-no-changes` clean. Rows 10 and 11 flipped, table regenerated and committed one repo at a time across the spec and all nine sibling READMEs. lazily-cs CI was queued at closeout — recorded, not waited on.
 
 Remaining in the phase: `#lzcscollections`, now rows 2–4 only — `ThreadSafeSlotMap`, `AsyncSlotMap`, and keyed-map sync with the `familysync` corpus.
-<!-- agent:boundary:fbdaadf0 -->
+
+### Re: keyed maps on the thread-safe and async planes — opus-5
+
+Rows 2 and 3 done and pushed. Row 4 is a different plane and is now its own item.
+
+**The runner is parameterised over the execution model**, replaying the same materialization corpus against `Context`, `ThreadSafeContext`, and `AsyncContext`. That parameterisation is the point rather than a convenience: materialization laws are about allocation timing, so a thread-safe or async map that pre-mints where the synchronous one defers returns *identical values at every key*. The divergence lives entirely in the present set, and only if something looks.
+
+**`ThreadSafeSlotMap` refines the kernel rather than reimplementing it.** Entries, the three reactive planes, and both strategies stay the single-threaded map's; the only addition is that every operation runs inside the context's critical section. A second implementation would be free to drift, and these are exactly the laws that drift silently — a wrong one still returns right-looking values.
+
+**`AsyncSlotMap` is a distinct type**, for the same reason `AsyncContext` is not a facade over `Context`: it is a different graph with its own handles. What it shares is the contract. "Eventual transparency" is that contract in async form — a key is materialized when it is **minted**, not when it resolves, so a deferred slot is deferred *allocation* and never a deferred answer. The model adapter blocks inside the async model so the engine stays synchronous, pushing the await into the one model that needs it instead of dragging an executor through the other two.
+
+**Mutation-checked per leg, and each failure is model-scoped** — which is the actual proof the parameterisation is real rather than three names over one code path. Dropping the async mint's order tracking fails only `AsyncContext/deferral_not_deallocation`; making thread-safe eager materialization a no-op fails only `ThreadSafeContext/deferral_not_deallocation`. If either had failed all three legs, the models would have been sharing plumbing they are supposed to own separately.
+
+**Verification.** `make check` green (65 tests, up from 63 — the two extra are the new model theories), `dotnet format --verify-no-changes` clean. Rows 2 and 3 flipped, table regenerated and committed one repo at a time across the spec and all nine sibling READMEs. lazily-cs CI queued at closeout, recorded rather than waited on.
+
+**Row 4 is split out into its own backlog item.** It is not a materialization row: the `familysync` corpus is a sync plane — per-key LWW registers, materialize-on-ingest for keys the local replica has never seen, epoch bumping, idempotent re-ingest, and a derived aggregate over the family. Keeping it inside a phase named for keyed-map materialization is what made the parent item mis-shaped in the first place, so it gets its own id rather than a fourth row bolted onto this one.
+<!-- agent:boundary:f75d8af2 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -262,10 +278,10 @@ Remaining in the phase: `#lzcscollections`, now rows 2–4 only — `ThreadSafeS
 - ~~do [#lzzigcitoolchain]~~
 - ~~do [#lzgoerrorretry]~~
 - ~~do [#lzasyncerrfixture]~~
-- ⏭️ do [#lzcscollections]
+- ~~⏭️ do [#lzcscollections]~~
 - ⏭️ do [#lzcsstatechart]
 - ⏭️ do [#lzcsqueues]
-- do [#lzcscrdt]
+- 🚧 do [#lzcscrdt]
 - do [#lzcsipc]
 - do [#lzcssync]
 - do [#lzcstemporal]
@@ -277,10 +293,10 @@ Remaining in the phase: `#lzcscollections`, now rows 2–4 only — `ThreadSafeS
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcscollections] lazily-cs: rows 2-4 — ThreadSafeSlotMap + AsyncSlotMap materialization and keyed-map sync (membership propagation, materialize-on-ingest, derived alignment); replay the familysync corpus. Row 1 (ReactiveMap core + CellMap/SlotMap + materialization corpus) shipped 2026-07-25 — plan: tasks/software/lazily-cs-parity-plan.md
+- [ ] [#lzcsfamilysync] lazily-cs: row 4 — keyed-map sync. Per-key LWW registers, materialize-on-ingest (a keyed op for an entry the local replica never registered must MATERIALIZE it from the op's converged register rather than drop it), epoch bumping, idempotent re-ingest, membership-only-grows, and a derived aggregate over the family; replay conformance/familysync/materialize_on_ingest.json — plan: tasks/software/lazily-cs-parity-plan.md
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
-- [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)
+- [ ] 🚧 [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)
 - [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
 - [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)
 - [ ] [#lzcstemporal] lazily-cs: TimerCell/IntervalCell/CronCell/DeadlineCell over a logical clock, debounce/throttle/sample/probabilistic-sample, tumbling/sliding/session windows; replay temporal + rateshape + windowing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 40, 41, 45)
@@ -303,4 +319,5 @@ Remaining in the phase: `#lzcscollections`, now rows 2–4 only — `ThreadSafeS
 - 2026-07-25 [#lzzigcitoolchain] lazily-zig: CI is red on both pinned toolchains (Zig 0.15.2 and 0.16.0) because src/lazily/context.zig:2208 reads builtin.Type.Fn.param_types, removed from newer std. Local dev runs 0.17.0-dev where the full suite passes, so the red is a pin/target mismatch, not a code defect. Either move the CI matrix to the toolchain the code targets or make that reflection version-agnostic. Predates the conformance work: the same error is on the prior commit
 - 2026-07-25 [#lzcsreactivemapfx] lazily-cs: row 9 — CellTree + reconcile on top of the shipped ReactiveMap core; replay collections/cellmap_atomic_move.json, cellmap_independence.json, keyed_reconciliation_lis.json (an atomic move must bump order only and keep the entry handle, which is what separates a reorder from a remove+re-mint) — plan: tasks/software/lazily-cs-parity-plan.md
 - 2026-07-25 [#lzcssemtree] lazily-cs: rows 10-11 — memoized semantic tree (SemTree) and stable-id alignment (manufactured identity); replay collections/semtree_incremental.json and collections/stableid_alignment.json — plan: tasks/software/lazily-cs-parity-plan.md
+- 2026-07-25 [#lzcscollections] lazily-cs: rows 2-4 — ThreadSafeSlotMap + AsyncSlotMap materialization and keyed-map sync (membership propagation, materialize-on-ingest, derived alignment); replay the familysync corpus. Row 1 (ReactiveMap core + CellMap/SlotMap + materialization corpus) shipped 2026-07-25 — plan: tasks/software/lazily-cs-parity-plan.md
 <!-- /agent:done -->

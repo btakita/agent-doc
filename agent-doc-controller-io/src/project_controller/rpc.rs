@@ -1263,6 +1263,41 @@ pub fn sync_tmux_layout(
     }
 }
 
+/// Ask the controller what tmux is showing, given the layout the caller sees.
+///
+/// The read half of the layout mirror (`#tmuxsyncstate`). `actual_documents` is
+/// the controller's own observation — the documents its panes hold, in pane
+/// order — so a caller comparing the two sides never has to report a fact only
+/// the controller has. The editor-surface graph pulls this to fill in the tmux
+/// side of its mirror, which is why it is a plain read: no autostart, no
+/// reconcile, no pane mutation.
+pub fn tmux_layout_sync_state(
+    project_root: &Path,
+    invocation: ControllerTmuxLayoutSyncStateInvocation,
+) -> Result<ControllerTmuxLayoutSyncStateReport> {
+    let diagnostic_payload = serde_json::to_string(&invocation)
+        .context("serialize tmux layout sync state invocation")?;
+    let file = invocation.focus.as_ref().map(PathBuf::from);
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "tmux_layout_sync_state".to_string(),
+            file,
+            session_id: None,
+            pane_id: None,
+            window_id: invocation.window.clone(),
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(diagnostic_payload),
+        },
+    )
+}
+
 #[cfg(not(any(test, feature = "test-support")))]
 fn command_plane_enabled() -> bool {
     std::env::var("AGENT_DOC_COMMAND_PLANE")

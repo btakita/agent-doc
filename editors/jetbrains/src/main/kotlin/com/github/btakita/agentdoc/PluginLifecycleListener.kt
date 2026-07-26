@@ -41,7 +41,7 @@ class PluginLifecycleListener : ProjectManagerListener {
         // Flip the turn-state editor banner on/off as the CP turn phase changes.
         TurnStateBannerRefresher.getInstance(project).start()
         // Register EditorTabSyncListener via code (not XML) so it survives hot-reload
-        val editorTabSync = EditorTabSyncListener()
+        val editorTabSync = EditorTabSyncListener.install(project)
         project.messageBus.connect().subscribe(
             FileEditorManagerListener.FILE_EDITOR_MANAGER,
             editorTabSync
@@ -94,7 +94,10 @@ class PluginLifecycleListener : ProjectManagerListener {
         PatchWatcher.disposeProject(project)
         LayoutChangeDetector.disposeProject(project)
         VisualHighlighterManager.disposeProject(project)
+        // Stop feeding focus events before releasing the surface graph, so a
+        // late observation cannot re-create the root we are about to forget.
         EditorFocusSyncListener.disposeProject(project)
+        EditorTabSyncListener.disposeProject(project)
         TmuxPaneFocusSync.disposeProject(project)
     }
 }

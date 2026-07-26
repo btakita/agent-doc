@@ -1,86 +1,41 @@
-export interface TabSyncState {
-    activeFile: string;
-    visibleSignature: string;
+/**
+ * Editor-surface reporting (`#jbsurfaceswap` / `#jbpluginlazilyeffects`).
+ *
+ * The extension no longer plans a tab change. It reports what it sees — focused
+ * document, visible markdown set, column layout — and the reactive graph behind
+ * `agent_doc_editor_surface_observe_json` folds that against what tmux was last
+ * reconciled against, derives focus-vs-sync, and runs the Project Controller
+ * command as an `Effect`. So the previous-state field, the focus/sync decision,
+ * the preserved-layout retry ladder, and the timeout backoff all left this file;
+ * what stayed is the layout normalization the editor alone can do, plus the
+ * manual `Sync Layout` command's argument builder.
+ */
+
+/** One column of the reported split layout. Wire shape of Rust `SurfaceColumn`. */
+export interface SurfaceColumn {
+    files: string[];
 }
 
-export interface TabChangeInput {
-    activeFile: string;
-    visibleMd: string[];
-    visibleColumns?: string[][];
-    previous?: TabSyncState;
+/** What the editor looks like right now. Wire shape of Rust `EditorSurface`. */
+export interface EditorSurface {
+    focused: string;
+    visible: string[];
+    columns: SurfaceColumn[];
+    force_reconcile: boolean;
 }
 
-export type TabChangeCommand =
-    | { kind: 'focus'; args: ['focus', string] }
-    | { kind: 'sync'; args: string[] };
-
-export interface PlannedTabChange {
-    command: TabChangeCommand;
-    nextState: TabSyncState;
-}
-
-export interface TabSyncCommandResult {
-    applied: boolean;
-    shouldRetry: boolean;
+/** What one observation implied, as reported back by the graph. */
+export interface SurfaceIntent {
+    kind: 'idle' | 'focus' | 'sync';
+    document?: string;
+    columns?: SurfaceColumn[];
 }
 
 const SAFE_PASSIVE_LAYOUT_PRESERVED_MARKER =
     '[sync] safe passive sync preserved the current tmux layout because';
-const SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER =
-    '[sync] safe_passive_layout_preserved_reselected_focus';
-const SAFE_PASSIVE_LOCK_CONTENTION_RETRY_MARKER =
-    '[sync] safe_passive_sync_lock_contention_retry';
-const TAB_SYNC_TIMEOUT_REPLAY_DELAY_MS = 5_000;
-const TAB_SYNC_TIMEOUT_BACKOFF_BASE_MS = 30_000;
-const TAB_SYNC_TIMEOUT_BACKOFF_MAX_MS = 300_000;
-
-export function shouldReplayQueuedTabChange(startedGeneration: number, latestGeneration: number): boolean {
-    return latestGeneration > startedGeneration;
-}
-
-export function replayDelayAfterTabSyncRun(
-    startedGeneration: number,
-    latestGeneration: number,
-    commandTimedOut: boolean,
-): number | null {
-    if (!shouldReplayQueuedTabChange(startedGeneration, latestGeneration)) return null;
-    return commandTimedOut ? TAB_SYNC_TIMEOUT_REPLAY_DELAY_MS : 0;
-}
-
-export function shouldScheduleDeferredTabSyncRetry(startedGeneration: number, latestGeneration: number): boolean {
-    return latestGeneration <= startedGeneration;
-}
-
-export function tabSyncTimeoutBackoffDelayMs(timeoutCount: number): number {
-    const step = Math.max(timeoutCount - 1, 0);
-    return Math.min(
-        TAB_SYNC_TIMEOUT_BACKOFF_BASE_MS * (2 ** Math.min(step, 4)),
-        TAB_SYNC_TIMEOUT_BACKOFF_MAX_MS,
-    );
-}
 
 export function isPreservedLayoutOutput(output: string): boolean {
     return output.includes(SAFE_PASSIVE_LAYOUT_PRESERVED_MARKER);
-}
-
-export function analyzeTabSyncCommandResult(
-    command: TabChangeCommand,
-    exitCode: number,
-    output: string,
-): TabSyncCommandResult {
-    if (exitCode !== 0) {
-        return { applied: false, shouldRetry: false };
-    }
-    if (command.kind === 'sync' && isPreservedLayoutOutput(output)) {
-        if (output.includes(SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER)) {
-            return { applied: true, shouldRetry: false };
-        }
-        return { applied: false, shouldRetry: true };
-    }
-    if (command.kind === 'sync' && output.includes(SAFE_PASSIVE_LOCK_CONTENTION_RETRY_MARKER)) {
-        return { applied: false, shouldRetry: true };
-    }
-    return { applied: true, shouldRetry: false };
 }
 
 function normalizeVisibleMd(visibleMd: string[]): string[] {
@@ -93,12 +48,6 @@ export function normalizeVisibleColumns(visibleColumns: string[][]): string[][] 
 
 export function flattenVisibleColumns(visibleColumns: string[][]): string[] {
     return normalizeVisibleMd(normalizeVisibleColumns(visibleColumns).flat());
-}
-
-export function visibleSignatureFromColumns(visibleColumns: string[][]): string {
-    return normalizeVisibleColumns(visibleColumns)
-        .map((column) => column.join('\u0001'))
-        .join('\u0000');
 }
 
 export function buildSyncCommandArgs(
@@ -122,33 +71,67 @@ export function buildSyncCommandArgs(
     return args;
 }
 
-export function buildTabChangeCommand(input: TabChangeInput): PlannedTabChange | null {
-    const visibleColumns = normalizeVisibleColumns(input.visibleColumns ?? [input.visibleMd]);
-    const visibleMd = normalizeVisibleMd(
-        input.visibleMd.length > 0 ? input.visibleMd : flattenVisibleColumns(visibleColumns),
+export interface EditorSurfaceInput {
+    activeFile: string;
+    visibleMd: string[];
+    visibleColumns?: string[][];
+    forceReconcile?: boolean;
+}
+
+/**
+ * Build the observation to report.
+ *
+ * Returns `null` only when there is nothing to observe (no visible markdown) —
+ * never because "nothing changed". Deciding that an observation implies no
+ * action is the graph's job, and an observation identical to the last one costs
+ * nothing there, which is why this needs no previous-state parameter.
+ *
+ * An undetected layout reports **no** columns rather than a synthesized single
+ * column, so the graph can tell "the editor has one column" apart from "the
+ * editor could not see its layout" and skip the drift comparison in the latter.
+ */
+export function buildEditorSurface(input: EditorSurfaceInput): EditorSurface | null {
+    const columns = normalizeVisibleColumns(input.visibleColumns ?? []).filter(
+        (column) => column.length > 0,
     );
-    if (visibleMd.length === 0) {
+    const visible = normalizeVisibleMd(
+        input.visibleMd.length > 0 ? input.visibleMd : columns.flat(),
+    );
+    if (visible.length === 0) {
         return null;
     }
-
-    const nextState: TabSyncState = {
-        activeFile: input.activeFile,
-        visibleSignature: visibleSignatureFromColumns(visibleColumns),
-    };
-    const previous = input.previous;
-    if (
-        previous &&
-        previous.activeFile === nextState.activeFile &&
-        previous.visibleSignature === nextState.visibleSignature
-    ) {
-        return null;
-    }
-
     return {
-        command: {
-            kind: 'sync',
-            args: buildSyncCommandArgs(visibleColumns, input.activeFile, { exactVisible: true }),
-        },
-        nextState,
+        focused: input.activeFile,
+        visible,
+        columns: columns.map((files) => ({ files })),
+        force_reconcile: input.forceReconcile === true,
     };
+}
+
+/** The intent a receipt reports, or `null` when the receipt is unusable. */
+export function intentFromReceipt(receiptJson: string | null | undefined): SurfaceIntent | null {
+    if (!receiptJson) return null;
+    try {
+        const receipt = JSON.parse(receiptJson);
+        const intent = receipt?.intent;
+        if (!intent || typeof intent.kind !== 'string') return null;
+        return intent as SurfaceIntent;
+    } catch {
+        return null;
+    }
+}
+
+export function formatSyncHint(columns: SurfaceColumn[], focus: string): string {
+    return `Sync: ${columns.map((column) => `--col ${column.files.join(',')}`).join(' ')} [focus: ${focus}]`;
+}
+
+/**
+ * The user-visible hint for an observation receipt, or `null` when the derived
+ * intent was idle or a pure focus move (which needs no hint — the operator just
+ * moved between documents they can already see).
+ */
+export function syncHintFromReceipt(receiptJson: string | null | undefined): string | null {
+    const intent = intentFromReceipt(receiptJson);
+    if (!intent || intent.kind !== 'sync' || !intent.document) return null;
+    return formatSyncHint(intent.columns ?? [], intent.document);
 }

@@ -1,18 +1,34 @@
 package com.github.btakita.agentdoc
 
+import com.google.gson.Gson
+import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * The plugin no longer plans (`#jbsurfaceswap`) — focus-vs-sync, dedup, and the
+ * retry ladder are the reactive graph's, exercised by
+ * `agent-doc-editor-surface`. What is left here is the observation: the editor
+ * has to report the surface it actually sees, and read the derived intent back.
+ */
 class EditorTabSyncListenerTest {
+    private val gson = Gson()
 
-    private fun visibleSignature(
+    private fun surfaceJson(
+        focusedFile: String,
         visibleMdFiles: List<String>,
         editorLayout: EditorLayout? = null,
-    ): String = EditorTabSyncListener.AutomaticCommandPlanner.visibleSignature(
-        visibleMdFiles = visibleMdFiles,
-        editorLayout = editorLayout,
+        forceReconcile: Boolean = false,
+    ): String = gson.toJson(
+        EditorTabSyncListener.SurfaceReport.buildSurface(
+            focusedFile = focusedFile,
+            visibleMdFiles = visibleMdFiles,
+            editorLayout = editorLayout,
+            forceReconcile = forceReconcile,
+        )
     )
 
     @Test
@@ -22,7 +38,7 @@ class EditorTabSyncListenerTest {
             "/repo/tasks/professional/sampleportal.md",
         )
 
-        val activeFile = EditorTabSyncListener.AutomaticCommandPlanner.resolveActiveFilePath(
+        val activeFile = EditorTabSyncListener.SurfaceReport.resolveActiveFilePath(
             preferredActiveFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
             selectedEditorFile = "/repo/tasks/professional/sampleportal.md",
             visibleMdFiles = visibleMdFiles,
@@ -32,437 +48,180 @@ class EditorTabSyncListenerTest {
     }
 
     @Test
-    fun `selection change with unchanged visible set routes to focus command not sync`() {
-        // #panefocussteal: a pure focus change (same visible layout, operator
-        // switched doc tabs) must move tmux via Project Controller `focus_document_pane`
-        // command — `sync` is layout-only and would not follow the switch.
-        val visibleMdFiles = listOf(
-            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/sample-app/tasks/sampleorders.md",
+    fun `selected editor file is used when no selection event file is supplied`() {
+        val activeFile = EditorTabSyncListener.SurfaceReport.resolveActiveFilePath(
+            preferredActiveFile = null,
+            selectedEditorFile = "/repo/tasks/professional/sampleportal.md",
+            visibleMdFiles = listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md"),
         )
-        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
-            visibleMdFiles = visibleMdFiles,
-            visibleSignature = visibleSignature(visibleMdFiles),
-            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
-            previousVisibleSignature = visibleSignature(
+
+        assertEquals("/repo/tasks/professional/sampleportal.md", activeFile)
+    }
+
+    @Test
+    fun `first visible markdown file is the last resort active file`() {
+        val activeFile = EditorTabSyncListener.SurfaceReport.resolveActiveFilePath(
+            preferredActiveFile = "",
+            selectedEditorFile = null,
+            visibleMdFiles = listOf("/repo/a.md", "/repo/b.md"),
+        )
+
+        assertEquals("/repo/a.md", activeFile)
+    }
+
+    @Test
+    fun `no visible markdown means no active file to report`() {
+        val activeFile = EditorTabSyncListener.SurfaceReport.resolveActiveFilePath(
+            preferredActiveFile = null,
+            selectedEditorFile = null,
+            visibleMdFiles = emptyList(),
+        )
+
+        assertNull(activeFile)
+    }
+
+    @Test
+    fun `observation reports the split layout the editor detected`() {
+        val json = surfaceJson(
+            focusedFile = "/repo/b.md",
+            visibleMdFiles = listOf("/repo/a.md", "/repo/b.md"),
+            editorLayout = EditorLayout(
                 listOf(
-                    "/repo/src/sample-app/tasks/sampleorders.md",
-                    "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+                    LayoutColumn(listOf("/repo/a.md")),
+                    LayoutColumn(listOf("/repo/b.md")),
                 )
             ),
-            previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
         )
 
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Focus, plan?.kind)
+        val surface = JsonParser.parseString(json).asJsonObject
+        assertEquals("/repo/b.md", surface.get("focused").asString)
+        assertEquals(
+            listOf("/repo/a.md", "/repo/b.md"),
+            surface.getAsJsonArray("visible").map { it.asString },
+        )
+        val columns = surface.getAsJsonArray("columns")
+        assertEquals(2, columns.size())
+        assertEquals(
+            listOf("/repo/a.md"),
+            columns[0].asJsonObject.getAsJsonArray("files").map { it.asString },
+        )
+        assertEquals(
+            listOf("/repo/b.md"),
+            columns[1].asJsonObject.getAsJsonArray("files").map { it.asString },
+        )
     }
 
     @Test
-    fun `single visible markdown file routes to focus command when selection changes`() {
-        // Same visible set, focus moved to this file → focus command, not sync.
-        val visibleMdFiles = listOf("/repo/src/sample-app/tasks/sampleorders.md")
-        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
-            visibleMdFiles = visibleMdFiles,
-            visibleSignature = visibleSignature(visibleMdFiles),
-            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
-            previousVisibleSignature = visibleSignature(visibleMdFiles),
-            previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+    fun `column order is preserved rather than sorted`() {
+        val json = surfaceJson(
+            focusedFile = "/repo/b.md",
+            visibleMdFiles = listOf("/repo/b.md", "/repo/a.md"),
+            editorLayout = EditorLayout(
+                listOf(
+                    LayoutColumn(listOf("/repo/b.md")),
+                    LayoutColumn(listOf("/repo/a.md")),
+                )
+            ),
         )
 
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Focus, plan?.kind)
+        val columns = JsonParser.parseString(json).asJsonObject.getAsJsonArray("columns")
+        assertEquals(
+            listOf("/repo/b.md"),
+            columns[0].asJsonObject.getAsJsonArray("files").map { it.asString },
+        )
     }
 
     @Test
-    fun `visible markdown changes trigger non destructive sync`() {
-        val visibleMdFiles = listOf(
-            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/sample-app/tasks/sampleorders.md",
-        )
-        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
-            visibleMdFiles = visibleMdFiles,
-            visibleSignature = visibleSignature(visibleMdFiles),
-            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
-            previousVisibleSignature = visibleSignature(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
-            previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
+    fun `an undetected layout reports no columns rather than a synthesized one`() {
+        val json = surfaceJson(
+            focusedFile = "/repo/a.md",
+            visibleMdFiles = listOf("/repo/a.md", "/repo/b.md"),
+            editorLayout = null,
         )
 
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
+        val surface = JsonParser.parseString(json).asJsonObject
+        assertEquals(0, surface.getAsJsonArray("columns").size())
+        assertEquals(2, surface.getAsJsonArray("visible").size())
     }
 
     @Test
-    fun `unchanged selection state does not rerun commands`() {
-        val visibleMdFiles = listOf(
-            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/sample-app/tasks/sampleorders.md",
+    fun `blank and duplicate layout entries are dropped from the observation`() {
+        val json = surfaceJson(
+            focusedFile = "/repo/a.md",
+            visibleMdFiles = listOf("/repo/a.md", "/repo/a.md"),
+            editorLayout = EditorLayout(
+                listOf(
+                    LayoutColumn(listOf("/repo/a.md", "", "/repo/a.md")),
+                    LayoutColumn(listOf("", "")),
+                )
+            ),
         )
-        val focusedFile = "/repo/src/sample-app/tasks/sampleorders.md"
 
+        val surface = JsonParser.parseString(json).asJsonObject
+        assertEquals(listOf("/repo/a.md"), surface.getAsJsonArray("visible").map { it.asString })
+        val columns = surface.getAsJsonArray("columns")
+        assertEquals(1, columns.size())
+        assertEquals(
+            listOf("/repo/a.md"),
+            columns[0].asJsonObject.getAsJsonArray("files").map { it.asString },
+        )
+    }
+
+    @Test
+    fun `force reconcile crosses the wire in the shape the graph reads`() {
+        val forced = JsonParser.parseString(
+            surfaceJson("/repo/a.md", listOf("/repo/a.md"), forceReconcile = true)
+        ).asJsonObject
+        val unforced = JsonParser.parseString(
+            surfaceJson("/repo/a.md", listOf("/repo/a.md"), forceReconcile = false)
+        ).asJsonObject
+
+        assertTrue(forced.get("force_reconcile").asBoolean)
+        assertFalse(unforced.get("force_reconcile").asBoolean)
+    }
+
+    @Test
+    fun `observation reports no layout_synced field for the controller to answer`() {
+        val surface = JsonParser.parseString(
+            surfaceJson("/repo/a.md", listOf("/repo/a.md"))
+        ).asJsonObject
+
+        assertFalse(surface.has("layout_synced"))
+        assertFalse(surface.has("layoutSynced"))
+    }
+
+    @Test
+    fun `a derived sync intent produces the operator hint`() {
+        val hint = EditorTabSyncListener.syncHintFromReceipt(
+            """
+            {"intent":{"kind":"sync","columns":[{"files":["/repo/a.md"]},{"files":["/repo/b.md"]}],
+             "document":"/repo/b.md"},"idle":false,"outcome":"{}","error":null}
+            """.trimIndent()
+        )
+
+        assertEquals("Sync: --col /repo/a.md --col /repo/b.md [focus: /repo/b.md]", hint)
+        assertEquals("sync", EditorTabSyncListener.intentKindFromReceipt(
+            """{"intent":{"kind":"sync","columns":[],"document":"/repo/b.md"},"idle":false}"""
+        ))
+    }
+
+    @Test
+    fun `focus and idle intents produce no hint`() {
         assertNull(
-            EditorTabSyncListener.AutomaticCommandPlanner.plan(
-                visibleMdFiles = visibleMdFiles,
-                visibleSignature = visibleSignature(visibleMdFiles),
-                focusedFile = focusedFile,
-                previousVisibleSignature = visibleSignature(visibleMdFiles),
-                previousFocusedFile = focusedFile,
+            EditorTabSyncListener.syncHintFromReceipt(
+                """{"intent":{"kind":"focus","document":"/repo/b.md"},"idle":false}"""
             )
         )
-    }
-
-    @Test
-    fun `real markdown selection event reconciles exact state with one focus effect`() {
-        val visibleMdFiles = listOf("/repo/tasks/software/corky.md")
-        val visibleSignature = visibleSignature(visibleMdFiles)
-
-        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
-            visibleMdFiles = visibleMdFiles,
-            visibleSignature = visibleSignature,
-            focusedFile = "/repo/tasks/software/corky.md",
-            previousVisibleSignature = visibleSignature,
-            previousFocusedFile = "/repo/tasks/software/corky.md",
-            forceReconcile = true,
-        )
-
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Focus, plan?.kind)
-    }
-
-    @Test
-    fun `forced reconcile still repairs a stale tmux layout`() {
-        val visibleMdFiles = listOf("/repo/tasks/software/corky.md")
-        val visibleSignature = visibleSignature(visibleMdFiles)
-
-        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
-            visibleMdFiles = visibleMdFiles,
-            visibleSignature = visibleSignature,
-            focusedFile = "/repo/tasks/software/corky.md",
-            previousVisibleSignature = visibleSignature,
-            previousFocusedFile = "/repo/tasks/software/corky.md",
-            forceReconcile = true,
-            layoutSynced = false,
-        )
-
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
-    }
-
-    @Test
-    fun `accepted passive sync queues focus retry behind layout rescue`() {
-        assertEquals(
-            true,
-            EditorTabSyncListener.AutomaticCommandPlanner.shouldQueuePostSyncFocus(
-                kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
-                exitCode = 0,
-                currentGeneration = true,
-            ),
-        )
-        assertEquals(
-            false,
-            EditorTabSyncListener.AutomaticCommandPlanner.shouldQueuePostSyncFocus(
-                kind = EditorTabSyncListener.AutomaticCommandKind.Focus,
-                exitCode = 0,
-                currentGeneration = true,
-            ),
-        )
-        assertEquals(
-            false,
-            EditorTabSyncListener.AutomaticCommandPlanner.shouldQueuePostSyncFocus(
-                kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
-                exitCode = 1,
-                currentGeneration = true,
-            ),
+        assertNull(
+            EditorTabSyncListener.syncHintFromReceipt("""{"intent":{"kind":"idle"},"idle":true}""")
         )
     }
 
     @Test
-    fun `opposite pane selection routes to focus command when visible split is unchanged`() {
-        // Switching focus to the other pane of an unchanged split is a pure focus
-        // change → focus command (tmux follows), not a layout sync.
-        val visibleMdFiles = listOf(
-            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/sample-app/tasks/sampleorders.md",
-        )
-        val visibleSignature = visibleSignature(visibleMdFiles)
-
-        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
-            visibleMdFiles = visibleMdFiles,
-            visibleSignature = visibleSignature,
-            focusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            previousVisibleSignature = visibleSignature,
-            previousFocusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
-        )
-
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Focus, plan?.kind)
-    }
-
-    @Test
-    fun `opposite pane selection routes to sync when tmux layout model is stale`() {
-        // The editor split did not change, but the controller's lazily-backed
-        // sync state check proved the visible tmux panes are swapped. A
-        // focus-only command would select the correct pane in the wrong column.
-        val visibleMdFiles = listOf(
-            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/sample-app/tasks/sampleorders.md",
-        )
-        val visibleSignature = visibleSignature(visibleMdFiles)
-
-        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
-            visibleMdFiles = visibleMdFiles,
-            visibleSignature = visibleSignature,
-            focusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            previousVisibleSignature = visibleSignature,
-            previousFocusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
-            layoutSynced = false,
-        )
-
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
-    }
-
-    @Test
-    fun `unchanged editor selection still syncs when tmux layout model is stale`() {
-        val visibleMdFiles = listOf(
-            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/sample-app/tasks/sampleorders.md",
-        )
-        val focusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md"
-        val visibleSignature = visibleSignature(visibleMdFiles)
-
-        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
-            visibleMdFiles = visibleMdFiles,
-            visibleSignature = visibleSignature,
-            focusedFile = focusedFile,
-            previousVisibleSignature = visibleSignature,
-            previousFocusedFile = focusedFile,
-            layoutSynced = false,
-        )
-
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
-    }
-
-    @Test
-    fun `focus gained on a different markdown split triggers reconcile`() {
-        // #panefocussplit: moving focus to the other split editor (a different
-        // md path than the last focus reconcile) must drive a focus reconcile so
-        // the tmux active pane follows the editor selection.
-        assertEquals(
-            true,
-            EditorTabSyncListener.AutomaticCommandPlanner.shouldReconcileFocusedFile(
-                focusedFilePath = "/repo/tasks/professional/sampleportal.md",
-                isMarkdown = true,
-                lastFocusRequestedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            ),
-        )
-    }
-
-    @Test
-    fun `repeated focus gained on the same file does not reconcile`() {
-        // Focus events fire repeatedly for the same editor; consecutive events on
-        // one file must not re-run the focus reconcile.
-        assertEquals(
-            false,
-            EditorTabSyncListener.AutomaticCommandPlanner.shouldReconcileFocusedFile(
-                focusedFilePath = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-                isMarkdown = true,
-                lastFocusRequestedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            ),
-        )
-    }
-
-    @Test
-    fun `focus gained on a non markdown editor does not reconcile`() {
-        assertEquals(
-            false,
-            EditorTabSyncListener.AutomaticCommandPlanner.shouldReconcileFocusedFile(
-                focusedFilePath = "/repo/src/main.rs",
-                isMarkdown = false,
-                lastFocusRequestedFile = null,
-            ),
-        )
-    }
-
-    @Test
-    fun `visible set changes still dispatch sync`() {
-        val visibleMdFiles = listOf(
-            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/sample-app/tasks/sampleorders.md",
-        )
-        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
-            visibleMdFiles = visibleMdFiles,
-            visibleSignature = visibleSignature(visibleMdFiles),
-            focusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            previousVisibleSignature = visibleSignature(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
-            previousFocusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
-        )
-
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
-    }
-
-    @Test
-    fun `automatic sync diagnostics describe Project Controller submit not CLI process`() {
-        val label = EditorTabSyncListener.formatProjectControllerSyncLabel(
-            columns = listOf(
-                "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-                "/repo/src/sample-app/tasks/sampleorders.md",
-            ),
-            focus = "/repo/src/sample-app/tasks/sampleorders.md",
-        )
-
-        assertEquals(
-            "project-controller:sync_tmux_layout --col /repo/tasks/agent-doc/agent-doc-bugs2.md --col /repo/src/sample-app/tasks/sampleorders.md --focus /repo/src/sample-app/tasks/sampleorders.md --exact-visible --no-autostart",
-            label,
-        )
-        assertFalse(label.contains("agent-doc sync"))
-    }
-
-    @Test
-    fun `selection change to a different file routes to focus command`() {
-        // Different focused file, same visible layout → focus command.
-        val visibleMdFiles = listOf(
-            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/sample-app/tasks/sampleorders.md",
-        )
-        val visibleSignature = visibleSignature(visibleMdFiles)
-
-        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
-            visibleMdFiles = visibleMdFiles,
-            visibleSignature = visibleSignature,
-            focusedFile = "/repo/src/sample-app/tasks/sampleorders.md",
-            previousVisibleSignature = visibleSignature,
-            previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-        )
-
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Focus, plan?.kind)
-    }
-
-    @Test
-    fun `newer automatic sync generations replay after the running command finishes`() {
-        assertEquals(true, EditorTabSyncListener.AutomaticCommandPlanner.shouldReplayAfterRun(3, 4))
-        assertEquals(false, EditorTabSyncListener.AutomaticCommandPlanner.shouldReplayAfterRun(4, 4))
-        assertEquals(0L, EditorTabSyncListener.AutomaticCommandPlanner.replayDelayAfterRun(3, 4, false))
-        assertEquals(null, EditorTabSyncListener.AutomaticCommandPlanner.replayDelayAfterRun(4, 4, false))
-    }
-
-    @Test
-    fun `timed out automatic sync generations replay with backoff`() {
-        assertEquals(5_000L, EditorTabSyncListener.AutomaticCommandPlanner.replayDelayAfterRun(3, 4, true))
-    }
-
-    @Test
-    fun `superseded automatic sync results do not schedule deferred retries`() {
-        assertEquals(false, EditorTabSyncListener.AutomaticCommandPlanner.shouldScheduleDeferredRetry(3, 4))
-        assertEquals(true, EditorTabSyncListener.AutomaticCommandPlanner.shouldScheduleDeferredRetry(4, 4))
-    }
-
-    @Test
-    fun `safe passive preserve output keeps sync pending for retry`() {
-        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
-            kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
-            exitCode = 0,
-            output = """
-                [sync] resolved target window after repair: 4:agent-doc → @128
-                [sync] safe passive sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tmux-router.md while visible protected pane(s) %241:preflight_started:/repo/tasks/software/tagpath.md cannot be detached safely because those panes still own open closeout cycle(s)
-            """.trimIndent(),
-        )
-
-        assertEquals(false, result.applied)
-        assertEquals(true, result.shouldRetry)
-    }
-
-    @Test
-    fun `generic preserve output from bugs2 to tsift keeps automatic sync pending for retry`() {
-        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
-            kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
-            exitCode = 0,
-            output = """
-                [sync] resolved target window after repair: 4:agent-doc -> @128
-                [sync] sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tsift.md while visible protected pane(s) %210:preflight_started:/repo/tasks/agent-doc/agent-doc-bugs2.md cannot be detached safely because those panes still own open closeout cycle(s)
-            """.trimIndent(),
-        )
-
-        assertEquals(false, result.applied)
-        assertEquals(true, result.shouldRetry)
-    }
-
-    @Test
-    fun `safe passive preserve output with reselected focus is treated as applied`() {
-        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
-            kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
-            exitCode = 0,
-            output = """
-                [sync] safe passive sync preserved the current tmux layout because missing requested pane(s) /repo/tasks/software/tmux-router.md while visible protected pane(s) %241:preflight_started:/repo/tasks/software/tagpath.md cannot be detached safely because those panes still own open closeout cycle(s)
-                [sync] safe_passive_layout_preserved_reselected_focus pane=%202 reason=protected_visible
-            """.trimIndent(),
-        )
-
-        assertEquals(true, result.applied)
-        assertEquals(false, result.shouldRetry)
-    }
-
-    @Test
-    fun `safe passive lock contention keeps automatic sync pending for retry`() {
-        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
-            kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
-            exitCode = 0,
-            output = """
-                [sync] latency budget exceeded: phase sync_lock_wait took 101ms (budget 100ms, mode=safe-passive)
-                [sync] safe_passive_sync_lock_contention_retry phase=sync_lock_wait elapsed_ms=101 budget_ms=100 status=over_budget action=retry
-            """.trimIndent(),
-        )
-
-        assertEquals(false, result.applied)
-        assertEquals(true, result.shouldRetry)
-    }
-
-    @Test
-    fun `successful sync output without preserve marker applies immediately`() {
-        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
-            kind = EditorTabSyncListener.AutomaticCommandKind.Sync,
-            exitCode = 0,
-            output = """
-                [sync] resolved target window after repair: 4:agent-doc → @128
-                [sync] reconcile path: 2 columns, [["%243"], ["%202"]]
-            """.trimIndent(),
-        )
-
-        assertEquals(true, result.applied)
-        assertEquals(false, result.shouldRetry)
-    }
-
-    @Test
-    fun `focus command success is treated as applied`() {
-        val result = EditorTabSyncListener.AutomaticCommandPlanner.analyzeCommandResult(
-            kind = EditorTabSyncListener.AutomaticCommandKind.Focus,
-            exitCode = 0,
-            output = "",
-        )
-
-        assertEquals(true, result.applied)
-        assertEquals(false, result.shouldRetry)
-    }
-
-    @Test
-    fun `column aware signatures preserve splitter identity for replayed requests`() {
-        val visibleMdFiles = listOf(
-            "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            "/repo/src/sample-app/tasks/sampleorders.md",
-        )
-        val previousLayout = EditorLayout(
-            columns = listOf(
-                LayoutColumn(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
-                LayoutColumn(listOf("/repo/src/sample-app/tasks/sampleorders.md")),
-            )
-        )
-        val latestLayout = EditorLayout(
-            columns = listOf(
-                LayoutColumn(listOf("/repo/src/sample-app/tasks/sampleorders.md")),
-                LayoutColumn(listOf("/repo/tasks/agent-doc/agent-doc-bugs2.md")),
-            )
-        )
-
-        val plan = EditorTabSyncListener.AutomaticCommandPlanner.plan(
-            visibleMdFiles = visibleMdFiles,
-            visibleSignature = visibleSignature(visibleMdFiles, latestLayout),
-            focusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-            previousVisibleSignature = visibleSignature(visibleMdFiles, previousLayout),
-            previousFocusedFile = "/repo/tasks/agent-doc/agent-doc-bugs2.md",
-        )
-
-        assertEquals(EditorTabSyncListener.AutomaticCommandKind.Sync, plan?.kind)
+    fun `an unusable receipt is reported as no intent instead of throwing`() {
+        assertNull(EditorTabSyncListener.syncHintFromReceipt(null))
+        assertNull(EditorTabSyncListener.syncHintFromReceipt(""))
+        assertNull(EditorTabSyncListener.syncHintFromReceipt("not json"))
+        assertNull(EditorTabSyncListener.intentKindFromReceipt("{}"))
     }
 }

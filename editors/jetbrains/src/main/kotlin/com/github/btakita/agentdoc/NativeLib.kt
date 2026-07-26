@@ -267,6 +267,28 @@ interface AgentDocLib : Library {
         exact_visible: Int,
     ): FfiJsonResult.ByValue
 
+    /**
+     * Report what the editor looks like now and get the derived tmux intent back
+     * (`#jbsurfaceswap`).
+     *
+     * `surface_json` is an `EditorSurface`: `{ "focused", "visible", "columns",
+     * "force_reconcile" }`. The receipt is `{ "intent", "idle", "outcome",
+     * "error" }`. This replaces choosing between
+     * [agent_doc_focus_document_pane_json] and [agent_doc_sync_tmux_layout_json]
+     * in the plugin.
+     */
+    fun agent_doc_editor_surface_observe_json(
+        project_root: String,
+        surface_json: String,
+    ): FfiJsonResult.ByValue
+
+    /**
+     * Forget a project root's editor-surface graph — the editor closed the
+     * project. Returns `1` when a surface was forgotten, `0` when none was
+     * registered, `-1` on a bad argument.
+     */
+    fun agent_doc_editor_surface_forget(project_root: String): Int
+
     /** Controller-backed `admin queue pause|resume|drain --json` wrapper. */
     fun agent_doc_admin_queue_control_json(
         project_root: String?,
@@ -1282,6 +1304,37 @@ object NativeAdminControls {
             return null
         }
         return decodeJsonResult(lib, result, "sync_tmux_layout")
+    }
+
+    /**
+     * Report one editor-surface observation (`#jbsurfaceswap`).
+     *
+     * Returns the receipt JSON, or `null` when the native library is unavailable
+     * or the observation was rejected. Callers report; they do not plan.
+     */
+    fun editorSurfaceObserve(
+        projectRoot: String,
+        surfaceJson: String,
+    ): String? {
+        val lib = AgentDocLib.get() ?: return null
+        val result = try {
+            lib.agent_doc_editor_surface_observe_json(projectRoot, surfaceJson)
+        } catch (e: Throwable) {
+            LOG.warn("[native] editor_surface_observe unavailable: ${e.message}")
+            return null
+        }
+        return decodeJsonResult(lib, result, "editor_surface_observe")
+    }
+
+    /** Release a project root's editor-surface graph. */
+    fun editorSurfaceForget(projectRoot: String): Boolean {
+        val lib = AgentDocLib.get() ?: return false
+        return try {
+            lib.agent_doc_editor_surface_forget(projectRoot) == 1
+        } catch (e: Throwable) {
+            LOG.warn("[native] editor_surface_forget unavailable: ${e.message}")
+            false
+        }
     }
 
     fun queueControl(

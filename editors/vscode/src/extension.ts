@@ -39,17 +39,14 @@ import {
     buildPrimaryPopupMenuItems,
 } from './popupMenu.js';
 import {
-    analyzeTabSyncCommandResult,
+    buildEditorSurface,
     buildSyncCommandArgs,
-    buildTabChangeCommand,
     flattenVisibleColumns,
+    intentFromReceipt,
     isPreservedLayoutOutput,
     normalizeVisibleColumns,
-    replayDelayAfterTabSyncRun,
-    shouldReplayQueuedTabChange,
-    shouldScheduleDeferredTabSyncRetry,
-    tabSyncTimeoutBackoffDelayMs,
-    type TabSyncState,
+    syncHintFromReceipt,
+    type EditorSurface,
 } from './tabSync.js';
 import {
     EditorCommandCompletion,
@@ -1836,264 +1833,106 @@ async function syncLayoutInternal(root: string, notify: boolean, noAutostart: bo
 }
 
 // ---------------------------------------------------------------------------
-// Feature 4: Tab Sync (Automatic)
+// Feature 4: Editor Surface Reporting (Automatic)
 // ---------------------------------------------------------------------------
+//
+// `#jbsurfaceswap`: the extension reports one observation per tab/visibility
+// change and the reactive graph behind `agent_doc_editor_surface_observe_json`
+// derives focus-vs-sync, dedups repeats, and drives the Project Controller
+// command. What is left here is event-storm handling that is genuinely the
+// editor's: a debounce plus a generation guard so a burst reports only its
+// final state.
 
-let tabSyncDebounceTimer: ReturnType<typeof setTimeout> | undefined;
-let tabSyncRunning = false;
-let lastTabSyncState: TabSyncState | undefined;
-const TAB_SYNC_DEBOUNCE_MS = 100;
-const TAB_SYNC_DEFERRED_RETRY_BASE_MS = 750;
-const TAB_SYNC_DEFERRED_RETRY_MAX_MS = 5_000;
-const TAB_SYNC_MAX_DEFERRED_RETRIES = 8;
-let latestTabSyncGeneration = 0;
-let latestFocusHandoffGeneration = 0;
-let lastFocusHandoffFsPath: string | undefined;
-let tabSyncDeferredRetryKey: string | undefined;
-let tabSyncDeferredRetryCount = 0;
-let tabSyncTimeoutBackoffKey: string | undefined;
-let tabSyncTimeoutBackoffCount = 0;
-let tabSyncTimeoutRetryAfterMs = 0;
+let surfaceDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+let surfaceReportRunning = false;
+const SURFACE_DEBOUNCE_MS = 100;
+let latestSurfaceGeneration = 0;
+/** Every project root observed this session, released on deactivate. */
+const observedSurfaceRoots = new Set<string>();
 
-interface PlannedTabSyncExecution {
+interface PendingSurfaceObservation {
     root: string;
-    activeFsPath: string;
-    planned: NonNullable<ReturnType<typeof buildTabChangeCommand>>;
+    relativePath: string;
+    surface: EditorSurface;
 }
 
-interface PlannedFocusHandoff {
-    root: string;
-    activeFsPath: string;
+/**
+ * Absolute paths, matching the JetBrains plugin and the controller's document
+ * identity. `collectVisibleMarkdownColumns` reports workspace-relative paths
+ * because the CLI took them that way; the surface graph focuses a document by
+ * path, so it needs the real one.
+ */
+function absolutizeColumns(root: string, columns: string[][]): string[][] {
+    return columns.map((column) => column.map((file) => path.join(root, file)));
 }
 
-function planCurrentFocusHandoff(): PlannedFocusHandoff | null {
+function captureCurrentSurface(forceReconcile: boolean): PendingSurfaceObservation | null {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return null;
 
     const root = getWorkspaceRoot(editor.document.uri);
     if (!root) return null;
 
-    return { root, activeFsPath: editor.document.uri.fsPath };
-}
-
-function planCurrentTabChange(): PlannedTabSyncExecution | null {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor || !isMarkdown(editor)) return null;
-
-    const root = getWorkspaceRoot(editor.document.uri);
-    if (!root) return null;
-
-    const visibleColumns = collectVisibleMarkdownColumns(root);
-    const visibleMd = flattenVisibleColumns(visibleColumns);
     const activeFsPath = editor.document.uri.fsPath;
-    const activeFile = relativePath(root, activeFsPath);
-    const planned = buildTabChangeCommand({
-        activeFile,
-        visibleMd,
+    const visibleColumns = absolutizeColumns(root, collectVisibleMarkdownColumns(root));
+    const surface = buildEditorSurface({
+        activeFile: activeFsPath,
+        visibleMd: flattenVisibleColumns(visibleColumns),
         visibleColumns,
-        previous: lastTabSyncState,
+        forceReconcile,
     });
-    if (planned === null) return null;
-    return { root, activeFsPath, planned };
+    if (surface === null) return null;
+    return { root, relativePath: relativePath(root, activeFsPath), surface };
 }
 
-function requestTabSync(delayMs = TAB_SYNC_DEBOUNCE_MS): number {
-    const requestedGeneration = ++latestTabSyncGeneration;
-    if (tabSyncDebounceTimer) clearTimeout(tabSyncDebounceTimer);
-    tabSyncDebounceTimer = setTimeout(() => {
-        void drainTabSync(requestedGeneration);
+function requestSurfaceObservation(delayMs = SURFACE_DEBOUNCE_MS): number {
+    const requestedGeneration = ++latestSurfaceGeneration;
+    if (surfaceDebounceTimer) clearTimeout(surfaceDebounceTimer);
+    surfaceDebounceTimer = setTimeout(() => {
+        surfaceDebounceTimer = undefined;
+        reportCurrentSurface(requestedGeneration);
     }, delayMs);
     return requestedGeneration;
 }
 
-function resetTabSyncDeferredRetry(): void {
-    tabSyncDeferredRetryKey = undefined;
-    tabSyncDeferredRetryCount = 0;
-}
-
-function tabSyncRetryKey(execution: PlannedTabSyncExecution): string {
-    return `${execution.planned.nextState.visibleSignature}\u0000${execution.planned.nextState.activeFile}`;
-}
-
-function resetTabSyncTimeoutBackoff(): void {
-    tabSyncTimeoutBackoffKey = undefined;
-    tabSyncTimeoutBackoffCount = 0;
-    tabSyncTimeoutRetryAfterMs = 0;
-}
-
-function remainingTabSyncTimeoutBackoffMs(execution: PlannedTabSyncExecution): number {
-    if (tabSyncTimeoutBackoffKey !== tabSyncRetryKey(execution)) return 0;
-    return Math.max(tabSyncTimeoutRetryAfterMs - Date.now(), 0);
-}
-
-function registerTabSyncTimeoutBackoff(execution: PlannedTabSyncExecution): number {
-    const retryKey = tabSyncRetryKey(execution);
-    if (tabSyncTimeoutBackoffKey === retryKey) {
-        tabSyncTimeoutBackoffCount += 1;
-    } else {
-        tabSyncTimeoutBackoffKey = retryKey;
-        tabSyncTimeoutBackoffCount = 1;
-    }
-    const delayMs = tabSyncTimeoutBackoffDelayMs(tabSyncTimeoutBackoffCount);
-    tabSyncTimeoutRetryAfterMs = Date.now() + delayMs;
-    return delayMs;
-}
-
-function nextTabSyncDeferredRetryDelay(retryCount: number): number {
-    const step = Math.max(retryCount - 1, 0);
-    const delay = TAB_SYNC_DEFERRED_RETRY_BASE_MS * (2 ** Math.min(step, 3));
-    return Math.min(delay, TAB_SYNC_DEFERRED_RETRY_MAX_MS);
-}
-
-function registerTabSyncDeferredRetry(execution: PlannedTabSyncExecution): number | null {
-    const retryKey = tabSyncRetryKey(execution);
-    if (tabSyncDeferredRetryKey === retryKey) {
-        tabSyncDeferredRetryCount += 1;
-    } else {
-        tabSyncDeferredRetryKey = retryKey;
-        tabSyncDeferredRetryCount = 1;
-    }
-    if (tabSyncDeferredRetryCount > TAB_SYNC_MAX_DEFERRED_RETRIES) {
-        return null;
-    }
-    return nextTabSyncDeferredRetryDelay(tabSyncDeferredRetryCount);
-}
-
-async function drainTabSync(requestedGeneration: number): Promise<void> {
-    if (requestedGeneration !== latestTabSyncGeneration) return;
-    if (tabSyncRunning) return;
-    tabSyncRunning = true;
-
-    let startedGeneration = requestedGeneration;
-    let retryAlreadyScheduled = false;
-    let commandTimedOut = false;
+function reportCurrentSurface(requestedGeneration: number): void {
+    if (requestedGeneration !== latestSurfaceGeneration) return;
+    if (surfaceReportRunning) return;
+    surfaceReportRunning = true;
     try {
-        while (true) {
-            startedGeneration = latestTabSyncGeneration;
-            commandTimedOut = false;
-            const execution = planCurrentTabChange();
-            if (execution === null) {
-                if (!shouldReplayQueuedTabChange(startedGeneration, latestTabSyncGeneration)) break;
-                continue;
-            }
-
-            try {
-                let output = '';
-                if (execution.planned.command.kind === 'focus') {
-                    const { cwd, relativePath: rel } = resolveProject(execution.root, execution.activeFsPath);
-                    output = native.focusDocumentPaneJson({
-                        projectRoot: cwd,
-                        documentPath: execution.activeFsPath,
-                    }) ?? '';
-                } else {
-                    const backoffMs = remainingTabSyncTimeoutBackoffMs(execution);
-                    if (backoffMs > 0) {
-                        requestTabSync(backoffMs);
-                        retryAlreadyScheduled = true;
-                        break;
-                    }
-                    output = await runCli(
-                        execution.planned.command.args,
-                        execution.root,
-                        { timeoutMs: AUTOMATIC_SYNC_CLI_TIMEOUT_MS },
-                    );
-                }
-                const result = analyzeTabSyncCommandResult(
-                    execution.planned.command,
-                    0,
-                    output,
-                );
-                if (result.applied) {
-                    lastTabSyncState = execution.planned.nextState;
-                    resetTabSyncDeferredRetry();
-                    resetTabSyncTimeoutBackoff();
-                } else if (result.shouldRetry) {
-                    if (shouldScheduleDeferredTabSyncRetry(startedGeneration, latestTabSyncGeneration)) {
-                        const delayMs = registerTabSyncDeferredRetry(execution);
-                        if (delayMs !== null) {
-                            requestTabSync(delayMs);
-                            retryAlreadyScheduled = true;
-                        }
-                    }
-                    break;
-                }
-            } catch (err) {
-                commandTimedOut = isCliTimeout(err);
-                if (
-                    commandTimedOut &&
-                    execution.planned.command.kind === 'sync' &&
-                    shouldScheduleDeferredTabSyncRetry(startedGeneration, latestTabSyncGeneration)
-                ) {
-                    const delayMs = registerTabSyncTimeoutBackoff(execution);
-                    requestTabSync(delayMs);
-                    retryAlreadyScheduled = true;
-                    break;
-                }
-                resetTabSyncDeferredRetry();
-                if (!commandTimedOut) {
-                    resetTabSyncTimeoutBackoff();
-                }
-                // Silently ignore tab sync errors
-            }
-
-            const replayDelayMs = replayDelayAfterTabSyncRun(
-                startedGeneration,
-                latestTabSyncGeneration,
-                commandTimedOut,
-            );
-            if (replayDelayMs === null) break;
-            if (replayDelayMs > 0) {
-                requestTabSync(replayDelayMs);
-                retryAlreadyScheduled = true;
-                break;
-            }
+        const pending = captureCurrentSurface(false);
+        if (pending === null) return;
+        observedSurfaceRoots.add(pending.root);
+        const receipt = native.editorSurfaceObserveJson({
+            projectRoot: pending.root,
+            surfaceJson: JSON.stringify(pending.surface),
+        });
+        if (receipt === null) return;
+        const intent = intentFromReceipt(receipt);
+        if (intent && intent.kind !== 'idle') {
+            const hint = syncHintFromReceipt(receipt);
+            if (hint) showHint(hint);
         }
     } finally {
-        tabSyncRunning = false;
-        if (!retryAlreadyScheduled) {
-            const replayDelayMs = replayDelayAfterTabSyncRun(
-                startedGeneration,
-                latestTabSyncGeneration,
-                commandTimedOut,
-            );
-            if (replayDelayMs !== null) {
-                requestTabSync(replayDelayMs);
-            }
+        surfaceReportRunning = false;
+        // A change that arrived while we were reporting has already bumped the
+        // generation; report the newer state rather than dropping it.
+        if (latestSurfaceGeneration !== requestedGeneration && !surfaceDebounceTimer) {
+            requestSurfaceObservation(0);
         }
     }
 }
 
-function focusExistingPaneForActiveEditor(): void {
-    const execution = planCurrentFocusHandoff();
-    if (execution === null) {
-        lastFocusHandoffFsPath = undefined;
-        return;
+/** Release every observed root's surface graph. */
+function forgetObservedSurfaces(): void {
+    for (const root of observedSurfaceRoots) {
+        native.editorSurfaceForget(root);
     }
-    if (execution.activeFsPath === lastFocusHandoffFsPath) return;
-    lastFocusHandoffFsPath = execution.activeFsPath;
-    const generation = ++latestFocusHandoffGeneration;
-    void (async () => {
-        if (generation !== latestFocusHandoffGeneration) return;
-        try {
-            const { cwd, relativePath: rel } = resolveProject(execution.root, execution.activeFsPath);
-            const receipt = native.focusDocumentPaneJson({
-                projectRoot: cwd,
-                documentPath: execution.activeFsPath,
-            });
-            if (generation === latestFocusHandoffGeneration && focusReceiptFocused(receipt)) {
-                showHint(`Focus: ${rel}`);
-            }
-        } catch {
-            // Missing or stale panes are expected during tab churn; background sync owns reconciliation.
-        }
-    })();
+    observedSurfaceRoots.clear();
 }
 
 function onTabChanged(): void {
-    focusExistingPaneForActiveEditor();
-    const execution = planCurrentTabChange();
-    if (execution === null) return;
-    requestTabSync();
+    requestSurfaceObservation();
 }
 
 // ---------------------------------------------------------------------------
@@ -3393,11 +3232,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {
-    // Clean up tab sync debounce
-    if (tabSyncDebounceTimer) {
-        clearTimeout(tabSyncDebounceTimer);
-        tabSyncDebounceTimer = undefined;
+    // Clean up the editor-surface debounce
+    if (surfaceDebounceTimer) {
+        clearTimeout(surfaceDebounceTimer);
+        surfaceDebounceTimer = undefined;
     }
+    // Release each observed root's surface graph: its reconciled-layout history
+    // must not outlive the editor that produced it.
+    forgetObservedSurfaces();
 
     // Clean up status bar
     if (statusBarTimeout) {
@@ -3413,7 +3255,7 @@ export function deactivate(): void {
     syntaxDecorationController = undefined;
 
     // Reset state
-    lastTabSyncState = undefined;
+    latestSurfaceGeneration = 0;
     resolvedAgentDoc = null;
     commandRunning = false;
     editorCommandRegistry.resetForTest();

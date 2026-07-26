@@ -28,7 +28,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
-use agent_doc_editor_surface::{EditorSurface, EditorSurfaceState, SurfaceIntent, TmuxLayout};
+use agent_doc_editor_surface::{
+    EditorSurface, EditorSurfaceState, SurfaceColumn, SurfaceIntent, TmuxLayout,
+};
 use agent_doc_state_scope::ProcessScope;
 use anyhow::{Context as _, Result};
 use serde::Serialize;
@@ -54,6 +56,21 @@ pub struct SurfaceObservationReceipt {
 /// The tmux consequence of a derived intent.
 pub type IntentRunner = Arc<dyn Fn(&Path, &SurfaceIntent) -> Result<String> + Send + Sync>;
 
+/// The controller's half of the mirror, pulled for one editor observation.
+///
+/// `observe_tmux` is the push form: the controller notices drift and writes it.
+/// A plugin process holds its own registry, and no controller writes into it, so
+/// its tmux side would stay unobserved forever and proven drift would never
+/// reconcile — the plugin would emit `Focus` for a layout tmux no longer shows.
+/// This is the pull form of the same fact. It is still the *controller's*
+/// observation, which is the property that matters: the editor never reports
+/// whether tmux agrees with it.
+///
+/// `None` means "not asked, or no answer" — deliberately distinct from "tmux
+/// matches" and from "tmux drifted" (`#idlerevisionreactive`).
+pub type TmuxLayoutProbe =
+    Arc<dyn Fn(&Path, &EditorSurface) -> Option<TmuxLayout> + Send + Sync>;
+
 struct RootSurface {
     state: EditorSurfaceState,
     /// The subscription that drives the consequence. `Effect` is a `Copy` handle
@@ -70,14 +87,24 @@ struct RootSurface {
 pub struct Registry {
     scope: ProcessScope,
     run_intent: IntentRunner,
+    probe_tmux: TmuxLayoutProbe,
     roots: Mutex<HashMap<PathBuf, RootSurface>>,
 }
 
 impl Registry {
+    /// A registry whose tmux side is only ever written by [`Self::observe_tmux`].
     pub fn new(run_intent: IntentRunner) -> Self {
+        Self::with_tmux_probe(run_intent, Arc::new(|_, _| None))
+    }
+
+    /// A registry that also pulls the controller's tmux observation for each
+    /// editor observation, so drift reconciles in a process no controller
+    /// pushes into.
+    pub fn with_tmux_probe(run_intent: IntentRunner, probe_tmux: TmuxLayoutProbe) -> Self {
         Self {
             scope: ProcessScope::new(),
             run_intent,
+            probe_tmux,
             roots: Mutex::new(HashMap::new()),
         }
     }
@@ -95,7 +122,13 @@ impl Registry {
     /// The plugin's entire job. Whether tmux does anything, and what, is derived
     /// here — the caller does not decide, debounce, or dedup.
     pub fn observe(&self, project_root: &Path, surface: EditorSurface) -> SurfaceObservationReceipt {
-        self.with_entry(project_root, |entry| entry.state.observe(surface))
+        // Probe before taking the registry lock: it is a controller round trip,
+        // and holding the lock across it would serialize every other root's
+        // observations behind this one.
+        let tmux = (self.probe_tmux)(project_root, &surface);
+        self.with_entry(project_root, move |entry| {
+            entry.state.observe_with_tmux(surface, tmux)
+        })
     }
 
     /// Record what tmux is showing at `project_root`.
@@ -228,8 +261,68 @@ fn run_intent_via_controller(root: &Path, intent: &SurfaceIntent) -> Result<Stri
     }
 }
 
-static REGISTRY: LazyLock<Registry> =
-    LazyLock::new(|| Registry::new(Arc::new(run_intent_via_controller)));
+/// Ask the controller what tmux is showing, expressed as the mirror's other side.
+///
+/// The controller answers "does tmux show this layout, and if not, which
+/// documents are in its panes" — so a mismatch becomes the tmux layout it
+/// actually observed, and a match becomes the surface itself, which is what
+/// "tmux shows this" means. Both are the controller's observation either way;
+/// neither is the editor reporting on tmux.
+///
+/// A surface with fewer than two columns is not probed. Column *arrangement* is
+/// what can drift, a one-column surface has none, and the probe is a round trip
+/// on the editor's event path — so the answer would cost more than it is worth.
+/// That returns `None` (unknown), not `Some(matching)`: claiming a match nobody
+/// checked is the inversion `#idlerevisionreactive` warns about.
+fn probe_tmux_via_controller(root: &Path, surface: &EditorSurface) -> Option<TmuxLayout> {
+    if surface.columns.len() < 2 {
+        return None;
+    }
+    let invocation =
+        agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncStateInvocation {
+            // The controller's column wire format is one comma-joined string per
+            // column, the same shape as `agent-doc sync --col`.
+            columns: surface
+                .columns
+                .iter()
+                .map(|column| column.files.join(","))
+                .collect(),
+            window: None,
+            focus: Some(surface.focused.clone()),
+        };
+    let report = match agent_doc_controller_io::project_controller::tmux_layout_sync_state(
+        root,
+        invocation,
+    ) {
+        Ok(report) => report,
+        Err(err) => {
+            // Not knowing is a distinct answer from "drifted". Treating an
+            // unreachable controller as drift would reconcile the layout on
+            // every editor event while the controller is down.
+            eprintln!("[editor-surface] tmux layout probe unavailable: {err:#}");
+            return None;
+        }
+    };
+    if report.synced {
+        return Some(TmuxLayout {
+            columns: surface.columns.clone(),
+        });
+    }
+    Some(TmuxLayout {
+        columns: report
+            .actual_documents
+            .into_iter()
+            .map(|document| SurfaceColumn { files: vec![document] })
+            .collect(),
+    })
+}
+
+static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
+    Registry::with_tmux_probe(
+        Arc::new(run_intent_via_controller),
+        Arc::new(probe_tmux_via_controller),
+    )
+});
 
 /// Record an editor-surface observation for the process-wide registry.
 pub fn observe(project_root: &Path, surface: EditorSurface) -> SurfaceObservationReceipt {
@@ -265,7 +358,6 @@ pub fn forget(project_root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_doc_editor_surface::SurfaceColumn;
 
     fn mirrored(surface: &EditorSurface) -> TmuxLayout {
         TmuxLayout {
@@ -303,6 +395,99 @@ mod tests {
             }
         };
         (Registry::new(Arc::new(runner)), ran)
+    }
+
+    /// The recording registry above, plus a tmux probe answering from `layouts`
+    /// — one answer per editor observation, in order.
+    fn registry_with_probe(layouts: Vec<Option<TmuxLayout>>) -> (Registry, Ran, Arc<Mutex<usize>>) {
+        let ran: Ran = Arc::new(Mutex::new(Vec::new()));
+        let runner = {
+            let ran = Arc::clone(&ran);
+            move |root: &Path, intent: &SurfaceIntent| {
+                ran.lock().unwrap().push((root.to_path_buf(), intent.clone()));
+                Ok("ok".to_string())
+            }
+        };
+        let probes = Arc::new(Mutex::new(0usize));
+        let probe = {
+            let probes = Arc::clone(&probes);
+            move |_: &Path, _: &EditorSurface| {
+                let mut index = probes.lock().unwrap();
+                let answer = layouts.get(*index).cloned().flatten();
+                *index += 1;
+                answer
+            }
+        };
+        (
+            Registry::with_tmux_probe(Arc::new(runner), Arc::new(probe)),
+            ran,
+            probes,
+        )
+    }
+
+    #[test]
+    fn a_pulled_tmux_layout_reconciles_drift_with_no_editor_change() {
+        let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
+        let drifted = TmuxLayout {
+            columns: vec![SurfaceColumn::new(["/b.md"]), SurfaceColumn::new(["/a.md"])],
+        };
+        // First observation: tmux mirrors the editor. Second: identical editor
+        // surface, but the probe reports tmux has swapped its panes.
+        let (registry, ran, probes) =
+            registry_with_probe(vec![Some(mirrored(&visible)), Some(drifted)]);
+
+        let first = registry.observe(Path::new("/p"), visible.clone());
+        assert!(!first.idle, "the first sighting must reconcile the layout");
+
+        let second = registry.observe(Path::new("/p"), visible.clone());
+        assert!(
+            !second.idle,
+            "an unchanged editor surface must still reconcile once tmux is known to have drifted"
+        );
+        assert!(matches!(second.intent, SurfaceIntent::Sync { .. }));
+        assert_eq!(*probes.lock().unwrap(), 2, "every observation pulls the mirror");
+        assert_eq!(ran.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_pulled_matching_layout_leaves_a_repeated_surface_idle() {
+        let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
+        let (registry, ran, _) = registry_with_probe(vec![
+            Some(mirrored(&visible)),
+            Some(mirrored(&visible)),
+        ]);
+
+        registry.observe(Path::new("/p"), visible.clone());
+        let second = registry.observe(Path::new("/p"), visible);
+
+        assert!(second.idle, "a mirrored layout must not re-reconcile");
+        assert_eq!(ran.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_unanswered_probe_is_unknown_rather_than_drift() {
+        let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
+        // `None` twice: the controller could not be asked. An unreachable
+        // controller must not read as drift, or every editor event reconciles.
+        let (registry, ran, _) = registry_with_probe(vec![None, None]);
+
+        registry.observe(Path::new("/p"), visible.clone());
+        let second = registry.observe(Path::new("/p"), visible);
+
+        assert!(second.idle);
+        assert_eq!(ran.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_default_registry_never_probes() {
+        let (registry, _) = registry();
+        let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
+        registry.observe(Path::new("/p"), visible.clone());
+        let second = registry.observe(Path::new("/p"), visible);
+        assert!(
+            second.idle,
+            "without a probe the tmux side stays unobserved, so nothing drifts"
+        );
     }
 
     #[test]

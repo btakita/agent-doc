@@ -162,6 +162,8 @@ function resetBindings(): void {
     _tmux_focus_state_json = null;
     _focus_document_pane_json = null;
     _sync_tmux_layout_json = null;
+    _editor_surface_observe_json = null;
+    _editor_surface_forget = null;
     _admin_queue_control_json = null;
     _admin_reap_json = null;
     _admin_handoff_json = null;
@@ -337,6 +339,8 @@ let _admin_inspect_json: any = null;
 let _tmux_focus_state_json: any = null;
 let _focus_document_pane_json: any = null;
 let _sync_tmux_layout_json: any = null;
+let _editor_surface_observe_json: any = null;
+let _editor_surface_forget: any = null;
 let _admin_queue_control_json: any = null;
 let _admin_reap_json: any = null;
 let _admin_handoff_json: any = null;
@@ -432,6 +436,12 @@ function bindFunctions(): void {
             FfiJsonResultType,
             ['str', 'str', 'str', 'str', 'int', 'int'],
         );
+        _editor_surface_observe_json = lib.func(
+            'agent_doc_editor_surface_observe_json',
+            FfiJsonResultType,
+            ['str', 'str'],
+        );
+        _editor_surface_forget = lib.func('agent_doc_editor_surface_forget', 'int', ['str']);
         _admin_queue_control_json = lib.func(
             'agent_doc_admin_queue_control_json',
             FfiJsonResultType,
@@ -458,6 +468,8 @@ function bindFunctions(): void {
         _tmux_focus_state_json = null;
         _focus_document_pane_json = null;
         _sync_tmux_layout_json = null;
+        _editor_surface_observe_json = null;
+        _editor_surface_forget = null;
         _admin_queue_control_json = null;
         _admin_reap_json = null;
         _admin_handoff_json = null;
@@ -1651,6 +1663,43 @@ export function syncTmuxLayoutJson(options: {
         ),
         'sync_tmux_layout',
     );
+}
+
+/**
+ * Report one editor-surface observation and get the derived tmux intent back
+ * (`#jbsurfaceswap`).
+ *
+ * `surfaceJson` is an `EditorSurface`; the receipt is
+ * `{ intent, idle, outcome, error }`. This replaces choosing between
+ * {@link focusDocumentPaneJson} and {@link syncTmuxLayoutJson} in the extension:
+ * the extension reports, the graph decides.
+ */
+export function editorSurfaceObserveJson(options: {
+    projectRoot: string;
+    surfaceJson: string;
+}): string | null {
+    if (!ensureLoaded(options.projectRoot)) return null;
+    bindFunctions();
+    if (!_editor_surface_observe_json) return null;
+    return decodeJsonResult(
+        _editor_surface_observe_json(options.projectRoot, options.surfaceJson),
+        'editor_surface_observe',
+    );
+}
+
+/**
+ * Release a project root's editor-surface graph — the editor closed the folder.
+ */
+export function editorSurfaceForget(projectRoot: string): boolean {
+    if (!ensureLoaded(projectRoot)) return false;
+    bindFunctions();
+    if (!_editor_surface_forget) return false;
+    try {
+        return _editor_surface_forget(projectRoot) === 1;
+    } catch (err: any) {
+        console.warn(`[agent-doc/native] editor_surface_forget failed: ${err.message}`);
+        return false;
+    }
 }
 
 /**

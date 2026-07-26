@@ -1,115 +1,137 @@
 package com.github.btakita.agentdoc
 
+import com.google.gson.JsonParser
+import com.google.gson.annotations.SerializedName
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Reconciles tmux focus/layout with editor tab switches.
+ * Reports what this editor looks like; the tmux consequence is derived elsewhere
+ * (`#jbsurfaceswap` / `#jbpluginlazilyeffects`).
  *
- * Single-document tab-selection changes use Project Controller `focus_document_pane`;
- * split-layout tab selections submit non-destructive `sync_tmux_layout` work to the
- * Project Controller so a selected pane can be rescued back out of stash into the
- * agent-doc window.
+ * Every tab selection and split-focus change produces **one observation** —
+ * focused document, visible markdown set, column layout — handed to
+ * `agent_doc_editor_surface_observe_json`. The reactive graph behind that entry
+ * point folds the observation against what tmux was last reconciled against,
+ * derives focus-vs-sync, and runs the Project Controller command as an `Effect`.
  *
- * Guards against rapid-fire events:
- * - 100ms debounce so only the final burst state is acted upon
- * - Concurrency guard: a newer request replays immediately after the running command finishes
- * - Real markdown selection events force one guarded reconciliation pass so
- *   missing actors/supervisors can be cold-started even after exact-state dedup
+ * The plugin therefore holds no plan, no previous-signature field, and no retry
+ * ladder: an observation identical to the last one is idle and costs nothing, so
+ * repeat events need no dedup here. What remains is event-storm handling that is
+ * genuinely the editor's: a 100ms debounce plus a generation guard so a burst
+ * reports only its final state, and an off-EDT executor so the derived command
+ * never blocks the UI thread.
  *
- * Registered in plugin.xml as a projectListener on FileEditorManagerListener.
+ * Registered from [PluginLifecycleListener] via [install] so it survives
+ * hot-reload.
  */
 class EditorTabSyncListener : FileEditorManagerListener {
-    @Volatile
-    private var lastVisibleSignature: String? = null
+    private val latestSurface = AtomicReference<PendingSurface?>(null)
 
-    @Volatile
-    private var lastFocusedFile: String? = null
+    /**
+     * Every project root this instance has observed. A root's graph holds the
+     * reconciled-layout history, so it is released on project close through
+     * `agent_doc_editor_surface_forget`.
+     */
+    private val observedRoots: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
-    // #panefocussplit: the last file path we drove a focus reconcile for from an
-    // editor focus-gained event. Focus events fire repeatedly for the same
-    // editor, so this dedups consecutive focus-gained events on one file while
-    // still reacting to every switch between different split editors.
-    @Volatile
-    private var lastFocusRequestedFile: String? = null
+    /**
+     * Debounce generation. Per-instance, so one project's tab churn cannot
+     * supersede another project's pending observation.
+     */
+    private val generation = AtomicLong(0)
 
-    private val latestSnapshot = java.util.concurrent.atomic.AtomicReference<AutomaticStateSnapshot?>(null)
     private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-editor-tab-sync").apply { isDaemon = true }
     }
 
     companion object {
         private const val DEBOUNCE_MS = 100L
-        private const val DEFERRED_RETRY_BASE_MS = 750L
-        private const val DEFERRED_RETRY_MAX_MS = 5_000L
-        private const val SYNC_GUARD_RETRY_MS = 1_000L
-        private const val SYNC_TIMEOUT_REPLAY_DELAY_MS = 5_000L
-        private const val AUTOMATIC_SYNC_TIMEOUT_MS = 5_000L
-        private const val SYNC_TIMEOUT_BACKOFF_BASE_MS = 30_000L
-        private const val SYNC_TIMEOUT_BACKOFF_MAX_MS = 300_000L
-        private const val FOCUS_TIMEOUT_MS = 2_000L
-        private const val MAX_DEFERRED_RETRIES = 8
-        private val fallbackGeneration = AtomicLong(0)
-        private val fallbackRunning = AtomicBoolean(false)
         private val LOG = Logger.getInstance(EditorTabSyncListener::class.java)
         private val GSON = com.google.gson.Gson()
+        private val instances = ConcurrentHashMap<Project, EditorTabSyncListener>()
 
-        internal fun formatProjectControllerSyncLabel(columns: List<String>, focus: String): String =
-            "project-controller:sync_tmux_layout " +
-                columns.joinToString(" ") { "--col $it" } +
-                " --focus $focus --exact-visible --no-autostart"
+        fun install(project: Project): EditorTabSyncListener =
+            instances.computeIfAbsent(project) { EditorTabSyncListener() }
+
+        /** Release the project's surface graphs and stop its debounce executor. */
+        fun disposeProject(project: Project) {
+            instances.remove(project)?.shutdown()
+        }
 
         internal fun formatCpSyncHint(columns: List<String>, focus: String): String =
             "Sync: ${columns.joinToString(" ") { "--col $it" }} [focus: $focus]"
+
+        /**
+         * The user-visible hint for an observation receipt, or `null` when the
+         * derived intent was idle or a pure focus move (which needs no hint —
+         * the operator just moved between documents they can already see).
+         */
+        internal fun syncHintFromReceipt(receiptJson: String?): String? {
+            val intent = intentObject(receiptJson) ?: return null
+            if (intent.get("kind")?.asString != "sync") return null
+            val document = intent.get("document")?.asString ?: return null
+            val columns = intent.getAsJsonArray("columns")
+                ?.map { column ->
+                    column.asJsonObject.getAsJsonArray("files")
+                        .joinToString(",") { it.asString }
+                }
+                .orEmpty()
+            return formatCpSyncHint(columns, document)
+        }
+
+        /** The `kind` of the intent a receipt reports, for diagnostics. */
+        internal fun intentKindFromReceipt(receiptJson: String?): String? =
+            intentObject(receiptJson)?.get("kind")?.asString
+
+        private fun intentObject(receiptJson: String?): com.google.gson.JsonObject? {
+            if (receiptJson.isNullOrBlank()) return null
+            return try {
+                JsonParser.parseString(receiptJson)
+                    .asJsonObject
+                    .getAsJsonObject("intent")
+            } catch (e: Exception) {
+                LOG.warn("[layout-sync] unparseable surface receipt: ${e.message}")
+                null
+            }
+        }
     }
 
-    internal enum class AutomaticCommandKind {
-        Focus,
-        Sync,
-    }
+    /** One column of the reported split layout. Wire shape of Rust `SurfaceColumn`. */
+    internal data class SurfaceColumnPayload(val files: List<String>)
 
-    internal data class AutomaticCommandPlan(
-        val kind: AutomaticCommandKind,
-        val visibleSignature: String,
+    /**
+     * What the editor looks like right now. Wire shape of Rust `EditorSurface`.
+     *
+     * Every field is something the editor saw. Notably absent is any notion of
+     * whether tmux agrees: that is derived by comparing this observation against
+     * the controller's own, so the plugin never reports a fact it would have to
+     * ask the controller for.
+     */
+    internal data class EditorSurfacePayload(
+        val focused: String,
+        val visible: List<String>,
+        val columns: List<SurfaceColumnPayload>,
+        @SerializedName("force_reconcile") val forceReconcile: Boolean,
     )
 
-    internal data class AutomaticExecutionPlan(
-        val plan: AutomaticCommandPlan,
+    private data class PendingSurface(
+        val project: Project,
         val projectRoot: String,
-        val command: List<String>,
-        val activeFile: String,
-        val columns: List<String> = emptyList(),
+        val relativePath: String,
+        val surfaceJson: String,
     )
 
-    internal data class AutomaticStateSnapshot(
-        val activeFile: String,
-        val focusedRelativePath: String,
-        val focusedProjectRoot: String,
-        val syncProjectRoot: String,
-        val visibleMdFiles: List<String>,
-        val editorLayout: EditorLayout?,
-        val visibleSignature: String,
-        val forceReconcile: Boolean = false,
-    )
-
-    internal data class AutomaticCommandResult(
-        val applied: Boolean,
-        val shouldRetry: Boolean,
-    )
-
-    internal object AutomaticCommandPlanner {
-        private const val SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER =
-            "[sync] safe_passive_layout_preserved_reselected_focus"
-        private const val SAFE_PASSIVE_LOCK_CONTENTION_RETRY_MARKER =
-            "[sync] safe_passive_sync_lock_contention_retry"
-
+    internal object SurfaceReport {
         fun resolveActiveFilePath(
             preferredActiveFile: String?,
             selectedEditorFile: String?,
@@ -124,192 +146,78 @@ class EditorTabSyncListener : FileEditorManagerListener {
             return visibleMdFiles.firstOrNull()
         }
 
-        fun visibleSignature(
-            visibleMdFiles: List<String>,
-            editorLayout: EditorLayout? = null,
-        ): String {
-            if (editorLayout != null) {
-                return editorLayout.columns.joinToString("\u0000") { column ->
-                    column.files
-                        .filter { it.isNotEmpty() }
-                        .distinct()
-                        .joinToString("\u0001")
-                }
-            }
-            return visibleMdFiles.distinct().sorted().joinToString("\u0000")
-        }
-
-        fun plan(
-            visibleMdFiles: List<String>,
-            visibleSignature: String,
-            focusedFile: String,
-            previousVisibleSignature: String?,
-            previousFocusedFile: String?,
-            forceReconcile: Boolean = false,
-            layoutSynced: Boolean? = true,
-        ): AutomaticCommandPlan? {
-            if (visibleMdFiles.isEmpty()) return null
-
-            if (
-                !forceReconcile &&
-                layoutSynced != false &&
-                visibleSignature == previousVisibleSignature &&
-                focusedFile == previousFocusedFile
-            ) {
-                return null
-            }
-
-            // #tmuxsyncstate: an editor focus event can arrive while the editor
-            // split model is unchanged but the tmux panes have drifted/swapped.
-            // The controller's lazily-backed sync state report is the authority
-            // for that mismatch; focus-only would select the right pane but leave
-            // it in the wrong column.
-            if (layoutSynced == false) {
-                return AutomaticCommandPlan(AutomaticCommandKind.Sync, visibleSignature)
-            }
-
-            // #panefocussteal: a pure focus change (same visible layout, the
-            // operator just switched between open doc tabs) is the ONLY case that
-            // should move tmux focus — route it through Project Controller
-            // `focus_document_pane`.
-            // `agent-doc sync` is layout-only and never
-            // moves the operator's active pane (it neutralizes any internal
-            // selection), so emitting Sync here would leave the doc-to-doc switch
-            // dead. A changed visible layout still goes through Sync.
-            if (visibleSignature == previousVisibleSignature) {
-                return AutomaticCommandPlan(AutomaticCommandKind.Focus, visibleSignature)
-            }
-
-            return AutomaticCommandPlan(AutomaticCommandKind.Sync, visibleSignature)
-        }
-
         /**
-         * #panefocussplit: decide whether an editor focus-gained event should
-         * trigger a tmux focus reconcile. Focus events fire repeatedly for the
-         * same editor, so only act on markdown files whose path differs from the
-         * last focus reconcile already requested. A switch to a different split
-         * editor always changes the path and therefore always reconciles.
+         * Build the observation. An undetected layout reports **no** columns
+         * rather than a synthesized single column, so the graph can tell "the
+         * editor has one column" apart from "the editor could not see its
+         * layout" and skip the drift comparison in the latter case.
          */
-        fun shouldReconcileFocusedFile(
-            focusedFilePath: String,
-            isMarkdown: Boolean,
-            lastFocusRequestedFile: String?,
-        ): Boolean = isMarkdown && focusedFilePath != lastFocusRequestedFile
-
-        fun shouldReplayAfterRun(startedGeneration: Long, latestGeneration: Long): Boolean =
-            latestGeneration > startedGeneration
-
-        fun replayDelayAfterRun(
-            startedGeneration: Long,
-            latestGeneration: Long,
-            commandTimedOut: Boolean,
-        ): Long? {
-            if (!shouldReplayAfterRun(startedGeneration, latestGeneration)) return null
-            return if (commandTimedOut) SYNC_TIMEOUT_REPLAY_DELAY_MS else 0L
-        }
-
-        fun shouldScheduleDeferredRetry(startedGeneration: Long, latestGeneration: Long): Boolean =
-            latestGeneration <= startedGeneration
-
-        fun shouldQueuePostSyncFocus(
-            kind: AutomaticCommandKind,
-            exitCode: Int,
-            currentGeneration: Boolean,
-        ): Boolean =
-            kind == AutomaticCommandKind.Sync && exitCode == 0 && currentGeneration
-
-        fun analyzeCommandResult(
-            kind: AutomaticCommandKind,
-            exitCode: Int,
-            output: String,
-        ): AutomaticCommandResult {
-            if (exitCode != 0) {
-                return AutomaticCommandResult(applied = false, shouldRetry = false)
-            }
-            if (
-                kind == AutomaticCommandKind.Sync &&
-                SyncLayoutAction.isPreservedLayoutOutput(output)
-            ) {
-                if (output.contains(SAFE_PASSIVE_LAYOUT_RESELECTED_FOCUS_MARKER)) {
-                    return AutomaticCommandResult(applied = true, shouldRetry = false)
-                }
-                return AutomaticCommandResult(applied = false, shouldRetry = true)
-            }
-            if (
-                kind == AutomaticCommandKind.Sync &&
-                output.contains(SAFE_PASSIVE_LOCK_CONTENTION_RETRY_MARKER)
-            ) {
-                return AutomaticCommandResult(applied = false, shouldRetry = true)
-            }
-            return AutomaticCommandResult(applied = true, shouldRetry = false)
-        }
+        fun buildSurface(
+            focusedFile: String,
+            visibleMdFiles: List<String>,
+            editorLayout: EditorLayout?,
+            forceReconcile: Boolean,
+        ): EditorSurfacePayload = EditorSurfacePayload(
+            focused = focusedFile,
+            visible = visibleMdFiles.distinct(),
+            columns = editorLayout
+                ?.columns
+                ?.map { column -> SurfaceColumnPayload(column.files.filter { it.isNotBlank() }.distinct()) }
+                ?.filter { it.files.isNotEmpty() }
+                .orEmpty(),
+            forceReconcile = forceReconcile,
+        )
     }
-
-    @Volatile
-    private var deferredRetryKey: String? = null
-
-    @Volatile
-    private var deferredRetryCount: Int = 0
-
-    @Volatile
-    private var syncTimeoutBackoffKey: String? = null
-
-    @Volatile
-    private var syncTimeoutBackoffCount: Int = 0
-
-    @Volatile
-    private var syncTimeoutRetryAfterMs: Long = 0L
 
     private fun log(msg: String) {
         LOG.debug("[layout-sync] $msg")
     }
 
-    private fun warn(msg: String) {
-        LOG.warn("[layout-sync] $msg")
-    }
-
-    private fun nextGeneration(): Long =
-        fallbackGeneration.incrementAndGet()
-
-    private fun currentGeneration(): Long =
-        fallbackGeneration.get()
-
-    private fun isCurrentGeneration(generation: Long): Boolean =
-        currentGeneration() == generation
-
-    private fun requestAutomaticSync(
-        project: com.intellij.openapi.project.Project,
-        snapshot: AutomaticStateSnapshot,
-        delayMs: Long = DEBOUNCE_MS,
-        requestedGeneration: Long? = null,
-    ) {
-        latestSnapshot.set(snapshot)
-        val generation = requestedGeneration ?: nextGeneration()
-        executor.schedule(sync@{
+    private fun requestObservation(pending: PendingSurface, delayMs: Long = DEBOUNCE_MS) {
+        latestSurface.set(pending)
+        val requested = generation.incrementAndGet()
+        executor.schedule(observe@{
             try {
-                if (!isCurrentGeneration(generation)) {
-                    log("debounce: superseded gen=$generation")
-                    return@sync
+                if (generation.get() != requested) {
+                    log("debounce: superseded gen=$requested")
+                    return@observe
                 }
-                drainAutomaticSync(project, generation)
+                reportLatestSurface()
             } catch (e: Exception) {
-                log("error: ${e.message}")
+                LOG.warn("[layout-sync] observation failed: ${e.message}")
             }
         }, delayMs.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
     }
 
-    private fun captureSnapshot(
-        project: com.intellij.openapi.project.Project,
-        preferredFile: com.intellij.openapi.vfs.VirtualFile? = null,
+    private fun reportLatestSurface() {
+        val pending = latestSurface.get() ?: return
+        observedRoots.add(pending.projectRoot)
+        val receipt = NativeAdminControls.editorSurfaceObserve(
+            projectRoot = pending.projectRoot,
+            surfaceJson = pending.surfaceJson,
+        )
+        if (receipt == null) {
+            LOG.warn("[layout-sync] surface observation unavailable for ${pending.relativePath}")
+            return
+        }
+        log("observe: file=${pending.relativePath} intent=${intentKindFromReceipt(receipt)} receipt=$receipt")
+        syncHintFromReceipt(receipt)?.let { hint ->
+            TerminalUtil.showHint(pending.project, hint)
+        }
+    }
+
+    private fun captureSurface(
+        project: Project,
+        preferredFile: VirtualFile? = null,
         forceReconcile: Boolean = false,
-    ): AutomaticStateSnapshot? {
+    ): PendingSurface? {
         val manager = FileEditorManager.getInstance(project)
         val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
         if (visibleMdFiles.isEmpty()) return null
         val preferredMarkdownFile = preferredFile?.takeIf { it.name.endsWith(".md") }
         val selectedEditorFile = manager.selectedTextEditor?.virtualFile
             ?.takeIf { it.name.endsWith(".md") }
-        val activeFilePath = AutomaticCommandPlanner.resolveActiveFilePath(
+        val activeFilePath = SurfaceReport.resolveActiveFilePath(
             preferredActiveFile = preferredMarkdownFile?.path,
             selectedEditorFile = selectedEditorFile?.path,
             visibleMdFiles = visibleMdFiles,
@@ -321,340 +229,61 @@ class EditorTabSyncListener : FileEditorManagerListener {
         ).filterNotNull().firstOrNull { it.path == activeFilePath } ?: return null
 
         val (focusedProjectRoot, focusedRelativePath) = TerminalUtil.resolveProject(project, file)
-        val activeFile = file.path
-
-        val detectedEditorLayout = LayoutDetector.detectEditorLayout(project)
-        val syncProjectRoot = SyncLayoutAction.chooseSyncProjectRoot(
+        // One root keys the surface graph, and it has to be the one that spans
+        // the whole visible layout — a surface is the layout, not one document.
+        val surfaceProjectRoot = SyncLayoutAction.chooseSyncProjectRoot(
             project.basePath,
             focusedProjectRoot,
             visibleMdFiles,
         )
         val absoluteEditorLayout = SyncLayoutAction.absolutizeEditorLayout(
-            syncProjectRoot,
+            surfaceProjectRoot,
             SyncLayoutAction.normalizeEditorLayout(
                 project.basePath,
-                syncProjectRoot,
-                detectedEditorLayout,
+                surfaceProjectRoot,
+                LayoutDetector.detectEditorLayout(project),
             ),
         )
-        return AutomaticStateSnapshot(
-            activeFile = activeFile,
-            focusedRelativePath = focusedRelativePath,
-            focusedProjectRoot = focusedProjectRoot,
-            syncProjectRoot = syncProjectRoot,
-            visibleMdFiles = visibleMdFiles,
-            editorLayout = absoluteEditorLayout,
-            visibleSignature = AutomaticCommandPlanner.visibleSignature(
-                visibleMdFiles,
-                absoluteEditorLayout,
+        return PendingSurface(
+            project = project,
+            projectRoot = surfaceProjectRoot,
+            relativePath = focusedRelativePath,
+            surfaceJson = GSON.toJson(
+                SurfaceReport.buildSurface(
+                    focusedFile = file.path,
+                    visibleMdFiles = visibleMdFiles,
+                    editorLayout = absoluteEditorLayout,
+                    forceReconcile = forceReconcile,
+                )
             ),
-            forceReconcile = forceReconcile,
         )
     }
 
-    private fun queryLayoutSyncState(
-        snapshot: AutomaticStateSnapshot,
-        syncColumns: List<String>,
-    ): Boolean? {
-        if (syncColumns.size < 2) return true
-        val report = CpRouteClient.tmuxLayoutSyncState(
-            projectRoot = snapshot.syncProjectRoot,
-            columnsJson = GSON.toJson(syncColumns),
-            focus = snapshot.activeFile,
-        )
-        if (report == null) {
-            log("sync state: unavailable for ${snapshot.focusedRelativePath}")
-            return false
+    private fun shutdown() {
+        executor.shutdownNow()
+        for (root in observedRoots) {
+            NativeAdminControls.editorSurfaceForget(root)
         }
-        log(
-            "sync state: synced=${report.synced} reason=${report.reason} file=${snapshot.focusedRelativePath}"
-        )
-        return report.synced
-    }
-
-    private fun buildExecutionPlan(snapshot: AutomaticStateSnapshot): AutomaticExecutionPlan? {
-        val syncColumns = SyncLayoutAction.buildSyncColumns(
-            visibleMdFiles = snapshot.visibleMdFiles,
-            editorLayout = snapshot.editorLayout,
-        )
-        val layoutSynced = queryLayoutSyncState(snapshot, syncColumns)
-        val plan = AutomaticCommandPlanner.plan(
-            visibleMdFiles = snapshot.visibleMdFiles,
-            visibleSignature = snapshot.visibleSignature,
-            focusedFile = snapshot.activeFile,
-            previousVisibleSignature = lastVisibleSignature,
-            previousFocusedFile = lastFocusedFile,
-            forceReconcile = snapshot.forceReconcile,
-            layoutSynced = layoutSynced,
-        ) ?: return null
-
-        val (projectRoot, cmd) = when (plan.kind) {
-            AutomaticCommandKind.Focus -> {
-                snapshot.focusedProjectRoot to listOf(
-                    "project-controller:focus_document_pane",
-                    snapshot.activeFile,
-                )
-            }
-            AutomaticCommandKind.Sync -> {
-                snapshot.syncProjectRoot to listOf("project-controller:sync_tmux_layout")
-            }
-        }
-
-        return AutomaticExecutionPlan(
-            plan = plan,
-            projectRoot = projectRoot,
-            command = cmd,
-            activeFile = snapshot.activeFile,
-            columns = syncColumns,
-        )
-    }
-
-    private fun resetDeferredRetryState() {
-        deferredRetryKey = null
-        deferredRetryCount = 0
-    }
-
-    private fun syncBackoffKey(snapshot: AutomaticStateSnapshot): String =
-        "${snapshot.visibleSignature}\u0000${snapshot.activeFile}"
-
-    private fun syncTimeoutBackoffRemainingMs(snapshot: AutomaticStateSnapshot): Long {
-        if (syncTimeoutBackoffKey != syncBackoffKey(snapshot)) return 0L
-        val remaining = syncTimeoutRetryAfterMs - System.currentTimeMillis()
-        return remaining.coerceAtLeast(0L)
-    }
-
-    private fun recordSyncTimeout(snapshot: AutomaticStateSnapshot): Long {
-        val retryKey = syncBackoffKey(snapshot)
-        if (syncTimeoutBackoffKey == retryKey) {
-            syncTimeoutBackoffCount += 1
-        } else {
-            syncTimeoutBackoffKey = retryKey
-            syncTimeoutBackoffCount = 1
-        }
-        val step = (syncTimeoutBackoffCount - 1).coerceAtLeast(0).coerceAtMost(4)
-        val delayMs = (SYNC_TIMEOUT_BACKOFF_BASE_MS * (1L shl step))
-            .coerceAtMost(SYNC_TIMEOUT_BACKOFF_MAX_MS)
-        syncTimeoutRetryAfterMs = System.currentTimeMillis() + delayMs
-        return delayMs
-    }
-
-    private fun resetSyncTimeoutBackoff() {
-        syncTimeoutBackoffKey = null
-        syncTimeoutBackoffCount = 0
-        syncTimeoutRetryAfterMs = 0L
-    }
-
-    private fun summarizeOutput(output: String, maxChars: Int = 1_200): String {
-        val trimmed = output.trim()
-        if (trimmed.length <= maxChars) return trimmed
-        val important = trimmed
-            .lineSequence()
-            .map { it.trim() }
-            .filter {
-                it.contains("timeout", ignoreCase = true) ||
-                    it.contains("latency budget exceeded") ||
-                    it.contains("preserved the current tmux layout") ||
-                    it.contains("safe_passive") ||
-                    it.contains("error", ignoreCase = true)
-            }
-            .distinct()
-            .joinToString("\n")
-            .take(maxChars)
-        val summary = important.ifBlank { trimmed.take(maxChars) }
-        return "$summary\n[truncated ${trimmed.length} chars]"
-    }
-
-    private fun nextDeferredRetryDelayMs(retryCount: Int): Long {
-        val step = (retryCount - 1).coerceAtLeast(0)
-        val delay = DEFERRED_RETRY_BASE_MS * (1L shl step.coerceAtMost(3))
-        return delay.coerceAtMost(DEFERRED_RETRY_MAX_MS)
-    }
-
-    private fun registerDeferredRetry(snapshot: AutomaticStateSnapshot): Long? {
-        val retryKey = "${snapshot.visibleSignature}\u0000${snapshot.activeFile}"
-        if (deferredRetryKey == retryKey) {
-            deferredRetryCount += 1
-        } else {
-            deferredRetryKey = retryKey
-            deferredRetryCount = 1
-        }
-        if (deferredRetryCount > MAX_DEFERRED_RETRIES) {
-            return null
-        }
-        return nextDeferredRetryDelayMs(deferredRetryCount)
-    }
-
-    private fun drainAutomaticSync(
-        project: com.intellij.openapi.project.Project,
-        requestedGeneration: Long,
-    ) {
-        val locked = fallbackRunning.compareAndSet(false, true)
-        if (!locked) {
-            log("guard: layout already running, queued latest request")
-            latestSnapshot.get()?.let {
-                requestAutomaticSync(project, it, SYNC_GUARD_RETRY_MS, requestedGeneration)
-            }
-            return
-        }
-
-        val startedGeneration = requestedGeneration
-        var commandTimedOut = false
-        try {
-            val snapshot = latestSnapshot.get()
-            val execution = snapshot?.let { buildExecutionPlan(it) }
-            if (execution == null) {
-                log("dedup: selection state already synchronized")
-            } else {
-                if (execution.plan.kind == AutomaticCommandKind.Sync) {
-                    val backoffMs = syncTimeoutBackoffRemainingMs(snapshot)
-                    if (backoffMs > 0L) {
-                        log("backoff: automatic sync delayed ${backoffMs}ms after prior timeout for ${execution.activeFile}")
-                        requestAutomaticSync(project, snapshot, backoffMs, requestedGeneration)
-                        return
-                    }
-                }
-                val cmd = execution.command
-                when (execution.plan.kind) {
-                    AutomaticCommandKind.Focus -> log("submit: ${cmd.joinToString(" ")}")
-                    AutomaticCommandKind.Sync -> {
-                        log("submit: ${formatProjectControllerSyncLabel(execution.columns, execution.activeFile)}")
-                        TerminalUtil.showHint(
-                            project,
-                            formatCpSyncHint(execution.columns, execution.activeFile),
-                        )
-                    }
-                }
-                val timeoutMs = when (execution.plan.kind) {
-                    AutomaticCommandKind.Focus -> FOCUS_TIMEOUT_MS
-                    AutomaticCommandKind.Sync -> AUTOMATIC_SYNC_TIMEOUT_MS
-                }
-                val processResult = if (execution.plan.kind == AutomaticCommandKind.Focus) {
-                    val result = CpRouteClient.submitFocusDocumentPane(
-                        projectRoot = execution.projectRoot,
-                        documentPath = execution.activeFile,
-                    )
-                    SyncLayoutAction.Companion.SyncProcessResult(
-                        exitCode = result.exitCode,
-                        output = result.output,
-                        timedOut = false,
-                    )
-                } else {
-                    val result = CpRouteClient.submitSyncTmuxLayout(
-                        projectRoot = execution.projectRoot,
-                        columnsJson = GSON.toJson(execution.columns),
-                        window = null,
-                        focus = execution.activeFile,
-                        noAutostart = true,
-                        exactVisible = true,
-                        callerKind = "automatic",
-                    )
-                    SyncLayoutAction.Companion.SyncProcessResult(
-                        exitCode = result.exitCode,
-                        output = result.output,
-                        timedOut = false,
-                    )
-                }
-                val output = processResult.output
-                val exitCode = processResult.exitCode
-                commandTimedOut = processResult.timedOut
-                log(
-                    "result: kind=${execution.plan.kind.name.lowercase()} exit=$exitCode timedOut=${processResult.timedOut} " +
-                        "timeoutMs=$timeoutMs output=${summarizeOutput(output)}"
-                )
-                // The immediate focus handoff intentionally runs before the
-                // debounced sync and may report actor_pane_not_visible while the
-                // selected document is still parked in stash. Queue a second
-                // Project Controller focus command after the accepted sync
-                // command. The controller command plane preserves that order,
-                // so the retry observes the pane after passive layout rescue.
-                if (AutomaticCommandPlanner.shouldQueuePostSyncFocus(
-                        execution.plan.kind,
-                        exitCode,
-                        isCurrentGeneration(startedGeneration),
-                    )
-                ) {
-                    val focusResult = CpRouteClient.submitFocusDocumentPane(
-                        projectRoot = snapshot.focusedProjectRoot,
-                        documentPath = execution.activeFile,
-                    )
-                    log(
-                        "post-sync-focus: exit=${focusResult.exitCode} file=${snapshot.focusedRelativePath} " +
-                            "output=${summarizeOutput(focusResult.output)}"
-                    )
-                }
-                if (processResult.timedOut) {
-                    if (execution.plan.kind == AutomaticCommandKind.Sync) {
-                        val delayMs = recordSyncTimeout(snapshot)
-                        warn(
-                            "timeout: automatic sync exceeded ${timeoutMs}ms; backing off ${delayMs}ms before retry"
-                        )
-                        if (isCurrentGeneration(startedGeneration)) {
-                            requestAutomaticSync(project, snapshot, delayMs, startedGeneration)
-                        }
-                    } else {
-                        warn("timeout: focus command exceeded ${timeoutMs}ms; skipped automatic focus")
-                    }
-                }
-                val result = AutomaticCommandPlanner.analyzeCommandResult(
-                    kind = execution.plan.kind,
-                    exitCode = exitCode,
-                    output = output,
-                )
-                if (result.applied) {
-                    lastVisibleSignature = execution.plan.visibleSignature
-                    lastFocusedFile = execution.activeFile
-                    resetDeferredRetryState()
-                    resetSyncTimeoutBackoff()
-                } else if (result.shouldRetry) {
-                    if (isCurrentGeneration(startedGeneration)) {
-                        val delayMs = registerDeferredRetry(snapshot)
-                        if (delayMs != null) {
-                            log(
-                                "deferred: passive sync preserved layout for ${execution.activeFile}; retry $deferredRetryCount/$MAX_DEFERRED_RETRIES in ${delayMs}ms"
-                            )
-                            requestAutomaticSync(project, snapshot, delayMs)
-                        } else {
-                            log(
-                                "deferred: passive sync preserved layout for ${execution.activeFile}; retry budget exhausted after $MAX_DEFERRED_RETRIES attempts"
-                            )
-                        }
-                    } else {
-                        log(
-                            "deferred: skipped superseded passive sync retry for ${execution.activeFile}; latest request will replay"
-                        )
-                    }
-                } else if (exitCode != 0 && !processResult.timedOut) {
-                    resetDeferredRetryState()
-                    resetSyncTimeoutBackoff()
-                }
-            }
-        } finally {
-            fallbackRunning.set(false)
-            val replayDelayMs = AutomaticCommandPlanner.replayDelayAfterRun(
-                startedGeneration,
-                currentGeneration(),
-                commandTimedOut,
-            )
-            if (replayDelayMs != null) {
-                val replayKind = if (replayDelayMs > 0) "delayed" else "immediate"
-                log("queue: replaying latest automatic sync request ($replayKind, delayMs=$replayDelayMs)")
-                latestSnapshot.get()?.let { requestAutomaticSync(project, it, replayDelayMs) }
-            }
-        }
+        observedRoots.clear()
+        latestSurface.set(null)
     }
 
     override fun selectionChanged(event: FileEditorManagerEvent) {
         val file = event.newFile ?: return
         if (!file.name.endsWith(".md")) return
 
-        val manager = FileEditorManager.getInstance(event.manager.project)
+        val project = event.manager.project
+        val manager = FileEditorManager.getInstance(project)
         val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
         log("selectionChanged: newFile=${file.name} mdFiles=$visibleMdFiles")
         if (visibleMdFiles.isEmpty()) return
 
-        TmuxPaneFocusSync.recordEditorFocusIntent(event.manager.project, file.path)
-        val snapshot = captureSnapshot(event.manager.project, file, forceReconcile = true) ?: return
-        requestAutomaticSync(event.manager.project, snapshot)
+        TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
+        // A real selection event is the operator asking for this document, so it
+        // skips the unchanged-observation shortcut: a missing actor/supervisor
+        // can still be cold-started when nothing about the surface changed.
+        val pending = captureSurface(project, file, forceReconcile = true) ?: return
+        requestObservation(pending)
     }
 
     /**
@@ -664,27 +293,22 @@ class EditorTabSyncListener : FileEditorManagerListener {
      * #panefocussplit: [FileEditorManagerListener.selectionChanged] does NOT
      * fire for focus movement between two existing split editors (only for tab /
      * visible-file-set changes), so without this entry point split navigation
-     * never moves the tmux active pane. Reuses the same debounced, generation-
-     * guarded reconcile as [selectionChanged]; [EditorFocusSyncListener] wires
-     * the per-editor focus events that call this.
+     * never moves the tmux active pane. [EditorFocusSyncListener] wires the
+     * per-editor focus events that call this.
+     *
+     * Focus events fire repeatedly for the same editor. That used to need a
+     * `lastFocusRequestedFile` field here; now a repeat produces the identical
+     * observation, which the graph reports as idle and acts on not at all.
      */
-    fun onEditorFocusGained(project: com.intellij.openapi.project.Project, file: VirtualFile) {
-        if (!AutomaticCommandPlanner.shouldReconcileFocusedFile(
-                focusedFilePath = file.path,
-                isMarkdown = file.name.endsWith(".md"),
-                lastFocusRequestedFile = lastFocusRequestedFile,
-            )
-        ) {
-            return
-        }
+    fun onEditorFocusGained(project: Project, file: VirtualFile) {
+        if (!file.name.endsWith(".md")) return
         val manager = FileEditorManager.getInstance(project)
         val visibleMdFiles = SyncLayoutAction.collectVisibleMarkdownFiles(manager.selectedFiles)
         if (visibleMdFiles.isEmpty()) return
-        lastFocusRequestedFile = file.path
         log("focusGained: file=${file.name} mdFiles=$visibleMdFiles")
         TmuxPaneFocusSync.recordEditorFocusIntent(project, file.path)
-        val snapshot = captureSnapshot(project, file, forceReconcile = false) ?: return
-        requestAutomaticSync(project, snapshot)
+        val pending = captureSurface(project, file, forceReconcile = false) ?: return
+        requestObservation(pending)
     }
 
     /**

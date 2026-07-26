@@ -172,6 +172,19 @@ impl EditorSurfaceState {
         self.fold_current();
     }
 
+    /// Record both halves of the mirror at once, and fold once.
+    ///
+    /// For the caller that pulls the controller's observation alongside the
+    /// editor's rather than waiting to be pushed it. Writing the two sources
+    /// separately would fold twice, and the first fold would compare the new
+    /// tmux layout against the *previous* editor surface — a comparison neither
+    /// side ever made, which can derive a `Sync` that nothing observed.
+    pub fn observe_with_tmux(&self, surface: EditorSurface, tmux: Option<TmuxLayout>) {
+        self.ctx.set(&self.tmux, tmux);
+        self.ctx.set(&self.editor, surface);
+        self.fold_current();
+    }
+
     /// Record what tmux is showing now.
     ///
     /// The controller's half of the mirror, and the capability the previous

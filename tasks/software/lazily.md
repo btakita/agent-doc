@@ -26,21 +26,83 @@ queue: go
 Compacted content:
 - Archived 28 response topic(s): create lazily-cs (C#); complete all lazily-cs features; queue + backlog attributes; 25 more
 - Prior summary/context: /goal Please create lazily-cs (C#) implementation. Create gh lazily-hub/lazily-cs. Add a submodule to src/lazily-cs. ...
-<!-- agent:boundary:707ef79a -->
+
+### Re: the done-archive quote bug is fixed, not worked around — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzdonequoteattr]
+
+
+`#lzdonequoteattr` is done: `src/agent-doc` `32583dbcb`, pushed, `make check`
+8152/8152, installed, controller marked to recycle at the next idle boundary.
+
+**The defect.** `parse_attrs` kept attribute values verbatim, quotes included, on
+the stated assumption that "values are unquoted (no quote support needed for
+simple mode values)". That assumption was false about agent-doc's own writers: a
+compact wrote `archive="tasks/software/lazily.done.md"` into this very document,
+and from then on every preflight and session-check hard-failed with `must point to
+a .done.md file` — because the parsed value ended in a quote character, so the
+`.done.md` suffix check could never match. Earlier this session I only unquoted
+the marker by hand to unblock the cycle; that was a workaround, and the parser
+would have broken the next document a compact touched.
+
+Values may now be quoted with `"` or `'`, and quoting also does what quoting is
+for: `preset="two words"` no longer truncates to `two` under whitespace splitting.
+An unterminated quote takes the rest of the input rather than failing closed —
+one stray quote unparsing an entire marker is the same class of outage.
+
+The fix lives in `parse_attrs`, so both done-archive validators pick it up from
+one place; they already read through `attrs`.
+
+**One finding worth recording: a test was pinning the defect.**
+`parse_patch_with_transfer_source_attr` asserted the value *with* its quotes. The
+buggy behaviour was the expected behaviour, which is a large part of why this
+survived — anyone touching the parser would have seen a green test telling them
+quote retention was intended. `transfer-source` turns out to have no production
+consumer that wanted the quotes; the one attribute that did care was breaking
+documents. I corrected the assertion and said why in the diff rather than quietly
+flipping it.
+
+**Coverage, mutation-checked.** Four `parse_attrs` unit tests (both quote
+characters, quoted-value-with-spaces, quotes not disturbing following attributes —
+using the real `preset="#spec-test-commit-push" priority go` marker from the
+document that broke, and an unterminated quote) plus three against the actual
+resolver: a quoted archive resolves, quoted and unquoted agree, and a
+non-`.done.md` path is **still** rejected so the fix did not widen the check.
+Reverting the strip turns four of five and two of three red respectively, and the
+"still rejected" test correctly stays green — it should not depend on quoting.
+
+**Two notes on the shared tree.** The first full-suite run failed on
+`finalize_integration` with `[double-spawn] failed to exec … No such file or
+directory` — the test binary vanished mid-run, which is the concurrent-build
+symptom, not a regression; it passes in isolation and the re-run was clean. And
+`src/agent-doc` still carries another session's in-flight work
+(`.claude/skills/agent-doc/SKILL.md`, `.claude/settings.json`, `.codex/`,
+`.opencode/`). I staged only my three source files and left all of it alone.
+
+**Also confirmed since last cycle:** you published js, so
+`@lazily-hub/lazily-js@0.29.0` is live with `latest` pointing at it. That closes
+the release — all nine bindings published. The CI OIDC job for that repo will keep
+404ing on `PUT` until its npm trusted-publisher config is finished, so treat a red
+`Release` run there as expected rather than a regression and check npm directly.
+
+Next head is `#lzqfspec` — Phase 0 of the queue-family plan.
+<!-- agent:boundary:997eb27f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ⏭️ do [#lzqfprep]
-- ⏭️ do [#lzdonequoteattr]
+- ~~do [#lzqfprep]~~
+- ~~⏭️ do [#lzdonequoteattr]~~
 - ⏭️ do [#lzqfspec]
 - ⏭️ do [#lzqfformal]
-- do [#lzqffx]
+- 🚧 do [#lzqffx]
 - do [#lzqfrs]
 - do [#lzqfjs]
 - do [#lzqfports]
-- 🚧 do [#lzqfzig]
+- ⏭️ do [#lzqfzig]
 - ⏭️ do [#maphandlecleardependents]
 - ⏭️ do [#lazilycellfamily]
 - ⏭️ do [#lazilyspecdisagrees]
@@ -55,7 +117,7 @@ Compacted content:
 - ⏭️ do [#lzcspackage]
 - ⏭️ do [#asyncplanenever]
 - ⏭️ do [#lazilyrenameinverted]
-- do [#readmeexamplesreference]
+- ⏭️ do [#readmeexamplesreference]
 - do [#signalgetsignallive]
 - do [#observerwordingcontradic]
 - do [#renametreesource]
@@ -83,16 +145,15 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdonequoteattr] agent-doc: the done-archive attribute parser keeps the surrounding quotes in the value. tasks/software/lazily.md carried agent:done archive="tasks/software/lazily.done.md" (quoted, as a compact wrote it) and every preflight/session-check hard-failed with 'must point to a .done.md file' because the parsed value ended in .done.md-quote. Every other session doc uses the unquoted form and works. Unquote in the attribute parser and add a regression fixture for both forms; a quoted value should be accepted, not fatal
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
 - [ ] [#lzqfspec] lazily-spec: Phase 0 of the queue-family flavor plan — add a Core-surface section for QueueCell/TopicCell/WorkQueueCell mirroring the ReactiveMap Core/Extended split, pin ONE reader-kind design (recommend memoized-derive+invalidate over cpp's version cells, and say explicitly that polling a counter is not a reader-kind), define the per-flavor obligation (confluence for thread-safe, eventual transparency for async, plus single-frontier-walk atomicity), resolve the threading paragraph that promises ThreadSafeContext no binding can accept, and split coverage.json's three conflated queue rows into nine — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfformal] lazily-formal: Phase 1 — prove the queue reader-kind invalidation set is a pure function of (op, len_before, len_after), prove one op's invalidations are not observably interleaved, and cross-check ThreadSafe.lean for the confluence obligation. Do NOT add per-flavor Lean models; the algebra must not fork — plan: tasks/plan-lazily-queue-family-flavors.md
-- [ ] [#lzqffx] lazily-spec + all binding runners: Phase 2 — replay the nine collections queue fixtures against all three flavors with a declared skip ledger (zig's reactive-graph runner is the reference: fails if everything skips, ledger must match observation). Add a positive assertion that fixtures ran, mutation-check each runner per flavor, and grep every queue runner for the invalidates-nesting trap (fixtures nest it under steps[].expected.invalidates; lazily-rs read it off the step and silently never asserted). Land this BEFORE any implementation so the gap goes red first — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] 🚧 [#lzqffx] lazily-spec + all binding runners: Phase 2 — replay the nine collections queue fixtures against all three flavors with a declared skip ledger (zig's reactive-graph runner is the reference: fails if everything skips, ledger must match observation). Add a positive assertion that fixtures ran, mutation-check each runner per flavor, and grep every queue runner for the invalidates-nesting trap (fixtures nest it under steps[].expected.invalidates; lazily-rs read it off the step and silently never asserted). Land this BEFORE any implementation so the gap goes red first — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfrs] lazily-rs: Phase 3 — context prerequisites + reference implementation. ThreadSafeContext needs a multi-root clear_slots equivalent (it has only single-handle clear at thread_safe.rs:3549 — four handles is four frontier walks; verify whether batch() already closes this, do not assume). AsyncContext needs a synchronous-compute computed and a multi-root clear (it has neither; only computed_async at async_context.rs:413). Then ship ThreadSafe/Async QueueCell + TopicCell + WorkQueueCell, each minting its own reader-kind handles on its own graph, Arc<Mutex<S>> storage with invalidation run outside the lock — plan: tasks/plan-lazily-queue-family-flavors.md
-- [ ] 🚧 [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfjs] lazily-js: QueueCell/TopicCell/WorkQueueCell are not reactive at all — src/queue.js takes no context, contains ZERO ctx references, and reports invalidation by diffing a private snapshot. It scores green on the coverage row. Bind the family to a context and mint real reader-kinds, and check whether the collections fixtures are being satisfied by a non-reactive model here the way test/collections.test.js drives src/collections.js instead of the reactive families — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfports] lazily: Phase 5 — port the queue-family flavors to cpp, dart, py, go, kt (and build cs flavor-complete from the start under #lzcsqueues). One subagent per binding, NEVER two against one repo. Dispatch only after #lzqfspec + #lzqffx + #lzqfrs are committed so each agent has a settled spec, a red per-flavor gate, and a reference diff. cpp additionally needs its Source<uint64_t> version cells migrated if Phase 0 picks memoized-derive — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md

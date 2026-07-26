@@ -249,7 +249,24 @@ The whole editor half is **~200–350ms**, dominated by receive→apply, with th
 `make check` green, installed, pushed (`a100ed4fc`, gitlink bumped). One thing I hit and had to repair by hand: the controller had exited and lazy relaunch failed with `project root "" is empty or not a directory` — I started a fresh one explicitly. That is a contributing factor I have not fixed, since I could not reproduce the empty-root caller.
 
 `#crdtwaitsubscribe` stays open and stays the queue head — your goal and these three questions took the turn, and I would rather leave it untouched than land a half-designed subscription on the write path, which is the one place where being wrong loses operator text.
-<!-- agent:boundary:d614773a -->
+
+### Re: lazily-rs QueueCell / ThreadSafeContext fix — opus-5
+
+Consumed it, and it matters more here than the upstream framing suggests.
+
+**What the fix actually is.** lazily-rs `9f14f40`: `recompute_slot_now` runs `compute` *outside* the state lock and publishes under it, rejecting the publish as `Stale` only when `invalidation_revision` moved. A `clear` arriving during an in-flight recompute was therefore **lost**, and the derived cell served a stale cached value and never re-derived. Upstream saw it as `ThreadSafeQueueCell` losing a push under saturating load — but storage was correct at 200; `len` was serving a stale 199.
+
+**Why it lands on us.** agent-doc's controller projection is built on `ThreadSafeContext`. "A derived coordination value stops re-deriving" is exactly the failure `#lazily-hot-path` assumes cannot happen — and it is the shape behind the stale-projection wedges in this document (`delivery_converged` re-reads, queue-head staleness, the `crdt_current_text` polls that keep reporting a converged plane while a consumer sees otherwise).
+
+**Landed** (`800da2806`): raised the floor to `0.51.1` in **all 18 member manifests**, not just the root, and updated the lock. A caret requirement would have *allowed* 0.51.1 while still letting a fresh lockfile resolve back to 0.51.0 — the floor makes the fix required. `make check` green: **8162 passed**, clippy clean, TLA+ specs pass. Installed and pushed.
+
+Two notes:
+
+- This is a dependency floor, not a behavior change in our code, so there is no new agent-doc test to add — the coverage lives upstream. What I did verify is that the whole suite passes *against* 0.51.1, which is the real risk (a kernel-level publish/staleness change is exactly the kind that shifts recompute counts in our own fixtures). It did not.
+- I did **not** drain the queue head `do [#adwritesourceenum]` this cycle — your steering took precedence, and it stays at the head for the next one.
+
+I filed the `lazily.md` wedge you hit as a tracked item rather than fixing it inline: you cleared it by hand with `reset --from-current --preserve-session`, which means the *incident* is resolved but the *class* is not. The interesting question is why `git::commit()`'s committed-historical patchback self-heal did not absorb it — AGENTS.md says that self-heal may repair the snapshot when the working tree matches HEAD modulo boundary/`(HEAD)` markers, which is close to this shape. That is a real diagnosis-then-fix cycle, not a one-liner, so it goes to the top of the backlog with the specific question to answer.
+<!-- agent:boundary:57de4b8e -->
 <!-- /agent:exchange -->
 ## Queue
 

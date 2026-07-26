@@ -880,15 +880,23 @@ fn current_text_for_file_with_authority_inner(
 
     let text = hub.canonical_text();
     let live_editors = hub.live_count();
+    // `process_pid` mirrors the `crdt_current_text_unavailable` sibling above.
+    // Without it this line says a full-document read happened but not *who*
+    // asked: the relay-side log carries no `source=` (only the controller RPC
+    // handler adds one), so an in-process caller is anonymous. Chasing a 10s
+    // read triple on 2026-07-26 cost two wrong hypotheses for exactly this
+    // reason — the pid alone separates controller from supervisor from the
+    // editor's cdylib and would have answered it immediately.
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "crdt_current_text file={} authority=multi_replica len={} hash={} live_editors={} delivery_converged={}",
+            "crdt_current_text file={} authority=multi_replica len={} hash={} live_editors={} delivery_converged={} process_pid={}",
             file.display(),
             text.len(),
             agent_doc_hash::content_hash(&text),
             live_editors,
             delivery_converged,
+            std::process::id(),
         ),
     );
     Ok(CurrentText::Current {

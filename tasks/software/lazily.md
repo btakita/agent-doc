@@ -802,6 +802,11 @@ plugin.
 
 ### Re: queue-family phases filed — opus-5
 
+> **Queue prompt:**
+>
+> do [#asynccontextthreadsafeco]
+
+
 All seven phase ids are now tracked and sequenced behind the ReactiveMap cluster:
 `#lzqfspec` → `#lzqfformal` → `#lzqffx` → `#lzqfrs` → `#lzqfzig` / `#lzqfjs` →
 `#lzqfports`, appended so they do not preempt the current drain.
@@ -814,14 +819,14 @@ response, which also left the sequencing answer duplicated in the exchange. This
 `--stream` pass merges against the live editor buffer to collapse it.
 
 Next up is `#maphandlecleardependents`, then `#portmembershiporder`.
-<!-- agent:boundary:5cf96b26 -->
+<!-- agent:boundary:70ca6d01 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~/goal complete tasks/plan-lazily-queue-family-flavors.md~~
-- ⏭️ do [#asynccontextthreadsafeco]
+- ~~⏭️ do [#asynccontextthreadsafeco]~~
 - ⏭️ do [#maphandlecleardependents]
 - ⏭️ do [#lazilycellfamily]
 - do [#lazilyspecdisagrees]
@@ -862,13 +867,13 @@ Next up is `#maphandlecleardependents`, then `#portmembershiporder`.
 - do [#lzqffx]
 - do [#lzqfrs]
 - do [#lzqfjs]
+- do [#lzqfports]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzdonequoteattr] agent-doc: the done-archive attribute parser keeps the surrounding quotes in the value. tasks/software/lazily.md carried agent:done archive="tasks/software/lazily.done.md" (quoted, as a compact wrote it) and every preflight/session-check hard-failed with 'must point to a .done.md file' because the parsed value ended in .done.md-quote. Every other session doc uses the unquoted form and works. Unquote in the attribute parser and add a regression fixture for both forms; a quoted value should be accepted, not fatal
-- [ ] [#asynccontextthreadsafeco] Add AsyncContext + ThreadSafeContext support to QueueCell + TopicCell + WorkQueueCell. Start with spec + formal +  conformance. Then subagents for implentations. Please ensure consistency across sync + thread + async apis.
 - [ ] [#portmembershiporder] Port the membership/order plane to the other 8 bindings thread-safe + async maps (py, js, kt, go, cpp, cs, dart, zig). lazily-rs is done (commit ffc0d83): each flavor mints its own membership + order signal cells on its own graph, with bumps run outside the map lock. Every other binding has the same hole — reactive keys/len/contains_key exist only on the sync map. Note go and dart async maps are not connected to their async graph at all (no context field / _ctx annotated unused_field), so they need wiring before they can carry a signal plane. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. The membership/order reads are now generic over the read surface (AsyncSource<u64>: Read<C>) and track correctly with an AsyncComputeContext — apply the same genericity to AsyncMapHandle::observe so entry-value reads can track too. This is the read-side twin of the discarded-factory-view defect.
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook at all. Any flavor-level `remove` — and the fix for lazily-cs AsyncComputedMap.Remove not disposing its node — requires adding one. Handle-trait surgery, not an additive method. Plan: tasks/plan-lazily-reactivemap-unification.md
@@ -880,6 +885,7 @@ Next up is `#maphandlecleardependents`, then `#portmembershiporder`.
 - [ ] [#lzqfrs] lazily-rs: Phase 3 — context prerequisites + reference implementation. ThreadSafeContext needs a multi-root clear_slots equivalent (it has only single-handle clear at thread_safe.rs:3549 — four handles is four frontier walks; verify whether batch() already closes this, do not assume). AsyncContext needs a synchronous-compute computed and a multi-root clear (it has neither; only computed_async at async_context.rs:413). Then ship ThreadSafe/Async QueueCell + TopicCell + WorkQueueCell, each minting its own reader-kind handles on its own graph, Arc<Mutex<S>> storage with invalidation run outside the lock — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfjs] lazily-js: QueueCell/TopicCell/WorkQueueCell are not reactive at all — src/queue.js takes no context, contains ZERO ctx references, and reports invalidation by diffing a private snapshot. It scores green on the coverage row. Bind the family to a context and mint real reader-kinds, and check whether the collections fixtures are being satisfied by a non-reactive model here the way test/collections.test.js drives src/collections.js instead of the reactive families — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] [#lzqfports] lazily: Phase 5 — port the queue-family flavors to cpp, dart, py, go, kt (and build cs flavor-complete from the start under #lzcsqueues). One subagent per binding, NEVER two against one repo. Dispatch only after #lzqfspec + #lzqffx + #lzqfrs are committed so each agent has a settled spec, a red per-flavor gate, and a reference diff. cpp additionally needs its Source<uint64_t> version cells migrated if Phase 0 picks memoized-derive — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyphaseextract] lazily-rs Phase A: extract the closure-free KeyedOrder<K,H> core (entries + order + membership + present-set + position/keys/len/contains_key + move_to/move_before/move_after) shared by all three families; thin per-model shells keep materialize/observe. Do NOT route through SyncReactiveGraph — its Send+Sync bound is stricter than the concrete Context API and would break Rc-capturing callers. `remove` stays out of the core (monotone present set is fixture- and Lean-backed). Plan: tasks/plan-lazily-reactivemap-unification.md
@@ -922,4 +928,6 @@ Next up is `#maphandlecleardependents`, then `#portmembershiporder`.
 ## Completed / Reaped
 
 <!-- agent:done archive=tasks/software/lazily.done.md -->
+
+<!-- completed work archived in tasks/software/lazily.done.md -->
 <!-- /agent:done -->

@@ -627,9 +627,9 @@ Taking this seriously, because reopening after research is legitimate — but th
 **Actions taken now:** `#haivensend` is marked ON HOLD — the v3 letter must not be sent while the decision is reopened; v3's firm-decline framing is now potentially stale. What would actually settle this: (1) Acadian's commitment state, (2) Craig's answers on runway, the safety roadmap's reality (built-in how — agents? protocol-level? policy tooling?), and seat timeline, (3) whether the mission pull survives a weekend. Say the word and I'll draft the (b)-variant letter.
 
 One-line status: exchange 591 lines / 27 sections (accretion warn); queue inactive; compact on your word.
-❯ 🚧 I have not reversed yet. I have not sent an email to Craig and the offer was stalled because I did not reply. Please advise on what I should do.
+❯ I have not reversed yet. I have not sent an email to Craig and the offer was stalled because I did not reply. Please advise on what I should do.
 
-❯ 🚧 re: Runway, Gravity Jack is backing Haiven. So while there is runway, the business may survive on some level even if there is no traction. What do you think? I was wrong about PresenceAI since the business did shut down when not profitable. But Gravity Jack does make money.
+❯ re: Runway, Gravity Jack is backing Haiven. So while there is runway, the business may survive on some level even if there is no traction. What do you think? I was wrong about PresenceAI since the business did shut down when not profitable. But Gravity Jack does make money.
 
 I can also setup more informal conversation over text. The crux is my sidework. I'm working on distributed computing interactions + apps. I could work with Haiven + Gravity Jack potentially on some of these side projects. But I need to get a feel for how receptive + supportive they would be.
 
@@ -644,7 +644,7 @@ Three things in this cycle: what to do about the stalled thread, whether a text 
 **3. Gravity Jack backing: a real update, and it moves the left tail, not the right one.** You're right to correct the model, in both directions. PresenceAI followed the normal startup script... unprofitable, shut down... and a profitable backer genuinely breaks that script: Gravity Jack's agency + patent-licensing revenue means Haiven likely doesn't die abruptly when the seed cash runs low. The Richeys can slow-burn it. Concretely that raises: the odds Haiven *exists* in 3-5 years, the odds your prototype fee gets paid, the odds a revenue-share-if-private ever has a company attached to it, and the durability of the ally relationship you're investing in. What it does **not** move: the $10M/$100M odds. A $1-3M/yr-scale agency can subsidize a small team's payroll; it cannot fund a growth run... that still requires the seed completing and the milestones landing. And there's a subtle downside scenario worth naming: backer-subsidized survival is also how companies persist for years in low-cash grind mode *without* the traction that makes equity or revenue-share worth anything... which is precisely the "long haul I don't have the stomach for" future you declined. So the update is net-positive *for the path you chose*... bounded prototype, ally relationship, door open... and neutral-to-negative for the path you didn't. It confirms rather than reopens the decision.
 
 Sequence for today: Acadian acceptance + questions (if outstanding), Haiven v3 letter, then the text. All three artifacts are committed and ready; the only remaining ingredient is send.
-<!-- agent:boundary:31da3009 -->
+<!-- agent:boundary:080bb034 -->
 <!-- /agent:exchange -->
 
 ## Queue

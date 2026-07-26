@@ -11,9 +11,7 @@ use lazily_interop::reference::run_reference_peer;
 use lazily_interop::report::{console_report, json_report, junit_report, mutation_console};
 use lazily_interop::scenario::{load_registry, load_scenario, resolve_default_paths, run_scenario};
 use lazily_interop::schema::{Schemas, validate_schema_files};
-use lazily_interop::types::{
-    ErrorCategory, Failure, Plane, RunReport, RunStatus,
-};
+use lazily_interop::types::{ErrorCategory, Failure, Plane, RunReport, RunStatus};
 
 #[derive(Debug, Parser)]
 #[command(name = "lazily-interop", version, about)]
@@ -34,7 +32,7 @@ enum Command {
         spec: Option<PathBuf>,
         #[arg(long)]
         seed: Option<u64>,
-        #[arg(long, default_value_t = 2_000)]
+        #[arg(long, default_value_t = 10_000)]
         timeout_ms: u64,
         #[arg(long)]
         require_channels: bool,

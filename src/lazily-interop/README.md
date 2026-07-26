@@ -20,7 +20,9 @@ binding-neutral.
 Peer groups are capability-driven. A feature scenario runs only implementations
 that advertise that production feature. Unsupported implementations remain
 visible in `staged_peers` but receive no pass credit. The checked-in C# entry is
-staged until Lazily C# ships real IPC and CRDT surfaces.
+staged until Lazily C# ships real IPC and CRDT surfaces. Feature-only scenarios
+may leave `required_codecs` and `required_channels` empty; codec and channel
+scenarios name those requirements and select the narrower supporting peer group.
 
 `cargo run -- mutation-check` must report all eight required defect classes as
 caught. This is the gate proving the harness can go red before any production

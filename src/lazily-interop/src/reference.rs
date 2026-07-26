@@ -223,6 +223,7 @@ impl ReferencePeer {
             if !self.seen.insert(signature) {
                 continue;
             }
+            applied += 1;
             let Some(node) = op.get("node").and_then(Value::as_u64) else {
                 return json!({"ok": false, "error": "op requires node"});
             };
@@ -246,7 +247,6 @@ impl ReferencePeer {
             };
             if wins {
                 self.cells.insert((node, key), Cell { stamp, state });
-                applied += 1;
             }
         }
         if self.mutation == Mutation::FalseApplied && applied == 0 && !ops.is_empty() {

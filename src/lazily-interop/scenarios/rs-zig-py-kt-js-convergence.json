@@ -1,0 +1,29 @@
+{
+  "name": "rs-zig-py-kt-js-convergence",
+  "seed": 5,
+  "peers": [
+    {"name": "lazily-rs", "peer_id": 1},
+    {"name": "lazily-zig", "peer_id": 2},
+    {"name": "lazily-py", "peer_id": 3},
+    {"name": "lazily-kt", "peer_id": 4},
+    {"name": "lazily-js", "peer_id": 5}
+  ],
+  "required_features": ["distributed_crdt"],
+  "required_codecs": ["json"],
+  "required_channels": [],
+  "steps": [
+    {"op": "local_set", "peer": "lazily-rs", "node": 7, "key": null, "state": {"Inline": [65]}, "at": 10, "save_as": "rs-write"},
+    {"op": "local_set", "peer": "lazily-zig", "node": 7, "key": null, "state": {"Inline": [66]}, "at": 10, "save_as": "zig-write"},
+    {"op": "local_set", "peer": "lazily-py", "node": 7, "key": null, "state": {"Inline": [67]}, "at": 10, "save_as": "py-write"},
+    {"op": "local_set", "peer": "lazily-kt", "node": 7, "key": null, "state": {"Inline": [68]}, "at": 10, "save_as": "kt-write"},
+    {"op": "local_set", "peer": "lazily-js", "node": 7, "key": null, "state": {"Inline": [69]}, "at": 20, "save_as": "js-write"},
+    {"op": "deliver", "frame": "js-write", "to": ["lazily-rs", "lazily-zig", "lazily-py", "lazily-kt"], "at": 21, "expect_applied": 1},
+    {"op": "deliver", "frame": "rs-write", "to": ["lazily-js"], "at": 21, "expect_applied": 1},
+    {"op": "deliver", "frame": "zig-write", "to": ["lazily-js"], "at": 21, "expect_applied": 1},
+    {"op": "deliver", "frame": "js-write", "to": ["lazily-rs"], "at": 22, "expect_applied": 0},
+    {"op": "assert_converged"}
+  ],
+  "expected_snapshot": [
+    {"node": 7, "key": null, "state": {"Inline": [69]}}
+  ]
+}

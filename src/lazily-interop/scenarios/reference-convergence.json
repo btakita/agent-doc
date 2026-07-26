@@ -39,7 +39,7 @@
       "frame": "left-write",
       "to": ["right"],
       "at": 11,
-      "expect_applied": 0
+      "expect_applied": 1
     },
     {
       "op": "deliver",

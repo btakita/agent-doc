@@ -4,6 +4,38 @@ command = ["{self}", "reference-peer"]
 [peers.right]
 command = ["{self}", "reference-peer"]
 
+[peers.lazily-rs]
+command = ["cargo", "run", "--locked", "--quiet", "--features", "distributed,webrtc", "--bin", "lazily-interop-peer"]
+cwd = "../lazily-rs"
+
+[peers.lazily-zig]
+command = ["zig", "build", "interop-peer", "--"]
+cwd = "../lazily-zig"
+
+[peers.lazily-py]
+command = ["uv", "run", "python", "-m", "lazily.interop_peer"]
+cwd = "../lazily-py"
+
+[peers.lazily-kt]
+command = ["./gradlew", "--quiet", "interopPeer"]
+cwd = "../lazily-kt"
+
+[peers.lazily-js]
+command = ["node", "bin/interop-peer.mjs"]
+cwd = "../lazily-js"
+
+[peers.lazily-dart]
+command = ["dart", "run", "bin/interop_peer.dart"]
+cwd = "../lazily-dart"
+
+[peers.lazily-go]
+command = ["go", "run", "./cmd/lazily-interop-peer"]
+cwd = "../lazily-go"
+
+[peers.lazily-cpp]
+command = ["./build/lazily_interop_peer"]
+cwd = "../lazily-cpp"
+
 # C# is visible to reports but is not eligible for any peer group until its
 # production IPC and CRDT surfaces exist.
 [peers.lazily-cs]

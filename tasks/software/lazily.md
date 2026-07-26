@@ -409,14 +409,67 @@ I asked each binding to report legacy naming rather than fix it, so this is a su
 Wire-level names (`DeltaOp.CellSet`, `DeltaOp.SlotValue`, the `cellmap`/`celltree` capability flags, fixture `model` strings) are excluded throughout — renaming those is a wire break and a spec change, not a local one.
 
 **Commits:** one per repo, all pushed to `origin/main`; superproject pointer bump is `3c34324b1`, not yet pushed. No version bumps, no tags, no publish — this is source only, per the standing hold on releases. lazily-py's `tests/test_reactive_graph_conformance.py` and `uv.lock` were already dirty from the last release and I left them out of the commit. `gh run list --workflow CI` reports no CI workflow in agent-loop, so local suites are the gate here.
-<!-- agent:boundary:d4fc8d2e -->
+
+### Re: EntryKind::Cell/Slot → Source/Computed, and what the rename exposed — opus-5
+
+> **Queue prompt:** Also rename EntryKind::Cell to EntryKind::Source + EntryKind::Slot to EntryKind::Computed.
+
+Done and pushed across all 11 repos. Superproject pointer `6e2aae64e`.
+
+`EntryKind` turned out to be **wire-visible**, which changed the shape of the job. Its values are read as `"kind": "cell"` / `"slot"` out of `conformance/materialization/entry_kind_orthogonal_to_mode.json` by all nine runners, so a naive rename would either break the corpus or silently desync it. I split it in two:
+
+1. **Identifier-only rename**, with the serialized form pinned unchanged — `Source` still travels as `"cell"` — and every runner taught to accept both spellings while hard-erroring on anything else.
+2. **Then** flip the canonical fixture to `"source"` / `"computed"`, once every runner provably accepted it.
+
+That flip also had to reach **tracked copies** of the fixture vendored inside lazily-py and lazily-dart. They are byte-identical to canonical and kept in sync by hand, with no script — so flipping only the spec would have left two runners reading the old corpus and reporting green. All three are now identical again, and no `"kind": "cell"` / `"slot"` remains anywhere in the family.
+
+**Verification — every suite re-run serially against the flipped corpus, after all agents were clear:**
+
+| repo | result |
+|---|---|
+| lazily-rs | 901 passed, 0 failed; clippy `-D warnings` clean |
+| lazily-spec | 147 passed; lean 9 jobs; coverage-check OK |
+| lazily-formal | lake 49 jobs (forced recompile, not a cache hit) |
+| lazily-py | 538 passed |
+| lazily-js | 483 passed; size-limit 0 over budget |
+| lazily-kt | 352 tests; 117 fixtures across 21 areas |
+| lazily-go | `check OK` + `-race` clean |
+| lazily-cpp | 43/43; coverage guard OK |
+| lazily-cs | 73 passed |
+| lazily-dart | 528 passed; analyze `--fatal-infos` clean |
+| lazily-zig | master 24/24 steps; 0.16 719/719 |
+
+I ran these **serially**, not in parallel. Several bindings build `../lazily-formal` as part of their own `make check`, and while the parallel agents were running, three of them independently hit a red `Unknown constant LazilyFormal.Materialization.EntryKind.cell` caused by the formal agent mid-edit. Each correctly diagnosed it as foreign, but parallel results were not trustworthy as final proof.
+
+### The rename was the small part
+
+Auditing the runners found that **four of them could not have detected the corpus flip at all**:
+
+- **lazily-cs** — `GetString() == "cell" ? Cell : Slot`. On a flipped corpus every key becomes a slot, no cells are seeded, and the `observe` assertions still pass.
+- **lazily-js** — unknown values swept into the slot bucket by the same ternary shape.
+- **lazily-cpp** — the materialization tests **hand-transcribed the fixture as C++ literals and never opened the file.** The coverage matrix's green check was reporting on transcribed constants.
+- **lazily-rs / go / kt / dart / zig / py** — lenient dispatch, now replaced with rejecting parsers.
+
+Most agents mutation-checked rather than observing a pass: go built a shadow corpus with the new spellings (passed) then flipped one value to `"widget"` (failed as intended); kt deleted the v2 arms and confirmed two tests went red; cpp proved its fix by compiling the pre-fix file from `git show HEAD` and showing it print `PASS` and exit 0 on a corpus it should have rejected.
+
+Then the cpp audit corrected my framing. The split is not real-vs-transcribed but **three-way**: ten more runners *open* the canonical file only to assert its `"model"` marker before replaying transcribed steps. They satisfy a did-you-load-fixtures check while being blind to the contents — 33 fixtures in that state. That is filed, along with a guard (`scripts/check-conformance-coverage.sh`, ported from lazily-kt) that now fails the build when a required area replays nothing, when the corpus grows a fixture nothing reads, or when the known-uncovered ledger goes stale. The ledger names all 25 still-uncovered fixtures with reasons rather than claiming coverage we do not have.
+
+Writing one of the new runners **found a real library bug**: `CrdtPlaneRuntime::ingest_ops` returned the number of ops that changed the winner rather than the number accepted into the log — 4 instead of 5 — which breaks the spec's rule that redelivery applies zero new ops. lazily-kt is correct; cpp is now fixed. The other seven bindings are unaudited for the same divergence, so that is queued.
+
+Six follow-ups are filed at the queue tail so they do not preempt your remaining items. The two I would rank highest are porting the coverage guard to the seven bindings that lack one, and converting the marker-only runners — both are about the same failure mode: a suite that reports green while testing nothing.
+
+**Not done, deliberately:** no version bumps, tags, or publishes — source only, per the standing hold on releases. lazily-py's `tests/test_reactive_graph_conformance.py` and `uv.lock` were already dirty from the last release and stayed out of the commit.
+
+One process note worth keeping: RTK mangled bare `cargo test` output into an unrelated digest, so a grep for `test result` returned **zero lines** for a suite that really ran 66 binaries. It hit me and a subagent independently, and `rtk proxy` did not bypass it. An empty grep from a test run is the tell. I have added that to the existing RTK-masking memory.
+<!-- agent:boundary:40bb2fbf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Rename CellTree to SourceTree. Scan the lazily spec + formal + implementations for any other moderization renames that are needed.~~
-- Also rename EntryKind::Cell to EntryKind::Source + EntryKind::Slot to EntryKind::Computed.
+- ~~Also rename EntryKind::Cell to EntryKind::Source + EntryKind::Slot to EntryKind::Computed.~~
+- In lazily-rs: `Recommendation: expose a ctx-taking factory on ReactiveMap (make mint_with public, or change get_or_insert_with to Fn(&Ctx, &K) -> V). Then single-threaded derived entries work at all, thread-safe ones stop needing the capture trick, and scope-drop-is-teardown stays true for both. That's a lazily-rs change across the two families plus Async* — say the word and I'll scope it, same converge-on-naming-first caveat as the SourceTree rename.`. If the spec + formal + implementation need to be updated, do so. release + publish all lazily except lazily-cs.
 - ⏭️ do [#lzjsnpmtrustedpub]
 - ⏭️ do [#lzcsqueues]
 - ⏭️ do [#lzcscrdt]
@@ -424,7 +477,7 @@ Wire-level names (`DeltaOp.CellSet`, `DeltaOp.SlotValue`, the `cellmap`/`celltre
 - ⏭️ do [#lzcssync]
 - ⏭️ do [#lzcstemporal]
 - ⏭️ do [#lzcscluster]
-- do [#lzcsplane]
+- ⏭️ do [#lzcsplane]
 - do [#lzcspackage]
 - do [#asyncplanenever]
 - do [#lazilyrenameinverted]
@@ -433,11 +486,23 @@ Wire-level names (`DeltaOp.CellSet`, `DeltaOp.SlotValue`, the `cellmap`/`celltre
 - do [#observerwordingcontradic]
 - do [#renametreesource]
 - do [#recommendeddecidewhether]
+- do [#lazilycppconformance]
+- do [#portconformancecoverage]
+- do [#verifycrdtplaneruntimein]
+- do [#lazilycppsignalingroom]
+- do [#lazilycppcollections]
+- do [#trackedcopieslazily]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lazilycppconformance] lazily-cpp: 10 conformance runners are MARKER-ONLY — they open the canonical fixture but only assert its `"model"` string, then replay hand-transcribed steps (rateshape 6, coordination 5, temporal/windowing/service/resilience 4 each, presence 3, membership/crdt-tree 1 each = 33 fixtures). They pass a did-you-load-fixtures check while being blind to any change in the corpus steps or expectations. Convert to real replays; the coverage guard counts them as covered today.
+- [ ] [#portconformancecoverage] Port a conformance-coverage guard to the 7 bindings that lack one. Only lazily-kt (scripts/check-conformance-coverage.sh) and now lazily-cpp fail the build when a canonical fixture is not actually replayed. rs, py, js, go, dart, zig, cs have no such guard, so the same marker-only / hand-transcribed drift found in cpp is undetected there. Audit each the same three ways: real replay vs marker-only vs absent.
+- [ ] [#verifycrdtplaneruntimein] Verify CrdtPlaneRuntime ingest-op counting in the 7 bindings not yet checked. lazily-cpp returned the count of ops that CHANGED THE WINNER rather than ops accepted into the log (4 vs 5 on lww_last_writer_wins), breaking the spec rule that redelivery applies 0 new ops. lazily-kt (CrdtPlane.kt:148) is correct and cpp is now fixed; rs, py, js, go, dart, zig, cs are unaudited for the same divergence.
+- [ ] [#lazilycppsignalingroom] lazily-cpp SignalingRoom::forward (include/lazily/signaling.hpp:203) silently drops frames addressed to an unknown peer, but conformance/signaling/anti_spoof_session.json requires an `unknown_target` error frame back to the sender. A faithful signaling runner stays red until this is fixed. The second signaling fixture (frames.json) additionally needs signaling wire serde, which lazily-cpp does not have.
+- [ ] [#lazilycppcollections] lazily-cpp: 15 collections fixtures still uncovered — 9 with no coverage at all (cellmap_atomic_move, cellmap_independence, keyed_reconciliation_lis, semtree_incremental, stableid_alignment, textcrdt_convergence, textcrdt_delta_sync, workqueue_competing_delivery, workqueue_lease_deadletter) and 6 hand-transcribed (mergecell_algebra, 5x queuecell_*). Largest single body of remaining conformance work; spans five separate primitives. Tracked in the KNOWN_UNCOVERED ledger.
+- [ ] [#trackedcopieslazily] The tracked copies of lazily-spec conformance fixtures inside lazily-py (tests/conformance), lazily-dart (test/conformance), lazily-rs (tests/conformance) and lazily-go (test/conformance) are kept byte-identical to canonical BY HAND with no sync script or drift check. This cycle had to flip the same fixture in three places. Add a sync/verify script (or make the runners read the sibling checkout) so a canonical edit cannot silently miss a vendored copy.
 - [ ] [#asyncplanenever] Async plane never migrated to the v2 kernel: AsyncCellHandle / AsyncSlotHandle / AsyncSlotState survive in cpp, go, js, kt, py, zig, cs. Sharpest case is lazily-cpp `AsyncContext::memo()` (async_context.hpp:144), still live and undeprecated while the sync `Context::memo` is DELETED. Migrate to Async{Source,Computed} with deprecated aliases.
 - [ ] [#lazilyrenameinverted] lazily-py has the v2 rename INVERTED vs every other binding: `class Cell` is primary with `Source = Cell` (cell.py:35,219) and `class CellSlot` primary with `SourceSlot = CellSlot` (cell.py:191,220). Flip so Source/SourceSlot are canonical and Cell/CellSlot are the deprecated aliases.
 - [ ] [#readmeexamplesreference] README examples reference types that no longer exist: lazily-go README:82 `lazily.NewCell` (never defined, example does not compile) and README:209 `*Cell[V]`; lazily-cpp README:54,280,387 + AGENTS.md:43 `CellHandle`/`SlotHandle` (deleted); lazily-dart README:38,329 claims a `Signal` back-compat alias that does not exist; lazily-py README:225 calls `CellSlot` canonical.

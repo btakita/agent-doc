@@ -364,14 +364,24 @@ impl IdleQueueTransition {
 /// `idle_watch_document_revision` already do, and report an unanswerable read as
 /// `Unresolved` so the caller can bound it instead of blocking forever.
 fn current_transition_for_idle_queue(file: &std::path::Path) -> IdleQueueTransition {
-    match agent_doc_controller_io::project_controller::current_text_via_controller_model_read_for_doc(
+    // `#idlewatchtransitionrevision`: this needs exactly one boolean —
+    // `delivery_converged` — and used to obtain it by asking the relay to
+    // materialize the whole document, SHA-256 it, and write an `ops.log` line
+    // carrying its length and hash, then discard the text (`..`). The compact
+    // revision already carries `delivery_converged`, which is what
+    // `CurrentRevision` exists for. Second-largest idle-watch read source in the
+    // measured window (935 of ~6,300 full-text reads).
+    //
+    // The two `Current` shapes are deliberately identical here: `live_editors`
+    // does not change the transition, only convergence does.
+    match agent_doc_controller_io::project_controller::revision_via_controller_model_read_for_doc(
         file,
         "current_transition_for_idle_queue",
     ) {
-        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Detached)) => {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentRevision::Detached)) => {
             IdleQueueTransition::Converged
         }
-        Ok(Some(agent_doc_crdt_relay_io::CurrentText::Current {
+        Ok(Some(agent_doc_crdt_relay_io::CurrentRevision::Current {
             delivery_converged, ..
         })) => {
             if delivery_converged {
@@ -380,10 +390,7 @@ fn current_transition_for_idle_queue(file: &std::path::Path) -> IdleQueueTransit
                 IdleQueueTransition::Pending
             }
         }
-        Ok(Some(
-            agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
-            | agent_doc_crdt_relay_io::CurrentText::EditorSyncPending,
-        ))
+        Ok(Some(agent_doc_crdt_relay_io::CurrentRevision::EditorAttachedMissingReplica))
         | Ok(None)
         | Err(_) => IdleQueueTransition::Unresolved,
     }

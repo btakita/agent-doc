@@ -562,13 +562,35 @@ Flipping renames the native class and changes `isinstance` identity. That's a re
 I've rewritten the item as `[recommended]` with the constraint recorded, rather than closing it — the underlying question (should vocabulary consistency win?) is legitimate, it just isn't the cleanup I described.
 
 Four new items filed from the review's findings, including the membership-plane gap and the `clear_dependents` handle-trait surgery that any flavor-level `remove` needs.
-<!-- agent:boundary:40ceac23 -->
+
+### Re: membership/order plane for the thread-safe and async maps — opus-5
+
+> **Queue prompt:** do [#closemembershiporder]
+
+Done in lazily-rs, committed `ffc0d83`, superproject `c4ebbe610`.
+
+This was the gap the adversarial review found and my first plan draft budgeted at zero. Both flavors had **no reactive `keys`/`len`/`contains_key` at all** — only non-reactive `present_keys`/`present_count`. The sync map gets its reactivity from two `Source<u64>` signal cells bumped on mutation; the other two never minted them, which is why `new(_ctx)` ignored the context it was handed — the same discarded-context pattern you pointed at when this started, one layer up.
+
+**What landed.** Each flavor now mints its own membership and order signals on its own graph — `ThreadSafeContext` and `AsyncContext` respectively. Three details worth stating:
+
+- **`AtomicU64` version mirrors**, not the sync map's `Cell<u64>` — these maps are `Send + Sync`.
+- **Bumps run with the map mutex released.** `ctx.set` can drive a dependent recompute that re-enters the map; the existing code already had a comment warning about exactly this on the mint path, so the bump goes after `drop(state)`.
+- **The async reads are generic over the read surface** — `where AsyncSource<u64>: Read<C, Output = u64>` — mirroring the sync map's `ComputeOps` genericity. An `AsyncComputeContext` registers a dependency edge; a bare `AsyncContext` does not. Both spellings are pinned by tests so the distinction can't be quietly collapsed later.
+
+**Verification.** Full suite **907 passed, 0 failed** (was 901); `clippy --all-features --all-targets -- -D warnings` clean.
+
+The tests are mutation-checked rather than merely green, since this whole thread has been about suites that report green while testing nothing. Removing the membership bump turns **all three** thread-safe tests and **two of three** async tests red. The third async test is the deliberate untracked-read pin, which correctly stays green — it asserts correctness of the value, not invalidation.
+
+I also had to work around two known traps: `cargo build` reported "0 crates compiled" on freshly edited files (the RTK stale-digest issue), and a `cd` into a directory I was already in short-circuited a `&&` chain so a patch script silently never ran while the build still executed. Both caught by checking the file rather than the command's word.
+
+**Two follow-ups filed.** The eight other bindings need the same plane — and note go's and dart's async maps aren't connected to their async graph at all, so they need wiring before they can carry signals. Separately, `AsyncMapHandle::observe` is still hard-bound to the untracked `&AsyncContext`, so entry-value reads from inside a compute still can't subscribe. That's the read-side twin of the discarded-factory defect, and the fix is the genericity I just applied to the signal reads.
+<!-- agent:boundary:ea875918 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#closemembershiporder]
+- ~~do [#closemembershiporder]~~
 - do [#maphandlecleardependents]
 - do [#lazilycellfamily]
 - do [#lazilyspecdisagrees]
@@ -607,12 +629,15 @@ Four new items filed from the review's findings, including the membership-plane 
 - do [#lazilytwoimplementations]
 - do [#lazilydartcomputedmap]
 - do [#recommendedspecdecision]
+- do [#portmembershiporder]
+- do [#lazilyasyncmap]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#closemembershiporder] Close the membership/order-signal gap in the lazily-rs thread-safe and async maps: they have NO reactive keys/len/contains_key at all, only non-reactive present_keys/present_count. The sync map gets this from `membership: Source<u64>` and `order_signal: Source<u64>` (cell_family.rs:210,218) bumped via ctx.set (:255-271). Each flavor must mint its own membership/order cells on its own graph — a shared closure-free core CANNOT supply this. This is the bulk of the real unification effort and was unbudgeted in the first plan draft. Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#portmembershiporder] Port the membership/order plane to the other 8 bindings thread-safe + async maps (py, js, kt, go, cpp, cs, dart, zig). lazily-rs is done (commit ffc0d83): each flavor mints its own membership + order signal cells on its own graph, with bumps run outside the map lock. Every other binding has the same hole — reactive keys/len/contains_key exist only on the sync map. Note go and dart async maps are not connected to their async graph at all (no context field / _ctx annotated unused_field), so they need wiring before they can carry a signal plane. Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. The membership/order reads are now generic over the read surface (AsyncSource<u64>: Read<C>) and track correctly with an AsyncComputeContext — apply the same genericity to AsyncMapHandle::observe so entry-value reads can track too. This is the read-side twin of the discarded-factory-view defect.
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook at all. Any flavor-level `remove` — and the fix for lazily-cs AsyncComputedMap.Remove not disposing its node — requires adding one. Handle-trait surgery, not an additive method. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
@@ -668,4 +693,5 @@ Four new items filed from the review's findings, including the membership-plane 
 - 2026-07-25 [#lzcsfamilysync] lazily-cs: row 4 — keyed-map sync. Per-key LWW registers, materialize-on-ingest (a keyed op for an entry the local replica never registered must MATERIALIZE it from the op's converged register rather than drop it), epoch bumping, idempotent re-ingest, membership-only-grows, and a derived aggregate over the family; replay conformance/familysync/materialize_on_ingest.json — plan: tasks/software/lazily-cs-parity-plan.md
 - 2026-07-25 [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 - 2026-07-25 [#lzrenamerelease] lazily: release + publish the SourceMap/ComputedMap rename — spec, formal, rs, py, kt, js, dart, zig, go, cpp (NOT lazily-cs, deliberately excluded). Proposed minor bumps: spec+formal 0.35.0->0.36.0, rs 0.48.1->0.49.0, py 0.35.0->0.36.0, kt 0.36.1->0.37.0, js 0.27.0->0.28.0, dart 0.25.0->0.26.0, zig ->0.30.0, go v0.21.0->v0.22.0, cpp v0.23.0->v0.24.0. Mechanisms differ per target: crates.io (token in passage, macros before lazily), PyPI via the wheels workflow, GitHub Packages for kt (IMMUTABLE - a 409 kills the publish, so the version must be new), npm for js (BLOCKED on operator 2FA), pub.dev for dart (manual OAuth, not 2FA-blocked), tag + gh release for spec/formal/zig/cpp/go. TWO PRE-EXISTING SNAGS: lazily-zig build.zig.zon says 0.28.0 while its published GitHub release is v0.29.0, so the version file is behind its own release and needs a deliberate decision, not a bulk bump; and lazily-cpp's project version likewise trails its v0.23.0 tag. Decisions already made, do not re-litigate: publish lazily-go with the raised Go 1.24 floor (generic type aliases need it), and lazily-cs keeps NO deprecated aliases with its types re-sealed
+- 2026-07-26 [#closemembershiporder] Close the membership/order-signal gap in the lazily-rs thread-safe and async maps: they have NO reactive keys/len/contains_key at all, only non-reactive present_keys/present_count. The sync map gets this from `membership: Source<u64>` and `order_signal: Source<u64>` (cell_family.rs:210,218) bumped via ctx.set (:255-271). Each flavor must mint its own membership/order cells on its own graph — a shared closure-free core CANNOT supply this. This is the bulk of the real unification effort and was unbudgeted in the first plan draft. Plan: tasks/plan-lazily-reactivemap-unification.md
 <!-- /agent:done -->

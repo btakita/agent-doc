@@ -1,7 +1,7 @@
 ---
 agent_doc_session: d818612d-3614-4c43-b5ec-83923406aa46
 resume: 24f78fda-2db5-41b6-8eb1-52772d913df8
-agent: claude
+agent: codex
 claude_model: opus
 agent_doc_format: template
 agent_doc_write: crdt
@@ -89,13 +89,43 @@ Split it in two, because the answer differs:
 **Conformance: yes, and this is the real gap.** What `ClientTag` actually buys is *rejection* — an unknown `type` is an error, never a silent default. Nothing in the corpus tests that, in any binding. Filed as `#lzsignalingnegative`: a `rejects` block covering unknown `type`, `to` and `from` both present, a client frame carrying `from`, and a `welcome` roster containing the joining peer. That is the portable version of your question, and unlike a type it applies to all nine.
 
 Also filed `#lzwirefrontier` — the two wire defects above are exactly the kind a hand-transcribed frames test cannot see, so the other seven bindings need the same encoder/decoder audit. rs is already correct on both. Both items are at the top of the backlog.
-<!-- agent:boundary:55ee267a -->
+
+### Re: do [#lzwirefrontier] — gpt-5
+
+Completed the cross-binding `CrdtSync` wire audit. C++ was the only implemented binding with a live mismatch: its standard keyed MessagePack codec encoded and decoded `StampFrontierEntry` as `{peer, stamp}`. It now requires the canonical two-element `[peer, WireStamp]` tuple in both directions. I also added an independent canonical-frame test that separately inspects the encoder shape and decodes a hand-built frame, so a symmetric encoder/decoder mistake cannot pass as a self-roundtrip.
+
+`CrdtOp.key` was already emitted as a required nullable field in C++, Dart, Go, JavaScript, Kotlin, Python, and Rust; their frontier entries were otherwise canonical. C# does not yet expose the IPC/CRDT surfaces, so this audit becomes applicable there after `#lzcsipc` and `#lzcssync`.
+
+The C++ change is committed and pushed as `bc10df2` (`fix CrdtSync frontier wire tuple shape`). `make test`, full `make check`, and the latest C++ CI run `30215769834` are green.
+
+### Re: one network suite across all implementations and data channels — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzwirefrontier]
+
+
+Created a coordinated plan set for one cross-language network suite:
+
+- `src/lazily-interop/docs/peer-contract.md` defines the shared peer protocol, semantic plane, transport plane, five channel names, and no-vacuous-channel rule.
+- `tasks/software/plan-lazily-interop-network-suite.md` is the master phased plan for an independent Rust orchestrator, nine peers, mutation proof, rollout, and CI.
+- `tasks/software/plan-lazily-interop-peer-rollout.md` defines thin production-library adapters and the binding-by-binding acceptance checklist.
+- `tasks/software/plan-lazily-interop-channel-matrix.md` separates frame, codec, and channel dimensions and specifies in-process FFI, shared memory, IPC socket, WebSocket, and WebRTC DataChannel profiles plus fault injection and CI tiers.
+
+The contract and plans are committed locally as `784719be3` (`lazily: plan cross-binding network interop suite`). All four Markdown files parse successfully and the staged diff passed whitespace validation. The root `make check` reached an unrelated pre-existing Corky parallel-test port-allocation race: four loopback tests failed with `AddrInUse`, while that exact test group passed in isolation. I left the unrelated public subrepo unchanged; the in-scope C++ full suite is green.
+
+Queued implementation in four explicit phases: `#lzinteropcore`, `#lzinteropeers`, `#lzinteropchannels`, then dependency-bound `#lzinteropcs`.
+<!-- agent:boundary:dd948485 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lzwirefrontier]
+- do [#lzinteropcore]
+- do [#lzinteropeers]
+- do [#lzinteropchannels]
+- do [#lzinteropcs]
+- ~~do [#lzwirefrontier]~~
 - do [#lzsignalingnegative]
 - ~~do [#lazilyzigconformance]~~
 - do [#lazilyzigport]
@@ -140,7 +170,10 @@ Also filed `#lzwirefrontier` — the two wire defects above are exactly the kind
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzwirefrontier] lazily cpp/dart/go/js/kt/py/cs: audit the CrdtSync wire encoding for the two defects lazily-zig was carrying undetected. (1) schemas/distributed.json#/$defs/StampFrontierEntry pins a 2-element [peer, WireStamp] tuple (prefixItems, minItems/maxItems 2); zig encoded AND decoded {peer, stamp}, so its frontier advertisement was unreadable by every other binding. (2) CrdtOp.key is in the schema's required list and is nullable — always present, null when unset, explicitly unlike NodeSnapshot/NodeAdd which omit it; zig omitted it when null and rejected an incoming explicit null. rs is CORRECT on both (Vec<(u64, WireStamp)> and a derived struct). Neither was visible until distributed/crdt_sync_frames.json was replayed rather than mirrored, so any binding whose frames coverage is hand-transcribed could have the same pair. Check the encoder and the decoder separately: zig was wrong in both directions and round-tripped against itself cleanly
+- [ ] [#lzinteropcore] Implement Phase 0-1 of `tasks/software/plan-lazily-interop-network-suite.md`: freeze schemas/results, build the Rust orchestrator, and prove the harness with mutation tests.
+- [ ] [#lzinteropeers] Implement the Rust+Zig reference pair and the Python/Kotlin/JavaScript/Dart/Go/C++ peer rollout from `tasks/software/plan-lazily-interop-peer-rollout.md`.
+- [ ] [#lzinteropchannels] Implement the five data-channel profiles, fault scenarios, and PR/merge/nightly CI matrix from `tasks/software/plan-lazily-interop-channel-matrix.md`.
+- [ ] [#lzinteropcs] Add the C# peer to the single network suite after `#lzcsipc` and `#lzcssync` provide real IPC/CRDT surfaces, following `tasks/software/plan-lazily-interop-peer-rollout.md`.
 - [ ] [#lzsignalingnegative] lazily-spec + all bindings: signaling/frames.json and anti_spoof_session.json have no NEGATIVE cases, so nothing anywhere pins that a malformed frame is REJECTED rather than silently defaulted. The schema already closes the tag set (oneOf over 14 branches, each type: {const}, additionalProperties: false), but no fixture drives it. Add a rejects block covering: unknown type value; to and from both present on one frame (the description says they never are); a client frame carrying from (the anti-spoof surface itself); welcome.peers containing the joining peer. This is the portable form of the tag-enum question — the wire contract is the closed tag set plus rejection, not any binding's type shape
 - [ ] [#lazilyzigport] lazily go/rs/zig: port lazily-dart's corrupt-manifest-id check into the other runtime conformance guards. dart found that a recorder can mangle its own evidence (severed ids like sure.json) and make the guard report INTACT fixtures as never opened — a guard that cries wolf gets switched off. Its guard now rejects any recorded id that names no file in the corpus. go, rs and zig all lack that check. Cheap: one loop over the manifest before the coverage comparison
 - [ ] [#lazilyconformancecoverag] lazily-cs: 87 of 124 canonical fixtures unreplayed (cs opens 37). MEASURED via the runtime manifest 2026-07-26. CORRECTION — an earlier note on this item claimed the 7 statechart fixtures were a cheap "runner gap"; that was derived from the STATIC grep and is WRONG. cs enumerates its corpus, so no fixture filename appears in its sources, and the static count under-reported every area. Runtime truth: cs FULLY replays reactive-graph 21/21, statechart 7/7, materialization 3/3, familysync 1/1. There is NO runner-gap win anywhere in cs — every one of the 87 is a genuinely missing surface, each already declared in a per-runner Unsupported ledger with the blocking surface named. Unreplayed by area: collections 15, lossless-tree 9, root 8, message-passing 8, reliable-sync 8, rateshape 6, coordination 5, resilience/service/temporal/windowing 4 each, presence 3, agent-doc/distributed/signaling 2 each, crdt-tree/membership/receipts 1 each. Work it down against tasks/software/lazily-cs-parity-plan.md by SHIPPING SURFACES, not by wiring runners

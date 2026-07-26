@@ -461,7 +461,62 @@ Six follow-ups are filed at the queue tail so they do not preempt your remaining
 **Not done, deliberately:** no version bumps, tags, or publishes — source only, per the standing hold on releases. lazily-py's `tests/test_reactive_graph_conformance.py` and `uv.lock` were already dirty from the last release and stayed out of the commit.
 
 One process note worth keeping: RTK mangled bare `cargo test` output into an unrelated digest, so a grep for `test result` returned **zero lines** for a suite that really ran 66 binaries. It hit me and a subagent independently, and `rtk proxy` did not bypass it. An empty grep from a test run is the tell. I have added that to the existing RTK-masking memory.
-<!-- agent:boundary:40bb2fbf -->
+
+### Re: Phase A scope, and how the family can conform — opus-5
+
+> **Queue prompt:** In lazily-rs: `Recommendation: expose a ctx-taking factory on ReactiveMap (make mint_with public, or change get_or_insert_with to Fn(&Ctx, &K) -> V)…`. If the spec + formal + implementation need to be updated, do so. release + publish all lazily except lazily-cs.
+
+Scoped, not implemented. Plan: [`tasks/plan-lazily-reactivemap-unification.md`](plan-lazily-reactivemap-unification.md). Nine follow-ups filed at the queue tail. **Nothing released or published** — see the end.
+
+You were right that it makes the fix smaller, and the surveys then made it bigger in a different direction.
+
+### Phase A
+
+Two of three families literally bind the tracking view and throw it away — `move |_ctx| factory(&k)` at `cell_family.rs:305` and `thread_safe_reactive_family.rs:203`. Async has nothing to discard: its compute is `Arc<dyn Fn() -> V>`, nullary.
+
+I first proposed unifying over `SyncReactiveGraph`, since `&G::Compute<'_>` is a single spelling that projects correctly (`Compute<'a>` for `Context`, `ThreadSafeContext` for itself). **That's wrong, and here's the trap:** the trait requires `Send + Sync` where the concrete API does not.
+
+| | value bound | closure bound |
+|---|---|---|
+| `Context::computed` (`context.rs:840`) | `T: PartialEq + 'static` | `F: Fn(&Compute) -> T + 'static` |
+| `SyncReactiveGraph::computed` for `Context` (`:2707`) | `+ Send + Sync` | `+ Send + Sync` |
+
+Routing the map through the trait newly requires `Send + Sync` on single-threaded map values and factories — an `Rc`-capturing caller, the normal case, stops compiling. An impl cannot weaken a trait's bounds. Corroborating: **nothing in `src/` consumes `SyncReactiveGraph` generically today**; its only generic consumer is the conformance harness. The compromise has never been load-bearing, which is why it went unnoticed.
+
+So Phase A extracts the **closure-free core** instead. All three families store the same state — `{ K → H, Vec<K> }`, `H` a `Copy` id, no closure retained — differing only in `RefCell` vs `Mutex`. Everything in the capability gap lives in that half. This is the "pure cores split from reactive cells" split the repo already uses for resilience, windowing, coordination, membership and service; the maps are where it wasn't applied.
+
+One correction to my own first draft: **`remove` stays out of the core.** py and go both report the thread-safe/async present sets are documented monotone — "deferral, not de-allocation" — backed by the shared `deferral_not_deallocation.json` fixture and the `materialize_present_comm` Lean theorem. Granting them `remove` is a spec and formal-model change, not an additive one.
+
+### Family conformance
+
+The gap is not a Rust problem. **Nine of nine bindings fail `cell-model.md:275` on the thread-safe and async flavors** — no binding exposes `move_to`/`move_before`/`move_after` on anything but its single-threaded source map. kt is worst: five of its six families lack ordering, including the *sync* `ComputedMap`.
+
+Worse, the contract is verified almost nowhere. **zig never replays the atomic-move fixtures at all** — they appear only in doc comments. **js replays them only against a fourth, non-reactive model**, so its reactive `moveTo` has no fixture backing. That's why this drifted invisibly, and it's the same failure mode as the marker-only runners from the `EntryKind` cycle.
+
+**The three execution models are largely a fiction at the map layer.** In six bindings the thread-safe map is the sync graph plus a lock — cpp's and dart's thread-safe contexts literally hold a `Context`; cs's `ThreadSafeContext.Inner` *is* one; py routes reads through the sync `Context`; go's is a plain mutex cache with no reactive nodes. The cpp survey proved it rather than asserting it: a compile probe showed `SourceMap::{keys,len,contains_key,get}` **already accept a `ThreadSafeContext` unmodified**, with exactly two signatures blocking the rest.
+
+And the fact that decides sequencing: **the ordering plane touches no handle.** `move_to`/`position` operate solely on the key list plus a version bump — not sync-, thread-, or async-coloured. The async maps lack them for no language reason. So async can have atomic move in every binding today; async's real blocker is only the *read* surface, which Phase A doesn't touch.
+
+zig already contains the proof: `Engine(comptime Model: type)` is one generic replay engine written against `SyncModel`/`TsModel`/`AsyncModel`, with the async projection isolated to a single `settle` that is `{}` on the other two. Proven in the harness, never applied to the library.
+
+Recommended order: **fixtures first** (else it lands green against nothing) → prototype in cs → land in zig and cpp (both can fold async in) → **go before v1** (still v0 on an unversioned module path; after v1 it costs a `/v2` path) → rs/py/js/dart sync+TS only → **kt last** (`suspend` colours construction, read *and* disposal).
+
+### Defects found on the way
+
+Independent of the refactor, filed separately: zig's sync map **is not graph-backed at all** (plain `V` plus polled `u64` counters — the richest surface is the least reactive) and its `ThreadSafeComputedMap` **mints cells, not computeds**; cs's `AsyncComputedMap.Len()` is non-reactive despite its doc, with `_membership` written and never read, and its `Remove` never disposes the node; js's two `moveTo` implementations disagree on negative indices; dart's `ComputedMap` entries are `Slot`, the *unguarded* type, so it lacks the memo guard its name implies.
+
+### On the rest of the item
+
+**I did not release or publish.** Three reasons, and I'd like your call rather than my assumption:
+
+1. The API decision isn't settled — that's what this scope is for.
+2. The item's own text says *"say the word and I'll scope it, same converge-on-naming-first caveat"*, so it was a proposal, not a decision.
+3. You told me it came from the `agent-doc-bugs2.md` session, which preflight has been skipping all along as foreign-owned. So the publish clause may belong to that session's context rather than this one.
+
+Nothing here needs a release anyway — no code changed this cycle.
+
+Still open from before: should this item stay in `lazily.md`'s queue or be struck here and left to the session that authored it?
+<!-- agent:boundary:5cebe260 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -469,7 +524,7 @@ One process note worth keeping: RTK mangled bare `cargo test` output into an unr
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~Rename CellTree to SourceTree. Scan the lazily spec + formal + implementations for any other moderization renames that are needed.~~
 - ~~Also rename EntryKind::Cell to EntryKind::Source + EntryKind::Slot to EntryKind::Computed.~~
-- In lazily-rs: `Recommendation: expose a ctx-taking factory on ReactiveMap (make mint_with public, or change get_or_insert_with to Fn(&Ctx, &K) -> V). Then single-threaded derived entries work at all, thread-safe ones stop needing the capture trick, and scope-drop-is-teardown stays true for both. That's a lazily-rs change across the two families plus Async* — say the word and I'll scope it, same converge-on-naming-first caveat as the SourceTree rename.`. If the spec + formal + implementation need to be updated, do so. release + publish all lazily except lazily-cs.
+- ~~In lazily-rs: `Recommendation: expose a ctx-taking factory on ReactiveMap (make mint_with public, or change get_or_insert_with to Fn(&Ctx, &K) -> V). Then single-threaded derived entries work at all, thread-safe ones stop needing the capture trick, and scope-drop-is-teardown stays true for both. That's a lazily-rs change across the two families plus Async* — say the word and I'll scope it, same converge-on-naming-first caveat as the SourceTree rename.`. If the spec + formal + implementation need to be updated, do so. release + publish all lazily except lazily-cs.~~
 - ⏭️ do [#lzjsnpmtrustedpub]
 - ⏭️ do [#lzcsqueues]
 - ⏭️ do [#lzcscrdt]
@@ -478,7 +533,7 @@ One process note worth keeping: RTK mangled bare `cargo test` output into an unr
 - ⏭️ do [#lzcstemporal]
 - ⏭️ do [#lzcscluster]
 - ⏭️ do [#lzcsplane]
-- do [#lzcspackage]
+- ⏭️ do [#lzcspackage]
 - do [#asyncplanenever]
 - do [#lazilyrenameinverted]
 - do [#readmeexamplesreference]
@@ -492,11 +547,31 @@ One process note worth keeping: RTK mangled bare `cargo test` output into an unr
 - do [#lazilycppsignalingroom]
 - do [#lazilycppcollections]
 - do [#trackedcopieslazily]
+- do [#firstunificationwire]
+- do [#prototypeunifiedreactive]
+- do [#lazilyphaseextract]
+- do [#unifythreemap]
+- do [#lazilymapunification]
+- do [#zigdefectsfound]
+- do [#lazilyasynccomputedmapde]
+- do [#lazilytwoimplementations]
+- do [#lazilydartcomputedmap]
+- do [#recommendedspecdecision]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-cs (630 lines, unpublished, no compat constraint, already closest to unified; ThreadSafeComputedMap is already a delegating shell over a real ComputedMap). Validates shape + API only, NOT the mechanism — sync-to-threadsafe is free in C# because ThreadSafeContext.Inner IS a Context. Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#lazilyphaseextract] lazily-rs Phase A: extract the closure-free KeyedOrder<K,H> core (entries + order + membership + present-set + position/keys/len/contains_key + move_to/move_before/move_after) shared by all three families; thin per-model shells keep materialize/observe. Do NOT route through SyncReactiveGraph — its Send+Sync bound is stricter than the concrete Context API and would break Rc-capturing callers. `remove` stays out of the core (monotone present set is fixture- and Lean-backed). Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#unifythreemap] Unify all three map families in lazily-zig and lazily-cpp — both can fold async in, unlike the rest. zig: fn ReactiveMap(comptime Ctx,K,V,kind) with Ctx.Handle/Ctx.Observed/Ctx.Lock projections; the proof already exists in-tree as Engine(comptime Model) at reactive_graph_conformance.zig:1206 over SyncModel/TsModel/AsyncModel. cpp: traits class + existing duck-typed Cx param; only Source::clear_dependents(Context&) and Computed::clear(Context&) block it, and AsyncSlotHandle needs one added clear_dependents. Neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#lazilymapunification] lazily-go map unification BEFORE it hits v1 — still v0.22.0 on an unversioned module path, so a breaking change costs nothing now; after v1 it costs a /v2 module path plus every import rewrite. Mechanism: closure fields (already proven in-repo at reactive_map.go:92-96) or one extra type param. Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#zigdefectsfound] zig defects found while surveying, independent of unification: (1) the sync ReactiveMap is NOT graph-backed — stores plain V and fakes reactivity with u64 counters callers must poll, so keys()/len()/contains() register no edge (reactive_map.zig:140-419 touches ctx only for .allocator); (2) ThreadSafeComputedMap mints the WRONG node kind — mintLocked always calls tsctx.cell ignoring entry_kind (thread_safe_reactive_map.zig:98), so its computed entries are cells; (3) moveTo desyncs on allocator failure — orderedRemove then insert-catch-return-false leaves the key in materialized but absent from order (reactive_map.zig:288-303).
+- [ ] [#lazilyasynccomputedmapde] lazily-cs AsyncComputedMap defects: Len() is documented as reading through the membership plane but returns _order.Count, and _membership is written at :117 and never read anywhere (dead code, so Len is non-reactive); Remove (:92-98) never disposes the removed AsyncComputed, unlike both sync clear delegates (ReactiveMap.cs:299,:405), leaving readers on a stale cache. Also: no thread-safe or async SourceMap exists at all — conformance papers over it with a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336).
+- [ ] [#lazilytwoimplementations] lazily-js: two implementations disagree on moveTo with a negative index — reactive-family.js:270 uses Math.min(index, Math.max(len-1,0)) with no lower clamp, collections.js:196 uses Math.max(0, Math.min(index, len-1)). moveTo(key,-1) splices before the last element in one and at 0 in the other. Untested in both; pick one before any unification silently changes a published surface.
+- [ ] [#lazilydartcomputedmap] lazily-dart: ComputedMap entries are Slot, not Computed (collections.dart:430). Post-v2 Slot is the UNGUARDED pass-through while Computed carries the == memo guard — so ComputedMap does not have the guard its name implies, and this leaks publicly through handle(). Decide whether the handle becomes Computed.
+- [ ] [#recommendedspecdecision] [recommended] Spec decision for lazily-spec, blocking the family unification: (1) does the atomic-move contract in cell-model.md:275 bind EVERY flavor or only the source map? All nine bindings fail it on thread-safe and async, yet coverage.json marks all three rows green for every binding. (2) Is a thread-safe flavor meaningful on single-threaded runtimes? dart ships a 182-line duplicate family the spec marks N/A, and js README:633-640 argues the opposite of its own source comment at thread-safe.js:134-137.
 - [ ] [#lazilycppconformance] lazily-cpp: 10 conformance runners are MARKER-ONLY — they open the canonical fixture but only assert its `"model"` string, then replay hand-transcribed steps (rateshape 6, coordination 5, temporal/windowing/service/resilience 4 each, presence 3, membership/crdt-tree 1 each = 33 fixtures). They pass a did-you-load-fixtures check while being blind to any change in the corpus steps or expectations. Convert to real replays; the coverage guard counts them as covered today.
 - [ ] [#portconformancecoverage] Port a conformance-coverage guard to the 7 bindings that lack one. Only lazily-kt (scripts/check-conformance-coverage.sh) and now lazily-cpp fail the build when a canonical fixture is not actually replayed. rs, py, js, go, dart, zig, cs have no such guard, so the same marker-only / hand-transcribed drift found in cpp is undetected there. Audit each the same three ways: real replay vs marker-only vs absent.
 - [ ] [#verifycrdtplaneruntimein] Verify CrdtPlaneRuntime ingest-op counting in the 7 bindings not yet checked. lazily-cpp returned the count of ops that CHANGED THE WINNER rather than ops accepted into the log (4 vs 5 on lww_last_writer_wins), breaking the spec rule that redelivery applies 0 new ops. lazily-kt (CrdtPlane.kt:148) is correct and cpp is now fixed; rs, py, js, go, dart, zig, cs are unaudited for the same divergence.

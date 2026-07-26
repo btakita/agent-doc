@@ -191,7 +191,7 @@ pub fn crdt_authority_for_file(file: &Path) -> CrdtAuthority {
     let routed_model_is_allocated = embedded_relay_route_is_registered_for_file(file)
         && agent_doc_fs::document_state_hash(file)
             .ok()
-            .is_some_and(|hash| hub_registry().lock().contains_key(&hash));
+            .is_some_and(|hash| hub_is_allocated(&hash));
     if routed_model_is_allocated || reliable_sync_editor_live_for_file(file) {
         CrdtAuthority::MultiReplica
     } else {
@@ -352,9 +352,63 @@ fn replica_registration_count(file: &Path) -> u64 {
 ///
 /// Per-document isolation (`#xdocsuper1/3`): each document's replicas live in
 /// their own hub; there is no shared canonical replica across documents.
-fn hub_registry() -> &'static Mutex<HashMap<String, RelayHub>> {
-    static REGISTRY: OnceLock<Mutex<HashMap<String, RelayHub>>> = OnceLock::new();
+///
+/// # Why the hub is behind its own lock (`#relayhubperdoclock`)
+///
+/// The map used to hold `RelayHub` by value, so every caller took **this**
+/// process-global lock and held it for the whole operation — a 3.3 MB replica
+/// bootstrap, a commit barrier, materializing 128 KB of canonical text, hashing
+/// it, and the `log_op` file write. Data was isolated per document; *concurrency*
+/// was not isolated at all, so one busy document serialized every other document
+/// in the project.
+///
+/// That is not a theoretical cost. Observed 2026-07-26: a second session looping
+/// `crdt_replica_register` with 3.3 MB bootstraps on `tasks/software/lazily.md`
+/// held this lock enough of the time that an unrelated document's
+/// `crdt_current_text` lost every 5s authority-resolve — nine consecutive
+/// closeout attempts failed with `timed out after 5.0s waiting for project
+/// controller response`, while `admin inspect` (which never takes this lock)
+/// answered instantly. A misbehaving session took the whole controller down for
+/// everyone else.
+///
+/// Holding `Arc<Mutex<RelayHub>>` makes the isolation real: the global lock is
+/// held only long enough to look up or insert a handle, and all hub work happens
+/// under that document's own lock. Same idiom as
+/// [`replica_registration_lock`] below, which already did it this way.
+///
+/// **Lock ordering: registry → hub, never the reverse.** Nothing may acquire the
+/// registry lock while holding a hub lock. Callers should use [`hub_handle`] /
+/// [`hub_handle_or_insert_with`], which release the registry lock before
+/// returning, rather than locking a hub inline under the registry guard.
+type HubHandle = Arc<Mutex<RelayHub>>;
+
+fn hub_registry() -> &'static Mutex<HashMap<String, HubHandle>> {
+    static REGISTRY: OnceLock<Mutex<HashMap<String, HubHandle>>> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The hub handle for `document_hash`, if one is allocated. Releases the registry
+/// lock before returning, so the caller's hub work never blocks another document.
+fn hub_handle(document_hash: &str) -> Option<HubHandle> {
+    hub_registry().lock().get(document_hash).cloned()
+}
+
+/// [`hub_handle`], allocating via `make` on first contact.
+///
+/// `make` runs under the registry lock, so it must stay cheap — allocating an
+/// empty or already-constructed hub. Anything expensive (reading the document to
+/// seed it, decoding a durable projection) belongs *outside*, with the result
+/// handed in; see [`with_hub_seeded_from_file`].
+fn hub_handle_or_insert_with(document_hash: &str, make: impl FnOnce() -> RelayHub) -> HubHandle {
+    hub_registry()
+        .lock()
+        .entry(document_hash.to_string())
+        .or_insert_with(|| Arc::new(Mutex::new(make())))
+        .clone()
+}
+
+fn hub_is_allocated(document_hash: &str) -> bool {
+    hub_registry().lock().contains_key(document_hash)
 }
 
 /// Explicit in-process relay routes used when the controller and model share a
@@ -517,11 +571,9 @@ fn forget_replica_identity(document_hash: &str, client_id: u64) -> Result<()> {
 /// finalize/disk entry points below do).
 pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T> {
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let mut registry = hub_registry().lock();
-    let hub = registry
-        .entry(hash)
-        .or_insert_with(|| RelayHub::new(CANONICAL_CLIENT_ID));
-    Ok(f(hub))
+    let handle = hub_handle_or_insert_with(&hash, || RelayHub::new(CANONICAL_CLIENT_ID));
+    let mut hub = handle.lock();
+    Ok(f(&mut hub))
 }
 
 /// Run `f` against an already-allocated per-document hub. Unlike
@@ -530,8 +582,11 @@ pub fn with_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T>
 /// not available.
 fn with_existing_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<Option<T>> {
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let mut registry = hub_registry().lock();
-    Ok(registry.get_mut(&hash).map(f))
+    let Some(handle) = hub_handle(&hash) else {
+        return Ok(None);
+    };
+    let mut hub = handle.lock();
+    Ok(Some(f(&mut hub)))
 }
 
 /// Drop an inactive hub only after its canonical text is known to be durable.
@@ -540,10 +595,14 @@ fn with_existing_hub<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Resu
 /// registration cannot add a member between the predicate and removal.
 fn evict_hub_if_safe(file: &Path, document_hash: &str, source: &str) -> bool {
     let evicted = {
+        // Registry → hub ordering (`#relayhubperdoclock`). Taking the hub lock
+        // under the registry guard is the one place that is allowed, because
+        // `is_safe_to_evict` is a cheap predicate and the check must stay atomic
+        // with the removal. Nothing here materializes text or drives a barrier.
         let mut registry = hub_registry().lock();
         let should_evict = registry
             .get(document_hash)
-            .is_some_and(RelayHub::is_safe_to_evict);
+            .is_some_and(|handle| handle.lock().is_safe_to_evict());
         if should_evict {
             registry.remove(document_hash);
         }
@@ -572,8 +631,7 @@ pub fn embedded_relay_is_available_for_file(file: &Path) -> bool {
     let Ok(hash) = agent_doc_fs::document_state_hash(file) else {
         return false;
     };
-    hub_registry().lock().contains_key(&hash)
-        || embedded_relay_route_registry().lock().contains(&hash)
+    hub_is_allocated(&hash) || embedded_relay_route_registry().lock().contains(&hash)
 }
 
 /// Whether `file` is explicitly routed to the relay in this process.
@@ -597,18 +655,20 @@ pub fn register_embedded_relay_route_for_file(file: &Path) -> Result<()> {
 /// delta can be applied at a clamped offset and later overwrite the buffer.
 fn with_hub_seeded_from_file<T>(file: &Path, f: impl FnOnce(&mut RelayHub) -> T) -> Result<T> {
     let hash = agent_doc_fs::document_state_hash(file)?;
-    {
-        let mut registry = hub_registry().lock();
-        if let Some(hub) = registry.get_mut(&hash) {
-            return Ok(f(hub));
-        }
+    if let Some(handle) = hub_handle(&hash) {
+        let mut hub = handle.lock();
+        return Ok(f(&mut hub));
     }
+    // Seeding reads the whole document, so it happens with no registry lock
+    // held; `hub_handle_or_insert_with` only installs the finished hub, and a
+    // racing allocator's hub wins (`or_insert_with` keeps the first).
     let seed_text = std::fs::read_to_string(file)
         .map_err(|e| anyhow::anyhow!("failed to seed relay hub from {}: {e}", file.display()))?;
-    let seeded_hub = RelayHub::from_text(CANONICAL_CLIENT_ID, &seed_text);
-    let mut registry = hub_registry().lock();
-    let hub = registry.entry(hash).or_insert(seeded_hub);
-    Ok(f(hub))
+    let handle = hub_handle_or_insert_with(&hash, || {
+        RelayHub::from_text(CANONICAL_CLIENT_ID, &seed_text)
+    });
+    let mut hub = handle.lock();
+    Ok(f(&mut hub))
 }
 
 /// Allocate the embedded Lazily relay from the current document projection.
@@ -624,7 +684,7 @@ pub fn seed_embedded_relay_for_file(file: &Path) -> Result<()> {
 /// Whether a relay hub has been allocated for `doc_hash` (test-only assertion
 /// helper, e.g. proving the Detached path allocates no hub).
 pub fn hub_is_allocated_for_test(doc_hash: &str) -> bool {
-    hub_registry().lock().contains_key(doc_hash)
+    hub_is_allocated(doc_hash)
 }
 
 /// Live document text resolved from the CRDT relay authority.
@@ -677,10 +737,10 @@ pub fn current_revision_for_file_with_authority(
     }
 
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let registry = hub_registry().lock();
-    let Some(hub) = registry.get(&hash) else {
+    let Some(handle) = hub_handle(&hash) else {
         return Ok(CurrentRevision::EditorAttachedMissingReplica);
     };
+    let hub = handle.lock();
 
     Ok(CurrentRevision::Current {
         state_vector: hub.canonical_state_vector(),
@@ -753,13 +813,17 @@ fn current_text_for_file_with_authority_inner(
     }
 
     let hash = agent_doc_fs::document_state_hash(file)?;
-    let mut registry = hub_registry().lock();
-    if !registry.contains_key(&hash) && recover_missing_from_projection {
-        drop(registry);
+    let mut handle = hub_handle(&hash);
+    if handle.is_none() && recover_missing_from_projection {
         recover_missing_hub_from_durable_projection(file, &hash)?;
-        registry = hub_registry().lock();
+        handle = hub_handle(&hash);
     }
-    let Some(hub) = registry.get_mut(&hash) else {
+    // `#relayhubperdoclock`: everything below — the commit barrier, materializing
+    // canonical text, hashing it, the `log_op` write — runs under THIS document's
+    // lock, never the registry's. Holding the process-global registry lock across
+    // this block is what let one busy document time out every other document's
+    // 5s authority resolve.
+    let Some(handle) = handle else {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -771,6 +835,8 @@ fn current_text_for_file_with_authority_inner(
         );
         return Ok(CurrentText::EditorAttachedMissingReplica);
     };
+    let mut hub = handle.lock();
+    let hub = &mut *hub;
 
     let ready = if flush_barrier {
         hub.commit_barrier_under_authority(authority)?
@@ -2097,19 +2163,18 @@ pub fn recover_hub_from_projection(
     lineage: Option<&str>,
 ) -> Result<()> {
     let hash = agent_doc_fs::document_state_hash(file)?;
-    {
-        let registry = hub_registry().lock();
-        if let Some(existing) = registry.get(&hash) {
-            // A live hub already holds the authority — disk is recovery-only, so
-            // reconcile the projection into it (in-memory wins) instead of clobbering.
-            existing.reconcile_disk_projection(projection)?;
-            return Ok(());
-        }
+    if let Some(handle) = hub_handle(&hash) {
+        // A live hub already holds the authority — disk is recovery-only, so
+        // reconcile the projection into it (in-memory wins) instead of clobbering.
+        handle.lock().reconcile_disk_projection(projection)?;
+        return Ok(());
     }
+    // Decoding the projection is the expensive part, so it runs before the
+    // registry lock is taken at all.
     let hub =
         RelayHub::recover_from_projection_with_lineage(CANONICAL_CLIENT_ID, projection, lineage)?;
-    let mut registry = hub_registry().lock();
-    registry.entry(hash).or_insert(hub);
+    let mut hub = Some(hub);
+    hub_handle_or_insert_with(&hash, || hub.take().expect("hub built above"));
     Ok(())
 }
 
@@ -2696,10 +2761,8 @@ pub fn record_committed_baseline_for_file(file: &Path) {
         }
     };
     let _registration_guard = registration_lock.lock();
-    {
-        if let Some(hub) = hub_registry().lock().get_mut(&hash) {
-            hub.record_committed_baseline(&on_disk);
-        }
+    if let Some(handle) = hub_handle(&hash) {
+        handle.lock().record_committed_baseline(&on_disk);
     }
     evict_hub_if_safe(file, &hash, "committed_baseline");
 }
@@ -3271,6 +3334,112 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         writeln!(f, "# {name}\n\nbody").unwrap();
         (dir, path)
+    }
+
+    /// `#relayhubperdoclock`: one busy document must not block another.
+    ///
+    /// This is the saturation fix's whole point, and it is a *structural* claim,
+    /// so the test is structural too — no sleeps, no timing margins. A worker
+    /// takes document A's hub and holds it open until told to let go. While it
+    /// is held, document B's `with_hub` must complete. Under the old
+    /// by-value registry both documents shared one process-global mutex, so B
+    /// would block until A released and this deadlocks; `recv_timeout` turns
+    /// that into a failure instead of a hung suite.
+    ///
+    /// The real-world shape (2026-07-26): a second session looping 3.3 MB
+    /// replica bootstraps on one document made every unrelated document's 5s
+    /// authority resolve time out — nine consecutive closeout attempts — while
+    /// `admin inspect`, which never takes this lock, stayed instant.
+    #[test]
+    fn a_busy_document_hub_does_not_block_another_document() {
+        let (_dir_a, doc_a) = temp_doc("busy.md");
+        let (_dir_b, doc_b) = temp_doc("bystander.md");
+        // Allocate both hubs up front so the test measures hub contention, not
+        // first-contact allocation.
+        with_hub(&doc_a, |_| ()).unwrap();
+        with_hub(&doc_b, |_| ()).unwrap();
+
+        let (holding_tx, holding_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (bystander_tx, bystander_rx) = std::sync::mpsc::channel::<()>();
+
+        let busy = {
+            let doc_a = doc_a.clone();
+            thread::spawn(move || {
+                with_hub(&doc_a, |_| {
+                    holding_tx.send(()).unwrap();
+                    // Hold A's hub until the bystander has proven it got through.
+                    release_rx.recv().unwrap();
+                })
+                .unwrap();
+            })
+        };
+
+        holding_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("worker should acquire document A's hub");
+
+        let bystander = {
+            let doc_b = doc_b.clone();
+            thread::spawn(move || {
+                with_hub(&doc_b, |_| ()).unwrap();
+                bystander_tx.send(()).unwrap();
+            })
+        };
+
+        let served = bystander_rx.recv_timeout(Duration::from_secs(10));
+        // Release A regardless, so a failure reports cleanly instead of hanging.
+        release_tx.send(()).unwrap();
+        busy.join().unwrap();
+        bystander.join().unwrap();
+
+        served.expect(
+            "document B must be served while document A's hub is held; \
+             a process-global registry lock makes one busy document starve every other",
+        );
+    }
+
+    /// The registry lock itself must never be held across hub work, which is what
+    /// makes the isolation above hold for *allocation* too — a first-contact
+    /// `with_hub` on a new document cannot be blocked by a busy existing one.
+    #[test]
+    fn allocating_a_new_document_hub_does_not_block_on_a_busy_one() {
+        let (_dir_a, doc_a) = temp_doc("busy-alloc.md");
+        let (_dir_b, doc_b) = temp_doc("fresh-alloc.md");
+        with_hub(&doc_a, |_| ()).unwrap();
+
+        let (holding_tx, holding_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (fresh_tx, fresh_rx) = std::sync::mpsc::channel::<()>();
+
+        let busy = {
+            let doc_a = doc_a.clone();
+            thread::spawn(move || {
+                with_hub(&doc_a, |_| {
+                    holding_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                })
+                .unwrap();
+            })
+        };
+        holding_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("worker should acquire document A's hub");
+
+        let fresh = {
+            let doc_b = doc_b.clone();
+            thread::spawn(move || {
+                // First contact for B: allocates a hub while A's is held.
+                with_hub(&doc_b, |_| ()).unwrap();
+                fresh_tx.send(()).unwrap();
+            })
+        };
+        let served = fresh_rx.recv_timeout(Duration::from_secs(10));
+        release_tx.send(()).unwrap();
+        busy.join().unwrap();
+        fresh.join().unwrap();
+
+        served.expect("allocating a hub for a new document must not wait on a busy document");
     }
 
     #[test]

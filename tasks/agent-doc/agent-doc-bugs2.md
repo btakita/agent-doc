@@ -76,7 +76,19 @@ One load-bearing detail is covered by a test rather than assumed: the slot facto
 **Known gaps, stated plainly.** `settle_retained_write_through_derived_verdict` is still an `Effect` used as a synchronous call (it returns through an `Arc<Mutex<..>>`); a real one would have no return value. And `lazily`'s `CellMap`/`SlotMap`/`EntryKind::{Cell,Slot}` names are pre-kernel holdovers that `#lzcellkernel` missed — `SourceMap`/`ComputedMap` would be consistent, but that rename crosses all 8 published bindings plus spec and formal, so it needs its own scoped change.
 
 `make check` green (clippy, tests, TLA+). Installed; controller recycled.
-<!-- agent:boundary:f7bb77bb -->
+
+### Re: complete the settle_retained_write_through_derived_verdict change — opus-5
+
+Done — the fake `Effect` is gone.
+
+**What it was.** The clear was wrapped in an `Effect` whose result had to be smuggled back out through an `Arc<Mutex<Option<Result<bool>>>>`, with `dispose_effect` on the very next line. Because the effect was created *after* the observations were set, it fired exactly once by construction. That is an `Effect` used as a synchronous function call, and the `Arc<Mutex<..>>` was the tell.
+
+**What it is now.** `#idlerevisionreactive` already states the rule — *if an `Effect`'s whole body assigns a value, it should have been a `Computed`*. The verdict **is** that `Computed`, derived in the controller's shared graph, so applying it is a plain projection over it: Cells decide, projection applies. That completes the triad from the original directive rather than approximating it. Idempotent by construction — every verdict other than `Satisfied` is a no-op, so calling twice clears nothing twice. Net −49/+35 lines.
+
+**What I deliberately did not add.** A standing `Effect` that settles autonomously. It would have to write SQLite from inside a cell-`set` on the controller hot path, and re-entrancy there is a bad trade for no real gain: the consumer asking for the verdict is already the trigger that matters, since `preflight` and `session-check` are precisely when an orphaned intent blocks work. If you want settlement to fire with nobody asking, that is a different (and riskier) change and I would rather scope it explicitly than smuggle it in.
+
+`make check` green (clippy, tests, TLA+). Installed. Committed `91f1bb8d1`. Latest CI run is green.
+<!-- agent:boundary:a2b11584 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -674,7 +674,7 @@ Fixed and pinned. `SignalingRoom::forward` now reports non-delivery and the disp
 Mutation-checked both ways: restoring the original drop fails with "expected an error frame to conn a but nothing was delivered" — the exact defect — and forwarding a client-supplied `from` fails the anti-spoof assertion naming the registered id.
 
 `make check` green, 94 canonical fixtures replayed, up from 93. Pushed as `a0f390e`.
-<!-- agent:boundary:81f17509 -->
+<!-- agent:boundary:1231f956 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -709,7 +709,7 @@ Mutation-checked both ways: restoring the original drop fails with "expected an 
 - ⏭️ do [#signalgetsignallive]
 - ⏭️ do [#recommendeddecidewhether]
 - ⏭️ do [#lazilycppconformance]
-- ~~do [#lazilycppsignalingroom]~~
+- ~~🚧 do [#lazilycppsignalingroom]~~
 - do [#lazilycppcollections]
 - do [#trackedcopieslazily]
 - do [#firstunificationwire]

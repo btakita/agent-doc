@@ -108,7 +108,15 @@ Filed as `#adreplacementturndispatch` with both exact errors, because it is two 
 The steering rejection is `#steergateidle`, already in backlog: steering is gated on an active busy turn and rejects otherwise, where per your earlier report an idle pane should simply dispatch the selection as a normal trigger. Your instruction here — always send `agent-doc <file>` for steering too — is the same conclusion from the other direction: there should not be a separate steering channel that can be refused on actor state.
 
 The convergence failure is separate and new. A replacement turn after an interrupt carries an edited prompt with no retained-delivery proof, so the 8 s ACK recovery window expires and the dispatch is *refused* rather than falling back to the plain `agent-doc <file>` trigger — which is exactly the fallback you are asking for. I have not fixed either; this arrived at the end of a turn whose work was already committed, and I would rather hand you an accurate report of both than a rushed change to the dispatch path.
-<!-- agent:boundary:aa04eaa3 -->
+
+### Re: reload + recycle — opus-5
+
+Done. `admin reload-lib` delivered the cdylib v0.35.28 typed reload to 1/1 editor endpoints (0 restart required, 0 unavailable), and `admin recycle` took: the controller is a fresh pid and `session-check` no longer reports the stale-binary warning, so the supervisor is mapping the current build.
+
+This is also the measurement I was missing. The corrected phase labels from `2b2f13669` only appear once a closeout runs on the fresh binary, so this cycle's own closeout is the first breakdown that will show `commit_authority` and `record_committed_baseline` split apart instead of the single mislabelled `git_commit` that sent me into git for a cost that was never there.
+
+Worth noting against the earlier finding: this reload is itself the thing I measured as expensive — 307 reload/reregister events and 838 full replica bootstraps at ~290-326 KB each across 12 installs today. Running it once deliberately is cheap; the defect is that a library reload forces a *full* bootstrap rather than an incremental resync, which is what made every closeout today pay a re-registration before it could converge. That sits next to `#ctrlkillreregister` and is the real remaining target for settling latency — not git, and not the closeout guards.
+<!-- agent:boundary:5221fb18 -->
 <!-- /agent:exchange -->
 ## Queue
 

@@ -222,7 +222,8 @@ use agent_doc_element::element;
 use agent_doc_element_backlog_io::backlog_cmd;
 use agent_doc_element_exchange::{
     exchange_has_live_user_edit, exchange_prompt_prefix_count, exchange_prompt_text_duplicated,
-    response_precedes_prompt_in_exchange, strip_prompt_prefix_from_response_body_first_lines,
+    response_precedes_prompt_in_exchange_with_partial_baseline,
+    strip_prompt_prefix_from_response_body_first_lines,
 };
 use agent_doc_queue::queue_consume::{
     queue_consumption_allowed_for_response, queue_targeted_completion_id_for_current_head,
@@ -2515,8 +2516,14 @@ fn normalize_final_template_content(
     response: Option<&str>,
 ) -> Result<String> {
     let mut normalized = content.to_string();
+    let prompt_authority = before_current.unwrap_or(base);
     if let Some(snapshot_doc) = snapshot {
-        normalized = normalize_user_prompts_in_exchange_safe(&normalized, base, snapshot_doc, file);
+        normalized = normalize_user_prompts_in_exchange_safe(
+            &normalized,
+            prompt_authority,
+            snapshot_doc,
+            file,
+        );
     }
     if let Some(stripped) = strip_prompt_prefix_from_response_body_first_lines(&normalized) {
         agent_doc_ops_log_io::log_op(
@@ -2554,20 +2561,36 @@ fn normalize_final_template_content(
             )?;
         }
     }
-    if let Some(repaired) = agent_doc_template_io::repair_response_prompt_order_for_file(
-        &normalized,
-        response,
-        file,
-        Some(base),
-    )? {
+    if let Some(repaired) =
+        agent_doc_template_io::repair_response_prompt_order_for_file_with_partial_baseline(
+            &normalized,
+            response,
+            file,
+            Some(prompt_authority),
+            Some(base),
+        )?
+    {
         normalized = repaired;
+        if let Some(snapshot_doc) = snapshot {
+            normalized = normalize_user_prompts_in_exchange_safe(
+                &normalized,
+                prompt_authority,
+                snapshot_doc,
+                file,
+            );
+        }
         normalized = normalize_template_structure_or_fail_preserving(
             &normalized,
             file,
             preserve_current_or_base,
         )?;
     }
-    if response_precedes_prompt_in_exchange(&normalized, response, Some(base)) {
+    if response_precedes_prompt_in_exchange_with_partial_baseline(
+        &normalized,
+        response,
+        Some(prompt_authority),
+        Some(base),
+    ) {
         agent_doc_ops_log_io::log_op(
             file,
             &format!(

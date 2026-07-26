@@ -161,11 +161,29 @@ pub fn repair_response_prompt_order_for_file(
     file: &Path,
     prompt_must_exist_in: Option<&str>,
 ) -> Result<Option<String>> {
-    let repaired = agent_doc_element_exchange::repair_response_precedes_prompt_in_exchange(
+    repair_response_prompt_order_for_file_with_partial_baseline(
         doc,
         response,
+        file,
         prompt_must_exist_in,
+        None,
     )
+}
+
+pub fn repair_response_prompt_order_for_file_with_partial_baseline(
+    doc: &str,
+    response: Option<&str>,
+    file: &Path,
+    prompt_must_exist_in: Option<&str>,
+    prompt_must_start_in: Option<&str>,
+) -> Result<Option<String>> {
+    let repaired =
+        agent_doc_element_exchange::repair_response_precedes_prompt_in_exchange_with_partial_baseline(
+            doc,
+            response,
+            prompt_must_exist_in,
+            prompt_must_start_in,
+        )
     .with_context(|| {
         format!(
             "failed to parse {} for response/prompt order repair",

@@ -1374,6 +1374,90 @@ Can you preserve the second paragraph too?
     }
 
     #[test]
+    fn normalize_final_template_content_repairs_concurrent_multiline_prompt_before_response() {
+        let dir = TempDir::new().unwrap();
+        let doc = dir.path().join("haiven-sdk.md");
+        let snapshot = "\
+<!-- agent:exchange patch=append -->
+### Re: Session configuration — gpt-5
+
+Ready.
+<!-- agent:boundary:old -->
+<!-- /agent:exchange -->
+";
+        let base = "\
+<!-- agent:exchange patch=append -->
+### Re: Session configuration — gpt-5
+
+Ready.
+Please reference job-offer.md.
+<!-- agent:boundary:old -->
+<!-- /agent:exchange -->
+";
+        let before_current = "\
+<!-- agent:exchange patch=append -->
+### Re: Session configuration — gpt-5
+
+Ready.
+Please reference job-offer.md.
+Please create a proposal and implementation plan.
+I want to use my experience with Lazily.
+<!-- agent:boundary:old -->
+<!-- /agent:exchange -->
+";
+        let merged = "\
+<!-- agent:exchange patch=append -->
+### Re: Haiven SDK proposal — gpt-5
+
+Created the proposal and implementation plan.
+Please reference job-offer.md.
+Please create a proposal and implementation plan.
+I want to use my experience with Lazily.
+<!-- agent:boundary:new -->
+<!-- /agent:exchange -->
+";
+        let response = "\
+### Re: Haiven SDK proposal — gpt-5
+
+Created the proposal and implementation plan.
+";
+
+        std::fs::write(&doc, before_current).unwrap();
+        let repaired = normalize_final_template_content(
+            &doc,
+            base,
+            Some(snapshot),
+            Some(before_current),
+            merged,
+            Some(response),
+        )
+        .unwrap();
+
+        let first_prompt = repaired.find("❯ Please reference job-offer.md.").unwrap();
+        let response_heading = repaired.find("### Re: Haiven SDK proposal").unwrap();
+        assert!(
+            first_prompt < response_heading,
+            "the complete concurrent prompt must precede its response:\n{repaired}"
+        );
+        assert!(
+            repaired.contains("❯ Please create a proposal and implementation plan.\n")
+                && repaired.contains("❯ I want to use my experience with Lazily.\n"),
+            "every line of the concurrent prompt must retain its prompt prefix:\n{repaired}"
+        );
+        assert_eq!(
+            repaired.matches("### Re: Haiven SDK proposal").count(),
+            1,
+            "response repair must not duplicate the response:\n{repaired}"
+        );
+        assert!(!response_precedes_prompt_in_exchange_with_partial_baseline(
+            &repaired,
+            Some(response),
+            Some(before_current),
+            Some(base),
+        ));
+    }
+
+    #[test]
     fn normalize_template_structure_repairs_duplicate_scaffold_close() {
         let dir = TempDir::new().unwrap();
         let doc_path = dir.path().join("doc.md");

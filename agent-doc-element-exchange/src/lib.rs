@@ -409,6 +409,14 @@ fn line_is_exchange_boundary(trimmed: &str) -> bool {
     trimmed.starts_with("<!-- agent:boundary:")
 }
 
+fn normalized_response_order_line(line: &str) -> String {
+    let normalized = line.trim().trim_start_matches('❯').trim();
+    normalized
+        .strip_suffix(" (HEAD)")
+        .unwrap_or(normalized)
+        .to_string()
+}
+
 fn normalized_response_signature_lines(response: Option<&str>) -> HashSet<String> {
     response
         .unwrap_or("")
@@ -417,7 +425,7 @@ fn normalized_response_signature_lines(response: Option<&str>) -> HashSet<String
         .filter(|line| !line.is_empty())
         .filter(|line| !line.starts_with("<!--"))
         .filter(|line| *line != "Done.")
-        .map(|line| line.trim_start_matches('❯').trim().to_string())
+        .map(normalized_response_order_line)
         .collect()
 }
 
@@ -435,7 +443,7 @@ fn exchange_response_block_matches_signature(
         return false;
     }
     let heading = segments[heading_idx].line.trim();
-    if response.contains(heading) {
+    if signature.contains(&normalized_response_order_line(heading)) {
         return true;
     }
     if signature.is_empty() {
@@ -455,13 +463,21 @@ fn exchange_response_block_matches_signature(
 fn find_response_precedes_prompt_candidate(
     exchange_content: &str,
     response: Option<&str>,
+    prompt_must_exist_in: Option<&str>,
+    prompt_must_start_in: Option<&str>,
 ) -> Option<(usize, usize, usize)> {
     let segments = split_exchange_line_segments(exchange_content);
     let signature = normalized_response_signature_lines(response);
 
-    for heading_idx in 0..segments.len() {
+    // Closeout repairs the response being committed now. Walk newest-first so
+    // an older response with the same generic heading/signature cannot claim a
+    // later, correctly ordered prompt from a subsequent orchestration step.
+    for heading_idx in (0..segments.len()).rev() {
         let heading = segments[heading_idx].line.trim();
         if !is_exchange_response_heading_for_prefix_repair(heading) {
+            continue;
+        }
+        if !signature.contains(&normalized_response_order_line(heading)) {
             continue;
         }
         let mut saw_boundary_after_heading = false;
@@ -482,7 +498,33 @@ fn find_response_precedes_prompt_candidate(
             }
             let normalized = trimmed.trim_start_matches('❯').trim();
             let is_target = signature.contains(normalized);
-            if saw_boundary_after_heading
+            let mut prompt_end = segments.len();
+            for (next_idx, next) in segments.iter().enumerate().skip(idx + 1) {
+                if is_exchange_response_heading_for_prefix_repair(next.line.trim()) {
+                    prompt_end = next_idx;
+                    break;
+                }
+            }
+            let prompt_lines = normalized_non_boundary_exchange_lines(&segments[idx..prompt_end]);
+            let prompt_matches_authority = prompt_must_exist_in.is_some_and(|required_doc| {
+                !prompt_lines.is_empty()
+                    && exchange_contains_normalized_line_sequence(required_doc, &prompt_lines)
+            });
+            let prompt_started_in_partial_baseline =
+                prompt_must_start_in.is_some_and(|partial_baseline| {
+                    prompt_lines.first().is_some_and(|first_line| {
+                        exchange_contains_normalized_line_sequence(
+                            partial_baseline,
+                            std::slice::from_ref(first_line),
+                        )
+                    })
+                });
+            let has_order_repair_evidence = if prompt_must_start_in.is_some() {
+                prompt_matches_authority && prompt_started_in_partial_baseline
+            } else {
+                saw_boundary_after_heading
+            };
+            if has_order_repair_evidence
                 && line_looks_like_prompt_prefix_repair_start(trimmed, is_target)
                 && exchange_response_block_matches_signature(
                     &segments,
@@ -492,16 +534,14 @@ fn find_response_precedes_prompt_candidate(
                     response,
                 )
             {
-                let mut prompt_end = segments.len();
-                for (next_idx, next) in segments.iter().enumerate().skip(idx + 1) {
-                    if is_exchange_response_heading_for_prefix_repair(next.line.trim()) {
-                        prompt_end = next_idx;
-                        break;
-                    }
-                }
                 return Some((heading_idx, idx, prompt_end));
             }
         }
+        // The newest heading matching the captured response owns this
+        // closeout. If it is already after every authoritative prompt, an
+        // older response with the same generic heading must not claim a later
+        // turn's prompt.
+        return None;
     }
     None
 }
@@ -511,13 +551,30 @@ pub fn response_precedes_prompt_in_exchange(
     response: Option<&str>,
     prompt_must_exist_in: Option<&str>,
 ) -> bool {
+    response_precedes_prompt_in_exchange_with_partial_baseline(
+        doc,
+        response,
+        prompt_must_exist_in,
+        None,
+    )
+}
+
+pub fn response_precedes_prompt_in_exchange_with_partial_baseline(
+    doc: &str,
+    response: Option<&str>,
+    prompt_must_exist_in: Option<&str>,
+    prompt_must_start_in: Option<&str>,
+) -> bool {
     let Some(exchange) = exchange_component(doc) else {
         return false;
     };
     let exchange_content = exchange.content(doc);
-    let Some((_, prompt_idx, prompt_end)) =
-        find_response_precedes_prompt_candidate(exchange_content, response)
-    else {
+    let Some((_, prompt_idx, prompt_end)) = find_response_precedes_prompt_candidate(
+        exchange_content,
+        response,
+        prompt_must_exist_in,
+        prompt_must_start_in,
+    ) else {
         return false;
     };
     if let Some(required_doc) = prompt_must_exist_in {
@@ -534,6 +591,20 @@ pub fn repair_response_precedes_prompt_in_exchange(
     response: Option<&str>,
     prompt_must_exist_in: Option<&str>,
 ) -> Result<Option<String>> {
+    repair_response_precedes_prompt_in_exchange_with_partial_baseline(
+        doc,
+        response,
+        prompt_must_exist_in,
+        None,
+    )
+}
+
+pub fn repair_response_precedes_prompt_in_exchange_with_partial_baseline(
+    doc: &str,
+    response: Option<&str>,
+    prompt_must_exist_in: Option<&str>,
+    prompt_must_start_in: Option<&str>,
+) -> Result<Option<String>> {
     let components = agent_doc_element::element::parse(doc)?;
     let Some(exchange) = components
         .iter()
@@ -542,9 +613,12 @@ pub fn repair_response_precedes_prompt_in_exchange(
         return Ok(None);
     };
     let exchange_content = exchange.content(doc);
-    let Some((heading_idx, prompt_idx, prompt_end)) =
-        find_response_precedes_prompt_candidate(exchange_content, response)
-    else {
+    let Some((heading_idx, prompt_idx, prompt_end)) = find_response_precedes_prompt_candidate(
+        exchange_content,
+        response,
+        prompt_must_exist_in,
+        prompt_must_start_in,
+    ) else {
         return Ok(None);
     };
     let segments = split_exchange_line_segments(exchange_content);

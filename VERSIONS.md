@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.31
+
+_JetBrains plugin 0.2.297; VS Code extension 0.2.57._
+
+- **Concurrent multiline prompts can no longer land below their streamed response without `❯ ` prefixes (`#haivenresponseorder`).** Production evidence from `haiven-sdk.md` showed a prompt growing from 384 to 816 bytes after the response baseline was captured; stream patchback inserted the response ahead of that authoritative prompt, moved the boundary below both blocks, and the old repair required either an intervening boundary or a complete prompt match in the earlier partial baseline. Response-order repair now accepts an exact prompt sequence from the full pre-write authority when its first line is already present in the partial admission baseline, even when the boundary already trails the prompt; it binds to the newest matching response across transient `(HEAD)` annotations, then reruns prompt normalization after reordering. The Haiven-shaped regression preserves all multiline prompt prefixes, places the complete prompt before its response, and proves the response remains singular. A wholly new follow-up arriving after preflight still fails closed and remains outside the committed response snapshot.
+
 ## 0.35.30
 
 _JetBrains plugin 0.2.297; VS Code extension 0.2.57._

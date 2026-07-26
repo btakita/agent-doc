@@ -3702,7 +3702,43 @@ impl CloseoutOwnerProjection {
     }
 }
 
+/// Lease for a foreground owner that is actually writing a closeout.
+///
+/// Long on purpose: a real write closeout can take minutes, and stealing it
+/// mid-flight is worse than waiting.
 pub const CLOSEOUT_OWNER_LEASE_SECS: u64 = 300;
+
+/// Lease for a **status-only** recovery probe (`session-check`).
+///
+/// `#closeoutwaitchurn`: `session-check` is status-only — its own refusal text
+/// says so — but it claimed the full write-closeout lease. So a probe that
+/// lingered blocked every subsequent probe for five minutes, and the refusal it
+/// produced told the operator to run *that same command* again. The advice
+/// manufactured the contention it was reporting, which is how a bounded wait
+/// turns into a poll loop.
+///
+/// Observed 2026-07-26 on `tasks/agent-doc/agent-doc-bugs2.md`: a live
+/// `agent-doc session-check` pid held `role=session_check_recovery` for 300s
+/// while every retry failed against it.
+///
+/// Short because the probe's own work is short. If one genuinely needs longer
+/// it renews; if it wedges, the next probe reclaims it in seconds instead of
+/// minutes.
+pub const CLOSEOUT_RECOVERY_LEASE_SECS: u64 = 20;
+
+/// The role that marks a status-only `session-check` recovery claim.
+pub const CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY: &str = "session_check_recovery";
+
+/// Lease duration for `role`.
+///
+/// Scoped by role rather than fixed, because "how long may this owner block
+/// everyone else" is a property of what the owner is doing, not of the lock.
+pub fn closeout_owner_lease_secs(role: &str) -> u64 {
+    match role {
+        CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY => CLOSEOUT_RECOVERY_LEASE_SECS,
+        _ => CLOSEOUT_OWNER_LEASE_SECS,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CloseoutOwnerClaimRequest {
@@ -5229,6 +5265,49 @@ pub fn transition_proof_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_status_only_recovery_probe_does_not_hold_the_write_closeout_lease() {
+        // #closeoutwaitchurn: `session-check` is status-only, but it claimed the
+        // full 300s write-closeout lease. A probe that lingered then blocked
+        // every subsequent probe for five minutes — while the refusal it
+        // produced told the operator to run that same command again. Observed
+        // 2026-07-26 with a live `agent-doc session-check` pid holding
+        // role=session_check_recovery for the full lease.
+        let recovery = closeout_owner_lease_secs(CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY);
+        let writing = closeout_owner_lease_secs("foreground_write_closeout");
+
+        assert_eq!(writing, CLOSEOUT_OWNER_LEASE_SECS);
+        assert_eq!(recovery, CLOSEOUT_RECOVERY_LEASE_SECS);
+        assert!(
+            recovery * 4 <= writing,
+            "a status-only probe must reclaim in a small fraction of the write lease \
+             (recovery={recovery}s, writing={writing}s)"
+        );
+    }
+
+    #[test]
+    fn an_expired_recovery_lease_stops_blocking_at_its_own_deadline() {
+        // The lease is what a waiter is waiting on, so its deadline is the
+        // waiter's worst case. Pin that the recovery deadline is derived from
+        // the recovery lease and not from the write lease.
+        let claimed = 1_000_u64;
+        let owner = CloseoutOwnerProjection {
+            cycle_id: "cycle-1".to_string(),
+            owner_id: "owner-1".to_string(),
+            owner_pid: 1,
+            role: CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY.to_string(),
+            claimed_secs: claimed,
+            expires_secs: claimed + closeout_owner_lease_secs(CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY),
+        };
+
+        assert!(owner.is_active_at(claimed + CLOSEOUT_RECOVERY_LEASE_SECS - 1));
+        assert!(!owner.is_active_at(claimed + CLOSEOUT_RECOVERY_LEASE_SECS));
+        assert!(
+            !owner.is_active_at(claimed + CLOSEOUT_OWNER_LEASE_SECS),
+            "a status-only probe must never block for the write-closeout lease"
+        );
+    }
 
     fn state_event(event_id: impl Into<String>, fact: StateFact) -> StateEvent {
         StateEvent::new(event_id, fact)

@@ -3008,6 +3008,15 @@ pub use agent_doc_state_backbone::{
     CloseoutOwnerClaimOutcome, CloseoutOwnerClaimRequest, CloseoutOwnerProjection,
 };
 pub const CLOSEOUT_OWNER_LEASE_SECS: u64 = agent_doc_state_backbone::CLOSEOUT_OWNER_LEASE_SECS;
+pub const CLOSEOUT_RECOVERY_LEASE_SECS: u64 =
+    agent_doc_state_backbone::CLOSEOUT_RECOVERY_LEASE_SECS;
+pub const CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY: &str =
+    agent_doc_state_backbone::CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY;
+
+/// Lease duration for a closeout-owner `role` (`#closeoutwaitchurn`).
+pub fn closeout_owner_lease_secs(role: &str) -> u64 {
+    agent_doc_state_backbone::closeout_owner_lease_secs(role)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CloseoutOwnerReleaseRequest {

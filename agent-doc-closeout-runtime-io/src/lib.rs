@@ -61,9 +61,13 @@ fn try_claim_recovery_closeout_owner(
             expected_cycle_id: Some(cycle_id.to_string()),
             owner_id: owner_id.clone(),
             owner_pid: std::process::id(),
-            role: "session_check_recovery".to_string(),
+            role: controller::CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY.to_string(),
             now_secs,
-            lease_secs: controller::CLOSEOUT_OWNER_LEASE_SECS,
+            // `#closeoutwaitchurn`: a status-only probe must not hold the
+            // write-closeout lease. See `closeout_owner_lease_secs`.
+            lease_secs: controller::closeout_owner_lease_secs(
+                controller::CLOSEOUT_ROLE_SESSION_CHECK_RECOVERY,
+            ),
             allow_dead_owner_takeover: true,
         },
     )? {

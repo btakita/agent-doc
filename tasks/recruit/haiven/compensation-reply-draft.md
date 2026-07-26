@@ -52,8 +52,9 @@ implementing right now is C#, which happens to be exactly what a Unity SDK is wr
 in). And the realtime side is familiar ground: I've shipped production realtime
 systems at Presence AI (WebRTC avatar pipeline) and Milyoni (live video social events
 for major studios), my current open-source work centers on realtime multi-replica
-sync, and your WebSocket-hub design exercise was genuinely fun. I'm not guessing at
-this work.
+sync, and your WebSocket-hub design exercise was genuinely fun. Chat and presence at
+scale is distributed state synchronization... which is the problem space I care most
+about... so this isn't just work I can do, it's the work I'd choose.
 
 I want to be upfront about how I got to these numbers, because I know an ask like this
 lands heavily on a seed-stage budget, and I don't make it lightly. My alternative is a

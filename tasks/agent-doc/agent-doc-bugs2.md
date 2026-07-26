@@ -351,12 +351,39 @@ Refactoring shipped with the fix: one public local convergence helper owns subsc
 Verification: focused subscription, publish-before-wait, parked-wakeup, bounded-timeout, delayed/stalled ACK, and controller absence regressions passed; full `make check` passed 8,181 tests with 241 skipped plus clippy, simulations, Lean, and TLA. The latest inspected CI run was green. Release commit `216600432`, tag `v0.35.30`, PyPI, GitHub Release, full local install, and idle-boundary controller/supervisor recycle are complete. Parent gitlink commit `8d8844401` is pushed.
 
 I also placed the reported `haiven-sdk.md` response-order/prefix regression at the top of the actionable queue for the next cycle.
-<!-- agent:boundary:52fcfc34 -->
+
+### Re: Haiven response ordering and prompt prefixes — gpt-5
+
+> **Queue prompt:**
+>
+> do [#haivenresponseorder]
+
+
+Fixed and released as agent-doc 0.35.31.
+
+Production evidence showed the Haiven prompt grew from a 384-byte preflight delta to 816 bytes by closeout. Stream patchback inserted the captured response ahead of the completed prompt, then structural normalization placed the boundary after both blocks; the old repair could not prove the prompt from the partial baseline and did not rerun prefix normalization after moving text.
+
+The closeout path now:
+
+- binds order repair to the newest matching response, including transient `(HEAD)` annotations;
+- repairs only when the full prompt exists in pre-write authority and its first line already existed in the partial admission baseline;
+- reruns prompt-prefix normalization after moving the prompt;
+- preserves fail-closed behavior for a wholly new follow-up prompt arriving after preflight.
+
+The Haiven-shaped regression proves the complete multiline prompt precedes the response, every prompt line keeps `❯ `, and the response occurs once. The opposing late-follow-up regression and repeated-heading DAG regression remain green.
+
+Verification: full `make check` passed 8,182 tests across 161 binaries (241 skipped), plus clippy, simulations, Lean, and TLA. Installed agent-doc 0.35.31 and the matching Codex skill; JetBrains plugin 0.2.297 was installed to four IDEs. Commits `0b5c4dcd6` (agent-doc) and `5be65085c` (parent gitlink) are pushed; tag `v0.35.31` is pushed. The multi-platform Release workflow is still in progress and owns GitHub Release/PyPI publication.
+
+This follows the 0.35.30 Lazily `ThreadSafeQueueCell` subscription release: delivery convergence now waits on a retained monotonic queue notification instead of controller polling. The remaining refactor opportunities are captured below: consolidate the duplicated final-normalization pipelines, represent prompt-growth provenance as a typed closeout input, and centralize response identity/order binding across closeout paths.
+<!-- agent:boundary:2ffea71b -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- do [#haivenresponseorder]
+- do [#closeoutnormrefactor]
+- do [#promptgrowthprovenance]
+- do [#responseordercell]
+- ~~do [#haivenresponseorder]~~
 - ~~do [#crdtwaitsubscribe]~~
 - do [#crdtwaitsplit]
 - do [#sessioncheckguardsweep]
@@ -403,7 +430,9 @@ I also placed the reported `haiven-sdk.md` response-order/prefix regression at t
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#haivenresponseorder] #agent-doc-bug Fix haiven-sdk.md response ordering/prefix loss: the assistant response was inserted above the operator prompt and the prompt lost its required prefix. Reproduce from session/runtime evidence, fix the patchback/normalization path, add regression coverage that preserves prompt-before-response ordering and prompt prefix, run full release workflow.
+- [ ] [#closeoutnormrefactor] [recommended] Consolidate the duplicated stream/template final-normalization pipelines into one shared closeout pipeline, including reorder, prompt-prefix normalization, and fail-closed authority checks, so disk and IPC cannot drift semantically.
+- [ ] [#promptgrowthprovenance] [recommended] Replace paired string snapshots used to infer continued prompt typing with a typed prompt-growth provenance input that distinguishes admission-baseline growth from a wholly new post-preflight follow-up.
+- [ ] [#responseordercell] [recommended] Move response identity and prompt-order binding into one shared turn-cell policy consumed by disk write, IPC write, and post-commit repair paths; preserve newest-response selection and transient `(HEAD)` insensitivity.
 - [ ] [#crdtwaitsplit] #agent-doc-feature Separate controller backpressure from CRDT delivery convergence in the write wait. ControllerModelBackpressure and DeliveryAckPending are different conditions with different remedies (back off the controller vs wait on the editor) but currently share one loop, one backoff schedule and one 60s budget, so the wrong remedy is applied to whichever one is actually blocking. Partial coalescing already exists and must be preserved: #crdtcasraced added the `advanced` flag so a non-advancing apply does not reset the backoff floor - without it a contended write pinned at 25ms for the whole 60s budget (~2400 merge+CAS attempts, each worsening the contention it retried). Land after #crdtwaitsubscribe, whose per-condition subscription makes the split natural rather than two parallel poll loops.
 - [ ] [#sessioncheckguardsweep] #agent-doc-bug session_check is the second-largest closeout phase - a flat 2.9-4.2s, observed once at 11,271ms - and it is a per-invocation ~30-guard sweep. Measured attribution from one run: inspect_with_warnings 2665ms (the nesting parent), guard_partial_staging_closeout 817ms, inspect_core 607ms, self_heal_response_replay_duplication 385ms, resolve_current_document_content 350ms/13x. The partial-staging guard is the concrete target: companion_findings iterates candidate_repos, which on this superproject enumerates every dirty submodule and then runs several git diffs per repo. candidate_repos legitimately needs --ignore-submodules=none (it is hunting dirty submodule repos, 341ms) and narrowing it with --untracked-files=no was measured at only 13ms and discarded, so the real question is a SEMANTICS decision: must a WARN-only narrow guard run on every closeout, or only when the cycle actually staged something beyond the session document? Related: #closeoutgitsubmodulescan (9e7ce2f79 fixed two 47x submodule scans in tracked_modified_paths that were NOT the dominant cost).
 - [ ] [#crdtdeliverybatch] #agent-doc-feature [recommended] Opportunistic client-side batching of CRDT deliveries. GATED ON #ackeditorstamps - do not start this until the profile says it applies. Current evidence points the other way: the measured shape is ONE delivery waiting a long time for a single ACK (delivery_ack_pending is 457 of 522 waits), and batching improves throughput across many writes rather than the latency of one, so it would not shorten the wait we actually have. It becomes the right lever only if the per-state profile shows delivery_ack_pending accumulating as many short delivery cycles instead of one long stretch. Filed to keep the option recorded with its precondition, not as agreed work.

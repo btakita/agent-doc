@@ -193,7 +193,25 @@ Fixed, and the matrix already had nightly — it just was not gating, which is w
 **Verified against the real toolchains, not inferred.** All three were already installed locally, so I built and ran the full suite on each rather than reasoning about std diffs: 0.16.0 PASS, 0.17.0-dev PASS, 0.15.2 FAIL on the pre-existing blockers above. I also reproduced the original 0.16.0 failure locally first, so the fix is tied to the actual error rather than to the CI log.
 
 Pushed; the run is queued. This also un-reds the one repo that was still failing after the conformance work — every other lazily repo is green on its exact commit.
-<!-- agent:boundary:29830409 -->
+
+### Re: lazily-cs keyed collections — opus-5
+
+Row 1 shipped and pushed. Six of the phase's seven rows are not done, and the phase itself turned out to be mis-shaped, which is the more useful finding.
+
+**The phase bundles four independent surfaces.** Mapping fixtures to rows rather than trusting the phase table: the `materialization` corpus (3 fixtures) is rows 1–3, `familysync` (1) is row 4, and only **5 of the 20** `collections` fixtures belong here at all — `cellmap_atomic_move`, `cellmap_independence`, `keyed_reconciliation_lis` for row 9, `semtree_incremental` for row 10, `stableid_alignment` for row 11. The other fifteen are `#lzcsqueues` and `#lzcscrdt` work. So `#lzcscollections` was one id covering a materialization port, a thread-safe/async port, a sync plane, a tree reconciler, and a memoized semantic tree. I split it rather than gate it repeatedly.
+
+**What shipped.** `ReactiveMap<TKey,TValue,THandle>` — the shared core, ported from lazily-go's `reactive_map.go` — plus `CellMap` and `SlotMap`. Three independent reactive planes on one map: writing an entry invalidates only that entry's readers, add/remove bumps membership and order, and a move bumps **order only** while keeping the entry's handle, dependents, and lineage. A reorder is not a remove plus a re-mint, and keeping those on separate signals is the only reason that distinction is observable.
+
+No eager/lazy mode flag, matching the family: eager is `MaterializeAll` (a pre-mint loop), lazy is `GetOrInsertWith` (mint-on-access). That is what makes "materialization changes allocation timing, never observed values" checkable rather than asserted.
+
+**The materialization corpus replays with an empty ledger.** Every fixture pins the **present set** as well as the values, and that is the whole design of the runner: the value laws alone pass trivially against a map that ignores the strategy and pre-mints everything — that binding gets every `observe` assertion right and every `present` assertion wrong.
+
+**The mutation check is the part worth reporting, because my first two attempts did not go red.** Removing the warm-key guard from `GetOrInsertWith` — suite still green. Removing it from `MintWith` instead — still green. Neither is a vacuous test; the law is defended by **two independent guards**, so a single-point mutation is masked by the other. Removing both, which is what a binding that re-mints on every read actually looks like, fails `present_after_each_read`: it climbs 1,2,3,4 where the fixture pins 1,2,2,3. I would have recorded a false "mutation-checked" if I had stopped at the first attempt.
+
+**Verification.** `make check` green (57 tests, up from 56), `dotnet format --verify-no-changes` clean. Coverage row 1 flipped for C#, `sync-coverage.mjs` run, and the regenerated table committed one repo at a time across the spec and all nine sibling READMEs — `coverage.json` is a hot multi-session file. lazily-cs CI was queued at closeout, not yet green; recorded rather than waited on.
+
+**What is left, now as three actionable items instead of one.** `#lzcscollections` narrows to rows 2–4 (`ThreadSafeSlotMap`, `AsyncSlotMap`, keyed-map sync + the `familysync` corpus), `#lzcsreactivemapfx` takes row 9 (the three CellMap/reconciliation fixtures plus `CellTree`), and `#lzcssemtree` takes rows 10–11 (`SemTree` and stable-id alignment). Each is one surface with its own fixtures, so each can close on an empty ledger instead of accumulating partial credit against a parent.
+<!-- agent:boundary:0e2ed990 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -204,7 +222,7 @@ Pushed; the run is queued. This also un-reds the one repo that was still failing
 - ~~do [#lzasyncerrfixture]~~
 - ⏭️ do [#lzcscollections]
 - ⏭️ do [#lzcsstatechart]
-- do [#lzcsqueues]
+- 🚧 do [#lzcsqueues]
 - do [#lzcscrdt]
 - do [#lzcsipc]
 - do [#lzcssync]
@@ -217,9 +235,11 @@ Pushed; the run is queued. This also un-reds the one repo that was still failing
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcscollections] lazily-cs: SlotMap / ThreadSafeSlotMap / AsyncSlotMap materialization, ReactiveMap (CellMap/SlotMap), CellTree + reconcile, SemTree, stable-id alignment; replay collections + materialization + familysync corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 1-4, 9-11)
+- [ ] [#lzcsreactivemapfx] lazily-cs: row 9 — CellTree + reconcile on top of the shipped ReactiveMap core; replay collections/cellmap_atomic_move.json, cellmap_independence.json, keyed_reconciliation_lis.json (an atomic move must bump order only and keep the entry handle, which is what separates a reorder from a remove+re-mint) — plan: tasks/software/lazily-cs-parity-plan.md
+- [ ] [#lzcssemtree] lazily-cs: rows 10-11 — memoized semantic tree (SemTree) and stable-id alignment (manufactured identity); replay collections/semtree_incremental.json and collections/stableid_alignment.json — plan: tasks/software/lazily-cs-parity-plan.md
+- [ ] [#lzcscollections] lazily-cs: rows 2-4 — ThreadSafeSlotMap + AsyncSlotMap materialization and keyed-map sync (membership propagation, materialize-on-ingest, derived alignment); replay the familysync corpus. Row 1 (ReactiveMap core + CellMap/SlotMap + materialization corpus) shipped 2026-07-25 — plan: tasks/software/lazily-cs-parity-plan.md
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
-- [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
+- [ ] 🚧 [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
 - [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)
 - [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
 - [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)

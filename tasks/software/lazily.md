@@ -26,37 +26,39 @@ queue: go
 Compacted content:
 - Archived 26 response topic(s): the done-archive quote bug is fixed, not worked around; Phase 0; Phase 1; 23 more
 - Prior summary/context: prior compacted content: Archived 28 response topic(s): create lazily-cs (C#); complete all lazily-cs features; queue...
-<!-- agent:boundary:18615928 -->
+<!-- agent:boundary:7a6f6659 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ⏭️ do [#lazilythreadsafetopiccel]
-- ⏭️ do [#lazilythreadsafeworkqueu]
-- ⏭️ do [#lazilybenchmarkregressio]
-- ⏭️ do [#lzqfjs]
-- ⏭️ do [#lzqfports]
-- ⏭️ do [#lzqfzig]
-- ⏭️ do [#maphandlecleardependents]
-- ⏭️ do [#lazilycellfamily]
-- ⏭️ do [#lazilyspecdisagrees]
-- ⏭️ do [#lzjsnpmtrustedpub]
-- ⏭️ do [#lzcsqueues]
-- ⏭️ do [#lzcscrdt]
-- ⏭️ do [#lzcsipc]
-- ⏭️ do [#lzcssync]
-- ⏭️ do [#lzcstemporal]
-- ⏭️ do [#lzcscluster]
-- ⏭️ do [#lzcsplane]
-- ⏭️ do [#lzcspackage]
-- ⏭️ do [#asyncplanenever]
-- ⏭️ do [#lazilyrenameinverted]
-- ⏭️ do [#readmeexamplesreference]
-- ⏭️ do [#signalgetsignallive]
-- ⏭️ do [#recommendeddecidewhether]
-- ⏭️ do [#lazilycppconformance]
-- ~~🚧 do [#lazilycppsignalingroom]~~
+- 🚧 do [#lazilyupgradeconformance]
+- do [#lazilyconformancecoverag]
+- do [#lazilythreadsafetopiccel]
+- do [#lazilythreadsafeworkqueu]
+- do [#lazilybenchmarkregressio]
+- do [#lzqfjs]
+- do [#lzqfports]
+- do [#lzqfzig]
+- do [#maphandlecleardependents]
+- do [#lazilycellfamily]
+- do [#lazilyspecdisagrees]
+- do [#lzjsnpmtrustedpub]
+- do [#lzcsqueues]
+- do [#lzcscrdt]
+- do [#lzcsipc]
+- do [#lzcssync]
+- do [#lzcstemporal]
+- do [#lzcscluster]
+- do [#lzcsplane]
+- do [#lzcspackage]
+- do [#asyncplanenever]
+- do [#lazilyrenameinverted]
+- do [#readmeexamplesreference]
+- do [#signalgetsignallive]
+- do [#recommendeddecidewhether]
+- do [#lazilycppconformance]
+- ~~do [#lazilycppsignalingroom]~~
 - do [#lazilycppcollections]
 - do [#trackedcopieslazily]
 - do [#firstunificationwire]
@@ -75,7 +77,7 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilyupgradeconformance] lazily: upgrade the conformance-coverage guard from static to runtime in rs, dart, zig. DONE for js, py, cs and go. go was the one that paid off immediately — see below. Remaining three have the same shape as go did: no interception seam, no shared loader, 20-40 read sites spread across per-file helpers. The go recipe is the pattern: introduce ONE package-level `specReadFile`-style helper, substitute the raw read call token across the test files (they share a package/namespace, so one helper serves all), record ids relative to the conformance root, APPEND (several test binaries contribute), flush at exit, and make a MISSING manifest FAIL as missing evidence. The manifest path must be ABSOLUTE — several bindings run test binaries from a per-package working directory. Effort estimate from go: ~1 helper file + a mechanical single-token substitution across ~22 files
+- [ ] 🚧 [#lazilyupgradeconformance] lazily: upgrade the conformance-coverage guard from static to runtime in rs, dart, zig. DONE for js, py, cs and go. go was the one that paid off immediately — see below. Remaining three have the same shape as go did: no interception seam, no shared loader, 20-40 read sites spread across per-file helpers. The go recipe is the pattern: introduce ONE package-level `specReadFile`-style helper, substitute the raw read call token across the test files (they share a package/namespace, so one helper serves all), record ids relative to the conformance root, APPEND (several test binaries contribute), flush at exit, and make a MISSING manifest FAIL as missing evidence. The manifest path must be ABSOLUTE — several bindings run test binaries from a per-package working directory. Effort estimate from go: ~1 helper file + a mechanical single-token substitution across ~22 files
 - [ ] [#lazilyconformancecoverag] lazily-cs: 87 of 124 canonical fixtures unreplayed (cs opens 37). MEASURED via the runtime manifest 2026-07-26. CORRECTION — an earlier note on this item claimed the 7 statechart fixtures were a cheap "runner gap"; that was derived from the STATIC grep and is WRONG. cs enumerates its corpus, so no fixture filename appears in its sources, and the static count under-reported every area. Runtime truth: cs FULLY replays reactive-graph 21/21, statechart 7/7, materialization 3/3, familysync 1/1. There is NO runner-gap win anywhere in cs — every one of the 87 is a genuinely missing surface, each already declared in a per-runner Unsupported ledger with the blocking surface named. Unreplayed by area: collections 15, lossless-tree 9, root 8, message-passing 8, reliable-sync 8, rateshape 6, coordination 5, resilience/service/temporal/windowing 4 each, presence 3, agent-doc/distributed/signaling 2 each, crdt-tree/membership/receipts 1 each. Work it down against tasks/software/lazily-cs-parity-plan.md by SHIPPING SURFACES, not by wiring runners
 - [ ] [#lazilythreadsafetopiccel] lazily-rs: ThreadSafeTopicCell + AsyncTopicCell. Same per-flavor rules as #lazilythreadsafequeuecel: own graph, own reader handles, bumps outside the lock, batch() for multi-root invalidation. Topic Core reader kinds per cell-model.md are subscribe/reconnect/disconnect/publish/read/read_stream/advance. Update the flavor ledger in the SAME change, and make the corpus replay against the new flavor rather than only flipping the flag — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lazilythreadsafeworkqueu] lazily-rs: ThreadSafeWorkQueueCell + AsyncWorkQueueCell. Core surface is push/claim/ack/nack/reap_expired plus the three independent reader kinds (pending / in-flight / dead-letter). Visibility-timeout redelivery needs a clock seam, which is NOT flavor-specific — reuse the sync one rather than minting a per-flavor clock. Update the flavor ledger in the SAME change and make the corpus replay against the new flavor. KEPT OPEN 2026-07-26: this reached the queue head before its own stated prerequisite existed — it says "same rules as the reference pair", and that pair had not been built. ThreadSafeQueueCell now ships (46d81e4) and IS the pattern to copy: memoized-derive reader kinds on its own graph, Arc<Mutex<S>> storage with invalidation OUTSIDE the lock (holding storage while invalidating inverts lock order against readers and deadlocks), multi-root invalidation via batch(), ledger flag flipped only alongside a real replay, plus an effect-based atomicity test because a step replay cannot see non-atomic invalidation. The THREAD-SAFE half is unblocked now; the async half waits on the AsyncContext prerequisites in #lzqfrs — plan: tasks/plan-lazily-queue-family-flavors.md

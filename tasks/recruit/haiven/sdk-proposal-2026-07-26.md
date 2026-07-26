@@ -20,6 +20,13 @@ idiomatic engine adapters**. That keeps authentication, WebSocket lifecycle,
 reconnect/resume behavior, message envelopes, safety events, and telemetry
 consistent while allowing each engine to feel native to its developers.
 
+The repository model should mirror that boundary: a thin integration
+superrepo pins dedicated repositories for contracts, conformance, every
+shipping SDK, and the agent harness. Each SDK keeps independent ownership,
+CI, permissions, and releases while the superrepo provides a reproducible
+workspace and compatibility evidence. The complete design is in the
+[Haiven SDK superrepo design](sdk-superrepo-design-2026-07-26.md).
+
 I would lead architecture and implementation in Haiven-owned repositories,
 working in a bounded 10–15 hour/week band with weekly demos. Haiven approves
 each milestone before the next begins, so cost, scope, and technical fit remain
@@ -117,6 +124,9 @@ policy.
 - Agent-harness design: versioned MCP documentation/guidance contract, content
 provenance and access policy, verification CLI command surface, and an initial
 agent-request evaluation catalog with pass/fail rubrics.
+- Superrepo design and bootstrap: component manifest, reproducible lock,
+dedicated-repository ownership/access map, cross-repository change train, and
+integration CI contract.
 - Unity technical design, package layout, sample-scene plan, and acceptance
 test plan.
 - Sequenced delivery backlog and refined fixed price for Milestone 1.

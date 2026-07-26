@@ -62,31 +62,35 @@ evidence checks locally and in CI;
 - an eval harness that scores representative agent requests, tool use,
 grounding, artifacts, verification, and safety boundaries.
 
-### 2.2 Suggested repository shape
+### 2.2 Superrepo and dedicated repositories
+
+Use a thin `haiven-sdk-superrepo` as the integration control plane, with
+dedicated repositories for contracts, conformance, the agent harness, and every
+approved SDK. The superrepo owns a component manifest, a reproducible lock,
+cross-repository policies, and integration CI; it does not duplicate SDK source
+or hold package-publishing credentials.
+
+The initial active set is:
 
 ```text
-sdk/
-  protocol/                 # schemas, fixtures, compatibility policy
-  conformance/              # fake server + cross-SDK scenarios
-  unity/                    # UPM package, tests, sample scene
-  unreal/                   # later: C++ module + Blueprint facade
-  godot/                    # later: plugin/extension
-  bevy/                     # later: Rust crate/plugin
-  mobile/
-    android/                # later: Kotlin
-    ios/                    # later: Swift
-samples/
-docs/
-decisions/                # short ADRs
-tools/
-  mcp/                    # versioned documentation + guidance server
-  cli/                    # deterministic verify/evidence commands
-evals/
-  agent-requests/         # requests, fixtures, rubrics, expected evidence
+haiven-sdk-superrepo
+├── haiven-sdk-contracts
+├── haiven-sdk-conformance
+├── haiven-sdk-agent-harness
+└── haiven-sdk-unity
 ```
 
-Haiven may split these into repositories for release/access reasons. The logical
-separation and shared conformance assets matter more than the physical layout.
+Unreal, Godot, Android, iOS, GameMaker, Cocos Creator, Construct 3, and Bevy
+remain lifecycle-gated registry entries until their roadmap gates pass. Once
+approved, each becomes a dedicated repository with native CI and an independent
+release history.
+
+The superrepo materializes exact component commits from `components.yaml` and
+`workspace.lock.json`. SDK packages consume released contract/conformance
+artifacts rather than sibling source checkouts, so a locked integration state
+does not force a single family-wide version. See the
+[Haiven SDK superrepo design](sdk-superrepo-design-2026-07-26.md) for repository
+contracts, CI, versioning, agent-harness boundaries, and bootstrap steps.
 
 ### 2.3 Starting protocol assumptions to validate
 
@@ -285,6 +289,8 @@ against the last approved harness release.
 - event delivery/ordering table by service;
 - schema/version strategy;
 - package/release/version-support policy;
+- superrepo component manifest, reproducible lock, repository ownership/access
+map, cross-repository change protocol, and integration CI contract;
 - agentic work-packet template, role boundaries, review gates, and evidence
 policy;
 - harness content map and source-of-truth rules;
@@ -308,6 +314,9 @@ baseline results against the selected harnesses/models;
 
 #### Package foundation
 
+- bootstrap the dedicated contracts, conformance, Unity, agent-harness, and
+superrepo repositories;
+- validate a locked workspace checkout and repository-local command contract;
 - create UPM package layout, assemblies, sample, and test assemblies;
 - define public API naming and asynchronous model;
 - avoid runtime reflection/dynamic code where IL2CPP/AOT compatibility matters;
@@ -474,6 +483,11 @@ single generic “console SDK” milestone.
 - Reproducible packages built by Haiven CI, signed/published from Haiven-owned
   credentials.
 - Release artifacts contain no production secrets or contractor-local paths.
+- Each SDK, shared foundation, and the agent harness versions independently;
+the superrepo lock records the exact green integration bill of materials.
+- Cross-repository changes use immutable contract/conformance candidates,
+repository-local pull requests, and a tested lock update rather than direct
+source coupling.
 
 ## 7. Risks and mitigations
 

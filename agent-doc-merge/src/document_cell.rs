@@ -18,7 +18,7 @@
 //!    structural edit becomes a handful of `Insert`/`Remove`/`Move`/`Update`
 //!    ops scoped to one component, never a whole-component (or whole-document)
 //!    replace.
-//! 3. Drives a reactive [`CellTree`]/[`CellMap`] representation
+//! 3. Drives a reactive [`CellTree`]/[`SourceMap`] representation
 //!    ([`DocumentCellTree`]) so an edit to one item invalidates only that item's
 //!    value cell — the core anti-corruption property that the eventual
 //!    per-cell merge needs.
@@ -39,7 +39,7 @@
 //! `item-id` is the durable child key.
 
 use lazily::{
-    CellMap, CellTree, Context, DiffOp, SemTree, TextCrdt, apply_to_map, apply_to_tree, reconcile,
+    SourceMap, CellTree, Context, DiffOp, SemTree, TextCrdt, apply_to_map, apply_to_tree, reconcile,
 };
 use std::fmt;
 
@@ -1940,8 +1940,8 @@ fn reconstruct_theirs_from_ops(
 pub struct DocumentCellTree {
     root: CellTree<String, String>,
     /// Per component-occurrence ordered item map (parallel to the tree's item
-    /// children) so ops apply via the LIS-driven [`CellMap`] path.
-    occurrences: std::collections::HashMap<(String, usize), CellMap<String, String>>,
+    /// children) so ops apply via the LIS-driven [`SourceMap`] path.
+    occurrences: std::collections::HashMap<(String, usize), SourceMap<String, String>>,
 }
 
 impl DocumentCellTree {
@@ -1952,7 +1952,7 @@ impl DocumentCellTree {
         for occ in project_document(doc) {
             let occ_id = format!("{}:{}", occ.component, occ.occurrence);
             let occ_node = root.insert_child(ctx, occ_id.clone(), String::new());
-            let map: CellMap<String, String> = CellMap::new(ctx);
+            let map: SourceMap<String, String> = SourceMap::new(ctx);
             for (key, value) in &occ.items {
                 let identity = node_key_identity(key).to_string();
                 occ_node.insert_child(ctx, identity.clone(), value.clone());
@@ -2022,7 +2022,7 @@ impl DocumentCellTree {
     /// Apply a component diff's minimal ops to the corresponding occurrence's
     /// item cells, driving the reactive tree to the new shape with minimal
     /// invalidation (stable items untouched, moves atomic, only changed values
-    /// rewritten). Keeps the [`CellTree`] children in sync with the [`CellMap`].
+    /// rewritten). Keeps the [`CellTree`] children in sync with the [`SourceMap`].
     pub fn apply(&mut self, ctx: &Context, diff: &ComponentDiff) {
         let occ_key = (diff.component.clone(), diff.occurrence);
         let occ_id = format!("{}:{}", diff.component, diff.occurrence);
@@ -2033,7 +2033,7 @@ impl DocumentCellTree {
         let map = self
             .occurrences
             .entry(occ_key)
-            .or_insert_with(|| CellMap::new(ctx));
+            .or_insert_with(|| SourceMap::new(ctx));
         apply_to_map(ctx, map, &diff.ops);
         apply_to_tree(ctx, &occ_node, &diff.ops);
     }
@@ -2417,13 +2417,13 @@ agent_doc_format: template
                         .iter()
                         .map(|(id, _)| id.clone())
                         .collect::<Vec<_>>(),
-                    "CellTree child order must match CellMap order for {occ_id}"
+                    "CellTree child order must match SourceMap order for {occ_id}"
                 );
                 for (id, value) in &map_items {
                     assert_eq!(
                         occ_node.child(id).expect("child present").get(ctx),
                         *value,
-                        "CellTree child value must match CellMap value for {id}"
+                        "CellTree child value must match SourceMap value for {id}"
                     );
                 }
                 (component, occurrence, map_items)

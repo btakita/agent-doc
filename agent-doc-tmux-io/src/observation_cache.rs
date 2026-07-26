@@ -9,7 +9,7 @@
 //! following.
 //!
 //! This module memoizes *read-only* tmux observations for the duration of one
-//! explicitly-opened scope, using lazily's [`SlotMap`] — a derived-slot keyed
+//! explicitly-opened scope, using lazily's [`ComputedMap`] — a derived-slot keyed
 //! collection with **no `set`**, so the cache can only ever derive from an
 //! observation and can never become a source of truth.
 //!
@@ -24,7 +24,7 @@
 //!    of stable structural metadata; an unrecognized verb counts as mutating.
 //!    Live-content reads like `capture-pane` are deliberately excluded.
 //!
-//! The scope is thread-local (lazily's `Context`/`SlotMap` are `Rc`-based and
+//! The scope is thread-local (lazily's `Context`/`ComputedMap` are `Rc`-based and
 //! therefore `!Send`), which also means one thread's scope never serves another
 //! thread's reads.
 
@@ -32,7 +32,7 @@ use std::cell::RefCell;
 
 use agent_doc_state_scope::LocalReadScope;
 use agent_doc_tmux_commands::TmuxCommand;
-use lazily::SlotMap;
+use lazily::ComputedMap;
 
 use crate::TmuxIoError;
 
@@ -44,7 +44,7 @@ struct ObservationScopeState {
     /// Keyed by the full argv so two different `display-message` formats never
     /// collide. Only successful outputs are stored — an error may be transient
     /// and must not be memoized.
-    reads: SlotMap<Vec<String>, String>,
+    reads: ComputedMap<Vec<String>, String>,
     depth: usize,
     hits: u64,
     misses: u64,
@@ -53,7 +53,7 @@ struct ObservationScopeState {
 impl ObservationScopeState {
     fn new() -> Self {
         let scope = LocalReadScope::new();
-        let reads = SlotMap::new(scope.ctx());
+        let reads = ComputedMap::new(scope.ctx());
         Self {
             scope,
             reads,
@@ -70,7 +70,7 @@ impl ObservationScopeState {
         // Re-taking the scope IS the invalidation: a tmux mutation must drop every
         // memoized observation, and dropping the scope drops the whole graph.
         self.scope = LocalReadScope::new();
-        self.reads = SlotMap::new(self.scope.ctx());
+        self.reads = ComputedMap::new(self.scope.ctx());
     }
 }
 

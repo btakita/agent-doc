@@ -4441,13 +4441,13 @@ thread_local! {
     /// spawns that were all the identical command. Unlike a pane's working
     /// directory, a directory's owning repository is immutable for our purposes,
     /// so this memo needs no invalidation — which is why it is a plain lazily
-    /// `SlotMap` rather than part of the mutation-invalidated tmux scope.
+    /// `ComputedMap` rather than part of the mutation-invalidated tmux scope.
     ///
     /// `#stategraphjoin`: the memo's lifetime is the process (per thread), so it
     /// joins a [`LocalProcessScope`] rather than minting a private context.
-    static GIT_TOPLEVEL_MEMO: (LocalProcessScope, lazily::SlotMap<PathBuf, Option<PathBuf>>) = {
+    static GIT_TOPLEVEL_MEMO: (LocalProcessScope, lazily::ComputedMap<PathBuf, Option<PathBuf>>) = {
         let scope = LocalProcessScope::new();
-        let map = lazily::SlotMap::new(scope.ctx());
+        let map = lazily::ComputedMap::new(scope.ctx());
         (scope, map)
     };
 }

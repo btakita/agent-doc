@@ -57,14 +57,14 @@ struct LedgerScopeState {
     /// The scope this cache's slots live in (`#stategraphjoin`). Its lifetime is
     /// exactly the ledger scope's depth-counted extent.
     scope: LocalReadScope,
-    ledgers: lazily::SlotMap<(PathBuf, String), Option<std::rc::Rc<EventLedger>>>,
+    ledgers: lazily::ComputedMap<(PathBuf, String), Option<std::rc::Rc<EventLedger>>>,
     depth: usize,
 }
 
 impl LedgerScopeState {
     fn new() -> Self {
         let scope = LocalReadScope::new();
-        let ledgers = lazily::SlotMap::new(scope.ctx());
+        let ledgers = lazily::ComputedMap::new(scope.ctx());
         Self {
             scope,
             ledgers,
@@ -77,7 +77,7 @@ impl LedgerScopeState {
         // its scope, so the scope boundary drops the whole graph rather than evicting
         // entries one at a time.
         self.scope = LocalReadScope::new();
-        self.ledgers = lazily::SlotMap::new(self.scope.ctx());
+        self.ledgers = lazily::ComputedMap::new(self.scope.ctx());
     }
 }
 

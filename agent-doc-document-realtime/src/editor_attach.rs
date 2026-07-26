@@ -4,12 +4,12 @@
 //! per-decision filesystem lease poll and onto the lazily reactive backbone. Two
 //! reactive inputs and one derived read:
 //!
-//! - `alive: ThreadSafeCellMap<pid, bool>` — process liveness. Set `true` when an
+//! - `alive: ThreadSafeSourceMap<pid, bool>` — process liveness. Set `true` when an
 //!   editor process attaches (register / cold-miss lease seed); set `false` by an OS
 //!   process-exit **event** (see [`ProcessExitWatcher`]). This is the crash signal the
 //!   reactive stream could not observe before S4b: a crashed editor sends no
 //!   `deregister`, but its pid death is an OS event that flips this cell.
-//! - `registered: ThreadSafeCellMap<(doc, pid), bool>` — per-document editor
+//! - `registered: ThreadSafeSourceMap<(doc, pid), bool>` — per-document editor
 //!   attachment, driven by the replica lifecycle (`register`/`reconnect`/`update` →
 //!   `true`, `deregister` → `false`).
 //! - `is_attached(doc)` — the authority read: *any registered `(doc, pid)` whose
@@ -42,7 +42,7 @@ use parking_lot::Mutex;
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
-use lazily::{Computed, Source, ThreadSafeCellMap, ThreadSafeContext};
+use lazily::{Computed, Source, ThreadSafeSourceMap, ThreadSafeContext};
 
 /// A source of process-exit **events** (not a poll on the hot path).
 ///
@@ -73,10 +73,10 @@ pub struct EditorAttach {
     ctx: ThreadSafeContext,
     /// `pid -> alive`. Materialized `true` on attach; flipped `false` by an OS exit
     /// event. Deferral-not-dealloc: a dead pid's key stays present-but-false.
-    alive: ThreadSafeCellMap<u32, bool>,
+    alive: ThreadSafeSourceMap<u32, bool>,
     /// `(doc, pid) -> registered`. Materialized `true` on attach; flipped `false` on an
     /// explicit deregister. A closed pair stays present-but-false (uncounted).
-    registered: ThreadSafeCellMap<(String, u32), bool>,
+    registered: ThreadSafeSourceMap<(String, u32), bool>,
     /// Bumped when a brand-new key is materialized so the derived count observes it.
     epoch: Source<u64>,
     /// Reactive count of distinct currently-attached documents (observability/tests).
@@ -108,8 +108,8 @@ impl EditorAttach {
 
     fn build(ctx: ThreadSafeContext) -> Self {
         let epoch = ctx.source(0u64);
-        let alive: ThreadSafeCellMap<u32, bool> = ThreadSafeCellMap::new(&ctx);
-        let registered: ThreadSafeCellMap<(String, u32), bool> = ThreadSafeCellMap::new(&ctx);
+        let alive: ThreadSafeSourceMap<u32, bool> = ThreadSafeSourceMap::new(&ctx);
+        let registered: ThreadSafeSourceMap<(String, u32), bool> = ThreadSafeSourceMap::new(&ctx);
         let attached_count = {
             let registered = registered.clone();
             let alive = alive.clone();

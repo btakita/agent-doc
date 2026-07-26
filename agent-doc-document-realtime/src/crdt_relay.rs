@@ -40,7 +40,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write;
 
 use anyhow::{Result, anyhow};
-use lazily::{Computed, EphemeralMapCore, Source, ThreadSafeCellMap, ThreadSafeContext};
+use lazily::{Computed, EphemeralMapCore, Source, ThreadSafeSourceMap, ThreadSafeContext};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -228,14 +228,14 @@ pub struct RelayHub {
     /// The thread-safe reactive graph that owns member liveness (#live-editor-reactive).
     /// `RelayHub` lives in a `static Mutex<HashMap<String, RelayHub>>`, so every
     /// reactive handle stored here must be `Send`; [`ThreadSafeContext`] and the
-    /// `Arc`-based [`ThreadSafeCellMap`]/[`Source`]/[`Computed`] all qualify.
+    /// `Arc`-based [`ThreadSafeSourceMap`]/[`Source`]/[`Computed`] all qualify.
     ctx: ThreadSafeContext,
     /// Per-member liveness as a keyed reactive family (keyed by `client_id`). This is
     /// the **single** source of truth for whether a member is connected — the former
     /// `Member.live` field is gone. The present set only grows (deferral, not
     /// de-allocation): a deregistered `client_id`'s cell stays present-but-false, so it
     /// is bounded per session and never counted as live.
-    liveness: ThreadSafeCellMap<u64, bool>,
+    liveness: ThreadSafeSourceMap<u64, bool>,
     /// Bumped on [`Self::register`] so the derived count picks up a newly-present key
     /// (a brand-new cell is not yet a dependency of `live_editor_count`; the epoch is,
     /// so the register forces a recompute that then observes the new cell).
@@ -260,7 +260,7 @@ pub struct RelayHub {
 /// than a tuple so adding an input to the graph stays readable at the call site.
 struct LivenessCore {
     ctx: ThreadSafeContext,
-    liveness: ThreadSafeCellMap<u64, bool>,
+    liveness: ThreadSafeSourceMap<u64, bool>,
     membership_epoch: Source<u64>,
     live_editor_count: Computed<usize>,
     delivery_epoch: Source<u64>,
@@ -328,7 +328,7 @@ impl RelayHub {
         let delivery_epoch = ctx.source(0u64);
         // Cells materialize on `register`; the factory value (`true` = live-on-register)
         // only applies before the explicit `set` in `set_live`.
-        let liveness: ThreadSafeCellMap<u64, bool> = ThreadSafeCellMap::new(&ctx);
+        let liveness: ThreadSafeSourceMap<u64, bool> = ThreadSafeSourceMap::new(&ctx);
         let live_editor_count = {
             let liveness = liveness.clone();
             ctx.computed(move |ctx| {

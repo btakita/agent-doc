@@ -114,14 +114,14 @@ struct TurnAttributionScopeState {
     /// exactly as long as the turn-attribution scope, and the scope boundary — not a
     /// clock — invalidates it.
     scope: LocalTurnScope,
-    turn_ids: lazily::SlotMap<PathBuf, Option<std::sync::Arc<str>>>,
+    turn_ids: lazily::ComputedMap<PathBuf, Option<std::sync::Arc<str>>>,
     depth: usize,
 }
 
 impl TurnAttributionScopeState {
     fn new() -> Self {
         let scope = LocalTurnScope::new();
-        let turn_ids = lazily::SlotMap::new(scope.ctx());
+        let turn_ids = lazily::ComputedMap::new(scope.ctx());
         Self {
             scope,
             turn_ids,

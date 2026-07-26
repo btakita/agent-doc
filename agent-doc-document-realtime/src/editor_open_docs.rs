@@ -24,7 +24,7 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use lazily::{Computed, Source, ThreadSafeCellMap, ThreadSafeContext};
+use lazily::{Computed, Source, ThreadSafeSourceMap, ThreadSafeContext};
 
 /// Per-document open state held in the reactive family.
 ///
@@ -56,7 +56,7 @@ pub struct EditorOpenDocs {
     ctx: ThreadSafeContext,
     /// `path -> DocOpenState`. Deferral-not-dealloc: a closed document's key stays
     /// present-but-closed (bounded per session), never counted as open.
-    docs: ThreadSafeCellMap<String, DocOpenState>,
+    docs: ThreadSafeSourceMap<String, DocOpenState>,
     /// Bumped when a brand-new key is materialized so the derived counts observe it
     /// (a not-yet-observed cell is not yet a dependency; the epoch is).
     epoch: Source<u64>,
@@ -86,7 +86,7 @@ impl EditorOpenDocs {
 
     fn build(ctx: ThreadSafeContext) -> Self {
         let epoch = ctx.source(0u64);
-        let docs: ThreadSafeCellMap<String, DocOpenState> = ThreadSafeCellMap::new(&ctx);
+        let docs: ThreadSafeSourceMap<String, DocOpenState> = ThreadSafeSourceMap::new(&ctx);
         let open_count = {
             let docs = docs.clone();
             ctx.computed(move |ctx| {

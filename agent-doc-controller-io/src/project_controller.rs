@@ -555,7 +555,7 @@ struct ControllerDocumentGraphs {
     /// The fact seam: the document's state projection, set once per applied
     /// state event. Everything retained-write-shaped is *derived* from this.
     projection:
-        lazily::ThreadSafeCellMap<String, Option<agent_doc_state_backbone::DocumentStateProjection>>,
+        lazily::ThreadSafeSourceMap<String, Option<agent_doc_state_backbone::DocumentStateProjection>>,
     /// Derived from [`Self::projection`] — **not** pushed.
     ///
     /// This was a cell map that `apply_state_event` computed and wrote into. A
@@ -564,19 +564,19 @@ struct ControllerDocumentGraphs {
     /// data. As a derived slot it updates because the projection changed, and
     /// any other consumer can derive from the same projection cell instead of
     /// re-implementing `retained_intent_facts_from_projection` at its own seam.
-    pending: lazily::ThreadSafeSlotMap<
+    pending: lazily::ThreadSafeComputedMap<
         String,
         Option<agent_doc_state_backbone::retained_write::RetainedIntentFacts>,
     >,
-    authority: lazily::ThreadSafeCellMap<
+    authority: lazily::ThreadSafeSourceMap<
         String,
         Option<agent_doc_state_backbone::retained_write::ContentObservation>,
     >,
-    disk: lazily::ThreadSafeCellMap<
+    disk: lazily::ThreadSafeSourceMap<
         String,
         Option<agent_doc_state_backbone::retained_write::ContentObservation>,
     >,
-    verdict: lazily::ThreadSafeSlotMap<
+    verdict: lazily::ThreadSafeComputedMap<
         String,
         agent_doc_state_backbone::retained_write::SettlementVerdict,
     >,
@@ -586,11 +586,11 @@ impl ControllerDocumentGraphs {
     fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
         let ctx = scope.ctx().clone();
         Self {
-            projection: lazily::ThreadSafeCellMap::new(&ctx),
-            pending: lazily::ThreadSafeSlotMap::new(&ctx),
-            authority: lazily::ThreadSafeCellMap::new(&ctx),
-            disk: lazily::ThreadSafeCellMap::new(&ctx),
-            verdict: lazily::ThreadSafeSlotMap::new(&ctx),
+            projection: lazily::ThreadSafeSourceMap::new(&ctx),
+            pending: lazily::ThreadSafeComputedMap::new(&ctx),
+            authority: lazily::ThreadSafeSourceMap::new(&ctx),
+            disk: lazily::ThreadSafeSourceMap::new(&ctx),
+            verdict: lazily::ThreadSafeComputedMap::new(&ctx),
             ctx,
         }
     }

@@ -481,10 +481,10 @@ mod tests {
 
 #[cfg(test)]
 mod reactive_map_probe {
-    use lazily::{ThreadSafeCellMap, ThreadSafeContext, ThreadSafeSlotMap};
+    use lazily::{ThreadSafeSourceMap, ThreadSafeContext, ThreadSafeComputedMap};
 
-    /// Does a `ThreadSafeSlotMap` entry whose factory captures a context clone
-    /// and reads a `ThreadSafeCellMap` actually subscribe to that cell?
+    /// Does a `ThreadSafeComputedMap` entry whose factory captures a context clone
+    /// and reads a `ThreadSafeSourceMap` actually subscribe to that cell?
     ///
     /// The slot factory is `Fn(&K) -> V` with no context parameter (the
     /// ctx-taking `mint_with` is private), so the only way to derive across maps
@@ -493,13 +493,13 @@ mod reactive_map_probe {
     #[test]
     fn slot_map_entry_capturing_a_ctx_clone_tracks_a_cell_map_dependency() {
         let ctx = ThreadSafeContext::new();
-        let inputs: ThreadSafeCellMap<String, u32> = ThreadSafeCellMap::new(&ctx);
-        let derived: ThreadSafeSlotMap<String, u32> = ThreadSafeSlotMap::new(&ctx);
+        let inputs: ThreadSafeSourceMap<String, u32> = ThreadSafeSourceMap::new(&ctx);
+        let derived: ThreadSafeComputedMap<String, u32> = ThreadSafeComputedMap::new(&ctx);
         inputs.set(&ctx, "doc".to_string(), 1);
 
         let factory_ctx = ctx.clone();
         let factory_inputs = inputs.clone();
-        let read = |derived: &ThreadSafeSlotMap<String, u32>| {
+        let read = |derived: &ThreadSafeComputedMap<String, u32>| {
             let factory_ctx = factory_ctx.clone();
             let factory_inputs = factory_inputs.clone();
             derived.get_or_insert_with(&ctx, "doc".to_string(), move |key| {

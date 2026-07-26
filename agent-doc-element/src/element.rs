@@ -661,19 +661,112 @@ fn bounded_preview(doc: &str, start: usize, max_bytes: usize) -> &str {
 /// Parse `key=value` pairs from the attribute portion of an opening marker.
 ///
 /// Given the text after `agent:NAME `, parses space-separated `key=value` pairs.
-/// Values are unquoted (no quote support needed for simple mode values).
+///
+/// Values MAY be quoted with `"` or `'`. Quoting does two things: it lets a value
+/// contain spaces, and — the reason this exists — it is a form agent-doc's own
+/// writers emit, so the parser has to accept it.
+///
+/// This used to keep the value verbatim, quotes included, on the assumption that
+/// "values are unquoted (no quote support needed)". A compact wrote
+/// `agent:done archive="tasks/x.done.md"` and every subsequent preflight and
+/// session-check on that document hard-failed with
+/// `archive=… must point to a .done.md file` — because the parsed value ended in a
+/// quote character, so the `.done.md` suffix check could never match. The document
+/// was unusable until the quotes were hand-stripped. A parser that rejects what
+/// the writers emit is the bug; be liberal here.
 pub fn parse_attrs(attr_text: &str) -> HashMap<String, String> {
     let mut attrs = HashMap::new();
-    for token in attr_text.split_whitespace() {
-        if let Some((key, value)) = token.split_once('=') {
-            if !key.is_empty() && !value.is_empty() {
-                attrs.insert(key.to_string(), value.to_string());
+    for (key, value) in split_attr_tokens(attr_text) {
+        if key.is_empty() {
+            continue;
+        }
+        match value {
+            Some(value) if !value.is_empty() => {
+                attrs.insert(key, value);
             }
-        } else if !token.is_empty() {
-            attrs.insert(token.to_string(), String::new());
+            // `key=` with an empty value is not a flag — it is a malformed pair,
+            // and dropping it preserves the previous behaviour.
+            Some(_) => {}
+            None => {
+                attrs.insert(key, String::new());
+            }
         }
     }
     attrs
+}
+
+/// Split an attribute string into `(key, Some(value) | None)` pairs, honouring
+/// quotes around values so a quoted value may contain spaces.
+///
+/// `None` marks a bare token (a boolean flag); `Some("")` marks a `key=` pair
+/// with no value.
+fn split_attr_tokens(attr_text: &str) -> Vec<(String, Option<String>)> {
+    let mut out = Vec::new();
+    let mut chars = attr_text.chars().peekable();
+
+    loop {
+        // Skip separating whitespace.
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+        if chars.peek().is_none() {
+            break;
+        }
+
+        // Key: up to `=` or whitespace. A key is never quoted.
+        let mut key = String::new();
+        let mut saw_eq = false;
+        while let Some(&c) = chars.peek() {
+            if c == '=' {
+                saw_eq = true;
+                chars.next();
+                break;
+            }
+            if c.is_whitespace() {
+                break;
+            }
+            key.push(c);
+            chars.next();
+        }
+
+        if !saw_eq {
+            out.push((key, None));
+            continue;
+        }
+
+        // Value: quoted (spaces allowed, closing quote consumed) or bare.
+        let mut value = String::new();
+        match chars.peek().copied() {
+            Some(quote @ ('"' | '\'')) => {
+                chars.next();
+                let mut closed = false;
+                for c in chars.by_ref() {
+                    if c == quote {
+                        closed = true;
+                        break;
+                    }
+                    value.push(c);
+                }
+                // An unterminated quote is tolerated: everything to end-of-input
+                // is the value. Failing closed here would make one stray quote
+                // unparse the whole marker, which is the failure mode this
+                // function is being fixed for.
+                let _ = closed;
+            }
+            _ => {
+                while let Some(&c) = chars.peek() {
+                    if c.is_whitespace() {
+                        break;
+                    }
+                    value.push(c);
+                    chars.next();
+                }
+            }
+        }
+        out.push((key, Some(value)));
+    }
+
+    out
 }
 
 /// Find byte ranges of code regions (fenced code blocks + inline code spans).
@@ -2118,6 +2211,69 @@ actual content
         let attrs = parse_attrs("auto");
         assert_eq!(attrs.len(), 1);
         assert!(attrs.contains_key("auto"));
+    }
+
+    #[test]
+    fn parse_attrs_strips_surrounding_quotes() {
+        // The regression this exists for: a compact wrote
+        // `agent:done archive="tasks/software/lazily.done.md"`, the value kept its
+        // quotes, and the `.done.md` suffix check could never match — so every
+        // preflight and session-check on that document hard-failed with
+        // "must point to a .done.md file" until the quotes were hand-stripped.
+        let attrs = parse_attrs(r#"archive="tasks/software/lazily.done.md""#);
+        assert_eq!(
+            attrs.get("archive").map(|s| s.as_str()),
+            Some("tasks/software/lazily.done.md"),
+            "a double-quoted value must parse without its quotes"
+        );
+
+        // Single quotes too.
+        let attrs = parse_attrs("archive='tasks/x.done.md'");
+        assert_eq!(attrs.get("archive").map(|s| s.as_str()), Some("tasks/x.done.md"));
+
+        // The unquoted form every other session document uses keeps working.
+        let attrs = parse_attrs("archive=tasks/x.done.md");
+        assert_eq!(attrs.get("archive").map(|s| s.as_str()), Some("tasks/x.done.md"));
+
+        // Both forms must agree — that they did not is the whole defect.
+        assert_eq!(
+            parse_attrs(r#"archive="tasks/x.done.md""#).get("archive"),
+            parse_attrs("archive=tasks/x.done.md").get("archive"),
+            "quoted and unquoted spellings must parse to the same value"
+        );
+    }
+
+    #[test]
+    fn parse_attrs_quoted_value_may_contain_spaces() {
+        // Quoting exists so a value can hold spaces; whitespace splitting alone
+        // would have truncated this to `two`.
+        let attrs = parse_attrs(r#"preset="two words" mode=append"#);
+        assert_eq!(attrs.get("preset").map(|s| s.as_str()), Some("two words"));
+        assert_eq!(attrs.get("mode").map(|s| s.as_str()), Some("append"));
+        assert_eq!(attrs.len(), 2);
+    }
+
+    #[test]
+    fn parse_attrs_quotes_do_not_disturb_neighbours() {
+        // A quoted value must not swallow the attributes after it. This is the
+        // real marker from the document that broke.
+        let attrs = parse_attrs(r##"preset="#spec-test-commit-push" priority go"##);
+        assert_eq!(
+            attrs.get("preset").map(|s| s.as_str()),
+            Some("#spec-test-commit-push")
+        );
+        assert_eq!(attrs.get("priority").map(|s| s.as_str()), Some(""));
+        assert_eq!(attrs.get("go").map(|s| s.as_str()), Some(""));
+        assert_eq!(attrs.len(), 3);
+    }
+
+    #[test]
+    fn parse_attrs_unterminated_quote_is_tolerated() {
+        // Failing closed on a stray quote would make one typo unparse an entire
+        // marker — the same class of outage this fix removes. Take the rest of the
+        // input as the value instead.
+        let attrs = parse_attrs(r#"archive="tasks/x.done.md"#);
+        assert_eq!(attrs.get("archive").map(|s| s.as_str()), Some("tasks/x.done.md"));
     }
 
     #[test]

@@ -3429,9 +3429,17 @@ body b
         assert_eq!(patches.len(), 1);
         assert_eq!(patches[0].name, "exchange");
         assert_eq!(patches[0].content, "Transferred content.\n");
+        // This used to assert the value WITH its quotes — i.e. it pinned the
+        // defect as expected behaviour, which is part of why the defect survived.
+        // `parse_attrs` now strips matching surrounding quotes, so a quoted and an
+        // unquoted attribute parse to the same value. `transfer-source` has no
+        // production consumer that wanted the quotes; the one place that DID care,
+        // `agent:done archive=`, was hard-failing every document written with the
+        // quoted form.
         assert_eq!(
             patches[0].attrs.get("transfer-source"),
-            Some(&"\"tasks/eval-runner.md\"".to_string())
+            Some(&"tasks/eval-runner.md".to_string()),
+            "a quoted attribute value must parse without its quotes"
         );
         assert!(unmatched.is_empty());
     }

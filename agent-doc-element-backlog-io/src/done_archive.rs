@@ -200,3 +200,79 @@ fn append_external_done_archive(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pull the `archive` attribute out of a real document the way production
+    /// does — parse the marker, read `attrs` — so the test exercises the same
+    /// path that broke.
+    fn archive_attr(marker: &str) -> String {
+        // Markers must sit at column 0 — an indented marker is not recognised.
+        let content =
+            format!("## Completed / Reaped\n\n<!-- agent:done {marker} -->\n<!-- /agent:done -->\n");
+        let components = agent_doc_element::element::parse(&content).expect("parse");
+        components
+            .into_iter()
+            .find(|c| agent_doc_element::element::is_backlog_done_component(&c.name))
+            .expect("agent:done component")
+            .attrs
+            .get("archive")
+            .expect("archive attribute")
+            .clone()
+    }
+
+    /// The end-to-end regression.
+    ///
+    /// agent-doc's own compact wrote `archive="tasks/software/lazily.done.md"`.
+    /// The attribute value kept its quotes, so the `.done.md` suffix check could
+    /// never match, and every preflight and session-check on that document died
+    /// with `must point to a .done.md file`. The document was unusable until the
+    /// quotes were hand-stripped out of the marker.
+    #[test]
+    fn quoted_archive_attribute_resolves() {
+        let quoted = archive_attr("archive=\"tasks/software/lazily.done.md\"");
+        assert_eq!(
+            quoted, "tasks/software/lazily.done.md",
+            "the parsed attribute must not carry its quotes"
+        );
+
+        // The resolver is what actually bailed. Run it inside this repo, where a
+        // project root exists.
+        let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/done_archive.rs");
+        resolve_done_archive_target(&here, &quoted)
+            .expect("a quoted archive attribute must resolve, not fail the document");
+    }
+
+    /// Quoted and unquoted spellings must behave identically — that they did not
+    /// is the entire defect.
+    #[test]
+    fn quoted_and_unquoted_archive_agree() {
+        let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/done_archive.rs");
+
+        let quoted = archive_attr("archive=\"tasks/x.done.md\"");
+        let bare = archive_attr("archive=tasks/x.done.md");
+        assert_eq!(quoted, bare, "both spellings must parse to the same value");
+
+        assert_eq!(
+            resolve_done_archive_target(&here, &quoted).expect("quoted resolves"),
+            resolve_done_archive_target(&here, &bare).expect("bare resolves"),
+            "both spellings must resolve to the same archive path"
+        );
+    }
+
+    /// The suffix check still rejects a genuinely wrong path — the fix must not
+    /// have widened it into accepting anything.
+    #[test]
+    fn non_done_md_archive_is_still_rejected() {
+        let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/done_archive.rs");
+        for attr in ["archive=\"tasks/x.md\"", "archive=tasks/x.md"] {
+            let value = archive_attr(attr);
+            assert!(
+                resolve_done_archive_target(&here, &value).is_err(),
+                "{attr} must still be rejected: only .done.md is a valid archive"
+            );
+        }
+    }
+}

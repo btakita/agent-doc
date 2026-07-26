@@ -359,13 +359,63 @@ lazily-rs's `spec_compliance` failed the moment I bumped `Cargo.toml`, because i
 **npm E404'd again, and the cause is worth fixing at the source.** The workflow's OIDC exchange succeeded — provenance was signed and logged to Sigstore — and only the upload was rejected: `E404 PUT https://registry.npmjs.org/@lazily-hub%2flazily-js`. From npm that means the package is not registered to that trusted publisher, or the token lacks scope permission. It is the workflow's *registration* that is wrong, not its code, so this will recur every release until `@lazily-hub/lazily-js` is configured as a trusted publisher on npmjs.com. Registering it once makes future releases unattended; your manual publish confirmed `latest` is 0.28.0.
 
 **`lazily-macros` needed no publish** — 0.23.0 is already on crates.io and the rename never touched it, so the "macros before lazily" ordering constraint was satisfied without a second upload.
-<!-- agent:boundary:37135d7d -->
+
+### Re: CellTree → SourceTree across spec, formal, and all nine bindings — opus-5
+
+> **Queue prompt:** Rename CellTree to SourceTree. Scan the lazily spec + formal + implementations for any other moderization renames that are needed.
+
+Done and pushed. `SourceTree` is the canonical name in all 11 repos; `CellTree` survives as a deprecated alias everywhere except lazily-cs, which is unpublished and takes clean renames by its own repo convention.
+
+The name now matches what the type actually holds — a `SourceTree` node is `(stable id, value cell, ordered keyed child collection)`, and those value cells are *input* cells, the same entry kind `SourceMap` carries. `CellTree` was the last collection type still on pre-v2 vocabulary.
+
+**Verification — every binding's own full suite, green:**
+
+| repo | suite | result |
+|---|---|---|
+| lazily-rs | `cargo test --all-features` + clippy | 898 passed, 0 failed |
+| lazily-spec | `make check` | 147 passed; lean 9 jobs; coverage-check OK |
+| lazily-formal | `make check` (forced Tree.lean recompile) | lake build, 49 jobs |
+| lazily-py | `make check` | 524 passed |
+| lazily-js | `make check` | 481 passed; size-limit 1.64/1.65 kB |
+| lazily-kt | `make check` + `gradlew test --rerun-tasks` | 350 tests, 0 failures |
+| lazily-go | `make check` + `-race` | 429 passed |
+| lazily-cpp | `make check` (ctest) | 39/39 suites |
+| lazily-cs | `make check` + `format-check` | 72 passed |
+| lazily-dart | `dart analyze --fatal-infos` + `dart test` | 525 passed |
+| lazily-zig | `mise run test` + `test_0_16` | 360 + 716 passed |
+
+One pre-existing failure, not mine: lazily-rs `make check` exits 2 on `benchmark-check` — `no Criterion estimates found under target/criterion`. I proved it is environmental by stashing the rename and re-running: unmodified HEAD fails identically. This tree has never run the benches. Everything else in `make check` passes.
+
+The coverage matrix went through `coverage.json` + `make coverage-sync`, so all 12 generated README tables moved in one shot rather than being hand-edited. While there I fixed two leftovers the *previous* rename missed: lazily-spec `docs/coverage.md:93` and `README.md:85` still said `CellMap` / `SlotMap`, and lazily-formal's README named `CellMap`/`SlotMap` as canonical in nine places of prose. The spec's `_KEYED_MODELS` now accepts `SourceTree` while still accepting `CellTree`, since the fixture `model` field is wire data nine runners read.
+
+Mechanism note: I used tsift's AST `rename_symbol` where it applies, but it only rewrites within a single file, so cross-file references and the six non-Rust languages went through word-boundary identifier replacement instead. The real check is that each binding's compiler and full suite passed — for the typed languages that is an AST-level verification of the rename.
+
+### The scan — what else is stale
+
+I asked each binding to report legacy naming rather than fix it, so this is a survey, not a diff. Six findings are queued as backlog items; they land at the queue *tail* so they don't preempt your ten queued items.
+
+**Already yours:** `EntryKind::Cell` / `EntryKind::Slot` is stale in all nine bindings plus lazily-formal `Materialization.lean:87`. That is your next queue item, so I left it alone.
+
+**The async plane is the real gap.** It never got the v2 migration at all — `AsyncCellHandle`, `AsyncSlotHandle`, `AsyncSlotState` are live and undeprecated in seven bindings. The sharpest case: lazily-cpp still exposes `AsyncContext::memo()` while `context.hpp:609` says outright that `memo` is DELETED because `computed` *is* the guarded form. One plane retired it, the other kept it.
+
+**lazily-py has the rename backwards.** `class Cell` is the primary type with `Source = Cell` as the alias, and `class CellSlot` with `SourceSlot = CellSlot`. Every other binding points the other way. Its `slot_def()` deprecation even directs callers to `cell_def()` — pointing at legacy vocabulary — when `source_def` already exists.
+
+**Four READMEs document types that don't exist.** lazily-go's README example calls `lazily.NewCell`, which is defined nowhere; that example cannot compile. lazily-cpp's README and AGENTS.md describe `CellHandle`/`SlotHandle` as the handle types, both deleted. lazily-dart claims a `Signal` back-compat alias while its own `core.dart:40` says `Signal` is gone. These are the first thing a new user hits.
+
+**"observer" language is still in six repos**, against the standing rule that there are no observers, only Effects. lazily-formal `ThreadSafe.lean:9` asserting "observers fire synchronously" is the one that matters most, since it is a formal model.
+
+**Open decision, not queued as work:** three bindings independently flagged the domain `*Cell` family — `QueueCell`, `TopicCell`, `RelayCell`, `MergeCell`, `TimerCell`, `LeaseCell`, `CircuitBreakerCell`, and ~30 more. It is by far the largest remaining `Cell`-vocabulary surface. It is plausibly deliberate spec-level naming rather than kernel residue, and it would have to move in lockstep across all nine bindings, so it needs your call before anyone touches it. Filed as `[recommended]`.
+
+Wire-level names (`DeltaOp.CellSet`, `DeltaOp.SlotValue`, the `cellmap`/`celltree` capability flags, fixture `model` strings) are excluded throughout — renaming those is a wire break and a spec change, not a local one.
+
+**Commits:** one per repo, all pushed to `origin/main`; superproject pointer bump is `3c34324b1`, not yet pushed. No version bumps, no tags, no publish — this is source only, per the standing hold on releases. lazily-py's `tests/test_reactive_graph_conformance.py` and `uv.lock` were already dirty from the last release and I left them out of the commit. `gh run list --workflow CI` reports no CI workflow in agent-loop, so local suites are the gate here.
+<!-- agent:boundary:d4fc8d2e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- 🚧 Rename CellTree to SourceTree. Scan the lazily spec + formal + implementations for any other moderization renames that are needed.
+- ~~Rename CellTree to SourceTree. Scan the lazily spec + formal + implementations for any other moderization renames that are needed.~~
 - Also rename EntryKind::Cell to EntryKind::Source + EntryKind::Slot to EntryKind::Computed.
 - ⏭️ do [#lzjsnpmtrustedpub]
 - ⏭️ do [#lzcsqueues]
@@ -373,14 +423,28 @@ lazily-rs's `spec_compliance` failed the moment I bumped `Cargo.toml`, because i
 - ⏭️ do [#lzcsipc]
 - ⏭️ do [#lzcssync]
 - ⏭️ do [#lzcstemporal]
-- do [#lzcscluster]
+- ⏭️ do [#lzcscluster]
 - do [#lzcsplane]
 - do [#lzcspackage]
+- do [#asyncplanenever]
+- do [#lazilyrenameinverted]
+- do [#readmeexamplesreference]
+- do [#signalgetsignallive]
+- do [#observerwordingcontradic]
+- do [#renametreesource]
+- do [#recommendeddecidewhether]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#asyncplanenever] Async plane never migrated to the v2 kernel: AsyncCellHandle / AsyncSlotHandle / AsyncSlotState survive in cpp, go, js, kt, py, zig, cs. Sharpest case is lazily-cpp `AsyncContext::memo()` (async_context.hpp:144), still live and undeprecated while the sync `Context::memo` is DELETED. Migrate to Async{Source,Computed} with deprecated aliases.
+- [ ] [#lazilyrenameinverted] lazily-py has the v2 rename INVERTED vs every other binding: `class Cell` is primary with `Source = Cell` (cell.py:35,219) and `class CellSlot` primary with `SourceSlot = CellSlot` (cell.py:191,220). Flip so Source/SourceSlot are canonical and Cell/CellSlot are the deprecated aliases.
+- [ ] [#readmeexamplesreference] README examples reference types that no longer exist: lazily-go README:82 `lazily.NewCell` (never defined, example does not compile) and README:209 `*Cell[V]`; lazily-cpp README:54,280,387 + AGENTS.md:43 `CellHandle`/`SlotHandle` (deleted); lazily-dart README:38,329 claims a `Signal` back-compat alias that does not exist; lazily-py README:225 calls `CellSlot` canonical.
+- [ ] [#signalgetsignallive] signal/getSignal still live and UNDEPRECATED on the threadsafe/async planes after the sync plane retired them: lazily-kt ThreadSafeContext.kt:195,247 + AsyncContext.kt:624, lazily-js reactive-async.d.ts:85, lazily-zig root.zig:86,90. Deprecate or migrate to eager Computed.
+- [ ] [#observerwordingcontradic] "observer" wording contradicts the no-observers-only-Effects rule (#lzdartobservercow): lazily-cs Effect.cs:41,59 + Reactive.cs:119, lazily-dart core.dart:1386,1418 + state_chart.dart:13, lazily-zig effect.zig:12,202, lazily-js README:149, lazily-formal ThreadSafe.lean:9, lazily-kt ThreadSafeContext.kt:37. Effects are not observers; fix the prose.
+- [ ] [#renametreesource] Rename the tree source files to match their types now that CellTree is SourceTree: lazily-rs src/cell_tree.rs, lazily-zig src/lazily/cell_tree.zig, lazily-cs src/Lazily/CellTree.cs + tests/Lazily.Tests/CellTreeTests.cs. lazily-cs precedent (81411c2) git mv'd its renamed files, so leaving them is a divergence from that repo's own convention.
+- [ ] [#recommendeddecidewhether] [recommended] Decide whether the domain *Cell family (QueueCell / TopicCell / RelayCell / MergeCell / TimerCell / LeaseCell / CircuitBreakerCell / PresenceCell / ...) follows the kernel to *Source, or is deliberately pinned as spec-level naming. Three independent bindings flagged it as the largest remaining Cell-vocabulary surface. It must move in lockstep across all 9 bindings, so it needs a decision before anyone starts.
 - [ ] [#lzjsnpmtrustedpub] lazily-js: register @lazily-hub/lazily-js as a trusted publisher on npmjs.com so release.yml can publish unattended. The workflow is correct — its OIDC exchange succeeds and provenance is signed and logged to Sigstore — but the upload is rejected with E404 PUT https://registry.npmjs.org/@lazily-hub%2flazily-js, meaning npm does not associate the package with that publisher (or the token lacks scope permission). This has now E404'd on two consecutive releases and each time required a manual 'npm publish --access public --otp=<code>' from the operator. Fix is npmjs.com-side configuration, not a code change
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
 - [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)

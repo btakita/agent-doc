@@ -156,6 +156,18 @@ pub fn complete_required_closeout_with_options(
     }
 
     let mut did_commit = effects.commit_for_authority(file, options.force_disk)?;
+    // `#closeoutphaselabels`: this used to be one phase called `git_commit`, and
+    // that label is why closeout latency was misdiagnosed. It is not git —
+    // `commit-io`'s own internal `commit.git_commit` timer measures 9-19ms on
+    // this project while the enclosing phase reported 4.6-22.5s. The seconds are
+    // editor-authority resolution and CRDT convergence inside
+    // `commit_for_authority`, plus a controller round trip below; the git
+    // plumbing (`read-tree`/`write-tree`/`commit-tree`) is 1-4ms each.
+    //
+    // A phase name that points at the wrong subsystem costs real time: it sent
+    // this investigation into `git status` submodule scans, which were genuinely
+    // 47x too slow and still not the cost. Name the phases for what they wait on.
+    timer.mark("commit_authority");
     // `#staleinmem` — record the just-committed on-disk content as the hub baseline
     // so a later out-of-band disk correction is detectable at the next commit
     // barrier (no-op under the Detached / headless path).
@@ -172,7 +184,7 @@ pub fn complete_required_closeout_with_options(
     }
     rc.invalidate_head_content();
     rc.invalidate_snapshot_content();
-    timer.mark("git_commit");
+    timer.mark("record_committed_baseline");
     ensure_cycle_committed(file)?;
     timer.mark("cycle_state");
 

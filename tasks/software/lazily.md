@@ -351,7 +351,7 @@ The five transcriptions and their now-unused Reader harness are deleted. What re
 `make check` green: 93 canonical fixtures across 18 areas, KNOWN_UNCOVERED 25 → 20. Pushed as `36bcb6e`, gitlink `4bc11979e`.
 
 Two housekeeping notes carried by this cycle. `tasks/software/lazily.done.md` had briefly been committed as a stray full copy of this session document (frontmatter and all) when it rode along on an unrelated staged commit; the correct 18-line archive is restored here. And #lzqfports keeps a written kept-open reason rather than a silent skip: #lzqfspec and #lzqffx are committed, but its stated precondition #lzqfrs is not, so dispatching six binding subagents now would be six independent guesses at a shape rs has not yet pinned. #lzqfrs is the next real head.
-<!-- agent:boundary:7a8fb49d -->
+<!-- agent:boundary:76d3cf65 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -383,8 +383,8 @@ Two housekeeping notes carried by this cycle. `tasks/software/lazily.done.md` ha
 - ⏭️ do [#lazilyrenameinverted]
 - ⏭️ do [#readmeexamplesreference]
 - ⏭️ do [#signalgetsignallive]
-- 🚧 do [#observerwordingcontradic]
-- do [#renametreesource]
+- ⏭️ do [#observerwordingcontradic]
+- 🚧 do [#renametreesource]
 - do [#recommendeddecidewhether]
 - do [#lazilycppconformance]
 - do [#portconformancecoverage]
@@ -437,8 +437,8 @@ Two housekeeping notes carried by this cycle. `tasks/software/lazily.done.md` ha
 - [ ] [#lazilyrenameinverted] [recommended] lazily-py keeps `Cell`/`CellSlot` as the native class names with `Source = Cell` / `SourceSlot = CellSlot` aliases (cell.py:35,191,219-220). This is NOT drift — it is documented and motivated: cell.py is inside the mypyc compilation unit (setup.py compiles slot/cell/signal/effect/batch as one unit for cross-file native-class inheritance BaseSlot -> CellSlot), and the docstring states Cell "stays the native class name (for mypyc native-struct reads and isinstance stability across the family)". Flipping would rename the native class and change isinstance identity. Do NOT flip without deciding whether mypyc native-struct naming or family-wide vocabulary consistency wins; that is a spec/ownership question, not a cleanup.
 - [ ] [#readmeexamplesreference] README examples reference types that no longer exist: lazily-go README:82 `lazily.NewCell` (never defined, example does not compile) and README:209 `*Cell[V]`; lazily-cpp README:54,280,387 + AGENTS.md:43 `CellHandle`/`SlotHandle` (deleted); lazily-dart README:38,329 claims a `Signal` back-compat alias that does not exist; lazily-py README:225 calls `CellSlot` canonical.
 - [ ] [#signalgetsignallive] signal/getSignal still live and UNDEPRECATED on the threadsafe/async planes after the sync plane retired them: lazily-kt ThreadSafeContext.kt:195,247 + AsyncContext.kt:624, lazily-js reactive-async.d.ts:85, lazily-zig root.zig:86,90. Deprecate or migrate to eager Computed.
-- [ ] 🚧 [#observerwordingcontradic] "observer" wording contradicts the no-observers-only-Effects rule (#lzdartobservercow): lazily-cs Effect.cs:41,59 + Reactive.cs:119, lazily-dart core.dart:1386,1418 + state_chart.dart:13, lazily-zig effect.zig:12,202, lazily-js README:149, lazily-formal ThreadSafe.lean:9, lazily-kt ThreadSafeContext.kt:37. Effects are not observers; fix the prose.
-- [ ] [#renametreesource] Rename the tree source files to match their types now that CellTree is SourceTree: lazily-rs src/cell_tree.rs, lazily-zig src/lazily/cell_tree.zig, lazily-cs src/Lazily/CellTree.cs + tests/Lazily.Tests/CellTreeTests.cs. lazily-cs precedent (81411c2) git mv'd its renamed files, so leaving them is a divergence from that repo's own convention.
+- [ ] [#observerwordingcontradic] "observer" wording contradicts the no-observers-only-Effects rule (#lzdartobservercow): lazily-cs Effect.cs:41,59 + Reactive.cs:119, lazily-dart core.dart:1386,1418 + state_chart.dart:13, lazily-zig effect.zig:12,202, lazily-js README:149, lazily-formal ThreadSafe.lean:9, lazily-kt ThreadSafeContext.kt:37. Effects are not observers; fix the prose.
+- [ ] 🚧 [#renametreesource] Rename the tree source files to match their types now that CellTree is SourceTree: lazily-rs src/cell_tree.rs, lazily-zig src/lazily/cell_tree.zig, lazily-cs src/Lazily/CellTree.cs + tests/Lazily.Tests/CellTreeTests.cs. lazily-cs precedent (81411c2) git mv'd its renamed files, so leaving them is a divergence from that repo's own convention.
 - [ ] [#recommendeddecidewhether] [recommended] Decide whether the domain *Cell family (QueueCell / TopicCell / RelayCell / MergeCell / TimerCell / LeaseCell / CircuitBreakerCell / PresenceCell / ...) follows the kernel to *Source, or is deliberately pinned as spec-level naming. Three independent bindings flagged it as the largest remaining Cell-vocabulary surface. It must move in lockstep across all 9 bindings, so it needs a decision before anyone starts.
 - [ ] [#lzjsnpmtrustedpub] lazily-js: register @lazily-hub/lazily-js as a trusted publisher on npmjs.com so release.yml can publish unattended. The workflow is correct — its OIDC exchange succeeds and provenance is signed and logged to Sigstore — but the upload is rejected with E404 PUT https://registry.npmjs.org/@lazily-hub%2flazily-js, meaning npm does not associate the package with that publisher (or the token lacks scope permission). This has now E404'd on two consecutive releases and each time required a manual 'npm publish --access public --otp=<code>' from the operator. Fix is npmjs.com-side configuration, not a code change
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)

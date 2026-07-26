@@ -1030,6 +1030,13 @@ pub struct RetainedWriteObservations {
     pub authority_payload_materialized: bool,
     pub disk_hash: Option<String>,
     pub disk_payload_materialized: bool,
+    /// `SupersededDeltaMaterialized` evidence. `#[serde(default)]` so a caller
+    /// built by an older binary still deserializes — it simply offers no delta
+    /// proof, which is the pre-existing behavior.
+    #[serde(default)]
+    pub authority_intent_delta_materialized: bool,
+    #[serde(default)]
+    pub disk_intent_delta_materialized: bool,
 }
 
 impl RetainedWriteObservations {
@@ -1039,17 +1046,28 @@ impl RetainedWriteObservations {
         Option<agent_doc_state_backbone::retained_write::ContentObservation>,
         Option<agent_doc_state_backbone::retained_write::ContentObservation>,
     ) {
-        let plane = |hash: Option<String>, payload_materialized: bool| {
+        let plane = |hash: Option<String>,
+                     payload_materialized: bool,
+                     intent_delta_materialized: bool| {
             hash.map(
                 |content_hash| agent_doc_state_backbone::retained_write::ContentObservation {
                     content_hash,
                     payload_materialized,
+                    intent_delta_materialized,
                 },
             )
         };
         (
-            plane(self.authority_hash, self.authority_payload_materialized),
-            plane(self.disk_hash, self.disk_payload_materialized),
+            plane(
+                self.authority_hash,
+                self.authority_payload_materialized,
+                self.authority_intent_delta_materialized,
+            ),
+            plane(
+                self.disk_hash,
+                self.disk_payload_materialized,
+                self.disk_intent_delta_materialized,
+            ),
         )
     }
 }

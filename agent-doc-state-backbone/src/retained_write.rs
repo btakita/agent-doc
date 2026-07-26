@@ -58,6 +58,12 @@ pub struct RetainedIntentFacts {
     /// different hash. Delivery-only projections have no such payload and must
     /// settle on exact bytes.
     pub carries_response_payload: bool,
+    /// True when the intent adds at least one non-blank line to the content it
+    /// expected — i.e. it has a delta whose materialization is checkable.
+    ///
+    /// A deletion-only or whitespace-only intent adds nothing, so there is no
+    /// delta to find in the converged content and it stays on exact bytes.
+    pub carries_content_delta: bool,
 }
 
 /// One observation of a content plane.
@@ -69,6 +75,10 @@ pub struct RetainedIntentFacts {
 pub struct ContentObservation {
     pub content_hash: String,
     pub payload_materialized: bool,
+    /// Does this content already contain every non-blank line the retained
+    /// intent was going to add? See [`SatisfiedProof::SupersededDeltaMaterialized`].
+    #[serde(default)]
+    pub intent_delta_materialized: bool,
 }
 
 /// Why a retained intent is not settleable yet.
@@ -100,6 +110,29 @@ pub enum SatisfiedProof {
     /// converged content. This is the case the byte-equality clear could never
     /// reach, and the one that stranded the intent.
     RebasedPayloadMaterialized,
+    /// The stamped target was superseded by a **later write of the same cycle**,
+    /// and every non-blank line the intent was going to add is present in the
+    /// converged content.
+    ///
+    /// This is not the operator-edit rebase above; it is agent-doc's own
+    /// pipeline overtaking itself. A closeout routinely writes twice — the
+    /// response/backlog `pending_write`, then the `pending_add_sync` queue
+    /// mirror seconds later — and the second target is a superset of the first.
+    /// If the closeout is interrupted between them, the first intent is retained
+    /// against bytes the document has already moved past, and neither exact
+    /// equality nor the response-payload proof can ever fire: the response was
+    /// materialized by an *earlier* write, so it is not this intent's payload.
+    /// The result is a gate that waits forever for a hash that will never
+    /// reappear, refusing every future cycle. Observed 2026-07-26 on
+    /// `tasks/agent-doc/agent-doc-bugs2.md` (`pending_write` target 85054 bytes
+    /// superseded by `pending_add_sync` at 85183, `delivery_converged=true` for
+    /// the whole wait).
+    ///
+    /// The delta is what makes this safe: the intent's *purpose* is to add
+    /// content, and requiring every added line to be present is strictly
+    /// stronger than "the document changed". Content that never carried the
+    /// write cannot satisfy it.
+    SupersededDeltaMaterialized,
 }
 
 impl SatisfiedProof {
@@ -107,6 +140,7 @@ impl SatisfiedProof {
         match self {
             Self::ExactTarget => "exact_target",
             Self::RebasedPayloadMaterialized => "rebased_payload_materialized",
+            Self::SupersededDeltaMaterialized => "superseded_delta_materialized",
         }
     }
 }
@@ -159,6 +193,48 @@ impl SettlementVerdict {
     }
 }
 
+/// The non-blank lines a retained intent was going to ADD to the content it
+/// expected (`SupersededDeltaMaterialized`).
+///
+/// Line-set rather than a positional diff on purpose: the question is "did this
+/// content end up in the document", not "did it end up at this offset". A later
+/// superseding write may legitimately place the same lines at a different
+/// position (the queue mirror inserts above them), and a positional diff would
+/// call that a miss.
+///
+/// Blank lines are excluded because they carry no evidence — a document with any
+/// blank line would otherwise "contain" a whitespace-only intent's whole delta.
+/// Without `expected` (an intent stamped before expected-content was retained)
+/// there is no baseline to subtract, so the delta is unknown and empty: an
+/// unknown delta must not become a settlement proof.
+pub fn intent_added_lines<'a>(expected: Option<&str>, target: &'a str) -> Vec<&'a str> {
+    let Some(expected) = expected else {
+        return Vec::new();
+    };
+    let baseline: std::collections::HashSet<&str> =
+        expected.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    let mut seen = std::collections::HashSet::new();
+    target
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .filter(|line| !baseline.contains(line.trim()))
+        .filter(|line| seen.insert(line.trim()))
+        .collect()
+}
+
+/// Is every line in `added` present in `content`?
+///
+/// Empty `added` answers `false`, not `true`. Vacuous truth is the dangerous
+/// answer here: it would settle every intent whose delta could not be computed.
+pub fn added_lines_materialized_in(added: &[&str], content: &str) -> bool {
+    if added.is_empty() {
+        return false;
+    }
+    let present: std::collections::HashSet<&str> =
+        content.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    added.iter().all(|line| present.contains(line.trim()))
+}
+
 /// The whole decision as a pure total function of its observations.
 ///
 /// Kept separate from the cells so it is unit-testable with fixed inputs, and
@@ -189,6 +265,8 @@ pub fn settlement_verdict(
         Some(SatisfiedProof::ExactTarget)
     } else if pending.carries_response_payload && authority.payload_materialized {
         Some(SatisfiedProof::RebasedPayloadMaterialized)
+    } else if pending.carries_content_delta && authority.intent_delta_materialized {
+        Some(SatisfiedProof::SupersededDeltaMaterialized)
     } else {
         None
     };
@@ -308,6 +386,7 @@ mod tests {
             target_hash: target_hash.to_string(),
             reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
             carries_response_payload,
+            carries_content_delta: false,
         }
     }
 
@@ -315,6 +394,7 @@ mod tests {
         ContentObservation {
             content_hash: content_hash.to_string(),
             payload_materialized,
+            intent_delta_materialized: false,
         }
     }
 
@@ -418,6 +498,90 @@ mod tests {
             }
             other => panic!("expected Unsettled, got {other:?}"),
         }
+    }
+
+    /// The 2026-07-26 deadlock. A closeout writes twice: the `pending_write`
+    /// carrying response+backlog, then the `pending_add_sync` queue mirror whose
+    /// target is a superset. Interrupted between them, the first intent is
+    /// stamped against bytes its own successor already replaced. Its target hash
+    /// will never reappear, and `carries_response_payload` is false because the
+    /// response cell's hash belongs to an *earlier* write — so before the delta
+    /// proof, nothing could settle it and every later cycle was refused.
+    #[test]
+    fn a_target_superseded_by_the_closeouts_own_later_write_settles_on_its_delta() {
+        let mut superseded = intent("pending_write_target", false);
+        superseded.carries_content_delta = true;
+        let mut converged = observed("queue_mirror_target", false);
+        converged.intent_delta_materialized = true;
+
+        let verdict =
+            settlement_verdict(Some(&superseded), Some(&converged), Some(&converged.clone()));
+        assert!(
+            verdict.should_clear_intent(),
+            "an intent whose successor carried its content must not block every future cycle"
+        );
+        assert!(!verdict.blocks_new_cycle());
+        match verdict {
+            SettlementVerdict::Satisfied { proof, .. } => {
+                assert_eq!(proof, SatisfiedProof::SupersededDeltaMaterialized)
+            }
+            other => panic!("expected Satisfied, got {other:?}"),
+        }
+    }
+
+    /// The delta proof must not become a way to settle anything. If the added
+    /// lines are NOT all present, the write genuinely has not landed and the
+    /// gate must keep holding — that is the invariant protecting operator text.
+    #[test]
+    fn a_delta_that_did_not_land_still_blocks() {
+        let mut superseded = intent("stamped", false);
+        superseded.carries_content_delta = true;
+        let elsewhere = observed("other", false); // intent_delta_materialized: false
+
+        let verdict = settlement_verdict(
+            Some(&superseded),
+            Some(&elsewhere),
+            Some(&elsewhere.clone()),
+        );
+        assert!(verdict.blocks_new_cycle());
+        assert!(!verdict.should_clear_intent());
+
+        // And an intent with nothing to add cannot borrow another intent's
+        // materialization: no delta, no delta proof.
+        let no_delta = intent("stamped", false);
+        let mut materialized = observed("other", false);
+        materialized.intent_delta_materialized = true;
+        assert!(
+            settlement_verdict(Some(&no_delta), Some(&materialized), Some(&materialized.clone()))
+                .blocks_new_cycle(),
+            "a deletion-only or unknown-delta intent must stay on exact bytes"
+        );
+    }
+
+    #[test]
+    fn the_delta_is_the_lines_the_intent_adds_and_an_unknown_baseline_yields_none() {
+        let expected = "alpha\n\nbeta\n";
+        let target = "alpha\n\nbeta\n\nadded one\nadded two\n";
+        assert_eq!(
+            intent_added_lines(Some(expected), target),
+            vec!["added one", "added two"]
+        );
+
+        // Position is not part of the question: a superseding write may place the
+        // same lines elsewhere, and a positional diff would call that a miss.
+        let added = intent_added_lines(Some(expected), target);
+        assert!(added_lines_materialized_in(
+            &added,
+            "preamble\nadded one\nalpha\nadded two\nbeta\n"
+        ));
+        assert!(!added_lines_materialized_in(&added, "alpha\nbeta\nadded one\n"));
+
+        // No baseline means the delta is UNKNOWN, not empty-and-satisfied.
+        assert!(intent_added_lines(None, target).is_empty());
+        // Vacuous truth is the dangerous answer: an empty delta proves nothing.
+        assert!(!added_lines_materialized_in(&[], "anything at all"));
+        // A whitespace-only intent carries no evidence either.
+        assert!(intent_added_lines(Some("alpha\n"), "alpha\n\n\n").is_empty());
     }
 
     /// `#idlerevisionreactive`: "I could not look" must stay distinct from "I
@@ -527,6 +691,7 @@ mod suppression_guard {
         ContentObservation {
             content_hash: hash.to_string(),
             payload_materialized: true,
+            intent_delta_materialized: false,
         }
     }
 
@@ -556,6 +721,7 @@ mod suppression_guard {
             target_hash: "stamped".to_string(),
             reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
             carries_response_payload: true,
+            carries_content_delta: false,
         }));
         assert!(
             settlement.verdict().should_clear_intent(),
@@ -569,6 +735,7 @@ mod suppression_guard {
             target_hash: "stamped".to_string(),
             reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
             carries_response_payload: true,
+            carries_content_delta: false,
         }));
         assert!(
             matches!(suppressed.verdict(), SettlementVerdict::Unobserved { .. }),

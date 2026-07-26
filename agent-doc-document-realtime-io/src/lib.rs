@@ -6010,7 +6010,11 @@ fn projected_captured_response(file: &Path) -> Option<String> {
 /// distinct outcome from "I looked and it is outstanding"
 /// (`#idlerevisionreactive`), and collapsing them would turn a transport blip
 /// into a permanent refusal to open a cycle.
-fn observe_plane(content: Result<String>, payload: Option<&str>) -> Option<ContentObservation> {
+fn observe_plane(
+    content: Result<String>,
+    payload: Option<&str>,
+    intent_added_lines: &[&str],
+) -> Option<ContentObservation> {
     let content = content.ok()?;
     let payload_materialized = payload.is_some_and(|payload| {
         agent_doc_turn::response_replay::response_materialized_in_content(payload, &content)
@@ -6018,6 +6022,11 @@ fn observe_plane(content: Result<String>, payload: Option<&str>) -> Option<Conte
     Some(ContentObservation {
         content_hash: agent_doc_hash::content_hash(&content),
         payload_materialized,
+        intent_delta_materialized:
+            agent_doc_state_backbone::retained_write::added_lines_materialized_in(
+                intent_added_lines,
+                &content,
+            ),
     })
 }
 
@@ -6046,23 +6055,53 @@ fn observe_retained_write_settlement(file: &Path, source: &str) -> RetainedWrite
         )
     });
 
+    // The lines this intent was going to add. A closeout writes more than once
+    // (response/backlog, then the queue mirror), so an interrupted one leaves the
+    // earlier intent stamped against bytes its own successor already replaced;
+    // the delta is what proves that successor carried it.
+    let added_lines = agent_doc_state_backbone::retained_write::intent_added_lines(
+        pending.expected_content.as_deref(),
+        &pending.target_content,
+    );
+
     settlement.observe_pending(Some(RetainedIntentFacts {
         intent_id: pending.intent_id.clone(),
         target_hash: pending.target_hash.clone(),
         reason: pending.reason.clone(),
         carries_response_payload: payload.is_some(),
+        carries_content_delta: !added_lines.is_empty(),
     }));
     settlement.observe_authority(observe_plane(
         try_resolve_current_document_content(file, source),
         payload,
+        &added_lines,
     ));
     // Observation must not claim authority: `peek_disk_document_content` reads
     // the same bytes without recording a disk-replica authority claim.
     settlement.observe_disk(observe_plane(
         peek_disk_document_content(file, source),
         payload,
+        &added_lines,
     ));
     settlement
+}
+
+/// Is the retained intent stranded rather than merely slow?
+///
+/// True when authority and disk have already converged and the intent still
+/// cannot settle: there is no delivery in flight, so no amount of waiting or
+/// retrying changes the answer. Guidance that says "retry" is actively wrong in
+/// this state, which is what turned one wedge into a long escalation on
+/// 2026-07-26. Kept here, beside the settlement adapters, so `session-check`
+/// asks the shared verdict rather than re-deriving the condition.
+pub fn retained_write_is_stranded(file: &Path, source: &str) -> bool {
+    matches!(
+        retained_write_settlement(file, source),
+        SettlementVerdict::Unsettled {
+            cause: agent_doc_state_backbone::retained_write::UnsettledCause::PayloadAbsentFromConvergedContent,
+            ..
+        }
+    )
 }
 
 /// The shared derived fact. `preflight` and `session-check` both read this.
@@ -6092,10 +6131,16 @@ pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict
         authority_payload_materialized: authority
             .as_ref()
             .is_some_and(|plane| plane.payload_materialized),
+        authority_intent_delta_materialized: authority
+            .as_ref()
+            .is_some_and(|plane| plane.intent_delta_materialized),
         authority_hash: authority.map(|plane| plane.content_hash),
         disk_payload_materialized: disk
             .as_ref()
             .is_some_and(|plane| plane.payload_materialized),
+        disk_intent_delta_materialized: disk
+            .as_ref()
+            .is_some_and(|plane| plane.intent_delta_materialized),
         disk_hash: disk.map(|plane| plane.content_hash),
     };
     match agent_doc_controller_io::project_controller::retained_write_settlement(

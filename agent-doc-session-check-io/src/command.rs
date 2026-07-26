@@ -1316,6 +1316,16 @@ fn retained_pending_write_message(
     // genuinely wrong, so the fix is not to weaken the guard — it is to name the
     // precondition that is actually missing.
     let editor_live = agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file);
+    // The same failure mode with the opposite precondition: the planes have
+    // ALREADY converged and the intent still cannot settle, so there is no
+    // pending delivery for a retry to observe. "Retry only session-check" then
+    // loops forever against a hash the document moved past — measured on
+    // 2026-07-26 through session-check retries, `admin reload-lib`, `repair`,
+    // `autofix`, and the `write --commit` that `doctor` recommends (which
+    // answers "empty response — nothing to write", because the body is already
+    // in the working tree). Name the command that actually resolves it.
+    let converged_but_unsettleable =
+        agent_doc_document_realtime_io::retained_write_is_stranded(file, "session_check_guidance");
     let convergence_detail = if !editor_live {
         " NOTE: zero live editor replicas are registered for this document, so \
          there is currently nothing for the delivery to converge WITH — it will \
@@ -1323,6 +1333,13 @@ fn retained_pending_write_message(
          editor so its replica re-registers; the retained capture then drains \
          automatically. The capture is durable in CRDT/Lazily state, so it is not \
          at risk while you do that."
+    } else if converged_but_unsettleable {
+        " NOTE: authority and disk have ALREADY converged and still do not \
+         satisfy this intent, so no delivery is in flight and retrying will not \
+         change the answer. This is a stranded target, not a slow one. Run \
+         `agent-doc commit <FILE>` to commit the content that is already \
+         present; do NOT force disk (the working tree already holds it, and a \
+         force-disk during an editor reconnect duplicates the response)."
     } else {
         ""
     };

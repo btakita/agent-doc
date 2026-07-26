@@ -836,8 +836,17 @@ impl ControllerDocumentGraphs {
 ///
 /// `carries_response_payload` asks whether the intent's own target contains the
 /// captured response: only such an intent can be proven landed by that response
-/// appearing in a rebased document. A delivery-only projection has no payload to
-/// stand in for its byte target and must settle on exact bytes.
+/// appearing in a rebased document.
+///
+/// That test is deliberately narrow — it is hash equality against the closeout's
+/// response cell — so a closeout's *second* write does not qualify. A closeout
+/// writes the response cell, then a `pending_write` carrying response+backlog,
+/// then the `pending_add_sync` queue mirror; only the first has the response
+/// cell's hash. An interrupt between the last two used to leave the middle
+/// intent with `carries_response_payload == false` and a target the queue mirror
+/// had already superseded, so nothing could ever settle it and every later cycle
+/// was refused. `carries_content_delta` is the proof that covers it: whatever
+/// the intent was adding is present in the converged content.
 fn retained_intent_facts_from_projection(
     document: &agent_doc_state_backbone::DocumentStateProjection,
 ) -> Option<agent_doc_state_backbone::retained_write::RetainedIntentFacts> {
@@ -850,12 +859,18 @@ fn retained_intent_facts_from_projection(
         .response_cell
         .as_ref()
         .is_some_and(|cell| cell.content_hash.eq_ignore_ascii_case(&pending.target_hash));
+    let carries_content_delta = !agent_doc_state_backbone::retained_write::intent_added_lines(
+        pending.expected_content.as_deref(),
+        &pending.target_content,
+    )
+    .is_empty();
     Some(
         agent_doc_state_backbone::retained_write::RetainedIntentFacts {
             intent_id: pending.intent_id.clone(),
             target_hash: pending.target_hash.clone(),
             reason: pending.reason.clone(),
             carries_response_payload,
+            carries_content_delta,
         },
     )
 }
@@ -7707,6 +7722,7 @@ agent:queue\n\
         agent_doc_state_backbone::retained_write::ContentObservation {
             content_hash: hash.to_string(),
             payload_materialized: true,
+            intent_delta_materialized: false,
         }
     }
 

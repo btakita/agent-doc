@@ -359,19 +359,20 @@ lazily-rs's `spec_compliance` failed the moment I bumped `Cargo.toml`, because i
 **npm E404'd again, and the cause is worth fixing at the source.** The workflow's OIDC exchange succeeded — provenance was signed and logged to Sigstore — and only the upload was rejected: `E404 PUT https://registry.npmjs.org/@lazily-hub%2flazily-js`. From npm that means the package is not registered to that trusted publisher, or the token lacks scope permission. It is the workflow's *registration* that is wrong, not its code, so this will recur every release until `@lazily-hub/lazily-js` is configured as a trusted publisher on npmjs.com. Registering it once makes future releases unattended; your manual publish confirmed `latest` is 0.28.0.
 
 **`lazily-macros` needed no publish** — 0.23.0 is already on crates.io and the rename never touched it, so the "macros before lazily" ordering constraint was satisfied without a second upload.
-<!-- agent:boundary:6fc58e29 -->
+<!-- agent:boundary:37135d7d -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- Rename CellTree to SourceTree. Scan the lazily spec + formal + implementations for any other moderization renames that are needed.
-- do [#lzjsnpmtrustedpub]
+- 🚧 Rename CellTree to SourceTree. Scan the lazily spec + formal + implementations for any other moderization renames that are needed.
+- Also rename EntryKind::Cell to EntryKind::Source + EntryKind::Slot to EntryKind::Computed.
+- ⏭️ do [#lzjsnpmtrustedpub]
 - ⏭️ do [#lzcsqueues]
 - ⏭️ do [#lzcscrdt]
 - ⏭️ do [#lzcsipc]
-- do [#lzcssync]
-- do [#lzcstemporal]
+- ⏭️ do [#lzcssync]
+- ⏭️ do [#lzcstemporal]
 - do [#lzcscluster]
 - do [#lzcsplane]
 - do [#lzcspackage]

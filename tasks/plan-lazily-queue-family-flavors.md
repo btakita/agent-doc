@@ -440,3 +440,20 @@ would fall into:
 **AsyncContext genuinely lacks both.** It has `source`, `computed_async` and
 `batch()`, but no synchronous-compute `computed` and no `clear` at all. Both are
 real prerequisites and remain to be built.
+
+### Phase 3 successor ids
+
+Phase 3 split into one item per primitive pair. The ids below are the tracked
+ones; earlier prose and commit messages from 2026-07-26 refer to them by three names
+that were never minted as items — `lzqfrsqueue`, `lzqfrstopic`, `lzqfrswork`,
+written there with a leading hash. agent-doc derives an item's id from its text,
+so those names resolve to nothing, and they are written WITHOUT the hash here so
+they do not read as tracked ids. Use these instead:
+
+| primitive pair | tracked id | blocked? |
+|---|---|---|
+| ThreadSafeQueueCell + AsyncQueueCell (reference) | `#lazilythreadsafequeuecel` | thread-safe half unblocked; async half waits on `#lzqfrs` |
+| ThreadSafeTopicCell + AsyncTopicCell | `#lazilythreadsafetopiccel` | follows the reference pair |
+| ThreadSafeWorkQueueCell + AsyncWorkQueueCell | `#lazilythreadsafeworkqueu` | follows the reference pair |
+
+`#lzqfrs` itself now holds only the remaining AsyncContext prerequisite.

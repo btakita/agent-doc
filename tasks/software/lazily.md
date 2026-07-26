@@ -283,7 +283,26 @@ Verification:
 Published commits: Go `f40f2b6`, Rust `2f61c63`, Zig `81070f7`; supervisor pointer commit `93d8dd08c`.
 
 Confidence: high. Both valid-manifest acceptance and corrupt-manifest rejection were exercised in every target binding, and Zig’s newly exposed false record was fixed at the recorder seam. Escalation: none for these repositories. The workspace-root `make check` remains separately red on the pre-existing `src/agent-doc` `delivery_version` compile errors and was not represented as part of this result.
-<!-- agent:boundary:1b89ba07 -->
+
+### Re: #lazilyconformancecoverag — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lazilyconformancecoverag]
+
+
+Kept this item open and explicitly staged, per the operator’s rule that incomplete bindings do not enter a feature’s peer/test group.
+
+The prior 37/124 measurement was stale. A fresh runtime-manifest gate reports C# opens 42/124 canonical fixtures and lists 82 as known-uncovered. The opened corpus is limited to reactive-graph 21, collections 10, statechart 7, materialization 3, and familysync 1. The remaining distributed, IPC, reliable-sync, signaling, and other planes are real missing product surfaces, not runner-wiring gaps.
+
+No implementation or coverage claim was added: doing so at this umbrella item would either duplicate the phase backlog or manufacture conformance against unsupported types. C# remains excluded from feature groups until the corresponding `#lzcs*` phase ships its production surface and replay, at which point the capability-driven suite can admit it.
+
+Changed paths: none. Existing dirty `AGENTS.md`, `README.md`, and `build/` in lazily-cs were preserved.
+
+Verification: `make check` passed — build clean, 77/77 tests passed, and runtime coverage reported 42/124 opened with 82 explicitly known-uncovered.
+
+Confidence: high. The staging decision is backed by the runtime manifest and the phase plan, not static source mentions. Escalation: none; this is deliberate product staging, and the item stays actionable through the existing `#lzcscollections`, `#lzcsqueues`, `#lzcscrdt`, `#lzcsipc`, `#lzcssync`, `#lzcstemporal`, `#lzcscluster`, and `#lzcsplane` phases.
+<!-- agent:boundary:67400f9b -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -291,7 +310,7 @@ Confidence: high. Both valid-manifest acceptance and corrupt-manifest rejection 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzsignalingnegative]~~
 - ~~do [#lazilyzigport]~~
-- do [#lazilyconformancecoverag]
+- ~~do [#lazilyconformancecoverag]~~
 - do [#lazilybenchmarkregressio]
 - do [#lzqfjs]
 - do [#lzqfports]
@@ -333,7 +352,7 @@ Confidence: high. Both valid-manifest acceptance and corrupt-manifest rejection 
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.
-- [ ] [#lazilyconformancecoverag] lazily-cs: 87 of 124 canonical fixtures unreplayed (cs opens 37). MEASURED via the runtime manifest 2026-07-26. CORRECTION — an earlier note on this item claimed the 7 statechart fixtures were a cheap "runner gap"; that was derived from the STATIC grep and is WRONG. cs enumerates its corpus, so no fixture filename appears in its sources, and the static count under-reported every area. Runtime truth: cs FULLY replays reactive-graph 21/21, statechart 7/7, materialization 3/3, familysync 1/1. There is NO runner-gap win anywhere in cs — every one of the 87 is a genuinely missing surface, each already declared in a per-runner Unsupported ledger with the blocking surface named. Unreplayed by area: collections 15, lossless-tree 9, root 8, message-passing 8, reliable-sync 8, rateshape 6, coordination 5, resilience/service/temporal/windowing 4 each, presence 3, agent-doc/distributed/signaling 2 each, crdt-tree/membership/receipts 1 each. Work it down against tasks/software/lazily-cs-parity-plan.md by SHIPPING SURFACES, not by wiring runners
+- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-26: 42/124 canonical fixtures opened, 82 known-uncovered (reactive-graph 21, collections 10, statechart 7, materialization 3, familysync 1 are covered). The remaining fixtures are genuinely missing product surfaces, not runner-wiring gaps. Keep open and work it down only by shipping the explicit tasks in tasks/software/lazily-cs-parity-plan.md (#lzcscollections, #lzcsqueues, #lzcscrdt, #lzcsipc, #lzcssync, #lzcstemporal, #lzcscluster, #lzcsplane); admit C# to each capability group only when that production surface and canonical replay ship.
 - [ ] [#lazilybenchmarkregressio] lazily-rs: the benchmark regression budgets have NO CI enforcement. ci.yml enumerates individual cargo test invocations and never runs `make check` or `benchmark-check`; regressions.yml runs only the loom model. So every budget in BENCHMARKS.md is enforced solely by whoever remembers to run `make benchmark-check` locally with a populated target/criterion — which, until #lazilyfailstarget, was nobody, because the gate hard-failed on a pruned target dir. Add a scheduled job (regressions.yml already has a nightly cron and is the natural home) that runs `cargo bench` then `make benchmark-check-strict`, so a real regression fails somewhere other than one developer machine. Note the numbers are machine-specific, so the job needs a stable runner class or relative-delta budgets rather than absolute ones
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all

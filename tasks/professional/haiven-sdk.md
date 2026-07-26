@@ -99,12 +99,32 @@ The eval suite verifies the request and its evidence as a system: expected and f
 **Verification:** both documents parse successfully through the Markdown AST (`79` nodes / `264` lines for the proposal and `240` nodes / `485` lines for the implementation plan), and whitespace validation passes. The stale `agent-doc` install was rebuilt successfully as `0.35.30`, including the matching editor package. Workspace `make check` then ran 955 of 8,181 tests: 952 passed and three current-tree `agent-doc::run_integration` owner-pane preflight tests failed (`preflight_emits_owned_pane_self_invocation_for_active_queue_head`, `preflight_emits_owned_pane_self_invocation_for_unresolved_prompt`, and `preflight_owned_pane_self_invocation_absent_for_non_owner_pane`). The Haiven changes are Markdown-only and do not touch that workstream, but the workspace is not green on this evidence. The required CI lookup was unavailable because this repository has no workflow named `CI`.
 
 **Confidence:** high that the requested MCP, guidance, CLI, and eval concepts are now presentation-ready and technically actionable. No additional backlog follow-up is needed because the requested artifact update is complete; remaining decisions are Milestone 0 commercial and product approvals.
-<!-- agent:boundary:ca03af1e -->
+
+### Re: Wave C engine market balance — gpt-5
+
+Agreed—Bevy is useful as a technically aligned Rust integration, but its present reach is too small for it to anchor the market-coverage wave. I updated both Haiven artifacts so Wave C now distinguishes broader-reach candidates from pilot-driven specialist adapters.
+
+The revised priority order is:
+
+- **GameMaker** is a Priority 3 market-balancing candidate for commercial 2D indie studios. The proposal calls for a GML-facing package plus platform extensions, with desktop/mobile/web first and consoles kept access-gated. GameMaker's official extension model supports third-party SDK and platform-specific integration, and its export surface spans desktop, mobile, web, and approved console lanes ([extensions](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Extensions.htm), [exports](https://gamemaker.io/en/blog/export-with-gamemaker)).
+- **Cocos Creator** is a Priority 3 TypeScript-oriented mobile/web candidate. The adapter shape is a TypeScript client/component package with native bridges only where required; Cocos officially supports TypeScript/JavaScript and project extension packages ([language support](https://docs.cocos.com/creator/3.7/manual/en/scripting/language-support.html), [extensions](https://docs.cocos.com/creator/3.8/manual/en/editor/extension/create-extension.html)).
+- **Construct 3** is a Priority 3 low-code/small-studio candidate, represented as a JavaScript/TypeScript addon with actions, conditions, expressions, events, and a sample project. Its official Addon SDK is designed for third-party service plugins, and its publishing targets cover web, mobile, and desktop wrappers ([Addon SDK](https://www.construct.net/en/make-games/manuals/addon-sdk), [publishing](https://www.construct.net/en/make-games/manuals/construct-3/overview/publishing-projects)).
+- **Bevy** moves to Priority 4 and the pilot-driven specialist group. MonoGame/FNA, Clickteam Fusion, and Source remain there; Defold, Phaser, and GDevelop are explicit pipeline- or reuse-driven evaluation options.
+
+The implementation plan's Wave C is now split into **Market-balancing candidates** and **Pilot-driven specialist candidates**. It also requires Milestone 0 to score named studios, target platforms, launch timing, integration cost, support burden, and protocol-core reuse before authorizing any adapter. That keeps the wider engine list commercially disciplined rather than turning it into an unsupported-platform promise.
+
+**Changed paths:** `tasks/recruit/haiven/sdk-proposal-2026-07-26.md` and `tasks/recruit/haiven/sdk-implementation-plan-2026-07-26.md`, committed as `383138ada`.
+
+**Verification:** both updated documents parse through the Markdown AST (`82` nodes / `279` lines and `246` nodes / `511` lines), whitespace validation passes, and the full workspace `make check` passed all `8,181` tests (`241` skipped). The required GitHub lookup remains unavailable because this repository has no workflow named `CI`.
+
+**Confidence:** high that Wave C now balances market reach much better without overcommitting to unsupported engines. No additional backlog follow-up is needed because the requested prioritization and artifact update are complete. The session document is large, but I left it un-compacted because auto-compaction is off and no compaction approval was given.
+Bevy has extremely small marketshare. Please include other engines in Wave C to balance the marketshare.
+<!-- agent:boundary:f99cbe6f -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue go -->
+<!-- agent:queue -->
 <!-- /agent:queue -->
 
 ## Backlog

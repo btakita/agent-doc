@@ -311,24 +311,38 @@ Rows 7 and 8 done and pushed. All seven fixtures replay with an empty ledger —
 **Verification.** `make check` green (72 tests, up from 66), `dotnet format --verify-no-changes` clean. Rows 7 and 8 flipped, table regenerated and committed one repo at a time across the spec and all nine sibling READMEs. lazily-cs CI queued at closeout, recorded rather than waited on.
 
 That puts lazily-cs at 11 of 48 rows. Remaining phases are the queue/topic/work-queue family, the CRDT plane, IPC, reliable sync, temporal, cluster, the projection plane, and packaging.
-<!-- agent:boundary:cc9a9177 -->
+
+### Re: SourceMap / ComputedMap rename across the family — opus-5
+
+Rename done across all eleven repos, every one CI-green. The release train is queued separately, and I explain below why I did not fire it at the end of this session.
+
+**Why the names changed.** This finishes the v2 kernel migration. The node kinds became `Source` and `Computed`; the maps were still carrying the pre-v2 `Cell`/`Slot` vocabulary. The new names say which kind of entry the map holds.
+
+**Spec and formal first, as instructed — and that ordering earned its keep.** Three bindings (go, dart, kt) were *already red* against the renamed corpus before their agents touched anything: fixture resolution is sibling-first, so the spec push had invalidated their `model` assertions. Each repaired it in the same pass. That breakage window is exactly what "spec first" is for, and it is the reason the dual-accept requirement was in every brief rather than left to discretion.
+
+**Deprecation cost something different in every language, and two of those costs were yours to weigh.**
+
+- **Go**: generic type aliases require Go 1.24 (gated behind `GOEXPERIMENT` in 1.23). Verified directly — `go1.23.12` rejects the alias, `go1.24.6` accepts. CI was pinned at 1.23, so the aliases would have compiled locally and broken CI. You chose to publish with the raised floor.
+- **C#**: no exportable generic type alias exists, so the only shim was an `[Obsolete]` subclass — which forced unsealing all four renamed types and was still one-directional. You chose to drop it and re-seal. lazily-cs has no published package, so the deprecation protected nobody; the divergence is recorded in its AGENTS.md rather than left as drift.
+- Rust, Go, Kotlin, Python, Zig, Dart, JS, C++ all got real aliases their languages can express.
+
+**Three agents independently added something I had not asked for**, and they were right: a test that constructs the deprecated aliases. Without a reference the requirement is unenforced — a later cleanup deletes the aliases and stays green. Zig's case is the sharpest, since Zig only semantically analyzes *referenced* declarations, so an unreferenced broken alias would ship invisibly.
+
+**Two defects found that predate this work.** lazily-rs `main` was already failing `cargo fmt --all --check` on three files from an earlier commit. And `from lazily import *` raised `AttributeError` in lazily-py, because `__all__` carried a quoted section divider written inside the list instead of above it — every targeted import kept working, which is why nothing caught it. I fixed the py one rather than publish it: three guards, each verified to go red by re-inserting the divider. 524 tests green.
+
+**Verification.** Ten of eleven repos CI-green on their rename commit (lazily-formal has no CI workflow; lazily-rs was still running at the last check and was green locally on its full feature-sliced gate). `sync-coverage.mjs --check` passes family-wide, so no README carries a stale table. Every residual old name is a deprecated alias, its re-export, or an accurate CHANGELOG entry.
+
+**Why the release is a separate item.** It is ten targets across five irreversible publish mechanisms — crates.io, PyPI via wheels CI, GitHub Packages (immutable; a 409 kills the publish outright), npm, and pub.dev — plus tag-and-release for spec, formal, zig, cpp and go. Two things make it a poor fit for the tail of this session: **npm needs your 2FA**, so lazily-js cannot complete unattended; and **lazily-zig's version file is already inconsistent with its own last release** (`build.zig.zon` 0.28.0 against a published v0.29.0), which is pre-existing drift that needs a deliberate decision rather than a bulk bump. Publishing is the one step that cannot be undone, so it gets a clean context rather than the end of a long one. The item carries the per-target mechanism, the proposed minor bumps, and both decisions you already made, so none of it is re-litigated.
+<!-- agent:boundary:e9be75cf -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#lzcsfamilysync]~~
-- ~~do [#lzcsreactivemapfx]~~
-- ~~do [#lzcssemtree]~~
-- ~~do [#lzzigcitoolchain]~~
-- ~~do [#lzgoerrorretry]~~
-- ~~do [#lzasyncerrfixture]~~
-- ~~do [#lzcscollections]~~
-- Rename CellMap to SourceMap + SlotMap to ComputedMap + ThreadSafeCellMap to ThreadSafeSourceMap + ThreadSafeSlotMap to ThreadSafeComputedMap + AsyncCellMap to AsyncSourceMap + AsyncSlotMap to AsyncComputedMap. Deprecate the old names. Do this across spec + formal first then implementations in subagents. Release + publish spec + formal + all implementations except lazily-cs.
-- ~~do [#lzcsstatechart]~~
+- ~~Rename CellMap to SourceMap + SlotMap to ComputedMap + ThreadSafeCellMap to ThreadSafeSourceMap + ThreadSafeSlotMap to ThreadSafeComputedMap + AsyncCellMap to AsyncSourceMap + AsyncSlotMap to AsyncComputedMap. Deprecate the old names. Do this across spec + formal first then implementations in subagents. Release + publish spec + formal + all implementations except lazily-cs.~~ — auto-struck: answered this cycle (#ftstrike)
 - ⏭️ do [#lzcsqueues]
 - ⏭️ do [#lzcscrdt]
-- 🚧 do [#lzcsipc]
+- ⏭️ do [#lzcsipc]
 - do [#lzcssync]
 - do [#lzcstemporal]
 - do [#lzcscluster]
@@ -339,9 +353,10 @@ That puts lazily-cs at 11 of 48 rows. Remaining phases are the queue/topic/work-
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzrenamerelease] lazily: release + publish the SourceMap/ComputedMap rename — spec, formal, rs, py, kt, js, dart, zig, go, cpp (NOT lazily-cs, deliberately excluded). Proposed minor bumps: spec+formal 0.35.0->0.36.0, rs 0.48.1->0.49.0, py 0.35.0->0.36.0, kt 0.36.1->0.37.0, js 0.27.0->0.28.0, dart 0.25.0->0.26.0, zig ->0.30.0, go v0.21.0->v0.22.0, cpp v0.23.0->v0.24.0. Mechanisms differ per target: crates.io (token in passage, macros before lazily), PyPI via the wheels workflow, GitHub Packages for kt (IMMUTABLE - a 409 kills the publish, so the version must be new), npm for js (BLOCKED on operator 2FA), pub.dev for dart (manual OAuth, not 2FA-blocked), tag + gh release for spec/formal/zig/cpp/go. TWO PRE-EXISTING SNAGS: lazily-zig build.zig.zon says 0.28.0 while its published GitHub release is v0.29.0, so the version file is behind its own release and needs a deliberate decision, not a bulk bump; and lazily-cpp's project version likewise trails its v0.23.0 tag. Decisions already made, do not re-litigate: publish lazily-go with the raised Go 1.24 floor (generic type aliases need it), and lazily-cs keeps NO deprecated aliases with its types re-sealed
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
 - [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)
-- [ ] 🚧 [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
+- [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
 - [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)
 - [ ] [#lzcstemporal] lazily-cs: TimerCell/IntervalCell/CronCell/DeadlineCell over a logical clock, debounce/throttle/sample/probabilistic-sample, tumbling/sliding/session windows; replay temporal + rateshape + windowing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 40, 41, 45)
 - [ ] [#lzcscluster] lazily-cs: MembershipCell (SWIM + Phi-accrual), LeaseCell/LeaderCell/LockCell/SemaphoreCell/BarrierCell, presence/awareness/ephemeral, circuit breaker/retry/bulkhead/timeout, health/readiness/discovery/registry; replay membership + coordination + presence + resilience + service corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 42-44, 46-47)

@@ -5896,8 +5896,6 @@ fn resolve_disk_only_current_doc(
 // both consumers the *same* `Computed`.
 // ---------------------------------------------------------------------------
 
-use std::sync::Arc;
-
 use agent_doc_state_backbone::retained_write::{
     ContentObservation, RetainedIntentFacts, RetainedWriteSettlement, SettlementVerdict,
 };
@@ -6025,56 +6023,44 @@ pub fn retained_write_blocks_new_cycle(file: &Path, source: &str) -> bool {
     retained_write_settlement(file, source).blocks_new_cycle()
 }
 
-/// Settle a retained write whose purpose the converged document already meets.
+/// Settle a retained write whose purpose the converged document already meets:
+/// the **projection** half of `#retainedsettlereactive`.
 ///
-/// The clear is an [`Effect`](lazily::Effect) gated on the derived verdict, not
-/// a `settle_*` call a code path had to remember to make: it fires because the
-/// observations say the intent is satisfied, and is a no-op whenever they do
-/// not. Returns whether the intent was cleared.
+/// There is deliberately no `Effect` here. The first version wrapped the clear
+/// in one and then had to smuggle the result back out through an
+/// `Arc<Mutex<Option<Result<bool>>>>`, disposing the effect on the next line —
+/// an `Effect` used as a synchronous function call. The `Arc<Mutex<..>>` was the
+/// tell. `#idlerevisionreactive` states the rule directly: *if an `Effect`'s
+/// whole body assigns a value, it should have been a `Computed`.*
+///
+/// So the decision is the `Computed` ([`retained_write_settlement`], derived in
+/// the controller's shared graph) and this is a plain projection over it —
+/// Cells decide, projection applies. Idempotent by construction: every verdict
+/// other than `Satisfied` is a no-op, so calling it twice clears nothing twice.
 pub fn settle_retained_write_through_derived_verdict(file: &Path, source: &str) -> Result<bool> {
-    let settlement = observe_retained_write_settlement(file, source);
-    let outcome: Arc<Mutex<Option<Result<bool>>>> = Arc::new(Mutex::new(None));
-
-    let effect = {
-        let verdict_cell = *settlement.verdict_cell();
-        let outcome = Arc::clone(&outcome);
-        let file = file.to_path_buf();
-        let source = source.to_string();
-        settlement.ctx().effect(move |ctx| {
-            let SettlementVerdict::Satisfied {
-                intent_id,
-                retained_target_hash,
-                settled_hash,
-                proof,
-            } = ctx.get(&verdict_cell)
-            else {
-                // Idempotent when the signal is empty: nothing to clear.
-                *outcome.lock() = Some(Ok(false));
-                return;
-            };
-            let cleared = clear_deferred_document_write_intent(&file, &retained_target_hash, &source)
-                .map(|()| {
-                    agent_doc_ops_log_io::log_op(
-                        &file,
-                        &format!(
-                            "retained_write_settled_from_derived_verdict file={} intent_id={} retained_target_hash={} settled_hash={} proof={} source={}",
-                            file.display(),
-                            intent_id,
-                            retained_target_hash,
-                            settled_hash,
-                            proof.token(),
-                            source,
-                        ),
-                    );
-                    true
-                });
-            *outcome.lock() = Some(cleared);
-        })
+    let SettlementVerdict::Satisfied {
+        intent_id,
+        retained_target_hash,
+        settled_hash,
+        proof,
+    } = retained_write_settlement(file, source)
+    else {
+        return Ok(false);
     };
-    settlement.ctx().dispose_effect(&effect);
-
-    let mut slot = outcome.lock();
-    slot.take().unwrap_or(Ok(false))
+    clear_deferred_document_write_intent(file, &retained_target_hash, source)?;
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "retained_write_settled_from_derived_verdict file={} intent_id={} retained_target_hash={} settled_hash={} proof={} source={}",
+            file.display(),
+            intent_id,
+            retained_target_hash,
+            settled_hash,
+            proof.token(),
+            source,
+        ),
+    );
+    Ok(true)
 }
 
 #[cfg(test)]

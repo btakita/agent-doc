@@ -644,7 +644,7 @@ Three things in this cycle: what to do about the stalled thread, whether a text 
 **3. Gravity Jack backing: a real update, and it moves the left tail, not the right one.** You're right to correct the model, in both directions. PresenceAI followed the normal startup script... unprofitable, shut down... and a profitable backer genuinely breaks that script: Gravity Jack's agency + patent-licensing revenue means Haiven likely doesn't die abruptly when the seed cash runs low. The Richeys can slow-burn it. Concretely that raises: the odds Haiven *exists* in 3-5 years, the odds your prototype fee gets paid, the odds a revenue-share-if-private ever has a company attached to it, and the durability of the ally relationship you're investing in. What it does **not** move: the $10M/$100M odds. A $1-3M/yr-scale agency can subsidize a small team's payroll; it cannot fund a growth run... that still requires the seed completing and the milestones landing. And there's a subtle downside scenario worth naming: backer-subsidized survival is also how companies persist for years in low-cash grind mode *without* the traction that makes equity or revenue-share worth anything... which is precisely the "long haul I don't have the stomach for" future you declined. So the update is net-positive *for the path you chose*... bounded prototype, ally relationship, door open... and neutral-to-negative for the path you didn't. It confirms rather than reopens the decision.
 
 Sequence for today: Acadian acceptance + questions (if outstanding), Haiven v3 letter, then the text. All three artifacts are committed and ready; the only remaining ingredient is send.
-<!-- agent:boundary:5f6526dd -->
+<!-- agent:boundary:bfdf895d -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -656,7 +656,6 @@ Sequence for today: Acadian acceptance + questions (if outstanding), Haiven v3 l
 
 <!-- agent:backlog queue -->
 - [ ] [#sdkcontract] #sdkcontract [on-hold] Prototype/contract path superseded by the decision to pursue the Haiven role; revive only if the package negotiation falls through (structure preserved in tasks/recruit/haiven/sdk-contract-structure.md)
-- [ ] [#haivensend] #haivensend [operator-verify] DECISION=Haiven: send the ACTIVE compensation ask (tasks/recruit/haiven/compensation-reply-draft.md) to Craig today, then the notification text; decline-draft.md is superseded/never sent
 - [ ] [#acadiansend] #acadiansend [operator-verify] HOLD Acadian (neither accept nor decline) until the Haiven package is agreed + signed; if the recruiter pings: 'finalizing another conversation, need a few days'; decline graciously only after Haiven signs
 <!-- /agent:backlog -->
 
@@ -685,5 +684,6 @@ Roblox already has a Child Safety team. Is this something that Haiven would appr
 - 2026-07-25 [#prototypeincludemultiple] I could have the prototype include multiple engines (Unity + Unreal + Discord) to validate the conformance.
 "for an intro that's useful": Should I also say "I have someone in mind"?
 - 2026-07-25 [#mentionexperienceapplyin] Should we mention that I have experience applying the same patterns cross-language which includes Classes/Traits/Interfaces and other type constructs + Systems Languages/Garbage Collected languages + other language features?
+- 2026-07-26 [#haivensend] #haivensend [operator-verify] DECISION=Haiven: send the ACTIVE compensation ask (tasks/recruit/haiven/compensation-reply-draft.md) to Craig today, then the notification text; decline-draft.md is superseded/never sent
 <!-- /agent:done -->
 92bcca70

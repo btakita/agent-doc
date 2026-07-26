@@ -1454,6 +1454,8 @@ name = "agent-doc-process-owner-io"
 version = "0.35.28"
 dependencies = [
  "agent-doc-controller",
+ "agent-doc-state-scope",
+ "lazily 0.49.0",
 ]
 
 [[package]]
@@ -2545,6 +2547,7 @@ name = "agent-doc-tmux-io"
 version = "0.35.28"
 dependencies = [
  "agent-doc-fs",
+ "agent-doc-process-owner-io",
  "agent-doc-state-scope",
  "agent-doc-tmux",
  "agent-doc-tmux-commands",

@@ -4948,6 +4948,15 @@ pub fn pane_runs_other_document_owner(tmux: &Tmux, pane_id: &str, claimed_file: 
     // reading it that way made a live Claude Code session in the project
     // directory electable and reapable. Treat an unmanaged harness pane as
     // foreign so owner election and reaping leave it alone.
+    //
+    // `#syncownerreactive`: both questions below are about the SAME pane's
+    // process tree, and each used to walk `/proc` for itself — so scanning N
+    // candidate panes cost 2N whole-table walks to re-answer questions about
+    // processes that had not changed. Opening the observation scope here makes
+    // the pair share one observation even when the caller opened no scope; when
+    // the caller did (a sync pass), this nests into theirs and the whole pass
+    // derives from one walk per pane.
+    let _observations = agent_doc_process_owner_io::begin_process_observation_scope();
     if agent_doc_process_owner_io::process_tree_runs_unmanaged_harness_session(&pane_pid) {
         return true;
     }

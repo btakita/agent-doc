@@ -97,6 +97,12 @@ impl ObservationScopeStats {
 /// the memo so a later run always re-observes.
 #[must_use = "the observation cache is active only while the guard is alive"]
 pub struct TmuxObservationScope {
+    /// The pane -> document owner graph shares this scope's lifetime: it answers
+    /// questions about the processes running in the panes observed here, and a
+    /// tmux mutation is the event that can change them. Held so the two scopes
+    /// open and close together rather than requiring every call site to
+    /// remember both.
+    _process_observations: agent_doc_process_owner_io::ProcessObservationScope,
     _not_send: std::marker::PhantomData<*const ()>,
 }
 
@@ -113,6 +119,7 @@ pub fn begin_observation_scope() -> TmuxObservationScope {
         }
     });
     TmuxObservationScope {
+        _process_observations: agent_doc_process_owner_io::begin_process_observation_scope(),
         _not_send: std::marker::PhantomData,
     }
 }
@@ -162,7 +169,15 @@ pub(crate) fn run_with_observation_cache(
                 state.reset_entries();
             }
         });
-        return spawn();
+        let result = spawn();
+        // The pane -> document owner graph CAN express the dependency, so it is
+        // re-observed rather than discarded: one `/proc` walk, written into each
+        // pane's `Source` under the equality guard. A pane whose process tree the
+        // mutation did not touch invalidates nothing; only a pane that actually
+        // changed recomputes its owner cells. Refresh after the mutation so the
+        // observation reflects the pane it created, killed, or respawned.
+        agent_doc_process_owner_io::refresh_process_observations();
+        return result;
     }
 
     let key = command.args().to_vec();

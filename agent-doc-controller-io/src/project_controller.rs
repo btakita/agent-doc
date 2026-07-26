@@ -81,8 +81,20 @@ const LAUNCH_CLAIM_WAIT: Duration = Duration::from_secs(1);
 const LAUNCH_CLAIM_POLL: Duration = Duration::from_millis(50);
 #[cfg(not(any(test, feature = "test-support")))]
 const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(5);
+/// The test-mode deadline exists so a *genuinely absent* controller fails fast
+/// instead of stalling the suite for 5s per call. It is not a latency assertion —
+/// no test checks that a response arrives within it.
+///
+/// 250ms made it one: on a loaded CI runner the fake in-process listener is not
+/// always scheduled inside a quarter second, so `compact_commit_preserves_only_
+/// unresolved_prompt_in_live_editor` failed with `transport failed at epoch 1 …
+/// timed out after 0.2s` while asserting nothing about timing. A deadline that
+/// fails when the machine is busy is measuring the runner, not the code. Two
+/// seconds keeps the fast-fail property (a missing controller still cannot cost
+/// 5s) with enough headroom that scheduling jitter cannot decide the outcome; a
+/// real hang is still caught by the harness's own per-test timeout.
 #[cfg(any(test, feature = "test-support"))]
-const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_millis(250);
+const CONTROLLER_RPC_TIMEOUT: Duration = Duration::from_secs(2);
 const CONTROLLER_IDLE_CLIENT_TIMEOUT: Duration = CONTROLLER_RPC_TIMEOUT;
 const SUPERVISOR_RECYCLE_SETTLE_WAIT: Duration = Duration::from_secs(10);
 

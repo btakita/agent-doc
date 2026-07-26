@@ -17398,22 +17398,34 @@ mod tests {
         std::fs::create_dir_all(sock.parent().unwrap()).unwrap();
         let name = sock.clone().to_fs_name::<GenericFilePath>().unwrap();
         let listener = ListenerOptions::new().name(name).create_sync().unwrap();
+        // The peer accepts and then never answers, holding the connection open
+        // until the client has given up. Parking on a channel rather than
+        // sleeping a multiple of the deadline keeps the test's runtime equal to
+        // the deadline itself instead of a multiple of it.
+        let (release, released) = std::sync::mpsc::channel::<()>();
         let handle = std::thread::spawn(move || {
             let _stream = listener.accept().unwrap();
-            std::thread::sleep(CONTROLLER_RPC_TIMEOUT * 2);
+            let _ = released.recv();
         });
 
         let started = Instant::now();
         let err = request(dir.path(), "status").unwrap_err();
+        let elapsed = started.elapsed();
+        drop(release);
+        handle.join().unwrap();
+
+        // Bound the read against the deadline itself, not a hard-coded wall
+        // clock: the previous `< 2s` literal silently became an equality with
+        // the deadline the moment that constant moved, turning a boundedness
+        // check into a latency assertion the runner could fail.
         assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "controller request should fail within the bounded timeout"
+            elapsed < CONTROLLER_RPC_TIMEOUT * 2,
+            "the read must be bounded by the deadline, not by the silent peer: {elapsed:?}"
         );
         assert!(
             err.to_string().contains("timed out") || format!("{err:#}").contains("timed out"),
             "{err:#}"
         );
-        handle.join().unwrap();
     }
     #[test]
     fn idle_controller_client_does_not_block_later_status_request() {

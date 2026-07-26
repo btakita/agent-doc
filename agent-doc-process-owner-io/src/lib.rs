@@ -2,28 +2,30 @@
 //!
 //! This crate owns process traversal and composes those
 //! observations with pure controller command-line ownership policy.
+//!
+//! Traversal is split in two (`#syncownerreactive`): [`proc_table`] performs the
+//! `/proc` observation, and [`owner_graph`] holds that observation as a `Source`
+//! with the pane -> document owner map derived over it. The free functions below
+//! are the stable call surface; each one reads through the graph when a scope is
+//! open and observes directly when it is not.
 
-use agent_doc_controller::command_line::{
-    agent_doc_cmdline_is_owner, agent_doc_owner_document_from_cmdline, cmdline_owns_other_document,
-    owner_document_from_cmdline,
+pub mod owner_graph;
+pub mod proc_table;
+
+pub use owner_graph::{
+    ProcessObservationScope, ProcessObservationStats, begin_process_observation_scope,
+    process_observation_scope_stats, refresh_process_observations,
 };
-use std::collections::{HashMap, HashSet};
+
+use agent_doc_controller::command_line::agent_doc_cmdline_is_owner;
+use owner_graph::with_tree_observation;
+use proc_table::{TreeProcess, tree_cmdlines};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 
-#[cfg(test)]
-fn parse_child_pids(output: &[u8]) -> Vec<String> {
-    String::from_utf8_lossy(output)
-        .lines()
-        .map(str::trim)
-        .filter(|pid| !pid.is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
-}
-
 pub fn child_pids(parent_pid: &str) -> Vec<String> {
-    proc_children_snapshot()
+    proc_table::observe_proc_children()
         .remove(parent_pid.trim())
         .unwrap_or_default()
 }
@@ -43,101 +45,10 @@ pub fn process_command(pid: &str) -> Option<String> {
 }
 
 pub fn process_tree_contains_pid(root_pid: &str, target_pid: u32) -> bool {
-    process_tree_pids(root_pid)
-        .into_iter()
-        .any(|pid| pid == target_pid.to_string())
-}
-
-#[cfg(test)]
-fn process_tree_contains_pid_with(
-    root_pid: &str,
-    target_pid: &str,
-    child_pids_for: impl FnMut(&str) -> Vec<String>,
-) -> bool {
-    process_tree_pids_with(root_pid, child_pids_for)
-        .into_iter()
-        .any(|pid| pid == target_pid)
-}
-
-#[cfg(test)]
-fn process_tree_pids_with(
-    root_pid: &str,
-    mut child_pids_for: impl FnMut(&str) -> Vec<String>,
-) -> Vec<String> {
-    let root_pid = root_pid.trim();
-    if root_pid.is_empty() {
-        return Vec::new();
-    }
-
-    let mut pids = Vec::new();
-    let mut seen = HashSet::new();
-    let mut frontier = vec![root_pid.to_string()];
-    while let Some(pid) = frontier.pop() {
-        if !seen.insert(pid.clone()) {
-            continue;
-        }
-        pids.push(pid.clone());
-
-        for child_pid in child_pids_for(&pid) {
-            let child_pid = child_pid.trim();
-            if child_pid.is_empty() {
-                continue;
-            }
-            frontier.push(child_pid.to_string());
-        }
-    }
-
-    pids
-}
-
-fn process_tree_pids(root_pid: &str) -> Vec<String> {
-    let root_pid = root_pid.trim();
-    if root_pid.is_empty() {
-        return Vec::new();
-    }
-    let children = proc_children_snapshot();
-    let mut pids = Vec::new();
-    let mut seen = HashSet::new();
-    let mut frontier = vec![root_pid.to_string()];
-    while let Some(pid) = frontier.pop() {
-        if !seen.insert(pid.clone()) {
-            continue;
-        }
-        pids.push(pid.clone());
-        if let Some(child_pids) = children.get(&pid) {
-            for child_pid in child_pids {
-                frontier.push(child_pid.to_string());
-            }
-        }
-    }
-    pids
-}
-
-fn proc_children_snapshot() -> HashMap<String, Vec<String>> {
-    let mut children = HashMap::new();
-    let Ok(entries) = fs::read_dir("/proc") else {
-        return children;
-    };
-    for entry in entries.flatten() {
-        let pid = entry.file_name().to_string_lossy().to_string();
-        if !pid.bytes().all(|b| b.is_ascii_digit()) {
-            continue;
-        }
-        let stat_path = entry.path().join("stat");
-        let Ok(stat) = fs::read_to_string(stat_path) else {
-            continue;
-        };
-        let Some(ppid) = proc_stat_ppid(&stat) else {
-            continue;
-        };
-        children.entry(ppid).or_insert_with(Vec::new).push(pid);
-    }
-    children
-}
-
-fn proc_stat_ppid(stat: &str) -> Option<String> {
-    let rest = stat.rsplit_once(')')?.1;
-    rest.split_whitespace().nth(1).map(ToOwned::to_owned)
+    let target = target_pid.to_string();
+    with_tree_observation(root_pid, |tree| {
+        tree.iter().any(|process| process.pid == target)
+    })
 }
 
 fn proc_process_command(pid: &str) -> Option<String> {
@@ -174,26 +85,7 @@ fn cmdline_is_agent_session(cmdline: &str) -> bool {
 }
 
 pub fn process_tree_has_agent_session(root_pid: &str) -> bool {
-    process_tree_pids(root_pid).into_iter().any(|pid| {
-        process_command(&pid)
-            .as_deref()
-            .is_some_and(cmdline_is_agent_session)
-    })
-}
-
-#[cfg(test)]
-fn process_tree_has_agent_session_with(
-    root_pid: &str,
-    child_pids_for: impl FnMut(&str) -> Vec<String>,
-    mut process_command_for: impl FnMut(&str) -> Option<String>,
-) -> bool {
-    process_tree_pids_with(root_pid, child_pids_for)
-        .into_iter()
-        .any(|pid| {
-            process_command_for(&pid)
-                .as_deref()
-                .is_some_and(cmdline_is_agent_session)
-        })
+    with_tree_observation(root_pid, tree_has_agent_session)
 }
 
 pub fn process_has_agent_doc_owner_for_file(pid: &str, file_path: &str) -> bool {
@@ -204,10 +96,8 @@ pub fn process_has_agent_doc_owner_for_file(pid: &str, file_path: &str) -> bool 
 }
 
 pub fn process_tree_has_agent_doc_owner_for_file(root_pid: &str, file_path: &str) -> bool {
-    process_tree_pids(root_pid).into_iter().any(|pid| {
-        process_command(&pid)
-            .as_deref()
-            .is_some_and(|cmdline| agent_doc_cmdline_is_owner(cmdline, file_path))
+    with_tree_observation(root_pid, |tree| {
+        tree_has_agent_doc_owner_for_file(tree, file_path)
     })
 }
 
@@ -215,11 +105,35 @@ pub fn process_tree_agent_doc_owner_pid_for_file(
     root_pid: &str,
     file_path: &str,
 ) -> Option<String> {
-    process_tree_pids(root_pid).into_iter().find(|pid| {
-        process_command(pid)
-            .as_deref()
-            .is_some_and(|cmdline| agent_doc_cmdline_is_owner(cmdline, file_path))
+    with_tree_observation(root_pid, |tree| {
+        tree_agent_doc_owner_pid_for_file(tree, file_path)
     })
+}
+
+// -- Pure tree-level lifts --------------------------------------------------
+//
+// Each takes an observed tree and answers with the controller's command-line
+// policy. Splitting them out keeps the observation (`/proc`) and the decision
+// separable, which is what lets the tests below drive the real predicates
+// instead of a parallel traversal written for the tests.
+
+fn tree_has_agent_session(tree: &[TreeProcess]) -> bool {
+    tree_cmdlines(tree).any(cmdline_is_agent_session)
+}
+
+fn tree_has_agent_doc_owner_for_file(tree: &[TreeProcess], file_path: &str) -> bool {
+    tree_cmdlines(tree).any(|cmdline| agent_doc_cmdline_is_owner(cmdline, file_path))
+}
+
+fn tree_agent_doc_owner_pid_for_file(tree: &[TreeProcess], file_path: &str) -> Option<String> {
+    tree.iter()
+        .find(|process| {
+            process
+                .cmdline
+                .as_deref()
+                .is_some_and(|cmdline| agent_doc_cmdline_is_owner(cmdline, file_path))
+        })
+        .map(|process| process.pid.clone())
 }
 
 /// Return the document bound by the first agent-doc owner process in a pane's
@@ -228,85 +142,14 @@ pub fn process_tree_agent_doc_owner_pid_for_file(
 /// authoritative binding even when the harness below it has a less specific
 /// command line.
 pub fn process_tree_agent_doc_owner_document(root_pid: &str) -> Option<String> {
-    process_tree_pids(root_pid).into_iter().find_map(|pid| {
-        let cmdline = process_command(&pid)?;
-        agent_doc_owner_document_from_cmdline(&cmdline)
-    })
-}
-
-#[cfg(test)]
-fn process_tree_agent_doc_owner_document_with(
-    root_pid: &str,
-    child_pids_for: impl FnMut(&str) -> Vec<String>,
-    mut process_command_for: impl FnMut(&str) -> Option<String>,
-) -> Option<String> {
-    process_tree_pids_with(root_pid, child_pids_for)
-        .into_iter()
-        .find_map(|pid| {
-            let cmdline = process_command_for(&pid)?;
-            agent_doc_owner_document_from_cmdline(&cmdline)
-        })
-}
-
-#[cfg(test)]
-fn process_tree_agent_doc_owner_pid_for_file_with(
-    root_pid: &str,
-    file_path: &str,
-    child_pids_for: impl FnMut(&str) -> Vec<String>,
-    mut process_command_for: impl FnMut(&str) -> Option<String>,
-) -> Option<String> {
-    process_tree_pids_with(root_pid, child_pids_for)
-        .into_iter()
-        .find(|pid| {
-            process_command_for(pid)
-                .as_deref()
-                .is_some_and(|cmdline| agent_doc_cmdline_is_owner(cmdline, file_path))
-        })
-}
-
-#[cfg(test)]
-fn process_tree_has_agent_doc_owner_for_file_with(
-    root_pid: &str,
-    file_path: &str,
-    child_pids_for: impl FnMut(&str) -> Vec<String>,
-    mut process_command_for: impl FnMut(&str) -> Option<String>,
-) -> bool {
-    process_tree_pids_with(root_pid, child_pids_for)
-        .into_iter()
-        .any(|pid| {
-            process_command_for(&pid)
-                .as_deref()
-                .is_some_and(|cmdline| agent_doc_cmdline_is_owner(cmdline, file_path))
-        })
+    owner_graph::tree_agent_doc_owner_document(root_pid)
 }
 
 pub fn process_tree_owner_document_other_than(
     root_pid: &str,
     claimed_file: &Path,
 ) -> Option<String> {
-    let claimed = claimed_file.to_string_lossy();
-    process_tree_pids(root_pid).into_iter().find_map(|pid| {
-        let cmdline = process_command(&pid)?;
-        cmdline_owns_other_document(&cmdline, &claimed)
-            .then(|| owner_document_from_cmdline(&cmdline))?
-    })
-}
-
-#[cfg(test)]
-fn process_tree_owner_document_other_than_with(
-    root_pid: &str,
-    claimed_file: &Path,
-    child_pids_for: impl FnMut(&str) -> Vec<String>,
-    mut process_command_for: impl FnMut(&str) -> Option<String>,
-) -> Option<String> {
-    let claimed = claimed_file.to_string_lossy();
-    process_tree_pids_with(root_pid, child_pids_for)
-        .into_iter()
-        .find_map(|pid| {
-            let cmdline = process_command_for(&pid)?;
-            cmdline_owns_other_document(&cmdline, &claimed)
-                .then(|| owner_document_from_cmdline(&cmdline))?
-        })
+    owner_graph::tree_owner_document_other_than(root_pid, claimed_file)
 }
 
 pub fn process_tree_owns_other_document(root_pid: &str, claimed_file: &Path) -> bool {
@@ -328,146 +171,73 @@ pub fn process_tree_owns_other_document(root_pid: &str, claimed_file: &Path) -> 
 ///
 /// [`cmdlines_are_unmanaged_harness_session`]: agent_doc_controller::command_line::cmdlines_are_unmanaged_harness_session
 pub fn process_tree_runs_unmanaged_harness_session(root_pid: &str) -> bool {
-    let cmdlines: Vec<String> = process_tree_pids(root_pid)
-        .into_iter()
-        .filter_map(|pid| process_command(&pid))
-        .collect();
-    agent_doc_controller::command_line::cmdlines_are_unmanaged_harness_session(
-        cmdlines.iter().map(String::as_str),
-    )
+    owner_graph::tree_runs_unmanaged_harness_session(root_pid)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
 
-    #[test]
-    fn parse_child_pids_trims_and_skips_blank_lines() {
-        assert_eq!(
-            parse_child_pids(b" 123 \n\n456\n\t789\t\n"),
-            vec!["123", "456", "789"]
-        );
+    fn tree(entries: &[(&str, &str)]) -> Vec<TreeProcess> {
+        entries
+            .iter()
+            .map(|(pid, cmdline)| TreeProcess {
+                pid: (*pid).to_string(),
+                cmdline: Some((*cmdline).to_string()),
+            })
+            .collect()
     }
 
     #[test]
-    fn process_tree_contains_pid_walks_descendants_and_stops_cycles() {
-        assert!(process_tree_contains_pid_with("10", "10", |_| Vec::new()));
-        assert!(process_tree_contains_pid_with(
-            "10",
-            "40",
-            |pid| match pid {
-                "10" => vec!["20".to_string(), "30".to_string()],
-                "20" => vec!["40".to_string()],
-                _ => Vec::new(),
-            }
-        ));
-        assert!(!process_tree_contains_pid_with(
-            "10",
-            "99",
-            |pid| match pid {
-                "10" => vec!["20".to_string()],
-                "20" => vec!["10".to_string()],
-                _ => Vec::new(),
-            }
-        ));
-    }
+    fn agent_doc_owner_for_file_matches_a_descendant_and_reports_its_pid() {
+        let observed = tree(&[("10", "zsh"), ("20", "agent-doc start tasks/session.md")]);
 
-    #[test]
-    fn process_tree_has_agent_doc_owner_for_file_matches_children() {
-        let commands = BTreeMap::from([
-            ("10", "zsh".to_string()),
-            ("20", "agent-doc start tasks/session.md".to_string()),
-        ]);
-
-        assert!(process_tree_has_agent_doc_owner_for_file_with(
-            "10",
-            "tasks/session.md",
-            |pid| match pid {
-                "10" => vec!["20".to_string()],
-                _ => Vec::new(),
-            },
-            |pid| commands.get(pid).cloned(),
+        assert!(tree_has_agent_doc_owner_for_file(
+            &observed,
+            "tasks/session.md"
         ));
-        assert!(!process_tree_has_agent_doc_owner_for_file_with(
-            "10",
-            "tasks/other.md",
-            |pid| match pid {
-                "10" => vec!["20".to_string()],
-                _ => Vec::new(),
-            },
-            |pid| commands.get(pid).cloned(),
+        assert!(!tree_has_agent_doc_owner_for_file(
+            &observed,
+            "tasks/other.md"
         ));
         assert_eq!(
-            process_tree_agent_doc_owner_pid_for_file_with(
-                "10",
-                "tasks/session.md",
-                |pid| match pid {
-                    "10" => vec!["20".to_string()],
-                    _ => Vec::new(),
-                },
-                |pid| commands.get(pid).cloned(),
-            ),
+            tree_agent_doc_owner_pid_for_file(&observed, "tasks/session.md"),
             Some("20".to_string())
         );
-    }
-
-    #[test]
-    fn process_tree_owner_document_prefers_route_owned_wrapper() {
-        let commands = BTreeMap::from([
-            (
-                "10",
-                "agent-doc start --route-owned /repo/tasks/selected.md".to_string(),
-            ),
-            ("20", "codex resume --last".to_string()),
-        ]);
-
         assert_eq!(
-            process_tree_agent_doc_owner_document_with(
-                "10",
-                |pid| match pid {
-                    "10" => vec!["20".to_string()],
-                    _ => Vec::new(),
-                },
-                |pid| commands.get(pid).cloned(),
-            )
-            .as_deref(),
-            Some("/repo/tasks/selected.md"),
+            tree_agent_doc_owner_pid_for_file(&observed, "tasks/other.md"),
+            None
         );
     }
 
     #[test]
-    fn process_tree_owner_document_other_than_returns_foreign_doc() {
-        let commands = BTreeMap::from([
-            ("10", "zsh".to_string()),
-            ("20", "codex agent-doc tasks/foreign.md".to_string()),
-        ]);
-
-        assert_eq!(
-            process_tree_owner_document_other_than_with(
-                "10",
-                Path::new("tasks/claimed.md"),
-                |pid| match pid {
-                    "10" => vec!["20".to_string()],
-                    _ => Vec::new(),
-                },
-                |pid| commands.get(pid).cloned(),
-            ),
-            Some("tasks/foreign.md".to_string())
-        );
+    fn agent_session_detection_matches_any_descendant() {
+        assert!(tree_has_agent_session(&tree(&[
+            ("10", "zsh"),
+            ("20", "claude --continue"),
+        ])));
+        assert!(!tree_has_agent_session(&tree(&[
+            ("10", "zsh"),
+            ("20", "vim"),
+        ])));
     }
 
     #[test]
-    fn process_tree_has_agent_session_matches_any_descendant() {
-        let commands = BTreeMap::from([("20", "claude --continue".to_string())]);
-
-        assert!(process_tree_has_agent_session_with(
-            "10",
-            |pid| match pid {
-                "10" => vec!["20".to_string()],
-                _ => Vec::new(),
+    fn a_process_whose_cmdline_could_not_be_read_is_skipped_not_matched() {
+        let observed = vec![
+            TreeProcess {
+                pid: "10".to_string(),
+                cmdline: None,
             },
-            |pid| commands.get(pid).cloned(),
-        ));
+            TreeProcess {
+                pid: "20".to_string(),
+                cmdline: Some("agent-doc start tasks/session.md".to_string()),
+            },
+        ];
+        assert_eq!(
+            tree_agent_doc_owner_pid_for_file(&observed, "tasks/session.md"),
+            Some("20".to_string()),
+            "an unreadable process must not shadow the real owner below it"
+        );
     }
 }

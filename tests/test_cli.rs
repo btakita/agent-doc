@@ -91,6 +91,34 @@ fn read_first_existing_source(manifest_dir: &Path, relatives: &[&str]) -> String
     panic!("none of the expected source paths exist: {relatives:?}");
 }
 
+/// Every source file of `agent-doc-process-owner-io`, concatenated.
+///
+/// The architecture guards below assert that this *crate* owns process-tree
+/// owner inspection. It is split into an observation module and a derived
+/// owner-map module (`#syncownerreactive`), so a guard that reads only `lib.rs`
+/// would fail on a refactor that keeps the responsibility exactly where it
+/// belongs.
+fn read_process_owner_io_source(manifest_dir: &Path) -> String {
+    let src = manifest_dir.join("agent-doc-process-owner-io/src");
+    let mut files: Vec<PathBuf> = fs::read_dir(&src)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+        .collect();
+    files.sort();
+    assert!(
+        !files.is_empty(),
+        "agent-doc-process-owner-io must have sources at {}",
+        src.display()
+    );
+    files
+        .into_iter()
+        .map(|path| fs::read_to_string(path).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn git_commit_count(root: &Path) -> usize {
     let output = ProcessCommand::new("git")
         .current_dir(root)
@@ -15899,8 +15927,11 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
     );
     let sync_source =
         fs::read_to_string(manifest_dir.join("agent-doc-sync-io/src/sync.rs")).unwrap();
-    let process_owner_io_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-process-owner-io/src/lib.rs")).unwrap();
+    // The crate's traversal is split across `lib.rs` (call surface + pure tree
+    // lifts), `proc_table.rs` (the `/proc` observation) and `owner_graph.rs`
+    // (the derived owner map). The guard is about the crate owning that
+    // responsibility, not about which file it lands in, so read the whole crate.
+    let process_owner_io_source = read_process_owner_io_source(manifest_dir);
     for forbidden_snippet in [
         "fn token_is_agent_doc_binary(",
         "fn token_is_harness_binary(",
@@ -15928,7 +15959,7 @@ fn test_agent_doc_controller_dispatch_has_no_rpc_facade() {
         "agent-doc-process-owner-io should compose process effects with focused controller command-line policy"
     );
     assert!(
-        process_owner_io_source.contains("fn proc_children_snapshot(")
+        process_owner_io_source.contains("fn observe_proc_children(")
             && process_owner_io_source.contains("fn proc_process_command(")
             && !process_owner_io_source.contains("Command::new(\"pgrep\")"),
         "agent-doc-process-owner-io process-tree traversal must use one /proc snapshot instead of shelling out to pgrep per node"
@@ -29786,20 +29817,25 @@ fn test_agent_doc_sync_owns_sync_scope_policy() {
             "agent-doc-process-owner-io must stay free of orchestration, sync, and tmux adapters: {forbidden_dependency}"
         );
     }
-    let process_owner_io_source =
-        fs::read_to_string(manifest_dir.join("agent-doc-process-owner-io/src/lib.rs")).unwrap();
+    // The crate's traversal is split across `lib.rs` (call surface + pure tree
+    // lifts), `proc_table.rs` (the `/proc` observation) and `owner_graph.rs`
+    // (the derived owner map). The guard is about the crate owning that
+    // responsibility, not about which file it lands in, so read the whole crate.
+    let process_owner_io_source = read_process_owner_io_source(manifest_dir);
     for required_snippet in [
         "pub fn child_pids(",
         "pub fn process_command(",
         "pub fn process_tree_contains_pid(",
-        "fn process_tree_contains_pid_with(",
+        // The traversal seam is `tree_pids` over an observed `/proc` snapshot,
+        // not a test-only injected-children twin of the real walk.
+        "pub fn tree_pids(",
         "pub fn process_tree_agent_doc_owner_pid_for_file(",
         "pub fn process_tree_has_agent_doc_owner_for_file(",
         "pub fn process_tree_has_agent_session(",
         "pub fn process_tree_owner_document_other_than(",
         "pub fn process_tree_owns_other_document(",
         "agent_doc_controller::command_line::{",
-        "fn proc_children_snapshot(",
+        "fn observe_proc_children(",
         "fn proc_process_command(",
     ] {
         assert!(

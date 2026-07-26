@@ -8092,6 +8092,66 @@ fn enqueue_orphan_drain_route(invocation: ControllerEditorRouteInvocation) -> Re
     }
 }
 
+/// A drainable head memoized against the revision it was parsed from
+/// (`#orphandrainrevisiongate`).
+///
+/// Newtyped rather than a bare `Option<String>` so the two states a hit can
+/// carry — "there is a head" and "there is provably no head" — stay distinct
+/// from the miss that `orphan_drain_memoized_head` returns as `None`. Collapsing
+/// them would make "no head this tick" indistinguishable from "not cached", and
+/// the drain would re-materialize the document on every quiescent tick, which is
+/// the whole cost being removed.
+#[derive(Clone)]
+pub(crate) struct OrphanDrainHead(Option<String>);
+
+impl OrphanDrainHead {
+    fn into_head(self) -> Option<String> {
+        self.0
+    }
+}
+
+/// Per-document `(revision, drainable head)` for the orphan-drain sweep.
+///
+/// Bounded by the number of documents with a live actor; an entry is replaced
+/// whenever the revision moves, so it never grows with time.
+fn orphan_drain_head_memo() -> &'static Mutex<
+    std::collections::HashMap<
+        PathBuf,
+        (agent_doc_crdt_relay_io::CurrentRevision, OrphanDrainHead),
+    >,
+> {
+    static MEMO: OnceLock<
+        Mutex<
+            std::collections::HashMap<
+                PathBuf,
+                (agent_doc_crdt_relay_io::CurrentRevision, OrphanDrainHead),
+            >,
+        >,
+    > = OnceLock::new();
+    MEMO.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn orphan_drain_memoized_head(
+    file: &Path,
+    revision: &agent_doc_crdt_relay_io::CurrentRevision,
+) -> Option<OrphanDrainHead> {
+    orphan_drain_head_memo()
+        .lock()
+        .get(file)
+        .filter(|(cached, _)| cached == revision)
+        .map(|(_, head)| head.clone())
+}
+
+fn orphan_drain_memoize_head(
+    file: &Path,
+    revision: agent_doc_crdt_relay_io::CurrentRevision,
+    head: Option<String>,
+) {
+    orphan_drain_head_memo()
+        .lock()
+        .insert(file.to_path_buf(), (revision, OrphanDrainHead(head)));
+}
+
 fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
     use agent_doc_controller::orphan_drain::{
         DEFAULT_MIN_DISPATCH_INTERVAL_SECS, OrphanDrainDecision, OrphanDrainObservation,
@@ -8151,31 +8211,73 @@ fn controller_orphan_drain_tick(runtime: &Arc<ControllerRuntime>) {
             continue;
         };
 
+        // `#orphandrainrevisiongate`: this sweep runs on the 10s supervisor
+        // watchdog tick and, unlike the other read sites fixed alongside it, it
+        // genuinely needs the text — it parses the queue head out of it. What it
+        // does not need is to re-materialize an unchanged document. Attributed
+        // by pid on 2026-07-26: after the idle-watch gates landed, every
+        // remaining quiescent-idle read was this loop, arriving as an isolated
+        // triple (one per open document) every ten seconds from the controller
+        // process, never through the RPC handler.
+        //
+        // The revision is read before the text, so a document that changes
+        // between the two stores the older revision and simply misses next
+        // tick; storing the revision observed after the text could pair a fresh
+        // revision with a stale head. Local call — the controller owns the hub
+        // in-process, so the gate costs a state-vector comparison.
+        // The memo caches the *head*, and the loop body then runs exactly as
+        // before. It deliberately does not `continue` on a hit: this sweep takes
+        // ACTION on a drainable head, and a head that failed to dispatch last
+        // tick must be retried on the next one. Skipping the iteration would
+        // turn a read optimization into a dropped retry.
+        let gate_revision = match agent_doc_crdt_relay_io::current_revision_for_file(&file) {
+            Ok(revision @ agent_doc_crdt_relay_io::CurrentRevision::Current { .. }) => {
+                Some(revision)
+            }
+            _ => None,
+        };
+        let memoized_head = gate_revision
+            .as_ref()
+            .and_then(|revision| orphan_drain_memoized_head(&file, revision));
         // Operator-visible live text is authoritative. Disk is consulted only
         // when no editor owns the document; an attached-but-pending replica
         // fails closed until the relay can supply a consistent cut.
-        let content = match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&file) {
-            Ok(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
-            Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => {
-                let Ok(content) = std::fs::read_to_string(&file) else {
+        let content = match &memoized_head {
+            // Unchanged revision: the head cannot have moved, so skip the
+            // materialize + SHA + log entirely and reuse the parsed answer.
+            Some(_) => String::new(),
+            None => match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&file) {
+                Ok(agent_doc_crdt_relay_io::CurrentText::Current { text, .. }) => text,
+                Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => {
+                    let Ok(content) = std::fs::read_to_string(&file) else {
+                        continue;
+                    };
+                    content
+                }
+                Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
+                | Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => continue,
+                Err(err) => {
+                    agent_doc_ops_log_io::log_op(
+                        &file,
+                        &format!("controller_orphan_drain_authority_failed error={err:#}"),
+                    );
                     continue;
-                };
-                content
-            }
-            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
-            | Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => continue,
-            Err(err) => {
-                agent_doc_ops_log_io::log_op(
-                    &file,
-                    &format!("controller_orphan_drain_authority_failed error={err:#}"),
+                }
+            },
+        };
+        let drainable = match memoized_head {
+            Some(head) => head.into_head(),
+            None => {
+                let head = agent_doc_queue::queue_continuation::live_drainable_continuation_head(
+                    &content,
+                    agent_doc_queue::queue_continuation::DrainScope::Supervisor,
                 );
-                continue;
+                if let Some(revision) = gate_revision {
+                    orphan_drain_memoize_head(&file, revision, head.clone());
+                }
+                head
             }
         };
-        let drainable = agent_doc_queue::queue_continuation::live_drainable_continuation_head(
-            &content,
-            agent_doc_queue::queue_continuation::DrainScope::Supervisor,
-        );
         let document_hash = match agent_doc_fs::document_state_hash(&file) {
             Ok(hash) => hash,
             Err(err) => {

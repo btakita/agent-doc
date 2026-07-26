@@ -154,6 +154,11 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 
 > **Queue prompt:**
 >
+> do [#lzqfjs]
+
+
+> **Queue prompt:**
+>
 > do [#lazilybenchmarkregressio]
 
 
@@ -325,7 +330,29 @@ Verification passed:
 - `git diff --check`
 
 Pushed lazily-rs commit `d5d3b47` (`ci: enforce benchmark regression budgets`). The latest CI run was queried exactly once and was `in_progress` (run `30225781945`). Committed the root submodule pointer as `b52d6207b` (`lazily: enforce benchmark regression budgets`).
-<!-- agent:boundary:20df3983 -->
+
+### Re: Response
+
+Implemented and shipped `#lzqfjs` in lazily-js.
+
+The defect was real across `QueueCell`, `TopicCell`, and `WorkQueueCell`: their fixture runners trusted returned `invalidates` booleans, but the objects owned no context, minted no graph nodes, and could not register a dependency edge.
+
+Changed paths:
+- `src/reactive.js` / `src/reactive.d.ts`: added `Context.clearComputeds(handles)`, which force-invalidates dependency-free derived roots together in one frontier walk and schedules downstream effects through the existing batch semantics.
+- `src/queue.js` / `src/queue.d.ts`: all three queue-family constructors now require a `Context`; Queue and WorkQueue mint guarded computed reader kinds, Topic mints per-subscriber pass-through computed readers, and reads accept the value-threaded `Compute` view so they actually subscribe. Successful mutations clear exactly the reader handles named by the canonical invalidation matrix.
+- `test/queue.test.js`, `test/topic.test.js`, `test/work-queue.test.js`: canonical fixtures now prime dependent computeds and assert recomputation deltas for every declared invalidation, rather than accepting runner bookkeeping as proof. Queue MPSC fixture steps also execute inside `Context.batch`.
+
+Verification:
+- targeted queue/topic/work-queue/ledger suite: 25/25 passed
+- full `make check`: passed
+- scoped `git diff --check`: passed
+
+One runtime test exposed and fixed the Topic empty-stream edge case: connect/disconnect can be contractually invalidating while the stream value remains `[]`, so Topic readers use `computedRippleWhen(..., () => true)` to propagate the cursor/connection transition instead of equality-suppressing it.
+
+Pushed lazily-js commit `186c8c9` (`fix: make queue family reader kinds reactive`). Latest CI was queried exactly once and was `queued` (run `30226088533`). Committed the root submodule pointer as `2105c1842` (`lazily: make JS queue readers reactive`). Pre-existing lazily-js `README.md` and untracked `build/` changes were preserved and not staged.
+
+Confidence: high. No escalation was required.
+<!-- agent:boundary:232d1c89 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -335,7 +362,7 @@ Pushed lazily-rs commit `d5d3b47` (`ci: enforce benchmark regression budgets`). 
 - ~~do [#lazilyzigport]~~
 - ~~do [#lazilyconformancecoverag]~~
 - ~~do [#lazilybenchmarkregressio]~~
-- do [#lzqfjs]
+- ~~do [#lzqfjs]~~
 - do [#lzqfports]
 - do [#lzqfzig]
 - do [#maphandlecleardependents]
@@ -381,7 +408,6 @@ Pushed lazily-rs commit `d5d3b47` (`ci: enforce benchmark regression budgets`). 
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
 - [ ] [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md
-- [ ] [#lzqfjs] lazily-js: QueueCell/TopicCell/WorkQueueCell are not reactive at all — src/queue.js takes no context, contains ZERO ctx references, and reports invalidation by diffing a private snapshot. It scores green on the coverage row. Bind the family to a context and mint real reader-kinds, and check whether the collections fixtures are being satisfied by a non-reactive model here the way test/collections.test.js drives src/collections.js instead of the reactive families — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfports] lazily: Phase 5 — port the queue-family flavors to cpp, dart, py, go, kt (and build cs flavor-complete from the start under #lzcsqueues). One subagent per binding, NEVER two against one repo. Dispatch only after #lzqfspec + #lzqffx + #lzqfrs are committed so each agent has a settled spec, a red per-flavor gate, and a reference diff. cpp additionally needs its Source<uint64_t> version cells migrated if Phase 0 picks memoized-derive. KEPT OPEN 2026-07-26: #lzqfspec and #lzqffx are now committed, but #lzqfrs (the rs reference implementation) is not, so the stated precondition is unmet — dispatching now would be six independent guesses at an unpinned shape. Unblocks the moment #lzqfrs lands — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md

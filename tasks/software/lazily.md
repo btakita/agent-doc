@@ -351,12 +351,39 @@ The five transcriptions and their now-unused Reader harness are deleted. What re
 `make check` green: 93 canonical fixtures across 18 areas, KNOWN_UNCOVERED 25 → 20. Pushed as `36bcb6e`, gitlink `4bc11979e`.
 
 Two housekeeping notes carried by this cycle. `tasks/software/lazily.done.md` had briefly been committed as a stray full copy of this session document (frontmatter and all) when it rode along on an unrelated staged commit; the correct 18-line archive is restored here. And #lzqfports keeps a written kept-open reason rather than a silent skip: #lzqfspec and #lzqffx are committed, but its stated precondition #lzqfrs is not, so dispatching six binding subagents now would be six independent guesses at a shape rs has not yet pinned. #lzqfrs is the next real head.
-<!-- agent:boundary:76d3cf65 -->
+
+### Re: do [#observerwordingcontradic] + do [#renametreesource] — opus-5
+
+Both done, plus a recommendation on the decision item below.
+
+**#observerwordingcontradic.** Fixed the eleven docstrings across cs, dart, zig, kt, js and formal. The distinction is worth stating because it is not cosmetic: an observer is a callback held in a registry that survives invalidation, an Effect is a graph node whose edges are re-discovered on every run. The one-line test — anything surviving an invalidation is not a graph edge — is how three registries were found hiding in lazily-py. Reference docstrings calling Effects observers are exactly how a reader concludes a registry is the intended shape and writes one.
+
+I scoped this to the eleven sites the item names. The wider sweep for the word across all eleven repos is ~55KB, and most of it is ordinary English (`observe`, `observation`, "an observer never sees `len` bumped before `is_full`") or tests that assert observers are *absent*. Rewriting all of it would be an uncontrolled sweep, not this item.
+
+**#renametreesource.** `cell_tree.rs`, `cell_tree.zig`, `CellTree.cs` and `CellTreeTests.cs` now match their types. The deprecated public aliases stay — `CellTree`/`CellTreeNode` still resolve and zig keeps a `cell_tree` module const pointing at the new file, following the deprecated-alias block already in `root.zig`.
+
+One thing I checked rather than assumed. Zig discovers tests through `refAllDecls` from `root.zig`, so a rename that quietly dropped the file from the build would leave the suite green — the exact failure shape this plan keeps turning up. Grepping the output proved nothing (zig does not print passing test names), so I mutated an assertion inside `source_tree.zig`: 380 tests, 1 failure, named `lazily.source_tree.test.lazily/source_tree: per-node value isolation`. The file is genuinely in the run.
+
+Also worth recording: the first zig run after the rename printed `failed command` while `rtk proxy` reported exit 0. Two clean re-runs at exit 0 showed it was a stale-cache artifact of the rename — but the masked exit code is the real hazard. Had I trusted the proxy's 0 I would have seen nothing; had I trusted the log line I would have chased a phantom. Both needed a raw re-run to separate.
+
+**One pre-existing red, not caused by this change.** `lazily-rs make check` now stops at `benchmark-check`: `target/criterion` has been pruned, so `update-benchmark-results.py --check` finds no estimates. I reproduced it on a clean stashed tree — it fails identically without my edits. 634 test targets pass and there are zero test failures. I deliberately did **not** regenerate the benchmarks: that would write machine-specific numbers into `BENCHMARKS.md` as a side effect of a file rename. Filed as a backlog item, because a gate that cannot reach green is not a gate.
+
+### Re: do [#recommendeddecidewhether] — opus-5
+
+Kept open for your call, with a recommendation: **keep `*Cell`; do not rename the domain family to `*Source`.**
+
+The reason is that the rename would assert something false. The v2 kernel renamed the two *value-node kinds* to `Source` and `Computed`, and kept `Cell` as the conceptual word for a value-bearing reactive node. A `QueueCell` is not a kind — it *composes* kinds: it owns five `Source<uint64_t>` reader-version cells and exposes derived readers over them. It is neither a source cell nor a computed cell, so `QueueSource` would name a kernel kind it does not belong to, and would specifically imply "written from outside, folds under a merge policy" — which is wrong for a queue with derived readers. The same argument holds for `TimerCell`, `LeaseCell`, `CircuitBreakerCell` and `PresenceCell`: each is a composite with its own pure core plus projecting cells.
+
+So the vocabulary is already consistent. `Cell` = value-bearing reactive node (conceptual); `Source`/`Computed` = the two handle kinds; `*Cell` = a domain composite made of them. Three bindings flagged it as the largest remaining Cell-vocabulary surface, which is true, but size is not evidence of wrongness — and this one has to move in lockstep across nine bindings, so the cost of getting it wrong is nine repos of churn plus a deprecation surface on every public type.
+
+I am not editing on this. It is a naming decision across nine bindings, and the standing rule here is to converge on naming before applying it. What unblocks it is a yes or no from you. If you do want the rename, the honest scope is: nine bindings in lockstep, deprecated aliases on every renamed public type, spec `cell-model.md` updated first so the bindings have something to conform to, and a decision on whether `MergeCell` collapses entirely — under the kernel it is already just `Source<T, M>` with a non-default policy, so it may not deserve a name at all.
+<!-- agent:boundary:42662c0e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#lazilyfailstarget]
 - ~~do [#lzqfcppfx]~~
 - ~~do [#lzqfprep]~~
 - ~~do [#lzdonequoteattr]~~
@@ -383,9 +410,9 @@ Two housekeeping notes carried by this cycle. `tasks/software/lazily.done.md` ha
 - ⏭️ do [#lazilyrenameinverted]
 - ⏭️ do [#readmeexamplesreference]
 - ⏭️ do [#signalgetsignallive]
-- ⏭️ do [#observerwordingcontradic]
-- 🚧 do [#renametreesource]
-- do [#recommendeddecidewhether]
+- ~~⏭️ do [#observerwordingcontradic]~~
+- ~~⏭️ do [#renametreesource]~~
+- 🚧 do [#recommendeddecidewhether]
 - do [#lazilycppconformance]
 - do [#portconformancecoverage]
 - do [#verifycrdtplaneruntimein]
@@ -409,6 +436,7 @@ Two housekeeping notes carried by this cycle. `tasks/software/lazily.done.md` ha
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lazilyfailstarget] lazily-rs: `make check` fails at `benchmark-check` because target/criterion no longer exists ("no Criterion estimates found under target/criterion; run without --no-run"). Reproduced on a clean stashed tree, so it is environmental, not a code regression — but it means make check cannot currently reach green in this checkout, which makes it useless as a gate. Either run the benchmark suite once to repopulate target/criterion, or make benchmark-check skip (loudly) when no criterion output exists instead of hard-failing, so a pruned target dir does not read as a red suite. Do NOT let it silently pass
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
@@ -437,9 +465,7 @@ Two housekeeping notes carried by this cycle. `tasks/software/lazily.done.md` ha
 - [ ] [#lazilyrenameinverted] [recommended] lazily-py keeps `Cell`/`CellSlot` as the native class names with `Source = Cell` / `SourceSlot = CellSlot` aliases (cell.py:35,191,219-220). This is NOT drift — it is documented and motivated: cell.py is inside the mypyc compilation unit (setup.py compiles slot/cell/signal/effect/batch as one unit for cross-file native-class inheritance BaseSlot -> CellSlot), and the docstring states Cell "stays the native class name (for mypyc native-struct reads and isinstance stability across the family)". Flipping would rename the native class and change isinstance identity. Do NOT flip without deciding whether mypyc native-struct naming or family-wide vocabulary consistency wins; that is a spec/ownership question, not a cleanup.
 - [ ] [#readmeexamplesreference] README examples reference types that no longer exist: lazily-go README:82 `lazily.NewCell` (never defined, example does not compile) and README:209 `*Cell[V]`; lazily-cpp README:54,280,387 + AGENTS.md:43 `CellHandle`/`SlotHandle` (deleted); lazily-dart README:38,329 claims a `Signal` back-compat alias that does not exist; lazily-py README:225 calls `CellSlot` canonical.
 - [ ] [#signalgetsignallive] signal/getSignal still live and UNDEPRECATED on the threadsafe/async planes after the sync plane retired them: lazily-kt ThreadSafeContext.kt:195,247 + AsyncContext.kt:624, lazily-js reactive-async.d.ts:85, lazily-zig root.zig:86,90. Deprecate or migrate to eager Computed.
-- [ ] [#observerwordingcontradic] "observer" wording contradicts the no-observers-only-Effects rule (#lzdartobservercow): lazily-cs Effect.cs:41,59 + Reactive.cs:119, lazily-dart core.dart:1386,1418 + state_chart.dart:13, lazily-zig effect.zig:12,202, lazily-js README:149, lazily-formal ThreadSafe.lean:9, lazily-kt ThreadSafeContext.kt:37. Effects are not observers; fix the prose.
-- [ ] 🚧 [#renametreesource] Rename the tree source files to match their types now that CellTree is SourceTree: lazily-rs src/cell_tree.rs, lazily-zig src/lazily/cell_tree.zig, lazily-cs src/Lazily/CellTree.cs + tests/Lazily.Tests/CellTreeTests.cs. lazily-cs precedent (81411c2) git mv'd its renamed files, so leaving them is a divergence from that repo's own convention.
-- [ ] [#recommendeddecidewhether] [recommended] Decide whether the domain *Cell family (QueueCell / TopicCell / RelayCell / MergeCell / TimerCell / LeaseCell / CircuitBreakerCell / PresenceCell / ...) follows the kernel to *Source, or is deliberately pinned as spec-level naming. Three independent bindings flagged it as the largest remaining Cell-vocabulary surface. It must move in lockstep across all 9 bindings, so it needs a decision before anyone starts.
+- [ ] 🚧 [#recommendeddecidewhether] [recommended] Decide whether the domain *Cell family (QueueCell / TopicCell / RelayCell / MergeCell / TimerCell / LeaseCell / CircuitBreakerCell / PresenceCell / ...) follows the kernel to *Source, or is deliberately pinned as spec-level naming. Three independent bindings flagged it as the largest remaining Cell-vocabulary surface. It must move in lockstep across all 9 bindings, so it needs a decision before anyone starts.
 - [ ] [#lzjsnpmtrustedpub] lazily-js: register @lazily-hub/lazily-js as a trusted publisher on npmjs.com so release.yml can publish unattended. The workflow is correct — its OIDC exchange succeeds and provenance is signed and logged to Sigstore — but the upload is rejected with E404 PUT https://registry.npmjs.org/@lazily-hub%2flazily-js, meaning npm does not associate the package with that publisher (or the token lacks scope permission). This has now E404'd on two consecutive releases and each time required a manual 'npm publish --access public --otp=<code>' from the operator. Fix is npmjs.com-side configuration, not a code change
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
 - [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)

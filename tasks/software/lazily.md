@@ -395,7 +395,33 @@ I chose the skip over the other option in the item — running the benches once 
 `make check` green end to end, zero test failures. Pushed as `74682c4`, gitlink `df732d1a0`.
 
 One note on session size, since the queue is active and I am not stopping for it: the exchange is at 359 lines across 8 response sections, 13 cycles closed in the last half hour.
-<!-- agent:boundary:f3d46c90 -->
+
+### Re: do [#lzqfrs] — opus-5
+
+Phase 3's prerequisite question is now answered, and the answer removes work from the plan.
+
+**ThreadSafeContext does not need a multi-root `clear_slots`.** The plan assumed four reader-kind handles meant four frontier walks and queued a new API for it — and, to its credit, told itself to verify rather than assume. `batch()` already closes it: `clear_slot` pushes into `state.batched_slots` while `batch_depth > 0`, and `finish_batch` sorts, dedups, and calls `flush_batched_invalidations` exactly once, handing every collected root to a single `clear_frontier_locked`. So the thread-safe queue primitives wrap their reader-kind bumps in `batch()` and need no new context API.
+
+Reading the code is not proof, so it is pinned by `thread_safe::tests::batch_gives_clear_a_single_multi_root_frontier` and mutation-checked — making `finish_batch` flush once per collected root turns it red with "got 8".
+
+**Two failed measurements, both worth keeping.** I did not get the observable right the first time, and each wrong attempt is a trap someone else would hit.
+
+Counting recomputes of a shared downstream does not separate the cases at all. `computed` is guarded, so when the cleared nodes recompute to equal values the downstream is *correctly* suppressed — batched and unbatched look identical. My own vacuity control caught that one.
+
+Comparing batched against unbatched does not work either, and this one is nastier: `SetCellInvalidation` is recorded only inside `flush_batched_invalidations`, so the unbatched path is not instrumented and that control read **0**. Had I written only the positive half, it would have "passed" while observing nothing — the exact failure shape this plan exists to prevent, produced by the person writing the guard against it. The discriminator that actually works is **root count**: one flush for four roots must also be one flush for eight.
+
+**AsyncContext genuinely lacks both.** It has `source`, `computed_async` and `batch()`, but no synchronous-compute `computed` and no `clear` at all. Those are real and remain.
+
+### Re: splitting the rest of Phase 3 — opus-5
+
+I am not closing #lzqfrs, and I am not leaving it as one parent that gets gated after every partial step. Its verified half is recorded and removed; what remains under that id is the AsyncContext prerequisite alone. The six primitives are now three actionable ids — `#lzqfrsqueue`, `#lzqfrstopic`, `#lzqfrswork` — one per primitive pair, which is the per-phase decomposition rather than a tracking placeholder.
+
+That split is not bookkeeping. It surfaces something the single parent id hid: **the thread-safe half of the queue work is unblocked right now.** Only the async half waits on the AsyncContext prerequisite, and a monolithic #lzqfrs would have made all six look blocked behind it.
+
+Each successor carries the constraint that is easiest to get backwards: landing `ThreadSafeQueueCell` turns `tests/queue_family_conformance.rs` **red by design** — the ledger asserts that type is absent. The same change must flip the shipped flag *and* make the corpus genuinely replay against that flavor. Flipping the flag alone is precisely the failure the ledger was built to catch, so each item says so explicitly.
+
+`make check` green end to end. Pushed as `a0c937a`, gitlink `2c86eba29`, plan findings recorded alongside.
+<!-- agent:boundary:a2a2bb59 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -461,6 +487,7 @@ One note on session size, since the queue is active and I am not stopping for it
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
 - [ ] [#lzqfrs] lazily-rs: Phase 3 of the queue-family plan — context prerequisites + reference implementation. ThreadSafeContext needs a multi-root clear_slots equivalent (it has only single-handle clear at thread_safe.rs:3549 — four handles is four frontier walks; verify whether batch() already closes this, do not assume). AsyncContext needs a synchronous-compute computed and a multi-root clear (it has neither; only computed_async at async_context.rs:413). Then ship ThreadSafe/Async QueueCell + TopicCell + WorkQueueCell, each minting its own reader-kind handles on its own graph, Arc<Mutex<S>> storage with invalidation run outside the lock. KEPT OPEN DELIBERATELY: this is Phase 3 and is gated on Phase 1 (#lzqfformal) and Phase 2 (#lzqffx) — the plan requires the per-flavor fixture gate to land BEFORE implementation so the gap goes red first. A drain that reaches this id before those two is out of order, not ready work — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] [#lazilythreadsafequeuecel] lazily-rs: ThreadSafeQueueCell + AsyncQueueCell (#lzqfrsqueue). Each mints its own head/len/is_empty/is_full/closed reader-kind handles on its OWN graph, Arc<Mutex<S>> storage, invalidation run OUTSIDE the lock, reader-kind bumps wrapped in batch() (proven sufficient — no multi-root clear API needed). Landing either type turns tests/queue_family_conformance.rs RED by design: the ledger asserts these are absent, so the same change must flip its shipped flag AND make the corpus actually replay against that flavor. Flipping the flag alone is the failure the ledger exists to catch. The THREAD-SAFE half is unblocked now; only the async half waits on the AsyncContext prerequisites in #lzqfrs — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfjs] lazily-js: QueueCell/TopicCell/WorkQueueCell are not reactive at all — src/queue.js takes no context, contains ZERO ctx references, and reports invalidation by diffing a private snapshot. It scores green on the coverage row. Bind the family to a context and mint real reader-kinds, and check whether the collections fixtures are being satisfied by a non-reactive model here the way test/collections.test.js drives src/collections.js instead of the reactive families — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfports] lazily: Phase 5 — port the queue-family flavors to cpp, dart, py, go, kt (and build cs flavor-complete from the start under #lzcsqueues). One subagent per binding, NEVER two against one repo. Dispatch only after #lzqfspec + #lzqffx + #lzqfrs are committed so each agent has a settled spec, a red per-flavor gate, and a reference diff. cpp additionally needs its Source<uint64_t> version cells migrated if Phase 0 picks memoized-derive. KEPT OPEN 2026-07-26: #lzqfspec and #lzqffx are now committed, but #lzqfrs (the rs reference implementation) is not, so the stated precondition is unmet — dispatching now would be six independent guesses at an unpinned shape. Unblocks the moment #lzqfrs lands — plan: tasks/plan-lazily-queue-family-flavors.md

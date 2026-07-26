@@ -339,7 +339,28 @@ fn backfill_list(file: &Path, list: backlog::TrackedWorkList) -> Result<()> {
     let (full_content, comp) = find_tracked_list_component(file, list)?;
     let existing = &full_content[comp.open_end..comp.close_start];
     let doc_id = agent_doc_hash::document_id_for_path(file);
-    let (new_content, changed) = backlog::backfill(existing, &doc_id, &HashSet::new());
+    let (new_content, changed, dropped_text) =
+        backlog::backfill_reporting_dropped_text(existing, &doc_id, &HashSet::new());
+    // `#adbacklogorphanseg`: never delete operator-visible text silently. Each
+    // removed segment is logged verbatim (newlines escaped so one drop stays one
+    // log line) so the deletion is auditable and recoverable from git, rather
+    // than something an operator discovers later with no record of what went.
+    for segment in &dropped_text {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "backlog_non_item_text_dropped component={} bytes={} text={}",
+                list.label(),
+                segment.len(),
+                segment.trim().replace('\n', "\\n"),
+            ),
+        );
+        eprintln!(
+            "[{}] removed non-item text ({} bytes) — see ops.log `backlog_non_item_text_dropped`",
+            list.label(),
+            segment.len(),
+        );
+    }
     if !changed {
         eprintln!("[{}] already canonical — no changes", list.label());
         return Ok(());

@@ -390,6 +390,41 @@ impl PendingLayout {
         Self { segments }
     }
 
+    /// Drop non-item segments that match a known splice signature, returning
+    /// them so the caller can log what it deleted (`#adbacklogorphanseg`).
+    ///
+    /// A `#capturebacklogatomic` splice can inject text into a tracked-work
+    /// component that nothing could then remove: it is not an item, so
+    /// `--backlog-edit` / `--done` cannot address it; it sits at column 0, so it
+    /// is not continuation and `replace_items` preserved it verbatim; and
+    /// full-replace is rejected by design.
+    ///
+    /// **This is deliberately not "drop all non-item text."** I tried that first
+    /// and `backfill_preserves_interleaved_headers_and_blank_lines` caught it:
+    /// `### Active` / `### Later` section headers inside a backlog body are a
+    /// supported, tested feature, and a blanket rule would have deleted operator
+    /// content. (`parse_pending_edit_payload` refuses non-item text in an *edit
+    /// payload*, which is narrower than the stored-content contract — I had
+    /// over-read it.) So only two observed corruption shapes qualify:
+    ///
+    /// 1. an `### Re:` heading — that is the *exchange response* form and belongs
+    ///    to `agent:exchange`; a legitimate section header is a topic label;
+    /// 2. a line carrying `] [#id]` — the signature of an item whose leading
+    ///    `- [ ` was eaten, i.e. a destroyed item boundary.
+    ///
+    /// Everything else survives: headers, prose, blank spacing, continuation.
+    fn drop_spliced_non_item_text(&self) -> (Self, Vec<String>) {
+        let mut segments = Vec::with_capacity(self.segments.len());
+        let mut dropped = Vec::new();
+        for segment in &self.segments {
+            match segment {
+                PendingSegment::Text(raw) if text_is_splice_debris(raw) => dropped.push(raw.clone()),
+                other => segments.push(other.clone()),
+            }
+        }
+        (Self { segments }, dropped)
+    }
+
     fn non_item_segments(&self) -> Vec<String> {
         self.segments
             .iter()
@@ -2826,6 +2861,30 @@ fn assign_unique_id(text: &str, doc_id: &str, taken: &HashSet<String>) -> String
 /// Starts at width 4 and extends up to the spec §1 ceiling of 8. Counter
 /// cycles within each width before widening — at width 4 that's ~1M values
 /// before we touch width 5, so normal docs never widen in practice.
+/// True when a non-item segment is debris from a component splice
+/// (`#adbacklogorphanseg`).
+///
+/// Both signatures are taken from observed corruption, not guessed. Any line in
+/// the segment matching either one condemns it — a splice can leave the heading
+/// and the eaten-boundary fragment in a single text run.
+fn text_is_splice_debris(text: &str) -> bool {
+    text.lines().any(|line| {
+        let trimmed = line.trim();
+        // An exchange *response* heading. `### Active` / `### Later` are
+        // legitimate section labels and must survive; `### Re:` is the response
+        // block form and only reaches a tracked-work body by being spliced in.
+        let is_response_heading = trimmed
+            .trim_start_matches('#')
+            .trim_start()
+            .starts_with("Re:")
+            && trimmed.starts_with('#');
+        // An item whose leading `- [ ` was eaten, leaving the checkbox's closing
+        // bracket immediately before its hash id.
+        let has_orphaned_item_boundary = trimmed.contains("] [#");
+        is_response_heading || has_orphaned_item_boundary
+    })
+}
+
 /// True when `text` is nothing but a `do [#id]` queue directive.
 ///
 /// `#adqueuelinephantomid`: this is the signature of an `agent:queue` line that
@@ -2974,7 +3033,24 @@ fn normalize_nested_subtasks(
 /// - Checkboxes are normalized (default `[ ]`).
 /// - Returns `(new_body, changed)`. `changed = false` when the body was already canonical.
 pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (String, bool) {
-    let layout = PendingLayout::parse(body);
+    let (body, changed, _dropped) = backfill_reporting_dropped_text(body, doc_id, existing_ids);
+    (body, changed)
+}
+
+/// [`backfill`], additionally returning any non-item text it removed
+/// (`#adbacklogorphanseg`).
+///
+/// Deleting operator-visible text is the one thing this codebase treats as
+/// absolute, so the drop is never silent: callers that hold a file path log every
+/// removed segment to `ops.log`, which makes the deletion auditable and
+/// recoverable from git rather than a mystery later. `backfill` keeps its
+/// signature for the callers that have no path to log against.
+pub fn backfill_reporting_dropped_text(
+    body: &str,
+    doc_id: &str,
+    existing_ids: &HashSet<String>,
+) -> (String, bool, Vec<String>) {
+    let (layout, dropped_text) = PendingLayout::parse(body).drop_spliced_non_item_text();
     let items = layout.items();
     let mut taken: HashSet<String> = existing_ids.clone();
     for item in &items {
@@ -3042,7 +3118,10 @@ pub fn backfill(body: &str, doc_id: &str, existing_ids: &HashSet<String>) -> (St
     if new_body != body {
         changed = true;
     }
-    (new_body, changed)
+    if !dropped_text.is_empty() {
+        changed = true;
+    }
+    (new_body, changed, dropped_text)
 }
 
 /// Render a tracked-work component body in canonical form, assigning any
@@ -4586,6 +4665,72 @@ mod tests {
             items.is_empty(),
             "empty bullet should be dropped: {items:?}"
         );
+    }
+
+    #[test]
+    fn backfill_drops_spliced_non_item_text_and_reports_what_it_removed() {
+        // #adbacklogorphanseg: the exact live shape. A `#capturebacklogatomic`
+        // splice left an orphaned exchange heading and a fragment whose leading
+        // `- [ ` was eaten, both at column 0. Neither parses as an item, so
+        // --backlog-edit/--done could not address them; neither is continuation,
+        // so `replace_items` preserved them verbatim; and full-replace is
+        // rejected by design. Nothing could remove them.
+        //
+        // `parse_pending_edit_payload` already REFUSES a payload containing this
+        // shape, so the component contract is "a list of items" — it was just
+        // enforced on input and not on stored content.
+        let body = concat!(
+            "### Active\n",
+            "- [ ] [#keep] a real item\n",
+            "### Re: #bbpe — gpt-5\n",
+            "\n",
+            "This remains an operator/live-editor v ] [#fmgc] [focused-cycle] stale duplicate\n",
+            "- [ ] [#keep2] another real item\n",
+        );
+        let (new_body, changed, dropped) =
+            backfill_reporting_dropped_text(body, DOC_ID, &ids());
+        assert!(changed);
+        assert_eq!(dropped.len(), 2, "both orphan segments must be reported: {dropped:?}");
+        assert!(dropped.iter().any(|d| d.contains("### Re: #bbpe")));
+        assert!(dropped.iter().any(|d| d.contains("[#fmgc]")));
+        assert!(!new_body.contains("### Re: #bbpe"));
+        assert!(!new_body.contains("operator/live-editor v"));
+
+        // The real items either side are untouched — the drop must not take
+        // neighbours with it.
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(items.len(), 2, "real items must survive: {items:?}");
+        assert_eq!(items[0].id, "keep");
+        assert_eq!(items[1].id, "keep2");
+        assert!(new_body.contains("a real item") && new_body.contains("another real item"));
+        assert!(
+            new_body.contains("### Active"),
+            "a legitimate section header must survive the splice cleanup: {new_body:?}"
+        );
+    }
+
+    #[test]
+    fn backfill_keeps_indented_continuation_and_blank_spacing() {
+        // The guard must distinguish non-item TEXT from an item's continuation
+        // and from the blank lines between items. Continuation is indented and
+        // belongs to its item; blank segments are spacing, not content. Dropping
+        // either would delete real operator text, which is the risk that kept
+        // this fix unlanded until it had an audit trail.
+        let body = concat!(
+            "- [ ] [#parent] parent item\n",
+            "  continuation detail that belongs to the parent\n",
+            "\n",
+            "- [ ] [#next] next item\n",
+        );
+        let (new_body, _changed, dropped) =
+            backfill_reporting_dropped_text(body, DOC_ID, &ids());
+        assert!(dropped.is_empty(), "nothing legitimate may be dropped: {dropped:?}");
+        assert!(
+            new_body.contains("continuation detail that belongs to the parent"),
+            "indented continuation must survive: {new_body:?}"
+        );
+        let (_, items, _) = parse_items(&new_body);
+        assert_eq!(items.len(), 2);
     }
 
     #[test]

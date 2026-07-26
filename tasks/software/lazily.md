@@ -872,7 +872,50 @@ Dart (`#lazilyspecdisagrees`). Phase 5 lists dart, so it should be settled once
 in the spec phase instead of re-litigated per family.
 
 Clear and start at `#lzqfspec`.
-<!-- agent:boundary:a79c36c5 -->
+
+### Re: prep verified — the queue plan is ready for a cleared session — opus-5
+
+Reaping `#lzqfprep`. I checked its claims rather than taking them on faith; all
+four hold in the committed file (`cd8d16205`, working tree clean):
+
+- `## What the ReactiveMap work already settled` — the precedent all nine
+  bindings converged on: graph-agnostic core, per-flavor signal cells minted on
+  each flavor's own graph, reads generic over the read surface. It settles Phase
+  0's reader-kind question by precedent instead of by argument.
+- `## How these gates fail` — the four false greens the ReactiveMap gates
+  produced on their first attempt, plus the meta-lesson that the mutation-check
+  harness itself lied once.
+- `### Per-binding runner traps` — kt's `len()`/`keys()` allocating a `Computed`
+  per recompute, kt's async only recomputing through `getAsync`, kt/cs/go async
+  reads needing an explicit compute surface.
+- The dart thread-safe contradiction (`#lazilyspecdisagrees`) folded into Phase
+  0's open questions, so it gets settled once in the spec phase rather than
+  re-litigated when Phase 5 reaches dart.
+
+Phase 2's mutation-check bullet and the Verification checklist both point at the
+new section, so the next reader hits it on the path they will actually walk.
+
+**Two environment notes, neither blocking this cycle.**
+
+Preflight warns `stale_install`. The installed binary and `src/agent-doc`'s
+`Cargo.toml` are both 0.35.28, so this is source-newer-than-binary, not a version
+bump: the submodule sits at `21236df30` ("deps: lazily 0.50.0 — take the tracking
+view the map factory now hands us"), which consumes the release from earlier
+today. That commit and the modified `.claude/skills/agent-doc/SKILL.md` beside it
+are **not mine**, and the superproject gitlink for `src/agent-doc` is behind the
+submodule HEAD. I left both alone — another session owns that build, and bumping
+a pointer into someone else's in-flight work is how the shared-superproject
+clobber happens. The supervisor owns the recycle.
+
+Session accretion is at `block` (854 exchange lines, 27 response sections). Noting
+it in one line per the guidance rather than stalling the queue over it.
+
+**Next head is `#lzqfspec` — Phase 0 of the queue-family plan.** That is the real
+work, and it is exactly what you said you wanted to start in a cleared session.
+The plan file is self-contained enough to carry it. Clear, then start there.
+
+Still outstanding and independent: the js npm publish needs your OTP.
+<!-- agent:boundary:158fed2a -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -931,7 +974,7 @@ Clear and start at `#lzqfspec`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzqfprep] lazily: BEFORE starting the queue-family plan, note that tasks/plan-lazily-queue-family-flavors.md now carries (a) the ReactiveMap precedent all nine bindings converged on — graph-agnostic core, per-flavor signal cells minted on each flavor's own graph, reads generic over the read surface — which settles Phase 0's reader-kind question by precedent rather than argument, and (b) a 'How these gates fail' section recording the four false greens the ReactiveMap gates produced on their first attempt. Start at #lzqfspec; the plan is self-contained enough for a cleared session
+- [x] [#lzqfprep] lazily: BEFORE starting the queue-family plan, note that tasks/plan-lazily-queue-family-flavors.md now carries (a) the ReactiveMap precedent all nine bindings converged on — graph-agnostic core, per-flavor signal cells minted on each flavor's own graph, reads generic over the read surface — which settles Phase 0's reader-kind question by precedent rather than argument, and (b) a 'How these gates fail' section recording the four false greens the ReactiveMap gates produced on their first attempt. Start at #lzqfspec; the plan is self-contained enough for a cleared session
 - [ ] [#lzdonequoteattr] agent-doc: the done-archive attribute parser keeps the surrounding quotes in the value. tasks/software/lazily.md carried agent:done archive="tasks/software/lazily.done.md" (quoted, as a compact wrote it) and every preflight/session-check hard-failed with 'must point to a .done.md file' because the parsed value ended in .done.md-quote. Every other session doc uses the unquoted form and works. Unquote in the attribute parser and add a regression fixture for both forms; a quoted value should be accepted, not fatal
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all

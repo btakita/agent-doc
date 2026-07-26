@@ -46,18 +46,15 @@ Two build-system traps worth recording: `zig build test` **caches Run steps**, s
 Also closing `#lazilythreadsafetopiccel` and `#lazilythreadsafeworkqueu` — both shipped earlier today in lazily-rs 0.51.0 with all eleven canonical fixtures replayed per flavor and ten mutation probes confirmed.
 
 **One finding I am not closing.** The rs agent hit `concurrent_push_and_read_do_not_deadlock` failing with `left: 199, right: 200` mid-run. It is not a deadlock — it is a lost or stale reactive read in `ThreadSafeQueueCell`, and it is pre-existing: 0/25 in isolation, but 2/30 on the working tree and 1/30 on stashed HEAD under saturating CPU load. That is a correctness defect in code released as 0.51.0, on the exact surface the thread-safe flavor exists to provide, so it goes to the top of the backlog rather than into this item.
-<!-- agent:boundary:d0062d27 -->
+<!-- agent:boundary:81da89b5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lazilyzigconformance]
+- 🚧 do [#lazilyzigconformance]
 - do [#lazilyzigport]
-- ~~do [#lazilyupgradeconformance]~~
 - do [#lazilyconformancecoverag]
-- ~~do [#lazilythreadsafetopiccel]~~
-- ~~do [#lazilythreadsafeworkqueu]~~
 - do [#lazilybenchmarkregressio]
 - do [#lzqfjs]
 - do [#lzqfports]
@@ -80,7 +77,6 @@ Also closing `#lazilythreadsafetopiccel` and `#lazilythreadsafeworkqueu` — bot
 - do [#signalgetsignallive]
 - do [#recommendeddecidewhether]
 - do [#lazilycppconformance]
-- ~~do [#lazilycppsignalingroom]~~
 - do [#lazilycppcollections]
 - do [#trackedcopieslazily]
 - do [#firstunificationwire]
@@ -99,7 +95,7 @@ Also closing `#lazilythreadsafetopiccel` and `#lazilythreadsafeworkqueu` — bot
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilyzigconformance] lazily-zig: 8 conformance fixtures are asserted by INLINE MIRROR tests — values typed into the .zig source with the fixture name only in a comment, so upstream can change the fixture and the mirror stays green. Same defect class as lazily-cpp's hand-transcribed queue tests. The runtime manifest now names each one in KNOWN_UNCOVERED with its mirroring file: keyed_reconciliation_lis (reconcile.zig), mergecell_algebra (merge.zig), semtree_incremental (sem_tree.zig), stableid_alignment (stable_id.zig), anti_entropy_converge (crdt_plane.zig), crdt_sync_frames (crdt_plane.zig + ipc.zig), anti_spoof_session and frames (signaling.zig). Replace each mirror with a real fixture replay and shrink the ledger
+- [ ] 🚧 [#lazilyzigconformance] lazily-zig: 8 conformance fixtures are asserted by INLINE MIRROR tests — values typed into the .zig source with the fixture name only in a comment, so upstream can change the fixture and the mirror stays green. Same defect class as lazily-cpp's hand-transcribed queue tests. The runtime manifest now names each one in KNOWN_UNCOVERED with its mirroring file: keyed_reconciliation_lis (reconcile.zig), mergecell_algebra (merge.zig), semtree_incremental (sem_tree.zig), stableid_alignment (stable_id.zig), anti_entropy_converge (crdt_plane.zig), crdt_sync_frames (crdt_plane.zig + ipc.zig), anti_spoof_session and frames (signaling.zig). Replace each mirror with a real fixture replay and shrink the ledger
 - [ ] [#lazilyzigport] lazily go/rs/zig: port lazily-dart's corrupt-manifest-id check into the other runtime conformance guards. dart found that a recorder can mangle its own evidence (severed ids like sure.json) and make the guard report INTACT fixtures as never opened — a guard that cries wolf gets switched off. Its guard now rejects any recorded id that names no file in the corpus. go, rs and zig all lack that check. Cheap: one loop over the manifest before the coverage comparison
 - [ ] [#lazilyconformancecoverag] lazily-cs: 87 of 124 canonical fixtures unreplayed (cs opens 37). MEASURED via the runtime manifest 2026-07-26. CORRECTION — an earlier note on this item claimed the 7 statechart fixtures were a cheap "runner gap"; that was derived from the STATIC grep and is WRONG. cs enumerates its corpus, so no fixture filename appears in its sources, and the static count under-reported every area. Runtime truth: cs FULLY replays reactive-graph 21/21, statechart 7/7, materialization 3/3, familysync 1/1. There is NO runner-gap win anywhere in cs — every one of the 87 is a genuinely missing surface, each already declared in a per-runner Unsupported ledger with the blocking surface named. Unreplayed by area: collections 15, lossless-tree 9, root 8, message-passing 8, reliable-sync 8, rateshape 6, coordination 5, resilience/service/temporal/windowing 4 each, presence 3, agent-doc/distributed/signaling 2 each, crdt-tree/membership/receipts 1 each. Work it down against tasks/software/lazily-cs-parity-plan.md by SHIPPING SURFACES, not by wiring runners
 - [ ] [#lazilybenchmarkregressio] lazily-rs: the benchmark regression budgets have NO CI enforcement. ci.yml enumerates individual cargo test invocations and never runs `make check` or `benchmark-check`; regressions.yml runs only the loom model. So every budget in BENCHMARKS.md is enforced solely by whoever remembers to run `make benchmark-check` locally with a populated target/criterion — which, until #lazilyfailstarget, was nobody, because the gate hard-failed on a pruned target dir. Add a scheduled job (regressions.yml already has a nightly cron and is the natural home) that runs `cargo bench` then `make benchmark-check-strict`, so a real regression fails somewhere other than one developer machine. Note the numbers are machine-specific, so the job needs a stable runner class or relative-delta budgets rather than absolute ones

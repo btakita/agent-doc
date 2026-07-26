@@ -207,19 +207,54 @@ Kept `lazily-cs` staged; activating it now would grant interop credit to an inco
 - **Verification:** `#lzcsipc` and `#lzcssync` are open; the latest passing network report lists `lazily-cs` as `registry entry is staged` while completed bindings run.
 - **Confidence:** high that staging is the only honest state today.
 - **Escalation:** none. The remaining work is explicitly driven by the two C# prerequisite backlog items.
-<!-- agent:boundary:b1e180bf -->
+
+### Re: #lzsignalingnegative — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lzsignalingnegative]
+
+
+Implemented and published capability-gated negative signaling conformance.
+
+The canonical fixtures now require rejection of all four requested malformed cases: an unknown tag, a directed client frame carrying both `to` and `from`, the anti-spoof client-supplied `from`, and a `welcome` roster containing the joining peer. The spec tests select the direction-specific schema branch, so a client frame cannot accidentally pass by matching the corresponding server variant; the welcome self-roster rule is checked semantically.
+
+Participating production decoders are Rust (including the TypeScript Worker/client), Python, Kotlin, JavaScript, Go, Dart, and Zig. Each now rejects unknown/extra per-variant fields and the welcome self-roster condition, and each runner replays the canonical `rejects` arrays rather than hand-transcribing them.
+
+Feature staging is explicit rather than credited as a pass:
+
+- C++ remains staged for this decoder feature because its existing conformance ledger states that it has typed signaling-room messages but no signaling wire serde; a test-only JSON parser would test the runner instead of production behavior.
+- C# remains staged because its signaling plane is not implemented; `#lzcsplane` and the parity ledger already own that work. No C# files or capability claims were changed.
+
+Changed paths:
+
+- `lazily-spec`: `conformance/signaling/{frames,anti_spoof_session}.json`, `tests/test_schema_conformance.py`
+- `lazily-{py,js,kt,go,dart,zig}`: production signaling decoder plus canonical conformance runner in each binding
+- `lazily-rs`: `src/signaling_client.rs`, new `tests/signaling_negative_conformance.rs`, and `signaling/{src,test,tsconfig}` for the TypeScript surface
+- Supervisor: only the eight participating submodule pointers
+
+Verification:
+
+- `make check` passed in lazily-spec, py, js, kt, go, dart, zig, and rs.
+- Rust additionally passed `npm --prefix signaling run check`: 32/32 TypeScript signaling tests; the Rust feature replay ran 2/2 new canonical negative tests and the runtime manifest covered 119/124 canonical fixtures.
+- Spec: 148/148 tests plus Lean build and coverage sync check.
+- Python: 551/551 tests; Dart: 541/541; Kotlin, Go, JavaScript, and Zig full gates and conformance coverage passed.
+- Zig printed its already-documented AsyncContext `dispose_signal_reverts_to_lazy` divergence from `EXPECTED_DIVERGENCES`; its signaling decoder/replay and overall gate completed successfully.
+- CI checked exactly once after push: lazily-spec completed green; js/kt/dart/zig/rs were queued and go was in progress. lazily-py has no workflow named `CI`.
+
+Published commits:
+
+- spec `17df13b`; py `730edea`; js `0281eab`; kt `66bc92a`; go `945d78c`; dart `605228a`; zig `6bdae44`; rs `10362af`
+- supervisor pointer commit `2bad00f9e`
+
+Confidence: high. The rejects are canonical shared bytes and every admitted binding exercises its production decoder. Escalation: none for this feature. The workspace-root `make check` remains separately red in the pre-existing `src/agent-doc` worktree on missing `delivery_version` fields at `agent-doc-preflight-io/src/lib.rs:5044` and `:5346`; it was not modified or represented as part of this signaling result.
+<!-- agent:boundary:91307fe5 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#lzinteropcore]~~
-- ~~do [#lzinteropeers]~~
-- ~~do [#lzinteropchannels]~~
-- ~~do [#lzinteropcs]~~
-- ~~do [#lzwirefrontier]~~
-- do [#lzsignalingnegative]
-- ~~do [#lazilyzigconformance]~~
+- ~~do [#lzsignalingnegative]~~
 - do [#lazilyzigport]
 - do [#lazilyconformancecoverag]
 - do [#lazilybenchmarkregressio]
@@ -263,7 +298,6 @@ Kept `lazily-cs` staged; activating it now would grant interop credit to an inco
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.
-- [ ] [#lzsignalingnegative] lazily-spec + all bindings: signaling/frames.json and anti_spoof_session.json have no NEGATIVE cases, so nothing anywhere pins that a malformed frame is REJECTED rather than silently defaulted. The schema already closes the tag set (oneOf over 14 branches, each type: {const}, additionalProperties: false), but no fixture drives it. Add a rejects block covering: unknown type value; to and from both present on one frame (the description says they never are); a client frame carrying from (the anti-spoof surface itself); welcome.peers containing the joining peer. This is the portable form of the tag-enum question — the wire contract is the closed tag set plus rejection, not any binding's type shape
 - [ ] [#lazilyzigport] lazily go/rs/zig: port lazily-dart's corrupt-manifest-id check into the other runtime conformance guards. dart found that a recorder can mangle its own evidence (severed ids like sure.json) and make the guard report INTACT fixtures as never opened — a guard that cries wolf gets switched off. Its guard now rejects any recorded id that names no file in the corpus. go, rs and zig all lack that check. Cheap: one loop over the manifest before the coverage comparison
 - [ ] [#lazilyconformancecoverag] lazily-cs: 87 of 124 canonical fixtures unreplayed (cs opens 37). MEASURED via the runtime manifest 2026-07-26. CORRECTION — an earlier note on this item claimed the 7 statechart fixtures were a cheap "runner gap"; that was derived from the STATIC grep and is WRONG. cs enumerates its corpus, so no fixture filename appears in its sources, and the static count under-reported every area. Runtime truth: cs FULLY replays reactive-graph 21/21, statechart 7/7, materialization 3/3, familysync 1/1. There is NO runner-gap win anywhere in cs — every one of the 87 is a genuinely missing surface, each already declared in a per-runner Unsupported ledger with the blocking surface named. Unreplayed by area: collections 15, lossless-tree 9, root 8, message-passing 8, reliable-sync 8, rateshape 6, coordination 5, resilience/service/temporal/windowing 4 each, presence 3, agent-doc/distributed/signaling 2 each, crdt-tree/membership/receipts 1 each. Work it down against tasks/software/lazily-cs-parity-plan.md by SHIPPING SURFACES, not by wiring runners
 - [ ] [#lazilybenchmarkregressio] lazily-rs: the benchmark regression budgets have NO CI enforcement. ci.yml enumerates individual cargo test invocations and never runs `make check` or `benchmark-check`; regressions.yml runs only the loom model. So every budget in BENCHMARKS.md is enforced solely by whoever remembers to run `make benchmark-check` locally with a populated target/criterion — which, until #lazilyfailstarget, was nobody, because the gate hard-failed on a pruned target dir. Add a scheduled job (regressions.yml already has a nightly cron and is the natural home) that runs `cargo bench` then `make benchmark-check-strict`, so a real regression fails somewhere other than one developer machine. Note the numbers are machine-specific, so the job needs a stable runner class or relative-delta budgets rather than absolute ones

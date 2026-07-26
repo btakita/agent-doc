@@ -375,6 +375,65 @@ enum CrdtConvergenceState {
     CompareAndSwapRaced,
 }
 
+/// Per-state time accumulator for one convergence wait (`#crdtackprofile`).
+///
+/// The wait already logged its state at each 2s notice, which tells you what it
+/// was doing *at that instant* and nothing about the distribution. Sampling those
+/// notices across a day gave "88% `delivery_ack_pending`" — enough to rule out
+/// git, the controller baseline round trip, and poll oversleep, but not enough to
+/// explain the ~70% of `commit_authority` that a replica-bootstrap correlation
+/// could not account for. Per-write totals turn that into an attributable number
+/// instead of a population statistic.
+///
+/// One call site by construction: [`Self::tick`] runs at the loop head and
+/// attributes the whole previous iteration to whatever state that iteration ended
+/// in. State assignments are scattered through the loop body, so charging on exit
+/// is the only accounting that cannot silently miss one.
+#[derive(Debug)]
+struct CrdtConvergenceProfile {
+    current: CrdtConvergenceState,
+    since: std::time::Instant,
+    totals: Vec<(CrdtConvergenceState, std::time::Duration)>,
+}
+
+impl CrdtConvergenceProfile {
+    fn new(initial: CrdtConvergenceState) -> Self {
+        Self {
+            current: initial,
+            since: std::time::Instant::now(),
+            totals: Vec::new(),
+        }
+    }
+
+    /// Charge the elapsed iteration to the state it ended in, then arm for `next`.
+    fn tick(&mut self, next: CrdtConvergenceState) {
+        let elapsed = self.since.elapsed();
+        match self
+            .totals
+            .iter_mut()
+            .find(|(state, _)| *state == self.current)
+        {
+            Some((_, total)) => *total += elapsed,
+            None => self.totals.push((self.current, elapsed)),
+        }
+        self.current = next;
+        self.since = std::time::Instant::now();
+    }
+
+    /// `state=ms` pairs, largest first — the breakdown a reader actually wants.
+    fn render(&mut self, final_state: CrdtConvergenceState) -> String {
+        self.tick(final_state);
+        let mut totals = self.totals.clone();
+        totals.sort_by(|a, b| b.1.cmp(&a.1));
+        totals
+            .iter()
+            .filter(|(_, total)| total.as_millis() > 0)
+            .map(|(state, total)| format!("{}={}ms", state.token(), total.as_millis()))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
 impl CrdtConvergenceState {
     const fn token(self) -> &'static str {
         match self {
@@ -1984,21 +2043,28 @@ pub fn apply_canonical_replace_if_attached(
     let mut pending_write: Option<agent_doc_crdt_relay_io::CpRelayWrite> = None;
     let mut ack_recovery = AckRecoveryState::default();
     let mut wait_state = CrdtConvergenceState::TypingQuiescence;
+    // `#crdtackprofile`: accumulate time per wait state so a single write reports
+    // where its convergence latency went, instead of only what state it happened
+    // to be in at a 2s notice.
+    let mut profile = CrdtConvergenceProfile::new(wait_state);
     let mut last_notice = std::time::Instant::now()
         .checked_sub(std::time::Duration::from_secs(2))
         .unwrap_or_else(std::time::Instant::now);
 
     loop {
+        // Charge the previous iteration to the state it ended in (`#crdtackprofile`).
+        profile.tick(wait_state);
         let elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
         deadline.tick(elapsed_ms);
         if deadline.is_expired() {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "{source}_crdt_convergence_timeout file={} reason={} timeout_ms={} recovery=retry_crdt_merge_no_legacy_replay",
+                    "{source}_crdt_convergence_timeout file={} reason={} timeout_ms={} profile=[{}] recovery=retry_crdt_merge_no_legacy_replay",
                     file.display(),
                     wait_state,
                     CRDT_WRITE_CONVERGENCE_TIMEOUT_MS,
+                    profile.render(wait_state),
                 ),
             );
             anyhow::bail!(
@@ -2113,13 +2179,14 @@ pub fn apply_canonical_replace_if_attached(
                             agent_doc_ops_log_io::log_op(
                                 file,
                                 &format!(
-                                    "{source}_crdt_relay_acknowledged file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true disk_projection=pending wait_ms={} transport=crdt_only",
+                                    "{source}_crdt_relay_acknowledged file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true disk_projection=pending wait_ms={} profile=[{}] transport=crdt_only",
                                     file.display(),
                                     relay_write.content_hash,
                                     relay_write.update_bytes,
                                     relay_write.targets,
                                     live_editors,
                                     started.elapsed().as_millis(),
+                                        profile.render(wait_state),
                                 ),
                             );
                             return Ok(Some(relay_write));
@@ -2505,13 +2572,14 @@ pub fn apply_canonical_replace_if_attached(
                                 agent_doc_ops_log_io::log_op(
                                     file,
                                     &format!(
-                                        "{source}_crdt_relay_acknowledged file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true disk_projection=pending wait_ms={} transport=crdt_only",
+                                        "{source}_crdt_relay_acknowledged file={} content_hash={} update_bytes={} targets={} live_editors={} delivery_converged=true disk_projection=pending wait_ms={} profile=[{}] transport=crdt_only",
                                         file.display(),
                                         relay_write.content_hash,
                                         relay_write.update_bytes,
                                         relay_write.targets,
                                         live_editors,
                                         started.elapsed().as_millis(),
+                                        profile.render(wait_state),
                                     ),
                                 );
                                 return Ok(Some(relay_write));
@@ -6139,6 +6207,48 @@ pub fn retained_write_blocks_new_cycle(file: &Path, source: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#crdtackprofile`: the accumulator must charge time to the state an
+    /// iteration *ended* in, and must aggregate repeat visits to one state.
+    ///
+    /// State assignments are scattered through the convergence loop body, so the
+    /// only accounting that cannot silently miss one is charging on exit at the
+    /// loop head. This pins that: two separate stretches in the same state sum
+    /// into a single entry rather than appearing twice, and zero-duration states
+    /// are omitted so the breakdown stays readable.
+    #[test]
+    fn convergence_profile_charges_each_iteration_to_the_state_it_ended_in() {
+        let mut profile = CrdtConvergenceProfile::new(CrdtConvergenceState::TypingQuiescence);
+
+        // Two non-adjacent stretches in DeliveryAckPending must aggregate.
+        profile.tick(CrdtConvergenceState::DeliveryAckPending);
+        std::thread::sleep(std::time::Duration::from_millis(12));
+        profile.tick(CrdtConvergenceState::CompareAndSwapRaced);
+        std::thread::sleep(std::time::Duration::from_millis(4));
+        profile.tick(CrdtConvergenceState::DeliveryAckPending);
+        std::thread::sleep(std::time::Duration::from_millis(12));
+
+        let rendered = profile.render(CrdtConvergenceState::DeliveryAckPending);
+
+        assert_eq!(
+            rendered.matches("delivery_ack_pending=").count(),
+            1,
+            "repeat visits to one state must aggregate into a single entry: {rendered}"
+        );
+        assert!(
+            rendered.contains("compare_and_swap_raced="),
+            "a state that was actually occupied must appear: {rendered}"
+        );
+        assert!(
+            !rendered.contains("editor_sync_pending="),
+            "a state never entered must not appear: {rendered}"
+        );
+        // Largest first, so the dominant cost reads off the front.
+        assert!(
+            rendered.starts_with("delivery_ack_pending="),
+            "the breakdown must be ordered by cost: {rendered}"
+        );
+    }
 
     #[test]
     fn controller_document_mutation_scope_is_nested_and_restored() {

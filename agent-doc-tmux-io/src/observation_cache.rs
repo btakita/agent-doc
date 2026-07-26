@@ -207,7 +207,7 @@ pub(crate) fn run_with_observation_cache(
             // returns without re-running the factory.
             state
                 .reads
-                .get_or_insert_with(state.scope.ctx(), key, move |_| observed.clone());
+                .get_or_insert_with(state.scope.ctx(), key, move |_, _| observed.clone());
         }
     });
 

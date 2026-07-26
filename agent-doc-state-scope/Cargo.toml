@@ -11,4 +11,4 @@ publish = false
 name = "agent_doc_state_scope"
 
 [dependencies]
-lazily = { version = "0.49.0", features = ["thread-safe"] }
+lazily = { version = "0.50.0", features = ["thread-safe"] }

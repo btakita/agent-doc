@@ -706,12 +706,11 @@ impl ControllerDocumentGraphs {
         &self,
         document_hash: &str,
     ) -> Option<agent_doc_state_backbone::retained_write::RetainedIntentFacts> {
-        let ctx = self.ctx.clone();
         let projection = self.projection.clone();
         self.pending
-            .get_or_insert_with(&self.ctx, document_hash.to_string(), move |key| {
+            .get_or_insert_with(&self.ctx, document_hash.to_string(), move |ctx, key| {
                 projection
-                    .observe(&ctx, key)
+                    .observe(ctx, key)
                     .flatten()
                     .as_ref()
                     .and_then(retained_intent_facts_from_projection)
@@ -737,29 +736,32 @@ impl ControllerDocumentGraphs {
             self.disk.set(ctx, document_hash.to_string(), disk);
         });
 
-        // The slot factory is `Fn(&K) -> V` with no context parameter, so the
-        // only way an entry can derive from the three cell maps is to capture a
-        // context clone and read through it. Clones share the graph's inner
-        // state, so those reads do subscribe the slot — covered by
-        // `slot_map_entry_capturing_a_ctx_clone_tracks_a_cell_map_dependency`,
-        // because "Computed in name only" fails silently and looks like a stale
-        // value much later.
+        // As of lazily 0.50 the slot factory receives the entry's own tracking
+        // view (`Fn(&ThreadSafeContext, &K) -> V`), so reads through it register
+        // dependency edges *on this entry* directly. Before that the only way to
+        // derive across maps was to capture a context clone — which did work
+        // (clones share the graph's inner state) but made "is this actually
+        // Computed?" something you had to prove rather than read, hence
+        // `slot_map_entry_tracks_a_cell_map_dependency_through_its_tracking_view`.
+        // "Computed in name only" fails silently and surfaces as a stale value
+        // much later, so taking the parameter the API now hands us beats
+        // re-proving the workaround.
+        //
         // Mint the derived `pending` slot before the verdict slot so the verdict's
         // recompute reads an already-materialized entry rather than minting one
         // mid-recompute.
         self.pending(document_hash);
 
-        let ctx = self.ctx.clone();
         let pending = self.pending.clone();
         let authority_map = self.authority.clone();
         let disk_map = self.disk.clone();
         let verdict = self
             .verdict
-            .get_or_insert_with(&self.ctx, document_hash.to_string(), move |key| {
+            .get_or_insert_with(&self.ctx, document_hash.to_string(), move |ctx, key| {
                 agent_doc_state_backbone::retained_write::settlement_verdict(
-                    pending.observe(&ctx, key).flatten().as_ref(),
-                    authority_map.observe(&ctx, key).flatten().as_ref(),
-                    disk_map.observe(&ctx, key).flatten().as_ref(),
+                    pending.observe(ctx, key).flatten().as_ref(),
+                    authority_map.observe(ctx, key).flatten().as_ref(),
+                    disk_map.observe(ctx, key).flatten().as_ref(),
                 )
             });
         // Minted after the slot it subscribes to, and only ever once per

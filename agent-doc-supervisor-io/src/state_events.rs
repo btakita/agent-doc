@@ -191,7 +191,7 @@ pub(crate) fn load_document_ledger_shared(
             let value = loaded.clone();
             state
                 .ledgers
-                .get_or_insert_with(state.scope.ctx(), key, move |_| Some(value.clone()));
+                .get_or_insert_with(state.scope.ctx(), key, move |_, _| Some(value.clone()));
         }
     });
     Ok(loaded)

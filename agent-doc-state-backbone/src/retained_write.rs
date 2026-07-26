@@ -483,27 +483,28 @@ mod tests {
 mod reactive_map_probe {
     use lazily::{ThreadSafeSourceMap, ThreadSafeContext, ThreadSafeComputedMap};
 
-    /// Does a `ThreadSafeComputedMap` entry whose factory captures a context clone
-    /// and reads a `ThreadSafeSourceMap` actually subscribe to that cell?
+    /// Does a `ThreadSafeComputedMap` entry that reads a `ThreadSafeSourceMap`
+    /// through its own tracking view actually subscribe to that cell?
     ///
-    /// The slot factory is `Fn(&K) -> V` with no context parameter (the
-    /// ctx-taking `mint_with` is private), so the only way to derive across maps
-    /// is a captured clone. If that does not track, the entry is "Computed in
-    /// name only" and a keyed derived registry cannot be expressed this way.
+    /// lazily 0.50 hands the slot factory the entry's tracking view
+    /// (`Fn(&ThreadSafeContext, &K) -> V`); before that the only way to derive
+    /// across maps was a captured context clone, and this probe existed to prove
+    /// the clone tracked at all. The question it answers is still the one that
+    /// matters — "Computed in name only" fails silently and looks like a stale
+    /// value much later — so the probe stays, now pointed at the supported API a
+    /// keyed derived registry is actually built on.
     #[test]
-    fn slot_map_entry_capturing_a_ctx_clone_tracks_a_cell_map_dependency() {
+    fn slot_map_entry_tracks_a_cell_map_dependency_through_its_tracking_view() {
         let ctx = ThreadSafeContext::new();
         let inputs: ThreadSafeSourceMap<String, u32> = ThreadSafeSourceMap::new(&ctx);
         let derived: ThreadSafeComputedMap<String, u32> = ThreadSafeComputedMap::new(&ctx);
         inputs.set(&ctx, "doc".to_string(), 1);
 
-        let factory_ctx = ctx.clone();
         let factory_inputs = inputs.clone();
         let read = |derived: &ThreadSafeComputedMap<String, u32>| {
-            let factory_ctx = factory_ctx.clone();
             let factory_inputs = factory_inputs.clone();
-            derived.get_or_insert_with(&ctx, "doc".to_string(), move |key| {
-                factory_inputs.observe(&factory_ctx, key).unwrap_or(0) + 100
+            derived.get_or_insert_with(&ctx, "doc".to_string(), move |ctx, key| {
+                factory_inputs.observe(ctx, key).unwrap_or(0) + 100
             })
         };
 

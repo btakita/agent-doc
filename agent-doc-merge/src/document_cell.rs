@@ -18,7 +18,7 @@
 //!    structural edit becomes a handful of `Insert`/`Remove`/`Move`/`Update`
 //!    ops scoped to one component, never a whole-component (or whole-document)
 //!    replace.
-//! 3. Drives a reactive [`CellTree`]/[`SourceMap`] representation
+//! 3. Drives a reactive [`SourceTree`]/[`SourceMap`] representation
 //!    ([`DocumentCellTree`]) so an edit to one item invalidates only that item's
 //!    value cell — the core anti-corruption property that the eventual
 //!    per-cell merge needs.
@@ -39,7 +39,7 @@
 //! `item-id` is the durable child key.
 
 use lazily::{
-    SourceMap, CellTree, Context, DiffOp, SemTree, TextCrdt, apply_to_map, apply_to_tree, reconcile,
+    SourceMap, SourceTree, Context, DiffOp, SemTree, TextCrdt, apply_to_map, apply_to_tree, reconcile,
 };
 use std::fmt;
 
@@ -1927,7 +1927,7 @@ fn reconstruct_theirs_from_ops(
     Some(out)
 }
 
-/// A reactive, per-item representation of a document: a [`CellTree`] root whose
+/// A reactive, per-item representation of a document: a [`SourceTree`] root whose
 /// children are component-occurrence subtrees, each of whose children are item
 /// value cells.
 ///
@@ -1938,7 +1938,7 @@ fn reconstruct_theirs_from_ops(
 /// a single-item edit invalidates exactly that leaf's value cell and nothing
 /// else (per-cell isolation).
 pub struct DocumentCellTree {
-    root: CellTree<String, String>,
+    root: SourceTree<String, String>,
     /// Per component-occurrence ordered item map (parallel to the tree's item
     /// children) so ops apply via the LIS-driven [`SourceMap`] path.
     occurrences: std::collections::HashMap<(String, usize), SourceMap<String, String>>,
@@ -1947,7 +1947,7 @@ pub struct DocumentCellTree {
 impl DocumentCellTree {
     /// Build a reactive tree from a document revision.
     pub fn from_document(ctx: &Context, doc: &str) -> Self {
-        let root: CellTree<String, String> = CellTree::leaf(ctx, String::new(), String::new());
+        let root: SourceTree<String, String> = SourceTree::leaf(ctx, String::new(), String::new());
         let mut occurrences = std::collections::HashMap::new();
         for occ in project_document(doc) {
             let occ_id = format!("{}:{}", occ.component, occ.occurrence);
@@ -1964,7 +1964,7 @@ impl DocumentCellTree {
     }
 
     /// Root tree handle (for wiring derived computeds).
-    pub fn root(&self) -> &CellTree<String, String> {
+    pub fn root(&self) -> &SourceTree<String, String> {
         &self.root
     }
 
@@ -2022,7 +2022,7 @@ impl DocumentCellTree {
     /// Apply a component diff's minimal ops to the corresponding occurrence's
     /// item cells, driving the reactive tree to the new shape with minimal
     /// invalidation (stable items untouched, moves atomic, only changed values
-    /// rewritten). Keeps the [`CellTree`] children in sync with the [`SourceMap`].
+    /// rewritten). Keeps the [`SourceTree`] children in sync with the [`SourceMap`].
     pub fn apply(&mut self, ctx: &Context, diff: &ComponentDiff) {
         let occ_key = (diff.component.clone(), diff.occurrence);
         let occ_id = format!("{}:{}", diff.component, diff.occurrence);
@@ -2417,13 +2417,13 @@ agent_doc_format: template
                         .iter()
                         .map(|(id, _)| id.clone())
                         .collect::<Vec<_>>(),
-                    "CellTree child order must match SourceMap order for {occ_id}"
+                    "SourceTree child order must match SourceMap order for {occ_id}"
                 );
                 for (id, value) in &map_items {
                     assert_eq!(
                         occ_node.child(id).expect("child present").get(ctx),
                         *value,
-                        "CellTree child value must match SourceMap value for {id}"
+                        "SourceTree child value must match SourceMap value for {id}"
                     );
                 }
                 (component, occurrence, map_items)

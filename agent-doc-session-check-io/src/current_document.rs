@@ -123,7 +123,7 @@ pub(crate) fn pass_resolved(
         }
         let tracked_ctx = ctx.clone();
         let version = graph.version.clone();
-        graph.resolved.get_or_insert_with(ctx, key, move |k| {
+        graph.resolved.get_or_insert_with(ctx, key, move |_ctx, k| {
             // Reading the version subscribes this entry to it, so a later bump
             // invalidates exactly this document's resolution.
             let _tracked = version.observe(&tracked_ctx, k);

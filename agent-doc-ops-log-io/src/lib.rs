@@ -198,7 +198,7 @@ fn cached_turn_id(file: &Path) -> Option<std::sync::Arc<str>> {
         let probe = file.to_path_buf();
         state
             .turn_ids
-            .get_or_insert_with(state.scope.ctx(), file.to_path_buf(), move |_| {
+            .get_or_insert_with(state.scope.ctx(), file.to_path_buf(), move |_, _| {
                 resolve_turn_id(&probe)
             })
     })

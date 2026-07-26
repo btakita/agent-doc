@@ -4456,7 +4456,7 @@ fn git_toplevel_memoized(dir: &Path) -> Option<PathBuf> {
     GIT_TOPLEVEL_MEMO.with(|(scope, map)| {
         let key = dir.to_path_buf();
         let probe = key.clone();
-        map.get_or_insert_with(scope.ctx(), key, move |_| {
+        map.get_or_insert_with(scope.ctx(), key, move |_, _| {
             agent_doc_git_io::dirs::git_toplevel_at(&probe)
         })
     })

@@ -175,17 +175,35 @@ All nine runners already replay against an `AsyncContext` model, so the async pl
 **Verification.** Mutation-checked in five bindings: restoring the sticky-error path fails the fixture on `AsyncContext` and nowhere else in go; the py, dart, kt and cs equivalents each fail their suite. Full suites green — go 427, js 481, py 521, dart 522, kt 349, cpp 39/39 ctest, rs conformance including the async feature, zig 442, cs 56, spec 147.
 
 **lazily-zig CI is red and it is not this change.** `src/lazily/context.zig:2208` uses `builtin.Type.Fn.param_types`, removed from newer `std`; CI pins Zig 0.15.2 and 0.16.0 while the code targets what local dev runs (0.17.0-dev, where the whole suite passes). The identical error is on the commit before mine and the file was last touched by the cell-kernel work. Filed as `#lzzigcitoolchain` rather than waived — a red CI that nobody owns stops being informative.
-<!-- agent:boundary:4ec7a904 -->
+
+### Re: zig nightly support — opus-5
+
+> **Queue prompt:** do [#lzzigcitoolchain]
+
+Fixed, and the matrix already had nightly — it just was not gating, which is why the breakage landed in the first place.
+
+**What was actually red.** One line. `normalizeCompute` in `src/lazily/context.zig` read `@typeInfo(F).@"fn".param_types`, and that field only exists on nightly: 0.17.0-dev renamed `params: []const Param` (whose elements carry `.type: ?type`) to `param_types: []const ?type` plus a parallel `param_attrs`. So the code compiled on the machine it was written on and broke the 0.16.0 gate. Every one of the "214 errors" / "54 errors" / "64 errors" counts in the CI log was that same line, re-reported per test target.
+
+**Both shapes are now read behind `@hasField`.** The condition is comptime-known, so the branch not taken is never analyzed and one source tree satisfies both toolchains — no per-version file, no build flag.
+
+**On your point about supporting nightly: it was already in the matrix, and that was the problem.** `master` ran with `continue-on-error`, on the reasoning written into the workflow — a main branch red from an upstream commit nobody here made is a branch people learn to ignore. That reasoning inverts once development happens *on* nightly: it becomes the toolchain most exercised and least likely to be noticed when it rots, and the practical cost of not gating it was nightly-only code reaching main and breaking the **0.16.0** gate instead. So `master` is promoted to a gate alongside 0.16.0. If the upstream-churn worry outweighs that for you, it is one line in `continue-on-error` to put back.
+
+**0.15.2 stays non-gating and still does not compile.** Its blockers are unrelated and pre-existing: `std.testing.io` in `reliable_sync.zig`, a comptime dependency loop in `cell.zig`, and an unresolvable comptime value in `cell_0_15_test.zig`. I left the job in place so the gap stays visible rather than being quietly dropped, and did not fold it into this fix.
+
+**Verified against the real toolchains, not inferred.** All three were already installed locally, so I built and ran the full suite on each rather than reasoning about std diffs: 0.16.0 PASS, 0.17.0-dev PASS, 0.15.2 FAIL on the pre-existing blockers above. I also reproduced the original 0.16.0 failure locally first, so the fix is tied to the actual error rather than to the CI log.
+
+Pushed; the run is queued. This also un-reds the one repo that was still failing after the conformance work — every other lazily repo is green on its exact commit.
+<!-- agent:boundary:29830409 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lzzigcitoolchain]
+- ~~do [#lzzigcitoolchain]~~
 - ~~do [#lzgoerrorretry]~~
 - ~~do [#lzasyncerrfixture]~~
 - ⏭️ do [#lzcscollections]
-- do [#lzcsstatechart]
+- ⏭️ do [#lzcsstatechart]
 - do [#lzcsqueues]
 - do [#lzcscrdt]
 - do [#lzcsipc]
@@ -199,7 +217,6 @@ All nine runners already replay against an `AsyncContext` model, so the async pl
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzzigcitoolchain] lazily-zig: CI is red on both pinned toolchains (Zig 0.15.2 and 0.16.0) because src/lazily/context.zig:2208 reads builtin.Type.Fn.param_types, removed from newer std. Local dev runs 0.17.0-dev where the full suite passes, so the red is a pin/target mismatch, not a code defect. Either move the CI matrix to the toolchain the code targets or make that reflection version-agnostic. Predates the conformance work: the same error is on the prior commit
 - [ ] [#lzcscollections] lazily-cs: SlotMap / ThreadSafeSlotMap / AsyncSlotMap materialization, ReactiveMap (CellMap/SlotMap), CellTree + reconcile, SemTree, stable-id alignment; replay collections + materialization + familysync corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 1-4, 9-11)
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
@@ -223,4 +240,5 @@ All nine runners already replay against an `AsyncContext` model, so the async pl
 - 2026-07-25 [#lzcsconcurrency] lazily-cs: ThreadSafeContext (lock-backed) + AsyncContext, and re-parameterise the reactive-graph conformance runner over the execution model so all three replay the same corpus — plan: tasks/software/lazily-cs-parity-plan.md (coverage rows 5-6)
 - 2026-07-25 [#lzgoerrorretry] lazily-go: an async slot in Error serves the stored error forever, but docs/async.md § Async slot state machine lists `Error → Computing` — "get_async retry after an error". lazily-cs follows the spec; either lazily-go is a finding or the spec sentence is wrong. Decide in lazily-spec first, then fix whichever side loses
 - 2026-07-25 [#lzasyncerrfixture] lazily-spec: land the async Error -> Computing conformance fixture. IN PROGRESS, uncommitted: conformance/reactive-graph/failed_compute_is_never_cached.json + fail_next in _REACTIVE_GRAPH_OPS + tag in _REACTIVE_GRAPH_TAGS (lazily-spec make check green, 147); lazily-go runner has fail_next on both models but its suite is RED with 20 divergences from a runner read-path wiring bug (the library is correct - probes show computes 1->2->3 with recovery on Get and TryGet). Eight runners untouched. Do NOT push lazily-spec before all nine runners replay it or every binding's corpus-drift check goes red
+- 2026-07-25 [#lzzigcitoolchain] lazily-zig: CI is red on both pinned toolchains (Zig 0.15.2 and 0.16.0) because src/lazily/context.zig:2208 reads builtin.Type.Fn.param_types, removed from newer std. Local dev runs 0.17.0-dev where the full suite passes, so the red is a pin/target mismatch, not a code defect. Either move the CI matrix to the toolchain the code targets or make that reflection version-agnostic. Predates the conformance work: the same error is on the prior commit
 <!-- /agent:done -->

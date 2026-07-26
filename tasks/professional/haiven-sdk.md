@@ -119,7 +119,39 @@ The implementation plan's Wave C is now split into **Market-balancing candidates
 
 **Confidence:** high that Wave C now balances market reach much better without overcommitting to unsupported engines. No additional backlog follow-up is needed because the requested prioritization and artifact update are complete. The session document is large, but I left it un-compacted because auto-compaction is off and no compaction approval was given.
 Bevy has extremely small marketshare. Please include other engines in Wave C to balance the marketshare.
-<!-- agent:boundary:f99cbe6f -->
+
+### Re: Haiven SDK superrepo design — gpt-5
+
+Designed and committed a superrepo architecture that keeps every SDK, the shared foundations, and the agent harness in dedicated repositories.
+
+**Architecture decision:** use a thin `haiven-sdk-superrepo` as the integration control plane. A versioned `components.yaml` declares repositories, lifecycle, owners, compatibility ranges, and standard commands; `workspace.lock.json` pins exact commits and artifact digests. A workspace CLI materializes the locked repositories without treating sibling source checkouts as package dependencies. Shipping SDKs consume released contract/conformance artifacts and retain independent versions, CI, permissions, and release histories.
+
+The design establishes:
+
+- dedicated repositories for contracts, conformance, the agent harness, Unity, Unreal, Godot, Android, iOS, GameMaker, Cocos Creator, Construct 3, and pilot-gated Bevy;
+- active/planned/incubator lifecycle gates so empty or unsupported SDK repos are not created prematurely;
+- repository-local native CI plus superrepo integration CI;
+- an explicit multi-repository contract-change train using immutable candidates, repository-local pull requests, and a tested lock update;
+- independent Semantic Versioning with a compatibility dashboard derived from CI evidence;
+- least-privilege ownership and publishing boundaries;
+- a dedicated `haiven-sdk-agent-harness` repository for the read-only MCP server, verification CLI, and agent-request eval suite, with no merge, publish, deploy, or production-secret authority;
+- Milestone 0/1 bootstrap steps, handoff/rollback drills, and implementation acceptance criteria.
+
+**Changed paths:**
+
+- [Superrepo design](../recruit/haiven/sdk-superrepo-design-2026-07-26.md)
+- [Milestone proposal](../recruit/haiven/sdk-proposal-2026-07-26.md)
+- [Implementation plan](../recruit/haiven/sdk-implementation-plan-2026-07-26.md)
+
+**Commit:** `512344c07` (`haiven sdk: design dedicated-repo superrepo`)
+
+**Commands and verification:** all three documents parse through the Markdown AST (superrepo: `124` nodes / `408` lines; proposal: `83` / `289`; plan: `251` / `525`), whitespace validation passed, and the required full workspace `make check` completed with exit code 0 and no detected failures. The required one-time GitHub lookup could not find a workflow named `CI`, so no CI run exists to inspect.
+
+**Confidence:** high that the design reconciles a unified development experience with truly independent SDK repositories and gives the agent harness a clear product and security boundary. No additional backlog follow-up is needed.
+
+**Escalation:** none for this task. Preflight did warn that the installed `agent-doc` binary is one committed change behind its local source; that is unrelated to the Haiven artifacts and did not block the cycle.
+Please design a superrepo with dedicated repos for each SDK. This would include agent harness.
+<!-- agent:boundary:2400c402 -->
 <!-- /agent:exchange -->
 
 ## Queue

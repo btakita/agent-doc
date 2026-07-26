@@ -150,8 +150,8 @@ pub fn complete_required_closeout_with_options(
             CloseoutGuardReason::ReplicaDeliveryPending,
         );
         anyhow::bail!(
-            "editor is the current authority for {}, but CRDT relay convergence is still pending; disk is a non-authoritative replica and was not used as commit authority",
-            file.display()
+            "{}",
+            agent_doc_git_io::live_buffer_guard::crdt_relay_pending_refusal(file)
         );
     }
 

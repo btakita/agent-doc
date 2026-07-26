@@ -2197,8 +2197,8 @@ fn finalize_commit(file: &Path, commit_mode: CommitMode, force_disk: bool) -> Re
                     );
                     if session_document {
                         anyhow::bail!(
-                            "editor is the current authority for {}, but CRDT relay convergence is still pending; disk is a non-authoritative replica and was not used as commit authority",
-                            file.display()
+                            "{}",
+                            agent_doc_git_io::live_buffer_guard::crdt_relay_pending_refusal(file)
                         );
                     }
                     return Ok(());

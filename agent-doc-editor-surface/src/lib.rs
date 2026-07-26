@@ -73,20 +73,58 @@ pub struct EditorSurface {
     /// falls back to the sorted visible set.
     #[serde(default)]
     pub columns: Vec<SurfaceColumn>,
-    /// Whether tmux currently matches this layout, when the caller knows.
-    ///
-    /// `Some(false)` is the case a pure focus decision gets wrong: the editor's
-    /// split model is unchanged but the tmux panes have drifted or swapped, so
-    /// selecting a pane would pick the right document in the wrong column. Kept
-    /// three-valued on purpose — "I did not look" (`None`) must not read as "it
-    /// has drifted", the inversion that made the supervisor's idle watch issue
-    /// its expensive probes 120x too often.
-    #[serde(default)]
-    pub layout_synced: Option<bool>,
     /// The operator asked for a reconcile explicitly, so skip the unchanged-
     /// observation shortcut.
     #[serde(default)]
     pub force_reconcile: bool,
+}
+
+/// The column layout tmux is actually showing, as observed by the controller.
+///
+/// The counterpart to [`EditorSurface`]. Both sides of the mirror are now
+/// observations in the same graph, which is what lets "has tmux drifted?" be a
+/// *derivation* rather than a field.
+///
+/// It used to be a field: `EditorSurface::layout_synced`, reported by the plugin.
+/// That asked the editor for a fact only the controller has — so a plugin either
+/// left it unset, in which case proven drift never reconciled, or paid a round
+/// trip to the controller to learn it before reporting it back. Deriving it also
+/// means tmux drifting is an event in its own right: the controller writes its
+/// observation and the consequence follows, with no editor event needed.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TmuxLayout {
+    #[serde(default)]
+    pub columns: Vec<SurfaceColumn>,
+}
+
+impl TmuxLayout {
+    pub fn signature(&self) -> String {
+        column_signature(&self.columns)
+    }
+}
+
+/// A stable identity for a column layout: which documents, arranged how.
+///
+/// Shared by both sides of the mirror so the comparison cannot drift — an editor
+/// signature and a tmux signature are computed by the same function or they are
+/// not comparable.
+fn column_signature(columns: &[SurfaceColumn]) -> String {
+    columns
+        .iter()
+        .map(|column| {
+            let mut seen: Vec<&String> = Vec::new();
+            for file in &column.files {
+                if !file.is_empty() && !seen.contains(&file) {
+                    seen.push(file);
+                }
+            }
+            seen.into_iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(&FILE_SEPARATOR.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join(&COLUMN_SEPARATOR.to_string())
 }
 
 impl EditorSurface {
@@ -99,20 +137,7 @@ impl EditorSurface {
     /// visible set, which is all the caller knows.
     pub fn visible_signature(&self) -> String {
         if !self.columns.is_empty() {
-            return self
-                .columns
-                .iter()
-                .map(|column| {
-                    let mut seen = Vec::new();
-                    for file in &column.files {
-                        if !file.is_empty() && !seen.contains(file) {
-                            seen.push(file.clone());
-                        }
-                    }
-                    seen.join(&FILE_SEPARATOR.to_string())
-                })
-                .collect::<Vec<_>>()
-                .join(&COLUMN_SEPARATOR.to_string());
+            return column_signature(&self.columns);
         }
         let mut files: Vec<&String> = Vec::new();
         for file in &self.visible {
@@ -132,6 +157,25 @@ impl EditorSurface {
     pub fn is_inert(&self) -> bool {
         self.visible.is_empty() || self.focused.is_empty()
     }
+}
+
+/// Whether tmux matches the layout the editor is showing.
+///
+/// Three-valued on purpose. `None` is "the controller has not reported a tmux
+/// layout", and it must not read as "it has drifted" — that is the same
+/// inversion that had the supervisor's idle watch answer an unresponsive
+/// controller with its *expensive* probes, up to 120x the intended load. Only
+/// `Some(false)` is evidence of drift.
+///
+/// The editor side is compared column-wise only when the editor detected a
+/// layout; with no detected layout there is nothing to mirror, so the answer is
+/// unknown rather than "mismatched".
+pub fn layout_matches(surface: &EditorSurface, tmux: Option<&TmuxLayout>) -> Option<bool> {
+    let tmux = tmux?;
+    if surface.columns.is_empty() {
+        return None;
+    }
+    Some(column_signature(&surface.columns) == tmux.signature())
 }
 
 /// What tmux should do about the current editor surface.
@@ -194,21 +238,22 @@ impl SurfaceTracking {
     /// implies nothing produces [`SurfaceIntent::Idle`] with the tracking value
     /// unchanged. Advancing on an idle observation is what would make a
     /// duplicate event look like a change on the next one.
-    pub fn advance(&self, surface: &EditorSurface) -> (Self, SurfaceIntent) {
+    pub fn advance(
+        &self,
+        surface: &EditorSurface,
+        layout_matches: Option<bool>,
+    ) -> (Self, SurfaceIntent) {
         if surface.is_inert() {
             return (self.clone(), SurfaceIntent::Idle);
         }
 
+        let drifted = layout_matches == Some(false);
         let signature = surface.visible_signature();
         let same_layout = self.reconciled_signature.as_deref() == Some(signature.as_str());
         let same_focus = self.focused_document.as_deref() == Some(surface.focused.as_str());
 
-        // Nothing observable changed and nobody claims tmux has drifted.
-        if !surface.force_reconcile
-            && surface.layout_synced != Some(false)
-            && same_layout
-            && same_focus
-        {
+        // Nothing observable changed and tmux is not known to have drifted.
+        if !surface.force_reconcile && !drifted && same_layout && same_focus {
             return (self.clone(), SurfaceIntent::Idle);
         }
 
@@ -219,7 +264,7 @@ impl SurfaceTracking {
 
         // tmux has drifted from a layout the editor never changed: focusing
         // would select the right document in the wrong column, so reconcile.
-        if surface.layout_synced == Some(false) {
+        if drifted {
             return (
                 advanced,
                 SurfaceIntent::Sync {
@@ -269,15 +314,18 @@ mod tests {
             focused: focused.to_string(),
             visible,
             columns,
-            layout_synced: Some(true),
             force_reconcile: false,
         }
     }
 
+    /// The default in these tests: the controller has reported a tmux layout
+    /// that matches. Drift is opted into per-test.
+    const MATCHES: Option<bool> = Some(true);
+
     #[test]
     fn the_first_observation_reconciles_the_layout() {
         let (tracking, intent) =
-            SurfaceTracking::default().advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]));
+            SurfaceTracking::default().advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
         assert!(matches!(intent, SurfaceIntent::Sync { .. }));
         assert_eq!(intent.document(), Some("/a.md"));
         assert_eq!(tracking.focused_document.as_deref(), Some("/a.md"));
@@ -286,8 +334,8 @@ mod tests {
     #[test]
     fn repeating_the_same_observation_implies_nothing() {
         let observed = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
-        let (tracking, _) = SurfaceTracking::default().advance(&observed);
-        let (again, intent) = tracking.advance(&observed);
+        let (tracking, _) = SurfaceTracking::default().advance(&observed, MATCHES);
+        let (again, intent) = tracking.advance(&observed, MATCHES);
         assert_eq!(intent, SurfaceIntent::Idle);
         assert_eq!(
             again, tracking,
@@ -298,8 +346,8 @@ mod tests {
     #[test]
     fn moving_focus_within_an_unchanged_layout_is_a_focus_move() {
         let (tracking, _) =
-            SurfaceTracking::default().advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]));
-        let (_, intent) = tracking.advance(&surface("/b.md", &[&["/a.md"], &["/b.md"]]));
+            SurfaceTracking::default().advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
+        let (_, intent) = tracking.advance(&surface("/b.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
         assert_eq!(
             intent,
             SurfaceIntent::Focus {
@@ -312,20 +360,16 @@ mod tests {
     #[test]
     fn a_changed_layout_reconciles_even_with_unchanged_focus() {
         let (tracking, _) =
-            SurfaceTracking::default().advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]));
-        let (_, intent) = tracking.advance(&surface("/a.md", &[&["/a.md"]]));
+            SurfaceTracking::default().advance(&surface("/a.md", &[&["/a.md"], &["/b.md"]]), MATCHES);
+        let (_, intent) = tracking.advance(&surface("/a.md", &[&["/a.md"]]), MATCHES);
         assert!(matches!(intent, SurfaceIntent::Sync { .. }));
     }
 
     #[test]
     fn proven_tmux_drift_reconciles_an_otherwise_unchanged_surface() {
         let observed = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
-        let (tracking, _) = SurfaceTracking::default().advance(&observed);
-        let drifted = EditorSurface {
-            layout_synced: Some(false),
-            ..observed.clone()
-        };
-        let (_, intent) = tracking.advance(&drifted);
+        let (tracking, _) = SurfaceTracking::default().advance(&observed, MATCHES);
+        let (_, intent) = tracking.advance(&observed, Some(false));
         assert!(
             matches!(intent, SurfaceIntent::Sync { .. }),
             "focusing would select the right document in the wrong column"
@@ -335,31 +379,63 @@ mod tests {
     #[test]
     fn an_unknown_layout_state_is_not_read_as_drift() {
         let observed = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
-        let (tracking, _) = SurfaceTracking::default().advance(&observed);
-        let unknown = EditorSurface {
-            layout_synced: None,
-            ..observed
-        };
-        let (_, intent) = tracking.advance(&unknown);
+        let (tracking, _) = SurfaceTracking::default().advance(&observed, MATCHES);
+        let (_, intent) = tracking.advance(&observed, None);
         assert_eq!(
             intent,
             SurfaceIntent::Idle,
-            "\"I did not look\" must stay distinct from \"I looked and it has drifted\""
+            "\"the controller has not reported a tmux layout\" must stay distinct from \"it has drifted\""
+        );
+    }
+
+    #[test]
+    fn the_mirror_comparison_is_derived_from_both_sides() {
+        let editor = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
+        let same = TmuxLayout {
+            columns: editor.columns.clone(),
+        };
+        let swapped = TmuxLayout {
+            columns: vec![
+                SurfaceColumn::new(["/b.md"]),
+                SurfaceColumn::new(["/a.md"]),
+            ],
+        };
+
+        assert_eq!(layout_matches(&editor, Some(&same)), Some(true));
+        assert_eq!(
+            layout_matches(&editor, Some(&swapped)),
+            Some(false),
+            "the same documents in swapped columns is drift, not a match"
+        );
+        assert_eq!(
+            layout_matches(&editor, None),
+            None,
+            "no reported tmux layout is unknown, never drift"
+        );
+
+        let no_detected_layout = EditorSurface {
+            columns: Vec::new(),
+            ..editor
+        };
+        assert_eq!(
+            layout_matches(&no_detected_layout, Some(&same)),
+            None,
+            "with no editor layout there is nothing to mirror, so the answer is unknown"
         );
     }
 
     #[test]
     fn force_reconcile_re_emits_but_does_not_change_the_kind() {
         let observed = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
-        let (tracking, _) = SurfaceTracking::default().advance(&observed);
+        let (tracking, _) = SurfaceTracking::default().advance(&observed, MATCHES);
         let forced = EditorSurface {
             force_reconcile: true,
             ..observed
         };
-        let (_, intent) = tracking.advance(&forced);
+        let (_, intent) = tracking.advance(&forced, MATCHES);
         // `force_reconcile` suppresses the unchanged-observation shortcut; it
-        // does not claim the layout drifted. Only `layout_synced: Some(false)`
-        // is evidence of that, and inventing a sync here would neutralize the
+        // does not claim the layout drifted. Only a derived `Some(false)` is
+        // evidence of that, and inventing a sync here would neutralize the
         // active pane the operator just moved.
         assert_eq!(
             intent,
@@ -372,7 +448,7 @@ mod tests {
             force_reconcile: true,
             ..surface("/a.md", &[&["/a.md"]])
         };
-        let (_, intent) = tracking.advance(&forced_new_layout);
+        let (_, intent) = tracking.advance(&forced_new_layout, MATCHES);
         assert!(matches!(intent, SurfaceIntent::Sync { .. }));
     }
 
@@ -393,7 +469,7 @@ mod tests {
                 ..EditorSurface::default()
             },
         ] {
-            let (advanced, intent) = tracking.advance(&inert);
+            let (advanced, intent) = tracking.advance(&inert, MATCHES);
             assert_eq!(intent, SurfaceIntent::Idle);
             assert_eq!(advanced, tracking);
         }

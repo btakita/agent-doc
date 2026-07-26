@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
-use agent_doc_editor_surface::{EditorSurface, EditorSurfaceState, SurfaceIntent};
+use agent_doc_editor_surface::{EditorSurface, EditorSurfaceState, SurfaceIntent, TmuxLayout};
 use agent_doc_state_scope::ProcessScope;
 use anyhow::{Context as _, Result};
 use serde::Serialize;
@@ -95,6 +95,27 @@ impl Registry {
     /// The plugin's entire job. Whether tmux does anything, and what, is derived
     /// here — the caller does not decide, debounce, or dedup.
     pub fn observe(&self, project_root: &Path, surface: EditorSurface) -> SurfaceObservationReceipt {
+        self.with_entry(project_root, |entry| entry.state.observe(surface))
+    }
+
+    /// Record what tmux is showing at `project_root`.
+    ///
+    /// The controller's half of the mirror. Drift the controller observes drives
+    /// a reconcile on its own, with nothing for the editor to report — which is
+    /// what the plugin-reported `layout_synced` field was standing in for, badly.
+    pub fn observe_tmux(
+        &self,
+        project_root: &Path,
+        layout: Option<TmuxLayout>,
+    ) -> SurfaceObservationReceipt {
+        self.with_entry(project_root, |entry| entry.state.observe_tmux(layout))
+    }
+
+    fn with_entry(
+        &self,
+        project_root: &Path,
+        write: impl FnOnce(&RootSurface),
+    ) -> SurfaceObservationReceipt {
         let root = project_root.to_path_buf();
         let mut roots = self.roots();
         let entry = roots.entry(root.clone()).or_insert_with(|| {
@@ -121,7 +142,7 @@ impl Registry {
         if let Ok(mut slot) = entry.outcome.lock() {
             *slot = None;
         }
-        entry.state.observe(surface);
+        write(entry);
         let intent = entry.state.intent();
         let outcome = entry.outcome.lock().ok().and_then(|slot| slot.clone());
 
@@ -215,6 +236,14 @@ pub fn observe(project_root: &Path, surface: EditorSurface) -> SurfaceObservatio
     REGISTRY.observe(project_root, surface)
 }
 
+/// Record a tmux-layout observation for the process-wide registry.
+pub fn observe_tmux(
+    project_root: &Path,
+    layout: Option<TmuxLayout>,
+) -> SurfaceObservationReceipt {
+    REGISTRY.observe_tmux(project_root, layout)
+}
+
 /// JSON-input form of [`observe`] — the shape both editor plugins call.
 pub fn observe_from_json(
     project_root: &Path,
@@ -238,6 +267,12 @@ mod tests {
     use super::*;
     use agent_doc_editor_surface::SurfaceColumn;
 
+    fn mirrored(surface: &EditorSurface) -> TmuxLayout {
+        TmuxLayout {
+            columns: surface.columns.clone(),
+        }
+    }
+
     fn surface(focused: &str, columns: &[&[&str]]) -> EditorSurface {
         let columns: Vec<SurfaceColumn> = columns
             .iter()
@@ -251,7 +286,6 @@ mod tests {
             focused: focused.to_string(),
             visible,
             columns,
-            layout_synced: Some(true),
             force_reconcile: false,
         }
     }
@@ -384,6 +418,43 @@ mod tests {
         );
         assert_eq!(ran.lock().unwrap().len(), 2);
         assert!(!registry.forget(Path::new("/never-observed")));
+    }
+
+    #[test]
+    fn a_controller_observed_drift_reconciles_without_an_editor_event() {
+        let (registry, ran) = registry();
+        let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
+        registry.observe_tmux(Path::new("/p"), Some(mirrored(&visible)));
+        registry.observe(Path::new("/p"), visible);
+        assert_eq!(ran.lock().unwrap().len(), 1);
+
+        // Nothing arrives from the editor; the controller reports that the panes
+        // no longer mirror the layout.
+        let receipt = registry.observe_tmux(
+            Path::new("/p"),
+            Some(TmuxLayout {
+                columns: vec![SurfaceColumn::new(["/b.md"]), SurfaceColumn::new(["/a.md"])],
+            }),
+        );
+        assert!(!receipt.idle);
+        assert!(matches!(receipt.intent, SurfaceIntent::Sync { .. }));
+        assert_eq!(ran.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_tmux_observation_before_any_editor_report_is_inert() {
+        let (registry, ran) = registry();
+        let receipt = registry.observe_tmux(
+            Path::new("/p"),
+            Some(TmuxLayout {
+                columns: vec![SurfaceColumn::new(["/a.md"])],
+            }),
+        );
+        assert!(
+            receipt.idle,
+            "tmux state alone says nothing until the editor has reported a surface"
+        );
+        assert!(ran.lock().unwrap().is_empty());
     }
 
     #[test]

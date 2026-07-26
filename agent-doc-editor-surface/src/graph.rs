@@ -22,7 +22,19 @@
 use agent_doc_state_scope::ProcessScope;
 use lazily::{Computed, Effect, ThreadSafeContext, ThreadSafeStateMachine};
 
-use crate::{EditorSurface, SurfaceIntent, SurfaceTracking};
+use crate::{EditorSurface, SurfaceIntent, SurfaceTracking, TmuxLayout, layout_matches};
+
+/// One observation of the whole mirror: what the editor shows, and whether tmux
+/// currently matches it.
+///
+/// The machine's event. `layout_matches` is *derived* before the event is sent
+/// rather than reported by the caller, so neither side of the mirror has to know
+/// the other's state to produce a correct decision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SurfaceObservation {
+    pub surface: EditorSurface,
+    pub layout_matches: Option<bool>,
+}
 
 /// The folded state: what tmux was last reconciled against, plus the intent the
 /// most recent observation implied.
@@ -61,8 +73,10 @@ impl Default for SurfaceFold {
 /// Total and pure — every observation produces a next state, and an observation
 /// that implies nothing leaves the tracking value and the epoch alone while
 /// clearing the intent back to [`SurfaceIntent::Idle`].
-pub fn advance(current: &SurfaceFold, surface: &EditorSurface) -> Option<SurfaceFold> {
-    let (tracking, intent) = current.tracking.advance(surface);
+pub fn advance(current: &SurfaceFold, observation: &SurfaceObservation) -> Option<SurfaceFold> {
+    let (tracking, intent) = current
+        .tracking
+        .advance(&observation.surface, observation.layout_matches);
     let epoch = if intent.is_idle() {
         current.epoch
     } else {
@@ -78,7 +92,15 @@ pub fn advance(current: &SurfaceFold, surface: &EditorSurface) -> Option<Surface
 /// One project root's editor-surface graph.
 pub struct EditorSurfaceState {
     ctx: ThreadSafeContext,
-    machine: ThreadSafeStateMachine<SurfaceFold, EditorSurface>,
+    /// What the editor reports. An observation, written by the plugin.
+    editor: lazily::Source<EditorSurface>,
+    /// What tmux is showing. An observation, written by the controller.
+    tmux: lazily::Source<Option<TmuxLayout>>,
+    /// Derived across both sides of the mirror: has tmux drifted from the layout
+    /// the editor is showing? This is the value that used to be a field on
+    /// `EditorSurface`, asked of an editor that cannot know it.
+    layout_matches: Computed<Option<bool>>,
+    machine: ThreadSafeStateMachine<SurfaceFold, SurfaceObservation>,
     intent: Computed<SurfaceIntent>,
     _scope: Option<ProcessScope>,
 }
@@ -107,15 +129,38 @@ impl EditorSurfaceState {
     /// derived across, instead of being an island with the right shape.
     pub fn new_in(scope: &ProcessScope) -> Self {
         let ctx = scope.ctx().clone();
+        let editor = ctx.source(EditorSurface::default());
+        let tmux = ctx.source(None::<TmuxLayout>);
+        let layout_matches = ctx.computed(move |c| {
+            let surface = c.get(&editor);
+            let tmux = c.get(&tmux);
+            layout_matches(&surface, tmux.as_ref())
+        });
         let machine = ThreadSafeStateMachine::new(&ctx, SurfaceFold::default(), advance);
         let state = machine.state_handle();
         let intent = ctx.computed(move |c| c.get(&state).intent.clone());
         Self {
             ctx,
+            editor,
+            tmux,
+            layout_matches,
             machine,
             intent,
             _scope: None,
         }
+    }
+
+    /// Fold the current state of both observations into the machine.
+    ///
+    /// Reads the derived mirror comparison rather than taking it as an argument,
+    /// so an editor event and a tmux event produce the same decision from the
+    /// same two cells.
+    fn fold_current(&self) {
+        let observation = SurfaceObservation {
+            surface: self.ctx.get(&self.editor),
+            layout_matches: self.ctx.get(&self.layout_matches),
+        };
+        self.machine.send(&self.ctx, observation);
     }
 
     /// Record what the editor looks like now.
@@ -123,7 +168,25 @@ impl EditorSurfaceState {
     /// The entire plugin-facing surface. Everything downstream updates because
     /// this observation arrived.
     pub fn observe(&self, surface: EditorSurface) {
-        self.machine.send(&self.ctx, surface);
+        self.ctx.set(&self.editor, surface);
+        self.fold_current();
+    }
+
+    /// Record what tmux is showing now.
+    ///
+    /// The controller's half of the mirror, and the capability the previous
+    /// shape did not have: tmux drifting is an event in its own right. The
+    /// consequence follows from the controller's observation alone, with no
+    /// editor event required and nothing for the plugin to report.
+    pub fn observe_tmux(&self, layout: Option<TmuxLayout>) {
+        self.ctx.set(&self.tmux, layout);
+        self.fold_current();
+    }
+
+    /// Whether tmux matches the layout the editor is showing, as currently
+    /// derived. `None` until the controller has reported a tmux layout.
+    pub fn layout_matches(&self) -> Option<bool> {
+        self.ctx.get(&self.layout_matches)
     }
 
     /// What tmux should do about the current surface.
@@ -185,8 +248,15 @@ mod tests {
             focused: focused.to_string(),
             visible,
             columns,
-            layout_synced: Some(true),
             force_reconcile: false,
+        }
+    }
+
+    /// A tmux layout that mirrors the editor's, so the derived comparison says
+    /// "matches" unless a test writes drift.
+    fn mirrored(surface: &EditorSurface) -> TmuxLayout {
+        TmuxLayout {
+            columns: surface.columns.clone(),
         }
     }
 
@@ -299,22 +369,66 @@ mod tests {
     #[test]
     fn repeated_proven_drift_reconciles_every_time() {
         // The same shape arriving from tmux rather than the operator: the
-        // controller keeps reporting that the panes do not match a layout the
-        // editor never changed. Each report is a fresh consequence.
+        // controller keeps reporting panes that do not match a layout the editor
+        // never changed. Each report is a fresh consequence.
+        let state = EditorSurfaceState::new();
+        let (seen, sink) = recorder();
+        let _effect = state.on_intent(sink);
+
+        let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
+        state.observe_tmux(Some(mirrored(&visible)));
+        state.observe(visible);
+
+        let drifted = TmuxLayout {
+            columns: vec![SurfaceColumn::new(["/b.md"]), SurfaceColumn::new(["/a.md"])],
+        };
+        state.observe_tmux(Some(drifted.clone()));
+        state.observe_tmux(Some(drifted));
+
+        assert_eq!(seen.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn tmux_drift_alone_drives_a_reconcile_with_no_editor_event() {
+        // The capability the previous shape did not have. The editor reports
+        // nothing new; the controller observes that the panes no longer mirror
+        // the layout, and the consequence follows from that observation alone.
+        let state = EditorSurfaceState::new();
+        let (seen, sink) = recorder();
+        let _effect = state.on_intent(sink);
+
+        let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
+        state.observe_tmux(Some(mirrored(&visible)));
+        state.observe(visible.clone());
+        assert_eq!(seen.lock().unwrap().len(), 1, "the first sighting reconciles");
+        assert_eq!(state.layout_matches(), Some(true));
+
+        state.observe_tmux(Some(TmuxLayout {
+            columns: vec![SurfaceColumn::new(["/b.md"]), SurfaceColumn::new(["/a.md"])],
+        }));
+
+        assert_eq!(state.layout_matches(), Some(false));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2, "drift is an event in its own right");
+        assert!(matches!(seen[1], SurfaceIntent::Sync { .. }));
+    }
+
+    #[test]
+    fn an_unreported_tmux_layout_never_reads_as_drift() {
         let state = EditorSurfaceState::new();
         let (seen, sink) = recorder();
         let _effect = state.on_intent(sink);
 
         let visible = surface("/a.md", &[&["/a.md"], &["/b.md"]]);
         state.observe(visible.clone());
-        let drifted = EditorSurface {
-            layout_synced: Some(false),
-            ..visible
-        };
-        state.observe(drifted.clone());
-        state.observe(drifted);
+        assert_eq!(state.layout_matches(), None);
+        state.observe(visible);
 
-        assert_eq!(seen.lock().unwrap().len(), 3);
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            1,
+            "with no tmux observation the repeat is still idle, not a reconcile"
+        );
     }
 
     #[test]

@@ -2534,7 +2534,12 @@ pub unsafe extern "C" fn agent_doc_tmux_focus_state_json(
 ///
 /// `surface_json` is an `EditorSurface`: `{ "focused": "<path>", "visible":
 /// ["<path>", ...], "columns": [{ "files": ["<path>", ...] }, ...],
-/// "layout_synced": true|false|null, "force_reconcile": false }`.
+/// "force_reconcile": false }`.
+///
+/// Note there is no `layout_synced`: whether tmux has drifted is derived by
+/// comparing this observation against the controller's own
+/// ([`agent_doc_editor_surface_observe_tmux_json`]), so a plugin never has to
+/// report a fact it would have to ask the controller for.
 ///
 /// This is the entry point a plugin should call instead of choosing between
 /// [`agent_doc_focus_document_pane_json`] and [`agent_doc_sync_tmux_layout_json`]
@@ -2561,6 +2566,42 @@ pub unsafe extern "C" fn agent_doc_editor_surface_observe_json(
             PathBuf::from(unsafe { required_ffi_string(project_root, "project_root") }?);
         let surface_json = unsafe { required_ffi_string(surface_json, "surface_json") }?;
         agent_doc_editor_surface_io::observe_from_json(&project_root, &surface_json)
+    })())
+}
+
+/// Report the column layout tmux is currently showing at `project_root`.
+///
+/// The controller's half of the mirror. `layout_json` is a `TmuxLayout`:
+/// `{ "columns": [{ "files": ["<path>", ...] }, ...] }`; pass a null pointer to
+/// record that no tmux layout is known.
+///
+/// Drift observed here drives a reconcile on its own — no editor event is
+/// required, and nothing about it is reported by a plugin.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_editor_surface_observe_tmux_json(
+    project_root: *const c_char,
+    layout_json: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root =
+            PathBuf::from(unsafe { required_ffi_string(project_root, "project_root") }?);
+        let layout_json = unsafe { optional_ffi_string(layout_json, "layout_json") }?;
+        let layout = match layout_json {
+            Some(json) => Some(
+                serde_json::from_str::<agent_doc_editor_surface::TmuxLayout>(&json)
+                    .context("parse tmux layout json")?,
+            ),
+            None => None,
+        };
+        Ok(agent_doc_editor_surface_io::observe_tmux(
+            &project_root,
+            layout,
+        ))
     })())
 }
 

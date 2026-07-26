@@ -54,7 +54,12 @@ systems at Presence AI (WebRTC avatar pipeline) and Milyoni (live video social e
 for major studios), my current open-source work centers on realtime multi-replica
 sync, and your WebSocket-hub design exercise was genuinely fun. Chat and presence at
 scale is distributed state synchronization... which is the problem space I care most
-about... so this isn't just work I can do, it's the work I'd choose.
+about... so this isn't just work I can do, it's the work I'd choose. And the mission
+gives it weight: kids deserve to play and connect without being preyed upon,
+communities deserve infrastructure that keeps them positive, and matching compatible
+people so they can actually have fun together is the part of gaming that makes the
+rest worth building. Putting that into the infrastructure itself... rather than
+bolting it on after the harm... is work worth doing well.
 
 I want to be upfront about how I got to these numbers, because I know an ask like this
 lands heavily on a seed-stage budget, and I don't make it lightly. My alternative is a

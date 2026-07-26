@@ -528,12 +528,50 @@ So prototyping a *unification* there would mean designing against two families t
 I've corrected both the plan and the filed item. The prototype target is now **zig and cpp**: feature-complete, both able to fold all three families in, seam mostly built, and neither exposes maps on its C ABI. zig additionally already contains the working proof — `Engine(comptime Model: type)` is one generic replay engine over `SyncModel`/`TsModel`/`AsyncModel` with the async projection isolated to a single `settle` method.
 
 That also removes the qualification I attached to the cs recommendation. I'd said it would validate the shape but not the mechanism, because sync↔thread-safe unification is free in C#. With zig and cpp as the targets, the prototype exercises the real mechanism — the per-execution-model projection — rather than the case where it happens to be the identity.
-<!-- agent:boundary:be8656e7 -->
+
+### Re: adversarial review refuted four of my claims — opus-5
+
+> **Queue prompt:** do [#lazilyrenameinverted]
+
+Two things this cycle: the queue item, and the result of an independent adversarial pass on my own plan. The second is more important.
+
+### The plan's central framing was wrong
+
+I asked a reviewer to attack six load-bearing claims and to default to "refuted" on thin evidence. Four fell. I verified each refutation against the source myself rather than taking them on report.
+
+**1. "Nine of nine bindings violate the spec" — withdrawn.** This was the framing I built the whole document on, and the one I said I most wanted attacked. `cell-model.md:406-408` scopes flavor obligations explicitly: *"A flavor MUST preserve the **entry-kind and materialization laws** above; it only adds the context-specific guarantee."* Ordering and atomic move are not flavor obligations, and `:454-458` sets the floor at *"at least its `SourceMap` specialization"*. Clause 8 requires collections of every **binding** — satisfied by each binding's sync map. The capability gap is real. The violation is not. I read `:275` early, quoted it repeatedly, and never checked whether the requirement scoped to flavors — the third time this session I've asserted from one line without reading the layer that qualifies it.
+
+**2. "All three families store the same closure-free state" — false.** The sync map additionally holds `membership: Source<u64>` (`cell_family.rs:210`) and `order_signal: Source<u64>` (`:218`) — **graph-bound reactive handles**. TS and async hold only `materialized + order`.
+
+**3. "The ordering plane touches no handle" — false.** I called this the decisive fact for sequencing. `move_*` never touch `H`, but the version bump is `ctx.set(&self.inner.order_signal, …)` (`:255-259`, called from `move_to` at `:389`). That *is* a handle write, sync-context-typed. So a fully graph-agnostic ordering core isn't achievable — and a core that is graph-agnostic all the way is exactly zig's sync map, which this same document catalogues as a defect because its "signals" are `u64` counters callers must poll. I argued for the thing I'd criticised.
+
+**4. The `remove` exclusion had fabricated-looking formal backing.** I cited `materialize_present_comm` as the monotonicity theorem; it's *confluence* — monotonicity is `materialize_present_monotone`. Worse, the Lean models contain **no remove operation at all**, so no theorem constrains adding one. The same fixture already replays against the sync map, which ships `remove`; lazily-cs's `AsyncComputedMap.Remove` exists today; and the "only grows" comment appears on the **sync** map ten lines above a `remove` that shrinks it. I asserted a formal constraint without opening the proofs.
+
+**The largest thing I missed entirely:** TS and async have **no reactive `keys`/`len`/`contains_key` at all — only non-reactive `present_keys`/`present_count`.** The gap is wider than ordering; *membership reactivity itself* is absent. Closing it needs each flavor to mint its own membership and order `Source` cells on its own graph. A shared closure-free core cannot supply that, and it is the bulk of the real effort. "Purely additive, by construction" was wrong.
+
+Plan corrected and committed (`6e7bb3974`), with the refutations recorded at the top rather than quietly edited away. Also fixed: a citation that pointed at a comment saying the opposite of my claim; "8 of 9 already do this" (it's 7 — go's `Observe` mints and isn't a pure read); cs having two awaitable methods not one; and the kt contradiction where I called it both "already ships the target design" and "suspend colours read."
+
+### The queue item
+
+`#lazilyrenameinverted` asked to flip lazily-py so `Source`/`SourceSlot` become canonical. **I did not do it, because the premise is wrong.**
+
+`Cell`/`CellSlot` being the native class names is not drift. `cell.py` sits inside the mypyc compilation unit — `setup.py` compiles `slot`/`cell`/`signal`/`effect`/`batch` as one unit specifically so cross-file native-class inheritance (`BaseSlot → CellSlot`) gets mypyc's early binding. And the class docstring states the reason outright: `Cell` *"stays the native class name (for mypyc native-struct reads and `isinstance` stability across the family)"*.
+
+Flipping renames the native class and changes `isinstance` identity. That's a real trade — mypyc native-struct naming versus family-wide vocabulary consistency — and it's a decision the repo already made deliberately. I filed that item from a survey line without reading the docstring beside it, which is the same error as the four above.
+
+I've rewritten the item as `[recommended]` with the constraint recorded, rather than closing it — the underlying question (should vocabulary consistency win?) is legitimate, it just isn't the cleanup I described.
+
+Four new items filed from the review's findings, including the membership-plane gap and the `clear_dependents` handle-trait surgery that any flavor-level `remove` needs.
+<!-- agent:boundary:40ceac23 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#closemembershiporder]
+- do [#maphandlecleardependents]
+- do [#lazilycellfamily]
+- do [#lazilyspecdisagrees]
 - ~~Rename CellTree to SourceTree. Scan the lazily spec + formal + implementations for any other moderization renames that are needed.~~
 - ~~Also rename EntryKind::Cell to EntryKind::Source + EntryKind::Slot to EntryKind::Computed.~~
 - ~~In lazily-rs: `Recommendation: expose a ctx-taking factory on ReactiveMap (make mint_with public, or change get_or_insert_with to Fn(&Ctx, &K) -> V). Then single-threaded derived entries work at all, thread-safe ones stop needing the capture trick, and scope-drop-is-teardown stays true for both. That's a lazily-rs change across the two families plus Async* — say the word and I'll scope it, same converge-on-naming-first caveat as the SourceTree rename.`. If the spec + formal + implementation need to be updated, do so. release + publish all lazily except lazily-cs.~~
@@ -546,8 +584,8 @@ That also removes the qualification I attached to the cs recommendation. I'd sai
 - ⏭️ do [#lzcscluster]
 - ⏭️ do [#lzcsplane]
 - ⏭️ do [#lzcspackage]
-- do [#asyncplanenever]
-- do [#lazilyrenameinverted]
+- ⏭️ do [#asyncplanenever]
+- 🚧 do [#lazilyrenameinverted]
 - do [#readmeexamplesreference]
 - do [#signalgetsignallive]
 - do [#observerwordingcontradic]
@@ -574,6 +612,10 @@ That also removes the qualification I attached to the cs recommendation. I'd sai
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#closemembershiporder] Close the membership/order-signal gap in the lazily-rs thread-safe and async maps: they have NO reactive keys/len/contains_key at all, only non-reactive present_keys/present_count. The sync map gets this from `membership: Source<u64>` and `order_signal: Source<u64>` (cell_family.rs:210,218) bumped via ctx.set (:255-271). Each flavor must mint its own membership/order cells on its own graph — a shared closure-free core CANNOT supply this. This is the bulk of the real unification effort and was unbudgeted in the first plan draft. Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook at all. Any flavor-level `remove` — and the fix for lazily-cs AsyncComputedMap.Remove not disposing its node — requires adding one. Handle-trait surgery, not an additive method. Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
+- [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyphaseextract] lazily-rs Phase A: extract the closure-free KeyedOrder<K,H> core (entries + order + membership + present-set + position/keys/len/contains_key + move_to/move_before/move_after) shared by all three families; thin per-model shells keep materialize/observe. Do NOT route through SyncReactiveGraph — its Send+Sync bound is stricter than the concrete Context API and would break Rc-capturing callers. `remove` stays out of the core (monotone present set is fixture- and Lean-backed). Plan: tasks/plan-lazily-reactivemap-unification.md
@@ -591,7 +633,7 @@ That also removes the qualification I attached to the cs recommendation. I'd sai
 - [ ] [#lazilycppcollections] lazily-cpp: 15 collections fixtures still uncovered — 9 with no coverage at all (cellmap_atomic_move, cellmap_independence, keyed_reconciliation_lis, semtree_incremental, stableid_alignment, textcrdt_convergence, textcrdt_delta_sync, workqueue_competing_delivery, workqueue_lease_deadletter) and 6 hand-transcribed (mergecell_algebra, 5x queuecell_*). Largest single body of remaining conformance work; spans five separate primitives. Tracked in the KNOWN_UNCOVERED ledger.
 - [ ] [#trackedcopieslazily] The tracked copies of lazily-spec conformance fixtures inside lazily-py (tests/conformance), lazily-dart (test/conformance), lazily-rs (tests/conformance) and lazily-go (test/conformance) are kept byte-identical to canonical BY HAND with no sync script or drift check. This cycle had to flip the same fixture in three places. Add a sync/verify script (or make the runners read the sibling checkout) so a canonical edit cannot silently miss a vendored copy.
 - [ ] [#asyncplanenever] Async plane never migrated to the v2 kernel: AsyncCellHandle / AsyncSlotHandle / AsyncSlotState survive in cpp, go, js, kt, py, zig, cs. Sharpest case is lazily-cpp `AsyncContext::memo()` (async_context.hpp:144), still live and undeprecated while the sync `Context::memo` is DELETED. Migrate to Async{Source,Computed} with deprecated aliases.
-- [ ] [#lazilyrenameinverted] lazily-py has the v2 rename INVERTED vs every other binding: `class Cell` is primary with `Source = Cell` (cell.py:35,219) and `class CellSlot` primary with `SourceSlot = CellSlot` (cell.py:191,220). Flip so Source/SourceSlot are canonical and Cell/CellSlot are the deprecated aliases.
+- [ ] 🚧 [#lazilyrenameinverted] [recommended] lazily-py keeps `Cell`/`CellSlot` as the native class names with `Source = Cell` / `SourceSlot = CellSlot` aliases (cell.py:35,191,219-220). This is NOT drift — it is documented and motivated: cell.py is inside the mypyc compilation unit (setup.py compiles slot/cell/signal/effect/batch as one unit for cross-file native-class inheritance BaseSlot -> CellSlot), and the docstring states Cell "stays the native class name (for mypyc native-struct reads and isinstance stability across the family)". Flipping would rename the native class and change isinstance identity. Do NOT flip without deciding whether mypyc native-struct naming or family-wide vocabulary consistency wins; that is a spec/ownership question, not a cleanup.
 - [ ] [#readmeexamplesreference] README examples reference types that no longer exist: lazily-go README:82 `lazily.NewCell` (never defined, example does not compile) and README:209 `*Cell[V]`; lazily-cpp README:54,280,387 + AGENTS.md:43 `CellHandle`/`SlotHandle` (deleted); lazily-dart README:38,329 claims a `Signal` back-compat alias that does not exist; lazily-py README:225 calls `CellSlot` canonical.
 - [ ] [#signalgetsignallive] signal/getSignal still live and UNDEPRECATED on the threadsafe/async planes after the sync plane retired them: lazily-kt ThreadSafeContext.kt:195,247 + AsyncContext.kt:624, lazily-js reactive-async.d.ts:85, lazily-zig root.zig:86,90. Deprecate or migrate to eager Computed.
 - [ ] [#observerwordingcontradic] "observer" wording contradicts the no-observers-only-Effects rule (#lzdartobservercow): lazily-cs Effect.cs:41,59 + Reactive.cs:119, lazily-dart core.dart:1386,1418 + state_chart.dart:13, lazily-zig effect.zig:12,202, lazily-js README:149, lazily-formal ThreadSafe.lean:9, lazily-kt ThreadSafeContext.kt:37. Effects are not observers; fix the prose.

@@ -43,10 +43,21 @@ exactly why this team is attractive, and congratulations on the seed progress an
 path to the August beta. Apologies for the slow reply: your email deserved a considered
 answer, and I wanted to be certain of mine before giving it to you.
 
+Before the numbers, the work itself: this role is the part I'm genuinely excited
+about. The SDK problem... one API surface delivered idiomatically across Unity, Unreal,
+and the other platforms... is the same shape as my own cross-language work, where I
+maintain one reactive-state API across 8 language bindings with a shared spec, formal
+model, and conformance suite (public at github.com/lazily-hub... and the binding I'm
+implementing right now is C#, which happens to be exactly what a Unity SDK is written
+in). The realtime backend side... WebSocket fan-out, presence, connection lifecycle...
+is where I've spent much of my career. I'm not guessing at this work; I've been
+rehearsing it for years.
+
 I want to be upfront about how I got to these numbers, because I know an ask like this
 lands heavily on a seed-stage budget, and I don't make it lightly. My alternative is a
-contract seat that annualizes above $205k ($100/hr) in cash. I sat down and ran the math on both
-paths honestly... and I'm mindful that cash is your tight constraint right now, which
+contract seat that annualizes above $205k (they raised their offer to $100/hr) in cash.
+I sat down and ran the math on both paths...
+and I'm mindful that cash is your tight constraint right now, which
 is exactly why this leans on equity and structure instead of asking you to match cash.
 This is the package where choosing Haiven becomes rational on my side of the ledger,
 not an opening bid:
@@ -76,13 +87,12 @@ core collaboration hours... I'm Eastern and will hold a 12-5pm ET overlap with t
 team, flexing around it.
 
 On timing: I'm ready to move quickly. If this framework works for you... even an
-informal "yes, we can get there" is enough... I can give you a final answer within a
-day or two of your reply.
+informal "yes, we can get there" is enough... I can give you a final answer today or tomorrow.
 
 I'll be honest, Craig: I hope the math works, because I'd rather build with you. If
 parts of this framework don't fit where Haiven is right now, tell me which ones... I
-listed the pieces separately precisely so we can solve it together rather than
-trade ultimatums. However it lands, I'm grateful for how you've engaged through this...
+listed the pieces separately precisely so we can solve it together.
+However it lands, I'm grateful for how you've engaged through this...
 it says good things about the company you're building.
 
 Best,

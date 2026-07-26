@@ -248,14 +248,49 @@ Published commits:
 - supervisor pointer commit `2bad00f9e`
 
 Confidence: high. The rejects are canonical shared bytes and every admitted binding exercises its production decoder. Escalation: none for this feature. The workspace-root `make check` remains separately red in the pre-existing `src/agent-doc` worktree on missing `delivery_version` fields at `agent-doc-preflight-io/src/lib.rs:5044` and `:5346`; it was not modified or represented as part of this signaling result.
-<!-- agent:boundary:91307fe5 -->
+
+### Re: #lazilyzigport — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lazilyzigport]
+
+
+Ported Dart’s fail-closed manifest-ID validation to the Go, Rust, and Zig runtime conformance guards.
+
+Each guard now resolves every distinct recorded ID against the canonical corpus and fails with an explicit recorder-corruption diagnostic when an ID names no file. This happens independently of the ordinary “fixture was not opened” comparison, so a severed or interleaved manifest line can no longer masquerade as upstream coverage drift.
+
+The port exposed and fixed one real Zig recorder defect: `specReadFile` recorded the requested path before the read succeeded. Zig’s intentional missing-corpus loader test therefore wrote `definitely-not-a-corpus-directory/nope.json` into the real manifest. Recording now occurs only after bytes are successfully opened, so failed probes cannot manufacture evidence.
+
+Changed paths:
+
+- `lazily-go/scripts/check-conformance-coverage.sh`
+- `lazily-rs/scripts/check-conformance-coverage.sh`
+- `lazily-zig/scripts/check-conformance-coverage.sh`
+- `lazily-zig/src/lazily/conformance_manifest.zig`
+
+Rust’s two signaling fixtures were also removed from `KNOWN_UNCOVERED`: the preceding cycle now genuinely opens both, so retaining those excuses would make the ledger overstate the remaining gap.
+
+Verification:
+
+- Corrupt-copy probes for all three bindings appended `definitely-not-a-corpus-directory/nope.json`; every guard exited nonzero and emitted `manifest records ... which names no file`.
+- `make check` passed in lazily-go, lazily-rs, and lazily-zig after the fixes.
+- Clean coverage results: Go 109/124 opened (15 known-uncovered), Rust 119/124 (5 known-uncovered), Zig 94/124 (30 known-uncovered).
+- Rust’s full matrix, Loom model, Lean builds, signaling feature tests, and conformance guard passed; its benchmark gate again reported the existing no-evidence skip because `target/criterion` is absent.
+- Zig’s existing documented AsyncContext divergence remains ledgered; the full gate and the newly clean manifest passed.
+- CI checked once after push: Go and Zig were in progress; Rust was queued.
+
+Published commits: Go `f40f2b6`, Rust `2f61c63`, Zig `81070f7`; supervisor pointer commit `93d8dd08c`.
+
+Confidence: high. Both valid-manifest acceptance and corrupt-manifest rejection were exercised in every target binding, and Zig’s newly exposed false record was fixed at the recorder seam. Escalation: none for these repositories. The workspace-root `make check` remains separately red on the pre-existing `src/agent-doc` `delivery_version` compile errors and was not represented as part of this result.
+<!-- agent:boundary:1b89ba07 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzsignalingnegative]~~
-- do [#lazilyzigport]
+- ~~do [#lazilyzigport]~~
 - do [#lazilyconformancecoverag]
 - do [#lazilybenchmarkregressio]
 - do [#lzqfjs]
@@ -298,7 +333,6 @@ Confidence: high. The rejects are canonical shared bytes and every admitted bind
 
 <!-- agent:backlog priority queue -->
 - [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.
-- [ ] [#lazilyzigport] lazily go/rs/zig: port lazily-dart's corrupt-manifest-id check into the other runtime conformance guards. dart found that a recorder can mangle its own evidence (severed ids like sure.json) and make the guard report INTACT fixtures as never opened — a guard that cries wolf gets switched off. Its guard now rejects any recorded id that names no file in the corpus. go, rs and zig all lack that check. Cheap: one loop over the manifest before the coverage comparison
 - [ ] [#lazilyconformancecoverag] lazily-cs: 87 of 124 canonical fixtures unreplayed (cs opens 37). MEASURED via the runtime manifest 2026-07-26. CORRECTION — an earlier note on this item claimed the 7 statechart fixtures were a cheap "runner gap"; that was derived from the STATIC grep and is WRONG. cs enumerates its corpus, so no fixture filename appears in its sources, and the static count under-reported every area. Runtime truth: cs FULLY replays reactive-graph 21/21, statechart 7/7, materialization 3/3, familysync 1/1. There is NO runner-gap win anywhere in cs — every one of the 87 is a genuinely missing surface, each already declared in a per-runner Unsupported ledger with the blocking surface named. Unreplayed by area: collections 15, lossless-tree 9, root 8, message-passing 8, reliable-sync 8, rateshape 6, coordination 5, resilience/service/temporal/windowing 4 each, presence 3, agent-doc/distributed/signaling 2 each, crdt-tree/membership/receipts 1 each. Work it down against tasks/software/lazily-cs-parity-plan.md by SHIPPING SURFACES, not by wiring runners
 - [ ] [#lazilybenchmarkregressio] lazily-rs: the benchmark regression budgets have NO CI enforcement. ci.yml enumerates individual cargo test invocations and never runs `make check` or `benchmark-check`; regressions.yml runs only the loom model. So every budget in BENCHMARKS.md is enforced solely by whoever remembers to run `make benchmark-check` locally with a populated target/criterion — which, until #lazilyfailstarget, was nobody, because the gate hard-failed on a pruned target dir. Add a scheduled job (regressions.yml already has a nightly cron and is the natural home) that runs `cargo bench` then `make benchmark-check-strict`, so a real regression fails somewhere other than one developer machine. Note the numbers are machine-specific, so the job needs a stable runner class or relative-delta budgets rather than absolute ones
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not

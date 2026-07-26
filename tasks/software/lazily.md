@@ -211,18 +211,40 @@ No eager/lazy mode flag, matching the family: eager is `MaterializeAll` (a pre-m
 **Verification.** `make check` green (57 tests, up from 56), `dotnet format --verify-no-changes` clean. Coverage row 1 flipped for C#, `sync-coverage.mjs` run, and the regenerated table committed one repo at a time across the spec and all nine sibling READMEs — `coverage.json` is a hot multi-session file. lazily-cs CI was queued at closeout, not yet green; recorded rather than waited on.
 
 **What is left, now as three actionable items instead of one.** `#lzcscollections` narrows to rows 2–4 (`ThreadSafeSlotMap`, `AsyncSlotMap`, keyed-map sync + the `familysync` corpus), `#lzcsreactivemapfx` takes row 9 (the three CellMap/reconciliation fixtures plus `CellTree`), and `#lzcssemtree` takes rows 10–11 (`SemTree` and stable-id alignment). Each is one surface with its own fixtures, so each can close on an empty ledger instead of accumulating partial credit against a parent.
-<!-- agent:boundary:0e2ed990 -->
+
+### Re: keyed reactive maps + CellTree — opus-5
+
+> **Queue prompt:** do [#lzcsreactivemapfx]
+
+Row 9 done, pushed, coverage flipped. The three `Collection`-kind fixtures replay with an empty ledger.
+
+**What the runner actually asserts.** Not values — **invalidation**. Three real reader slots stand on the map, one per reactive plane (a value reader per key, a membership reader over `Len`, an order reader over `Keys`), each counting its own recomputes from inside its compute body. That placement is the whole design: a map that bumps one shared signal for every mutation returns exactly the right order, values, and membership at every step and gets every `invalidates` assertion wrong. A value-only runner cannot tell the two apart.
+
+**One interpretation call, and it is worth stating.** Step 2 of `cellmap_independence` removes `b` and expects `value: []`. My first run reported `b` as invalidated — correctly, because `CellMap.Remove` clears the orphaned cell so its readers learn their source is gone rather than sitting on a stale cache. The fixture's wording is "insert/remove MUST NOT invalidate **unrelated** entry value readers", so the removed key is not in scope. Value probes are now scoped to keys still present. That is a runner fix, not a relaxed assertion: the removed key's own reader is *supposed* to be invalidated, and counting it would have reported intended behaviour as a divergence.
+
+**Reconcile.** `Insert`, `Reconcile`, the four-way `DiffOp` union, and a patience-sort LIS ported from the sibling reconcilers. Reconciling `[a,b,c,d] → [b,c,a]` emits exactly `{remove d, move a}`: `b` and `c` are already in relative order, so holding the LIS fixed means nothing touches them, and their value cells survive a sibling reorder untouched.
+
+**CellTree, and why I did not settle for a partial row.** Row 9 names `CellTree`, and no fixture in the corpus reaches it — the collections fixtures drive `CellMap` directly. The plan's rule would have allowed `~` with a stated gap. It is a thin composition though (a value cell plus a child `CellMap`, inheriting every guarantee rather than reimplementing one), so porting it and marking the row shipped was cheaper than writing down why it was partial. It carries native tests instead of corpus coverage, each naming the mutation it dies under — the headline one being that a sibling reorder keeps the moved child's identity and leaves readers beneath it untouched, which is the entire reason a tree is not just nested maps.
+
+**Mutation-checked three ways, each restored.** Collapsing order into membership fails the independence fixture. Making the LIS return nothing fails `keyed_reconciliation_lis` — `b` and `c` move when they must not. Making a move bump membership fails both the fixture and the CellTree test.
+
+**Verification.** `make check` green (61 tests, up from 58), `dotnet format --verify-no-changes` clean. Coverage row 9 flipped for C#, table regenerated and committed one repo at a time across the spec and all nine sibling READMEs. lazily-cs CI was queued at closeout — recorded, not waited on.
+
+Remaining in this phase: `#lzcscollections` (rows 2–4 — `ThreadSafeSlotMap`, `AsyncSlotMap`, keyed-map sync + the `familysync` corpus) and `#lzcssemtree` (rows 10–11).
+<!-- agent:boundary:b1d49619 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- ~~do [#lzcsreactivemapfx]~~
+- do [#lzcssemtree]
 - ~~do [#lzzigcitoolchain]~~
 - ~~do [#lzgoerrorretry]~~
 - ~~do [#lzasyncerrfixture]~~
 - ⏭️ do [#lzcscollections]
 - ⏭️ do [#lzcsstatechart]
-- 🚧 do [#lzcsqueues]
+- ⏭️ do [#lzcsqueues]
 - do [#lzcscrdt]
 - do [#lzcsipc]
 - do [#lzcssync]
@@ -235,11 +257,10 @@ No eager/lazy mode flag, matching the family: eager is `MaterializeAll` (a pre-m
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcsreactivemapfx] lazily-cs: row 9 — CellTree + reconcile on top of the shipped ReactiveMap core; replay collections/cellmap_atomic_move.json, cellmap_independence.json, keyed_reconciliation_lis.json (an atomic move must bump order only and keep the entry handle, which is what separates a reorder from a remove+re-mint) — plan: tasks/software/lazily-cs-parity-plan.md
 - [ ] [#lzcssemtree] lazily-cs: rows 10-11 — memoized semantic tree (SemTree) and stable-id alignment (manufactured identity); replay collections/semtree_incremental.json and collections/stableid_alignment.json — plan: tasks/software/lazily-cs-parity-plan.md
 - [ ] [#lzcscollections] lazily-cs: rows 2-4 — ThreadSafeSlotMap + AsyncSlotMap materialization and keyed-map sync (membership propagation, materialize-on-ingest, derived alignment); replay the familysync corpus. Row 1 (ReactiveMap core + CellMap/SlotMap + materialization corpus) shipped 2026-07-25 — plan: tasks/software/lazily-cs-parity-plan.md
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
-- [ ] 🚧 [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
+- [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
 - [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)
 - [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
 - [ ] [#lzcssync] lazily-cs: CrdtPlaneRuntime + anti-entropy, resync coordinator, durable OutboxStore, IpcSink/IpcSource + full-duplex SyncDriver; replay reliable-sync + distributed + message-passing corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 28-32)
@@ -261,4 +282,5 @@ No eager/lazy mode flag, matching the family: eager is `MaterializeAll` (a pre-m
 - 2026-07-25 [#lzgoerrorretry] lazily-go: an async slot in Error serves the stored error forever, but docs/async.md § Async slot state machine lists `Error → Computing` — "get_async retry after an error". lazily-cs follows the spec; either lazily-go is a finding or the spec sentence is wrong. Decide in lazily-spec first, then fix whichever side loses
 - 2026-07-25 [#lzasyncerrfixture] lazily-spec: land the async Error -> Computing conformance fixture. IN PROGRESS, uncommitted: conformance/reactive-graph/failed_compute_is_never_cached.json + fail_next in _REACTIVE_GRAPH_OPS + tag in _REACTIVE_GRAPH_TAGS (lazily-spec make check green, 147); lazily-go runner has fail_next on both models but its suite is RED with 20 divergences from a runner read-path wiring bug (the library is correct - probes show computes 1->2->3 with recovery on Get and TryGet). Eight runners untouched. Do NOT push lazily-spec before all nine runners replay it or every binding's corpus-drift check goes red
 - 2026-07-25 [#lzzigcitoolchain] lazily-zig: CI is red on both pinned toolchains (Zig 0.15.2 and 0.16.0) because src/lazily/context.zig:2208 reads builtin.Type.Fn.param_types, removed from newer std. Local dev runs 0.17.0-dev where the full suite passes, so the red is a pin/target mismatch, not a code defect. Either move the CI matrix to the toolchain the code targets or make that reflection version-agnostic. Predates the conformance work: the same error is on the prior commit
+- 2026-07-25 [#lzcsreactivemapfx] lazily-cs: row 9 — CellTree + reconcile on top of the shipped ReactiveMap core; replay collections/cellmap_atomic_move.json, cellmap_independence.json, keyed_reconciliation_lis.json (an atomic move must bump order only and keep the entry handle, which is what separates a reorder from a remove+re-mint) — plan: tasks/software/lazily-cs-parity-plan.md
 <!-- /agent:done -->

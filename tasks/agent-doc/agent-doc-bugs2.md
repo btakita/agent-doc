@@ -299,14 +299,29 @@ Resumed the interrupted Claude turn and completed `#adwritesourceenum`.
 - Released `v0.35.28`: implementation commit `b76f7fde4`, PyPI manylinux wheel published, and GitHub release created with the verified prebuilt binary. The superproject gitlink is recorded in `57fc3cc87`.
 
 Pre-existing generated skill/config drift in the submodule was deliberately left unstaged and untouched.
-<!-- agent:boundary:e97ef2b9 -->
+
+### Re: do [#adopseventenum] — gpt-5
+
+> **Queue prompt:** do [#adopseventenum]
+
+Completed and released as agent-doc 0.35.29.
+
+- Added the shared `OpsLogEvent` vocabulary with exact leading-token and field-token parsing, uniqueness/round-trip coverage, and compiler-coupled names for correctness-sensitive `ops.log` events.
+- Migrated parsed producers and consumers across session-check, doctor/autofix, convergence playback, op-capture verification, route/controller recovery, and ops-summary classification/clustering. Prefix lookalikes no longer satisfy event checks; the dependency-cycle diagnostic parser is pinned by a cross-crate regression.
+- Fixed two contributors to this session's churn: parsed event renames can no longer silently drift between string literals, and the contributor contract now requires temporary Rust mutation probes to restore current mtimes before later Cargo runs, with narrow package cleanup before a full cache reset.
+- Confirmed the observed impossible missing-crate/missing-symbol failures were stale Cargo artifacts compiled from temporarily mutated sources. The one cache reset removed 502.8 GiB of generated Cargo artifacts only; current artifacts were rebuilt by the full suite and release install, with source and operator files untouched.
+- Per the operator's steering, committed and pushed the original dirty harness files separately as `47789e58f` (`chore: track harness turn-status hooks`). The release commit is `d6722a168`; the parent gitlink commit is `864564340`.
+- Verification passed: focused crate/report regressions, the full 8,176-test workspace gate, clippy, deterministic simulator corpus, version sync, Lean, TLA, and the single full release-profile install. The latest CI run inspected once was still in progress, so it was not used as a blocking gate.
+- Published the manylinux wheel to PyPI, pushed `v0.35.29`, and created the [GitHub release](https://github.com/btakita/agent-doc/releases/tag/v0.35.29) with the verified release binary (`SHA-256 94a4580aba681e3cbee711a02973bdab48ddc49c11eb36f594b1f55c8c1927b0`). The session controller is marked to recycle onto 0.35.29 at its next idle boundary.
+
+No actionable follow-up remains for this item.
+<!-- agent:boundary:c25d4f72 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - do [#sessionwedgeband]
-- ~~do [#adwritesourceenum]~~
-- do [#adopseventenum]
+- ~~do [#adopseventenum]~~
 - do [#crdtwaitsubscribe]
 - do [#crdtwaitsplit]
 - do [#sessioncheckguardsweep]
@@ -354,7 +369,6 @@ Pre-existing generated skill/config drift in the submodule was deliberately left
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#sessionwedgeband] [operator-verify] Should preflight auto-run the non-destructive `reset --from-current --preserve-session` when a committed-historical patchback refusal is detected, or stay operator-initiated? NARROWED 2026-07-26 (8346f4d1a). Widening repair_committed_historical_snapshot_drift is REJECTED with reason: it rebases onto HEAD only when the visible document normalizes equal to HEAD, and once the live file carries content beyond HEAD, adopting HEAD would drop exactly the operator content the guard protects. The real defect (opaque refusal) is FIXED — commit-io now prints the verbatim recovery commands. What remains is a UX call for the operator, not a correctness fix: auto-healing a state whose purpose is to stop and be noticed. Decide, then implement or close.
-- [ ] [#adopseventenum] #agent-doc-refactor Type the ops.log event vocabulary. 812 distinct event names are emitted as free-text format! literals and 310 call sites match on log text with contains(...), so producer and consumer share no vocabulary and a renamed event silently stops matching - the failure is invisible because the matcher just returns false. This is a correctness surface, not just tidiness: autofix scans the last N ops.log lines to plan repairs, doctor and session-check classify recovery state from these strings, and the convergence-playback and digest paths parse them. Introduce a typed event enum (or at minimum shared const names) for the events that are PARSED rather than merely logged - start from the ~310 contains() sites and work backwards to their producers, since typing all 812 emitters at once is churn without payoff. Deliberately out of scope: events that are only ever read by humans.
 - [ ] [#crdtwaitsubscribe] #agent-doc-feature Replace the CRDT convergence poll with a subscription to the convergence cell. MEASURED: the wait loop issues ~2 controller reads per iteration and ~18 per write (6,983 write-path controller_crdt_current_text reads across 390 acknowledged writes), so an 11s wait generates ~18 round trips against the very controller it is waiting on - structurally the same self-feeding loop as the idle-watch storm fixed in 511527103/f170067bb, and a plausible source of the controller_model_backpressure that is 10% of all waits. NOT justified by poll oversleep: CRDT_WRITE_BACKOFF_POLICY is 25ms initial / 250ms max, which is <=2% of an 11,000ms wait - do not sell this fix on latency-per-sleep, sell it on removing generated load. Doctrine already says so (#closeoutterminalreactive: 'every waiter re-probes on a clock instead of subscribing'), and ThreadSafeContext runs Computed/Effect bodies with NO state lock held (verified: recompute_slot_now clones the closure, runs compute(self) unlocked, and takes the write lock only to publish), so there is no throughput objection. CAUTION: this is the write path, the one place where being wrong loses operator text - keep the deadline/retained-intent fallback intact.
 - [ ] [#crdtwaitsplit] #agent-doc-feature Separate controller backpressure from CRDT delivery convergence in the write wait. ControllerModelBackpressure and DeliveryAckPending are different conditions with different remedies (back off the controller vs wait on the editor) but currently share one loop, one backoff schedule and one 60s budget, so the wrong remedy is applied to whichever one is actually blocking. Partial coalescing already exists and must be preserved: #crdtcasraced added the `advanced` flag so a non-advancing apply does not reset the backoff floor - without it a contended write pinned at 25ms for the whole 60s budget (~2400 merge+CAS attempts, each worsening the contention it retried). Land after #crdtwaitsubscribe, whose per-condition subscription makes the split natural rather than two parallel poll loops.
 - [ ] [#sessioncheckguardsweep] #agent-doc-bug session_check is the second-largest closeout phase - a flat 2.9-4.2s, observed once at 11,271ms - and it is a per-invocation ~30-guard sweep. Measured attribution from one run: inspect_with_warnings 2665ms (the nesting parent), guard_partial_staging_closeout 817ms, inspect_core 607ms, self_heal_response_replay_duplication 385ms, resolve_current_document_content 350ms/13x. The partial-staging guard is the concrete target: companion_findings iterates candidate_repos, which on this superproject enumerates every dirty submodule and then runs several git diffs per repo. candidate_repos legitimately needs --ignore-submodules=none (it is hunting dirty submodule repos, 341ms) and narrowing it with --untracked-files=no was measured at only 13ms and discarded, so the real question is a SEMANTICS decision: must a WARN-only narrow guard run on every closeout, or only when the cycle actually staged something beyond the session document? Related: #closeoutgitsubmodulescan (9e7ce2f79 fixed two 47x submodule scans in tracked_modified_paths that were NOT the dominant cost).

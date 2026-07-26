@@ -627,7 +627,7 @@ Taking this seriously, because reopening after research is legitimate — but th
 **Actions taken now:** `#haivensend` is marked ON HOLD — the v3 letter must not be sent while the decision is reopened; v3's firm-decline framing is now potentially stale. What would actually settle this: (1) Acadian's commitment state, (2) Craig's answers on runway, the safety roadmap's reality (built-in how — agents? protocol-level? policy tooling?), and seat timeline, (3) whether the mission pull survives a weekend. Say the word and I'll draft the (b)-variant letter.
 
 One-line status: exchange 591 lines / 27 sections (accretion warn); queue inactive; compact on your word.
-<!-- agent:boundary:797e6c34 -->
+<!-- agent:boundary:13ae0741 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -639,7 +639,7 @@ One-line status: exchange 591 lines / 27 sections (accretion warn); queue inacti
 
 <!-- agent:backlog queue -->
 - [ ] [#sdkcontract] #sdkcontract If Craig engages the prototype offer: sketch scope (ONE engine + spec + conformance scaffold + sample, 1-2wks), then milestone SOW per tasks/recruit/haiven/sdk-contract-structure.md; AI agent-harness layer (LiveKit-Agents-style) recorded as a milestone-ladder item; Riza intro contingent on prototype reception + Riza double opt-in
-- [ ] [#haivensend] #haivensend [operator-verify] Send the v3 decline+offer letter (tasks/recruit/haiven/decline-draft.md) to Craig; compensation-reply-draft.md is superseded/history-only
+- [ ] [#haivensend] #haivensend [operator-verify] ON HOLD (decision reopened 2026-07-26) — do NOT send while reopened. Send the v3 decline+offer letter (tasks/recruit/haiven/decline-draft.md) to Craig; compensation-reply-draft.md is superseded/history-only
 - [ ] [#acadiansend] [operator-verify] Send Acadian recruiter questions (tasks/recruit/acadian/recruiter-questions-draft.md) incl. signing-bonus/advance ask; file written answers under tasks/recruit/acadian/
 <!-- /agent:backlog -->
 

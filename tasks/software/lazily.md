@@ -153,14 +153,37 @@ Not done. The fixture exists and lazily-spec is green on it, one of nine runners
 **Nothing is pushed and no CI is red.** The cost is two dirty working trees: `lazily-spec` (fixture + schema test) and `lazily-go` (runner, suite red). Anyone else picking up lazily-go before this resumes will find it failing, so that is worth knowing before the next session touches it.
 
 Resume point: debug the lazily-go read path until the fixture replays clean on both models, then repeat the same ~15-line change across rs, py, js, kt, dart, cpp, zig and cs, then push lazily-spec and all nine together.
-<!-- agent:boundary:4e2ca80d -->
+
+### Re: the conformance fixture, landed across all nine bindings — opus-5
+
+`failed_compute_is_never_cached.json` is on spec main and every binding accounts for it. Ten repos committed and pushed; eight CI green on the exact commit, lazily-rs still running, lazily-zig red for a reason that predates this work.
+
+**What the fixture asserts, and why on the counter.** Sixteen steps: a baseline proving a warm read does not re-run (which is what makes the counter discriminating at all), one armed failure with recovery, a doubly-armed failure proving a persistently failing node runs one compute **per read** rather than one compute total, and a final write proving the failing runs re-registered their edges instead of leaving the node detached. Every assertion is on `computes_of`; none is on the error. That is the whole design constraint — a caching binding raises the same error at the same steps and differs only by one on the counter, so an error-only fixture passes against both behaviors, which is exactly how six bindings and three bindings disagreed indefinitely under green suites.
+
+New op `fail_next` arms the next N computes of an existing node to raise. It creates nothing and touches no dependency set.
+
+**Three design constraints the survey turned up, none of which was the one I expected.**
+
+All nine runners already replay against an `AsyncContext` model, so the async plane was reachable from the corpus the whole time — teaching nine runners a new context was never the problem. The real constraints were: runners **ignore** a fixture's `model` field and replay everything against every context they ship; the per-fixture ledgers make a new fixture fail all nine corpus-drift checks until each binding replays or explicitly parks it; and an armed failure needs an invalidation to force the recompute it fails, which makes the fixture sensitive to eager-vs-lazy scheduling. So the fixture is model-agnostic and names no state — on the async plane the rule is `Error → Computing`, on the sync plane it is the same rule with no state to name. I verified the sync behavior already held before writing it down, so this records what the bindings do rather than inventing a requirement.
+
+**Two engines were reporting the defect the fixture exists to catch, against correct bindings.** lazily-go's `readID` and lazily-py's `read_id` latch an id as permanently unreadable after its first failed read. That was written when disposal was the only error a read could produce, and disposal *is* permanent — but a `fail_next` failure is recoverable by contract, so the latch froze the compute counter and manufactured a divergence. lazily-rs had the same shape one layer down: `quiet` collapsed every panic into `Err(())`, which the engine then latched. It now re-raises the armed sentinel for the engine to convert. Same fix in three languages, same root cause: conflating "this read failed" with "this node is torn down."
+
+**Four bindings needed no library change** — js, py, kt, cs already re-spawn — which is the check that the fixture does not false-positive on correct behavior.
+
+**Three honest per-model skips, each naming a capability gap rather than faking a pass.** `lazily-zig/ThreadSafeContext`: `ComputeFn(T)` returns a plain `T` with no error channel, a deliberate design choice documented in `thread_safe_context.zig`. `lazily-zig/AsyncContext`: no lazy mode for derived slots, so `setCell` enqueues every dependent unconditionally and the armed run is consumed by the write instead of the read — the same eagerness already recorded for `dispose_signal_reverts_to_lazy`. `lazily-rs/AsyncContext`: the compute returns `BoxFuture<Output = i64>` with no error channel and the model blocks on its own runtime inside `read`, so an armed panic kills the spawned task and the read never resolves — the test hangs rather than reporting. In each case the alternative was to return a sentinel value and report an error from `read`, which would cache the sentinel, stop the node re-running, and report a runner artifact as a finding against a correct binding. Both zig and rs gained a per-model skip ledger asserted in both directions, so an entry that stops applying fails the build.
+
+**Verification.** Mutation-checked in five bindings: restoring the sticky-error path fails the fixture on `AsyncContext` and nowhere else in go; the py, dart, kt and cs equivalents each fail their suite. Full suites green — go 427, js 481, py 521, dart 522, kt 349, cpp 39/39 ctest, rs conformance including the async feature, zig 442, cs 56, spec 147.
+
+**lazily-zig CI is red and it is not this change.** `src/lazily/context.zig:2208` uses `builtin.Type.Fn.param_types`, removed from newer `std`; CI pins Zig 0.15.2 and 0.16.0 while the code targets what local dev runs (0.17.0-dev, where the whole suite passes). The identical error is on the commit before mine and the file was last touched by the cell-kernel work. Filed as `#lzzigcitoolchain` rather than waived — a red CI that nobody owns stops being informative.
+<!-- agent:boundary:4ec7a904 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#lzzigcitoolchain]
 - ~~do [#lzgoerrorretry]~~
-- 🚧 do [#lzasyncerrfixture]
+- ~~do [#lzasyncerrfixture]~~
 - ⏭️ do [#lzcscollections]
 - do [#lzcsstatechart]
 - do [#lzcsqueues]
@@ -176,7 +199,7 @@ Resume point: debug the lazily-go read path until the fixture replays clean on b
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] 🚧 [#lzasyncerrfixture] lazily-spec: land the async Error -> Computing conformance fixture. IN PROGRESS, uncommitted: conformance/reactive-graph/failed_compute_is_never_cached.json + fail_next in _REACTIVE_GRAPH_OPS + tag in _REACTIVE_GRAPH_TAGS (lazily-spec make check green, 147); lazily-go runner has fail_next on both models but its suite is RED with 20 divergences from a runner read-path wiring bug (the library is correct - probes show computes 1->2->3 with recovery on Get and TryGet). Eight runners untouched. Do NOT push lazily-spec before all nine runners replay it or every binding's corpus-drift check goes red
+- [ ] [#lzzigcitoolchain] lazily-zig: CI is red on both pinned toolchains (Zig 0.15.2 and 0.16.0) because src/lazily/context.zig:2208 reads builtin.Type.Fn.param_types, removed from newer std. Local dev runs 0.17.0-dev where the full suite passes, so the red is a pin/target mismatch, not a code defect. Either move the CI matrix to the toolchain the code targets or make that reflection version-agnostic. Predates the conformance work: the same error is on the prior commit
 - [ ] [#lzcscollections] lazily-cs: SlotMap / ThreadSafeSlotMap / AsyncSlotMap materialization, ReactiveMap (CellMap/SlotMap), CellTree + reconcile, SemTree, stable-id alignment; replay collections + materialization + familysync corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 1-4, 9-11)
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
@@ -199,4 +222,5 @@ Resume point: debug the lazily-go read path until the fixture replays clean on b
 <!-- agent:done -->
 - 2026-07-25 [#lzcsconcurrency] lazily-cs: ThreadSafeContext (lock-backed) + AsyncContext, and re-parameterise the reactive-graph conformance runner over the execution model so all three replay the same corpus — plan: tasks/software/lazily-cs-parity-plan.md (coverage rows 5-6)
 - 2026-07-25 [#lzgoerrorretry] lazily-go: an async slot in Error serves the stored error forever, but docs/async.md § Async slot state machine lists `Error → Computing` — "get_async retry after an error". lazily-cs follows the spec; either lazily-go is a finding or the spec sentence is wrong. Decide in lazily-spec first, then fix whichever side loses
+- 2026-07-25 [#lzasyncerrfixture] lazily-spec: land the async Error -> Computing conformance fixture. IN PROGRESS, uncommitted: conformance/reactive-graph/failed_compute_is_never_cached.json + fail_next in _REACTIVE_GRAPH_OPS + tag in _REACTIVE_GRAPH_TAGS (lazily-spec make check green, 147); lazily-go runner has fail_next on both models but its suite is RED with 20 divergences from a runner read-path wiring bug (the library is correct - probes show computes 1->2->3 with recovery on Get and TryGet). Eight runners untouched. Do NOT push lazily-spec before all nine runners replay it or every binding's corpus-drift check goes red
 <!-- /agent:done -->

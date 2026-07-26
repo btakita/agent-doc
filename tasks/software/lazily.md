@@ -189,7 +189,25 @@ Implemented and committed the capability-driven five-channel network suite as `c
 - **Workspace gate:** root `make check` reached an unrelated pre-existing `src/agent-doc` test compile error: two `CurrentText::Current` initializers omit the newly required `delivery_version` field (`agent-doc-preflight-io/src/lib.rs:5044` and `:5346`). Those out-of-scope edits were preserved.
 - **Confidence:** high for the Lazily interop scope; all local suite, schema, regression, and mutation gates pass.
 - **Escalation:** none. The unrelated workspace compile break is recorded rather than modified.
-<!-- agent:boundary:7f485d92 -->
+
+### Re: do [#lzinteropcs] — codex
+
+> **Queue prompt:**
+>
+> do [#lzinteropcs]
+
+
+Kept `lazily-cs` staged; activating it now would grant interop credit to an incomplete binding.
+
+- **Dependency state:** both `#lzcsipc` (schema-validated Snapshot/Delta/CrdtSync plus shared-memory/blob transport) and `#lzcssync` (CRDT runtime, resync/outbox, IPC source/sink, full-duplex sync) remain open.
+- **Current suite behavior:** C# is present in `peers.toml` with `staged = true`, appears in `staged_peers`, is excluded from active semantic/transport peer groups, and receives no pass credit.
+- **Future admission:** after those two prerequisites ship, the C# peer must advertise only its real production features/codecs/channels/variants. The capability-driven matrix from `cb0558b02` will then include it automatically as sender and receiver without a binding-specific scenario edit.
+- **Changed paths:** no production paths changed in this cycle; the existing backlog item was narrowed to preserve this activation gate.
+- **Commands:** read the live agent-doc backlog and inspected the already-verified PR-tier suite state from `#lzinteropchannels`.
+- **Verification:** `#lzcsipc` and `#lzcssync` are open; the latest passing network report lists `lazily-cs` as `registry entry is staged` while completed bindings run.
+- **Confidence:** high that staging is the only honest state today.
+- **Escalation:** none. The remaining work is explicitly driven by the two C# prerequisite backlog items.
+<!-- agent:boundary:b1e180bf -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -198,7 +216,7 @@ Implemented and committed the capability-driven five-channel network suite as `c
 - ~~do [#lzinteropcore]~~
 - ~~do [#lzinteropeers]~~
 - ~~do [#lzinteropchannels]~~
-- do [#lzinteropcs]
+- ~~do [#lzinteropcs]~~
 - ~~do [#lzwirefrontier]~~
 - do [#lzsignalingnegative]
 - ~~do [#lazilyzigconformance]~~
@@ -244,7 +262,7 @@ Implemented and committed the capability-driven five-channel network suite as `c
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzinteropcs] Add the C# peer to the single network suite after `#lzcsipc` and `#lzcssync` provide real IPC/CRDT surfaces, following `tasks/software/plan-lazily-interop-peer-rollout.md`.
+- [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.
 - [ ] [#lzsignalingnegative] lazily-spec + all bindings: signaling/frames.json and anti_spoof_session.json have no NEGATIVE cases, so nothing anywhere pins that a malformed frame is REJECTED rather than silently defaulted. The schema already closes the tag set (oneOf over 14 branches, each type: {const}, additionalProperties: false), but no fixture drives it. Add a rejects block covering: unknown type value; to and from both present on one frame (the description says they never are); a client frame carrying from (the anti-spoof surface itself); welcome.peers containing the joining peer. This is the portable form of the tag-enum question — the wire contract is the closed tag set plus rejection, not any binding's type shape
 - [ ] [#lazilyzigport] lazily go/rs/zig: port lazily-dart's corrupt-manifest-id check into the other runtime conformance guards. dart found that a recorder can mangle its own evidence (severed ids like sure.json) and make the guard report INTACT fixtures as never opened — a guard that cries wolf gets switched off. Its guard now rejects any recorded id that names no file in the corpus. go, rs and zig all lack that check. Cheap: one loop over the manifest before the coverage comparison
 - [ ] [#lazilyconformancecoverag] lazily-cs: 87 of 124 canonical fixtures unreplayed (cs opens 37). MEASURED via the runtime manifest 2026-07-26. CORRECTION — an earlier note on this item claimed the 7 statechart fixtures were a cheap "runner gap"; that was derived from the STATIC grep and is WRONG. cs enumerates its corpus, so no fixture filename appears in its sources, and the static count under-reported every area. Runtime truth: cs FULLY replays reactive-graph 21/21, statechart 7/7, materialization 3/3, familysync 1/1. There is NO runner-gap win anywhere in cs — every one of the 87 is a genuinely missing surface, each already declared in a per-runner Unsupported ledger with the blocking surface named. Unreplayed by area: collections 15, lossless-tree 9, root 8, message-passing 8, reliable-sync 8, rateshape 6, coordination 5, resilience/service/temporal/windowing 4 each, presence 3, agent-doc/distributed/signaling 2 each, crdt-tree/membership/receipts 1 each. Work it down against tasks/software/lazily-cs-parity-plan.md by SHIPPING SURFACES, not by wiring runners

@@ -43,23 +43,14 @@ exactly why this team is attractive, and congratulations on the seed progress an
 path to the August beta. Apologies for the slow reply: your email deserved a considered
 answer, and I wanted to be certain of mine before giving it to you.
 
-Before the numbers, the work itself: this role is the part I'm genuinely excited
-about. The SDK problem... one API surface delivered idiomatically across Unity, Unreal,
-and the other platforms... is the same shape as my own cross-language work, where I
-maintain one reactive-state API across 8 language bindings with a shared spec, formal
-model, and conformance suite (public at github.com/lazily-hub... and the binding I'm
-implementing right now is C#, which happens to be exactly what a Unity SDK is written
-in). And the realtime side is familiar ground: I've shipped production realtime
-systems at Presence AI (WebRTC avatar pipeline) and Milyoni (live video social events
-for major studios), my current open-source work centers on realtime multi-replica
-sync, and your WebSocket-hub design exercise was genuinely fun. Chat and presence at
-scale is distributed state synchronization... which is the problem space I care most
-about... so this isn't just work I can do, it's the work I'd choose. And the mission
-gives it weight: kids deserve to play and connect without being preyed upon,
-communities deserve infrastructure that keeps them positive, and matching compatible
-people so they can actually have fun together is the part of gaming that makes the
-rest worth building. Putting that into the infrastructure itself... rather than
-bolting it on after the harm... is work worth doing well.
+Before the numbers, briefly, the work: this is the role I'd choose on its merits. The
+SDK problem is the same shape as my own cross-language work (one API surface across 8
+language bindings with shared spec and conformance suites, public at
+github.com/lazily-hub... and the binding I'm writing right now happens to be C#), and
+chat and presence at scale is distributed state synchronization... the problem space I
+care most about. The mission gives it weight: kids safe from predation, communities
+kept positive, and compatible people matched so games are actually fun... built into
+the infrastructure rather than bolted on after the harm.
 
 I want to be upfront about how I got to these numbers, because I know an ask like this
 lands heavily on a seed-stage budget, and I don't make it lightly. My alternative is a

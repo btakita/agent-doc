@@ -196,14 +196,27 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcSnapshotState for SupervisorShar
     fn editor_authority_snapshot(&self) -> Option<serde_json::Value> {
         let file = self.actor_runtime.as_ref()?.file.clone();
         let display = file.display().to_string();
+        // `#idlewatchtransitionrevision`: a *status* snapshot needs two fields —
+        // `live_editors` and `delivery_converged` — and used to obtain them by
+        // materializing the entire document, SHA-256ing it, and appending an
+        // `ops.log` line with its length and hash, then discarding the text
+        // (`..`). One supervisor exists per open document, and this snapshot is
+        // served on a status poll, so on this project it was three
+        // whole-document materializations every ten seconds, forever, at idle.
+        //
+        // The compact revision carries both fields and drives no commit barrier.
+        // `CurrentRevision` has no `EditorSyncPending`: that state exists only
+        // because the text path can find the barrier not ready, and it arrives
+        // here as `Current { delivery_converged: false }`, which already reports
+        // `in_flight: true`.
         Some(
-            match agent_doc_crdt_relay_io::current_text_for_file_nonblocking(&file) {
-                Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => serde_json::json!({
+            match agent_doc_crdt_relay_io::current_revision_for_file(&file) {
+                Ok(agent_doc_crdt_relay_io::CurrentRevision::Detached) => serde_json::json!({
                     "file": display,
                     "authority": "detached",
                     "in_flight": false,
                 }),
-                Ok(agent_doc_crdt_relay_io::CurrentText::Current {
+                Ok(agent_doc_crdt_relay_io::CurrentRevision::Current {
                     live_editors,
                     delivery_converged,
                     ..
@@ -214,18 +227,13 @@ impl agent_doc_supervisor_io::ipc::SupervisorIpcSnapshotState for SupervisorShar
                     "delivery_converged": delivery_converged,
                     "in_flight": !delivery_converged,
                 }),
-                Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica) => {
+                Ok(agent_doc_crdt_relay_io::CurrentRevision::EditorAttachedMissingReplica) => {
                     serde_json::json!({
                         "file": display,
                         "authority": "editor_attached_missing_replica",
                         "in_flight": true,
                     })
                 }
-                Ok(agent_doc_crdt_relay_io::CurrentText::EditorSyncPending) => serde_json::json!({
-                    "file": display,
-                    "authority": "editor_sync_pending",
-                    "in_flight": true,
-                }),
                 Err(error) => serde_json::json!({
                     "file": display,
                     "authority": "unavailable",

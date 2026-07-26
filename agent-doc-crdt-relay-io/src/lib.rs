@@ -749,6 +749,20 @@ pub fn current_revision_for_file_with_authority(
     })
 }
 
+/// [`current_revision_for_file_with_authority`] resolving authority itself.
+///
+/// The revision counterpart to [`current_text_for_file_nonblocking`], for status
+/// and observation callers that need `live_editors` / `delivery_converged` and
+/// nothing else. Reaching for the text entry point and discarding the body with
+/// `..` is the recurring shape behind the idle-watch read storm
+/// (`#idlewatchtransitionrevision`): it materializes the whole document,
+/// SHA-256s it, and writes an `ops.log` line to answer a question the compact
+/// revision already carries.
+pub fn current_revision_for_file(file: &Path) -> Result<CurrentRevision> {
+    let authority = authority_for_file(&file.display().to_string());
+    current_revision_for_file_with_authority(file, authority)
+}
+
 /// Return the current operator-visible document text from the live CRDT relay.
 ///
 /// This is the replacement read authority for the old live-buffer sidecar hot

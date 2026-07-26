@@ -1,6 +1,14 @@
 # Plan — `QueueCell` / `TopicCell` / `WorkQueueCell` across all three execution flavors
 
-Status: **planned, not started.** Sibling of
+Status: **planned, not started — prerequisite discharged.** The ReactiveMap
+sibling is **complete and released** (2026-07-26: rs 0.50.0, py 0.37.0, kt
+0.38.0, dart 0.27.0, zig 0.31.0, go v0.23.0, cpp 0.25.0, cs v0.2.0; js 0.29.0
+tagged but its npm publish is blocked on an operator OTP). That work discharged
+this plan's stated blocker — the `AsyncContext` widening — and, more usefully,
+established a shipped precedent in all nine bindings that Phase 0 should mirror
+rather than re-derive. See "What the ReactiveMap work already settled" below.
+
+Sibling of
 [`plan-lazily-reactivemap-unification.md`](plan-lazily-reactivemap-unification.md)
 — same defect shape (a Core surface that only the single-threaded flavor ships),
 same remedy shape (spec Core/Extended split → per-flavor fixture replay →
@@ -122,6 +130,33 @@ per-flavor reader-kind plane that must be minted on each flavor's own graph —
 structurally identical to the membership/order plane in the ReactiveMap work,
 where a shared closure-free core could **not** supply reactivity.
 
+## What the ReactiveMap work already settled
+
+The ReactiveMap Core surface now binds every flavor in all nine bindings, and it
+converged on one shape. **Phase 0 should adopt this shape for the queue family
+rather than re-deriving it**, because it is now the shipped, released,
+mutation-checked answer to the same structural question:
+
+1. **A shared, graph-agnostic core** (`KeyedOrder` / `keyed_order.*`) holding the
+   pure bookkeeping and algebra. No context, no factory, no closure. Present in
+   all nine bindings under the same name.
+2. **Reactivity deliberately excluded from that core.** Membership and order
+   invalidation is a graph write, so each flavor mints its **own** version cells
+   on its **own** graph and bumps them with its own lock released — a set can
+   drive a dependent recompute that re-enters the map.
+3. **Reads generic over the read surface.** A compute view registers the
+   dependency edge; a bare context does not. This is not a stylistic choice: a
+   read spellable only as a zero-argument call *cannot* subscribe from inside a
+   derived node, and that is exactly how lazily-go's single-threaded map shipped
+   reads that registered no edge at all.
+
+That maps onto the queue family one-for-one: the storage/FIFO/cursor/lease
+algebra is the graph-agnostic core (Finding 5), and the reader-kind plane is the
+per-flavor reactivity. **It also settles Phase 0's reader-kind decision by
+precedent** — memoized-derive + explicit invalidate is what nine bindings now do
+for maps, so picking the version-cell form for queues would fork the family's own
+shape for no gain.
+
 ## Phases
 
 ### Phase 0 — spec (`lazily-spec`)
@@ -169,6 +204,12 @@ Blocking; everything else derives from it.
 - `WorkQueueCell` lease expiry is time-driven (`now: u64` passed in). Under
   async, is `reap_expired` still caller-driven, or does the flavor own a timer?
   Caller-driven keeps it deterministic and fixture-replayable — recommend that.
+- **Does dart have a thread-safe flavor at all?** `coverage.json` now marks
+  dart's thread-safe ReactiveMap Core surface shipped, while
+  `docs/coverage.md` still declares the thread-safe context "not applicable" for
+  single-isolate Dart. The spec contradicts itself, and the ReactiveMap work made
+  it sharper rather than resolving it (tracked as `#lazilyspecdisagrees`). Phase 5
+  lists dart, so settle it **once**, here, instead of hitting it again per family.
 
 ### Phase 1 — formal (`lazily-formal`)
 
@@ -213,6 +254,9 @@ the reference shape).
    trusting any green result.
 4. Mutation-check each runner: break the library on purpose (drop one
    invalidation, flip one bound) and confirm the suite goes red **per flavor**.
+   Read "How these gates fail" below first — four of the nine ReactiveMap gates
+   were green against broken code on the first attempt, and the failure modes
+   repeat here.
 
 Phase 2 lands **before** any implementation work, so the gap turns from invisible
 to red first.
@@ -284,9 +328,79 @@ Per binding, per flavor, no exceptions:
 - A positive assertion that the fixtures ran (step count > 0 per flavor).
 - The `invalidates` matrix is actually asserted (grep for the `expected`-nesting
   trap).
-- Mutation check: one deliberate defect turns each flavor red.
+- Mutation check: one deliberate defect turns each flavor red — and the probe
+  is confirmed to discriminate (see "How these gates fail").
 - Full local suite per binding + `make check` where it exists.
 - `coverage.json` regenerated with the nine split rows.
+
+## How these gates fail — read this before writing one
+
+The ReactiveMap work landed nine per-flavor gates and mutation-checked every one.
+**Four of them were green against broken code on the first attempt.** Each failure
+below is a real one from that run, not a hypothetical, and each applies verbatim
+to the queue family. Budget time for finding them; the mutation check is what
+found them, and only after it was itself corrected.
+
+1. **A probe that passes with *and* without the defect.** The obvious
+   negative-index probe for a missing lower clamp, `move_to(key, -5)`, lands
+   correctly either way in Python — `list.insert` clamps a very negative index to
+   0 by itself. Only `-1` discriminates. *Before trusting a mutation check,
+   confirm the un-mutated case would actually produce a different observable.*
+
+2. **"Did not invalidate" passes trivially for a reader that tracks nothing.**
+   lazily-cs's `AsyncComputedMap.Len()` read a membership cell that was written on
+   every mutation and never read anywhere — dead. The assertion "a pure reorder
+   must NOT invalidate the membership reader" held perfectly, because the reader
+   was subscribed to nothing at all. **Every negative invalidation assertion needs
+   a positive twin**: something that MUST invalidate the same reader.
+
+3. **A gate that drives only one entry kind leaves the newly-fixed one untested.**
+   The value-mutating fixtures need a settable map, so they naturally drive the
+   source maps. In lazily-kt that left the single-threaded `ComputedMap` — the
+   family that commit had just fixed — entirely outside the gate. Dropping its
+   membership bump was **not caught**. Derived-slot flavors need their own direct
+   drive. For the queue family the analogue is any flavor the fixtures cannot
+   reach.
+
+4. **A gate wired to no target runs zero tests and exits 0.** lazily-rs's
+   three-flavor gate needs both `thread-safe` and `async` features; no `make`
+   target enabled that combination, so `cargo test --test
+   collections_family_conformance` printed `running 0 tests` and passed. It had
+   been a no-op in every make target. **Assert a non-zero replayed-step count, and
+   verify the gate actually runs under `make check` — not just under a hand-typed
+   command.**
+
+And a meta-lesson: **the mutation-check harness itself can lie.** A first pass
+reported six py mutations as uncaught because the predicate was
+`grep "passed"` — which matches `1 failed, 8 passed`. Check for *failure*, and
+sanity-check that the baseline reports green and a deliberate break reports red.
+
+### Per-binding runner traps
+
+Discovered the hard way; all of them produced a false green first.
+
+- **kt:** `map.len()` and `map.keys()` *allocate* a `Computed`. Calling them
+  inside a reader body mints a fresh node on every recompute, so the reader
+  depends on a throwaway slot and is never invalidated again. Hoist the
+  allocation outside the reader.
+- **kt:** the async graph only recomputes through `getAsync`; the non-blocking
+  `get` returns the cached value without driving, so a recompute counter never
+  moves. Drive with `runBlocking { ctx.getAsync(slot) }`.
+- **kt / cs / go:** async reads need an explicit compute surface
+  (`AsyncComputeContext` / `AsyncCompute` / `*Compute`). Spelled against the bare
+  context they register no edge and the whole "reactive" read is decorative.
+- **cs:** asserting the resulting *list* after a move is not asserting the *order
+  signal*. A map that reorders without bumping still passes a list-only check.
+- **cs:** a removed node's disposal is unobservable unless the map exposes its
+  handle. `AsyncComputedMap` needed a `TryGetHandle` before "Remove disposes"
+  could be tested at all.
+- **rs:** `make check` runs `--locked`; a version bump without
+  `cargo update -p <crate> --precise X.Y.Z` fails clippy before any test runs.
+
+**Recommended probe shape**, which worked in all nine: measure invalidation by
+**recompute count inside the reader's own compute body**, not by a cache flag. A
+counter the library has to move cannot be satisfied by runner bookkeeping. Pair
+it with an assertion that the fixture had a non-zero number of steps.
 
 ## Anti-goals
 

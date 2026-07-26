@@ -152,15 +152,47 @@ This item was filed last cycle describing two things; both are done and measured
 Worth recording that the *first* attempt at this was wrong and got reverted: I gated the resolution on the CRDT frontier as a cheap witness, which fails on a live document because the editor advances the frontier independently of whether a self-heal changed anything. I also briefly reverted the second attempt on an invalid A/B — the call-count difference I read as a regression turned out to be path-dependent and reproduced identically on the reverted baseline. Measure the same document state on both sides.
 
 The `ReactiveMap` gap this surfaced is real but belongs upstream and is being handled in the lazily session: `mint_with` already threads the context into the compute closure and `get_or_insert_handle` discards it (`move |_ctx| factory(&k)`), so a single-threaded derived entry cannot read another cell at all — `lazily::Context` isn't `Clone` and the public factory is `Fn(&K) -> V`. That is why this uses the thread-safe family rather than the `LocalReadScope` the lifetime actually calls for. Not touching it from here.
-<!-- agent:boundary:9bb321fa -->
+
+### Re: do [#syncownerreactive] — opus-5
+
+> **Queue prompt:**
+>
+> do [#syncownerreactive]
+
+
+Done, committed as `e1ea37640`, `make check` green (8072 passed), built + installed.
+
+**What was actually wrong.** `pane_runs_other_document_owner` asked `/proc` two independent questions about the same pane — the unmanaged-harness guard and the other-document guard — and each walked the entire process table for itself. Scanning a dozen candidate panes therefore cost ~24 whole-table walks to re-answer questions about processes that had not changed. That is the substance of `gap_window_to_ownership 25620`.
+
+`observation_cache` was the tmux-side patch for the same disease, and your diagnosis of it is exactly right: it memoizes raw argv output, and its only invalidation is *recreate the context*, because there are no edges to invalidate along. It cannot express "this pane changed, so only this pane's owner is stale" — so it discards everything or nothing.
+
+**The split.** `agent-doc-process-owner-io` is now two halves that were previously tangled in one file:
+
+- `proc_table` — the observation. One `/proc` walk for the parent edges; one tree walk per pane root yielding pid + command line.
+- `owner_graph` — the derivation. Each pane's tree is a `Source` in a `LocalReadScope`, and the owner map is `Computed` over it: the other document a pane owns, the document its agent-doc owner binds, whether it runs an unmanaged harness session.
+
+Classification did not move. It is still pure functions over command lines in `agent_doc_controller::command_line`; `owner_graph` only lifts one-command-line policy to one observed tree. The observation is what joined the graph.
+
+**Where the edge is.** `refresh_process_observations` re-observes every pane in the scope from a single `/proc` walk and writes each `Source`. Those writes are equality-guarded, so a pane whose tree did not change invalidates nothing, and a pane that did change re-derives exactly its own cells. The tmux observation scope now opens and closes the process scope with it and calls the refresh after each tmux mutation — a mutation is the event that can create, replace, or kill the process a pane's ownership is decided from, and it is the one thing the argv memo could only respond to by throwing the whole context away.
+
+`pane_runs_other_document_owner` also opens the scope itself, so even an unscoped caller (editor navigation through `focus`) gets one observation for the pair instead of two walks.
+
+**On the tests.** The crate carried a set of `#[cfg(test)] fn *_with` helpers — a second traversal, written for the tests, taking injected `child_pids`/`process_command` closures. The tests exercised those, not the code that ships, and one of them was pinned as a requirement by the architecture guard in `test_cli.rs`. I deleted them. What the tests drive now is the real walk (`tree_pids` over an observed snapshot), the real pure lifts, and the real graph through `record_tree_observation` — the observation seam. That includes the test the old shape could not have: a pane's observation changes, and its derived answer changes with it while an untouched pane's does not. A memo fails that test.
+
+The architecture guard now reads the whole crate rather than `lib.rs` alone, since the responsibility it protects is the crate's, not the file's.
+
+**CI.** The latest run was red before this change, on `compact_commit_preserves_only_unresolved_prompt_in_live_editor`: `transport failed at epoch 1 — timed out after 0.2s waiting for project controller response`. The test-mode `CONTROLLER_RPC_TIMEOUT` was 250ms, which exists so an *absent* controller fails fast — but on a loaded runner the in-process fake listener is not always scheduled inside a quarter second, so a deadline that asserts nothing about latency was deciding the outcome. Raised to 2s, which keeps the fast-fail property. That surfaced a second instance of the same mistake: `controller_client_response_read_times_out` bounded the request with a hard-coded `< 2s` literal, which became an equality with the deadline the moment the constant moved. It now derives its bound from the constant and asserts boundedness against the deadline rather than the wall clock.
+
+One thing I did not do: `agent-doc admin recycle` refused (`authoritative actor is still starting and the document changed after the last committed cycle`), and I did not `--force` past that guard. The binary and cdylib are installed; the supervisor will promote them at the next idle boundary.
+<!-- agent:boundary:d51f0558 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ⏭️ do [#syncownerreactive]
+- ~~⏭️ do [#syncownerreactive]~~
 - ⏭️ do [#jbpluginlazilyeffects]
 - ⏭️ do [#ctrlkillreregister]
-- 🚧 do [#steergateidle]
+- ⏭️ do [#steergateidle]
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
 - 📌 do [#60ev]
@@ -196,10 +228,9 @@ The `ReactiveMap` gap this surfaced is real but belongs upstream and is being ha
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#syncownerreactive] #agent-doc-bug Owner resolution re-observes per call instead of deriving. Measured 2026-07-25 in ops.log while the pane swap was broken: sync_latency tmux_router elapsed_ms=45063 (budget 1000), gap_window_to_ownership 25620, prune_stash_panes 8027 (budget 250), window_resolution 4708, controller_actor_lookup 4297. Every decision re-shells ps/tmux, which is why observation_cache exists at all: it memoizes raw argv output, which is a cache, not a derivation (its invalidation is 'recreate the context', because there are no edges to invalidate along). Make pane observations Sources in a scope (see stategraphjoin) and the pane->document owner map a Computed over them, so a pane change invalidates the owner map instead of every caller recomputing it. Classification stays a pure function in command_line.rs; it is the OBSERVATION that belongs in the graph.
 - [ ] [#jbpluginlazilyeffects] #agent-doc-feature The JetBrains/VS Code plugin should drive lazily state + Effects, not one-shot CLI commands. Today every editor action (file selected, layout changed, Sync Tmux Pane) shells a fresh agent-doc process that re-observes the world from scratch and returns one answer that is already stale, with no subscription and no invalidation. Keep the CLI supported as an entrypoint, but the plugin path should be: plugin reports an event -> FFI sets a Source in the document scope -> an Effect drives the tmux/pane consequence. Same Shared Foundation rule already in AGENTS.md, applied to observation rather than business logic. Consumes the derived owner map from syncownerreactive, so order it after that.
 - [ ] [#ctrlkillreregister] #agent-doc-bug Killing the controller strands a live editor. Hydration restores the durable liveness plane so the editor still reads as registered, but the relay hub holding its replica is process-local, died with the previous controller, and nothing rehydrates it — leaving attached-with-missing-replica until the plugin happens to re-register, which is why operators reach for an IDE restart. DONE: Tier 1 restart fan-out (34546de4f); Tier 3 replicated derivation registrations_missing_replica/peer_registrations_missing_replica (46f2321ad), controller command peer_replicas_missing, and FFI export agent_doc_peer_replicas_missing so the editor asks about itself and repairs instead of being pushed at. Tier 2 (controller-side Effect) intentionally skipped: it still owns a cross-process push, the failure behind 'reload-lib reached 1/4 endpoints'. REMAINING: have the JetBrains and VS Code plugins call agent_doc_peer_replicas_missing on reconnect/startup, then retire the Tier 1 fan-out as a compatibility shim.
-- [ ] 🚧 [#steergateidle] #agent-doc-bug Selected-text turn steering is gated on an active turn and rejects otherwise ('requires the authoritative pane to have an active turn (actor_state=ready)'). Both halves are wrong per operator: (a) an active turn should not be required — an idle pane should dispatch the selection as a normal trigger, not error; (b) detection was incorrect, a turn WAS active while it reported ready. (b) is corroborated by repeated 'timed out after 5.0s waiting for project controller response' on admin inspect in the same window, so a failed actor-state read may be surfacing as authoritative 'ready'. Fix both: idle becomes a dispatch path, and a failed read fails closed or retries instead of reporting ready. Related #selectedturnsteering.
+- [ ] [#steergateidle] #agent-doc-bug Selected-text turn steering is gated on an active turn and rejects otherwise ('requires the authoritative pane to have an active turn (actor_state=ready)'). Both halves are wrong per operator: (a) an active turn should not be required — an idle pane should dispatch the selection as a normal trigger, not error; (b) detection was incorrect, a turn WAS active while it reported ready. (b) is corroborated by repeated 'timed out after 5.0s waiting for project controller response' on admin inspect in the same window, so a failed actor-state read may be surfacing as authoritative 'ready'. Fix both: idle becomes a dispatch path, and a failed read fails closed or retries instead of reporting ready. Related #selectedturnsteering.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 ### Re: #bbpe — gpt-5
 

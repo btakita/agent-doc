@@ -101,8 +101,25 @@ pub fn project_root_from_arg(root: Option<&Path>) -> Result<PathBuf> {
 /// routing, constrained to the current git toplevel so an outer workspace root
 /// cannot capture IPC sidecars for a nested repo.
 pub fn resolve_ipc_project_root(canonical: &Path) -> PathBuf {
-    let parent = canonical.parent().unwrap_or(Path::new("/"));
-    let git_toplevel = agent_doc_git_io::dirs::git_toplevel_at(parent);
+    // `Path::parent` returns `Some("")` — not `None` — for a bare relative file
+    // name, so `unwrap_or("/")` does not cover the empty case and the empty
+    // string flows through as if it were a directory. It reaches
+    // `Command::current_dir`, which can only fail; the launch guard then
+    // correctly reports `project root "" is empty or not a directory ...
+    // retrying cannot help`, and every agent-doc command on the project fails
+    // until a controller is started by hand (2026-07-26). This function's name
+    // says `canonical`, but nothing enforces that, and a caller that is merely
+    // wrong about its argument should not be able to produce an unusable root.
+    //
+    // Same lesson the empty-explicit-root test below already records: an empty
+    // path is a *missing* answer wearing the shape of one.
+    let parent = canonical
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("/"));
+    let git_toplevel = agent_doc_git_io::dirs::git_toplevel_at(&parent);
 
     if let Some(root) = agent_doc_fs::find_project_root(canonical)
         && git_toplevel
@@ -112,13 +129,32 @@ pub fn resolve_ipc_project_root(canonical: &Path) -> PathBuf {
         return root;
     }
 
-    git_toplevel.unwrap_or_else(|| parent.to_path_buf())
+    git_toplevel.unwrap_or(parent)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::process::Command;
+
+    /// The same lesson one call deeper: a bare relative file name has
+    /// `parent() == Some("")`, so the `unwrap_or("/")` guard never fired and the
+    /// empty string became the returned project root. It then reached
+    /// `Command::current_dir` and wedged every agent-doc command on the project
+    /// behind `project root "" is empty or not a directory` until a controller
+    /// was started by hand.
+    #[test]
+    fn a_bare_file_name_never_resolves_to_an_empty_project_root() {
+        let resolved = resolve_ipc_project_root(Path::new("plan.md"));
+        assert!(
+            !resolved.as_os_str().is_empty(),
+            "an empty root is unusable by every caller; it must resolve to a real directory"
+        );
+        assert!(
+            resolved.is_dir(),
+            "the fallback must be a directory `Command::current_dir` can accept, got {resolved:?}"
+        );
+    }
 
     /// An empty explicit root is a *missing* root wearing the shape of an answer.
     /// Returning it verbatim sends `""` to `Command::current_dir`, which can only

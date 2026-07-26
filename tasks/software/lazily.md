@@ -471,16 +471,42 @@ Ordering is not async-coloured, and I made that claim falsifiable rather than as
 Ledger flags flipped only alongside replays that actually run, both times. Mutation-checked: removing head invalidation on pop turns both async tests red. `make check` green — `21bce99`, gitlink `00ecc9273`.
 
 Remaining in the family: `#lazilythreadsafetopiccel` and `#lazilythreadsafeworkqueu`. Both are now fully unblocked — the pattern they say to follow exists in `thread_safe_queue.rs` and `async_queue.rs`, and the context prerequisites they would have hit are gone.
-<!-- agent:boundary:90f0ec1b -->
+
+### Re: do [#portconformancecoverage] — opus-5
+
+Done, and one of the more interesting bugs of the session came out of it.
+
+**The audit first**, since the item asked for it. Canonical corpus is 124 fixtures. Names referenced by each binding's tests: rs 111, py 114, js 121, go 115, dart 111, zig 94, cs 30. Only kt (117) and cpp (103) had a guard; the other seven could gain an unreplayed fixture and stay green forever.
+
+**What landed is a static guard, and the header says so plainly.** It greps test sources for each canonical fixture's filename, so absence is caught — a fixture no test names cannot be being replayed. Presence proves nothing: a test can name a fixture in a comment and transcribe its contents by hand, which is *exactly* the drift found in cpp's queue tests. Only a runtime manifest proves the bytes were opened, which is what kt and cpp do. A green run here means "no canonical fixture is unmentioned", not "every fixture is replayed", and I have filed the upgrade rather than letting the weaker guard read as the strong one.
+
+It fails in both directions — an unnamed fixture that is not excused, and a `KNOWN_UNCOVERED` entry naming a fixture the corpus no longer has, because a stale excuse is its own drift. It also refuses to run vacuously: reading no test sources is a failure, not a pass. Mutation-checked both ways.
+
+The allowlists are seeded from the audit rather than invented, so each binding starts green *and* honest.
+
+### Re: the bug that inverted the guard — opus-5
+
+The first version reported **110 of 124 fixtures missing in lazily-rs**, while a manual grep found every one of them present.
+
+The cause: `set -o pipefail` combined with `printf ... | grep -q`. `grep -q` exits on the first match, `printf` then takes SIGPIPE writing the remainder, and `pipefail` surfaces printf's death as the pipeline's status. So the check inverted — it reported every **covered** fixture as missing, precisely *because* the match succeeded. A guard whose verdict flips on the condition it is testing for is worse than no guard, and it would have been trivially "fixed" by padding the allowlist to 110 entries, which is how it would have shipped as a permanent lie.
+
+It only surfaced because the count disagreed with an independent audit I had already run. That is the fifth time this session a gate has been wrong about its own result, and the second where the wrongness was invisible from the exit code alone.
+
+Two notes on the state it exposes. **lazily-cs names 30 of 124** — that is the real state of the newest binding, not a guard defect, and it now cannot drift further without a deliberate decision; filed against the cs parity plan. And **lazily-dart had no Makefile at all**, so its verification was ad-hoc `dart analyze` plus `dart test` with nothing named `check`; it gets one, which is also why the guard had somewhere to hang.
+
+All seven guards run green and are wired into each binding's `check`. Full `make check` verified end-to-end on js and cs; the guard target verified directly in the other five.
+<!-- agent:boundary:c36fb03c -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#lazilyupgradeconformance]
+- do [#lazilyconformancecoverag]
+- ~~do [#lazilythreadsafequeuecel]~~
+- ~~do [#lzqfrs]~~
 - ⏭️ do [#lazilythreadsafetopiccel]
 - ⏭️ do [#lazilythreadsafeworkqueu]
-- ⏭️ do [#lazilythreadsafequeuecel]
-- ⏭️ do [#lazilybenchmarkregressio]
 - ~~do [#lazilyfailstarget]~~
 - ~~do [#lzqfcppfx]~~
 - ~~do [#lzqfprep]~~
@@ -488,7 +514,7 @@ Remaining in the family: `#lazilythreadsafetopiccel` and `#lazilythreadsafeworkq
 - ~~do [#lzqfspec]~~
 - ~~do [#lzqfformal]~~
 - ~~do [#lzqffx]~~
-- ⏭️ do [#lzqfrs]
+- ⏭️ do [#lazilybenchmarkregressio]
 - ⏭️ do [#lzqfjs]
 - ⏭️ do [#lzqfports]
 - ⏭️ do [#lzqfzig]
@@ -511,8 +537,8 @@ Remaining in the family: `#lazilythreadsafetopiccel` and `#lazilythreadsafeworkq
 - ~~do [#observerwordingcontradic]~~
 - ~~do [#renametreesource]~~
 - ⏭️ do [#recommendeddecidewhether]
-- 🚧 do [#lazilycppconformance]
-- do [#portconformancecoverage]
+- ⏭️ do [#lazilycppconformance]
+- ~~🚧 do [#portconformancecoverage]~~
 - do [#verifycrdtplaneruntimein]
 - do [#lazilycppsignalingroom]
 - do [#lazilycppcollections]
@@ -534,6 +560,8 @@ Remaining in the family: `#lazilythreadsafetopiccel` and `#lazilythreadsafeworkq
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lazilyupgradeconformance] lazily: upgrade the conformance-coverage guard from static to runtime in rs, py, js, go, dart, zig, cs. The guard landed 2026-07-26 is STATIC — it greps test sources for each canonical fixture filename, so absence is caught but presence proves nothing. A test can name a fixture in a comment and hand-transcribe its contents, which is precisely the drift found in lazily-cpp queue tests and which this guard cannot see. lazily-kt and lazily-cpp already do it properly: every runner appends the fixtures it actually OPENED to the file named by LAZILY_CONFORMANCE_MANIFEST, flushed at exit, and the script asserts the union. Port that mechanism. Highest value where the allowlist is smallest (js 3, go 9, py 10) because those bindings claim near-total coverage and a false claim there is the most misleading
+- [ ] [#lazilyconformancecoverag] lazily-cs: the conformance-coverage allowlist is 94 of 124 canonical fixtures — cs names only 30. That is the real state of the newest binding, not a defect in the guard, but it means roughly three quarters of the canonical corpus is unreplayed there. Work the list down against tasks/software/lazily-cs-parity-plan.md; the guard now fails the build if the corpus grows without a matching decision, so the number can only move deliberately
 - [ ] [#lazilythreadsafetopiccel] lazily-rs: ThreadSafeTopicCell + AsyncTopicCell. Same per-flavor rules as #lazilythreadsafequeuecel: own graph, own reader handles, bumps outside the lock, batch() for multi-root invalidation. Topic Core reader kinds per cell-model.md are subscribe/reconnect/disconnect/publish/read/read_stream/advance. Update the flavor ledger in the SAME change, and make the corpus replay against the new flavor rather than only flipping the flag — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lazilythreadsafeworkqueu] lazily-rs: ThreadSafeWorkQueueCell + AsyncWorkQueueCell. Core surface is push/claim/ack/nack/reap_expired plus the three independent reader kinds (pending / in-flight / dead-letter). Visibility-timeout redelivery needs a clock seam, which is NOT flavor-specific — reuse the sync one rather than minting a per-flavor clock. Update the flavor ledger in the SAME change and make the corpus replay against the new flavor. KEPT OPEN 2026-07-26: this reached the queue head before its own stated prerequisite existed — it says "same rules as the reference pair", and that pair had not been built. ThreadSafeQueueCell now ships (46d81e4) and IS the pattern to copy: memoized-derive reader kinds on its own graph, Arc<Mutex<S>> storage with invalidation OUTSIDE the lock (holding storage while invalidating inverts lock order against readers and deadlocks), multi-root invalidation via batch(), ledger flag flipped only alongside a real replay, plus an effect-based atomicity test because a step replay cannot see non-atomic invalidation. The THREAD-SAFE half is unblocked now; the async half waits on the AsyncContext prerequisites in #lzqfrs — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lazilybenchmarkregressio] lazily-rs: the benchmark regression budgets have NO CI enforcement. ci.yml enumerates individual cargo test invocations and never runs `make check` or `benchmark-check`; regressions.yml runs only the loom model. So every budget in BENCHMARKS.md is enforced solely by whoever remembers to run `make benchmark-check` locally with a populated target/criterion — which, until #lazilyfailstarget, was nobody, because the gate hard-failed on a pruned target dir. Add a scheduled job (regressions.yml already has a nightly cron and is the natural home) that runs `cargo bench` then `make benchmark-check-strict`, so a real regression fails somewhere other than one developer machine. Note the numbers are machine-specific, so the job needs a stable runner class or relative-delta budgets rather than absolute ones
@@ -554,8 +582,7 @@ Remaining in the family: `#lazilythreadsafetopiccel` and `#lazilythreadsafeworkq
 - [ ] [#lazilytwoimplementations] lazily-js: two implementations disagree on moveTo with a negative index — reactive-family.js:270 uses Math.min(index, Math.max(len-1,0)) with no lower clamp, collections.js:196 uses Math.max(0, Math.min(index, len-1)). moveTo(key,-1) splices before the last element in one and at 0 in the other. Untested in both; pick one before any unification silently changes a published surface.
 - [ ] [#lazilydartcomputedmap] lazily-dart: ComputedMap entries are Slot, not Computed (collections.dart:430). Post-v2 Slot is the UNGUARDED pass-through while Computed carries the == memo guard — so ComputedMap does not have the guard its name implies, and this leaks publicly through handle(). Decide whether the handle becomes Computed.
 - [ ] [#recommendedspecdecision] [recommended] Spec decision for lazily-spec, blocking the family unification: (1) does the atomic-move contract in cell-model.md:275 bind EVERY flavor or only the source map? All nine bindings fail it on thread-safe and async, yet coverage.json marks all three rows green for every binding. (2) Is a thread-safe flavor meaningful on single-threaded runtimes? dart ships a 182-line duplicate family the spec marks N/A, and js README:633-640 argues the opposite of its own source comment at thread-safe.js:134-137.
-- [ ] 🚧 [#lazilycppconformance] lazily-cpp: 10 conformance runners are MARKER-ONLY — they open the canonical fixture but only assert its `"model"` string, then replay hand-transcribed steps (rateshape 6, coordination 5, temporal/windowing/service/resilience 4 each, presence 3, membership/crdt-tree 1 each = 33 fixtures). They pass a did-you-load-fixtures check while being blind to any change in the corpus steps or expectations. Convert to real replays; the coverage guard counts them as covered today.
-- [ ] [#portconformancecoverage] Port a conformance-coverage guard to the 7 bindings that lack one. Only lazily-kt (scripts/check-conformance-coverage.sh) and now lazily-cpp fail the build when a canonical fixture is not actually replayed. rs, py, js, go, dart, zig, cs have no such guard, so the same marker-only / hand-transcribed drift found in cpp is undetected there. Audit each the same three ways: real replay vs marker-only vs absent.
+- [ ] [#lazilycppconformance] lazily-cpp: 10 conformance runners are MARKER-ONLY — they open the canonical fixture but only assert its `"model"` string, then replay hand-transcribed steps (rateshape 6, coordination 5, temporal/windowing/service/resilience 4 each, presence 3, membership/crdt-tree 1 each = 33 fixtures). They pass a did-you-load-fixtures check while being blind to any change in the corpus steps or expectations. Convert to real replays; the coverage guard counts them as covered today.
 - [ ] [#verifycrdtplaneruntimein] Verify CrdtPlaneRuntime ingest-op counting in the 7 bindings not yet checked. lazily-cpp returned the count of ops that CHANGED THE WINNER rather than ops accepted into the log (4 vs 5 on lww_last_writer_wins), breaking the spec rule that redelivery applies 0 new ops. lazily-kt (CrdtPlane.kt:148) is correct and cpp is now fixed; rs, py, js, go, dart, zig, cs are unaudited for the same divergence.
 - [ ] [#lazilycppsignalingroom] lazily-cpp SignalingRoom::forward (include/lazily/signaling.hpp:203) silently drops frames addressed to an unknown peer, but conformance/signaling/anti_spoof_session.json requires an `unknown_target` error frame back to the sender. A faithful signaling runner stays red until this is fixed. The second signaling fixture (frames.json) additionally needs signaling wire serde, which lazily-cpp does not have.
 - [ ] [#lazilycppcollections] lazily-cpp: 15 collections fixtures still uncovered — 9 with no coverage at all (cellmap_atomic_move, cellmap_independence, keyed_reconciliation_lis, semtree_incremental, stableid_alignment, textcrdt_convergence, textcrdt_delta_sync, workqueue_competing_delivery, workqueue_lease_deadletter) and 6 hand-transcribed (mergecell_algebra, 5x queuecell_*). Largest single body of remaining conformance work; spans five separate primitives. Tracked in the KNOWN_UNCOVERED ledger.

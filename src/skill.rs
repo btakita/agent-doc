@@ -1580,8 +1580,13 @@ mod tests {
             Environment::Generic,
         ] {
             let content = super::content_for_env(env);
+            // 152: raised from 150 by `#preflightinbinary`, which adds one
+            // hot-path digest bullet. The bullet is what flips the default —
+            // an agent that does not read it re-runs preflight every turn — so
+            // it earns a line. Keep the headroom small: the guard exists to
+            // catch drift, and a generous ceiling stops catching it.
             assert!(
-                line_count(&content) <= 150,
+                line_count(&content) <= 152,
                 "{env:?} rendered instruction surface grew to {} lines",
                 line_count(&content)
             );

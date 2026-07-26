@@ -12,6 +12,12 @@ use std::path::PathBuf;
 
 use agent_doc_hooks_io::preflight_user_prompt_submit::{invoked_document, resolve_document};
 
+/// Printed immediately before the injected contract.
+///
+/// `SKILL.md` keys "do not run `agent-doc preflight` yourself" off this line, so
+/// the agent tests for a fact rather than guessing whether the hook ran.
+pub const CONTRACT_MARKER: &str = "[agent-doc] cycle contract (preflight already ran in the binary; do NOT run `agent-doc preflight` for this turn)";
+
 /// Claude Code `UserPromptSubmit` hook entry point.
 ///
 /// Reads the hook payload from stdin. When the prompt is an `agent-doc <FILE>`
@@ -48,6 +54,10 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
         return Ok(());
     };
 
+    // The marker makes "a contract is present" checkable rather than inferred.
+    // SKILL.md keys the do-not-re-run rule off it, so it must precede the
+    // contract and must not appear on any other path.
+    println!("{CONTRACT_MARKER}");
     if let Err(e) = agent_doc_preflight_command_io::run_with_options(
         &file,
         agent_doc_preflight_command_io::PreflightOptions { probe: false },

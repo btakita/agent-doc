@@ -362,6 +362,40 @@ impl CycleState {
             && self.response_sha256.is_none()
     }
 
+    /// `#preflightinbinary` — should a preflight invocation **reuse** this open
+    /// cycle instead of minting a new one?
+    ///
+    /// Once preflight runs in the binary on the trigger prompt, two preflights
+    /// can legitimately reach the same turn: the hook's, and an agent (or a
+    /// harness without the hook) that also runs one. `start_preflight_with_task`
+    /// unconditionally minted `cycle-{now_millis}`, so the second silently
+    /// replaced the first — discarding its identity along with
+    /// `active_queue_heads`, the carried semantic-merge acks, and the skipped-head
+    /// accumulator. Nothing downstream could tell it had happened.
+    ///
+    /// A cycle qualifies for reuse when it is still `PreflightStarted` with no
+    /// response artifact — i.e. a turn is open and nothing has been captured
+    /// against it yet, so re-running preflight is a *re-entry*, not a new turn.
+    /// Deliberately does not compare content hashes: preflight itself mutates the
+    /// document (queue convergence, baseline checkpoint), so the hook's run and a
+    /// later run in the same turn legitimately see different bytes.
+    ///
+    /// A **stalled** open cycle is excluded: that is a crashed or superseded
+    /// older turn, and a genuinely new turn must not inherit its identity. The
+    /// same `stalled_before_response_capture_cycle` policy the supervisor uses to
+    /// force-abandon one decides it here, so the two cannot drift.
+    pub fn reusable_by_reentrant_preflight(
+        &self,
+        inflight: u64,
+        now_secs: u64,
+        deadline_secs: u64,
+    ) -> bool {
+        matches!(self.phase, CyclePhase::PreflightStarted)
+            && self.capture_id.is_none()
+            && self.response_sha256.is_none()
+            && !self.stalled_before_response_capture_cycle(inflight, now_secs, deadline_secs)
+    }
+
     /// Derive the live finalize-pipeline view (`#fm-run-id-step` / `#fmrunid-wire`)
     /// from the authoritative cycle-state fields: `run_id` = cycle id, `step` =
     /// lowercase phase, plus the recorded `turn_id` / `queue_task_id`.
@@ -1127,14 +1161,34 @@ pub fn start_preflight_with_task(
         .flatten()
         .map(|prior| prior.skipped_queue_head_ids)
         .unwrap_or_default();
+    // `#preflightinbinary`: a second preflight inside the same open turn is a
+    // re-entry, not a new turn — see `reusable_by_reentrant_preflight`. Keep the
+    // turn's IDENTITY (cycle id and start time) and recompute everything else,
+    // rather than returning the stored state: the contract must reflect facts
+    // recorded since the turn opened (acks, queue heads, hashes), so a re-entry
+    // that replayed the opening snapshot would report a stale document.
+    let reentrant = load(file)
+        .ok()
+        .flatten()
+        .filter(|open| open.reusable_by_reentrant_preflight(0, now, STALLED_CYCLE_RESOLVE_SECS));
+    if let Some(open) = reentrant.as_ref() {
+        eprintln!(
+            "[preflight] re-entrant preflight kept open cycle {} for {}",
+            open.cycle_id,
+            file.display()
+        );
+    }
     let phase = CyclePhaseMachine::transition(CyclePhase::Committed, CycleEvent::StartPreflight)
         .unwrap_or(CyclePhase::PreflightStarted);
     let state = CycleState {
-        cycle_id: format!("cycle-{}", now_millis()),
+        cycle_id: reentrant
+            .as_ref()
+            .map(|open| open.cycle_id.clone())
+            .unwrap_or_else(|| format!("cycle-{}", now_millis())),
         file: canonical.display().to_string(),
         phase,
         last_event: "preflight_started".to_string(),
-        started_at: now,
+        started_at: reentrant.as_ref().map_or(now, |open| open.started_at),
         updated_at: now,
         snapshot_hash: snapshot_content.map(agent_doc_hash::content_hash),
         file_hash: file_content.map(agent_doc_hash::content_hash),
@@ -3217,6 +3271,59 @@ mod tests {
     }
 
     #[test]
+    fn a_reentrant_preflight_keeps_the_turn_identity_and_refreshes_the_contract() {
+        use agent_doc_merge::document_cell_merge::AckReason;
+        // #preflightinbinary: with preflight running in the binary on the
+        // trigger prompt, a second preflight can reach the same turn (an agent
+        // or a hookless harness also runs one). It used to mint
+        // `cycle-{now_millis}` over the first, silently discarding its identity
+        // and accumulators. Re-entry must keep the identity — and must still
+        // report facts recorded since the turn opened, or the agent acts on a
+        // stale contract.
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        let first = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        record_semantic_merge_acks(
+            &doc,
+            &[ack("exchange", "a", AckReason::SameNodeOperatorOverride)],
+        )
+        .unwrap();
+
+        let reentrant = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        assert_eq!(
+            reentrant.cycle_id, first.cycle_id,
+            "a re-entrant preflight must not open a second cycle over the open turn"
+        );
+        assert_eq!(reentrant.started_at, first.started_at);
+        assert_eq!(
+            reentrant.pending_semantic_merge_acks.len(),
+            1,
+            "the refreshed contract must carry facts recorded since the turn opened"
+        );
+    }
+
+    #[test]
+    fn a_committed_turn_still_opens_a_new_cycle() {
+        // The boundary that must survive: re-entrancy must not merge two real
+        // turns into one.
+        let dir = setup_project();
+        let doc = dir.path().join("doc.md");
+        fs::write(&doc, "body").unwrap();
+
+        let first = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+        mark_committed(&doc, "commit_success", Some("snap"), Some("body")).unwrap();
+        let second = start_preflight(&doc, Some("snap"), Some("body")).unwrap();
+
+        assert_ne!(
+            second.cycle_id, first.cycle_id,
+            "a committed turn is a real boundary"
+        );
+    }
+
+    #[test]
     fn document_cell_merge_acks_survive_in_ledger() {
         use agent_doc_merge::document_cell_merge::AckReason;
         let dir = setup_project();
@@ -4453,6 +4560,66 @@ mod tests {
         );
         // run_id stays stable across transitions (same cycle).
         assert_eq!(captured.to_pipeline().run_id, pipeline.run_id);
+    }
+}
+
+#[cfg(test)]
+mod reentrant_preflight_tests {
+    use super::*;
+
+    fn state(phase: CyclePhase, updated_at: u64) -> CycleState {
+        let mut state = synthetic_state(Path::new("/tmp/plan.md"), phase);
+        state.updated_at = updated_at;
+        state
+    }
+
+    /// The case the hook creates: preflight already opened this turn, and a
+    /// second preflight arrives before anything was captured.
+    #[test]
+    fn a_second_preflight_in_the_same_open_turn_reuses_the_cycle() {
+        let open = state(CyclePhase::PreflightStarted, 1_000);
+        assert!(open.reusable_by_reentrant_preflight(0, 1_005, STALLED_CYCLE_RESOLVE_SECS));
+    }
+
+    /// A committed turn is a real boundary — the next preflight is a new turn
+    /// and must mint a new id.
+    #[test]
+    fn a_committed_cycle_is_not_reused() {
+        let committed = state(CyclePhase::Committed, 1_000);
+        assert!(!committed.reusable_by_reentrant_preflight(0, 1_005, STALLED_CYCLE_RESOLVE_SECS));
+    }
+
+    /// Once a response exists, the cycle is durable recovery evidence. Reusing
+    /// it would let a fresh turn inherit another turn's captured response.
+    #[test]
+    fn a_cycle_with_a_captured_response_is_not_reused() {
+        let mut captured = state(CyclePhase::PreflightStarted, 1_000);
+        captured.capture_id = Some("capture-1".to_string());
+        assert!(!captured.reusable_by_reentrant_preflight(0, 1_005, STALLED_CYCLE_RESOLVE_SECS));
+
+        let mut written = state(CyclePhase::PreflightStarted, 1_000);
+        written.response_sha256 = Some("deadbeef".to_string());
+        assert!(!written.reusable_by_reentrant_preflight(0, 1_005, STALLED_CYCLE_RESOLVE_SECS));
+    }
+
+    /// A crashed or superseded older turn must not be inherited by a new one.
+    /// Uses the same staleness policy the supervisor force-abandons on, so the
+    /// two cannot drift.
+    #[test]
+    fn a_stalled_open_cycle_is_not_inherited_by_a_new_turn() {
+        let stalled = state(CyclePhase::PreflightStarted, 1_000);
+        let now = 1_000 + STALLED_CYCLE_RESOLVE_SECS + 1;
+        assert!(stalled.stalled_before_response_capture_cycle(0, now, STALLED_CYCLE_RESOLVE_SECS));
+        assert!(!stalled.reusable_by_reentrant_preflight(0, now, STALLED_CYCLE_RESOLVE_SECS));
+    }
+
+    /// Inflight IPC means the cycle is live, so it is not stalled and stays
+    /// reusable even well past the deadline.
+    #[test]
+    fn an_inflight_cycle_stays_reusable_past_the_deadline() {
+        let live = state(CyclePhase::PreflightStarted, 1_000);
+        let now = 1_000 + STALLED_CYCLE_RESOLVE_SECS + 1;
+        assert!(live.reusable_by_reentrant_preflight(1, now, STALLED_CYCLE_RESOLVE_SECS));
     }
 }
 

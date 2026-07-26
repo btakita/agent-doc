@@ -555,26 +555,36 @@ Audited, and the audit came back clean — which turned out not to be the intere
 **The Makefile bit me twice in the same way the guards have all session.** First the target was referenced by `check` before its recipe existed, so `check` died on "No rule to make target". Before that, the test only ran at all because `test-crdt-plane` happens to run every target under those features — incidental coverage that would vanish the moment someone narrowed that target. It is named explicitly now, and I verified it by breaking the test and confirming `make check` goes red rather than by assuming the dependency line worked.
 
 `make check` green. Pushed as `b31c61d`.
-<!-- agent:boundary:f6517c5d -->
+
+### Re: do [#lazilydistributedconform] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lazilydistributedconform]
+
+
+Closed by building the missing accessor rather than by re-recording the limitation.
+
+**`CrdtPlaneRuntime::converged()`** returns the winning op's payload per `(node, key)` — the shape the canonical fixture states convergence in, and the shape lazily-py and lazily-go already expose. rs had only the typed read `value::<C>()`, which structurally cannot answer it: registered cells hold *deserialized* CRDT state, so there was no way to compare against the fixture's raw bytes and the runner skipped that half.
+
+The fold is the op log rather than a second source of truth, and that distinction is the point. `missing_since` already yields every op in ascending stamp order, so writing each into a map keyed by `(node, key)` leaves the greatest stamp per address — and `HlcStamp` orders by `(wall_time, logical, peer)`, so the peer tiebreak the fixture exercises **falls out** instead of being reimplemented inside the accessor where it could drift from the log's own ordering.
+
+**`crdt_sync_frames.json` was a different contract than I assumed.** I expected another plane-behaviour fixture; it is a *wire* fixture — frames carrying a `CrdtSync` payload plus assertions on frontier and op counts, pinning the codec boundary. So it needed its own replay, not an extension of the first. Two details matter there: it deserializes through the real `CrdtSync` type rather than reading the JSON fields, because reading the fields would assert the fixture against itself; and it re-serializes, because a codec that drops ops on the way *out* would satisfy every count checked on the way in.
+
+Before this, I confirmed the allowlist entries were honest rather than an artifact of the static guard. rs's IPC conformance runner loads fixtures by explicit name and never touches `distributed/` — unlike lazily-cs, which enumerates its corpus and therefore *looked* uncovered when it was not. Same guard, opposite conclusion, and only checking the loader distinguishes them.
+
+Mutation-checked both: making `converged()` keep the first op per address instead of the greatest stamp fails the LWW scenario; clearing ops after deserialization fails the frame `op_count`.
+
+Both entries are out of the coverage allowlist — rs now genuinely replays the whole distributed corpus. `make check` green, pushed as `423ac46`.
+<!-- agent:boundary:7c8beeae -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lazilydistributedconform]
-- ~~do [#lazilyupgradeconformance]~~
-- ~~do [#lazilyconformancecoverag]~~
-- ~~do [#lazilythreadsafequeuecel]~~
-- ~~do [#lzqfrs]~~
+- ~~do [#lazilydistributedconform]~~
 - ⏭️ do [#lazilythreadsafetopiccel]
 - ⏭️ do [#lazilythreadsafeworkqueu]
-- ~~do [#lazilyfailstarget]~~
-- ~~do [#lzqfcppfx]~~
-- ~~do [#lzqfprep]~~
-- ~~do [#lzdonequoteattr]~~
-- ~~do [#lzqfspec]~~
-- ~~do [#lzqfformal]~~
-- ~~do [#lzqffx]~~
 - ⏭️ do [#lazilybenchmarkregressio]
 - ⏭️ do [#lzqfjs]
 - ⏭️ do [#lzqfports]
@@ -595,12 +605,8 @@ Audited, and the audit came back clean — which turned out not to be the intere
 - ⏭️ do [#lazilyrenameinverted]
 - ⏭️ do [#readmeexamplesreference]
 - ⏭️ do [#signalgetsignallive]
-- ~~do [#observerwordingcontradic]~~
-- ~~do [#renametreesource]~~
 - ⏭️ do [#recommendeddecidewhether]
 - ⏭️ do [#lazilycppconformance]
-- ~~do [#portconformancecoverage]~~
-- ~~🚧 do [#verifycrdtplaneruntimein]~~
 - do [#lazilycppsignalingroom]
 - do [#lazilycppcollections]
 - do [#trackedcopieslazily]
@@ -614,14 +620,12 @@ Audited, and the audit came back clean — which turned out not to be the intere
 - do [#lazilytwoimplementations]
 - do [#lazilydartcomputedmap]
 - do [#recommendedspecdecision]
-- ~~do [#portmembershiporder]~~
 - do [#lazilyasyncmap]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilydistributedconform] lazily-rs: the distributed conformance runner asserts applied_count and redeliver_applied_count but NOT the fixture`s `converged` view, and distributed/crdt_sync_frames.json is still unreplayed. The converged view is the winning op`s raw Inline bytes per (node, key); rs`s plane is typed-cell oriented (merges serialized CRDT state into registered ReplicatedCells, reads via value::<C>()) and exposes no accessor for the raw winning payload — a byte-valued LwwRegister<Vec<u8>> does not bridge it because merge_state deserializes and the cells stay empty. Either add a converged-entries accessor mirroring lazily-py`s plane.converged(), or decide rs deliberately does not model that view and record it in the spec. Then replay crdt_sync_frames.json too and drop both entries from the coverage allowlist
 - [ ] [#lazilyupgradeconformance] lazily: upgrade the conformance-coverage guard from static to runtime in rs, go, dart, zig, cs. DONE 2026-07-26 for js and py, and both proved CLEAN (js opens 121/124, py 114/124 — exactly their static counts, so no marker-only drift). Those two were cheap because the language offers an interception seam: js uses a --require preload wrapping fs reads, py a conftest wrapping Path.read_text/open, so neither needed edits to ~73 / ~70 load sites. The remaining five are compiled and have no such seam — each needs a shared fixture-loader helper plus migration of its existing load sites through it, which is why they are separate work rather than a bulk edit. Pattern to copy: record the id relative to the conformance root, APPEND (multiple processes contribute), and make a MISSING manifest fail as missing evidence rather than pass as no-fixtures-needed. Highest remaining value is go (allowlist 9) then rs (13) and dart (13); zig (30) and cs (94) claim least, so a false claim there is least misleading
 - [ ] [#lazilyconformancecoverag] lazily-cs: 87 of 124 canonical fixtures are unreplayed. MEASURED 2026-07-26 via the runtime manifest, not inferred: cs opens 37/124. The earlier figure of 30 came from the static grep and was an UNDERSTATEMENT — cs discovers fixtures by enumerating the corpus directory, so seven fixtures it genuinely replays never appear by name in its sources. Work the list down against tasks/software/lazily-cs-parity-plan.md; the guard is now runtime-backed, so the number can only move by actually replaying more. Biggest untouched areas: reactive-graph 11, lossless-tree 9, message-passing 8, reliable-sync 8, statechart 7 (statechart is notable because cs HAS StateChart.cs and a conformance runner, so those 7 are a runner gap rather than a missing feature — likely the cheapest win)
 - [ ] [#lazilythreadsafetopiccel] lazily-rs: ThreadSafeTopicCell + AsyncTopicCell. Same per-flavor rules as #lazilythreadsafequeuecel: own graph, own reader handles, bumps outside the lock, batch() for multi-root invalidation. Topic Core reader kinds per cell-model.md are subscribe/reconnect/disconnect/publish/read/read_stream/advance. Update the flavor ledger in the SAME change, and make the corpus replay against the new flavor rather than only flipping the flag — plan: tasks/plan-lazily-queue-family-flavors.md

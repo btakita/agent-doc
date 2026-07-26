@@ -1,9 +1,10 @@
 # Plan — ReactiveMap unification (Phase A) and family conformance
 
-Status: **in progress.** The spec question at the end is **settled** (see
-"Resolved" below); `rs` and `zig` are done; seven bindings remain. Supersedes the
-narrower "expose a ctx-taking factory on ReactiveMap" recommendation, which is a
-symptom of the structure this plan addresses.
+Status: **complete.** All nine bindings carry the Core surface on every flavor
+they ship, each behind a mutation-checked per-flavor gate, and `coverage.json`
+scores it. Two rows stay deliberately partial and are recorded below. Supersedes
+the narrower "expose a ctx-taking factory on ReactiveMap" recommendation, which
+was a symptom of the structure this plan addressed.
 
 > ## Progress
 >
@@ -93,8 +94,38 @@ symptom of the structure this plan addresses.
 > actually changes observable behaviour — verify the mutation applied *and* that
 > the un-mutated case would differ.
 >
-> **Remaining:** js, dart, cs, kt — Core surface per flavor, plus the fixture
-> replay. Sequencing below still holds, minus zig, cpp, go, and py.
+> **Done — lazily-js** (`5a5445a`, 492 tests). Worst starting position: the
+> ordering contract had never been replayed against **any** reactive map here —
+> the collections fixtures were loaded only by `test/collections.test.js`, which
+> drives a fourth, non-reactive model. `moveTo` clamped only the upper end, so a
+> negative index reached `splice`'s count-from-the-end semantics;
+> `src/collections.js` clamped correctly and `reactive-family.js` did not.
+>
+> **Done — lazily-dart** (`90ffdf5`, 537 tests). Thread-safe and async were both
+> plain value caches whose constructor argument was annotated
+> `// ignore: unused_field` — the context was dead. Both are graph-backed now.
+> Does **not** settle whether dart should have a thread-safe flavor at all.
+>
+> **Done — lazily-kt** (`c28c363`). The widest gap: **five of six** keyed
+> collections had no ordering surface, including the single-threaded
+> `ComputedMap`. The async Core reads had to become read-surface generic to be
+> reactive at all — this graph tracks through `AsyncComputeContext`, so a read
+> spelled against the bare `AsyncContext` registers no edge.
+>
+> **Done — lazily-cs** (`11677fd`, 76 tests). Thread-safe was pure delegation, as
+> predicted. Three catalogued defects fixed: `AsyncComputedMap.Len()` read a
+> membership cell that was written on every mutation and never read anywhere;
+> `Remove` never disposed the removed node; and `MoveTo` returned `false` for a
+> no-op move where every sibling returns `true`.
+>
+> **A seventh correction — a gate is only as good as its weakest flavor.** Three
+> mutations survived their first gate and were only caught after strengthening
+> it: kt's sync `ComputedMap` membership bump (the gate drove only SourceMaps),
+> cs's async order bump (the test asserted the resulting list, not the signal),
+> and cs's async membership read (**"a pure reorder did not invalidate" passes
+> trivially for a reader that tracks nothing** — the positive assertion is the
+> one that matters). Mutation-checking is not a formality; each of those would
+> have shipped as a false green.
 >
 > **Sibling plan.** The same defect exists in the queue family — `QueueCell`,
 > `TopicCell`, and `WorkQueueCell` are hard-bound to the single-threaded context

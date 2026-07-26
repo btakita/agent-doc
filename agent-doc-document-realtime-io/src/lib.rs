@@ -1557,8 +1557,7 @@ pub fn settle_retained_non_capture_projection_through_authority(
     // preflight. Retire only that exact historical shape: a serialized write
     // whose target contains the active marker and is otherwise equivalent to
     // its expected exchange content after transient prefixes are removed.
-    let transient_active_prompt_marker_intent =
-        pending.source.starts_with("serialized_atomic_write")
+    let transient_active_prompt_marker_intent = pending.source.is_serialized_atomic_write()
             && pending.target_content.contains('🚧')
             && pending.expected_content.as_deref().is_some_and(|expected| {
                 expected != pending.target_content
@@ -1762,8 +1761,8 @@ fn retire_superseded_compact_projection_intents(
 
     let mut retired = 0;
     for intent in pending_document_write_journal(path) {
-        let eligible_source = intent.source == "post_commit_reposition"
-            || intent.source.starts_with("serialized_atomic_write");
+        let eligible_source = intent.source.is_post_commit_reposition()
+            || intent.source.is_serialized_atomic_write();
         let eligible_reason = matches!(
             intent.reason,
             DocumentWriteDeferredReason::CrdtDeliveryAckPending
@@ -3273,6 +3272,26 @@ pub fn pending_document_write(
         .clone()
 }
 
+/// The closeout stage that overtook `intent`, if its own successor converged
+/// after it (`#adwritesourceenum`).
+///
+/// Derived by the projection, which owns the write ordinals — settlement
+/// observes only content planes and cannot tell this cycle's later stage from
+/// the previous cycle's.
+pub fn superseding_closeout_stage(
+    file: &Path,
+    intent: &agent_doc_state_backbone::DocumentWriteIntentProjection,
+) -> Option<agent_doc_state_backbone::CloseoutStage> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    agent_doc_controller_io::project_controller::load_state_backbone_projection(&project_root)
+        .ok()?
+        .document(&document_hash)?
+        .document
+        .superseding_closeout_stage(intent)
+}
+
 /// Ordered deferred agent changes for `file`. Newer targets are normally
 /// cumulative, but retaining each intent lets reconnect replay an earlier
 /// same-component mutation (for example `--backlog-add`) even if a later
@@ -3430,6 +3449,12 @@ fn ensure_deferred_document_write_intent_with_mode(
     refine_current_cut: bool,
 ) -> Result<String> {
     validate_canonical_document_target(file, content, source)?;
+    // The diagnostic tag stays a `&str` (it is only ever logged); the *intent
+    // discriminant* is typed once here, at the retention boundary, so behavior
+    // downstream compares variants instead of string prefixes
+    // (`#adwritesourceenum`). An unrecognized tag becomes `Unknown` and
+    // round-trips through `state.db` verbatim.
+    let typed_source = agent_doc_state_backbone::DocumentWriteSource::from(source);
     let mut expected_content = expected_current.to_string();
     let mut target_content = content.to_string();
     let requested_target_hash = agent_doc_hash::content_hash(content);
@@ -3482,8 +3507,8 @@ fn ensure_deferred_document_write_intent_with_mode(
             // write refines that same candidate. Keep the original editor cut
             // as its comparison base; the bytes currently on disk are the
             // prior force-disk target, not a newer editor decision.
-            if source.starts_with("force_disk")
-                && pending.source.starts_with("force_disk")
+            if typed_source.is_force_disk()
+                && pending.source.is_force_disk()
                 && let Some(retained_base) = pending.expected_content.clone().filter(|base| {
                     agent_doc_hash::content_hash(base).eq_ignore_ascii_case(&pending.expected_hash)
                 })
@@ -3611,7 +3636,7 @@ fn ensure_deferred_document_write_intent_with_mode(
             expected_content: Some(expected_content),
             target_hash,
             target_content,
-            source: source.to_string(),
+            source: typed_source,
             reason,
         },
     );
@@ -3861,7 +3886,7 @@ pub fn retain_external_disk_candidate_without_editor_cut(
             expected_content: None,
             target_hash,
             target_content: disk_content.to_string(),
-            source: source.to_string(),
+            source: source.into(),
             reason: DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor,
         },
     );
@@ -4194,6 +4219,7 @@ fn append_document_write_converged_event(
             intent_id: pending.intent_id,
             target_hash: target_hash.to_string(),
             source: source.to_string(),
+            intent_source: pending.source,
         },
     );
     agent_doc_controller_io::project_controller::append_state_event(&project_root, &event)
@@ -6068,6 +6094,8 @@ fn observe_retained_write_settlement(file: &Path, source: &str) -> RetainedWrite
         intent_id: pending.intent_id.clone(),
         target_hash: pending.target_hash.clone(),
         reason: pending.reason.clone(),
+        source: pending.source.clone(),
+        superseding_stage: superseding_closeout_stage(file, &pending),
         carries_response_payload: payload.is_some(),
         carries_content_delta: !added_lines.is_empty(),
     }));
@@ -6185,6 +6213,7 @@ fn settle_actorless_document(
         retained_target_hash,
         settled_hash,
         proof,
+        ..
     } = &verdict
     else {
         return verdict;
@@ -8442,7 +8471,7 @@ mod tests {
                     expected_content: Some(base.to_string()),
                     target_hash: agent_doc_hash::content_hash(target),
                     target_content: target.to_string(),
-                    source: "test".to_string(),
+                    source: agent_doc_state_backbone::DocumentWriteSource::from("test"),
                     reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
                 },
             );
@@ -9111,7 +9140,7 @@ mod tests {
                     expected_content: Some(current.clone()),
                     target_hash: agent_doc_hash::content_hash(target),
                     target_content: target.to_string(),
-                    source: source.to_string(),
+                    source: agent_doc_state_backbone::DocumentWriteSource::from(source),
                     reason,
                 },
             );
@@ -9167,7 +9196,7 @@ mod tests {
                 expected_content: Some(current),
                 target_hash: agent_doc_hash::content_hash(&stale),
                 target_content: stale,
-                source: "queue_mutation".to_string(),
+                source: agent_doc_state_backbone::DocumentWriteSource::from("queue_mutation"),
                 reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
             },
         );

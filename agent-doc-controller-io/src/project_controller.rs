@@ -626,7 +626,14 @@ impl RetainedWriteSettleSink {
     /// verdict that triggered us; the rerun then sees `NoRetainedIntent` and
     /// stops. `flush_effects` is re-entrancy-guarded, so that second run is
     /// another iteration of the same drain, not recursion.
-    fn settle(&self, document_hash: &str, intent_id: &str, target_hash: &str, source: &str) {
+    fn settle(
+        &self,
+        document_hash: &str,
+        intent_id: &str,
+        target_hash: &str,
+        source: &str,
+        intent_source: &agent_doc_state_backbone::DocumentWriteSource,
+    ) {
         let Some(runtime) = self.runtime.upgrade() else {
             // The controller is shutting down; the intent stays retained and the
             // next controller derives the same verdict from the same ledger.
@@ -639,6 +646,7 @@ impl RetainedWriteSettleSink {
                 intent_id: intent_id.to_string(),
                 target_hash: target_hash.to_string(),
                 source: source.to_string(),
+                intent_source: intent_source.clone(),
             },
         );
         if let Err(e) = append_state_event(&self.project_root, &event) {
@@ -797,6 +805,7 @@ impl ControllerDocumentGraphs {
                 retained_target_hash,
                 settled_hash,
                 proof,
+                intent_source,
             }) = verdict_map.observe(ctx, &effect_key)
             else {
                 return;
@@ -810,7 +819,13 @@ impl ControllerDocumentGraphs {
                 return;
             };
             let source = "controller_retained_write_settlement_effect";
-            sink.settle(&effect_key, &intent_id, &retained_target_hash, source);
+            sink.settle(
+                &effect_key,
+                &intent_id,
+                &retained_target_hash,
+                source,
+                &intent_source,
+            );
             agent_doc_ops_log_io::log_op(
                 &file,
                 &format!(
@@ -869,6 +884,11 @@ fn retained_intent_facts_from_projection(
             intent_id: pending.intent_id.clone(),
             target_hash: pending.target_hash.clone(),
             reason: pending.reason.clone(),
+            source: pending.source.clone(),
+            // Answered by the projection, which owns the write ordinals
+            // (`#adwritesourceenum`). Settlement itself observes only content
+            // planes, so it cannot tell a later stage from an older cycle's.
+            superseding_stage: document.document.superseding_closeout_stage(pending),
             carries_response_payload,
             carries_content_delta,
         },
@@ -7700,7 +7720,7 @@ agent:queue\n\
                 expected_content: None,
                 target_hash: target_hash.to_string(),
                 target_content: format!("content-for-{target_hash}"),
-                source: "test".to_string(),
+                source: agent_doc_state_backbone::DocumentWriteSource::PendingWrite,
                 reason: agent_doc_state_backbone::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
             },
         );

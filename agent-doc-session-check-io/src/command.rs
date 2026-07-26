@@ -1505,7 +1505,7 @@ fn inspect_core_profiled(
                 file,
                 &pending.intent_id,
                 pending.reason.token(),
-                &pending.source,
+                pending.source.token(),
                 &pending.target_hash,
                 captured_resume_reason.as_deref(),
                 captured_closeout,

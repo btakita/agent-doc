@@ -257,7 +257,7 @@ pub fn try_ipc_reposition_boundary(file: &Path) -> bool {
             // transient projection. Retaining `(HEAD)` here would reintroduce a
             // stale working-tree diff when the JetBrains replica reconnects.
             let target = agent_doc_document::transient_markers::strip_head_markers(&target);
-            let (transport, result) = if pending.source.starts_with("force_disk") {
+            let (transport, result) = if pending.source.is_force_disk() {
                 (
                     "force_disk_projection",
                     agent_doc_document_realtime_io::atomic_write_force_disk_through_authority(

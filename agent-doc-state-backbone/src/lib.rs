@@ -23,6 +23,9 @@ pub mod adstatechart;
 pub mod closeout_gate;
 pub mod retained_write;
 pub mod write_pipeline;
+pub mod write_source;
+
+pub use write_source::{CloseoutStage, DocumentWriteSource};
 
 /// Project-scoped supervisor graph document. Most state facts are per session
 /// document; supervisor recycle is a project-wide gate shared by every routed
@@ -308,14 +311,25 @@ pub enum StateFact {
         expected_content: Option<String>,
         target_hash: String,
         target_content: String,
-        source: String,
+        source: DocumentWriteSource,
         reason: DocumentWriteDeferredReason,
     },
     DocumentWriteConverged {
         document_hash: String,
         intent_id: String,
         target_hash: String,
+        /// Free-text tag for the *caller that cleared* the intent — a diagnostic
+        /// actor label, deliberately not the intent's discriminant.
         source: String,
+        /// The converged intent's own discriminant (`#adwritesourceenum`).
+        ///
+        /// Kept separate from `source` because they answer different questions:
+        /// `source` is "who settled this", `intent_source` is "which closeout
+        /// stage's write this was". Only the latter can be ordered. Older events
+        /// omit it and deserialize as `Unknown("")`, which carries no stage and
+        /// therefore never supersedes anything.
+        #[serde(default)]
+        intent_source: DocumentWriteSource,
     },
     QueueHeadSelected {
         document_hash: String,
@@ -1513,6 +1527,7 @@ impl DocumentStateProjection {
                     target_content: target_content.clone(),
                     source: source.clone(),
                     reason: reason.clone(),
+                    ordinal: self.document.next_write_fact_ordinal(),
                 };
                 if *reason == DocumentWriteDeferredReason::PendingUserDecisionExternalDiskVsEditor {
                     // External file-cache conflicts and agent-owned response
@@ -1536,8 +1551,15 @@ impl DocumentStateProjection {
             StateFact::DocumentWriteConverged {
                 intent_id,
                 target_hash,
+                intent_source,
                 ..
             } => {
+                self.document.latest_converged_write = Some(ConvergedWriteProjection {
+                    intent_id: intent_id.clone(),
+                    target_hash: target_hash.clone(),
+                    source: intent_source.clone(),
+                    ordinal: self.document.next_write_fact_ordinal(),
+                });
                 self.document
                     .seed_pending_write_journal_from_legacy_projection();
                 if let Some(index) =
@@ -2719,6 +2741,30 @@ pub struct DocumentProjection {
     pub pending_write_journal: Vec<DocumentWriteIntentProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_external_disk: Option<DocumentWriteIntentProjection>,
+    /// Monotone counter behind `DocumentWriteIntentProjection::ordinal` and
+    /// [`ConvergedWriteProjection::ordinal`]. Advanced by every write fact the
+    /// projection applies, so replay assigns the same ordinals every time.
+    #[serde(default)]
+    pub write_fact_ordinal: u64,
+    /// The newest write that reached convergence (`#adwritesourceenum`).
+    ///
+    /// A closeout's later stage routinely overtakes an earlier stage's retained
+    /// intent and then converges, draining itself out of `pending_write_journal`
+    /// and leaving nothing to compare against. Keeping the last converged write
+    /// is what lets settlement ask "was I superseded by my own successor" as an
+    /// ordering comparison.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_converged_write: Option<ConvergedWriteProjection>,
+}
+
+/// The newest write that converged on a document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConvergedWriteProjection {
+    pub intent_id: String,
+    pub target_hash: String,
+    pub source: DocumentWriteSource,
+    #[serde(default)]
+    pub ordinal: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2729,11 +2775,52 @@ pub struct DocumentWriteIntentProjection {
     pub expected_content: Option<String>,
     pub target_hash: String,
     pub target_content: String,
-    pub source: String,
+    pub source: DocumentWriteSource,
     pub reason: DocumentWriteDeferredReason,
+    /// Monotone ordinal the projection assigns to every write fact it applies
+    /// (`#adwritesourceenum`).
+    ///
+    /// Stage ordering alone cannot say whether a converged write came *before*
+    /// or *after* a retained intent — a `post_commit_reposition` from the
+    /// previous cycle outranks this cycle's `pending_write` by stage while being
+    /// strictly older in time. The ordinal supplies that missing half, and being
+    /// assigned during replay keeps it deterministic. `#[serde(default)]` so
+    /// projections written before this field deserialize as ordinal 0.
+    #[serde(default)]
+    pub ordinal: u64,
 }
 
 impl DocumentProjection {
+    /// Next ordinal in the document's write-fact sequence.
+    ///
+    /// Assigned during projection (not at emit time) so replaying the same
+    /// ledger produces the same ordinals — the property that lets a stale
+    /// controller and a fresh one agree on which write came later.
+    fn next_write_fact_ordinal(&mut self) -> u64 {
+        self.write_fact_ordinal = self.write_fact_ordinal.saturating_add(1);
+        self.write_fact_ordinal
+    }
+
+    /// The stage of a converged write that is strictly newer than `intent` and
+    /// strictly later in the closeout sequence — i.e. `intent`'s own successor
+    /// overtook it (`#adwritesourceenum`).
+    ///
+    /// Both halves are required. Stage alone cannot order across cycles (last
+    /// cycle's `post_commit_reposition` outranks this cycle's `pending_write` by
+    /// stage while being older in time), and the ordinal alone says nothing
+    /// about whether the newer write belongs to the same closeout sequence.
+    pub fn superseding_closeout_stage(
+        &self,
+        intent: &DocumentWriteIntentProjection,
+    ) -> Option<CloseoutStage> {
+        let converged = self.latest_converged_write.as_ref()?;
+        if converged.ordinal <= intent.ordinal {
+            return None;
+        }
+        let stage = converged.source.closeout_stage()?;
+        intent.source.superseded_by(&converged.source).then_some(stage)
+    }
+
     fn seed_pending_write_journal_from_legacy_projection(&mut self) {
         if self.pending_write_journal.is_empty()
             && let Some(pending) = self.pending_write.clone()
@@ -7228,6 +7315,7 @@ mod tests {
                 intent_id: "intent-2".into(),
                 target_hash: "target".into(),
                 source: "test".into(),
+                intent_source: DocumentWriteSource::PendingWrite,
             },
         ));
         assert!(
@@ -7247,6 +7335,7 @@ mod tests {
                 intent_id: "intent-1".into(),
                 target_hash: "target".into(),
                 source: "test".into(),
+                intent_source: DocumentWriteSource::PendingWrite,
             },
         ));
         assert!(
@@ -7256,6 +7345,83 @@ mod tests {
                 .document
                 .pending_write
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn superseding_closeout_stage_requires_a_newer_fact_at_a_later_stage() {
+        let mut ledger = EventLedger::new();
+
+        // A high-rank stage from before the retained intent must not satisfy it.
+        // Stage ordering alone is insufficient across closeouts; the projection
+        // ordinal supplies the chronological half of the proof.
+        ledger.append(state_event(
+            "older-reposition-converged",
+            StateFact::DocumentWriteConverged {
+                document_hash: "doc-a".into(),
+                intent_id: "older-reposition".into(),
+                target_hash: "older-target".into(),
+                source: "test".into(),
+                intent_source: DocumentWriteSource::PostCommitReposition,
+            },
+        ));
+        ledger.append(state_event(
+            "write-deferred",
+            StateFact::DocumentWriteDeferred {
+                document_hash: "doc-a".into(),
+                intent_id: "response-write".into(),
+                expected_hash: "base".into(),
+                expected_content: Some("base".into()),
+                target_hash: "response-target".into(),
+                target_content: "response".into(),
+                source: DocumentWriteSource::PendingWrite,
+                reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            },
+        ));
+
+        let projected = ledger.project_document("doc-a").unwrap();
+        let pending = projected.document.pending_write.as_ref().unwrap();
+        assert_eq!(
+            projected.document.superseding_closeout_stage(pending),
+            None,
+            "an older post-commit reposition must not supersede a newer response write"
+        );
+
+        // A newer write at the same stage is chronological evidence, but not a
+        // closeout successor. Supersession is strict in both dimensions.
+        ledger.append(state_event(
+            "later-response-write-converged",
+            StateFact::DocumentWriteConverged {
+                document_hash: "doc-a".into(),
+                intent_id: "other-response-write".into(),
+                target_hash: "other-response-target".into(),
+                source: "test".into(),
+                intent_source: DocumentWriteSource::PendingWrite,
+            },
+        ));
+        let projected = ledger.project_document("doc-a").unwrap();
+        let pending = projected.document.pending_write.as_ref().unwrap();
+        assert_eq!(
+            projected.document.superseding_closeout_stage(pending),
+            None,
+            "a newer write at the same stage must not count as a successor"
+        );
+
+        ledger.append(state_event(
+            "queue-mirror-converged",
+            StateFact::DocumentWriteConverged {
+                document_hash: "doc-a".into(),
+                intent_id: "queue-mirror".into(),
+                target_hash: "queue-mirror-target".into(),
+                source: "test".into(),
+                intent_source: DocumentWriteSource::PendingAddSync,
+            },
+        ));
+        let projected = ledger.project_document("doc-a").unwrap();
+        let pending = projected.document.pending_write.as_ref().unwrap();
+        assert_eq!(
+            projected.document.superseding_closeout_stage(pending),
+            Some(CloseoutStage::QueueMirror)
         );
     }
 
@@ -7460,6 +7626,7 @@ mod tests {
                 intent_id: "intent-retained".into(),
                 target_hash: "target-retained".into(),
                 source: "editor_ack".into(),
+                intent_source: DocumentWriteSource::PendingWrite,
             },
         ));
         ledger.append(state_event(
@@ -7533,6 +7700,7 @@ mod tests {
                 intent_id: "intent-1".into(),
                 target_hash: "target-1".into(),
                 source: "editor_ack".into(),
+                intent_source: DocumentWriteSource::PendingWrite,
             },
         ));
         let projected = ledger.project_document("doc-a").unwrap();
@@ -7549,6 +7717,7 @@ mod tests {
                 intent_id: "intent-2".into(),
                 target_hash: "target-2".into(),
                 source: "editor_ack".into(),
+                intent_source: DocumentWriteSource::PendingWrite,
             },
         ));
         let projected = ledger.project_document("doc-a").unwrap();
@@ -7611,6 +7780,7 @@ mod tests {
                 intent_id: "disk-intent".into(),
                 target_hash: "disk-target".into(),
                 source: "editor_save".into(),
+                intent_source: DocumentWriteSource::PendingWrite,
             },
         ));
         let projected = ledger.project_document("doc-a").unwrap();

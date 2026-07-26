@@ -40,7 +40,7 @@
 use lazily::{Computed, Source, ThreadSafeContext};
 use serde::{Deserialize, Serialize};
 
-use crate::{DocumentScope, DocumentWriteDeferredReason};
+use crate::{CloseoutStage, DocumentScope, DocumentWriteDeferredReason, DocumentWriteSource};
 
 /// The facts about a retained intent that settlement depends on.
 ///
@@ -53,6 +53,19 @@ pub struct RetainedIntentFacts {
     pub intent_id: String,
     pub target_hash: String,
     pub reason: DocumentWriteDeferredReason,
+    /// What produced the intent. Carries its position in the closeout sequence,
+    /// so "a later stage of my own closeout overtook me" is an ordering
+    /// comparison rather than a line-set diff (`#adwritesourceenum`).
+    #[serde(default)]
+    pub source: DocumentWriteSource,
+    /// The stage of a strictly-newer converged write that sits strictly later in
+    /// the closeout sequence than [`Self::source`], if one exists.
+    ///
+    /// Supplied by the projection ([`crate::DocumentProjection::superseding_closeout_stage`])
+    /// rather than derived here, because answering it needs the document's write
+    /// ordinals — which settlement deliberately does not observe.
+    #[serde(default)]
+    pub superseding_stage: Option<CloseoutStage>,
     /// True when the intent introduces an assistant response, so materializing
     /// that response in the converged document satisfies the intent even at a
     /// different hash. Delivery-only projections have no such payload and must
@@ -133,6 +146,22 @@ pub enum SatisfiedProof {
     /// stronger than "the document changed". Content that never carried the
     /// write cannot satisfy it.
     SupersededDeltaMaterialized,
+    /// A strictly later stage of the **same closeout** converged after this
+    /// intent was retained (`#adwritesourceenum`).
+    ///
+    /// This is [`Self::SupersededDeltaMaterialized`]'s question answered by the
+    /// type instead of by a content diff. The stages are sequential — response
+    /// write, then queue mirror, then post-commit reposition — and each writes a
+    /// document the previous one produced, so a later stage converging *is* the
+    /// earlier stage's target being carried forward.
+    ///
+    /// The delta proof stays: it covers concurrent operator rebases, which no
+    /// stage ordering can express. This arm covers the case the delta proof
+    /// cannot — an intent whose delta is empty or uncomputable (deletion-only,
+    /// whitespace-only, or stamped before `expected_content` was retained),
+    /// which `intent_added_lines` deliberately reports as unknown and which
+    /// therefore stranded forever.
+    SupersededByLaterCloseoutStage,
 }
 
 impl SatisfiedProof {
@@ -141,6 +170,7 @@ impl SatisfiedProof {
             Self::ExactTarget => "exact_target",
             Self::RebasedPayloadMaterialized => "rebased_payload_materialized",
             Self::SupersededDeltaMaterialized => "superseded_delta_materialized",
+            Self::SupersededByLaterCloseoutStage => "superseded_by_later_closeout_stage",
         }
     }
 }
@@ -163,6 +193,11 @@ pub enum SettlementVerdict {
         retained_target_hash: String,
         settled_hash: String,
         proof: SatisfiedProof,
+        /// The settled intent's discriminant, carried so the emitted
+        /// `DocumentWriteConverged` fact records *which closeout stage*
+        /// converged rather than only who cleared it (`#adwritesourceenum`).
+        #[serde(default)]
+        intent_source: DocumentWriteSource,
     },
     /// Genuinely still awaiting delivery.
     Unsettled {
@@ -267,6 +302,13 @@ pub fn settlement_verdict(
         Some(SatisfiedProof::RebasedPayloadMaterialized)
     } else if pending.carries_content_delta && authority.intent_delta_materialized {
         Some(SatisfiedProof::SupersededDeltaMaterialized)
+    } else if pending.superseding_stage.is_some() {
+        // Ordered last on purpose: it is the weakest of the four, proving the
+        // intent's *successor* landed rather than the intent's own content. It
+        // only fires once the content-bearing proofs have declined, and only
+        // when the projection has established both that the superseding write is
+        // newer and that it belongs to a later stage of the same closeout.
+        Some(SatisfiedProof::SupersededByLaterCloseoutStage)
     } else {
         None
     };
@@ -276,6 +318,7 @@ pub fn settlement_verdict(
             retained_target_hash: pending.target_hash.clone(),
             settled_hash: authority.content_hash.clone(),
             proof,
+            intent_source: pending.source.clone(),
         },
         None => SettlementVerdict::Unsettled {
             intent_id: pending.intent_id.clone(),
@@ -385,6 +428,8 @@ mod tests {
             intent_id: "intent-1".to_string(),
             target_hash: target_hash.to_string(),
             reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            source: DocumentWriteSource::PendingWrite,
+            superseding_stage: None,
             carries_response_payload,
             carries_content_delta: false,
         }
@@ -558,6 +603,103 @@ mod tests {
         );
     }
 
+    /// The case the delta proof structurally cannot reach (`#adwritesourceenum`).
+    ///
+    /// `a_delta_that_did_not_land_still_blocks` asserts, correctly, that an
+    /// intent with no computable delta "must stay on exact bytes" — which for a
+    /// target its own successor already replaced means staying stranded forever.
+    /// A deletion-only closeout write, or one stamped before `expected_content`
+    /// was retained, lands exactly there. Stage ordering answers it without
+    /// weakening the delta rule: the projection has proven a *newer* write from
+    /// a *later stage of the same closeout* converged.
+    #[test]
+    fn an_undeltaable_intent_settles_once_its_own_later_stage_converged() {
+        let mut superseded = intent("pending_write_target", false);
+        superseded.source = DocumentWriteSource::PendingWrite;
+        superseded.carries_content_delta = false;
+        superseded.superseding_stage = Some(CloseoutStage::QueueMirror);
+        let converged = observed("queue_mirror_target", false);
+
+        let verdict =
+            settlement_verdict(Some(&superseded), Some(&converged), Some(&converged.clone()));
+        assert!(
+            verdict.should_clear_intent(),
+            "the queue mirror converging must settle the response write it superseded"
+        );
+        assert!(!verdict.blocks_new_cycle());
+        match verdict {
+            SettlementVerdict::Satisfied { proof, .. } => {
+                assert_eq!(proof, SatisfiedProof::SupersededByLaterCloseoutStage)
+            }
+            other => panic!("expected Satisfied, got {other:?}"),
+        }
+    }
+
+    /// The stage arm is the weakest proof, so it must never outrank a
+    /// content-bearing one — a settled intent should still report *why* it is
+    /// settled as precisely as the evidence allows.
+    #[test]
+    fn content_bearing_proofs_outrank_the_stage_ordering_proof() {
+        let mut both = intent("stamped", true);
+        both.superseding_stage = Some(CloseoutStage::QueueMirror);
+        match settlement_verdict(
+            Some(&both),
+            Some(&observed("rebased", true)),
+            Some(&observed("rebased", true)),
+        ) {
+            SettlementVerdict::Satisfied { proof, .. } => {
+                assert_eq!(proof, SatisfiedProof::RebasedPayloadMaterialized)
+            }
+            other => panic!("expected Satisfied, got {other:?}"),
+        }
+
+        let mut exact = intent("stamped", false);
+        exact.superseding_stage = Some(CloseoutStage::PostCommitReposition);
+        match settlement_verdict(
+            Some(&exact),
+            Some(&observed("stamped", false)),
+            Some(&observed("stamped", false)),
+        ) {
+            SettlementVerdict::Satisfied { proof, .. } => {
+                assert_eq!(proof, SatisfiedProof::ExactTarget)
+            }
+            other => panic!("expected Satisfied, got {other:?}"),
+        }
+    }
+
+    /// Without a proven superseding stage the arm must not fire — otherwise it
+    /// becomes a way to settle any intent, which is exactly the operator-text
+    /// hazard `a_delta_that_did_not_land_still_blocks` guards.
+    #[test]
+    fn no_superseding_stage_means_the_stage_arm_never_fires() {
+        let mut stranded = intent("stamped", false);
+        stranded.superseding_stage = None;
+        let elsewhere = observed("other", false);
+        let verdict =
+            settlement_verdict(Some(&stranded), Some(&elsewhere), Some(&elsewhere.clone()));
+        assert!(verdict.blocks_new_cycle());
+        match verdict {
+            SettlementVerdict::Unsettled { cause, .. } => {
+                assert_eq!(cause, UnsettledCause::PayloadAbsentFromConvergedContent)
+            }
+            other => panic!("expected Unsettled, got {other:?}"),
+        }
+
+        // Diverged planes still win: a superseding stage must not paper over a
+        // delivery that is still in flight.
+        let mut superseded = intent("stamped", false);
+        superseded.superseding_stage = Some(CloseoutStage::QueueMirror);
+        assert!(
+            settlement_verdict(
+                Some(&superseded),
+                Some(&observed("authority", false)),
+                Some(&observed("disk", false)),
+            )
+            .blocks_new_cycle(),
+            "authority/disk divergence must still block"
+        );
+    }
+
     #[test]
     fn the_delta_is_the_lines_the_intent_adds_and_an_unknown_baseline_yields_none() {
         let expected = "alpha\n\nbeta\n";
@@ -720,6 +862,8 @@ mod suppression_guard {
             intent_id: "intent-1".to_string(),
             target_hash: "stamped".to_string(),
             reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            source: DocumentWriteSource::PendingWrite,
+            superseding_stage: None,
             carries_response_payload: true,
             carries_content_delta: false,
         }));
@@ -734,6 +878,8 @@ mod suppression_guard {
             intent_id: "intent-1".to_string(),
             target_hash: "stamped".to_string(),
             reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            source: DocumentWriteSource::PendingWrite,
+            superseding_stage: None,
             carries_response_payload: true,
             carries_content_delta: false,
         }));

@@ -30,7 +30,8 @@ Hi Craig,
 
 Thank you for the transparency on the funding position, and for how you and Luke have
 engaged through this whole process... it genuinely says good things about the company
-you're building.
+you're building. And apologies for the slow reply: your email deserved a considered
+answer, and I wanted to be certain of mine before giving it to you.
 
 I've made my decision, and I want to give it to you straight rather than negotiate
 toward an answer I'd already reached: I'm going to accept the other offer. It's not

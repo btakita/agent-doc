@@ -731,16 +731,16 @@ pub trait PreflightCycleCompletionEffects {
 
     fn commit(&self, file: &Path) -> Result<bool>;
 
-    /// Apply the shared settlement projection before reading the gate
-    /// (`#preflightsettleparity`).
+    /// Whether a retained document write genuinely blocks a new cycle.
     ///
-    /// `session-check` reads the derived verdict *and* clears a `Satisfied`
-    /// intent; preflight used to only read it. Sharing the cell without sharing
-    /// the action is what let a satisfied intent block every cycle while
-    /// `session-check` simultaneously reported ok. Idempotent: every verdict
-    /// other than `Satisfied` is a no-op.
-    fn settle_retained_document_write(&self, file: &Path);
-
+    /// `#retainedclearreactive`: reading this **is** the settlement. The
+    /// implementation reads the shared derived verdict, and the controller has
+    /// a per-document `Effect` subscribed to that same verdict cell, so a
+    /// `Satisfied` intent is cleared as a consequence of the read rather than
+    /// by a companion `settle_*` call the gate had to remember. The trait used
+    /// to carry that companion (`settle_retained_document_write`, added by
+    /// `#preflightsettleparity` because preflight forgot to make it); a third
+    /// consumer would have forgotten it too.
     fn retained_document_write(&self, file: &Path) -> bool;
 
     fn session_interruption(&self, file: &Path) -> Result<Option<String>>;
@@ -754,9 +754,10 @@ pub fn enforce_cycle_completion(
 ) -> Result<(bool, bool)> {
     // A retained document-write effect is an unfinished durable sink, even
     // when an older repair accidentally made its closeout cycle look terminal.
-    // Give session-check one chance to settle the exact capture, then fail
-    // closed before a new preflight can replace its live projection.
-    effects.settle_retained_document_write(file);
+    // Reading the gate settles a `Satisfied` intent through the controller's
+    // subscribed clear (`#retainedclearreactive`); give session-check one
+    // chance at the exact capture, then fail closed before a new preflight can
+    // replace its live projection.
     if effects.retained_document_write(file) {
         if let Some(reason) = effects.session_interruption(file)? {
             anyhow::bail!("{}", reason.replace('\n', " "));
@@ -5077,9 +5078,12 @@ mod tests {
     struct TestPreflightCycleCompletionEffects {
         repair_calls: std::cell::Cell<usize>,
         commit_calls: std::cell::Cell<usize>,
-        settle_calls: std::cell::Cell<usize>,
+        gate_reads: std::cell::Cell<usize>,
         retained_document_write: std::cell::Cell<bool>,
-        /// The `Satisfied` verdict: settling clears the intent.
+        /// The `Satisfied` verdict. `#retainedclearreactive`: settling is a
+        /// consequence of *reading* the derived verdict — the controller's
+        /// per-document effect is subscribed to the same cell — so the stub
+        /// clears on read rather than exposing a `settle_*` companion.
         settle_satisfies: bool,
         session_interruption: Option<String>,
     }
@@ -5095,15 +5099,15 @@ mod tests {
             Ok(false)
         }
 
-        fn settle_retained_document_write(&self, _file: &Path) {
-            self.settle_calls.set(self.settle_calls.get() + 1);
-            if self.settle_satisfies {
-                self.retained_document_write.set(false);
-            }
-        }
-
         fn retained_document_write(&self, _file: &Path) -> bool {
-            self.retained_document_write.get()
+            self.gate_reads.set(self.gate_reads.get() + 1);
+            let blocking = self.retained_document_write.get();
+            if self.settle_satisfies {
+                // The subscribed clear fires off this read.
+                self.retained_document_write.set(false);
+                return false;
+            }
+            blocking
         }
 
         fn session_interruption(&self, _file: &Path) -> Result<Option<String>> {
@@ -9998,6 +10002,12 @@ mod tests {
         // 2026-07-26 on tasks/agent-doc/agent-doc-bugs2.md, where the verdict was
         // `Satisfied` the whole time and nothing in preflight's path ever
         // applied the clear. Sharing the cell is not sharing the action.
+        //
+        // #retainedclearreactive: the fix is no longer "preflight also calls
+        // settle" — the clear is subscribed to the verdict cell in the
+        // controller, so reading the gate settles a `Satisfied` intent. The gate
+        // must therefore read the derived verdict, not a raw
+        // `pending_write.is_some()`, or the subscription never runs.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
@@ -10016,17 +10026,17 @@ mod tests {
         enforce_cycle_completion(&doc, &effects)
             .expect("a satisfied retained intent must not block a new cycle");
         assert_eq!(
-            effects.settle_calls.get(),
+            effects.gate_reads.get(),
             1,
-            "the gate must apply the shared settlement projection exactly once before reading"
+            "the gate must read the shared derived verdict exactly once — that read is what settles"
         );
     }
 
     #[test]
     fn enforce_cycle_completion_still_blocks_when_settling_cannot_satisfy() {
         // The other half of #preflightsettleparity: settling is idempotent and a
-        // genuinely `Unsettled` intent must still fail closed. Making the gate
-        // settle first must not turn it into a rubber stamp.
+        // genuinely `Unsettled` intent must still fail closed. Making the read
+        // settle must not turn the gate into a rubber stamp.
         let dir = setup_project();
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
@@ -10041,7 +10051,9 @@ mod tests {
             error.to_string().contains("remains unsettled"),
             "unexpected error: {error}"
         );
-        assert_eq!(effects.settle_calls.get(), 1);
+        // Read once for the gate, once after `session_interruption` returned
+        // `None` — the fail-closed re-check.
+        assert_eq!(effects.gate_reads.get(), 2);
     }
 
     #[test]

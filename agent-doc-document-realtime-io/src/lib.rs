@@ -6006,10 +6006,18 @@ fn observe_retained_write_settlement(file: &Path, source: &str) -> RetainedWrite
 /// divergence this exists to remove. The local path below is a fallback for an
 /// actorless document (no controller), where there is no shared graph to join
 /// and hydrate-then-derive is the honest best available.
+///
+/// `#retainedclearreactive`: on the controller path, reading this is also what
+/// *clears* a `Satisfied` intent — the controller subscribes a per-document
+/// settle effect to the same verdict slot, so there is no `settle_*` companion
+/// for a consumer to forget. The actorless branch below has no shared graph to
+/// subscribe in (`observe_retained_write_settlement` mints a fresh
+/// `DocumentScope` per call, so an `Effect` there would be this same projection
+/// wearing a costume), so it applies the clear directly and says so.
 pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict {
     let settlement = observe_retained_write_settlement(file, source);
     let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
-        return settlement.verdict();
+        return settle_actorless_document(file, settlement.verdict(), source);
     };
     let (authority, disk) = settlement.observations();
     let observations = agent_doc_controller_io::project_controller::RetainedWriteObservations {
@@ -6037,9 +6045,53 @@ pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict
                     source,
                 ),
             );
-            settlement.verdict()
+            settle_actorless_document(file, settlement.verdict(), source)
         }
     }
+}
+
+/// Apply a `Satisfied` verdict's clear when there is no controller graph to
+/// subscribe it in (`#retainedclearreactive`).
+///
+/// On the controller path the clear is an `Effect` gated on the verdict cell,
+/// so no consumer has to remember it. An actorless document has no such graph —
+/// each observation builds and drops its own `DocumentScope` — so the clear
+/// stays a plain projection over the verdict this function was handed. It is
+/// private on purpose: the failure this replaces was a *public* `settle_*`
+/// companion that every consumer of the verdict had to call.
+///
+/// Idempotent by construction: every verdict other than `Satisfied` returns
+/// unchanged, so calling it twice clears nothing twice.
+fn settle_actorless_document(
+    file: &Path,
+    verdict: SettlementVerdict,
+    source: &str,
+) -> SettlementVerdict {
+    let SettlementVerdict::Satisfied {
+        intent_id,
+        retained_target_hash,
+        settled_hash,
+        proof,
+    } = &verdict
+    else {
+        return verdict;
+    };
+    if let Err(e) = clear_deferred_document_write_intent(file, retained_target_hash, source) {
+        eprintln!(
+            "[agent-doc] actorless retained-write settlement failed for {}: {e}",
+            file.display()
+        );
+        return verdict;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "retained_write_settled_from_derived_verdict file={} intent_id={intent_id} retained_target_hash={retained_target_hash} settled_hash={settled_hash} proof={} source={source} plane=actorless_local",
+            file.display(),
+            proof.token(),
+        ),
+    );
+    verdict
 }
 
 /// True when a retained write genuinely blocks opening a new cycle.
@@ -6073,45 +6125,16 @@ pub fn retained_write_blocks_new_cycle(file: &Path, source: &str) -> bool {
     verdict.blocks_new_cycle()
 }
 
-/// Settle a retained write whose purpose the converged document already meets:
-/// the **projection** half of `#retainedsettlereactive`.
-///
-/// There is deliberately no `Effect` here. The first version wrapped the clear
-/// in one and then had to smuggle the result back out through an
-/// `Arc<Mutex<Option<Result<bool>>>>`, disposing the effect on the next line —
-/// an `Effect` used as a synchronous function call. The `Arc<Mutex<..>>` was the
-/// tell. `#idlerevisionreactive` states the rule directly: *if an `Effect`'s
-/// whole body assigns a value, it should have been a `Computed`.*
-///
-/// So the decision is the `Computed` ([`retained_write_settlement`], derived in
-/// the controller's shared graph) and this is a plain projection over it —
-/// Cells decide, projection applies. Idempotent by construction: every verdict
-/// other than `Satisfied` is a no-op, so calling it twice clears nothing twice.
-pub fn settle_retained_write_through_derived_verdict(file: &Path, source: &str) -> Result<bool> {
-    let SettlementVerdict::Satisfied {
-        intent_id,
-        retained_target_hash,
-        settled_hash,
-        proof,
-    } = retained_write_settlement(file, source)
-    else {
-        return Ok(false);
-    };
-    clear_deferred_document_write_intent(file, &retained_target_hash, source)?;
-    agent_doc_ops_log_io::log_op(
-        file,
-        &format!(
-            "retained_write_settled_from_derived_verdict file={} intent_id={} retained_target_hash={} settled_hash={} proof={} source={}",
-            file.display(),
-            intent_id,
-            retained_target_hash,
-            settled_hash,
-            proof.token(),
-            source,
-        ),
-    );
-    Ok(true)
-}
+// `#retainedclearreactive`: there is deliberately no public
+// `settle_retained_write_through_derived_verdict` here any more. It was the
+// imperative form `#idlerevisionreactive` names — "a side effect that must be
+// *called* at the right moment" — and `#preflightsettleparity` had already
+// proven the failure mode by fixing "preflight forgot to call the clear" with a
+// *second* call site. A third consumer of the verdict would have reintroduced
+// it. The clear is now an `Effect` in the controller's per-document graph gated
+// on the same verdict cell every consumer reads
+// (`ControllerDocumentGraphs::ensure_settle_effect`), with
+// [`settle_actorless_document`] above as the private no-controller fallback.
 
 #[cfg(test)]
 mod tests {

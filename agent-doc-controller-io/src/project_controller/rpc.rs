@@ -1066,7 +1066,7 @@ pub(crate) fn handle_retained_write_settlement(
         .and_then(|payload| serde_json::from_str::<RetainedWriteObservations>(payload).ok())
         .unwrap_or_default();
     let (authority, disk) = observations.into_planes();
-    Ok(runtime.document_retained_write_verdict(&document_hash, authority, disk))
+    Ok(runtime.document_retained_write_verdict(&document_hash, &file, authority, disk))
 }
 
 /// Ask the controller for the document's retained-write settlement verdict.
@@ -7654,7 +7654,7 @@ pub fn start_state_actor_for_tests(project_root: &Path) -> Result<StateActorTest
         std::fs::create_dir_all(parent)?;
     }
     let bootstrap = write_bootstrap(project_root, LaunchMode::Lazy)?;
-    let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
+    let runtime = ControllerRuntime::new_arc(bootstrap)?;
     let name = sock.clone().to_fs_name::<GenericFilePath>()?;
     let listener = ListenerOptions::new()
         .name(name)
@@ -7819,7 +7819,7 @@ pub(crate) fn serve_with_options(
         write_bootstrap(project_root, launch_mode)?
     };
     let durable_project_root = bootstrap.project_root.clone();
-    let runtime = Arc::new(ControllerRuntime::new(bootstrap)?);
+    let runtime = ControllerRuntime::new_arc(bootstrap)?;
     // P4: rebuild every controller-acknowledged liveness fact before the socket
     // becomes visible. Sender frames may already have been pruned after their ACK;
     // the receiver journal is therefore the recycle authority, not a lease scan.
@@ -8858,7 +8858,7 @@ pub(crate) fn handle_request(
 ) -> Result<String> {
     handle_request_locked(
         line,
-        &Arc::new(ControllerRuntime::new(bootstrap.clone())?),
+        &ControllerRuntime::new_arc(bootstrap.clone())?,
         should_stop,
     )
 }
@@ -16489,7 +16489,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "body").unwrap();
 
-        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
 
         let submit = build_closeout_advance_submit(
             "cmd-dispatch-1",
@@ -16541,7 +16541,7 @@ mod tests {
         // resolves instead of hanging on a non-terminal ACK.
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
 
         let mut submit = super::command_plane::build_supervisor_recycle_submit(
             "cmd-unknown-1",
@@ -16581,7 +16581,7 @@ mod tests {
         // routed to a domain service.
         let dir = tempfile::TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
-        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
 
         let mut submit = super::command_plane::build_supervisor_recycle_submit(
             "cmd-foreign-1",
@@ -16627,7 +16627,7 @@ mod tests {
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "body").unwrap();
 
-        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
         let bootstrap = runtime.bootstrap_snapshot().unwrap();
 
         let submit = build_closeout_advance_submit(
@@ -16675,7 +16675,7 @@ mod tests {
         let doc = dir.path().join("tasks/routed.md");
         std::fs::create_dir_all(doc.parent().unwrap()).unwrap();
         std::fs::write(&doc, "body").unwrap();
-        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
         let bootstrap = runtime.bootstrap_snapshot().unwrap();
         let document_hash = agent_doc_hash::document_id_for_path(&doc);
         let mk = |command_id: &str, event: CloseoutPhaseEvent, reason: Option<&str>| {
@@ -16726,7 +16726,7 @@ mod tests {
         let doc2 = dir2.path().join("tasks/abandon.md");
         std::fs::create_dir_all(doc2.parent().unwrap()).unwrap();
         std::fs::write(&doc2, "body").unwrap();
-        let runtime2 = Arc::new(ControllerRuntime::new(test_bootstrap(&dir2)).unwrap());
+        let runtime2 = ControllerRuntime::new_arc(test_bootstrap(&dir2)).unwrap();
         let bootstrap2 = runtime2.bootstrap_snapshot().unwrap();
         let submit = build_closeout_advance_submit(
             "ab",
@@ -16758,7 +16758,7 @@ mod tests {
     fn controller_client_handler_errors_return_error_envelope() {
         let dir = tempfile::TempDir::new().unwrap();
         let bootstrap = test_bootstrap(&dir);
-        let runtime = Arc::new(ControllerRuntime::new(bootstrap).unwrap());
+        let runtime = ControllerRuntime::new_arc(bootstrap).unwrap();
         let request = serde_json::json!({
             "command": "register_supervisor",
             "file": "missing.md",
@@ -17375,7 +17375,7 @@ mod tests {
         // gate is preserved).
         let dir = tempfile::TempDir::new().unwrap();
         let bootstrap = test_bootstrap(&dir);
-        let runtime = Arc::new(ControllerRuntime::new(bootstrap).unwrap());
+        let runtime = ControllerRuntime::new_arc(bootstrap).unwrap();
         let mut should_stop = false;
 
         // Plain recycle: want-recycle set, force NOT set.
@@ -17672,7 +17672,7 @@ mod tests {
         let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n"))
             .unwrap();
 
-        let runtime = Arc::new(ControllerRuntime::new(test_bootstrap(&dir)).unwrap());
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
         let bootstrap = runtime.bootstrap_snapshot().unwrap();
 
         let claim_submit = |owner_id: &str| {
@@ -18584,7 +18584,7 @@ mod tests {
         )
         .unwrap();
         let bootstrap = test_bootstrap(&dir);
-        let runtime = Arc::new(ControllerRuntime::new(bootstrap).unwrap());
+        let runtime = ControllerRuntime::new_arc(bootstrap).unwrap();
         let mut should_stop = false;
         let doc_id = doc.to_string_lossy().to_string();
 
@@ -20463,7 +20463,7 @@ mod tests {
         std::fs::write(&file, "# receipt\n").unwrap();
         let bootstrap = test_bootstrap(&dir);
         let document_hash = agent_doc_hash::document_id_for_path(&file);
-        let runtime = Arc::new(ControllerRuntime::new(bootstrap).unwrap());
+        let runtime = ControllerRuntime::new_arc(bootstrap).unwrap();
 
         let recorder = Arc::clone(&runtime);
         let recorded_hash = document_hash.clone();

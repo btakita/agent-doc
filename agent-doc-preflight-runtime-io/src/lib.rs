@@ -76,18 +76,6 @@ where
         agent_doc_commit_io::commit(file)
     }
 
-    fn settle_retained_document_write(&self, file: &Path) {
-        if let Err(e) = agent_doc_document_realtime_io::settle_retained_write_through_derived_verdict(
-            file,
-            "preflight_retained_document_write_gate",
-        ) {
-            eprintln!(
-                "[preflight] retained-write settlement warning for {}: {e}",
-                file.display()
-            );
-        }
-    }
-
     fn retained_document_write(&self, file: &Path) -> bool {
         // `#retainedsettlereactive`: ask the shared derived verdict, not the raw
         // `pending_document_write(..).is_some()`. That reload arbitrated the
@@ -96,10 +84,13 @@ where
         // already satisfied, which `session-check` simultaneously reported as
         // ok. Both being true is what deadlocked the session.
         //
-        // `#preflightsettleparity`: sharing the *cell* was necessary but not
-        // sufficient — `settle_retained_document_write` above applies the same
-        // projection `session-check` does, so both consumers share the action
-        // and not just the observation.
+        // `#retainedclearreactive`: sharing the *cell* was necessary but not
+        // sufficient, and `#preflightsettleparity`'s fix — a second
+        // `settle_retained_document_write` call beside session-check's — was
+        // the imperative form of the answer. The clear is now an `Effect` in
+        // the controller's per-document graph gated on this same verdict cell,
+        // so reading the gate is what settles a `Satisfied` intent and there is
+        // no companion call for a third consumer to omit.
         agent_doc_document_realtime_io::retained_write_blocks_new_cycle(
             file,
             "preflight_retained_document_write_gate",

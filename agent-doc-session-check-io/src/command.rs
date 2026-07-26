@@ -197,17 +197,18 @@ fn ensure_terminal_authority_disk_convergence(
         // the retained write, so an intent whose byte target a concurrent
         // operator edit had rebased stayed in `pending_write` forever while
         // session-check reported success — and preflight, reading that same
-        // intent, refused every new cycle. Settle it from the shared derived
-        // verdict (`#retainedsettlereactive`) so both consumers agree.
-        if let Err(e) = agent_doc_document_realtime_io::settle_retained_write_through_derived_verdict(
+        // intent, refused every new cycle.
+        //
+        // `#retainedclearreactive`: reading the shared derived verdict is the
+        // whole of it now. The controller's per-document settle effect is
+        // subscribed to that verdict cell, so a `Satisfied` intent is cleared
+        // *because the fact says so* — there is no companion `settle_*` call
+        // here to keep in sync with preflight's, which is the parity bug
+        // `#preflightsettleparity` patched by adding the second call site.
+        agent_doc_document_realtime_io::retained_write_settlement(
             file,
             "session_check_terminal_convergence_derived_settlement",
-        ) {
-            eprintln!(
-                "[session-check] retained-write settlement warning for {}: {e}",
-                file.display()
-            );
-        }
+        );
         return Ok(());
     }
     let non_capture_cycle = terminal_phase_allows_non_capture_projection_settlement(

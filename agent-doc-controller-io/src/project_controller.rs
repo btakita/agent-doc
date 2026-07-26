@@ -592,6 +592,65 @@ struct ControllerDocumentGraphs {
         String,
         agent_doc_state_backbone::retained_write::SettlementVerdict,
     >,
+    /// `#retainedclearreactive` — one settle [`lazily::Effect`] per document,
+    /// subscribed to that document's [`Self::verdict`] slot.
+    ///
+    /// Holding the handles is what keeps the effects alive; nothing reads this
+    /// map for its values. Minting is idempotent, so the effect exists from the
+    /// first verdict query onward and fires whenever the slot changes.
+    settle_effects: Mutex<BTreeMap<String, lazily::Effect>>,
+    /// Where a `Satisfied` verdict's clear is written.
+    ///
+    /// Installed once, after the runtime is in its `Arc` — the effect must reach
+    /// the runtime and the runtime owns this graph, so the reference has to be
+    /// weak and late-bound. An uninstalled sink makes every effect a logged
+    /// no-op rather than a panic (test runtimes construct the graph without one).
+    settle_sink: Arc<OnceLock<RetainedWriteSettleSink>>,
+}
+
+/// The durable half of `#retainedclearreactive`: emit `DocumentWriteConverged`
+/// for an intent the derived verdict proved `Satisfied`.
+///
+/// This is a plain projection of a decision the graph already made — Cells
+/// decide, projection applies. It holds a [`std::sync::Weak`] because the
+/// runtime owns the graph that owns the effect that calls it; a strong handle
+/// would be a reference cycle that never drops the controller.
+struct RetainedWriteSettleSink {
+    project_root: PathBuf,
+    runtime: std::sync::Weak<ControllerRuntime>,
+}
+
+impl RetainedWriteSettleSink {
+    /// Append + apply the convergence fact. Applying re-enters
+    /// [`ControllerDocumentGraphs::set_projection`], which invalidates the
+    /// verdict that triggered us; the rerun then sees `NoRetainedIntent` and
+    /// stops. `flush_effects` is re-entrancy-guarded, so that second run is
+    /// another iteration of the same drain, not recursion.
+    fn settle(&self, document_hash: &str, intent_id: &str, target_hash: &str, source: &str) {
+        let Some(runtime) = self.runtime.upgrade() else {
+            // The controller is shutting down; the intent stays retained and the
+            // next controller derives the same verdict from the same ledger.
+            return;
+        };
+        let event = agent_doc_state_backbone::StateEvent::new(
+            format!("document-write-converged-{document_hash}-{intent_id}"),
+            agent_doc_state_backbone::StateFact::DocumentWriteConverged {
+                document_hash: document_hash.to_string(),
+                intent_id: intent_id.to_string(),
+                target_hash: target_hash.to_string(),
+                source: source.to_string(),
+            },
+        );
+        if let Err(e) = append_state_event(&self.project_root, &event) {
+            eprintln!(
+                "[controller] retained-write settle append failed for {document_hash}: {e}"
+            );
+            return;
+        }
+        if let Err(e) = runtime.apply_state_event(&event) {
+            eprintln!("[controller] retained-write settle apply failed for {document_hash}: {e}");
+        }
+    }
 }
 
 impl ControllerDocumentGraphs {
@@ -603,19 +662,43 @@ impl ControllerDocumentGraphs {
             authority: lazily::ThreadSafeSourceMap::new(&ctx),
             disk: lazily::ThreadSafeSourceMap::new(&ctx),
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
+            settle_effects: Mutex::new(BTreeMap::new()),
+            settle_sink: Arc::new(OnceLock::new()),
             ctx,
         }
     }
 
+    /// Bind the settle effects' durable sink. Called once, right after the
+    /// runtime enters its `Arc`.
+    fn install_settle_sink(&self, project_root: PathBuf, runtime: &Arc<ControllerRuntime>) {
+        let _ = self.settle_sink.set(RetainedWriteSettleSink {
+            project_root,
+            runtime: Arc::downgrade(runtime),
+        });
+    }
+
     /// Record the applied state projection. This is the only write into the
     /// retained-write graph; `pending` derives from it.
+    ///
+    /// The content observations are dropped in the same batch. They were taken
+    /// against the *previous* projection, and a verdict is only as fresh as its
+    /// least fresh input: keeping them would let a new intent be judged against
+    /// planes nobody has looked at since, which is exactly the "I did not look"
+    /// vs "I looked" collapse `#idlerevisionreactive` forbids. Clearing them
+    /// yields `Unobserved`, which blocks nothing and settles nothing until a
+    /// caller looks again. The batch matters: without it the projection `set`
+    /// would flush the settle effect while the stale planes were still in place.
     fn set_projection(
         &self,
         document_hash: &str,
         projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
     ) {
-        self.projection
-            .set(&self.ctx, document_hash.to_string(), projection);
+        self.ctx.batch(|ctx| {
+            self.authority.set(ctx, document_hash.to_string(), None);
+            self.disk.set(ctx, document_hash.to_string(), None);
+            self.projection
+                .set(ctx, document_hash.to_string(), projection);
+        });
     }
 
     /// Mint (or read) the derived retained-intent slot for `document_hash`.
@@ -643,12 +726,16 @@ impl ControllerDocumentGraphs {
     fn verdict(
         &self,
         document_hash: &str,
+        file: &Path,
         authority: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
         disk: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
-        self.authority
-            .set(&self.ctx, document_hash.to_string(), authority);
-        self.disk.set(&self.ctx, document_hash.to_string(), disk);
+        // One batch: the two planes are one observation, and a settle effect that
+        // ran between them would be judging a fresh authority against a stale disk.
+        self.ctx.batch(|ctx| {
+            self.authority.set(ctx, document_hash.to_string(), authority);
+            self.disk.set(ctx, document_hash.to_string(), disk);
+        });
 
         // The slot factory is `Fn(&K) -> V` with no context parameter, so the
         // only way an entry can derive from the three cell maps is to capture a
@@ -666,14 +753,80 @@ impl ControllerDocumentGraphs {
         let pending = self.pending.clone();
         let authority_map = self.authority.clone();
         let disk_map = self.disk.clone();
-        self.verdict
+        let verdict = self
+            .verdict
             .get_or_insert_with(&self.ctx, document_hash.to_string(), move |key| {
                 agent_doc_state_backbone::retained_write::settlement_verdict(
                     pending.observe(&ctx, key).flatten().as_ref(),
                     authority_map.observe(&ctx, key).flatten().as_ref(),
                     disk_map.observe(&ctx, key).flatten().as_ref(),
                 )
-            })
+            });
+        // Minted after the slot it subscribes to, and only ever once per
+        // document. On the first query it fires here; afterwards it has already
+        // fired from the `set` above. Either way no caller decides to settle.
+        self.ensure_settle_effect(document_hash, file);
+        verdict
+    }
+
+    /// `#retainedclearreactive` — subscribe this document's clear to its verdict.
+    ///
+    /// Before this, clearing a `Satisfied` intent was a `settle_*` call two
+    /// separate consumers had to remember to make; `#preflightsettleparity` had
+    /// already been one round of "add the second call site", and a third consumer
+    /// would have reintroduced the same class of bug. Gated on the derived signal
+    /// in the graph that owns it, the clear fires whenever the signal says so and
+    /// is a no-op for every verdict other than `Satisfied` — so there is no
+    /// moment for a caller to miss.
+    fn ensure_settle_effect(&self, document_hash: &str, file: &Path) {
+        if self.settle_effects.lock().contains_key(document_hash) {
+            return;
+        }
+        let key = document_hash.to_string();
+        let verdict_map = self.verdict.clone();
+        let sink = self.settle_sink.clone();
+        let file = file.to_path_buf();
+        let effect_key = key.clone();
+        let effect = self.ctx.effect(move |ctx| {
+            // Reading through the map is what subscribes this effect; a verdict
+            // fetched any other way would make it fire exactly once.
+            let Some(agent_doc_state_backbone::retained_write::SettlementVerdict::Satisfied {
+                intent_id,
+                retained_target_hash,
+                settled_hash,
+                proof,
+            }) = verdict_map.observe(ctx, &effect_key)
+            else {
+                return;
+            };
+            let Some(sink) = sink.get() else {
+                // No sink bound (test runtime): say so rather than silently
+                // dropping a settlement.
+                eprintln!(
+                    "[controller] retained-write settle skipped for {effect_key}: no sink installed"
+                );
+                return;
+            };
+            let source = "controller_retained_write_settlement_effect";
+            sink.settle(&effect_key, &intent_id, &retained_target_hash, source);
+            agent_doc_ops_log_io::log_op(
+                &file,
+                &format!(
+                    "retained_write_settled_from_derived_verdict file={} intent_id={intent_id} retained_target_hash={retained_target_hash} settled_hash={settled_hash} proof={} source={source}",
+                    file.display(),
+                    proof.token(),
+                ),
+            );
+        });
+        // Losing the mint race means another thread already installed an
+        // equivalent effect; drop ours rather than leaving two subscribed.
+        let mut effects = self.settle_effects.lock();
+        if effects.contains_key(&key) {
+            drop(effects);
+            self.ctx.dispose_effect(&effect);
+            return;
+        }
+        effects.insert(key, effect);
     }
 }
 
@@ -732,6 +885,22 @@ impl ControllerRuntime {
             recycle_forced: AtomicBool::new(false),
             _scope: scope,
         })
+    }
+
+    /// Build the runtime already inside its `Arc` and bind the retained-write
+    /// settle sink to it (`#retainedclearreactive`).
+    ///
+    /// The sink needs the runtime and the runtime owns the graph that owns the
+    /// effect that calls the sink, so it cannot be wired in [`Self::new`]. Every
+    /// production path constructs through here so no controller runs with
+    /// settle effects that have nowhere to write.
+    pub(crate) fn new_arc(bootstrap: ControllerBootstrap) -> Result<Arc<Self>> {
+        let project_root = bootstrap.project_root.clone();
+        let runtime = Arc::new(Self::new(bootstrap)?);
+        runtime
+            .document_graphs
+            .install_settle_sink(project_root, &runtime);
+        Ok(runtime)
     }
 
     /// `#ctlrecycle` R2 — mark this controller to recycle at the next idle boundary.
@@ -829,14 +998,21 @@ impl ControllerRuntime {
     /// Both `preflight` and `session-check` reach this one cell, so they cannot
     /// answer "is a retained write outstanding?" differently — which is the
     /// contradiction that deadlocked closeout before `#retainedsettlereactive`.
+    /// `#retainedclearreactive`: reading the verdict is also what settles a
+    /// `Satisfied` intent — the per-document settle effect is subscribed to this
+    /// slot, so the clear happens because the fact changed, not because a caller
+    /// invoked a `settle_*` companion. The returned verdict is the one derived
+    /// from the caller's observations; the clear it triggers is recorded in
+    /// `ops.log`.
     pub(crate) fn document_retained_write_verdict(
         &self,
         document_hash: &str,
+        file: &Path,
         authority: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
         disk: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         self.document_graphs
-            .verdict(document_hash, authority, disk)
+            .verdict(document_hash, file, authority, disk)
     }
 
     /// `#lazily-hot-path` W1 — bounded await for the visible-write receipt of
@@ -7477,5 +7653,157 @@ agent:queue\n\
         let ops_log = std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap();
         assert!(ops_log.contains("orphaned_preparing_controller_reaped_cross_project pid="));
         assert!(ops_log.contains("caller=test"));
+    }
+
+    // -----------------------------------------------------------------------
+    // `#retainedclearreactive` — the retained-write clear as a subscribed
+    // `Effect`, not a `settle_*` call every consumer has to remember.
+    // -----------------------------------------------------------------------
+
+    fn retained_test_document(dir: &tempfile::TempDir) -> (PathBuf, String) {
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, "# Session\n").unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        (file, document_hash)
+    }
+
+    fn defer_document_write(
+        runtime: &Arc<ControllerRuntime>,
+        project_root: &Path,
+        document_hash: &str,
+        intent_id: &str,
+        target_hash: &str,
+    ) {
+        let event = agent_doc_state_backbone::StateEvent::new(
+            format!("document-write-deferred-{document_hash}-{intent_id}"),
+            agent_doc_state_backbone::StateFact::DocumentWriteDeferred {
+                document_hash: document_hash.to_string(),
+                intent_id: intent_id.to_string(),
+                expected_hash: "expected".to_string(),
+                expected_content: None,
+                target_hash: target_hash.to_string(),
+                target_content: format!("content-for-{target_hash}"),
+                source: "test".to_string(),
+                reason: agent_doc_state_backbone::DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            },
+        );
+        append_state_event(project_root, &event).unwrap();
+        runtime.apply_state_event(&event).unwrap();
+    }
+
+    fn pending_intent_id(runtime: &Arc<ControllerRuntime>, document_hash: &str) -> Option<String> {
+        runtime
+            .memory
+            .lock()
+            .state_projection
+            .document(document_hash)
+            .and_then(|document| document.document.pending_write.as_ref())
+            .map(|pending| pending.intent_id.clone())
+    }
+
+    fn observation(hash: &str) -> agent_doc_state_backbone::retained_write::ContentObservation {
+        agent_doc_state_backbone::retained_write::ContentObservation {
+            content_hash: hash.to_string(),
+            payload_materialized: true,
+        }
+    }
+
+    /// The property the item exists for: **nobody calls settle**. Reading the
+    /// derived verdict is the only thing this test does, and the intent is gone
+    /// afterwards — durably and in the live projection.
+    ///
+    /// Before this, the clear was `settle_retained_write_through_derived_verdict`,
+    /// a public companion that `session-check` called and `preflight` did not
+    /// (`#preflightsettleparity` fixed that by adding a *second* call site, which
+    /// is the imperative shape `#idlerevisionreactive` names). A third consumer
+    /// would have reintroduced the same class of bug.
+    #[test]
+    fn reading_the_verdict_settles_a_satisfied_intent_with_no_settle_call() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        defer_document_write(&runtime, dir.path(), &document_hash, "intent-1", "target");
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash).as_deref(),
+            Some("intent-1"),
+        );
+
+        // The planes converged on exactly the stamped target: `Satisfied`.
+        runtime.document_retained_write_verdict(
+            &document_hash,
+            &file,
+            Some(observation("target")),
+            Some(observation("target")),
+        );
+
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash),
+            None,
+            "the subscribed clear must fire off the verdict, with no caller invoking a settle"
+        );
+        let ledger = load_state_event_ledger(dir.path()).unwrap();
+        assert!(
+            ledger.events().iter().any(|event| matches!(
+                &event.fact,
+                agent_doc_state_backbone::StateFact::DocumentWriteConverged { intent_id, .. }
+                    if intent_id == "intent-1"
+            )),
+            "the clear must be durable, not just an in-memory projection edit"
+        );
+    }
+
+    /// An `Unsettled` intent must survive the read. Making the gate settle must
+    /// not turn it into a rubber stamp.
+    #[test]
+    fn reading_the_verdict_leaves_an_unsettled_intent_alone() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        defer_document_write(&runtime, dir.path(), &document_hash, "intent-1", "target");
+
+        // Authority and disk disagree: delivery is still in flight.
+        let verdict = runtime.document_retained_write_verdict(
+            &document_hash,
+            &file,
+            Some(observation("authority")),
+            Some(observation("disk")),
+        );
+        assert!(verdict.blocks_new_cycle());
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash).as_deref(),
+            Some("intent-1"),
+        );
+    }
+
+    /// A verdict is only as fresh as its least fresh input.
+    ///
+    /// The observations are supplied per query, but the pending intent arrives
+    /// asynchronously through `apply_state_event`. Without dropping the planes
+    /// when a new fact lands, a *later* intent would be judged against planes
+    /// nobody had looked at since — and a coincidental hash match would clear a
+    /// write that never landed. `#idlerevisionreactive`: "I did not look" is a
+    /// distinct outcome, so the verdict must fall back to `Unobserved`.
+    #[test]
+    fn a_new_projection_fact_invalidates_the_observations_it_predates() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (file, document_hash) = retained_test_document(&dir);
+        defer_document_write(&runtime, dir.path(), &document_hash, "intent-1", "target");
+        runtime.document_retained_write_verdict(
+            &document_hash,
+            &file,
+            Some(observation("target")),
+            Some(observation("target")),
+        );
+        assert_eq!(pending_intent_id(&runtime, &document_hash), None);
+
+        // A second intent stamped at the SAME target hash the last observation
+        // reported. Nothing has looked at either plane since it was deferred.
+        defer_document_write(&runtime, dir.path(), &document_hash, "intent-2", "target");
+        assert_eq!(
+            pending_intent_id(&runtime, &document_hash).as_deref(),
+            Some("intent-2"),
+            "a stale observation must not be able to settle an intent that postdates it"
+        );
     }
 }

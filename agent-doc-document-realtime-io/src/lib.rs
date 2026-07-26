@@ -4996,6 +4996,32 @@ pub fn resolve_disk_current_document_content(
     Ok(resolve_disk_current_document(file, source)?.into_content())
 }
 
+/// Read the disk plane **without** recording a disk-replica authority claim.
+///
+/// [`resolve_disk_current_document`] records
+/// `DocumentAuthority::DiskReplica` with reason `editor_detached` as a side
+/// effect of reading. That is right for a caller that has *elected* disk
+/// authority — as [`observe_live_editor_authority`] puts it, "detached callers
+/// should record disk authority after they choose to use disk" — and wrong for
+/// a caller that is only *observing*.
+///
+/// Settlement is an observation, and so is `session-check`, which tells the
+/// operator it is status-only. Recording from those paths made the act of
+/// checking perturb the authority the next check compares against: consecutive
+/// `session-check` runs saw a moving `authority_hash` against a fixed
+/// `disk_hash` and never converged, while the guidance said to wait for a
+/// settlement that observation itself kept resetting. A read that claims
+/// authority is not a read (`#retainedsettlereactive`).
+pub fn peek_disk_document_content(file: &std::path::Path, source: &str) -> Result<String> {
+    let content = std::fs::read_to_string(file).with_context(|| {
+        format!(
+            "{source}: failed to read disk-authoritative document {}",
+            file.display()
+        )
+    })?;
+    Ok(CurrentDocument::new(file.to_path_buf(), reconcile_current_doc(&content, None)).into_content())
+}
+
 pub fn try_resolve_current_document_content(
     file: &std::path::Path,
     source: &str,
@@ -5962,8 +5988,10 @@ fn observe_retained_write_settlement(file: &Path, source: &str) -> RetainedWrite
         try_resolve_current_document_content(file, source),
         payload,
     ));
+    // Observation must not claim authority: `peek_disk_document_content` reads
+    // the same bytes without recording a disk-replica authority claim.
     settlement.observe_disk(observe_plane(
-        resolve_disk_current_document_content(file, source),
+        peek_disk_document_content(file, source),
         payload,
     ));
     settlement

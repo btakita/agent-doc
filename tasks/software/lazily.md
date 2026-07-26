@@ -516,7 +516,19 @@ Independent of the refactor, filed separately: zig's sync map **is not graph-bac
 Nothing here needs a release anyway — no code changed this cycle.
 
 Still open from before: should this item stay in `lazily.md`'s queue or be struck here and left to the session that authored it?
-<!-- agent:boundary:5cebe260 -->
+
+### Re: lazily-cs is not a viable prototype target — opus-5
+
+You're right, and it's more decisive than a caveat — it inverts that recommendation.
+
+`coverage.json` puts lazily-cs at **13 of 48 rows shipped, 35 absent**. And the survey had already found the specific blocker without my connecting it: lazily-cs has **no thread-safe or async `SourceMap` at all**. Its conformance runner papers over that with a hand-locked sync map (`MaterializationConformanceTests.cs:305`) and a bare `Dictionary<string,int>` (`:336`).
+
+So prototyping a *unification* there would mean designing against two families that don't exist — inventing the surface rather than converging one. A prototype's value is that it surfaces what breaks; nothing would break, because nothing is there. The zero-compat-cost property is real but buys far less than I claimed.
+
+I've corrected both the plan and the filed item. The prototype target is now **zig and cpp**: feature-complete, both able to fold all three families in, seam mostly built, and neither exposes maps on its C ABI. zig additionally already contains the working proof — `Engine(comptime Model: type)` is one generic replay engine over `SyncModel`/`TsModel`/`AsyncModel` with the async projection isolated to a single `settle` method.
+
+That also removes the qualification I attached to the cs recommendation. I'd said it would validate the shape but not the mechanism, because sync↔thread-safe unification is free in C#. With zig and cpp as the targets, the prototype exercises the real mechanism — the per-execution-model projection — rather than the case where it happens to be the identity.
+<!-- agent:boundary:be8656e7 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -563,7 +575,7 @@ Still open from before: should this item stay in `lazily.md`'s queue or be struc
 
 <!-- agent:backlog priority queue -->
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
-- [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-cs (630 lines, unpublished, no compat constraint, already closest to unified; ThreadSafeComputedMap is already a delegating shell over a real ComputedMap). Validates shape + API only, NOT the mechanism — sync-to-threadsafe is free in C# because ThreadSafeContext.Inner IS a Context. Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyphaseextract] lazily-rs Phase A: extract the closure-free KeyedOrder<K,H> core (entries + order + membership + present-set + position/keys/len/contains_key + move_to/move_before/move_after) shared by all three families; thin per-model shells keep materialize/observe. Do NOT route through SyncReactiveGraph — its Send+Sync bound is stricter than the concrete Context API and would break Rc-capturing callers. `remove` stays out of the core (monotone present set is fixture- and Lean-backed). Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#unifythreemap] Unify all three map families in lazily-zig and lazily-cpp — both can fold async in, unlike the rest. zig: fn ReactiveMap(comptime Ctx,K,V,kind) with Ctx.Handle/Ctx.Observed/Ctx.Lock projections; the proof already exists in-tree as Engine(comptime Model) at reactive_graph_conformance.zig:1206 over SyncModel/TsModel/AsyncModel. cpp: traits class + existing duck-typed Cx param; only Source::clear_dependents(Context&) and Computed::clear(Context&) block it, and AsyncSlotHandle needs one added clear_dependents. Neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilymapunification] lazily-go map unification BEFORE it hits v1 — still v0.22.0 on an unversioned module path, so a breaking change costs nothing now; after v1 it costs a /v2 module path plus every import rewrite. Mechanism: closure fields (already proven in-repo at reactive_map.go:92-96) or one extra type param. Plan: tasks/plan-lazily-reactivemap-unification.md

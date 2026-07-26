@@ -231,14 +231,34 @@ Row 9 done, pushed, coverage flipped. The three `Collection`-kind fixtures repla
 **Verification.** `make check` green (61 tests, up from 58), `dotnet format --verify-no-changes` clean. Coverage row 9 flipped for C#, table regenerated and committed one repo at a time across the spec and all nine sibling READMEs. lazily-cs CI was queued at closeout — recorded, not waited on.
 
 Remaining in this phase: `#lzcscollections` (rows 2–4 — `ThreadSafeSlotMap`, `AsyncSlotMap`, keyed-map sync + the `familysync` corpus) and `#lzcssemtree` (rows 10–11).
-<!-- agent:boundary:b1d49619 -->
+
+### Re: SemTree + stable-id alignment — opus-5
+
+> **Queue prompt:** do [#lzcssemtree]
+
+Rows 10 and 11 both done, pushed, coverage flipped. I did them in one cycle rather than splitting: they are independent surfaces, but splitting would have meant two coverage syncs across ten repos for two fixtures.
+
+**SemTree** is one guarded memo per node, folding that node's value with its children's folded values. The fixture's claim is about **cost, not values** — editing a node must recompute only its ancestor chain, and an edit whose fold lands on the same value must not reach a downstream consumer at all. Neither is visible to a value assertion: a tree that refolds the entire document on every edit returns exactly the right numbers. So `sibling_a_cached` and `downstream_consumer_reran` are asserted on recompute counters installed inside the observed computations themselves.
+
+**StableId** manufactures identity in three layers — in-band anchors (exact, survive a full body rewrite), FNV-1a hashes over whitespace-normalized text (survive reflow, change on a real edit), and word-LCS similarity where ≥ 0.5 means Edited-and-key-inheriting rather than Inserted. The ordering matters more than any single layer: exact key matching runs as a **complete pass before** any similarity matching, because interleaving them lets a merely-similar block consume an old entry that a later block matches exactly — which is how a pure reorder degrades into a pile of edits.
+
+**A mutation attempt that was itself wrong, and worth recording.** To check the memo guard I replaced the comparer with `null` — and the suite stayed green. That was not a vacuous test: `Context.Computed(f, null)` coalesces to `EqualityComparer<T>.Default`, so `null` is still guarded; the unguarded factory is `Slot(f)`. Redone against `Slot`, it fails correctly. That is the second time this phase a first mutation attempt proved nothing — the earlier one was masked by two redundant warm-key guards. Both would have been recorded as "mutation-checked" by anyone who stopped at the first green.
+
+**Five real mutations, each restored.** SemTree: an unguarded memo fails `downstream_consumer_reran`; a fold ignoring the child-key order fails the removal scenario. StableId: dropping normalization fails the reflow case, interleaving similarity into the exact pass fails the pure-reorder case, ignoring anchors fails the body-rewrite case.
+
+**One ledger change.** The collections runner gains a `HandledElsewhere` set, deliberately separate from `Unsupported`. That one is a ledger of *gaps in this binding*, and folding "another runner owns this fixture" into it would quietly overstate what is missing.
+
+**Verification.** `make check` green (63 tests, up from 61), `dotnet format --verify-no-changes` clean. Rows 10 and 11 flipped, table regenerated and committed one repo at a time across the spec and all nine sibling READMEs. lazily-cs CI was queued at closeout — recorded, not waited on.
+
+Remaining in the phase: `#lzcscollections`, now rows 2–4 only — `ThreadSafeSlotMap`, `AsyncSlotMap`, and keyed-map sync with the `familysync` corpus.
+<!-- agent:boundary:fbdaadf0 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzcsreactivemapfx]~~
-- do [#lzcssemtree]
+- ~~do [#lzcssemtree]~~
 - ~~do [#lzzigcitoolchain]~~
 - ~~do [#lzgoerrorretry]~~
 - ~~do [#lzasyncerrfixture]~~
@@ -257,7 +277,6 @@ Remaining in this phase: `#lzcscollections` (rows 2–4 — `ThreadSafeSlotMap`,
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzcssemtree] lazily-cs: rows 10-11 — memoized semantic tree (SemTree) and stable-id alignment (manufactured identity); replay collections/semtree_incremental.json and collections/stableid_alignment.json — plan: tasks/software/lazily-cs-parity-plan.md
 - [ ] [#lzcscollections] lazily-cs: rows 2-4 — ThreadSafeSlotMap + AsyncSlotMap materialization and keyed-map sync (membership propagation, materialize-on-ingest, derived alignment); replay the familysync corpus. Row 1 (ReactiveMap core + CellMap/SlotMap + materialization corpus) shipped 2026-07-25 — plan: tasks/software/lazily-cs-parity-plan.md
 - [ ] [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
@@ -283,4 +302,5 @@ Remaining in this phase: `#lzcscollections` (rows 2–4 — `ThreadSafeSlotMap`,
 - 2026-07-25 [#lzasyncerrfixture] lazily-spec: land the async Error -> Computing conformance fixture. IN PROGRESS, uncommitted: conformance/reactive-graph/failed_compute_is_never_cached.json + fail_next in _REACTIVE_GRAPH_OPS + tag in _REACTIVE_GRAPH_TAGS (lazily-spec make check green, 147); lazily-go runner has fail_next on both models but its suite is RED with 20 divergences from a runner read-path wiring bug (the library is correct - probes show computes 1->2->3 with recovery on Get and TryGet). Eight runners untouched. Do NOT push lazily-spec before all nine runners replay it or every binding's corpus-drift check goes red
 - 2026-07-25 [#lzzigcitoolchain] lazily-zig: CI is red on both pinned toolchains (Zig 0.15.2 and 0.16.0) because src/lazily/context.zig:2208 reads builtin.Type.Fn.param_types, removed from newer std. Local dev runs 0.17.0-dev where the full suite passes, so the red is a pin/target mismatch, not a code defect. Either move the CI matrix to the toolchain the code targets or make that reflection version-agnostic. Predates the conformance work: the same error is on the prior commit
 - 2026-07-25 [#lzcsreactivemapfx] lazily-cs: row 9 — CellTree + reconcile on top of the shipped ReactiveMap core; replay collections/cellmap_atomic_move.json, cellmap_independence.json, keyed_reconciliation_lis.json (an atomic move must bump order only and keep the entry handle, which is what separates a reorder from a remove+re-mint) — plan: tasks/software/lazily-cs-parity-plan.md
+- 2026-07-25 [#lzcssemtree] lazily-cs: rows 10-11 — memoized semantic tree (SemTree) and stable-id alignment (manufactured identity); replay collections/semtree_incremental.json and collections/stableid_alignment.json — plan: tasks/software/lazily-cs-parity-plan.md
 <!-- /agent:done -->

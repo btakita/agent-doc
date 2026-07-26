@@ -872,14 +872,14 @@ Dart (`#lazilyspecdisagrees`). Phase 5 lists dart, so it should be settled once
 in the spec phase instead of re-litigated per family.
 
 Clear and start at `#lzqfspec`.
-<!-- agent:boundary:d787e861 -->
+<!-- agent:boundary:fe22a9b9 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lzqfprep]
-- 🚧 do [#lzdonequoteattr]
+- 🚧 do [#lzqfprep]
+- ⏭️ do [#lzdonequoteattr]
 - do [#lzqfspec]
 - do [#lzqfformal]
 - do [#lzqfzig]
@@ -931,8 +931,8 @@ Clear and start at `#lzqfspec`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzqfprep] lazily: BEFORE starting the queue-family plan, note that tasks/plan-lazily-queue-family-flavors.md now carries (a) the ReactiveMap precedent all nine bindings converged on — graph-agnostic core, per-flavor signal cells minted on each flavor's own graph, reads generic over the read surface — which settles Phase 0's reader-kind question by precedent rather than argument, and (b) a 'How these gates fail' section recording the four false greens the ReactiveMap gates produced on their first attempt. Start at #lzqfspec; the plan is self-contained enough for a cleared session
-- [ ] 🚧 [#lzdonequoteattr] agent-doc: the done-archive attribute parser keeps the surrounding quotes in the value. tasks/software/lazily.md carried agent:done archive="tasks/software/lazily.done.md" (quoted, as a compact wrote it) and every preflight/session-check hard-failed with 'must point to a .done.md file' because the parsed value ended in .done.md-quote. Every other session doc uses the unquoted form and works. Unquote in the attribute parser and add a regression fixture for both forms; a quoted value should be accepted, not fatal
+- [ ] 🚧 [#lzqfprep] lazily: BEFORE starting the queue-family plan, note that tasks/plan-lazily-queue-family-flavors.md now carries (a) the ReactiveMap precedent all nine bindings converged on — graph-agnostic core, per-flavor signal cells minted on each flavor's own graph, reads generic over the read surface — which settles Phase 0's reader-kind question by precedent rather than argument, and (b) a 'How these gates fail' section recording the four false greens the ReactiveMap gates produced on their first attempt. Start at #lzqfspec; the plan is self-contained enough for a cleared session
+- [ ] [#lzdonequoteattr] agent-doc: the done-archive attribute parser keeps the surrounding quotes in the value. tasks/software/lazily.md carried agent:done archive="tasks/software/lazily.done.md" (quoted, as a compact wrote it) and every preflight/session-check hard-failed with 'must point to a .done.md file' because the parsed value ended in .done.md-quote. Every other session doc uses the unquoted form and works. Unquote in the attribute parser and add a regression fixture for both forms; a quoted value should be accepted, not fatal
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.

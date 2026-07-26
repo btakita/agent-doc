@@ -44,6 +44,8 @@ agent-doc-queue = { path = "../agent-doc-queue", version = "0.35.28" }
 agent-doc-queue-io = { path = "../agent-doc-queue-io", version = "0.35.28" }
 agent-doc-run-context-io = { path = "../agent-doc-run-context-io", version = "0.35.28" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.28" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.28" }
+lazily = "0.49.0"
 agent-doc-state-observer-io = { path = "../agent-doc-state-observer-io", version = "0.35.28" }
 agent-doc-supervisor-io = { path = "../agent-doc-supervisor-io", version = "0.35.28" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.28" }

@@ -1,15 +1,16 @@
 use anyhow::{Context, Result};
-use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::cell::Cell;
+use std::path::Path;
 
 pub mod backlog_guards;
 pub mod closeout_guards;
 pub mod command;
 pub mod detect;
 pub mod guard_modes;
+pub mod current_document;
 pub mod partial_staging;
 pub mod profile;
+pub(crate) use current_document::{invalidate_current_document_pass, with_current_document_pass};
 pub mod pending_capture;
 pub mod pending_guards;
 pub mod prompt_bearing;
@@ -55,88 +56,6 @@ fn force_disk_resolution_enabled() -> bool {
     FORCE_DISK_RESOLUTION.with(Cell::get)
 }
 
-thread_local! {
-    /// `#sccurrentpass`: pass-scoped memo of the resolved current document.
-    ///
-    /// `session-check` is a read-only sweep over one document: ~8 independent
-    /// guards each called [`resolve_current_document`], and every call was a
-    /// full controller round trip returning the whole document text. On a live
-    /// editor-attached document that cost ~0.5-1s apiece, so one sweep spent
-    /// several seconds re-fetching the same text — the dominant term in
-    /// `Compact Exchange` wall time, which runs a sweep after its writeback.
-    ///
-    /// Worse, it was not only slow but *inconsistent*: because the operator can
-    /// type mid-sweep, guards observed different document versions within a
-    /// single pass (`text_len` 38865 -> 38866 -> 38932 in one recorded run), so
-    /// two guards could disagree about the same document. A pass evaluates one
-    /// document version now: the first resolve inside the scope wins and every
-    /// later guard reads that same value.
-    ///
-    /// The memo is opened explicitly by the `session-check` entry points and is
-    /// never global ambient state: outside a scope, resolution is unchanged.
-    /// Force-disk resolution bypasses it entirely (different authority).
-    static CURRENT_DOCUMENT_PASS: RefCell<Option<HashMap<PathBuf, agent_doc_document_realtime_io::CurrentDocument>>> =
-        const { RefCell::new(None) };
-}
-
-/// Run `f` with a pass-scoped current-document memo active (`#sccurrentpass`).
-///
-/// Nested calls reuse the outer pass rather than installing a second memo, so a
-/// sweep that delegates into another entry point still sees one document
-/// version. Any document mutation performed inside a pass must call
-/// [`invalidate_current_document_pass`]; `session-check` guards are read-only
-/// over the document text, which is what makes this safe.
-pub(crate) fn with_current_document_pass<T>(f: impl FnOnce() -> T) -> T {
-    let installed = CURRENT_DOCUMENT_PASS.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.is_some() {
-            return false;
-        }
-        *slot = Some(HashMap::new());
-        true
-    });
-    let result = f();
-    if installed {
-        CURRENT_DOCUMENT_PASS.with(|slot| {
-            *slot.borrow_mut() = None;
-        });
-    }
-    result
-}
-
-/// Drop `file` from the active pass memo so the next resolve re-reads it.
-///
-/// Call this after any path that can change the document's current text while a
-/// pass is open.
-pub(crate) fn invalidate_current_document_pass(file: &Path) {
-    CURRENT_DOCUMENT_PASS.with(|slot| {
-        if let Some(entries) = slot.borrow_mut().as_mut() {
-            entries.remove(file);
-        }
-    });
-}
-
-fn current_document_pass_hit(
-    file: &Path,
-) -> Option<agent_doc_document_realtime_io::CurrentDocument> {
-    CURRENT_DOCUMENT_PASS.with(|slot| {
-        slot.borrow()
-            .as_ref()
-            .and_then(|entries| entries.get(file).cloned())
-    })
-}
-
-fn record_current_document_pass(
-    file: &Path,
-    document: &agent_doc_document_realtime_io::CurrentDocument,
-) {
-    CURRENT_DOCUMENT_PASS.with(|slot| {
-        if let Some(entries) = slot.borrow_mut().as_mut() {
-            entries.insert(file.to_path_buf(), document.clone());
-        }
-    });
-}
-
 pub(crate) fn resolve_current_document(
     file: &Path,
     source: &str,
@@ -147,10 +66,22 @@ pub(crate) fn resolve_current_document(
             &format!("session-check {source}"),
         );
     }
-    if let Some(hit) = current_document_pass_hit(file) {
+    // `#sccurrentpass`: one derived resolution per sweep, re-taken only when a
+    // step actually rewrote the document. See `current_document`.
+    let owned_file = file.to_path_buf();
+    let label = format!("session-check {source}");
+    if let Some(hit) = crate::current_document::pass_resolved(file, move || {
+        agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+            &owned_file,
+            &label,
+        )
+        .ok()
+    }) {
         return Ok(hit);
     }
-    let resolved = agent_doc_document_realtime_io::try_resolve_current_document_with_source(
+    // No pass open, or the memoized resolve failed. Re-run uncached so the real
+    // error surfaces instead of a cached absence.
+    agent_doc_document_realtime_io::try_resolve_current_document_with_source(
         file,
         &format!("session-check {source}"),
     )
@@ -159,9 +90,7 @@ pub(crate) fn resolve_current_document(
             "session-check {source}: resolve current document {}",
             file.display()
         )
-    })?;
-    record_current_document_pass(file, &resolved);
-    Ok(resolved)
+    })
 }
 
 pub(crate) fn resolve_current_document_with_force_disk(

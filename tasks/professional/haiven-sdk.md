@@ -151,12 +151,43 @@ The design establishes:
 
 **Escalation:** none for this task. Preflight did warn that the installed `agent-doc` binary is one committed change behind its local source; that is unrelated to the Haiven artifacts and did not block the cycle.
 Please design a superrepo with dedicated repos for each SDK. This would include agent harness.
-<!-- agent:boundary:2400c402 -->
+
+### Re: RPG Maker, Ren'Py, and long-tail framing — gpt-5
+
+> **Queue prompt:**
+>
+> do [#rpgmakerren]
+
+
+Added RPG Maker and Ren'Py across the SDK proposal, implementation roadmap, and superrepo design, and corrected Wave C so none of its adapters is presented as a market-balancing anchor.
+
+The [2025 Video Game Insights report](https://app.sensortower.com/vgi/assets/reports/The_Big_Game_Engines_Report_of_2025.pdf) supports the long-tail framing: it describes public engines outside Unity and Unreal as significantly smaller; its 2024 Steam view groups Godot, RPG Maker, GameMaker, and similar engines at just over 10% of qualifying releases but about 2% of units sold, and its smaller-engine analysis includes Ren'Py. I recorded the important limits as well: this is directional Steam evidence, the highlighted mix excludes games below 1,000 lifetime units, and the report does not separately quantify Cocos Creator or Construct 3.
+
+The roadmap now specifies:
+
+- **RPG Maker:** a dedicated `haiven-sdk-rpg-maker` repository, with one target generation chosen first—prefer RPG Maker MZ's [JavaScript plugin surface](https://rpgmakerofficial.com/product/mz/plugin/start/whta-plugin.html) unless a pilot requires something else—and an upfront networking, save/load, deployment, and distribution spike.
+- **Ren'Py:** a dedicated `haiven-sdk-renpy` repository, using a Python package plus thin `.rpy` integration. Native targets come first; save/rollback behavior and the web transport need explicit validation because Ren'Py's [Python integration](https://www.renpy.org/doc/html/python.html) and [web networking constraints](https://www.renpy.org/doc/html/web.html) differ by target.
+- **Wave C:** renamed to “long-tail and specialist ecosystems”; GameMaker, RPG Maker, Ren'Py, Cocos Creator, and Construct 3 are all pilot-gated. Selection is based on Haiven's qualified pipeline, integration cost, platform fit, reuse, and support burden—not generalized market-share claims.
+
+**Changed paths:**
+
+- [Milestone proposal](../recruit/haiven/sdk-proposal-2026-07-26.md)
+- [Implementation plan](../recruit/haiven/sdk-implementation-plan-2026-07-26.md)
+- [Superrepo design](../recruit/haiven/sdk-superrepo-design-2026-07-26.md)
+
+**Commit:** `e39a5dac7` (`haiven sdk: add RPG Maker and Ren'Py roadmap`)
+
+**Commands and verification:** the three documents parse through the Markdown AST (proposal: `86` nodes / `304` lines; plan: `253` / `540`; superrepo: `124` / `411`), whitespace validation passed, and full workspace `make check` completed with exit code 0 and no detected failures. The required one-time GitHub lookup found no workflow named `CI`.
+
+**Confidence:** high. The documents now reflect the report without overstating what its Steam-only estimates establish, and both new SDKs have concrete technical and repository boundaries.
+
+**Escalation:** none. The requested work is complete.
+<!-- agent:boundary:fe507197 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue -->
+<!-- agent:queue priority -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -168,3 +199,9 @@ Please design a superrepo with dedicated repos for each SDK. This would include 
 
 <!-- agent:icebox -->
 <!-- /agent:icebox -->
+
+## Completed / Reaped
+
+<!-- agent:done -->
+- 2026-07-26 [#rpgmakerren] Add RPG Maker + Ren'Py. These are all long tail. See https://app.sensortower.com/vgi/assets/reports/The_Big_Game_Engines_Report_of_2025.pdf
+<!-- /agent:done -->

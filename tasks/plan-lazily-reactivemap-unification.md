@@ -1,8 +1,55 @@
 # Plan — ReactiveMap unification (Phase A) and family conformance
 
-Status: **scoping**, nothing implemented. Supersedes the narrower "expose a
-ctx-taking factory on ReactiveMap" recommendation, which is a symptom of the
-structure this plan addresses.
+Status: **in progress.** The spec question at the end is **settled** (see
+"Resolved" below); `rs` and `zig` are done; seven bindings remain. Supersedes the
+narrower "expose a ctx-taking factory on ReactiveMap" recommendation, which is a
+symptom of the structure this plan addresses.
+
+> ## Progress
+>
+> **Resolved — the open spec question.** `cell-model.md` now defines a **Core**
+> surface (REQUIRED of every binding × every flavor, fixture-gated) and an
+> **Extended** set (OPTIONAL, non-normative, unscored). Deprecating the drifted
+> methods was rejected: it would churn nine released bindings to delete working
+> methods that break nothing. The real defect was that nothing distinguished
+> "kt is missing seven required methods" from "cs also ships a `reconcile`
+> helper" — both read as divergence and both scored green. Ordering and atomic
+> move are Core and **bind every flavor**. Kind specializations (`set`
+> source-only, `materialize_all` computed-only) bind per entry kind, not per
+> flavor. `coverage.json`'s one conflated map row is now four.
+>
+> **Done — lazily-rs** (`325ee7d`, CI green). `KeyedOrder<K,H>` core; thread-safe
+> and async gained `position`/`move_*`/`remove`; the tracking view is threaded
+> into the factory on all three (async's trait compute widened from a nullary
+> `Arc<dyn Fn() -> V>`); `AsyncContext::eval_detached` + `is_set`; `PartialEq`/
+> `Debug` on the async handles. Both fixtures replay against all three flavors,
+> mutation-checked three ways.
+>
+> **Done — lazily-zig** (`5327635`, `529b20c`). Shared `KeyedOrder`; thread-safe
+> and async gained the full Core surface; both fixtures replay against all three
+> flavors. Sync stays **partial**: entries are cached values, not nodes, so
+> `handle` is a birth id — enough for the atomic-move law, no dependents or
+> lineage. Making it green means making the map graph-backed.
+>
+> **Corrections this work forced:**
+> 1. **The `remove` blocker was wrong.** "TS and async handle traits have no
+>    disposal hook, so a flavor `remove` is handle-trait surgery" — both rs
+>    contexts already expose `dispose_cell`/`dispose_slot`, stronger than the
+>    sync `clear_dependents` and observably the same.
+> 2. **A defect the survey missed: zig's `moveBefore`/`moveAfter` land the key on
+>    the wrong side of the anchor** whenever it precedes the anchor.
+>    `moveBefore("a","d")` on `[a,b,c,d]` gave `[b,c,d,a]`. Both computed the
+>    target on the pre-removal list. Verified by probe before changing anything.
+> 3. **The one place rs *did* replay the contract wasn't asserting it.**
+>    `collections_conformance.rs` read `invalidates` off the step, but the
+>    fixtures nest it under `expected` — always `None`, so `assert_invalidation`
+>    never ran. **Check this in the seven remaining bindings.**
+> 4. **zig's `moveTo` desync is fixed structurally, not on its error path.**
+>    Reordering cannot need memory, so the move is a `std.mem.rotate` and there
+>    is no allocating error path left to desync on.
+>
+> **Remaining:** py, js, dart, cpp, cs, go, kt — Core surface per flavor, plus
+> the fixture replay. Sequencing below still holds, minus zig.
 
 > ## Corrections after adversarial review
 >
@@ -422,18 +469,21 @@ applied to the library.
    context, never the map. Its remaining costs are ordinary: no default type
    arguments, and Kotlin 2.0.21 without context parameters.
 
-### Open question for the spec
+### Open question for the spec — RESOLVED
 
 `cell-model.md` mandates the observable contract, not an internal factoring.
 Whether the *family* converges on one map shape is a spec question about what
-`ReactiveMap` is, not nine independent refactors. Two concrete spec decisions
-fall out:
+`ReactiveMap` is, not nine independent refactors.
 
-- Does the atomic-move contract bind **every flavor**, or only the source map?
-  Today's fixtures only ever exercise the latter, and `coverage.json` marks all
-  three rows green for every binding.
-- Is the thread-safe flavor meaningful where the runtime is single-threaded
-  (dart isolates, js event loop)? dart's own spec row says N/A while a full
-  duplicate family ships; js's README argues the opposite of its own source
-  comment.
+- **Does the atomic-move contract bind every flavor, or only the source map?**
+  **Every flavor.** Settled by the Core/Extended split in `cell-model.md`
+  § "Core surface vs. binding extensions". Ordering touches no entry handle and
+  awaits nothing, so it is neither thread- nor async-coloured; rs and zig now
+  ship it on all three at no language cost. `coverage.json` scores it per flavor.
+- **Is the thread-safe flavor meaningful where the runtime is single-threaded
+  (dart isolates, js event loop)?** **Still open.** dart's own spec row says N/A
+  while a full duplicate family ships; js's README argues the opposite of its own
+  source comment. This one is about whether the flavor should *exist*, not about
+  what it must expose if it does — so it does not block the Core work, but it
+  should be settled before dart's duplicate family is either extended or deleted.
 

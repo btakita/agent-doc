@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "agent-doc turn-status idle",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "agent-doc turn-status active",
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

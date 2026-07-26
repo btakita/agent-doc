@@ -661,16 +661,84 @@ of nine bindings already have a synchronous async-map read, so `pop` is likely
 uncoloured — verify before writing it down); and whether `reap_expired` stays
 caller-driven under async (recommend yes, it keeps lease expiry deterministic and
 fixture-replayable).
-<!-- agent:boundary:91fcfd74 -->
+
+### Re: sequencing — ReactiveMap first, then the queue family — opus-5
+
+> **Queue prompt:** /goal complete tasks/plan-lazily-queue-family-flavors.md
+
+Deferred deliberately, and decomposed: that goal is now seven tracked phase ids
+(`#lzqfspec`, `#lzqfformal`, `#lzqffx`, `#lzqfrs`, `#lzqfzig`, `#lzqfjs`,
+`#lzqfports`) sitting **behind** the ReactiveMap cluster in both backlog and
+queue, per the answer below.
+
+**Yes — finish ReactiveMap first.** Four reasons, in order of weight:
+
+1. **The queue plan's Phase 3 is blocked on work the ReactiveMap plan already
+   scopes.** `#lzqfrs` needs `AsyncContext` to gain a synchronous-compute
+   `computed` and a multi-root clear. The ReactiveMap plan's "Async — corrected"
+   section already calls for widening the async compute type for
+   `AsyncMapHandle::materialize`. That is one `AsyncContext` change serving both.
+   Doing the queue family first means either paying for it twice or landing it
+   speculatively with only one consumer to validate it.
+2. **ReactiveMap is 2 of 9 with a proven reference shape.** rs (`325ee7d`,
+   `ffc0d83`) and zig (`5327635`, `529b20c`) are done and CI-green; seven
+   bindings have a committed diff to mirror. Stopping now leaves the coverage
+   matrix in its worst state — some flavors Core-conforming, some not, and
+   nothing in the scoring that tells you which without reading source.
+3. **The current queue head is a ReactiveMap prerequisite.**
+   `#maphandlecleardependents` is the disposal-hook question that flavor `remove`
+   depends on. It is already at the head and cheap to clear.
+4. **The per-flavor conformance gate is shared machinery.** Building it once
+   against the collections/ReactiveMap fixtures and then extending it to the nine
+   queue fixtures is strictly cheaper than designing two gates in parallel — and
+   the queue gate needs the same `invalidates`-nesting check that lazily-rs
+   already got wrong once.
+
+The one argument for going the other way is that the queue family has a *live
+false-green*: js and zig score `✅` while shipping no reactivity. That is real,
+but it is a reporting defect on a shipped surface, not a regression, and it is
+now filed as `#lzqfzig` / `#lzqfjs`. It does not justify preempting a family
+migration that is 2/9 through.
+
+**Order now in queue + backlog:**
+
+1. `#maphandlecleardependents` — disposal hook (ReactiveMap prereq)
+2. `#portmembershiporder` — port the membership/order plane to the remaining
+   7 bindings; rs reference is `ffc0d83`
+3. `#lazilycellfamily`, `#lazilyspecdisagrees` — remaining ReactiveMap items
+4. `#lzqfspec` → `#lzqfformal` → `#lzqffx` → `#lzqfrs` → `#lzqfzig` /
+   `#lzqfjs` → `#lzqfports` — the queue family, spec-first as you asked
+
+New queue-family items were appended rather than prepended so they do not
+preempt the ReactiveMap drain.
+
+**Two operational notes from this cycle.**
+
+The previous cycle's response committed (`36c263cd0`) but its backlog mutations
+did not — the controller timed out at 5 s mid-write, so the body crossed the CRDT
+plane and the `--done` / `--backlog-add` transaction was dropped. Re-applied here.
+
+Preflight and session-check were then hard-failing on every cycle with
+`agent:done archive="tasks/software/lazily.done.md" must point to a .done.md
+file`. The value **is** a `.done.md` path; the parser keeps the surrounding
+quotes, so it compares against `.done.md"`. This document was the only one
+carrying the quoted form — every other session doc uses `archive=path` bare. I
+unquoted the marker, which unblocked the cycle, and filed the parser bug as
+`#lzdonequoteattr`.
+
+Also: the JetBrains plugin is 0.2.294 against an expected 0.2.296. `reload-lib`
+refreshes only the cdylib and cannot move the plugin version, so that one needs
+an IDE plugin update + reload from you.
+<!-- agent:boundary:30f21756 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- /goal complete tasks/plan-lazily-queue-family-flavors.md
+- ~~/goal complete tasks/plan-lazily-queue-family-flavors.md~~ — auto-struck: answered this cycle (#ftstrike)
 - ⏭️ do [#asynccontextthreadsafeco]
 - ⏭️ do [#maphandlecleardependents]
-- do [#lazilycellfamily]
+- ⏭️ do [#lazilycellfamily]
 - do [#lazilyspecdisagrees]
 - ⏭️ do [#lzjsnpmtrustedpub]
 - ⏭️ do [#lzcsqueues]
@@ -711,6 +779,7 @@ fixture-replayable).
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzdonequoteattr] agent-doc: the done-archive attribute parser keeps the surrounding quotes in the value. tasks/software/lazily.md carried agent:done archive="tasks/software/lazily.done.md" (quoted, as a compact wrote it) and every preflight/session-check hard-failed with 'must point to a .done.md file' because the parsed value ended in .done.md-quote. Every other session doc uses the unquoted form and works. Unquote in the attribute parser and add a regression fixture for both forms; a quoted value should be accepted, not fatal
 - [ ] [#asynccontextthreadsafeco] Add AsyncContext + ThreadSafeContext support to QueueCell + TopicCell + WorkQueueCell. Start with spec + formal +  conformance. Then subagents for implentations. Please ensure consistency across sync + thread + async apis.
 - [ ] [#portmembershiporder] Port the membership/order plane to the other 8 bindings thread-safe + async maps (py, js, kt, go, cpp, cs, dart, zig). lazily-rs is done (commit ffc0d83): each flavor mints its own membership + order signal cells on its own graph, with bumps run outside the map lock. Every other binding has the same hole — reactive keys/len/contains_key exist only on the sync map. Note go and dart async maps are not connected to their async graph at all (no context field / _ctx annotated unused_field), so they need wiring before they can carry a signal plane. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. The membership/order reads are now generic over the read surface (AsyncSource<u64>: Read<C>) and track correctly with an AsyncComputeContext — apply the same genericity to AsyncMapHandle::observe so entry-value reads can track too. This is the read-side twin of the discarded-factory-view defect.
@@ -758,5 +827,5 @@ fixture-replayable).
 
 ## Completed / Reaped
 
-<!-- agent:done archive="tasks/software/lazily.done.md" -->
+<!-- agent:done archive=tasks/software/lazily.done.md -->
 <!-- /agent:done -->

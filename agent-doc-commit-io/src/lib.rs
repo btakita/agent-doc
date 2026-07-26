@@ -1053,11 +1053,24 @@ where
                 marker.replace('\n', " ")
             ),
         );
+        // Name the exact unblocker. The self-heal above
+        // (`repair_committed_historical_snapshot_drift`) only rebases the snapshot
+        // when the visible document normalizes equal to HEAD; once the live file
+        // carries content BEYOND HEAD it declines, and refusing here is correct —
+        // auto-adopting would drop that operator content. But the operator is then
+        // left with an opaque refusal and has to know the recovery incantation,
+        // which is the wedge they actually feel. `reset --from-current
+        // --preserve-session` is non-destructive (it rebuilds the cold recovery
+        // projections from the visible file and keeps session state), so it is
+        // always the right next step here. Same convention as capture-io's
+        // baseline-mismatch bail.
         anyhow::bail!(
-            "refusing to auto-adopt committed historical response patchback for {}: HEAD contains an out-of-band {} mutation with response marker {}",
+            "refusing to auto-adopt committed historical response patchback for {}: HEAD contains an out-of-band {} mutation with response marker {}. The visible document has content beyond HEAD, so adopting HEAD would drop it. Rebuild the recovery projections from the visible file without clearing session state: `agent-doc reset --from-current --preserve-session {}` then `agent-doc commit {}`",
             file.display(),
             kind,
-            marker
+            marker,
+            file.display(),
+            file.display()
         );
     }
 

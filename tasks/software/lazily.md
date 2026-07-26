@@ -322,13 +322,42 @@ One honest limit. cpp's replayed-fixture count rose 88 → 93 because the ledger
 Mutation-checked per binding — simulating each flavor's arrival turns the ledger red (zig: compile error), and all restore clean. All seven gates green: py, go, js, dart, kt, cpp, zig. Committed and pushed per binding, with superproject gitlinks bumped in `20e11d3aa`.
 
 One note on that commit: `tasks/software/lazily.done.md` was already staged when I committed the gitlinks, so it rode along under the gitlink message. It is this session's own archive, not another session's work, so nothing was clobbered — but the message does not describe it.
-<!-- agent:boundary:3fdd5ff2 -->
+
+### Re: do [#lzqfcppfx] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lzqfcppfx]
+
+
+Done. lazily-cpp now replays the canonical queue corpus instead of transcribing it.
+
+The old arrangement was subtler than "no coverage". `test_queue.cpp` had five blocks named after five canonical fixtures, and the *observation harness* in them was sound — real derived `Computed` readers, real validity checks, the right invalidation polarity. What was wrong was that the **data** was a copy. A copy cannot drift-detect: add a step upstream, tighten one `invalidates` entry, change an expected value, and the transcription stays green against the contract it was written for rather than the one the spec holds today. Hence the honest KNOWN_UNCOVERED listing — declared, but declared as a gap.
+
+`test_queue_conformance.cpp` opens the bytes. Everything it asserts is library-sourced: the five reader kinds come from derived `Computed` readers so an edge is genuinely registered rather than a counter polled, and the `invalidates` matrix is checked against whether those readers were *actually* invalidated — captured before any refresh, because reading revalidates. It reads `invalidates` from under `expected`, where it lives; a runner that looked at step level would find nothing and check nothing, which is the trap that disabled rs's map assertion.
+
+`elements` needed an actual decision rather than a default. The queue exposes no enumeration, so checking full contents mid-fixture would mean asserting against a model the runner maintains itself — that tests the runner, not the library, and is the fourth false-green shape from the plan. Instead every step pins head+len from real reads, and each fixture ends by draining the queue and comparing the popped sequence to the fixture's final `elements`. That is the only spelling where the contents claim comes from the queue.
+
+Two findings worth keeping.
+
+**A real API narrowing.** The fixtures use `pop` with an `Empty`/`Closed` status return, but cpp's `pop()` convenience wrapper collapses both to `nullopt` and cannot express it. The contract survives on `try_pop`, so both spellings replay through that. The wrapper is lossy against the spec — not a bug I fixed here, but worth knowing before the thread-safe and async flavors copy its shape.
+
+**The coverage gate caught me.** My edit to shrink KNOWN_UNCOVERED took out `mergecell_algebra.json` as collateral, and the gate immediately failed with "exists on disk but is never replayed". Restored — it is still hand-mirrored in `test_merge.cpp`, a separate job.
+
+Mutation-checked three ways, all caught: dropping `bump_head` from pop (caught by the invalidates matrix *and* the head value), popping from the back so FIFO breaks (head + returns), and making close non-terminal — that last one returned `Ok` where the fixture says `Closed`, and left an element behind that **only the final drain caught**. If I had settled for head+len, mutation 3 would have half-passed.
+
+The five transcriptions and their now-unused Reader harness are deleted. What remains in `test_queue.cpp` is genuinely local — storage-backend seams, the minimal raw-channel contract, topic tests — none of it in the corpus.
+
+`make check` green: 93 canonical fixtures across 18 areas, KNOWN_UNCOVERED 25 → 20. Pushed as `36bcb6e`, gitlink `4bc11979e`.
+
+Two housekeeping notes carried by this cycle. `tasks/software/lazily.done.md` had briefly been committed as a stray full copy of this session document (frontmatter and all) when it rode along on an unrelated staged commit; the correct 18-line archive is restored here. And #lzqfports keeps a written kept-open reason rather than a silent skip: #lzqfspec and #lzqffx are committed, but its stated precondition #lzqfrs is not, so dispatching six binding subagents now would be six independent guesses at a shape rs has not yet pinned. #lzqfrs is the next real head.
+<!-- agent:boundary:c1ee8ce8 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ⏭️ do [#lzqfcppfx]
+- ~~⏭️ do [#lzqfcppfx]~~
 - ~~do [#lzqfprep]~~
 - ~~do [#lzdonequoteattr]~~
 - ~~do [#lzqfspec]~~
@@ -336,7 +365,7 @@ One note on that commit: `tasks/software/lazily.done.md` was already staged when
 - ~~do [#lzqffx]~~
 - ⏭️ do [#lzqfrs]
 - ⏭️ do [#lzqfjs]
-- 🚧 do [#lzqfports]
+- ⏭️ do [#lzqfports]
 - ⏭️ do [#lzqfzig]
 - ⏭️ do [#maphandlecleardependents]
 - ⏭️ do [#lazilycellfamily]
@@ -380,7 +409,6 @@ One note on that commit: `tasks/software/lazily.done.md` was already staged when
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzqfcppfx] lazily-cpp: replay the canonical queue fixtures instead of hand-mirroring them. test_queue.cpp transcribes queuecell_spsc_push_pop / popped_head_observation / mpsc_multi_writer / bounded_backpressure / closure_lifecycle by hand and never opens the canonical bytes — its coverage script declares them KNOWN_UNCOVERED with exactly that reason, so this is honest rather than a false green, but a hand transcription can silently drift from the corpus it claims to mirror. cpp already has the machinery (spec_fixture_text + REQUIRE_FIXTURES_LOADED + the manifest), which is what test_collections_family_conformance.cpp uses, so this is wiring rather than invention. Shrinking that KNOWN_UNCOVERED list is the deliverable — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
@@ -388,7 +416,7 @@ One note on that commit: `tasks/software/lazily.done.md` was already staged when
 - [ ] [#lzqfrs] lazily-rs: Phase 3 of the queue-family plan — context prerequisites + reference implementation. ThreadSafeContext needs a multi-root clear_slots equivalent (it has only single-handle clear at thread_safe.rs:3549 — four handles is four frontier walks; verify whether batch() already closes this, do not assume). AsyncContext needs a synchronous-compute computed and a multi-root clear (it has neither; only computed_async at async_context.rs:413). Then ship ThreadSafe/Async QueueCell + TopicCell + WorkQueueCell, each minting its own reader-kind handles on its own graph, Arc<Mutex<S>> storage with invalidation run outside the lock. KEPT OPEN DELIBERATELY: this is Phase 3 and is gated on Phase 1 (#lzqfformal) and Phase 2 (#lzqffx) — the plan requires the per-flavor fixture gate to land BEFORE implementation so the gap goes red first. A drain that reaches this id before those two is out of order, not ready work — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfjs] lazily-js: QueueCell/TopicCell/WorkQueueCell are not reactive at all — src/queue.js takes no context, contains ZERO ctx references, and reports invalidation by diffing a private snapshot. It scores green on the coverage row. Bind the family to a context and mint real reader-kinds, and check whether the collections fixtures are being satisfied by a non-reactive model here the way test/collections.test.js drives src/collections.js instead of the reactive families — plan: tasks/plan-lazily-queue-family-flavors.md
-- [ ] 🚧 [#lzqfports] lazily: Phase 5 — port the queue-family flavors to cpp, dart, py, go, kt (and build cs flavor-complete from the start under #lzcsqueues). One subagent per binding, NEVER two against one repo. Dispatch only after #lzqfspec + #lzqffx + #lzqfrs are committed so each agent has a settled spec, a red per-flavor gate, and a reference diff. cpp additionally needs its Source<uint64_t> version cells migrated if Phase 0 picks memoized-derive — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] 🚧 [#lzqfports] lazily: Phase 5 — port the queue-family flavors to cpp, dart, py, go, kt (and build cs flavor-complete from the start under #lzcsqueues). One subagent per binding, NEVER two against one repo. Dispatch only after #lzqfspec + #lzqffx + #lzqfrs are committed so each agent has a settled spec, a red per-flavor gate, and a reference diff. cpp additionally needs its Source<uint64_t> version cells migrated if Phase 0 picks memoized-derive. KEPT OPEN 2026-07-26: #lzqfspec and #lzqffx are now committed, but #lzqfrs (the rs reference implementation) is not, so the stated precondition is unmet — dispatching now would be six independent guesses at an unpinned shape. Unblocks the moment #lzqfrs lands — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyphaseextract] lazily-rs Phase A: extract the closure-free KeyedOrder<K,H> core (entries + order + membership + present-set + position/keys/len/contains_key + move_to/move_before/move_after) shared by all three families; thin per-model shells keep materialize/observe. Do NOT route through SyncReactiveGraph — its Send+Sync bound is stricter than the concrete Context API and would break Rc-capturing callers. `remove` stays out of the core (monotone present set is fixture- and Lean-backed). Plan: tasks/plan-lazily-reactivemap-unification.md

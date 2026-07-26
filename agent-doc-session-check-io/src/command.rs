@@ -857,15 +857,17 @@ fn inspect_with_warnings_inner(
         // Phase 1 lossless-tree shadow projection (#lzlosstree): audit the tree
         // round-trip against the same authoritative text the guard sweep uses.
         // Logged, never load-bearing — the flat CRDT stays the closeout authority.
-        agent_doc_ops_log_io::log_op(
-            file,
-            &agent_doc_markdown_lossless::shadow_audit_ops_log_line(
-                current_document.content(),
-                "session_check_guard_sweep",
-            ),
-        );
+        crate::profile::timed("shadow_audit_lossless_roundtrip", || {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &agent_doc_markdown_lossless::shadow_audit_ops_log_line(
+                    current_document.content(),
+                    "session_check_guard_sweep",
+                ),
+            );
+        });
         rc.set_current_document(current_document);
-        match crate::check_dropped_exchange_prompt_guard(file, &rc)? {
+        match crate::profile::timed("guard_dropped_exchange_prompt", || crate::check_dropped_exchange_prompt_guard(file, &rc))? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -873,7 +875,7 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        match crate::check_dropped_queue_prompt_guard(file, &rc)? {
+        match crate::profile::timed("guard_dropped_queue_prompt", || crate::check_dropped_queue_prompt_guard(file, &rc))? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -881,7 +883,7 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        match crate::check_queue_response_contamination_guard(file, &rc)? {
+        match crate::profile::timed("guard_queue_response_contamination", || crate::check_queue_response_contamination_guard(file, &rc))? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -889,11 +891,11 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        if let Some(message) = crate::check_completed_pending_reap_guard(file, &rc)? {
+        if let Some(message) = crate::profile::timed("guard_completed_pending_reap", || crate::check_completed_pending_reap_guard(file, &rc))? {
             report.status = SessionCheckStatus::Interrupted(message);
             return Ok(report);
         }
-        match crate::check_shadow_backlog_guard(file, &rc)? {
+        match crate::profile::timed("guard_shadow_backlog", || crate::check_shadow_backlog_guard(file, &rc))? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -901,7 +903,7 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        match crate::check_malformed_tracked_item_guard(file, &rc)? {
+        match crate::profile::timed("guard_malformed_tracked_item", || crate::check_malformed_tracked_item_guard(file, &rc))? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -909,7 +911,7 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        match crate::check_backlog_replay_guard(file, &rc)? {
+        match crate::profile::timed("guard_backlog_replay", || crate::check_backlog_replay_guard(file, &rc))? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -961,7 +963,7 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        match crate::check_prompt_only_exchange_tail_guard(file, &rc)? {
+        match crate::profile::timed("guard_prompt_only_exchange_tail", || crate::check_prompt_only_exchange_tail_guard(file, &rc))? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -970,16 +972,16 @@ fn inspect_with_warnings_inner(
             }
         }
         for guard in [
-            crate::check_pending_capture_guard(file, &rc)?,
-            crate::check_coined_ids_guard(file, &rc)?,
-            crate::check_pending_done_guard(file, &rc)?,
-            crate::check_expect_done_or_gate_guard(file, &rc)?,
+            crate::profile::timed("guard_pending_capture", || crate::check_pending_capture_guard(file, &rc))?,
+            crate::profile::timed("guard_coined_ids", || crate::check_coined_ids_guard(file, &rc))?,
+            crate::profile::timed("guard_pending_done", || crate::check_pending_done_guard(file, &rc))?,
+            crate::profile::timed("guard_expect_done_or_gate", || crate::check_expect_done_or_gate_guard(file, &rc))?,
             crate::check_partial_closeout_state_guard(file)?,
             crate::check_partial_staging_closeout_guard(file)?,
-            crate::check_blocked_closeout_followup_guard(file, &rc)?,
-            crate::check_gated_phase_split_guard(file, &rc)?,
+            crate::profile::timed("guard_blocked_closeout_followup", || crate::check_blocked_closeout_followup_guard(file, &rc))?,
+            crate::profile::timed("guard_gated_phase_split", || crate::check_gated_phase_split_guard(file, &rc))?,
             crate::check_queue_audit_partial_completion_guard(file)?,
-            crate::check_queue_head_removal_guard(file, &rc)?,
+            crate::profile::timed("guard_queue_head_removal", || crate::check_queue_head_removal_guard(file, &rc))?,
             crate::check_free_text_queue_head_provenance(file, &rc)?,
         ] {
             match guard {

@@ -93,6 +93,14 @@ pub fn tracked_modified_paths(file: &Path) -> Result<Vec<String>> {
             "--porcelain=v1",
             "--untracked-files=no",
             "--ignored=no",
+            // `#closeoutgitsubmodulescan`: ask git to skip submodules instead of
+            // reporting them and filtering them out below. Measured on
+            // agent-loop (69 submodules): 284ms with submodules, 6ms without —
+            // and the two outputs differ by exactly the gitlink lines that
+            // `#side-effect-exclude-submodules` already discards, so this is the
+            // same answer 47x faster. `git_commit` was 4.6-22.5s of a closeout,
+            // and repeated whole-tree submodule scans are most of it.
+            "--ignore-submodules=all",
         ])
         .output()?;
     if !output.status.success() {
@@ -103,6 +111,10 @@ pub fn tracked_modified_paths(file: &Path) -> Result<Vec<String>> {
     // sibling project sharing this superproject) is NEVER an agent-doc cycle
     // side-effect. Excluding submodule paths keeps closeout diagnostics focused
     // on files the cycle could have touched.
+    //
+    // `--ignore-submodules=all` above already removes these, so this filter is
+    // now defence in depth rather than the mechanism — kept because it costs
+    // nothing once the path set comes from `.gitmodules` instead of a scan.
     let submodules = submodule_paths(&git_root);
 
     Ok(agent_doc_git::tracked_modified_paths_from_porcelain(
@@ -172,21 +184,42 @@ pub fn tracked_side_effect_note(file: &Path) -> Result<String> {
     Ok(note)
 }
 
-/// Paths registered as git submodules under `git_root` (from `git submodule
-/// status`). Best-effort: a failed or absent submodule listing yields an empty
-/// set, so callers simply do not exclude anything.
+/// Paths registered as git submodules under `git_root`, read from `.gitmodules`.
+///
+/// Best-effort: a failed or absent listing yields an empty set, so callers simply
+/// do not exclude anything.
+///
+/// `#closeoutgitsubmodulescan`: this used to run `git submodule status`, which
+/// *walks every submodule* — 154ms on agent-loop's 69 of them, paid on every
+/// call. The registered paths are a config lookup, and `--get-regexp` over
+/// `.gitmodules` returns them in ~0ms. `git submodule status` also reports live
+/// checkout state (current sha, dirty markers) that this caller never reads: it
+/// wants the *path set*, so the cheaper source is also the more precise one.
 fn submodule_paths(git_root: &Path) -> std::collections::HashSet<String> {
     let Ok(output) = Command::new("git")
         .current_dir(git_root)
-        .args(["submodule", "status"])
+        .args([
+            "config",
+            "--file",
+            ".gitmodules",
+            "--get-regexp",
+            r"^submodule\..*\.path$",
+        ])
         .output()
     else {
         return std::collections::HashSet::new();
     };
     if !output.status.success() {
+        // No `.gitmodules` (the common single-repo case) exits non-zero. That is
+        // "no submodules", not an error.
         return std::collections::HashSet::new();
     }
-    agent_doc_git::parse_submodule_paths(&String::from_utf8_lossy(&output.stdout))
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .map(|(_key, path)| path.trim().to_string())
+        .filter(|path| !path.is_empty())
+        .collect()
 }
 
 #[cfg(test)]

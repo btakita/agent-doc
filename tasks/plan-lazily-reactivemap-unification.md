@@ -50,6 +50,14 @@ symptom of the structure this plan addresses.
 >
 > **Remaining:** py, js, dart, cpp, cs, go, kt — Core surface per flavor, plus
 > the fixture replay. Sequencing below still holds, minus zig.
+>
+> **Sibling plan.** The same defect exists in the queue family — `QueueCell`,
+> `TopicCell`, and `WorkQueueCell` are hard-bound to the single-threaded context
+> in all eight bindings that ship them. See
+> [`plan-lazily-queue-family-flavors.md`](plan-lazily-queue-family-flavors.md).
+> It reuses this plan's Core/Extended mechanism and its per-flavor fixture-replay
+> gate, and it needs the same `AsyncContext` widening ("Async — corrected" below)
+> as a prerequisite.
 
 > ## Corrections after adversarial review
 >

@@ -510,6 +510,22 @@ pub(crate) struct ControllerRuntime {
     /// recycle takes effect at the next tick even mid-turn. Implies
     /// `recycle_requested`.
     recycle_forced: AtomicBool,
+    /// `#stategraphjoin` / `#retainedsettlereactive` — one reactive graph per
+    /// open document.
+    ///
+    /// `supervisor_recycle_graph` above is process-scoped because there is one
+    /// supervisor. Retained-write settlement is **per document**, so each
+    /// document owns a [`DocumentScope`](agent_doc_state_scope::DocumentScope)
+    /// whose drop takes that document's cells with it.
+    ///
+    /// The point of the registry is lifetime. Before it, callers built a scope,
+    /// set observations, read the verdict, and dropped the whole graph inside
+    /// one function call — which is "constructing a whole context to answer one
+    /// comparison", strictly worse than the comparison. Here the graph outlives
+    /// the call, `apply_state_event` pushes facts into it, and the verdict
+    /// updates because a fact arrived rather than because a caller remembered to
+    /// reload SQLite and recompute.
+    document_graphs: ControllerDocumentGraphs,
     /// `#stategraphjoin` — the controller process's reactive scope.
     ///
     /// Every graph below is built in this one scope, so controller-lifetime facts
@@ -517,6 +533,127 @@ pub(crate) struct ControllerRuntime {
     /// them, instead of one private context per struct. Dropping the runtime drops
     /// the scope and every cell in it — teardown is the scope's lifetime.
     _scope: agent_doc_state_scope::ProcessScope,
+}
+
+/// Per-document retained-write settlement as a **keyed reactive collection**
+/// (`#reactivemap`, `#retainedsettlereactive`).
+///
+/// The first draft of this was a `Mutex<HashMap<String, DocumentGraph>>` whose
+/// entries each held their own `DocumentScope`. The entries were reactive but
+/// the registry was not: membership was imperative (`or_insert_with` on whoever
+/// touched it first), nothing could derive across documents, and — because no
+/// path ever removed a key — the "dropping the scope is the teardown" claim it
+/// carried was simply not true.
+///
+/// A keyed reactive map is the shape that actually holds: `document_hash` is the
+/// key dimension, the three observations are per-entry input cells, and the
+/// verdict is a per-entry derived slot over them. Membership is the map's
+/// present set rather than a side table, and a closed document is the value
+/// `None` rather than a leaked graph.
+struct ControllerDocumentGraphs {
+    ctx: ThreadSafeContext,
+    pending: lazily::ThreadSafeCellMap<
+        String,
+        Option<agent_doc_state_backbone::retained_write::RetainedIntentFacts>,
+    >,
+    authority: lazily::ThreadSafeCellMap<
+        String,
+        Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+    >,
+    disk: lazily::ThreadSafeCellMap<
+        String,
+        Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+    >,
+    verdict: lazily::ThreadSafeSlotMap<
+        String,
+        agent_doc_state_backbone::retained_write::SettlementVerdict,
+    >,
+}
+
+impl ControllerDocumentGraphs {
+    fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
+        let ctx = scope.ctx().clone();
+        Self {
+            pending: lazily::ThreadSafeCellMap::new(&ctx),
+            authority: lazily::ThreadSafeCellMap::new(&ctx),
+            disk: lazily::ThreadSafeCellMap::new(&ctx),
+            verdict: lazily::ThreadSafeSlotMap::new(&ctx),
+            ctx,
+        }
+    }
+
+    fn set_pending(
+        &self,
+        document_hash: &str,
+        pending: Option<agent_doc_state_backbone::retained_write::RetainedIntentFacts>,
+    ) {
+        self.pending
+            .set(&self.ctx, document_hash.to_string(), pending);
+    }
+
+    /// Read `document_hash`'s derived verdict, minting the slot on first access.
+    ///
+    /// The slot's body reads the three cell maps, which subscribes it to them, so
+    /// a later `set` on any one invalidates this verdict instead of leaving a
+    /// stale value behind.
+    fn verdict(
+        &self,
+        document_hash: &str,
+        authority: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+        disk: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+    ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
+        self.authority
+            .set(&self.ctx, document_hash.to_string(), authority);
+        self.disk.set(&self.ctx, document_hash.to_string(), disk);
+
+        // The slot factory is `Fn(&K) -> V` with no context parameter, so the
+        // only way an entry can derive from the three cell maps is to capture a
+        // context clone and read through it. Clones share the graph's inner
+        // state, so those reads do subscribe the slot — covered by
+        // `slot_map_entry_capturing_a_ctx_clone_tracks_a_cell_map_dependency`,
+        // because "Computed in name only" fails silently and looks like a stale
+        // value much later.
+        let ctx = self.ctx.clone();
+        let pending = self.pending.clone();
+        let authority_map = self.authority.clone();
+        let disk_map = self.disk.clone();
+        self.verdict
+            .get_or_insert_with(&self.ctx, document_hash.to_string(), move |key| {
+                agent_doc_state_backbone::retained_write::settlement_verdict(
+                    pending.observe(&ctx, key).flatten().as_ref(),
+                    authority_map.observe(&ctx, key).flatten().as_ref(),
+                    disk_map.observe(&ctx, key).flatten().as_ref(),
+                )
+            })
+    }
+}
+
+/// Project a document's retained-write intent into the facts settlement needs.
+///
+/// `carries_response_payload` asks whether the intent's own target contains the
+/// captured response: only such an intent can be proven landed by that response
+/// appearing in a rebased document. A delivery-only projection has no payload to
+/// stand in for its byte target and must settle on exact bytes.
+fn retained_intent_facts_from_projection(
+    document: &agent_doc_state_backbone::DocumentStateProjection,
+) -> Option<agent_doc_state_backbone::retained_write::RetainedIntentFacts> {
+    let pending = document.document.pending_write.as_ref()?;
+    // The same identity `DocumentWriteConverged` already uses to prove a write
+    // through to `DiskProjected`: the closeout's response cell and this intent's
+    // target are the same content, so the intent *is* the response write.
+    let carries_response_payload = document
+        .closeout
+        .response_cell
+        .as_ref()
+        .is_some_and(|cell| cell.content_hash.eq_ignore_ascii_case(&pending.target_hash));
+    Some(
+        agent_doc_state_backbone::retained_write::RetainedIntentFacts {
+            intent_id: pending.intent_id.clone(),
+            target_hash: pending.target_hash.clone(),
+            reason: pending.reason.clone(),
+            carries_response_payload,
+        },
+    )
 }
 
 impl ControllerRuntime {
@@ -541,6 +678,7 @@ impl ControllerRuntime {
             supervisor_recycle_graph,
             supervisor_recycle_waiters: Condvar::new(),
             state_projection_waiters: Condvar::new(),
+            document_graphs: ControllerDocumentGraphs::new_in(&scope),
             recycle_requested: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
             _scope: scope,
@@ -611,16 +749,67 @@ impl ControllerRuntime {
     }
 
     fn apply_state_event(&self, event: &agent_doc_state_backbone::StateEvent) -> Result<()> {
-        let recycle = {
+        let document_hash = event.fact.document_hash().to_string();
+        let (recycle, retained_intent) = {
             let mut memory = self.memory.lock();
             memory.state_ledger.append(event.clone());
             memory.state_projection.apply(event);
-            memory.state_projection.project_supervisor_recycle()
+            let retained_intent = memory
+                .state_projection
+                .document(&document_hash)
+                .and_then(retained_intent_facts_from_projection);
+            (
+                memory.state_projection.project_supervisor_recycle(),
+                retained_intent,
+            )
         };
         self.supervisor_recycle_graph.set(recycle);
+        // `#retainedsettlereactive`: the retained-write fact is *pushed* into the
+        // document's graph as it lands. That is what makes the settlement verdict
+        // a derived value rather than something a later caller recomputes from a
+        // fresh SQLite reload. Done outside the memory lock: setting a cell runs
+        // that document's effects, which must not re-enter the projection.
+        self.set_document_retained_intent(&document_hash, retained_intent);
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
         Ok(())
+    }
+
+    /// Push the current retained-write intent into `document_hash`'s graph,
+    /// creating that graph on first touch and hydrating it from the projection.
+    ///
+    /// Storage hydrates here and only here; it never arbitrates the decision
+    /// (`#lzdurablesink`).
+    fn set_document_retained_intent(
+        &self,
+        document_hash: &str,
+        retained_intent: Option<
+            agent_doc_state_backbone::retained_write::RetainedIntentFacts,
+        >,
+    ) {
+        if retained_intent.is_none() && !self.document_graphs.pending.is_present(&document_hash.to_string()) {
+            // Nothing outstanding and no entry yet: do not mint one just to
+            // record an absence (the present set never shrinks).
+            return;
+        }
+        self.document_graphs
+            .set_pending(document_hash, retained_intent);
+    }
+
+    /// The document's derived settlement verdict, given content observations the
+    /// caller has resolved.
+    ///
+    /// Both `preflight` and `session-check` reach this one cell, so they cannot
+    /// answer "is a retained write outstanding?" differently — which is the
+    /// contradiction that deadlocked closeout before `#retainedsettlereactive`.
+    pub(crate) fn document_retained_write_verdict(
+        &self,
+        document_hash: &str,
+        authority: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+        disk: Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+    ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
+        self.document_graphs
+            .verdict(document_hash, authority, disk)
     }
 
     /// `#lazily-hot-path` W1 — bounded await for the visible-write receipt of
@@ -6529,6 +6718,7 @@ agent:queue\n\
             coordination_graph,
             supervisor_recycle_waiters: Condvar::new(),
             state_projection_waiters: Condvar::new(),
+            document_graphs: ControllerDocumentGraphs::new_in(&scope),
             recycle_requested: AtomicBool::new(false),
             recycle_forced: AtomicBool::new(false),
             _scope: scope,

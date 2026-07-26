@@ -1022,6 +1022,84 @@ pub fn tmux_focus_state(project_root: &Path) -> Result<ControllerTmuxFocusState>
     )
 }
 
+/// Content observations the caller resolved, sent to the controller so the
+/// verdict is derived in the one live graph rather than in each caller.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RetainedWriteObservations {
+    pub authority_hash: Option<String>,
+    pub authority_payload_materialized: bool,
+    pub disk_hash: Option<String>,
+    pub disk_payload_materialized: bool,
+}
+
+impl RetainedWriteObservations {
+    fn into_planes(
+        self,
+    ) -> (
+        Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+        Option<agent_doc_state_backbone::retained_write::ContentObservation>,
+    ) {
+        let plane = |hash: Option<String>, payload_materialized: bool| {
+            hash.map(
+                |content_hash| agent_doc_state_backbone::retained_write::ContentObservation {
+                    content_hash,
+                    payload_materialized,
+                },
+            )
+        };
+        (
+            plane(self.authority_hash, self.authority_payload_materialized),
+            plane(self.disk_hash, self.disk_payload_materialized),
+        )
+    }
+}
+
+pub(crate) fn handle_retained_write_settlement(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::retained_write::SettlementVerdict> {
+    let file = request_file(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let observations = request
+        .diagnostic_payload
+        .as_deref()
+        .and_then(|payload| serde_json::from_str::<RetainedWriteObservations>(payload).ok())
+        .unwrap_or_default();
+    let (authority, disk) = observations.into_planes();
+    Ok(runtime.document_retained_write_verdict(&document_hash, authority, disk))
+}
+
+/// Ask the controller for the document's retained-write settlement verdict.
+///
+/// This is the hop that makes the fact *shared*. `preflight` and `session-check`
+/// are separate short-lived processes: without it they would each replay the
+/// SQLite ledger and derive privately, which is exactly the divergence
+/// `#retainedsettlereactive` exists to remove.
+pub fn retained_write_settlement(
+    project_root: &Path,
+    file: &Path,
+    observations: &RetainedWriteObservations,
+) -> Result<agent_doc_state_backbone::retained_write::SettlementVerdict> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "retained_write_settlement".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(observations)?),
+        },
+    )
+}
+
 pub fn focus_document_pane(project_root: &Path, file: &Path) -> Result<ControllerTmuxFocusReceipt> {
     #[cfg(any(test, feature = "test-support"))]
     {
@@ -9207,6 +9285,9 @@ pub(crate) fn handle_request_locked(
             request,
         )),
         "state_subscribe" => controller_envelope(handle_state_subscribe(runtime.as_ref(), request)),
+        "retained_write_settlement" => {
+            controller_envelope(handle_retained_write_settlement(runtime.as_ref(), request))
+        }
         "reliable_sync" => controller_envelope(handle_reliable_sync(
             &bootstrap_snapshot.project_root,
             request,
@@ -9859,15 +9940,29 @@ fn publish_editor_replica_rebuild_targets(project_root: &Path) {
         .projection()
         .registrations_missing_replica(&held)
         .into_iter()
-        .filter(|registration| {
-            !agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(std::path::Path::new(
-                &registration.path,
-            ))
-        })
+        .filter(|registration| !controller_serves_replica(&registration.path))
+        .filter(|registration| !peer_repairs_itself(registration))
         .map(|registration| (registration.path, registration.pid, registration.editor_id))
         .collect();
     let plane = editor_replica_rebuild_plane(project_root);
     plane.scope.ctx().set(&plane.targets, targets);
+}
+
+/// Whether this registration's editor advertises the Tier 3 pull and therefore
+/// repairs itself.
+///
+/// The capability travels on the registration, which is part of the same replicated
+/// liveness plane the desired set is derived from — so the fan-out retires **per
+/// peer**, from converged state, with no version handshake and no flag day. An old
+/// plugin in one IDE keeps getting the compatibility push while a current one in the
+/// next IDE does not.
+fn peer_repairs_itself(
+    registration: &agent_doc_reliable_sync_io::liveness::EditorRegistration,
+) -> bool {
+    agent_doc_document_realtime::editor_contract::has_capability(
+        &registration.capabilities,
+        agent_doc_document_realtime::editor_contract::PEER_REPLICA_PULL_CAPABILITY,
+    )
 }
 
 fn request_editor_replica_rebuild_after_restart(project_root: &Path) {
@@ -9883,6 +9978,19 @@ fn request_editor_replica_rebuild_after_restart(project_root: &Path) {
         .registrations_missing_replica(&held);
     let mut requested: BTreeSet<String> = BTreeSet::new();
     for registration in registrations {
+        // The retirement condition (`#ctrlkillreregister`): a peer that pulls
+        // `peer_replicas_missing` about itself repairs without being pushed at, so
+        // pushing anyway is a delivery that can only fail, never help.
+        if peer_repairs_itself(&registration) {
+            agent_doc_ops_log_io::log_op(
+                project_root,
+                &format!(
+                    "controller_restart_editor_replica_rebuild_skipped file={} pid={} editor_id={} reason=peer_replica_pull",
+                    registration.path, registration.pid, registration.editor_id
+                ),
+            );
+            continue;
+        }
         if !requested.insert(registration.path.clone()) {
             continue;
         }
@@ -11826,7 +11934,28 @@ pub(crate) fn handle_peer_replicas_missing(
     Ok(controller_liveness_plane()
         .lock()
         .projection()
-        .peer_registrations_missing_replica(pid, &held))
+        .peer_registrations_missing_replica(pid, &held)
+        .into_iter()
+        .filter(|registration| !controller_serves_replica(&registration.path))
+        .collect())
+}
+
+/// Whether **this controller process** can currently serve `path`'s replica.
+///
+/// The relay hub is a process-local static, so this is the only fact that
+/// distinguishes "registered" from "registered and actually backed". The caller's
+/// `held` set cannot answer it: an editor holding a forwarder it believes is live
+/// says nothing about whether the hub on this side survived, and after a controller
+/// kill that belief is exactly what is wrong. So the derivation subtracts what this
+/// process can serve, and the peer's `held` only suppresses documents it has already
+/// decided not to hear about.
+///
+/// Without this the pull returned every live registration in steady state, which
+/// would have made an editor re-register perfectly healthy documents on every
+/// startup — and returned nothing useful after a restart, since a stranded editor
+/// still lists its stale forwarders as `held`.
+fn controller_serves_replica(path: &str) -> bool {
+    agent_doc_crdt_relay_io::embedded_relay_is_available_for_file(std::path::Path::new(path))
 }
 
 /// `#lazily-hot-path` Theme A — bounded server-side await for delivery convergence.
@@ -15285,6 +15414,60 @@ mod tests {
         assert_eq!(
             editor_native_reload_policy("future-editor-123", &[]),
             EditorNativeReloadPolicy::RestartRequired
+        );
+    }
+
+    /// `#ctrlkillreregister` — the Tier 1 fan-out retires **per peer**, off the same
+    /// replicated registration set the desired set is derived from.
+    ///
+    /// The point of asserting it here is that there is no flag day and no version
+    /// handshake: a current plugin stops being pushed at the moment its registration
+    /// converges, while an old plugin in another IDE keeps the compatibility push.
+    #[test]
+    fn restart_fan_out_skips_peers_that_pull_their_own_missing_replicas() {
+        let registration = |capabilities: Vec<String>| {
+            agent_doc_reliable_sync_io::liveness::EditorRegistration {
+                document_hash: "doc".into(),
+                pid: 42,
+                path: "/proj/plan.md".into(),
+                editor_id: "jetbrains-42".into(),
+                editor_kind: "jetbrains".into(),
+                editor_version: "0.2.283".into(),
+                capabilities,
+                timestamp_ms: 1,
+            }
+        };
+
+        assert!(
+            !peer_repairs_itself(&registration(vec![])),
+            "a plugin predating the pull still needs the compatibility push"
+        );
+        assert!(
+            !peer_repairs_itself(&registration(vec!["operator_text_authority_v1".to_string()])),
+            "an unrelated capability must not retire the push"
+        );
+        assert!(
+            peer_repairs_itself(&registration(vec![
+                "operator_text_authority_v1".to_string(),
+                agent_doc_document_realtime::editor_contract::PEER_REPLICA_PULL_CAPABILITY
+                    .to_string(),
+            ])),
+            "a peer that asks about itself must not also be pushed at"
+        );
+    }
+
+    /// The pull's answer is scoped by what THIS controller can serve, not by what the
+    /// asking editor believes it holds.
+    ///
+    /// A stranded editor lists its stale forwarders as `held`, so a `held`-only
+    /// derivation returns nothing exactly when the editor most needs an answer. With
+    /// no hub for the path, the controller cannot serve it and the registration is
+    /// reported.
+    #[test]
+    fn controller_serves_replica_is_false_without_a_process_local_hub() {
+        assert!(
+            !controller_serves_replica("/nonexistent/never-registered.md"),
+            "a path this process holds no relay for is not served here"
         );
     }
 

@@ -77,7 +77,16 @@ where
     }
 
     fn retained_document_write(&self, file: &Path) -> bool {
-        agent_doc_document_realtime_io::pending_document_write(file).is_some()
+        // `#retainedsettlereactive`: ask the shared derived verdict, not the raw
+        // `pending_document_write(..).is_some()`. That reload arbitrated the
+        // gate from storage (`#lazily-hot-path`) and reported *any* retained
+        // intent as outstanding — including one the converged document had
+        // already satisfied, which `session-check` simultaneously reported as
+        // ok. Both being true is what deadlocked the session.
+        agent_doc_document_realtime_io::retained_write_blocks_new_cycle(
+            file,
+            "preflight_retained_document_write_gate",
+        )
     }
 
     fn session_interruption(&self, file: &Path) -> Result<Option<String>> {

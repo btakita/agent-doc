@@ -192,6 +192,22 @@ fn ensure_terminal_authority_disk_convergence(
     effects: &impl SessionCheckEffects,
 ) -> Result<()> {
     if authority_content == disk_content {
+        // Converged planes are not on their own proof that no retained intent
+        // is outstanding. This path used to return ok without ever consulting
+        // the retained write, so an intent whose byte target a concurrent
+        // operator edit had rebased stayed in `pending_write` forever while
+        // session-check reported success — and preflight, reading that same
+        // intent, refused every new cycle. Settle it from the shared derived
+        // verdict (`#retainedsettlereactive`) so both consumers agree.
+        if let Err(e) = agent_doc_document_realtime_io::settle_retained_write_through_derived_verdict(
+            file,
+            "session_check_terminal_convergence_derived_settlement",
+        ) {
+            eprintln!(
+                "[session-check] retained-write settlement warning for {}: {e}",
+                file.display()
+            );
+        }
         return Ok(());
     }
     let non_capture_cycle = terminal_phase_allows_non_capture_projection_settlement(

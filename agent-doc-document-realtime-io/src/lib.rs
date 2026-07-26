@@ -5885,6 +5885,198 @@ fn resolve_disk_only_current_doc(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Retained-write settlement as one derived fact (`#retainedsettlereactive`).
+//
+// `preflight` and `session-check` must agree on "is a retained document write
+// still unsettled?". They used to derive it from different inputs and never
+// shared a cell, which let both "unsettled" and "ok" be true at once and
+// deadlocked the session. These adapters feed the observations into the
+// document-scoped cells in `agent_doc_state_backbone::retained_write` and hand
+// both consumers the *same* `Computed`.
+// ---------------------------------------------------------------------------
+
+use std::sync::Arc;
+
+use agent_doc_state_backbone::retained_write::{
+    ContentObservation, RetainedIntentFacts, RetainedWriteSettlement, SettlementVerdict,
+};
+
+/// The captured response body for `file`'s current cycle, if one is projected.
+///
+/// This is the intent's semantic payload: the thing whose presence in the
+/// converged document proves a rebased intent actually landed.
+fn projected_captured_response(file: &Path) -> Option<String> {
+    let state = agent_doc_cycle_state_io::load_with_closeout_projection(file).ok()??;
+    let capture_id = state.capture_id.as_deref()?;
+    let capture =
+        agent_doc_cycle_state_io::load_projected_captured_response(file, capture_id).ok()??;
+    (capture.cycle_id == state.cycle_id).then_some(capture.response_body)
+}
+
+/// Observe one content plane. `Err` becomes `None` — "I could not look" is a
+/// distinct outcome from "I looked and it is outstanding"
+/// (`#idlerevisionreactive`), and collapsing them would turn a transport blip
+/// into a permanent refusal to open a cycle.
+fn observe_plane(content: Result<String>, payload: Option<&str>) -> Option<ContentObservation> {
+    let content = content.ok()?;
+    let payload_materialized = payload.is_some_and(|payload| {
+        agent_doc_turn::response_replay::response_materialized_in_content(payload, &content)
+    });
+    Some(ContentObservation {
+        content_hash: agent_doc_hash::content_hash(&content),
+        payload_materialized,
+    })
+}
+
+/// Build the document-scoped settlement cells for `file` from live observations.
+///
+/// Storage hydrates the sources here and nowhere else; it never arbitrates the
+/// decision (`#lzdurablesink`).
+fn observe_retained_write_settlement(file: &Path, source: &str) -> RetainedWriteSettlement {
+    let scope = agent_doc_state_backbone::DocumentScope::new();
+    let settlement = RetainedWriteSettlement::new_in(&scope);
+
+    let Some(pending) = pending_document_write(file) else {
+        // No intent: the verdict is `NoRetainedIntent` without paying for a
+        // single content read.
+        return settlement;
+    };
+
+    let captured_response = projected_captured_response(file);
+    // The intent carries a response payload only if its own target actually
+    // contains that response. A delivery-only projection has nothing that can
+    // stand in for its byte target, so it must settle on exact bytes.
+    let payload = captured_response.as_deref().filter(|payload| {
+        agent_doc_turn::response_replay::response_materialized_in_content(
+            payload,
+            &pending.target_content,
+        )
+    });
+
+    settlement.observe_pending(Some(RetainedIntentFacts {
+        intent_id: pending.intent_id.clone(),
+        target_hash: pending.target_hash.clone(),
+        reason: pending.reason.clone(),
+        carries_response_payload: payload.is_some(),
+    }));
+    settlement.observe_authority(observe_plane(
+        try_resolve_current_document_content(file, source),
+        payload,
+    ));
+    settlement.observe_disk(observe_plane(
+        resolve_disk_current_document_content(file, source),
+        payload,
+    ));
+    settlement
+}
+
+/// The shared derived fact. `preflight` and `session-check` both read this.
+///
+/// The verdict is derived in the **controller's** per-document graph whenever a
+/// controller is reachable. That hop is the point: `preflight` and
+/// `session-check` are separate short-lived processes, so deriving in-process
+/// would give each its own private graph replayed from SQLite — which is the
+/// divergence this exists to remove. The local path below is a fallback for an
+/// actorless document (no controller), where there is no shared graph to join
+/// and hydrate-then-derive is the honest best available.
+pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict {
+    let settlement = observe_retained_write_settlement(file, source);
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return settlement.verdict();
+    };
+    let (authority, disk) = settlement.observations();
+    let observations = agent_doc_controller_io::project_controller::RetainedWriteObservations {
+        authority_payload_materialized: authority
+            .as_ref()
+            .is_some_and(|plane| plane.payload_materialized),
+        authority_hash: authority.map(|plane| plane.content_hash),
+        disk_payload_materialized: disk
+            .as_ref()
+            .is_some_and(|plane| plane.payload_materialized),
+        disk_hash: disk.map(|plane| plane.content_hash),
+    };
+    match agent_doc_controller_io::project_controller::retained_write_settlement(
+        &project_root,
+        file,
+        &observations,
+    ) {
+        Ok(verdict) => verdict,
+        Err(e) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "retained_write_settlement_local_fallback file={} source={} reason={e}",
+                    file.display(),
+                    source,
+                ),
+            );
+            settlement.verdict()
+        }
+    }
+}
+
+/// True when a retained write genuinely blocks opening a new cycle.
+///
+/// Replaces `pending_document_write(file).is_some()` at the preflight gate: an
+/// intent that the converged document has already satisfied — and one whose
+/// planes could not be observed — are both *not* outstanding writes.
+pub fn retained_write_blocks_new_cycle(file: &Path, source: &str) -> bool {
+    retained_write_settlement(file, source).blocks_new_cycle()
+}
+
+/// Settle a retained write whose purpose the converged document already meets.
+///
+/// The clear is an [`Effect`](lazily::Effect) gated on the derived verdict, not
+/// a `settle_*` call a code path had to remember to make: it fires because the
+/// observations say the intent is satisfied, and is a no-op whenever they do
+/// not. Returns whether the intent was cleared.
+pub fn settle_retained_write_through_derived_verdict(file: &Path, source: &str) -> Result<bool> {
+    let settlement = observe_retained_write_settlement(file, source);
+    let outcome: Arc<Mutex<Option<Result<bool>>>> = Arc::new(Mutex::new(None));
+
+    let effect = {
+        let verdict_cell = *settlement.verdict_cell();
+        let outcome = Arc::clone(&outcome);
+        let file = file.to_path_buf();
+        let source = source.to_string();
+        settlement.ctx().effect(move |ctx| {
+            let SettlementVerdict::Satisfied {
+                intent_id,
+                retained_target_hash,
+                settled_hash,
+                proof,
+            } = ctx.get(&verdict_cell)
+            else {
+                // Idempotent when the signal is empty: nothing to clear.
+                *outcome.lock() = Some(Ok(false));
+                return;
+            };
+            let cleared = clear_deferred_document_write_intent(&file, &retained_target_hash, &source)
+                .map(|()| {
+                    agent_doc_ops_log_io::log_op(
+                        &file,
+                        &format!(
+                            "retained_write_settled_from_derived_verdict file={} intent_id={} retained_target_hash={} settled_hash={} proof={} source={}",
+                            file.display(),
+                            intent_id,
+                            retained_target_hash,
+                            settled_hash,
+                            proof.token(),
+                            source,
+                        ),
+                    );
+                    true
+                });
+            *outcome.lock() = Some(cleared);
+        })
+    };
+    settlement.ctx().dispose_effect(&effect);
+
+    let mut slot = outcome.lock();
+    slot.take().unwrap_or(Ok(false))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

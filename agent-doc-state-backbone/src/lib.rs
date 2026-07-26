@@ -20,6 +20,7 @@ use agent_doc_turn::{CycleEvent, CyclePhaseMachine};
 
 /// Phase E (`#adstatechart`) local-process Harel state chart consolidation.
 pub mod adstatechart;
+pub mod retained_write;
 pub mod write_pipeline;
 
 /// Project-scoped supervisor graph document. Most state facts are per session

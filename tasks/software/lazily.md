@@ -149,14 +149,37 @@ Confidence: high for the Phase 0-1 gate and its feature/staging semantics. Escal
 Implemented capability-driven peer groups. `hello.features` advertises only production-backed surfaces. A scenario includes peers that support its required feature; unsupported implementations remain visible in `staged_peers`, receive no green credit, and are excluded from the active group. Required codecs and channels still fail closed within that eligible group, and fewer than two eligible peers is red, so feature filtering cannot produce a vacuous pass.
 
 `lazily-cs` is checked into the registry as staged with no executable command. It will join CRDT feature scenarios only after `#lzcsipc` and `#lzcssync` provide the real library surfaces; the plans and peer contract now state this explicitly.
-<!-- agent:boundary:28b469cb -->
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> do [#lzinteropeers]
+
+
+Implemented `#lzinteropeers` as a capability-driven production peer rollout.
+
+- Added thin production-runtime adapters for Rust, Zig, Python, Kotlin, JavaScript, Dart, Go, and C++; each adapter is exercised by its binding’s normal local gate.
+- Added progressive 2–8 peer convergence scenarios. The eight-peer feature scenario requires `distributed_crdt` but no state-plane codec, so all implementations that support the feature participate. Codec/channel scenarios retain explicit capability requirements and therefore select narrower peer groups.
+- Kept `lazily-cs` registered with `staged = true`; reports show it as staged, it is never started, and it receives no pass credit until its production CRDT/IPC feature surfaces exist.
+- C++ advertises only production MessagePack support, normalizes frames through its keyed MessagePack codec, self-checks keyed and positional MessagePack, and runs under ASan/UBSan. It does not falsely advertise JSON state-plane support.
+- Corrected Zig’s conformance-evidence invocation so freshly truncated manifests force real test execution rather than accepting cached runs.
+
+Proof:
+- changed_paths: `src/lazily-interop/{peers.toml,README.md,schemas/scenario.schema.json,scenarios/*.json,src/main.rs,src/reference.rs}` and the peer adapter/build files in `src/lazily-{rs,zig,py,kt,js,dart,go,cpp}`.
+- commands: every binding’s `make check`; `src/lazily-interop/make check`; `cargo run --quiet -- run --scenario scenarios/eight-way-convergence.json --format json --require-channels --timeout-ms 10000`; workspace-root `make check`.
+- verification: eight-peer convergence passed with 8 peers started, 8 frames emitted, 11 deliveries, zero failures, and `lazily-cs` reported as staged; mutation gate caught 8/8 defect classes; all binding gates passed; workspace gate passed 8,176 agent-doc tests plus remaining workspace checks.
+- commits: Rust `6403b3a`, Zig `c0e8b58`, Python `0a2d6f5`, Kotlin `aea8b58`, JavaScript `5ed7c47`, Dart `0198fed`, Go `f82fd09`, C++ `3d83a61` (all pushed); workspace supervisor commit `00c63466b`.
+- confidence: high.
+- escalation: none.
+<!-- agent:boundary:30558332 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzinteropcore]~~
-- do [#lzinteropeers]
+- ~~do [#lzinteropeers]~~
 - do [#lzinteropchannels]
 - do [#lzinteropcs]
 - ~~do [#lzwirefrontier]~~
@@ -204,7 +227,6 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzinteropeers] Implement the Rust+Zig reference pair and the Python/Kotlin/JavaScript/Dart/Go/C++ peer rollout from `tasks/software/plan-lazily-interop-peer-rollout.md`.
 - [ ] [#lzinteropchannels] Implement the five data-channel profiles, fault scenarios, and PR/merge/nightly CI matrix from `tasks/software/plan-lazily-interop-channel-matrix.md`.
 - [ ] [#lzinteropcs] Add the C# peer to the single network suite after `#lzcsipc` and `#lzcssync` provide real IPC/CRDT surfaces, following `tasks/software/plan-lazily-interop-peer-rollout.md`.
 - [ ] [#lzsignalingnegative] lazily-spec + all bindings: signaling/frames.json and anti_spoof_session.json have no NEGATIVE cases, so nothing anywhere pins that a malformed frame is REJECTED rather than silently defaulted. The schema already closes the tag set (oneOf over 14 branches, each type: {const}, additionalProperties: false), but no fixture drives it. Add a rejects block covering: unknown type value; to and from both present on one frame (the description says they never are); a client frame carrying from (the anti-spoof surface itself); welcome.peers containing the joining peer. This is the portable form of the tag-enum question — the wire contract is the closed tag set plus rejection, not any binding's type shape

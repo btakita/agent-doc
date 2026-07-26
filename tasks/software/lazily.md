@@ -819,17 +819,75 @@ response, which also left the sequencing answer duplicated in the exchange. This
 `--stream` pass merges against the live editor buffer to collapse it.
 
 Next up is `#maphandlecleardependents`, then `#portmembershiporder`.
-<!-- agent:boundary:70ca6d01 -->
+
+### Re: prep for the queue-family plan — opus-5
+
+Three things, so a cleared session starts clean.
+
+**`#portmembershiporder` is reaped — it is exactly what shipped.** The item read
+"port the membership/order plane to the other 8 bindings' thread-safe + async
+maps (py, js, kt, go, cpp, cs, dart, zig)". All eight landed, released, and
+published on 2026-07-26. Leaving it open above the queue items was the real
+hazard here: a fresh session would have picked it up and redone finished work.
+
+**Two neighbouring items were partly overtaken, so I corrected their text rather
+than leaving a stale survey.** `#lazilyasyncmap` turns out not to be an rs quirk
+— the same untracked-read defect was found and fixed in go, cs, and kt, and rs is
+now the *only* binding where a keyed async entry read cannot subscribe. The fix
+shape is settled and shipped eight times. `#maphandlecleardependents`'s premise
+was wrong and is now disproven in practice: cpp shipped the hook on both flavors
+with no new primitive (both contexts project onto a real `Context`), and cs
+shipped it after finding the concrete harm — an async `Remove` that left readers
+on the removed entry's last resolved value. What remains is rs's own traits, and
+py, which has no disposal hook on any flavor.
+
+**The queue plan now carries what a cleared session cannot recover** (`cd8d16205`).
+Two additions:
+
+*The precedent.* All nine bindings converged on one shape — a graph-agnostic core
+holding the pure algebra, reactivity deliberately excluded from it because
+membership and order invalidation is a graph write each flavor must own, and reads
+generic over the read surface. That maps onto the queue family one-for-one and
+settles Phase 0's reader-kind decision by precedent: memoized-derive is what nine
+bindings now do for maps, so picking the version-cell form for queues would fork
+the family's own shape for no gain.
+
+*How the gates fail.* This is the part worth the fifteen minutes. **Four of the
+nine ReactiveMap gates were green against broken code on the first attempt.** A
+probe that passed with *and* without the defect. A negative invalidation
+assertion that passes trivially for a reader tracking nothing — every one of
+those needs a positive twin. A gate that drove only one entry kind and so skipped
+the family that same commit had just fixed. And a gate wired to no make target
+that ran zero tests and exited 0. The mutation-check harness itself lied once,
+because the predicate matched "passed" inside "1 failed, 8 passed". Plus the
+per-binding traps: kt's `len()`/`keys()` allocate a `Computed` so calling them
+inside a reader body mints a throwaway node per recompute; kt's async graph only
+recomputes through `getAsync`; kt/cs/go async reads need an explicit compute
+surface or they register no edge.
+
+**One question got sharper rather than resolved**, and it is now folded into
+Phase 0: `coverage.json` marks dart's thread-safe Core surface shipped while
+`docs/coverage.md` still declares the thread-safe context N/A for single-isolate
+Dart (`#lazilyspecdisagrees`). Phase 5 lists dart, so it should be settled once
+in the spec phase instead of re-litigated per family.
+
+Clear and start at `#lzqfspec`.
+<!-- agent:boundary:d787e861 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
+- do [#lzqfprep]
+- 🚧 do [#lzdonequoteattr]
+- do [#lzqfspec]
+- do [#lzqfformal]
+- do [#lzqfzig]
 - ~~/goal complete tasks/plan-lazily-queue-family-flavors.md~~
-- ~~⏭️ do [#asynccontextthreadsafeco]~~
+- ~~do [#asynccontextthreadsafeco]~~
 - ⏭️ do [#maphandlecleardependents]
 - ⏭️ do [#lazilycellfamily]
-- do [#lazilyspecdisagrees]
+- ⏭️ do [#lazilyspecdisagrees]
 - ⏭️ do [#lzjsnpmtrustedpub]
 - ⏭️ do [#lzcsqueues]
 - ⏭️ do [#lzcscrdt]
@@ -862,7 +920,7 @@ Next up is `#maphandlecleardependents`, then `#portmembershiporder`.
 - do [#lazilytwoimplementations]
 - do [#lazilydartcomputedmap]
 - do [#recommendedspecdecision]
-- do [#portmembershiporder]
+- ~~do [#portmembershiporder]~~
 - do [#lazilyasyncmap]
 - do [#lzqffx]
 - do [#lzqfrs]
@@ -873,10 +931,10 @@ Next up is `#maphandlecleardependents`, then `#portmembershiporder`.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzdonequoteattr] agent-doc: the done-archive attribute parser keeps the surrounding quotes in the value. tasks/software/lazily.md carried agent:done archive="tasks/software/lazily.done.md" (quoted, as a compact wrote it) and every preflight/session-check hard-failed with 'must point to a .done.md file' because the parsed value ended in .done.md-quote. Every other session doc uses the unquoted form and works. Unquote in the attribute parser and add a regression fixture for both forms; a quoted value should be accepted, not fatal
-- [ ] [#portmembershiporder] Port the membership/order plane to the other 8 bindings thread-safe + async maps (py, js, kt, go, cpp, cs, dart, zig). lazily-rs is done (commit ffc0d83): each flavor mints its own membership + order signal cells on its own graph, with bumps run outside the map lock. Every other binding has the same hole — reactive keys/len/contains_key exist only on the sync map. Note go and dart async maps are not connected to their async graph at all (no context field / _ctx annotated unused_field), so they need wiring before they can carry a signal plane. Plan: tasks/plan-lazily-reactivemap-unification.md
-- [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. The membership/order reads are now generic over the read surface (AsyncSource<u64>: Read<C>) and track correctly with an AsyncComputeContext — apply the same genericity to AsyncMapHandle::observe so entry-value reads can track too. This is the read-side twin of the discarded-factory-view defect.
-- [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook at all. Any flavor-level `remove` — and the fix for lazily-cs AsyncComputedMap.Remove not disposing its node — requires adding one. Handle-trait surgery, not an additive method. Plan: tasks/plan-lazily-reactivemap-unification.md
+- [ ] [#lzqfprep] lazily: BEFORE starting the queue-family plan, note that tasks/plan-lazily-queue-family-flavors.md now carries (a) the ReactiveMap precedent all nine bindings converged on — graph-agnostic core, per-flavor signal cells minted on each flavor's own graph, reads generic over the read surface — which settles Phase 0's reader-kind question by precedent rather than argument, and (b) a 'How these gates fail' section recording the four false greens the ReactiveMap gates produced on their first attempt. Start at #lzqfspec; the plan is self-contained enough for a cleared session
+- [ ] 🚧 [#lzdonequoteattr] agent-doc: the done-archive attribute parser keeps the surrounding quotes in the value. tasks/software/lazily.md carried agent:done archive="tasks/software/lazily.done.md" (quoted, as a compact wrote it) and every preflight/session-check hard-failed with 'must point to a .done.md file' because the parsed value ended in .done.md-quote. Every other session doc uses the unquoted form and works. Unquote in the attribute parser and add a regression fixture for both forms; a quoted value should be accepted, not fatal
+- [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
+- [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
 - [ ] [#lzqfspec] lazily-spec: Phase 0 of the queue-family flavor plan — add a Core-surface section for QueueCell/TopicCell/WorkQueueCell mirroring the ReactiveMap Core/Extended split, pin ONE reader-kind design (recommend memoized-derive+invalidate over cpp's version cells, and say explicitly that polling a counter is not a reader-kind), define the per-flavor obligation (confluence for thread-safe, eventual transparency for async, plus single-frontier-walk atomicity), resolve the threading paragraph that promises ThreadSafeContext no binding can accept, and split coverage.json's three conflated queue rows into nine — plan: tasks/plan-lazily-queue-family-flavors.md

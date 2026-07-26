@@ -1,0 +1,20 @@
+[package]
+name = "agent-doc-editor-surface-io"
+version = "0.35.28"
+edition = "2024"
+description = "Project-scoped editor-surface graphs and their tmux consequence for agent-doc"
+license = "MIT"
+repository = "https://github.com/btakita/agent-doc"
+publish = false
+
+[lib]
+name = "agent_doc_editor_surface_io"
+
+[dependencies]
+agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.28" }
+agent-doc-editor-surface = { path = "../agent-doc-editor-surface", version = "0.35.28" }
+agent-doc-state-scope = { path = "../agent-doc-state-scope", version = "0.35.28" }
+anyhow = "1"
+lazily = { version = "0.49.0", features = ["thread-safe"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

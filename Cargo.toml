@@ -32,6 +32,8 @@ members = [
     "agent-doc-template-io",
     "agent-doc-diff",
     "agent-doc-diff-io",
+    "agent-doc-editor-surface",
+    "agent-doc-editor-surface-io",
     "agent-doc-frontmatter",
     "agent-doc-frontmatter-io",
     "agent-doc-ffi",
@@ -206,6 +208,8 @@ agent-doc-element-exchange = { path = "agent-doc-element-exchange", version = "0
 agent-doc-element-exchange-io = { path = "agent-doc-element-exchange-io", version = "0.35.28" }
 agent-doc-element-review = { path = "agent-doc-element-review", version = "0.35.28" }
 agent-doc-ffi = { path = "agent-doc-ffi", version = "0.35.28" }
+agent-doc-editor-surface = { path = "agent-doc-editor-surface", version = "0.35.28" }
+agent-doc-editor-surface-io = { path = "agent-doc-editor-surface-io", version = "0.35.28" }
 agent-doc-focus-io = { path = "agent-doc-focus-io", version = "0.35.28" }
 agent-doc-flow = { path = "agent-doc-flow", version = "0.35.28" }
 agent-doc-flow-io = { path = "agent-doc-flow-io", version = "0.35.28" }

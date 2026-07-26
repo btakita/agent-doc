@@ -2529,6 +2529,60 @@ pub unsafe extern "C" fn agent_doc_tmux_focus_state_json(
     })())
 }
 
+/// Report what an editor looks like right now and let the graph decide what tmux
+/// should do about it (`#jbpluginlazilyeffects`).
+///
+/// `surface_json` is an `EditorSurface`: `{ "focused": "<path>", "visible":
+/// ["<path>", ...], "columns": [{ "files": ["<path>", ...] }, ...],
+/// "layout_synced": true|false|null, "force_reconcile": false }`.
+///
+/// This is the entry point a plugin should call instead of choosing between
+/// [`agent_doc_focus_document_pane_json`] and [`agent_doc_sync_tmux_layout_json`]
+/// itself. The plugin reports an observation; the intent is derived from it and
+/// the previous one, and an `Effect` drives the consequence. An observation
+/// identical to the last one costs nothing, so the plugin needs no dedup of its
+/// own — which is what lets the per-editor planners and their `@Volatile`
+/// previous-observation fields go away instead of being reimplemented per editor.
+///
+/// Returns a receipt: `{ "intent": {...}, "idle": bool, "outcome": string|null,
+/// "error": string|null }`.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8. Returned pointers must
+/// be freed with [`agent_doc_free_string`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_editor_surface_observe_json(
+    project_root: *const c_char,
+    surface_json: *const c_char,
+) -> FfiJsonResult {
+    ffi_json_from_result((|| -> anyhow::Result<_> {
+        let project_root =
+            PathBuf::from(unsafe { required_ffi_string(project_root, "project_root") }?);
+        let surface_json = unsafe { required_ffi_string(surface_json, "surface_json") }?;
+        agent_doc_editor_surface_io::observe_from_json(&project_root, &surface_json)
+    })())
+}
+
+/// Forget an editor surface — the editor closed the project.
+///
+/// Discards that root's reconciled-layout history and unsubscribes its
+/// consequence. Returns `1` when a surface was forgotten, `0` when none was
+/// registered, and `-1` on a bad argument.
+///
+/// # Safety
+///
+/// Non-null string pointers must be NUL-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn agent_doc_editor_surface_forget(project_root: *const c_char) -> c_int {
+    let Ok(project_root) = (unsafe { required_ffi_string(project_root, "project_root") }) else {
+        return -1;
+    };
+    c_int::from(agent_doc_editor_surface_io::forget(Path::new(
+        &project_root,
+    )))
+}
+
 /// Focus the actor pane for a document through the Project Controller.
 ///
 /// This centralizes pane selection behind the controller so JetBrains does not

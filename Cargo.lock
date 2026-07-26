@@ -46,6 +46,8 @@ dependencies = [
  "agent-doc-document",
  "agent-doc-document-realtime",
  "agent-doc-document-realtime-io",
+ "agent-doc-editor-surface",
+ "agent-doc-editor-surface-io",
  "agent-doc-element",
  "agent-doc-element-backlog",
  "agent-doc-element-backlog-io",
@@ -716,6 +718,28 @@ dependencies = [
  "serde_json",
  "tempfile",
  "uuid",
+]
+
+[[package]]
+name = "agent-doc-editor-surface"
+version = "0.35.28"
+dependencies = [
+ "agent-doc-state-scope",
+ "lazily 0.49.0",
+ "serde",
+]
+
+[[package]]
+name = "agent-doc-editor-surface-io"
+version = "0.35.28"
+dependencies = [
+ "agent-doc-controller-io",
+ "agent-doc-editor-surface",
+ "agent-doc-state-scope",
+ "anyhow",
+ "lazily 0.49.0",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

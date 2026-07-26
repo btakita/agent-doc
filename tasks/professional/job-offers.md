@@ -607,7 +607,7 @@ Should I note that I'm not suggesting that we use Lazily...though it could be he
 Note this doesn't grow the letter's scope at all — "sample" was already in the scope line; I sharpened the letter's private notes to pin it (`786d64e`): sample = minimal demo scene, optionally on a stock template, NOT a reference game. Your own letter edits (C++/Rust reorder, the new "discuss the shape of the api / begin implementing this week" closing) rode along in that commit — both read well, and the new closing is stronger: it converts "say the word" into a concrete next step with a this-week start.
 
 Two stray fragments sit at the very bottom of the document, outside all components: the leaked `92bcca70` hash line (from yesterday's wedge, still safe to delete) and `Twould need a/ui` — I read the latter as this prompt's companion thought and answered it above; delete both lines in the editor whenever convenient. Exchange is at 578 lines / 26 sections and the queue is inactive — say the word if you want `agent-doc compact` run on this doc. (Ops note: the shared controller crash-looped during this turn — the concurrent agent-doc dev session's controller-respawn work is the likely cause; this response landed on a retry.)
-❯ 🚧 I'm reopening my decision after doing more research. Discord has >$700M ARR.
+❯ I'm reopening my decision after doing more research. Discord has >$700M ARR.
 ❯ Haiven will be building in ways to reduce toxicity + predation in chat.
 
 ### Re: reopening the Haiven decision — fable
@@ -627,7 +627,7 @@ Taking this seriously, because reopening after research is legitimate — but th
 **Actions taken now:** `#haivensend` is marked ON HOLD — the v3 letter must not be sent while the decision is reopened; v3's firm-decline framing is now potentially stale. What would actually settle this: (1) Acadian's commitment state, (2) Craig's answers on runway, the safety roadmap's reality (built-in how — agents? protocol-level? policy tooling?), and seat timeline, (3) whether the mission pull survives a weekend. Say the word and I'll draft the (b)-variant letter.
 
 One-line status: exchange 591 lines / 27 sections (accretion warn); queue inactive; compact on your word.
-<!-- agent:boundary:13ae0741 -->
+<!-- agent:boundary:268083f9 -->
 <!-- /agent:exchange -->
 
 ## Queue

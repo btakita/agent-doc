@@ -383,7 +383,16 @@ pub fn run_with_options(
 ) -> Result<()> {
     // `#sccurrentpass`: one document version per sweep. See
     // `with_current_document_pass`.
-    crate::with_current_document_pass(|| run_with_options_inner(file, codex_final_gate, effects))
+    // Reset and report at the OUTERMOST boundary. Doing it around `inspect_core`
+    // instead cleared the samples that the self-heal phases above it had already
+    // recorded, which is how a profile can under-report the very work it was
+    // added to find (`#sessioncheckprofile`).
+    crate::profile::reset();
+    let started = std::time::Instant::now();
+    let out =
+        crate::with_current_document_pass(|| run_with_options_inner(file, codex_final_gate, effects));
+    crate::profile::report(file, started.elapsed());
+    out
 }
 
 fn run_with_options_inner(
@@ -402,7 +411,9 @@ fn run_with_options_inner(
     // A retained response replay can duplicate only semantic response cells or
     // protocol boundary markers. Collapse that narrow, lossless transient
     // before the generic gate so integrity does not block its own recovery.
-    self_heal_response_replay_duplication(file, effects)?;
+    crate::profile::timed("self_heal_response_replay_duplication", || {
+        self_heal_response_replay_duplication(file, effects)
+    })?;
     // Both self-heals can rewrite the document, so the pass memo must re-read
     // afterwards instead of serving the pre-repair text (`#sccurrentpass`).
     crate::invalidate_current_document_pass(file);
@@ -411,7 +422,9 @@ fn run_with_options_inner(
     // evidence-backed overapplication before the generic integrity gate;
     // otherwise the duplicate boundary marker prevents the recovery routine
     // that knows how to remove it from ever running.
-    self_heal_late_ipc_overapplication(file, effects)?;
+    crate::profile::timed("self_heal_late_ipc_overapplication", || {
+        self_heal_late_ipc_overapplication(file, effects)
+    })?;
     crate::invalidate_current_document_pass(file);
     // `session-check` is the final proof boundary. It must not report a clean
     // cycle for a document whose component tree cannot be parsed, regardless
@@ -469,14 +482,18 @@ fn run_with_options_inner(
         )?;
     }
     ensure_terminal_authority_disk_convergence(file, &authority_content, &disk_content, effects)?;
-    self_heal_transiently_stale_committed_projection(file, &authority_content, effects)?;
+    crate::profile::timed("self_heal_transiently_stale_committed_projection", || {
+        self_heal_transiently_stale_committed_projection(file, &authority_content, effects)
+    })?;
     // Both converge/self-heal steps can project a new document image.
     crate::invalidate_current_document_pass(file);
     // Phase E rung 2 (`#adstatechart2`): advisory read-only observability of the
     // local-process four-region state, logged alongside the existing ops.log
     // markers. Never gates closeout — emitted regardless of the check outcome.
     agent_doc_state_observer_io::log_advisory_snapshot(file);
-    let report = inspect_with_warnings(file, effects)?;
+    let report = crate::profile::timed("inspect_with_warnings", || {
+        inspect_with_warnings(file, effects)
+    })?;
     for warning in &report.warnings {
         eprintln!("{}", warning);
     }
@@ -611,6 +628,7 @@ fn run_with_options_inner(
                             file.display()
                         );
                     }
+                    crate::profile::report_now(file);
                     std::process::exit(2);
                 }
             } else {
@@ -736,6 +754,7 @@ fn run_with_options_inner(
                         file.display(),
                         file.display()
                     );
+                    crate::profile::report_now(file);
                     std::process::exit(2);
                 }
             }
@@ -743,7 +762,8 @@ fn run_with_options_inner(
         }
         SessionCheckStatus::Interrupted(message) => {
             println!("{}", message);
-            std::process::exit(1);
+            crate::profile::report_now(file);
+                    std::process::exit(1);
         }
     }
 }
@@ -1332,7 +1352,23 @@ fn log_slow_session_check_phase(file: &Path, phase: &str, started: &mut std::tim
     *started = std::time::Instant::now();
 }
 
+/// Time the whole run and print the per-operation breakdown when it was slow
+/// (`#sessioncheckprofile`).
+///
+/// A wrapper rather than instrumentation at each exit: the inner function
+/// returns from dozens of branches, and a profiler that only reports on some of
+/// them would understate exactly the runs worth looking at.
 fn inspect_core_with_captured_resume(
+    file: &Path,
+    effects: &impl SessionCheckEffects,
+    allow_captured_resume: bool,
+) -> Result<SessionCheckStatus> {
+    crate::profile::timed("inspect_core", || {
+        inspect_core_profiled(file, effects, allow_captured_resume)
+    })
+}
+
+fn inspect_core_profiled(
     file: &Path,
     effects: &impl SessionCheckEffects,
     allow_captured_resume: bool,

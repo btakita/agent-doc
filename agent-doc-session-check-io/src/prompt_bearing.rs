@@ -1,7 +1,13 @@
 use anyhow::Result;
 use std::path::Path;
 
+/// Timed at the definition so every branch that reaches it is attributed
+/// to one total (`#sessioncheckprofile`).
 pub fn detect_unstarted_prompt_bearing_diff(file: &Path) -> Result<Option<String>> {
+    crate::profile::timed("detect_unstarted_prompt_bearing_diff", || detect_unstarted_prompt_bearing_diff_inner(file))
+}
+
+fn detect_unstarted_prompt_bearing_diff_inner(file: &Path) -> Result<Option<String>> {
     let steering = realtime_steering_since_turn_baseline(file)?;
     let Some(label) = steering.label() else {
         return Ok(None);

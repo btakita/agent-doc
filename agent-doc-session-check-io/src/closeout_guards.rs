@@ -204,7 +204,13 @@ pub fn check_queue_audit_partial_completion_guard(file: &Path) -> Result<GuardRe
     Ok(agent_doc_workflow::session_check::queue_audit_partial_completion_guard_result())
 }
 
+/// Timed at the definition so every branch that reaches it is attributed
+/// to one total (`#sessioncheckprofile`).
 pub fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<String>> {
+    crate::profile::timed("detect_active_session_post_commit_drift", || detect_active_session_post_commit_drift_inner(file))
+}
+
+fn detect_active_session_post_commit_drift_inner(file: &Path) -> Result<Option<String>> {
     let Some(session) = agent_doc_codex_hook_io::load_active_session_for_current_file(file)? else {
         return Ok(None);
     };
@@ -253,7 +259,13 @@ pub fn detect_active_session_post_commit_drift(file: &Path) -> Result<Option<Str
     Ok(Some(detail))
 }
 
+/// Timed at the definition so every branch that reaches it is attributed
+/// to one total (`#sessioncheckprofile`).
 pub fn detect_uncommitted_exchange_drift(file: &Path) -> Result<Option<String>> {
+    crate::profile::timed("detect_uncommitted_exchange_drift", || detect_uncommitted_exchange_drift_inner(file))
+}
+
+fn detect_uncommitted_exchange_drift_inner(file: &Path) -> Result<Option<String>> {
     let Some(snapshot) = agent_doc_snapshot_io::load_document_baseline(file)? else {
         return Ok(None);
     };
@@ -341,7 +353,13 @@ pub fn open_cycle_manual_patchback_message(
     ))
 }
 
+/// Timed at the definition so every branch that reaches it is attributed
+/// to one total (`#sessioncheckprofile`).
 pub fn detect_bypassed_response_write(file: &Path) -> Result<Option<String>> {
+    crate::profile::timed("detect_bypassed_response_write", || detect_bypassed_response_write_inner(file))
+}
+
+fn detect_bypassed_response_write_inner(file: &Path) -> Result<Option<String>> {
     let Some(snapshot) = agent_doc_snapshot_io::load_document_baseline(file)? else {
         return Ok(None);
     };

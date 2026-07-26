@@ -9,6 +9,7 @@ pub mod command;
 pub mod detect;
 pub mod guard_modes;
 pub mod partial_staging;
+pub mod profile;
 pub mod pending_capture;
 pub mod pending_guards;
 pub mod prompt_bearing;
@@ -178,14 +179,21 @@ pub(crate) fn resolve_current_document_with_force_disk(
 }
 
 pub(crate) fn resolve_current_document_content(file: &Path, source: &str) -> Result<String> {
-    Ok(resolve_current_document(file, source)?.into_content())
+    // The detectors above all funnel into this, so it is the one place where
+    // authority resolution can be attributed once instead of per branch
+    // (`#sessioncheckprofile`).
+    profile::timed("resolve_current_document_content", || {
+        Ok(resolve_current_document(file, source)?.into_content())
+    })
 }
 
 pub(crate) fn resolve_disk_document_content(file: &Path, source: &str) -> Result<String> {
-    agent_doc_document_realtime_io::resolve_disk_current_document_content(
-        file,
-        &format!("session-check {source}"),
-    )
+    profile::timed("resolve_disk_document_content", || {
+        agent_doc_document_realtime_io::resolve_disk_current_document_content(
+            file,
+            &format!("session-check {source}"),
+        )
+    })
 }
 
 pub(crate) fn resolve_current_document_content_with_force_disk(

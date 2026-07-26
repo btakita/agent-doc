@@ -197,9 +197,10 @@ of the Unity pilot.
 ## Engine and runtime strategy
 
 Engines/frameworks and runtime platforms should be planned separately. Unity,
-Unreal, Godot, GameMaker, Cocos Creator, Construct 3, Bevy, Clickteam Fusion,
-MonoGame, and Source are integration surfaces; Android, iOS, Windows, macOS,
-Linux, web, Nintendo, PlayStation, and Xbox are runtime/certification targets.
+Unreal, Godot, GameMaker, RPG Maker, Ren'Py, Cocos Creator, Construct 3, Bevy,
+Clickteam Fusion, MonoGame, and Source are integration surfaces; Android, iOS,
+Windows, macOS, Linux, web, Nintendo, PlayStation, and Xbox are
+runtime/certification targets.
 
 | Priority | Integration surface | Recommendation |
 |---|---|---|
@@ -207,9 +208,11 @@ Linux, web, Nintendo, PlayStation, and Xbox are runtime/certification targets.
 | 2 | **Godot** | Strong indie fit and open ecosystem. Choose GDScript, C#, or a native extension only after pilot-customer discovery. Validate desktop, Android, iOS, and web constraints explicitly. |
 | 2 | **Unreal / C++ + Blueprint** | High-value second major-engine candidate. Expose a Blueprint-friendly facade over a testable C++ core; validate desktop and mobile first. |
 | 2 | **Native mobile** | Add Swift/iOS and Kotlin/Android clients if Haiven expects native companion apps or non-engine mobile titles. Consider React Native only when a concrete product requires it. |
-| 3 | **GameMaker** | Stronger market-balancing candidate for commercial 2D indie games. Start with a GML-facing package plus platform extensions where required; validate desktop, mobile, and web before any access-gated console work. |
-| 3 | **Cocos Creator / TypeScript** | Adds a mobile- and web-oriented 2D/3D ecosystem beyond the Unity/Godot/Unreal cluster. Prefer a TypeScript client/component package with native bridges only where the runtime requires them. |
-| 3 | **Construct 3** | Reaches low-code and small-studio web/mobile/desktop projects. Package Haiven as a JavaScript/TypeScript addon with actions, conditions, expressions, and a sample project; proceed after a named pilot confirms demand. |
+| 3 — long-tail | **GameMaker** | Start with a GML-facing package plus platform extensions where required; validate desktop, mobile, and web before any access-gated console work. Require a named pilot rather than treating the engine as a market-coverage anchor. |
+| 3 — long-tail | **RPG Maker** | Target one supported generation first—prefer an RPG Maker MZ JavaScript plugin unless a pilot requires MV or another generation. Validate background networking, save/load behavior, deployment targets, and plugin-distribution constraints before productizing it. |
+| 3 — long-tail | **Ren'Py / Python** | Provide a Python package plus a thin `.rpy` integration layer for chat, presence, and safety events. Validate save/rollback semantics and native targets first; treat the web build as a separate transport spike because its networking constraints differ. |
+| 3 — long-tail | **Cocos Creator / TypeScript** | Prefer a TypeScript client/component package for its mobile/web workflow, with native bridges only where the runtime requires them. Proceed only after qualified pipeline evidence. |
+| 3 — long-tail | **Construct 3** | Package Haiven as a JavaScript/TypeScript addon with actions, conditions, expressions, and a sample project. Require a named pilot before productizing it. |
 | 4 | **MonoGame / FNA** | Treat this as the modern XNA-family target. Do not invest in a new Microsoft XNA SDK, which was discontinued; serve current .NET indie projects instead. |
 | 4 | **Bevy / Rust** | Technically aligned but currently too small to anchor market coverage. Keep a clean Rust crate/plugin design available for a named pilot or unusually strong pipeline evidence. |
 | 4 | **Clickteam Fusion 2.5** | This is the current name for the Multimedia Fusion lineage. Build an extension only after a named studio validates demand and exporter constraints. |
@@ -220,6 +223,13 @@ Defold, Phaser, GDevelop, Roblox, Discord, and other creator/community channels
 can be evaluated alongside this matrix. They should enter the roadmap through a
 named studio, qualified pipeline evidence, or a low-cost reuse path rather than
 displacing the first engine pilot.
+
+The Wave C entries are all long-tail. The 2025 Video Game Insights report is
+useful directional evidence, not a total-addressable-market ranking: it studies
+Steam releases, its highlighted 2024 mix excludes games below 1,000 lifetime
+units, and it does not quantify every candidate above separately. Haiven should
+rank these adapters by its own qualified pipeline, integration cost, platform
+fit, and support burden.
 
 ## Commercial and operating model
 
@@ -270,12 +280,17 @@ after the integration contract and business priority are concrete.
 
 ## Public platform references
 
+- [Video Game Insights: The Big Game Engines Report of 2025](https://app.sensortower.com/vgi/assets/reports/The_Big_Game_Engines_Report_of_2025.pdf)
 - [Unity multiplatform support](https://unity.com/features/multiplatform) and
-  [console access requirements](https://unity.com/solutions/console)
+[console access requirements](https://unity.com/solutions/console)
 - [Unreal Engine packaging and target platforms](https://dev.epicgames.com/documentation/en-us/unreal-engine/packaging-your-project)
 - [Godot supported export platforms and console constraints](https://docs.godotengine.org/en/stable/about/faq.html#which-platforms-are-supported-by-godot)
 - [GameMaker extension packages](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Extensions.htm)
 and [export platforms](https://gamemaker.io/en/blog/export-with-gamemaker)
+- [RPG Maker MZ JavaScript plugins](https://rpgmakerofficial.com/product/mz/plugin/start/whta-plugin.html)
+- [Ren'Py Python integration](https://www.renpy.org/doc/html/python.html),
+[HTTP fetch](https://www.renpy.org/doc/html/fetch.html), and
+[web limitations](https://www.renpy.org/doc/html/web.html)
 - [Cocos Creator TypeScript/JavaScript support](https://docs.cocos.com/creator/3.7/manual/en/scripting/language-support.html)
 and [extension packages](https://docs.cocos.com/creator/3.8/manual/en/editor/extension/create-extension.html)
 - [Construct 3 Addon SDK](https://www.construct.net/en/make-games/manuals/addon-sdk)

@@ -66,6 +66,8 @@ haiven-sdk-superrepo                  integration control plane
 ├── haiven-sdk-android               Android SDK
 ├── haiven-sdk-ios                   iOS SDK
 ├── haiven-sdk-gamemaker             GameMaker SDK
+├── haiven-sdk-rpg-maker             RPG Maker SDK
+├── haiven-sdk-renpy                 Ren'Py SDK
 ├── haiven-sdk-cocos-creator         Cocos Creator SDK
 ├── haiven-sdk-construct             Construct 3 SDK
 └── haiven-sdk-bevy                  Bevy SDK, only when pilot-gated
@@ -114,6 +116,8 @@ history. The initial lifecycle registry is:
 | `haiven-sdk-android` | Planned, Wave B | Mobile product demand and lifecycle/security design |
 | `haiven-sdk-ios` | Planned, Wave B | Mobile product demand and lifecycle/security design |
 | `haiven-sdk-gamemaker` | Planned, Wave C | Named pilot and extension feasibility spike |
+| `haiven-sdk-rpg-maker` | Planned, Wave C | Named pilot, target-generation choice, and plugin/networking spike |
+| `haiven-sdk-renpy` | Planned, Wave C | Named pilot, target-platform choice, and save/rollback/networking spike |
 | `haiven-sdk-cocos-creator` | Planned, Wave C | Named pilot and supported-version choice |
 | `haiven-sdk-construct` | Planned, Wave C | Named pilot and addon/distribution feasibility spike |
 | `haiven-sdk-bevy` | Incubator | A specific Rust/Bevy pilot justifies specialist support |
@@ -405,4 +409,3 @@ The design is implemented when:
 5. Which adapters are considered supported versus incubating in each lock.
 6. Required reviewers for protocol, safety, security, and release changes.
 7. Compatibility/deprecation windows and minimum supported engine versions.
-

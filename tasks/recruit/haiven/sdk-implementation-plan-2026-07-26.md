@@ -80,10 +80,10 @@ haiven-sdk-superrepo
 └── haiven-sdk-unity
 ```
 
-Unreal, Godot, Android, iOS, GameMaker, Cocos Creator, Construct 3, and Bevy
-remain lifecycle-gated registry entries until their roadmap gates pass. Once
-approved, each becomes a dedicated repository with native CI and an independent
-release history.
+Unreal, Godot, Android, iOS, GameMaker, RPG Maker, Ren'Py, Cocos Creator,
+Construct 3, and Bevy remain lifecycle-gated registry entries until their
+roadmap gates pass. Once approved, each becomes a dedicated repository with
+native CI and an independent release history.
 
 The superrepo materializes exact component commits from `components.yaml` and
 `workspace.lock.json`. SDK packages consume released contract/conformance
@@ -421,29 +421,44 @@ Mobile has two forms:
 Each mobile target gets device-level failure testing; a successful desktop build
 does not count as mobile acceptance.
 
-### Wave C — broader indie and creator ecosystems
+### Wave C — long-tail and specialist ecosystems
 
-Wave C should balance qualified market reach, integration cost, and reuse of the
-shared protocol core. Bevy is not a market-coverage anchor; it belongs behind
-engines with broader commercial 2D, mobile, web, and low-code pipelines.
+Every Wave C candidate is long-tail and pilot-gated. The
+[2025 Video Game Insights report](https://app.sensortower.com/vgi/assets/reports/The_Big_Game_Engines_Report_of_2025.pdf)
+describes public engines outside Unity and Unreal as significantly smaller. Its
+2024 Steam view groups Godot, RPG Maker, GameMaker, and similar engines at just
+over 10% of qualifying releases but about 2% of units sold, and its
+smaller-engine analysis includes Ren'Py. That is directional evidence rather
+than a total-market ranking: the report covers Steam, the highlighted mix
+excludes games below 1,000 lifetime units, and Cocos Creator and Construct 3 are
+not individually quantified.
 
-#### Market-balancing candidates
+#### Long-tail adapter candidates
 
 - **GameMaker:** GML-facing package plus native/platform extension shims where
 required. Validate Windows/macOS/Linux, HTML5, Android, and iOS first; console
 exports stay in the access-gated lane.
+- **RPG Maker:** target one generation first, preferably an RPG Maker MZ
+JavaScript plugin unless a pilot requires MV or another generation. Spike
+background networking, save/load lifecycle, deployment targets, and plugin
+distribution before committing to support.
+- **Ren'Py:** Python package plus a thin `.rpy` integration layer. Validate
+save/rollback semantics and desktop/mobile packaging; treat the web build as a
+separate transport spike because its networking constraints differ from native
+targets.
 - **Cocos Creator:** TypeScript client/component package for its mobile/web
 workflow, with a native bridge only where the target runtime requires it.
 - **Construct 3:** JavaScript/TypeScript addon exposing Haiven actions,
 conditions, expressions, and events, backed by a sample project and web/mobile/
 desktop export validation. Require a named pilot before productizing it.
 
-These candidates still compete through Haiven's qualified pipeline rather than
+These candidates compete through Haiven's qualified pipeline rather than
 receiving automatic implementation commitments. Milestone 0 should score named
 studios, target platforms, launch timing, integration effort, support burden,
-and protocol-core reuse.
+and protocol-core reuse. No Wave C adapter should be justified as a
+market-share counterweight to Unity or Unreal.
 
-#### Pilot-driven specialist candidates
+#### Other pilot-driven specialist candidates
 
 - **MonoGame/FNA:** .NET library compatible with current XNA-style frameworks;
 target MonoGame rather than discontinued Microsoft XNA.

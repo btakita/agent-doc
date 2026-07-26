@@ -517,3 +517,61 @@ mod reactive_map_probe {
         );
     }
 }
+
+#[cfg(test)]
+mod suppression_guard {
+    use super::*;
+
+    fn observed(hash: &str) -> ContentObservation {
+        ContentObservation {
+            content_hash: hash.to_string(),
+            payload_materialized: true,
+        }
+    }
+
+    /// A consumer that resolves content planes but whose own storage view shows
+    /// no pending intent must still report those planes, because the shared
+    /// graph — not that consumer — decides what is outstanding.
+    ///
+    /// The regression: an early return skipped both content reads when the local
+    /// ledger replay saw no intent, so the shared graph received
+    /// `authority: None, disk: None` and answered `Unobserved` for a document
+    /// whose planes were converged. A storage read in one process must never be
+    /// able to suppress the shared verdict.
+    #[test]
+    fn converged_planes_settle_even_when_the_local_view_missed_the_intent() {
+        let settlement = RetainedWriteSettlement::new();
+
+        // Local view saw no intent, but the planes were still observed.
+        settlement.observe_pending(None);
+        settlement.observe_authority(Some(observed("converged")));
+        settlement.observe_disk(Some(observed("converged")));
+        assert_eq!(settlement.verdict(), SettlementVerdict::NoRetainedIntent);
+
+        // The authority's view arrives: the intent exists, and because the
+        // planes were reported the verdict can settle immediately.
+        settlement.observe_pending(Some(RetainedIntentFacts {
+            intent_id: "intent-1".to_string(),
+            target_hash: "stamped".to_string(),
+            reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            carries_response_payload: true,
+        }));
+        assert!(
+            settlement.verdict().should_clear_intent(),
+            "observations must survive a local view that missed the intent"
+        );
+
+        // Had the planes been suppressed, the same authority view would stall.
+        let suppressed = RetainedWriteSettlement::new();
+        suppressed.observe_pending(Some(RetainedIntentFacts {
+            intent_id: "intent-1".to_string(),
+            target_hash: "stamped".to_string(),
+            reason: DocumentWriteDeferredReason::CrdtDeliveryAckPending,
+            carries_response_payload: true,
+        }));
+        assert!(
+            matches!(suppressed.verdict(), SettlementVerdict::Unobserved { .. }),
+            "this is the failure the early return produced"
+        );
+    }
+}

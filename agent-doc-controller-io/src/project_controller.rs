@@ -552,7 +552,19 @@ pub(crate) struct ControllerRuntime {
 /// `None` rather than a leaked graph.
 struct ControllerDocumentGraphs {
     ctx: ThreadSafeContext,
-    pending: lazily::ThreadSafeCellMap<
+    /// The fact seam: the document's state projection, set once per applied
+    /// state event. Everything retained-write-shaped is *derived* from this.
+    projection:
+        lazily::ThreadSafeCellMap<String, Option<agent_doc_state_backbone::DocumentStateProjection>>,
+    /// Derived from [`Self::projection`] — **not** pushed.
+    ///
+    /// This was a cell map that `apply_state_event` computed and wrote into. A
+    /// pushed value is only correct while every writer remembers to push it, and
+    /// it forces the derivation to live at the call site rather than beside the
+    /// data. As a derived slot it updates because the projection changed, and
+    /// any other consumer can derive from the same projection cell instead of
+    /// re-implementing `retained_intent_facts_from_projection` at its own seam.
+    pending: lazily::ThreadSafeSlotMap<
         String,
         Option<agent_doc_state_backbone::retained_write::RetainedIntentFacts>,
     >,
@@ -574,7 +586,8 @@ impl ControllerDocumentGraphs {
     fn new_in(scope: &agent_doc_state_scope::ProcessScope) -> Self {
         let ctx = scope.ctx().clone();
         Self {
-            pending: lazily::ThreadSafeCellMap::new(&ctx),
+            projection: lazily::ThreadSafeCellMap::new(&ctx),
+            pending: lazily::ThreadSafeSlotMap::new(&ctx),
             authority: lazily::ThreadSafeCellMap::new(&ctx),
             disk: lazily::ThreadSafeCellMap::new(&ctx),
             verdict: lazily::ThreadSafeSlotMap::new(&ctx),
@@ -582,13 +595,32 @@ impl ControllerDocumentGraphs {
         }
     }
 
-    fn set_pending(
+    /// Record the applied state projection. This is the only write into the
+    /// retained-write graph; `pending` derives from it.
+    fn set_projection(
         &self,
         document_hash: &str,
-        pending: Option<agent_doc_state_backbone::retained_write::RetainedIntentFacts>,
+        projection: Option<agent_doc_state_backbone::DocumentStateProjection>,
     ) {
+        self.projection
+            .set(&self.ctx, document_hash.to_string(), projection);
+    }
+
+    /// Mint (or read) the derived retained-intent slot for `document_hash`.
+    fn pending(
+        &self,
+        document_hash: &str,
+    ) -> Option<agent_doc_state_backbone::retained_write::RetainedIntentFacts> {
+        let ctx = self.ctx.clone();
+        let projection = self.projection.clone();
         self.pending
-            .set(&self.ctx, document_hash.to_string(), pending);
+            .get_or_insert_with(&self.ctx, document_hash.to_string(), move |key| {
+                projection
+                    .observe(&ctx, key)
+                    .flatten()
+                    .as_ref()
+                    .and_then(retained_intent_facts_from_projection)
+            })
     }
 
     /// Read `document_hash`'s derived verdict, minting the slot on first access.
@@ -613,6 +645,11 @@ impl ControllerDocumentGraphs {
         // `slot_map_entry_capturing_a_ctx_clone_tracks_a_cell_map_dependency`,
         // because "Computed in name only" fails silently and looks like a stale
         // value much later.
+        // Mint the derived `pending` slot before the verdict slot so the verdict's
+        // recompute reads an already-materialized entry rather than minting one
+        // mid-recompute.
+        self.pending(document_hash);
+
         let ctx = self.ctx.clone();
         let pending = self.pending.clone();
         let authority_map = self.authority.clone();
@@ -750,50 +787,28 @@ impl ControllerRuntime {
 
     fn apply_state_event(&self, event: &agent_doc_state_backbone::StateEvent) -> Result<()> {
         let document_hash = event.fact.document_hash().to_string();
-        let (recycle, retained_intent) = {
+        let (recycle, document_projection) = {
             let mut memory = self.memory.lock();
             memory.state_ledger.append(event.clone());
             memory.state_projection.apply(event);
-            let retained_intent = memory
-                .state_projection
-                .document(&document_hash)
-                .and_then(retained_intent_facts_from_projection);
+            let document_projection = memory.state_projection.document(&document_hash).cloned();
             (
                 memory.state_projection.project_supervisor_recycle(),
-                retained_intent,
+                document_projection,
             )
         };
         self.supervisor_recycle_graph.set(recycle);
-        // `#retainedsettlereactive`: the retained-write fact is *pushed* into the
-        // document's graph as it lands. That is what makes the settlement verdict
-        // a derived value rather than something a later caller recomputes from a
-        // fresh SQLite reload. Done outside the memory lock: setting a cell runs
-        // that document's effects, which must not re-enter the projection.
-        self.set_document_retained_intent(&document_hash, retained_intent);
+        // `#retainedsettlereactive`: publish the applied *projection* as the fact
+        // lands; the retained-intent facts and the settlement verdict are derived
+        // from it. Pushing a pre-computed intent here instead would put the
+        // derivation at this call site, where it is correct only while every
+        // writer remembers to run it. Done outside the memory lock: setting a
+        // cell recomputes dependents, which must not re-enter the projection.
+        self.document_graphs
+            .set_projection(&document_hash, document_projection);
         self.supervisor_recycle_waiters.notify_all();
         self.state_projection_waiters.notify_all();
         Ok(())
-    }
-
-    /// Push the current retained-write intent into `document_hash`'s graph,
-    /// creating that graph on first touch and hydrating it from the projection.
-    ///
-    /// Storage hydrates here and only here; it never arbitrates the decision
-    /// (`#lzdurablesink`).
-    fn set_document_retained_intent(
-        &self,
-        document_hash: &str,
-        retained_intent: Option<
-            agent_doc_state_backbone::retained_write::RetainedIntentFacts,
-        >,
-    ) {
-        if retained_intent.is_none() && !self.document_graphs.pending.is_present(&document_hash.to_string()) {
-            // Nothing outstanding and no entry yet: do not mint one just to
-            // record an absence (the present set never shrinks).
-            return;
-        }
-        self.document_graphs
-            .set_pending(document_hash, retained_intent);
     }
 
     /// The document's derived settlement verdict, given content observations the

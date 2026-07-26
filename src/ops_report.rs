@@ -1,5 +1,6 @@
 //! Operational log reports for `.agent-doc/logs/ops.log`.
 
+use agent_doc_turn::op_log::OpsLogEvent;
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -93,7 +94,7 @@ struct BucketKey {
 
 #[derive(Debug, Clone)]
 struct ClassifiedEvent {
-    event_name: String,
+    event_kind: Option<OpsLogEvent>,
     timestamp: Option<u64>,
     category: String,
     file: Option<String>,
@@ -717,74 +718,115 @@ fn print_human_summary(report: &OpsSummaryReport) {
 fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
     let (timestamp, message) = parse_log_line(line);
     let event_name = message.split_whitespace().next()?;
+    let event_kind = OpsLogEvent::from_token(event_name);
     let fields = parse_fields(message);
 
-    let category = match event_name {
-        "flow_event" => classify_flow_event(&fields),
-        "interrupted_cycle_detected" => "closeout interrupted cycle".to_string(),
-        "late_fallback_patch_rejected" => "closeout late fallback rejected".to_string(),
-        "stale_snapshot_reset_drift_blocked" => "closeout stale snapshot reset blocked".to_string(),
-        "commit_blocked_missing_captured_response" => {
+    let category = match event_kind {
+        Some(OpsLogEvent::FlowEvent) => classify_flow_event(&fields),
+        Some(OpsLogEvent::InterruptedCycleDetected) => "closeout interrupted cycle".to_string(),
+        Some(OpsLogEvent::LateFallbackPatchRejected) => {
+            "closeout late fallback rejected".to_string()
+        }
+        Some(OpsLogEvent::StaleSnapshotResetDriftBlocked) => {
+            "closeout stale snapshot reset blocked".to_string()
+        }
+        Some(OpsLogEvent::CommitBlockedMissingCapturedResponse) => {
             "closeout missing captured response".to_string()
         }
-        "session_check_commit_boundary_recovered" => {
+        Some(OpsLogEvent::SessionCheckCommitBoundaryRecovered) => {
             "closeout commit boundary recovered".to_string()
         }
-        "ipc_write_consumed" => "write ipc consumed".to_string(),
-        "commit_success" => "commit success".to_string(),
-        "commit_noop" if field_eq(&fields, "drift_kind", "user_follow_up") => {
+        Some(OpsLogEvent::IpcWriteConsumed) => "write ipc consumed".to_string(),
+        Some(OpsLogEvent::IpcProofInsufficient) => "write ipc proof insufficient".to_string(),
+        Some(OpsLogEvent::CommitSuccess) => "commit success".to_string(),
+        Some(OpsLogEvent::CommitNoop) if field_eq(&fields, "drift_kind", "user_follow_up") => {
             "expected user follow-up noop".to_string()
         }
-        "commit_noop" if field_eq(&fields, "drift_kind", "working_tree_edits") => {
+        Some(OpsLogEvent::CommitNoop) if field_eq(&fields, "drift_kind", "working_tree_edits") => {
             "anomalous drift noop".to_string()
         }
-        "commit_noop" if field_eq(&fields, "drift_kind", "none") => {
+        Some(OpsLogEvent::CommitNoop) if field_eq(&fields, "drift_kind", "none") => {
             "expected already-current noop".to_string()
         }
-        "commit_noop" => "commit noop".to_string(),
-        "route_dispatch_start_proven" => "route dispatch proven".to_string(),
-        "route_submit_issue" if field_eq(&fields, "issue", "prompt_not_submitted") => {
+        Some(OpsLogEvent::CommitNoop) => "commit noop".to_string(),
+        Some(OpsLogEvent::RouteDispatchStartProven) => "route dispatch proven".to_string(),
+        Some(OpsLogEvent::RouteSubmitIssue)
+            if field_eq(&fields, "issue", "prompt_not_submitted") =>
+        {
             "route submit prompt not submitted".to_string()
         }
-        "route_submit_issue"
+        Some(OpsLogEvent::RouteSubmitIssue)
             if field_eq(&fields, "issue", "accepted_without_dispatch_start_proof") =>
         {
             "route submit dispatch proof missing".to_string()
         }
-        "route_submit_issue" => "route submit issue".to_string(),
-        "post_commit_user_follow_up" => "expected user follow-up".to_string(),
-        "post_commit_local_drift" if field_eq(&fields, "kind", "user_follow_up") => {
+        Some(OpsLogEvent::RouteSubmitIssue) => "route submit issue".to_string(),
+        Some(OpsLogEvent::PostCommitUserFollowUp) => "expected user follow-up".to_string(),
+        Some(OpsLogEvent::PostCommitLocalDrift) if field_eq(&fields, "kind", "user_follow_up") => {
             "expected user follow-up".to_string()
         }
-        "post_commit_local_drift" => "anomalous post-commit drift".to_string(),
-        "session_clear_active_pane_allowed" => "active clear allowed".to_string(),
-        "session_clear_protected_input_guard_refused" => {
+        Some(OpsLogEvent::PostCommitLocalDrift) => "anomalous post-commit drift".to_string(),
+        Some(OpsLogEvent::SessionClearActivePaneAllowed) => "active clear allowed".to_string(),
+        Some(OpsLogEvent::SessionClearProtectedInputGuardRefused) => {
             "expected protected-input clear refusal".to_string()
         }
-        "session_clear_live_busy_guard_bypassed" => "busy clear bypassed".to_string(),
-        "session_clear_live_busy_guard_refused" => "busy clear refused".to_string(),
-        "session_clear_live_busy_guard_blocked" => "busy clear blocked".to_string(),
-        "route_authoritative_actor_starting_not_ready" => "starting actor not ready".to_string(),
-        "route_starting_actor_timeout_coalesced" => "starting actor timeout coalesced".to_string(),
-        "route_cycle_start_missing"
-        | "route_cycle_start_missing_after_fresh_restart_optimistic"
-        | "route_cycle_start_missing_optimistic" => "route cycle start missing".to_string(),
-        "route_dispatch_start_unproven_but_accepted" => "accepted-only route proof".to_string(),
-        "route_dispatch_only_sent" if field_eq(&fields, "proof_scope", "accepted_only") => {
+        Some(OpsLogEvent::SessionClearLiveBusyGuardBypassed) => "busy clear bypassed".to_string(),
+        Some(OpsLogEvent::SessionClearLiveBusyGuardRefused) => "busy clear refused".to_string(),
+        Some(OpsLogEvent::SessionClearLiveBusyGuardBlocked) => "busy clear blocked".to_string(),
+        Some(OpsLogEvent::RouteAuthoritativeActorStartingNotReady) => {
+            "starting actor not ready".to_string()
+        }
+        Some(OpsLogEvent::RouteStartingActorTimeoutCoalesced) => {
+            "starting actor timeout coalesced".to_string()
+        }
+        Some(
+            OpsLogEvent::RouteCycleStartMissing
+            | OpsLogEvent::RouteCycleStartMissingAfterFreshRestartOptimistic
+            | OpsLogEvent::RouteCycleStartMissingOptimistic,
+        ) => "route cycle start missing".to_string(),
+        Some(OpsLogEvent::RouteDispatchStartUnprovenButAccepted) => {
             "accepted-only route proof".to_string()
         }
-        "route_dispatch_only_submit_unproven" => "dispatch-only not proven".to_string(),
-        "run_preflight_timeout" => "run preflight timeout".to_string(),
-        "sync_latency" if field_eq(&fields, "status", "over_budget") => {
+        Some(OpsLogEvent::RouteDispatchOnlySent)
+            if field_eq(&fields, "proof_scope", "accepted_only") =>
+        {
+            "accepted-only route proof".to_string()
+        }
+        Some(OpsLogEvent::RouteDispatchOnlySubmitUnproven) => {
+            "dispatch-only not proven".to_string()
+        }
+        Some(OpsLogEvent::RunPreflightTimeout) => "run preflight timeout".to_string(),
+        Some(OpsLogEvent::SyncLatency) if field_eq(&fields, "status", "over_budget") => {
             "sync over budget".to_string()
         }
-        "sqlite_log_counts" | "sqlite_log_count" => "sqlite log counts".to_string(),
-        "session_review_guard" => "session-review guardrail".to_string(),
-        "codex_thread_started" | "claude_jsonl_hook_marker" | "agent_doc_cycle_marker" => {
-            "cross-harness correlation marker".to_string()
+        Some(OpsLogEvent::SqliteLogCounts | OpsLogEvent::SqliteLogCount) => {
+            "sqlite log counts".to_string()
         }
-        _ if is_codex_manifest_warning(message) => "codex manifest warning storm".to_string(),
-        _ if session_review_family_for_message(message).is_some() => {
+        Some(OpsLogEvent::SessionReviewGuard) => "session-review guardrail".to_string(),
+        Some(
+            OpsLogEvent::CodexThreadStarted
+            | OpsLogEvent::ClaudeJsonlHookMarker
+            | OpsLogEvent::AgentDocCycleMarker,
+        ) => "cross-harness correlation marker".to_string(),
+        Some(OpsLogEvent::ConvergenceGateBlocked) => "convergence gate blocked".to_string(),
+        Some(OpsLogEvent::RecursiveDirectInvocationBlocked) => {
+            "recursive direct invocation blocked".to_string()
+        }
+        Some(OpsLogEvent::EditorOpRecorded) => "editor op recorded".to_string(),
+        Some(OpsLogEvent::EditorOpsForBase) => "editor ops consumed".to_string(),
+        Some(OpsLogEvent::EditorOpRecordFailed) => "editor op record failed".to_string(),
+        Some(OpsLogEvent::SupervisorBinaryStale) => "stale supervisor".to_string(),
+        Some(OpsLogEvent::RetryOnCurrentGeneration | OpsLogEvent::SupervisorRestartRedirect) => {
+            "supervisor generation recovery".to_string()
+        }
+        Some(OpsLogEvent::StaleGeneration) => "stale generation block".to_string(),
+        Some(
+            OpsLogEvent::EditorConvergenceAckMismatch
+            | OpsLogEvent::EditorConvergenceNoAck
+            | OpsLogEvent::LivePromptDriftAfterPreflight,
+        ) => "editor convergence failure".to_string(),
+        None if is_codex_manifest_warning(message) => "codex manifest warning storm".to_string(),
+        None if session_review_family_for_message(message).is_some() => {
             "session-review guardrail".to_string()
         }
         _ => return None,
@@ -797,7 +839,7 @@ fn classify_line(line: &str, project_root: &Path) -> Option<ClassifiedEvent> {
     };
 
     Some(ClassifiedEvent {
-        event_name: event_name.to_string(),
+        event_kind,
         timestamp,
         category,
         file: fields
@@ -982,12 +1024,14 @@ fn cluster_seed(event: &ClassifiedEvent) -> Option<ClusterSeed> {
     let category = event.category.as_str();
 
     if matches!(
-        event.event_name.as_str(),
-        "interrupted_cycle_detected"
-            | "late_fallback_patch_rejected"
-            | "stale_snapshot_reset_drift_blocked"
-            | "commit_blocked_missing_captured_response"
-            | "session_check_commit_boundary_recovered"
+        event.event_kind,
+        Some(
+            OpsLogEvent::InterruptedCycleDetected
+                | OpsLogEvent::LateFallbackPatchRejected
+                | OpsLogEvent::StaleSnapshotResetDriftBlocked
+                | OpsLogEvent::CommitBlockedMissingCapturedResponse
+                | OpsLogEvent::SessionCheckCommitBoundaryRecovered
+        )
     ) || (flow == Some("closeout")
         && matches!(
             reason,
@@ -1007,14 +1051,16 @@ fn cluster_seed(event: &ClassifiedEvent) -> Option<ClusterSeed> {
     }
 
     if matches!(
-        event.event_name.as_str(),
-        "route_starting_actor_timeout_coalesced"
-            | "route_cycle_start_missing"
-            | "route_cycle_start_missing_after_fresh_restart_optimistic"
-            | "route_cycle_start_missing_optimistic"
-            | "run_preflight_timeout"
-            | "route_submit_issue"
-            | "route_dispatch_only_submit_unproven"
+        event.event_kind,
+        Some(
+            OpsLogEvent::RouteStartingActorTimeoutCoalesced
+                | OpsLogEvent::RouteCycleStartMissing
+                | OpsLogEvent::RouteCycleStartMissingAfterFreshRestartOptimistic
+                | OpsLogEvent::RouteCycleStartMissingOptimistic
+                | OpsLogEvent::RunPreflightTimeout
+                | OpsLogEvent::RouteSubmitIssue
+                | OpsLogEvent::RouteDispatchOnlySubmitUnproven
+        )
     ) || flow == Some("routed_reopen")
         || category == "accepted-only route proof"
         || category == "starting actor not ready"

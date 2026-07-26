@@ -20,6 +20,7 @@ use agent_doc_ipc_protocol::{
 };
 use agent_doc_template as template;
 use agent_doc_template::stale_baseline::patch_touches_exchange;
+use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_write_converge_io::{
     AlreadyAppliedSocketSnapshotContext, checkpoint_ipc_baseline_nonfatal,
     clear_ipc_socket_ack_timeouts, dedupe_ipc_snapshot_content, full_content_ipc_scope_allows,
@@ -310,7 +311,8 @@ fn try_ipc_inner(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "late_fallback_patch_rejected file={} cycle_id={} patch_id={} reason=already_committed",
+                    "{} file={} cycle_id={} patch_id={} reason=already_committed",
+                    OpsLogEvent::LateFallbackPatchRejected,
                     file.display(),
                     cycle_id,
                     patch_id

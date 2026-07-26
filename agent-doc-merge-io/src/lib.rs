@@ -1,5 +1,6 @@
 //! Git-backed merge adapters for agent-doc documents.
 
+use agent_doc_turn::op_log::OpsLogEvent;
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
@@ -110,7 +111,8 @@ pub fn merge_contents_crdt_with_ops(
             logger(
                 doc,
                 &format!(
-                    "editor_ops_for_base accepted=true ops={} base={} {} #qnodemerge4wire",
+                    "{} accepted=true ops={} base={} {} #qnodemerge4wire",
+                    OpsLogEvent::EditorOpsForBase,
                     ops.len(),
                     agent_doc_hash::content_hash(&base_text)
                         .get(..12)

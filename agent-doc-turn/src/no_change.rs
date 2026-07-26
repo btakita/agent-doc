@@ -5,6 +5,7 @@
 //! or surface an abnormal prior cycle.
 
 use crate::CyclePhase;
+use crate::op_log::OpsLogEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NoChangeCycleStateInput<'a> {
@@ -49,10 +50,7 @@ pub fn classify_no_change_cycle_state(
     };
 
     if state.phase == CyclePhase::Abandoned {
-        if state
-            .last_event
-            .starts_with("recursive_direct_invocation_blocked")
-        {
+        if OpsLogEvent::RecursiveDirectInvocationBlocked.is_line(state.last_event) {
             return NoChangeVerdict::Abnormal {
                 summary: format!(
                     "the previous run was blocked as a recursive direct invocation and its cycle ({}) was abandoned, so no normal dispatch/response completed",

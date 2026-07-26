@@ -2,6 +2,7 @@
 
 pub mod pending;
 
+use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_turn::{
     closeout_recovery::visible_response_recovery_is_adoptable, repair::RepairOutcome,
     response_replay,
@@ -2706,7 +2707,8 @@ pub fn recover_missing_commit_boundary(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "repair_commit_boundary_recovered file={} event={} reason={}",
+            "{} file={} event={} reason={}",
+            OpsLogEvent::RepairCommitBoundaryRecovered,
             file.display(),
             event,
             reason

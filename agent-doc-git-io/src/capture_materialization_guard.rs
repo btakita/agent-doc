@@ -1,3 +1,4 @@
+use agent_doc_turn::op_log::OpsLogEvent;
 use anyhow::Result;
 use std::path::Path;
 
@@ -99,7 +100,8 @@ pub fn ensure_active_capture_materialized_for_commit(
     effects.log_op(
         file,
         &format!(
-            "commit_blocked_missing_captured_response file={} capture_id={} response_sha256={} basis={}",
+            "{} file={} capture_id={} response_sha256={} basis={}",
+            OpsLogEvent::CommitBlockedMissingCapturedResponse,
             file.display(),
             capture.capture_id,
             capture.response_sha256,

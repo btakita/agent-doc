@@ -48,6 +48,7 @@
 //!   and ACKs the delivery. The commit barrier refuses a MultiReplica closeout
 //!   while any live target has unacknowledged delivery.
 
+use agent_doc_turn::op_log::OpsLogEvent;
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -841,7 +842,8 @@ fn current_text_for_file_with_authority_inner(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_current_text_unavailable file={} authority=multi_replica reason=missing_replica doc_hash={} process_pid={}",
+                "{} file={} authority=multi_replica reason=missing_replica doc_hash={} process_pid={}",
+                OpsLogEvent::CrdtCurrentTextUnavailable,
                 file.display(),
                 hash,
                 std::process::id(),
@@ -868,7 +870,8 @@ fn current_text_for_file_with_authority_inner(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "crdt_current_text_unavailable file={} authority=multi_replica reason=sync_pending live_editors={} delivery_converged={} delivery_version={}",
+                "{} file={} authority=multi_replica reason=sync_pending live_editors={} delivery_converged={} delivery_version={}",
+                OpsLogEvent::CrdtCurrentTextUnavailable,
                 file.display(),
                 hub.live_count(),
                 delivery_converged,
@@ -1031,7 +1034,8 @@ fn ensure_document_model_with_current_text_observer_inner(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "document_model_ensure_start file={} source={} initial_state={}",
+            "{} file={} source={} initial_state={}",
+            OpsLogEvent::DocumentModelEnsureStart,
             file.display(),
             source,
             first_label,
@@ -1193,7 +1197,8 @@ fn ensure_document_model_with_current_text_observer_inner(
                     // the long-form constant. This previously always printed 5000
                     // while a missing-replica ensure really got 400ms, which sent
                     // diagnosis after a phantom 5s stall for a long time.
-                    "document_model_ensure_failed file={} source={} initial_state={} final_state={} timeout_ms={} window_extended={} last_observer_error={} recovery=retry_without_disk_write",
+                    "{} file={} source={} initial_state={} final_state={} timeout_ms={} window_extended={} last_observer_error={} recovery=retry_without_disk_write",
+                    OpsLogEvent::DocumentModelEnsureFailed,
                     file.display(),
                     source,
                     first_label,

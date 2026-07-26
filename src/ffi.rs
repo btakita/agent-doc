@@ -50,6 +50,7 @@
 //! - crdt_merge_no_base: identical `ours`/`theirs` with null base → merged text equals input
 
 use agent_doc_state_backbone::{EventLedger, StateEvent, StateFact};
+use agent_doc_turn::op_log::OpsLogEvent;
 use anyhow::Context as _;
 use serde::Serialize;
 use std::ffi::{CStr, CString, c_char, c_int};
@@ -1569,7 +1570,8 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
             agent_doc_ops_log_io::log_op(
                 &file_path_buf,
                 &format!(
-                    "editor_op_recorded kind={kind} offset={offset} {op_log_summary} base={} #qnodemerge4wire",
+                    "{} kind={kind} offset={offset} {op_log_summary} base={} #qnodemerge4wire",
+                    OpsLogEvent::EditorOpRecorded,
                     base.get(..12).unwrap_or(base),
                 ),
             );
@@ -1578,7 +1580,10 @@ pub unsafe extern "C" fn agent_doc_record_editor_op(
         Err(e) => {
             agent_doc_ops_log_io::log_op(
                 &file_path_buf,
-                &format!("editor_op_record_failed kind={kind} error={e} #qnodemerge4wire"),
+                &format!(
+                    "{} kind={kind} error={e} #qnodemerge4wire",
+                    OpsLogEvent::EditorOpRecordFailed
+                ),
             );
             0
         }
@@ -2323,9 +2328,7 @@ pub unsafe extern "C" fn agent_doc_peer_replicas_missing(
         serde_json::to_string(&missing).context("serialize missing replica registrations")
     })();
     match result {
-        Ok(json) => CString::new(json)
-            .unwrap_or_default()
-            .into_raw(),
+        Ok(json) => CString::new(json).unwrap_or_default().into_raw(),
         // Never swallow: an editor that cannot ask is one that stays stranded.
         Err(err) => {
             eprintln!("[ffi] agent_doc_peer_replicas_missing: {err:#}");

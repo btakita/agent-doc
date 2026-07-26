@@ -24,6 +24,7 @@ use agent_doc_queue::queue_convergence::{
 };
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_turn::drain_stall::{StallFacts, StallVerdict, classify_stall};
+use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_workflow::session_cycle::{compute_user_intent_prompt_changes, derive_turn_scope};
 use anyhow::Context;
 
@@ -959,7 +960,8 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "preflight_diff_start file={} snap_len={} file_len={}",
+                    "{} file={} snap_len={} file_len={}",
+                    OpsLogEvent::PreflightDiffStart,
                     file.display(),
                     snap_len,
                     file_len

@@ -38,6 +38,7 @@ use agent_doc_supervisor::{
         supervisor_restart_action,
     },
 };
+use agent_doc_turn::op_log::OpsLogEvent;
 
 const CLEAN_SESSION_CONTEXT_RESET_REASON: &str = "active queue head is a [clean-session] item - clearing to give it a fresh agent context (#cleandrainsup)";
 const FOCUSED_CYCLE_CONTEXT_RESET_REASON: &str = "active queue head is a [focused-cycle] item - clearing to continue in a fresh agent context (#qfocsup)";
@@ -75,7 +76,10 @@ static IDLE_WATCH_QUEUE_HEAD_BY_REVISION: std::sync::LazyLock<
     parking_lot::Mutex<
         std::collections::HashMap<
             std::path::PathBuf,
-            (agent_doc_crdt_relay_io::CurrentRevision, QueueHeadObservation),
+            (
+                agent_doc_crdt_relay_io::CurrentRevision,
+                QueueHeadObservation,
+            ),
         >,
     >,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
@@ -460,7 +464,8 @@ fn record_convergence_gate_blocked(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "convergence_gate_blocked severity=error file={} reason=editor_ipc_convergence_boundary_failed action=fail_closed unmet={} inflight={} elapsed_ms={} timeout_ms={} playback=unwritten playback_error={} (#fbwire)",
+                    "{} severity=error file={} reason=editor_ipc_convergence_boundary_failed action=fail_closed unmet={} inflight={} elapsed_ms={} timeout_ms={} playback=unwritten playback_error={} (#fbwire)",
+                    OpsLogEvent::ConvergenceGateBlocked,
                     file.display(),
                     unmet.join(","),
                     facts.inflight,
@@ -4129,7 +4134,10 @@ mod tests {
         assert!(state.projection_stale(), "a first observation is a change");
 
         state.observe(RevisionObservation::observed(fingerprint(&first)));
-        assert!(!state.projection_stale(), "an equal revision is not a change");
+        assert!(
+            !state.projection_stale(),
+            "an equal revision is not a change"
+        );
 
         state.observe(RevisionObservation::observed(fingerprint(&changed)));
         assert!(state.projection_stale(), "a different revision is a change");

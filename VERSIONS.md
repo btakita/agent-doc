@@ -6,6 +6,13 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.29
+
+_JetBrains plugin 0.2.297; VS Code extension 0.2.56._
+
+- **Parsed `ops.log` events now have one typed vocabulary (`#adopseventenum`).** `OpsLogEvent` provides exact token parsing and compiler-coupled names for correctness-sensitive producers and consumers across session-check, doctor/autofix, convergence playback, op-capture verification, and ops-summary clustering. Prefix lookalikes no longer satisfy event checks, and the remaining dependency-cycle diagnostic parser is pinned to the typed token by a cross-crate regression test.
+- **Contributor mutation probes can no longer silently poison later Cargo runs.** Repository instructions now require every temporary Rust source restore to refresh its mtime before another build and prescribe narrow package cleanup before a full cache reset. This captures the stale-rlib failure observed while implementing this release, where clean source text and a clean diff still produced missing-symbol errors from mutated artifacts.
+
 ## 0.35.28
 
 _JetBrains plugin 0.2.293; VS Code extension 0.2.56._

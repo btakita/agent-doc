@@ -37,6 +37,7 @@ use agent_doc_document_realtime::{
 };
 pub use agent_doc_document_realtime::{CurrentDocument, DocumentKey};
 pub use agent_doc_state_backbone::DocumentWriteDeferredReason;
+use agent_doc_turn::op_log::OpsLogEvent;
 
 /// Wall-clock seconds (since UNIX epoch) of the last controller RPC failure
 /// observed by [`observe_live_editor_authority`] (the controller-timeout path).
@@ -1558,14 +1559,14 @@ pub fn settle_retained_non_capture_projection_through_authority(
     // whose target contains the active marker and is otherwise equivalent to
     // its expected exchange content after transient prefixes are removed.
     let transient_active_prompt_marker_intent = pending.source.is_serialized_atomic_write()
-            && pending.target_content.contains('🚧')
-            && pending.expected_content.as_deref().is_some_and(|expected| {
-                expected != pending.target_content
-                    && agent_doc_document::transient_markers::exchange_prompt_prefix_equivalent(
-                        expected,
-                        &pending.target_content,
-                    )
-            });
+        && pending.target_content.contains('🚧')
+        && pending.expected_content.as_deref().is_some_and(|expected| {
+            expected != pending.target_content
+                && agent_doc_document::transient_markers::exchange_prompt_prefix_equivalent(
+                    expected,
+                    &pending.target_content,
+                )
+        });
     if transient_active_prompt_marker_intent {
         clear_deferred_document_write_intent(path, &pending.target_hash, source)?;
         agent_doc_ops_log_io::log_op(
@@ -1761,8 +1762,8 @@ fn retire_superseded_compact_projection_intents(
 
     let mut retired = 0;
     for intent in pending_document_write_journal(path) {
-        let eligible_source = intent.source.is_post_commit_reposition()
-            || intent.source.is_serialized_atomic_write();
+        let eligible_source =
+            intent.source.is_post_commit_reposition() || intent.source.is_serialized_atomic_write();
         let eligible_reason = matches!(
             intent.reason,
             DocumentWriteDeferredReason::CrdtDeliveryAckPending
@@ -2185,7 +2186,7 @@ pub fn apply_canonical_replace_if_attached(
                                     relay_write.targets,
                                     live_editors,
                                     started.elapsed().as_millis(),
-                                        profile.render(wait_state),
+                                    profile.render(wait_state),
                                 ),
                             );
                             return Ok(Some(relay_write));
@@ -5113,7 +5114,10 @@ pub fn peek_disk_document_content(file: &std::path::Path, source: &str) -> Resul
             file.display()
         )
     })?;
-    Ok(CurrentDocument::new(file.to_path_buf(), reconcile_current_doc(&content, None)).into_content())
+    Ok(
+        CurrentDocument::new(file.to_path_buf(), reconcile_current_doc(&content, None))
+            .into_content(),
+    )
 }
 
 pub fn try_resolve_current_document_content(
@@ -5510,7 +5514,8 @@ fn try_resolve_current_doc_with_disk_inner(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "realtime_doc_resolve_crdt_error file={} source={} error={}",
+                    "{} file={} source={} error={}",
+                    OpsLogEvent::RealtimeDocResolveCrdtError,
                     file.display(),
                     source,
                     e,
@@ -5556,7 +5561,8 @@ fn try_resolve_current_doc_with_disk_inner(
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
-                            "realtime_doc_resolve authority={} reason={} diverged={} file={} source=crdt_relay live_editors={} delivery_converged={} editor_open=true recovery=keep_editor_authority_no_live_replica",
+                            "{} authority={} reason={} diverged={} file={} source=crdt_relay live_editors={} delivery_converged={} editor_open=true recovery=keep_editor_authority_no_live_replica",
+                            OpsLogEvent::RealtimeDocResolve,
                             reconciliation.authority.as_str(),
                             reconciliation.reason,
                             reconciliation.diverged,
@@ -5604,7 +5610,8 @@ fn try_resolve_current_doc_with_disk_inner(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "realtime_doc_resolve authority={} reason={} diverged={} file={} source=crdt_relay live_editors={} delivery_converged={}",
+                    "{} authority={} reason={} diverged={} file={} source=crdt_relay live_editors={} delivery_converged={}",
+                    OpsLogEvent::RealtimeDocResolve,
                     reconciliation.authority.as_str(),
                     reconciliation.reason,
                     reconciliation.diverged,
@@ -5756,9 +5763,10 @@ fn resolve_editor_unavailable_disk_read_fallback(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "realtime_doc_resolve authority={} reason={} diverged={} file={} \
+                        "{} authority={} reason={} diverged={} file={} \
                          source=crdt_relay live_editors={} delivery_converged={} \
                          recovery=editor_model_rebuilt",
+                        OpsLogEvent::RealtimeDocResolve,
                         reconciliation.authority.as_str(),
                         reconciliation.reason,
                         reconciliation.diverged,
@@ -5861,9 +5869,10 @@ fn resolve_editor_unavailable_disk_read_fallback(
                     agent_doc_ops_log_io::log_op(
                         file,
                         &format!(
-                            "realtime_doc_resolve authority={} reason={} diverged={} file={} \
+                            "{} authority={} reason={} diverged={} file={} \
                              source=crdt_relay live_editors={} delivery_converged={} \
                              recovery=missing_replica_terminal_rebuild",
+                            OpsLogEvent::RealtimeDocResolve,
                             reconciliation.authority.as_str(),
                             reconciliation.reason,
                             reconciliation.diverged,
@@ -5973,7 +5982,8 @@ fn resolve_detached_current_doc(file: &std::path::Path, disk: &str) -> Reconcili
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "realtime_doc_resolve authority={} reason={} diverged={} file={}",
+            "{} authority={} reason={} diverged={} file={}",
+            OpsLogEvent::RealtimeDocResolve,
             reconciliation.authority.as_str(),
             reconciliation.reason,
             reconciliation.diverged,
@@ -5992,7 +6002,8 @@ fn resolve_disk_only_current_doc(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "realtime_doc_resolve authority={} reason={} diverged={} file={}",
+            "{} authority={} reason={} diverged={} file={}",
+            OpsLogEvent::RealtimeDocResolve,
             reconciliation.authority.as_str(),
             reason,
             reconciliation.diverged,

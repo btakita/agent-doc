@@ -26,6 +26,7 @@ use agent_doc_controller::dispatch::{
 use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry;
 use agent_doc_supervisor::ipc_protocol::IpcMethod;
+use agent_doc_turn::op_log::OpsLogEvent;
 use tmux_router::Tmux;
 
 #[derive(Debug, Clone, Copy)]
@@ -588,7 +589,8 @@ pub fn dispatch_routed_reopen_with_mode(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "route_dispatch_start_proven file={} pane={} harness={} proof={} timeout_secs={}",
+                "{} file={} pane={} harness={} proof={} timeout_secs={}",
+                OpsLogEvent::RouteDispatchStartProven,
                 file.display(),
                 pane,
                 harness.binary,
@@ -660,7 +662,8 @@ pub fn dispatch_routed_reopen_with_mode(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "route_dispatch_start_proven file={} pane={} harness={} proof={} timeout_secs={}",
+                        "{} file={} pane={} harness={} proof={} timeout_secs={}",
+                        OpsLogEvent::RouteDispatchStartProven,
                         file.display(),
                         pane,
                         harness.binary,
@@ -682,7 +685,8 @@ pub fn dispatch_routed_reopen_with_mode(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_dispatch_start_unproven_but_accepted file={} pane={} harness={} timeout_secs={}",
+                    "{} file={} pane={} harness={} timeout_secs={}",
+                    OpsLogEvent::RouteDispatchStartUnprovenButAccepted,
                     file.display(),
                     pane,
                     harness.binary,

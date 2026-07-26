@@ -69,7 +69,7 @@
 use agent_doc_run_context_io::AgentDocContextExt;
 use agent_doc_turn::CyclePhase;
 use agent_doc_turn::op_log::{
-    PREFLIGHT_START_EVENT, event_name, is_write_completed_commit_missing_event,
+    OpsLogEvent, PREFLIGHT_START_EVENT, event_name, is_write_completed_commit_missing_event,
 };
 use agent_doc_workflow::session_check::{BlockedCloseoutMessage, GuardResult};
 use anyhow::Result;
@@ -390,8 +390,9 @@ pub fn run_with_options(
     // added to find (`#sessioncheckprofile`).
     crate::profile::reset();
     let started = std::time::Instant::now();
-    let out =
-        crate::with_current_document_pass(|| run_with_options_inner(file, codex_final_gate, effects));
+    let out = crate::with_current_document_pass(|| {
+        run_with_options_inner(file, codex_final_gate, effects)
+    });
     crate::profile::report(file, started.elapsed());
     out
 }
@@ -742,9 +743,7 @@ fn run_with_options_inner(
                     .ok()
                     .flatten()
                 && matches!(cycle.phase, agent_doc_turn::CyclePhase::Abandoned)
-                && cycle
-                    .last_event
-                    .contains("recursive_direct_invocation_blocked")
+                && OpsLogEvent::RecursiveDirectInvocationBlocked.is_line(&cycle.last_event)
                 && cycle.capture_id.is_none()
                 && cycle.response_sha256.is_none()
             {
@@ -779,7 +778,7 @@ fn run_with_options_inner(
         SessionCheckStatus::Interrupted(message) => {
             println!("{}", message);
             crate::profile::report_now(file);
-                    std::process::exit(1);
+            std::process::exit(1);
         }
     }
 }
@@ -868,7 +867,9 @@ fn inspect_with_warnings_inner(
             );
         });
         rc.set_current_document(current_document);
-        match crate::profile::timed("guard_dropped_exchange_prompt", || crate::check_dropped_exchange_prompt_guard(file, &rc))? {
+        match crate::profile::timed("guard_dropped_exchange_prompt", || {
+            crate::check_dropped_exchange_prompt_guard(file, &rc)
+        })? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -876,7 +877,9 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        match crate::profile::timed("guard_dropped_queue_prompt", || crate::check_dropped_queue_prompt_guard(file, &rc))? {
+        match crate::profile::timed("guard_dropped_queue_prompt", || {
+            crate::check_dropped_queue_prompt_guard(file, &rc)
+        })? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -884,7 +887,9 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        match crate::profile::timed("guard_queue_response_contamination", || crate::check_queue_response_contamination_guard(file, &rc))? {
+        match crate::profile::timed("guard_queue_response_contamination", || {
+            crate::check_queue_response_contamination_guard(file, &rc)
+        })? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -892,11 +897,15 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        if let Some(message) = crate::profile::timed("guard_completed_pending_reap", || crate::check_completed_pending_reap_guard(file, &rc))? {
+        if let Some(message) = crate::profile::timed("guard_completed_pending_reap", || {
+            crate::check_completed_pending_reap_guard(file, &rc)
+        })? {
             report.status = SessionCheckStatus::Interrupted(message);
             return Ok(report);
         }
-        match crate::profile::timed("guard_shadow_backlog", || crate::check_shadow_backlog_guard(file, &rc))? {
+        match crate::profile::timed("guard_shadow_backlog", || {
+            crate::check_shadow_backlog_guard(file, &rc)
+        })? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -904,7 +913,9 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        match crate::profile::timed("guard_malformed_tracked_item", || crate::check_malformed_tracked_item_guard(file, &rc))? {
+        match crate::profile::timed("guard_malformed_tracked_item", || {
+            crate::check_malformed_tracked_item_guard(file, &rc)
+        })? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -912,7 +923,9 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        match crate::profile::timed("guard_backlog_replay", || crate::check_backlog_replay_guard(file, &rc))? {
+        match crate::profile::timed("guard_backlog_replay", || {
+            crate::check_backlog_replay_guard(file, &rc)
+        })? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -964,7 +977,9 @@ fn inspect_with_warnings_inner(
                 return Ok(report);
             }
         }
-        match crate::profile::timed("guard_prompt_only_exchange_tail", || crate::check_prompt_only_exchange_tail_guard(file, &rc))? {
+        match crate::profile::timed("guard_prompt_only_exchange_tail", || {
+            crate::check_prompt_only_exchange_tail_guard(file, &rc)
+        })? {
             GuardResult::None => {}
             GuardResult::Warn(lines) => report.warnings.extend(lines),
             GuardResult::Error(message) => {
@@ -973,17 +988,39 @@ fn inspect_with_warnings_inner(
             }
         }
         for guard in [
-            crate::profile::timed("guard_pending_capture", || crate::check_pending_capture_guard(file, &rc))?,
-            crate::profile::timed("guard_coined_ids", || crate::check_coined_ids_guard(file, &rc))?,
-            crate::profile::timed("guard_pending_done", || crate::check_pending_done_guard(file, &rc))?,
-            crate::profile::timed("guard_expect_done_or_gate", || crate::check_expect_done_or_gate_guard(file, &rc))?,
-            crate::profile::timed("guard_partial_closeout_state", || crate::check_partial_closeout_state_guard(file))?,
-            crate::profile::timed("guard_partial_staging_closeout", || crate::check_partial_staging_closeout_guard(file))?,
-            crate::profile::timed("guard_blocked_closeout_followup", || crate::check_blocked_closeout_followup_guard(file, &rc))?,
-            crate::profile::timed("guard_gated_phase_split", || crate::check_gated_phase_split_guard(file, &rc))?,
-            crate::profile::timed("guard_queue_audit_partial_completion", || crate::check_queue_audit_partial_completion_guard(file))?,
-            crate::profile::timed("guard_queue_head_removal", || crate::check_queue_head_removal_guard(file, &rc))?,
-            crate::profile::timed("guard_free_text_queue_head_provenance", || crate::check_free_text_queue_head_provenance(file, &rc))?,
+            crate::profile::timed("guard_pending_capture", || {
+                crate::check_pending_capture_guard(file, &rc)
+            })?,
+            crate::profile::timed("guard_coined_ids", || {
+                crate::check_coined_ids_guard(file, &rc)
+            })?,
+            crate::profile::timed("guard_pending_done", || {
+                crate::check_pending_done_guard(file, &rc)
+            })?,
+            crate::profile::timed("guard_expect_done_or_gate", || {
+                crate::check_expect_done_or_gate_guard(file, &rc)
+            })?,
+            crate::profile::timed("guard_partial_closeout_state", || {
+                crate::check_partial_closeout_state_guard(file)
+            })?,
+            crate::profile::timed("guard_partial_staging_closeout", || {
+                crate::check_partial_staging_closeout_guard(file)
+            })?,
+            crate::profile::timed("guard_blocked_closeout_followup", || {
+                crate::check_blocked_closeout_followup_guard(file, &rc)
+            })?,
+            crate::profile::timed("guard_gated_phase_split", || {
+                crate::check_gated_phase_split_guard(file, &rc)
+            })?,
+            crate::profile::timed("guard_queue_audit_partial_completion", || {
+                crate::check_queue_audit_partial_completion_guard(file)
+            })?,
+            crate::profile::timed("guard_queue_head_removal", || {
+                crate::check_queue_head_removal_guard(file, &rc)
+            })?,
+            crate::profile::timed("guard_free_text_queue_head_provenance", || {
+                crate::check_free_text_queue_head_provenance(file, &rc)
+            })?,
         ] {
             match guard {
                 GuardResult::None => {}
@@ -1529,8 +1566,10 @@ fn inspect_core_profiled(
                     file, &state, blocked,
                 )));
             }
-            let recovered_boundary = effects
-                .recover_missing_commit_boundary(file, "session_check_commit_boundary_recovered")?;
+            let recovered_boundary = effects.recover_missing_commit_boundary(
+                file,
+                OpsLogEvent::SessionCheckCommitBoundaryRecovered.as_str(),
+            )?;
             log_slow_session_check_phase(
                 file,
                 "recover_missing_commit_boundary",
@@ -1571,9 +1610,7 @@ fn inspect_core_profiled(
         // cycle in this shape, but older abandoned cycles or alternate paths must
         // still be caught here.)
         if matches!(state.phase, agent_doc_turn::CyclePhase::Abandoned)
-            && state
-                .last_event
-                .contains("recursive_direct_invocation_blocked")
+            && OpsLogEvent::RecursiveDirectInvocationBlocked.is_line(&state.last_event)
             && let Some(unresolved) = crate::unresolved_exchange_prompt(file)?
         {
             let excerpt: String = unresolved
@@ -1826,9 +1863,10 @@ fn inspect_core_profiled(
             )))
         }
         Some(event) if is_write_completed_commit_missing_event(&event) => {
-            if let Some(reason) = effects
-                .recover_missing_commit_boundary(file, "session_check_commit_boundary_recovered")?
-            {
+            if let Some(reason) = effects.recover_missing_commit_boundary(
+                file,
+                OpsLogEvent::SessionCheckCommitBoundaryRecovered.as_str(),
+            )? {
                 let repaired_cycle = agent_doc_cycle_state_io::load_with_closeout_projection(file)?;
                 if let Some(prompt_marker) = detect_unstarted_prompt_bearing_diff(file)? {
                     return Ok(SessionCheckStatus::Interrupted(format!(

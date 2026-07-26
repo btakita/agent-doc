@@ -2,7 +2,7 @@
 
 use agent_doc_state_scope::LocalTurnScope;
 use agent_doc_turn::op_log::{
-    IPC_PROOF_INSUFFICIENT_EVENT, is_write_completed_commit_missing_event, strip_timestamp_prefix,
+    OpsLogEvent, is_write_completed_commit_missing_event, strip_timestamp_prefix,
 };
 use anyhow::Result;
 use parking_lot::Mutex;
@@ -401,12 +401,17 @@ pub fn last_ops_event(file: &Path) -> Result<Option<String>> {
 }
 
 fn is_read_only_document_resolution_event(event: &str) -> bool {
-    event.starts_with("realtime_doc_resolve ")
-        || event.starts_with("realtime_doc_resolve_crdt_error ")
-        || event.starts_with("crdt_current_text_unavailable ")
-        || event.starts_with("document_model_ensure_start ")
-        || event.starts_with("document_model_ensure_publish_requested ")
-        || event.starts_with("document_model_ensure_failed ")
+    matches!(
+        OpsLogEvent::from_line(event),
+        Some(
+            OpsLogEvent::RealtimeDocResolve
+                | OpsLogEvent::RealtimeDocResolveCrdtError
+                | OpsLogEvent::CrdtCurrentTextUnavailable
+                | OpsLogEvent::DocumentModelEnsureStart
+                | OpsLogEvent::DocumentModelEnsurePublishRequested
+                | OpsLogEvent::DocumentModelEnsureFailed
+        )
+    )
 }
 
 pub fn latest_ipc_proof_diagnostic(file: &Path) -> Result<Option<String>> {
@@ -420,7 +425,7 @@ pub fn latest_ipc_proof_diagnostic(file: &Path) -> Result<Option<String>> {
         .rev()
         .map(strip_timestamp_prefix)
         .find(|event| {
-            event.starts_with(IPC_PROOF_INSUFFICIENT_EVENT)
+            OpsLogEvent::IpcProofInsufficient.is_line(event)
                 && (event.contains(&format!("file={canonical_display}"))
                     || event.contains(&format!("file={requested_display}")))
         })
@@ -454,9 +459,10 @@ pub fn latest_unclosed_write_completed_commit_missing(file: &Path) -> Result<Opt
         if is_write_completed_commit_missing_event(event) {
             return Ok(Some(event.to_string()));
         }
-        if event.starts_with("commit_success ")
-            || event.starts_with("repair_commit_boundary_recovered ")
-        {
+        if matches!(
+            OpsLogEvent::from_line(event),
+            Some(OpsLogEvent::CommitSuccess | OpsLogEvent::RepairCommitBoundaryRecovered)
+        ) {
             return Ok(None);
         }
     }

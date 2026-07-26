@@ -19,6 +19,7 @@ use agent_doc_harness::HarnessConfig;
 use agent_doc_turn::cycle_ack::{
     CycleAckState, PromptBearingRouteContext, cycle_state_advances_start_ack,
 };
+use agent_doc_turn::op_log::OpsLogEvent;
 use tmux_router::Tmux;
 
 #[derive(Debug, Clone, Copy)]
@@ -250,7 +251,8 @@ pub fn retry_routed_cycle_ack_after_fresh_restart(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "route_cycle_start_missing_after_fresh_restart_optimistic file={} pane={} harness={} marker={} timeout_secs={} startup_miss_timestamp={}",
+                        "{} file={} pane={} harness={} marker={} timeout_secs={} startup_miss_timestamp={}",
+                        OpsLogEvent::RouteCycleStartMissingAfterFreshRestartOptimistic,
                         file.display(),
                         dispatch_pane,
                         harness.binary,
@@ -411,7 +413,8 @@ pub fn require_routed_cycle_ack(
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "route_cycle_start_missing file={} pane={} harness={} marker={} timeout_secs={}",
+                    "{} file={} pane={} harness={} marker={} timeout_secs={}",
+                    OpsLogEvent::RouteCycleStartMissing,
                     file.display(),
                     pane,
                     harness.binary,
@@ -446,7 +449,8 @@ pub fn require_routed_cycle_ack(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "route_cycle_start_missing_optimistic file={} pane={} harness={} marker={} timeout_secs={} startup_miss_timestamp={}",
+                        "{} file={} pane={} harness={} marker={} timeout_secs={} startup_miss_timestamp={}",
+                        OpsLogEvent::RouteCycleStartMissingOptimistic,
                         file.display(),
                         pane,
                         harness.binary,

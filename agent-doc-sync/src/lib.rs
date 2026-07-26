@@ -4,6 +4,7 @@
 //! selection for sync. Orchestration owns tmux calls, repair side effects,
 //! document validation, and state-file IO.
 
+use agent_doc_turn::op_log::OpsLogEvent;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -169,7 +170,8 @@ pub fn sync_latency_message(
     mode_label: &str,
 ) -> String {
     format!(
-        "sync_latency phase={} elapsed_ms={} budget_ms={} status={} mode={}",
+        "{} phase={} elapsed_ms={} budget_ms={} status={} mode={}",
+        OpsLogEvent::SyncLatency,
         phase,
         elapsed.as_millis(),
         budget.as_millis(),

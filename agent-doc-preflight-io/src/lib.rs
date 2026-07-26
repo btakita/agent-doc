@@ -36,6 +36,7 @@ use agent_doc_queue::{
     },
     queue_response::{free_text_head_answered_by_response, queue_prompt_text_is_free_text},
 };
+use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_workflow::preflight_policy::ResolvedFreeTextExecution;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -979,7 +980,8 @@ pub fn enforce_cycle_completion(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "interrupted_cycle_detected file={} cycle_id={} phase={:?} event={}",
+            "{} file={} cycle_id={} phase={:?} event={}",
+            OpsLogEvent::InterruptedCycleDetected,
             file.display(),
             state.cycle_id,
             state.phase,
@@ -10163,7 +10165,10 @@ mod tests {
         ids.iter().map(|id| (*id).to_string()).collect()
     }
 
-    fn prior_cycle_json(phase: &str, capture: Option<&str>) -> agent_doc_cycle_state_io::CycleState {
+    fn prior_cycle_json(
+        phase: &str,
+        capture: Option<&str>,
+    ) -> agent_doc_cycle_state_io::CycleState {
         let capture = capture
             .map(|c| format!(r#","capture_id":"{c}""#))
             .unwrap_or_default();
@@ -10260,8 +10265,12 @@ mod tests {
         assert_eq!(fresh, id_set(["alpha", "beta"]));
 
         // Progress on an unrelated head clears them and re-offers the work.
-        let fresh =
-            advance_skipped_queue_head_ids(id_set(["alpha", "beta"]), None, &id_set(["gamma"]), &live);
+        let fresh = advance_skipped_queue_head_ids(
+            id_set(["alpha", "beta"]),
+            None,
+            &id_set(["gamma"]),
+            &live,
+        );
         assert!(
             fresh.is_empty(),
             "a completed head must re-offer previously skipped work, not strand it: {fresh:?}"

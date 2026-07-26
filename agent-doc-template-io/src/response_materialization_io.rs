@@ -4,6 +4,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use agent_doc_template::response_materialization::strip_partial_response_materialization_from_exchange;
+use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_turn::response_replay::response_materialized_in_content;
 
 pub fn ipc_response_materialized_or_fallback_with_recycle(
@@ -92,7 +93,8 @@ pub fn log_ipc_proof_failure_with_recycle(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ipc_proof_insufficient file={} source={} patch_id={} invariant={} recovery={}{}{}",
+            "{} file={} source={} patch_id={} invariant={} recovery={}{}{}",
+            OpsLogEvent::IpcProofInsufficient,
             file.display(),
             source,
             patch_id.unwrap_or("-"),

@@ -1,6 +1,7 @@
 use agent_doc_element_backlog::guard_policy::BacklogGuardOutcome;
 use agent_doc_frontmatter::frontmatter::PendingCaptureGuardMode;
 use agent_doc_turn::CyclePhase;
+use agent_doc_turn::op_log::OpsLogEvent;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GuardResult {
@@ -660,10 +661,8 @@ pub struct OpenCycleMessage<'a> {
 }
 
 pub fn open_cycle_message(input: OpenCycleMessage<'_>) -> String {
-    if input.last_event.starts_with("direct_invocation_timeout")
-        || input
-            .last_event
-            .starts_with("recursive_direct_invocation_blocked")
+    if OpsLogEvent::DirectInvocationTimeout.is_line(input.last_event)
+        || OpsLogEvent::RecursiveDirectInvocationBlocked.is_line(input.last_event)
     {
         return format!(
             "[session-check] INTERRUPTED: cycle `{}` is still `{}` ({}) — direct invocation did not reach response capture. If the owning pane is now idle but the document still reports busy, reconcile it without killing the pane via `agent-doc session status {}` (or `agent-doc session clear {}`). Otherwise retry from outside the managed pane, restart the owner with `agent-doc start {}`, or abandon the stale cycle only after confirming no response exists.{}",

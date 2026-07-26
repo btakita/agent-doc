@@ -36,6 +36,7 @@ use agent_doc_queue::queue_prompt_drift::{
     dropped_queue_prompt_lines_after_content_ours, merge_visible_queue_additions_into_content_ours,
     preserve_content_ours_over_live_queue_deletions,
 };
+use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_turn::response_replay::{
     materialize_response_in_current_exchange, response_materialized_in_content,
 };
@@ -3528,7 +3529,8 @@ fn log_ipc_proof_failure_with_recycle(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "ipc_proof_insufficient file={} source={} patch_id={} invariant={} recovery={}{}{}",
+            "{} file={} source={} patch_id={} invariant={} recovery={}{}{}",
+            OpsLogEvent::IpcProofInsufficient,
             file.display(),
             source,
             patch_id.unwrap_or("-"),

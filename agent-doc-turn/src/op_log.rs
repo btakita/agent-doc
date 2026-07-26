@@ -24,12 +24,147 @@
 
 use serde::{Deserialize, Serialize};
 
+macro_rules! ops_log_events {
+    ($( $variant:ident => $token:literal ),+ $(,)?) => {
+        /// Stable event names that agent-doc code parses from `ops.log`.
+        ///
+        /// This intentionally excludes human-only diagnostics. Adding a parsed event here makes
+        /// producer/consumer renames compiler-visible instead of relying on duplicated string
+        /// literals whose mismatch silently evaluates to `false`.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub enum OpsLogEvent {
+            $( $variant, )+
+        }
+
+        impl OpsLogEvent {
+            /// Complete vocabulary of event names parsed by agent-doc code.
+            pub const PARSED_EVENTS: &'static [Self] = &[
+                $( Self::$variant, )+
+            ];
+
+            /// Stable first-token representation written to `ops.log`.
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $( Self::$variant => $token, )+
+                }
+            }
+
+            /// Parse one exact event-name token.
+            pub fn from_token(token: &str) -> Option<Self> {
+                match token {
+                    $( $token => Some(Self::$variant), )+
+                    _ => None,
+                }
+            }
+
+            /// Parse the first event token from a complete, optionally timestamped log line.
+            pub fn from_line(line: &str) -> Option<Self> {
+                Self::from_token(event_name(strip_timestamp_prefix(line)))
+            }
+
+            /// True when this is the leading event token of `line`.
+            pub fn is_line(self, line: &str) -> bool {
+                Self::from_line(line) == Some(self)
+            }
+
+            /// True when this event occurs as an exact whitespace-delimited token,
+            /// either standalone or as a `key=<event>` field value.
+            ///
+            /// Some legacy doctor records embed a causal event name in a field instead of using
+            /// it as the line's leading token. This helper keeps those records readable without
+            /// returning to substring matching.
+            pub fn is_line_or_field_value(self, line: &str) -> bool {
+                if self.is_line(line) {
+                    return true;
+                }
+                let expected = self.as_str();
+            strip_timestamp_prefix(line)
+                .split_ascii_whitespace()
+                .map(|field| {
+                    field
+                        .split_once('=')
+                        .map(|(_, value)| value)
+                        .unwrap_or(field)
+                })
+                .map(|value| value.trim_matches([',', ';', '"', '\'']))
+                .any(|value| value == expected)
+            }
+        }
+
+        impl std::fmt::Display for OpsLogEvent {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str(self.as_str())
+            }
+        }
+    };
+}
+
+ops_log_events! {
+    PreflightDiffStart => "preflight_diff_start",
+    IpcWriteConsumed => "ipc_write_consumed",
+    IpcProofInsufficient => "ipc_proof_insufficient",
+    RealtimeDocResolve => "realtime_doc_resolve",
+    RealtimeDocResolveCrdtError => "realtime_doc_resolve_crdt_error",
+    CrdtCurrentTextUnavailable => "crdt_current_text_unavailable",
+    DocumentModelEnsureStart => "document_model_ensure_start",
+    DocumentModelEnsurePublishRequested => "document_model_ensure_publish_requested",
+    DocumentModelEnsureFailed => "document_model_ensure_failed",
+    CommitSuccess => "commit_success",
+    RepairCommitBoundaryRecovered => "repair_commit_boundary_recovered",
+    RecursiveDirectInvocationBlocked => "recursive_direct_invocation_blocked",
+    FlowEvent => "flow_event",
+    InterruptedCycleDetected => "interrupted_cycle_detected",
+    LateFallbackPatchRejected => "late_fallback_patch_rejected",
+    StaleSnapshotResetDriftBlocked => "stale_snapshot_reset_drift_blocked",
+    CommitBlockedMissingCapturedResponse => "commit_blocked_missing_captured_response",
+    SessionCheckCommitBoundaryRecovered => "session_check_commit_boundary_recovered",
+    CommitNoop => "commit_noop",
+    RouteDispatchStartProven => "route_dispatch_start_proven",
+    RouteSubmitIssue => "route_submit_issue",
+    PostCommitUserFollowUp => "post_commit_user_follow_up",
+    PostCommitLocalDrift => "post_commit_local_drift",
+    SessionClearActivePaneAllowed => "session_clear_active_pane_allowed",
+    SessionClearProtectedInputGuardRefused => "session_clear_protected_input_guard_refused",
+    SessionClearLiveBusyGuardBypassed => "session_clear_live_busy_guard_bypassed",
+    SessionClearLiveBusyGuardRefused => "session_clear_live_busy_guard_refused",
+    SessionClearLiveBusyGuardBlocked => "session_clear_live_busy_guard_blocked",
+    RouteAuthoritativeActorStartingNotReady => "route_authoritative_actor_starting_not_ready",
+    RouteStartingActorTimeoutCoalesced => "route_starting_actor_timeout_coalesced",
+    RouteCycleStartMissing => "route_cycle_start_missing",
+    RouteCycleStartMissingAfterFreshRestartOptimistic =>
+        "route_cycle_start_missing_after_fresh_restart_optimistic",
+    RouteCycleStartMissingOptimistic => "route_cycle_start_missing_optimistic",
+    RouteDispatchStartUnprovenButAccepted => "route_dispatch_start_unproven_but_accepted",
+    RouteDispatchOnlySent => "route_dispatch_only_sent",
+    RouteDispatchOnlySubmitUnproven => "route_dispatch_only_submit_unproven",
+    RunPreflightTimeout => "run_preflight_timeout",
+    DirectInvocationTimeout => "direct_invocation_timeout",
+    SyncLatency => "sync_latency",
+    SqliteLogCounts => "sqlite_log_counts",
+    SqliteLogCount => "sqlite_log_count",
+    SessionReviewGuard => "session_review_guard",
+    CodexThreadStarted => "codex_thread_started",
+    ClaudeJsonlHookMarker => "claude_jsonl_hook_marker",
+    AgentDocCycleMarker => "agent_doc_cycle_marker",
+    SupervisorBinaryStale => "supervisor_binary_stale",
+    RetryOnCurrentGeneration => "retry_on_current_generation",
+    SupervisorRestartRedirect => "supervisor_restart_redirect",
+    StaleGeneration => "stale_generation",
+    EditorConvergenceAckMismatch => "editor_convergence_ack_mismatch",
+    EditorConvergenceNoAck => "editor_convergence_no_ack",
+    LivePromptDriftAfterPreflight => "live_prompt_drift_after_preflight",
+    EditorOpRecorded => "editor_op_recorded",
+    EditorOpsForBase => "editor_ops_for_base",
+    EditorOpRecordFailed => "editor_op_record_failed",
+    ConvergenceGateBlocked => "convergence_gate_blocked",
+}
+
 /// Event name prefix emitted by preflight when a cycle starts.
-pub const PREFLIGHT_START_EVENT: &str = "preflight_diff_start";
+pub const PREFLIGHT_START_EVENT: &str = OpsLogEvent::PreflightDiffStart.as_str();
 /// Event name emitted when an IPC write was consumed and awaits commit proof.
-pub const IPC_WRITE_CONSUMED_EVENT: &str = "ipc_write_consumed";
+pub const IPC_WRITE_CONSUMED_EVENT: &str = OpsLogEvent::IpcWriteConsumed.as_str();
 /// Event name emitted when IPC response-materialization proof is insufficient.
-pub const IPC_PROOF_INSUFFICIENT_EVENT: &str = "ipc_proof_insufficient";
+pub const IPC_PROOF_INSUFFICIENT_EVENT: &str = OpsLogEvent::IpcProofInsufficient.as_str();
 
 /// Strip a leading `[NNN] ` timestamp prefix from an ops-log line.
 pub fn strip_timestamp_prefix(line: &str) -> &str {
@@ -43,7 +178,7 @@ pub fn strip_timestamp_prefix(line: &str) -> &str {
 
 /// True when an ops-log event proves a write landed but commit proof is missing.
 pub fn is_write_completed_commit_missing_event(event: &str) -> bool {
-    event.starts_with(IPC_WRITE_CONSUMED_EVENT)
+    OpsLogEvent::IpcWriteConsumed.is_line(event)
 }
 
 /// Return the first whitespace-delimited event token from an ops-log event.
@@ -245,6 +380,49 @@ mod tests {
         assert_eq!(event_name(""), "");
         assert_eq!(PREFLIGHT_START_EVENT, "preflight_diff_start");
         assert_eq!(IPC_PROOF_INSUFFICIENT_EVENT, "ipc_proof_insufficient");
+        assert_eq!(
+            OpsLogEvent::FlowEvent.as_str(),
+            agent_doc_flow::types::FLOW_EVENT_LOG_NAME
+        );
+        assert!(
+            agent_doc_diff::line_is_binary_authored_ipc_proof_diagnostic(&format!(
+                "{} invariant=visible_write recovery=retry_without_disk_write",
+                OpsLogEvent::IpcProofInsufficient
+            ))
+        );
+    }
+
+    #[test]
+    fn parsed_ops_log_event_vocabulary_is_unique_and_round_trips() {
+        let mut tokens = std::collections::BTreeSet::new();
+        for event in OpsLogEvent::PARSED_EVENTS {
+            assert!(
+                tokens.insert(event.as_str()),
+                "duplicate parsed ops-log token {}",
+                event.as_str()
+            );
+            assert_eq!(OpsLogEvent::from_token(event.as_str()), Some(*event));
+            assert_eq!(
+                OpsLogEvent::from_line(&format!("[1700000000] {event} file=/x")),
+                Some(*event)
+            );
+        }
+        assert_eq!(
+            OpsLogEvent::from_line("[1700000000] human_only_diagnostic file=/x"),
+            None
+        );
+    }
+
+    #[test]
+    fn parsed_event_matching_is_token_exact() {
+        let event = OpsLogEvent::SupervisorBinaryStale;
+        assert!(event.is_line("supervisor_binary_stale file=/x"));
+        assert!(event.is_line_or_field_value("route_failed supervisor_binary_stale file=/x"));
+        assert!(event.is_line_or_field_value("route_failed reason=supervisor_binary_stale"));
+        assert!(!event.is_line("prefix_supervisor_binary_stale file=/x"));
+        assert!(
+            !event.is_line_or_field_value("route_failed reason=prefix_supervisor_binary_stale")
+        );
     }
 
     #[test]

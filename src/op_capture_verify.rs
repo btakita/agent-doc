@@ -1,3 +1,4 @@
+use agent_doc_turn::op_log::OpsLogEvent;
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 
@@ -50,7 +51,9 @@ fn verify(file: &Path, expect_cafe_demo: bool) -> Result<OpCaptureVerification> 
     let recorded: Vec<&str> = doc_lines
         .iter()
         .copied()
-        .filter(|line| line.contains("editor_op_recorded") && line.contains("#qnodemerge4wire"))
+        .filter(|line| {
+            OpsLogEvent::EditorOpRecorded.is_line(line) && line.contains("#qnodemerge4wire")
+        })
         .collect();
     if recorded.is_empty() {
         bail!(
@@ -63,7 +66,9 @@ fn verify(file: &Path, expect_cafe_demo: bool) -> Result<OpCaptureVerification> 
         .iter()
         .copied()
         .filter(|line| {
-            line.contains("editor_ops_for_base accepted=true") && line.contains("#qnodemerge4wire")
+            OpsLogEvent::EditorOpsForBase.is_line(line)
+                && line.contains("accepted=true")
+                && line.contains("#qnodemerge4wire")
         })
         .collect();
     if accepted.is_empty() {
@@ -75,7 +80,7 @@ fn verify(file: &Path, expect_cafe_demo: bool) -> Result<OpCaptureVerification> 
 
     let failed_count = doc_lines
         .iter()
-        .filter(|line| line.contains("editor_op_record_failed"))
+        .filter(|line| OpsLogEvent::EditorOpRecordFailed.is_line(line))
         .count();
     if failed_count > 0 {
         bail!("found {failed_count} editor_op_record_failed marker(s) for {doc_tag}");

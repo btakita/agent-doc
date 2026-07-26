@@ -7,6 +7,8 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt::Write as _, path::Path};
 
+use agent_doc_turn::op_log::OpsLogEvent;
+
 use crate::invariants::{
     RemediationAction, WorkflowInvariant, WorkflowInvariantCatalog, WorkflowInvariantId,
 };
@@ -540,25 +542,30 @@ pub fn classify_ops_marker(line: &str) -> Option<&'static str> {
     if line.contains("failed_stage=queue_paused")
         && (line.contains("reason=#qchurn")
             || line.contains("stale host supervisor")
-            || line.contains("supervisor_binary_stale"))
+            || OpsLogEvent::SupervisorBinaryStale.is_line_or_field_value(line))
     {
         return Some("stale_queue_pause");
     }
-    if line.contains("supervisor_binary_stale") || line.contains("stale host supervisor") {
+    if OpsLogEvent::SupervisorBinaryStale.is_line_or_field_value(line)
+        || line.contains("stale host supervisor")
+    {
         return Some("stale_supervisor");
     }
-    if line.contains("retry_on_current_generation") || line.contains("supervisor_restart_redirect")
+    if OpsLogEvent::RetryOnCurrentGeneration.is_line_or_field_value(line)
+        || OpsLogEvent::SupervisorRestartRedirect.is_line_or_field_value(line)
     {
         return Some("retry_on_current_generation");
     }
-    if line.contains("stale_generation") || line.contains("stale generation") {
+    if OpsLogEvent::StaleGeneration.is_line_or_field_value(line)
+        || line.contains("stale generation")
+    {
         return Some("stale_generation_block");
     }
     if line.contains("File Cache Conflict")
-        || line.contains("ipc_proof_insufficient")
-        || line.contains("editor_convergence_ack_mismatch")
-        || line.contains("editor_convergence_no_ack")
-        || line.contains("live_prompt_drift_after_preflight")
+        || OpsLogEvent::IpcProofInsufficient.is_line_or_field_value(line)
+        || OpsLogEvent::EditorConvergenceAckMismatch.is_line_or_field_value(line)
+        || OpsLogEvent::EditorConvergenceNoAck.is_line_or_field_value(line)
+        || OpsLogEvent::LivePromptDriftAfterPreflight.is_line_or_field_value(line)
     {
         return Some("editor_convergence_failure");
     }

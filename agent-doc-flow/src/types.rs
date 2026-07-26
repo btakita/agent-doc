@@ -240,9 +240,13 @@ pub fn session_cycle_event(
     flow_event(FlowName::SessionCycle, stage, outcome, reason)
 }
 
+/// Stable leading token for the typed flow event written to `ops.log`.
+pub const FLOW_EVENT_LOG_NAME: &str = "flow_event";
+
 pub fn flow_event_log_message(file: &str, event: &FlowEvent) -> String {
     let mut message = format!(
-        "flow_event file={} flow={} stage={} outcome={}",
+        "{} file={} flow={} stage={} outcome={}",
+        FLOW_EVENT_LOG_NAME,
         file,
         event.flow.as_str(),
         event.stage.as_str(),

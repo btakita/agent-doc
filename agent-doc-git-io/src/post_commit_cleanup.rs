@@ -4,6 +4,7 @@ use std::path::Path;
 use agent_doc_document::transient_markers::normalize_for_replay_hash;
 use agent_doc_element_exchange::post_commit_ipc_reposition_only_exchange_safe;
 use agent_doc_git::PostCommitLocalDriftKind;
+use agent_doc_turn::op_log::OpsLogEvent;
 
 pub struct QueueContinuationProof {
     pub head_prompt: String,
@@ -109,13 +110,16 @@ pub fn finalize_successful_commit(
     prior_head_doc: Option<&str>,
 ) {
     effects.log_cycle(file, "commit", None, None);
-    effects.log_op(file, &format!("commit_success file={}", file.display()));
-    effects.log_closeout_commit_completed(file, "commit_success");
+    effects.log_op(
+        file,
+        &format!("{} file={}", OpsLogEvent::CommitSuccess, file.display()),
+    );
+    effects.log_closeout_commit_completed(file, OpsLogEvent::CommitSuccess.as_str());
     let snap = effects.load_snapshot(file);
     let file_content = effects.read_to_string(file).ok();
     if let Err(e) = effects.mark_pipeline_committed(
         file,
-        "commit_success",
+        OpsLogEvent::CommitSuccess.as_str(),
         snap.as_deref(),
         file_content.as_deref(),
     ) {
@@ -179,7 +183,8 @@ pub fn log_already_current_local_drift_handoff(
         effects.log_op(
             file,
             &format!(
-                "post_commit_user_follow_up file={} basis=head",
+                "{} file={} basis=head",
+                OpsLogEvent::PostCommitUserFollowUp,
                 file.display()
             ),
         );
@@ -203,7 +208,8 @@ pub fn log_already_current_local_drift_handoff(
     effects.log_op(
         file,
         &format!(
-            "post_commit_local_drift file={} kind={} basis=head",
+            "{} file={} kind={} basis=head",
+            OpsLogEvent::PostCommitLocalDrift,
             file.display(),
             kind.as_str()
         ),
@@ -219,14 +225,20 @@ pub fn finalize_already_committed_noop(
     file_content: Option<&str>,
     drift_kind: Option<PostCommitLocalDriftKind>,
 ) {
-    effects.log_cycle(file, "commit_noop", snapshot_content, file_content);
+    effects.log_cycle(
+        file,
+        OpsLogEvent::CommitNoop.as_str(),
+        snapshot_content,
+        file_content,
+    );
     let drift_kind = drift_kind
         .map(PostCommitLocalDriftKind::as_str)
         .unwrap_or("none");
     effects.log_op(
         file,
         &format!(
-            "commit_noop file={} reason=already_current drift_kind={} basis=head",
+            "{} file={} reason=already_current drift_kind={} basis=head",
+            OpsLogEvent::CommitNoop,
             file.display(),
             drift_kind
         ),

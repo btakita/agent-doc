@@ -16,6 +16,7 @@
 
 use std::path::{Path, PathBuf};
 
+use agent_doc_turn::op_log::OpsLogEvent;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
@@ -213,7 +214,8 @@ pub fn blocked_boundary_ops_message(
     playback_path: &Path,
 ) -> String {
     format!(
-        "convergence_gate_blocked severity=error file={} reason=editor_ipc_convergence_boundary_failed action=fail_closed cycle={} inflight={} timeout_ms={} unmet={} playback={}",
+        "{} severity=error file={} reason=editor_ipc_convergence_boundary_failed action=fail_closed cycle={} inflight={} timeout_ms={} unmet={} playback={}",
+        OpsLogEvent::ConvergenceGateBlocked,
         file.display(),
         playback.cycle_id,
         playback.inflight,
@@ -272,7 +274,7 @@ mod tests {
             "write".into(),
             "commit".into(),
             "postcommit_worktree_check:match=false".into(),
-            "convergence_gate_blocked".into(),
+            OpsLogEvent::ConvergenceGateBlocked.to_string(),
         ])
         .with_hashes(
             Some("snap".into()),
@@ -310,7 +312,7 @@ mod tests {
         let pb = sample_playback();
         let path = Path::new("/tmp/.agent-doc/playback/abc/cycle-123.json");
         let msg = blocked_boundary_ops_message(Path::new("/tmp/doc.md"), &pb, path);
-        assert!(msg.contains("convergence_gate_blocked"));
+        assert!(OpsLogEvent::ConvergenceGateBlocked.is_line(&msg));
         assert!(msg.contains("severity=error"));
         assert!(msg.contains("action=fail_closed"));
         assert!(msg.contains("reason=editor_ipc_convergence_boundary_failed"));

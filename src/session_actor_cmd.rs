@@ -16,6 +16,7 @@ use agent_doc_supervisor::ipc_protocol::IpcMethod;
 use agent_doc_supervisor::ipc_protocol::IpcResponse;
 use agent_doc_supervisor::startup_miss::{SessionLogStatus, StartupMiss, format_timestamp};
 use agent_doc_tmux_commands::tmux_submit_mode_for_harness;
+use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_turn_executor_tmux::context_clear::{
     ContextClearSubmitObservation, ContextClearSubmitPollState, ContextClearSubmitRetryFacts,
     ContextClearSubmitStatus, InterruptClearTimeoutFacts, busy_clear_already_deferred_message,
@@ -1062,7 +1063,8 @@ fn reconcile_idle_projection_before_clear(
                 agent_doc_ops_log_io::log_op(
                     &ctx.canonical_file,
                     &format!(
-                        "session_clear_protected_input_guard_refused file={} pane={} source={} reason={} current_command={} tail={:?}",
+                        "{} file={} pane={} source={} reason={} current_command={} tail={:?}",
+                        OpsLogEvent::SessionClearProtectedInputGuardRefused,
                         ctx.canonical_file.display(),
                         evidence.pane_id.as_deref().unwrap_or("unknown"),
                         evidence.source,
@@ -1178,7 +1180,8 @@ fn reconcile_idle_projection_before_clear(
                     agent_doc_ops_log_io::log_op(
                         &ctx.canonical_file,
                         &format!(
-                            "session_clear_live_busy_guard_blocked file={} pane={} source={} reason={} current_command={} tail={:?}",
+                            "{} file={} pane={} source={} reason={} current_command={} tail={:?}",
+                            OpsLogEvent::SessionClearLiveBusyGuardBlocked,
                             ctx.canonical_file.display(),
                             evidence.pane_id.as_deref().unwrap_or("unknown"),
                             evidence.source,

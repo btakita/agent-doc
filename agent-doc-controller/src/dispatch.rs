@@ -2,6 +2,7 @@
 
 use agent_doc_flow::types::{FlowEvent, FlowName, FlowOutcome, FlowStage};
 use agent_doc_supervisor::route_runtime::SupervisorHealth;
+use agent_doc_turn::op_log::OpsLogEvent;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
@@ -868,7 +869,8 @@ pub struct StartingActorLogFacts<'a> {
 
 pub fn starting_actor_not_ready_log_line(facts: StartingActorLogFacts<'_>) -> String {
     format!(
-        "route_authoritative_actor_starting_not_ready file={} harness={} timeout_ms={} elapsed_ms={} {}",
+        "{} file={} harness={} timeout_ms={} elapsed_ms={} {}",
+        OpsLogEvent::RouteAuthoritativeActorStartingNotReady,
         facts.file_display,
         facts.harness_binary,
         facts.timeout.as_millis(),
@@ -930,7 +932,8 @@ pub fn starting_actor_timeout_coalesced_log_line(
     facts: &AuthoritativeActorReadyFacts,
 ) -> String {
     format!(
-        "route_starting_actor_timeout_coalesced file={} harness={} elapsed_ms={} {}",
+        "{} file={} harness={} elapsed_ms={} {}",
+        OpsLogEvent::RouteStartingActorTimeoutCoalesced,
         file_display,
         harness_binary,
         elapsed.as_millis(),
@@ -1493,7 +1496,8 @@ pub fn route_submit_observation_message(facts: RouteSubmitObservationFacts<'_>) 
 pub fn route_submit_issue_message(facts: RouteSubmitObservationFacts<'_>) -> Option<String> {
     let issue = facts.observation.issue()?;
     let mut message = format!(
-        "route_submit_issue file={} pane={} harness={} phase={} issue={} result={} elapsed_ms={}",
+        "{} file={} pane={} harness={} phase={} issue={} result={} elapsed_ms={}",
+        OpsLogEvent::RouteSubmitIssue,
         facts.file_display,
         facts.pane,
         facts.harness_binary,
@@ -1875,7 +1879,8 @@ pub const fn dispatch_only_should_print_unproven_progress() -> bool {
 
 pub fn dispatch_only_sent_log_message(facts: DispatchOnlyProofOutcomeFacts<'_>) -> String {
     format!(
-        "route_dispatch_only_sent file={} pane={} harness={} delivery={} submit_mode={} proof={} proof_scope={}",
+        "{} file={} pane={} harness={} delivery={} submit_mode={} proof={} proof_scope={}",
+        OpsLogEvent::RouteDispatchOnlySent,
         facts.file_display,
         facts.pane,
         facts.harness_binary,
@@ -1903,7 +1908,8 @@ pub fn accepted_only_dispatch_start_log_message(
     facts: DispatchOnlyProofOutcomeFacts<'_>,
 ) -> String {
     format!(
-        "route_dispatch_only_submit_unproven file={} pane={} harness={} delivery={} submit_mode={} proof=accepted proof_scope=accepted_only timeout_secs={}",
+        "{} file={} pane={} harness={} delivery={} submit_mode={} proof=accepted proof_scope=accepted_only timeout_secs={}",
+        OpsLogEvent::RouteDispatchOnlySubmitUnproven,
         facts.file_display,
         facts.pane,
         facts.harness_binary,
@@ -2839,7 +2845,7 @@ pub fn dispatch_error_stale_generation_redirect_target(message: &str) -> Option<
 
 pub fn pause_reason_is_stale_supervisor_churn_stop(reason: &str) -> bool {
     let r = reason.to_ascii_lowercase();
-    if r.contains("supervisor_binary_stale")
+    if OpsLogEvent::SupervisorBinaryStale.is_line_or_field_value(&r)
         || r.contains("stale supervisor")
         || r.contains("stale host supervisor")
         || r.contains("stale route-owned supervisor")

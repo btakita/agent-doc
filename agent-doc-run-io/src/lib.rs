@@ -18,6 +18,7 @@ use agent_doc_template_io::{
 use agent_doc_turn::no_change::{
     NoChangeCycleStateInput, NoChangeVerdict, classify_no_change_cycle_state,
 };
+use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_turn::owner_pane_recursion::{
     OwnerPaneQueueHead, owner_pane_wedge_threshold_reached, prompt_miss_message,
     queue_handoff_message, queue_wedge_halt_message, recursive_direct_invocation_message,
@@ -578,7 +579,7 @@ pub fn run_once(
     {
         effects.abandon_recursive_cycle(
             file,
-            "recursive_direct_invocation_blocked",
+            OpsLogEvent::RecursiveDirectInvocationBlocked.as_str(),
             &diagnostic,
         )?;
         anyhow::bail!("{}", diagnostic);
@@ -604,7 +605,7 @@ pub fn run_once(
         Ok(response) => response,
         Err(err) if agent_doc_harness::timeout::error_chain_is_timeout(&err) => {
             let diagnostic = run_dispatch_timeout_diagnostic(file, agent_name);
-            record_run_preflight_timeout(file, "direct_invocation_timeout", &diagnostic)?;
+            record_run_preflight_timeout(file, OpsLogEvent::DirectInvocationTimeout, &diagnostic)?;
             anyhow::bail!("{}\n\nsource: {}", diagnostic, err);
         }
         Err(err) => return Err(err),
@@ -1353,14 +1354,19 @@ pub fn start_run_cycle(file: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn record_run_preflight_timeout(file: &Path, event: &str, diagnostic: &str) -> Result<()> {
+pub fn record_run_preflight_timeout(
+    file: &Path,
+    event: OpsLogEvent,
+    diagnostic: &str,
+) -> Result<()> {
     let compact = diagnostic.split_whitespace().collect::<Vec<_>>().join(" ");
     let event = format!("{event} {}", compact.chars().take(700).collect::<String>());
     agent_doc_cycle_state_io::mark_recoverable_preflight_timeout(file, &event)?;
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "run_preflight_timeout file={} event={} diagnostic={}",
+            "{} file={} event={} diagnostic={}",
+            OpsLogEvent::RunPreflightTimeout,
             file.display(),
             event.split_whitespace().next().unwrap_or(event.as_str()),
             compact

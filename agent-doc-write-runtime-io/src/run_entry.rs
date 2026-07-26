@@ -21,6 +21,7 @@ use agent_doc_template_io::{
     normalize_template_structure_or_fail_preserving, normalize_user_prompts_in_exchange_safe,
     template_mode_overrides_for_current_doc,
 };
+use agent_doc_turn::op_log::OpsLogEvent;
 
 // Deeper root cause A superseded the interim `#qftlossdelta` recovery-sidecar
 // safety net (`preserve_dropped_operator_buffer_if_needed`): the committed
@@ -1257,7 +1258,8 @@ pub(crate) fn run_stream(
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
-                        "ipc_write_consumed file={} patches={}",
+                        "{} file={} patches={}",
+                        OpsLogEvent::IpcWriteConsumed,
                         file.display(),
                         patches.len()
                     ),

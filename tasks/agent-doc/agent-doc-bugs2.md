@@ -40,11 +40,14 @@ done
 Compacted content:
 - Archived 5 response topic(s): do #missingreplicarebuild; complete all 3 tiers; #stategraphjoin, and the pane swap that was not a hijack; 2 more
 - Prior summary/context: prior compacted content: Archived 14 response topic(s): IPC proof diagnostic (interrupted-cycle recovery); #retention...
-<!-- agent:boundary:6c8d9be1 -->
+<!-- agent:boundary:8cbb0554 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
+- do [#retainedsettlereactive]
+- do [#reactivemap]
+- When I run Compact Exchange, the JB editor hangs. Run Agent Doc is slow to add the prompt + slow to submit the prompt.
 - 🚧 do [#syncownerreactive]
 - do [#jbpluginlazilyeffects]
 - do [#ctrlkillreregister]
@@ -84,6 +87,8 @@ Compacted content:
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#retainedsettlereactive] preflight/session-check disagreed on whether a retained document-write was unsettled (preflight read pending_document_write().is_some() from a fresh SQLite replay; session-check compared authority==disk bytes and never consulted the intent), deadlocking closeout. Derive one shared verdict; settle rebased-but-satisfied intents. Plan: src/agent-doc/agent-doc-state-backbone/src/retained_write.rs
+- [ ] [#reactivemap] controller per-document settlement registry must be a ThreadSafeCellMap/ThreadSafeSlotMap keyed reactive collection, not a Mutex<HashMap> side table
 - [ ] 🚧 [#syncownerreactive] #agent-doc-bug Owner resolution re-observes per call instead of deriving. Measured 2026-07-25 in ops.log while the pane swap was broken: sync_latency tmux_router elapsed_ms=45063 (budget 1000), gap_window_to_ownership 25620, prune_stash_panes 8027 (budget 250), window_resolution 4708, controller_actor_lookup 4297. Every decision re-shells ps/tmux, which is why observation_cache exists at all: it memoizes raw argv output, which is a cache, not a derivation (its invalidation is 'recreate the context', because there are no edges to invalidate along). Make pane observations Sources in a scope (see stategraphjoin) and the pane->document owner map a Computed over them, so a pane change invalidates the owner map instead of every caller recomputing it. Classification stays a pure function in command_line.rs; it is the OBSERVATION that belongs in the graph.
 - [ ] [#jbpluginlazilyeffects] #agent-doc-feature The JetBrains/VS Code plugin should drive lazily state + Effects, not one-shot CLI commands. Today every editor action (file selected, layout changed, Sync Tmux Pane) shells a fresh agent-doc process that re-observes the world from scratch and returns one answer that is already stale, with no subscription and no invalidation. Keep the CLI supported as an entrypoint, but the plugin path should be: plugin reports an event -> FFI sets a Source in the document scope -> an Effect drives the tmux/pane consequence. Same Shared Foundation rule already in AGENTS.md, applied to observation rather than business logic. Consumes the derived owner map from syncownerreactive, so order it after that.
 - [ ] [#ctrlkillreregister] #agent-doc-bug Killing the controller strands a live editor. Hydration restores the durable liveness plane so the editor still reads as registered, but the relay hub holding its replica is process-local, died with the previous controller, and nothing rehydrates it — leaving attached-with-missing-replica until the plugin happens to re-register, which is why operators reach for an IDE restart. DONE: Tier 1 restart fan-out (34546de4f); Tier 3 replicated derivation registrations_missing_replica/peer_registrations_missing_replica (46f2321ad), controller command peer_replicas_missing, and FFI export agent_doc_peer_replicas_missing so the editor asks about itself and repairs instead of being pushed at. Tier 2 (controller-side Effect) intentionally skipped: it still owns a cross-process push, the failure behind 'reload-lib reached 1/4 endpoints'. REMAINING: have the JetBrains and VS Code plugins call agent_doc_peer_replicas_missing on reconnect/startup, then retire the Tier 1 fan-out as a compatibility shim.

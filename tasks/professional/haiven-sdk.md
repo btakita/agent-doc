@@ -80,7 +80,26 @@ The eval suite verifies the request and its evidence as a system: expected and f
 **Verification:** both documents parse successfully through the Markdown AST (`79` nodes / `264` lines for the proposal and `240` nodes / `485` lines for the implementation plan before the final metadata-spacing cleanup), and whitespace validation passes. The stale `agent-doc` install was rebuilt successfully as `0.35.30`, including the matching editor package. Workspace `make check` then ran 955 of 8,181 tests: 952 passed and three current-tree `agent-doc::run_integration` owner-pane preflight tests failed (`preflight_emits_owned_pane_self_invocation_for_active_queue_head`, `preflight_emits_owned_pane_self_invocation_for_unresolved_prompt`, and `preflight_owned_pane_self_invocation_absent_for_non_owner_pane`). The Haiven changes are Markdown-only and do not touch that workstream, but the workspace is not green on this evidence. The required CI lookup was unavailable because this repository has no workflow named `CI`.
 
 **Confidence:** high that the requested MCP, guidance, CLI, and eval concepts are now presentation-ready and technically actionable. No additional backlog follow-up is needed because the requested artifact update is complete; remaining decisions are Milestone 0 commercial and product approvals.
-<!-- agent:boundary:608302f5 -->
+
+### Re: Haiven SDK agent harness assistance — gpt-5
+
+> **Queue prompt:** Please include agentic harness assistance with a mcp server for documentation lookups + opinionated guidance + possible cli tooling for verification + eval test suite to verify agentic requests.
+
+Updated both presentation artifacts with a concrete, phased agent-harness lane:
+
+- [`tasks/recruit/haiven/sdk-proposal-2026-07-26.md`](../recruit/haiven/sdk-proposal-2026-07-26.md) now presents a Haiven-owned, read-only MCP server for version-scoped documentation and opinionated guidance; a thin deterministic verification/evidence CLI; and an agent-request eval suite. It keeps the harness separate from the game runtime, places contract/design work in Milestone 0, and makes the narrow Milestone 1 prototype subject to discovery-confirmed scope and pricing.
+- [`tasks/recruit/haiven/sdk-implementation-plan-2026-07-26.md`](../recruit/haiven/sdk-implementation-plan-2026-07-26.md) now specifies the architecture, repository shape (`tools/mcp`, `tools/cli`, and `evals/agent-requests`), MCP resources and citation rules, CLI behavior, eval scenarios and rubrics, security/access boundaries, metrics, milestone outputs, CI evidence, and acceptance checks.
+
+The opinionated guidance contract distinguishes **required contract**, **recommended paved road**, **supported alternative**, and **open decision**. It requires version/source citations, reports stale or conflicting content explicitly, and keeps write-capable tools, production credentials, autonomous releases, and protected console material outside the first version.
+
+The eval suite verifies the request and its evidence as a system: expected and forbidden file changes, required commands and fixture execution, grounding, API correctness, uncertainty handling, write-scope compliance, and safety are scored separately. Initial cases cover Unity scaffolding, reconnect/resume, a chat/presence/moderation slice, version mismatch diagnosis, SDK migration, and refusal or safe redirection of disallowed production/console requests. A fluent response without the required artifacts and executed fixtures fails.
+
+**Changed paths:** the two Haiven proposal/plan artifacts above, committed as `736f337a0`. The active session document is reserved for binary-owned closeout.
+
+**Verification:** both documents parse successfully through the Markdown AST (`79` nodes / `264` lines for the proposal and `240` nodes / `485` lines for the implementation plan), and whitespace validation passes. The stale `agent-doc` install was rebuilt successfully as `0.35.30`, including the matching editor package. Workspace `make check` then ran 955 of 8,181 tests: 952 passed and three current-tree `agent-doc::run_integration` owner-pane preflight tests failed (`preflight_emits_owned_pane_self_invocation_for_active_queue_head`, `preflight_emits_owned_pane_self_invocation_for_unresolved_prompt`, and `preflight_owned_pane_self_invocation_absent_for_non_owner_pane`). The Haiven changes are Markdown-only and do not touch that workstream, but the workspace is not green on this evidence. The required CI lookup was unavailable because this repository has no workflow named `CI`.
+
+**Confidence:** high that the requested MCP, guidance, CLI, and eval concepts are now presentation-ready and technically actionable. No additional backlog follow-up is needed because the requested artifact update is complete; remaining decisions are Milestone 0 commercial and product approvals.
+<!-- agent:boundary:ca03af1e -->
 <!-- /agent:exchange -->
 
 ## Queue

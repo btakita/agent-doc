@@ -410,3 +410,33 @@ it with an assertion that the fixture had a non-zero number of steps.
   it; MPSC is a usage rule, not a type.
 - No per-flavor Lean models.
 - No release/publish in any phase. Releases stay gated on the per-cell CRDT work.
+
+## Phase 3 prerequisite findings (2026-07-26)
+
+Verified rather than assumed, because the plan told itself to.
+
+**ThreadSafeContext does NOT need a multi-root `clear_slots`.** The plan assumed
+four reader-kind handles meant four frontier walks and queued a new API for it.
+`batch()` already closes the gap: `clear_slot` pushes into `state.batched_slots`
+while `batch_depth > 0`, and `finish_batch` sorts, dedups, and calls
+`flush_batched_invalidations` exactly once, handing every collected root to a
+single `clear_frontier_locked`. Pinned by
+`thread_safe::tests::batch_gives_clear_a_single_multi_root_frontier`, and
+mutation-checked: making `finish_batch` flush per root turns it red with "got 8".
+The thread-safe queue primitives should wrap their reader-kind bumps in `batch()`
+and need no new context API.
+
+Two failed measurements are worth keeping, because both are traps a later reader
+would fall into:
+
+- **Recompute counts cannot separate the cases.** `computed` is guarded, so when
+  cleared nodes recompute to the same values the shared downstream is correctly
+  suppressed and batched/unbatched look identical.
+- **Batched-vs-unbatched cannot either.** `SetCellInvalidation` is recorded only
+  by `flush_batched_invalidations`; the unbatched path is not instrumented, so
+  that control read 0 and proved nothing. The discriminator that works is ROOT
+  COUNT — one flush for four roots must also be one flush for eight.
+
+**AsyncContext genuinely lacks both.** It has `source`, `computed_async` and
+`batch()`, but no synchronous-compute `computed` and no `clear` at all. Both are
+real prerequisites and remain to be built.

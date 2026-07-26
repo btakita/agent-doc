@@ -597,6 +597,27 @@ interface AgentDocLib : Library {
     fun agent_doc_reliable_sync_document_op_flush(projectRoot: String, filePath: String): Int
 
     /**
+     * `#ctrlkillreregister` Tier 3 — which of THIS editor's registrations the
+     * controller currently holds no replica for.
+     *
+     * The editor is the only process that can create its own replica, so it asks
+     * about itself and repairs, instead of being pushed a rebuild request. A push has
+     * to reach the editor — the failure behind `reload-lib reached 1/4 endpoints` —
+     * while this is driven by a process that is provably alive, because it just
+     * called. It is therefore correct whichever side restarted.
+     *
+     * [heldJson] is a JSON array of document hashes this editor already has a replica
+     * for. Returns a JSON array of `EditorRegistration` objects to rebuild (`[]` when
+     * up to date), or null when the ABI is unavailable or the controller could not be
+     * reached. Caller must free a non-null result with [agent_doc_free_string].
+     */
+    fun agent_doc_peer_replicas_missing(
+        projectRoot: String,
+        pid: Long,
+        heldJson: String,
+    ): Pointer?
+
+    /**
      * Commit the document at [filePath] to git.
      * Call after successfully applying a patch as a defense-in-depth guarantee
      * that the agent response is tracked even if the shell-side --commit was skipped.

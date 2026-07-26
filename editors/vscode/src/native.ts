@@ -179,6 +179,7 @@ function resetBindings(): void {
     _reliable_sync_document_op_push = null;
     _reliable_sync_text_adopt_push = null;
     _reliable_sync_document_op_flush = null;
+    _peer_replicas_missing = null;
     _free_state = null;
     _free_string = null;
     _version = null;
@@ -203,12 +204,21 @@ function resetBindings(): void {
 
 const LIB_NAME = process.platform === 'darwin' ? 'libagent_doc.dylib' : 'libagent_doc.so';
 export const EDITOR_PLUGIN_KIND = 'vscode';
-export const EDITOR_PLUGIN_VERSION = '0.2.56';
+export const EDITOR_PLUGIN_VERSION = '0.2.57';
 const OPERATOR_TEXT_AUTHORITY_CAPABILITY = 'operator_text_authority_v1';
 const LAZILY_TRANSPORT_RECEIPTS_CAPABILITY = 'lazily_transport_receipts_v1';
+// #ctrlkillreregister Tier 3: this extension calls agent_doc_peer_replicas_missing
+// about itself on activation and on controller-transport recovery, so the
+// controller's Tier 1 restart fan-out must stop pushing rebuild requests at it. The
+// token is the retirement condition and travels on the registration, which is part of
+// the same replicated liveness plane — so the push retires per peer with no flag day.
+// Kept in sync with
+// agent_doc_document_realtime::editor_contract::PEER_REPLICA_PULL_CAPABILITY.
+const PEER_REPLICA_PULL_CAPABILITY = 'peer_replica_pull_v1';
 export const EDITOR_CAPABILITY_LIST = [
 OPERATOR_TEXT_AUTHORITY_CAPABILITY,
 LAZILY_TRANSPORT_RECEIPTS_CAPABILITY,
+PEER_REPLICA_PULL_CAPABILITY,
 ];
 const EDITOR_CAPABILITIES = EDITOR_CAPABILITY_LIST.join(',');
 
@@ -344,6 +354,7 @@ let _reliable_sync_liveness_flush: any = null;
 let _reliable_sync_document_op_push: any = null;
 let _reliable_sync_text_adopt_push: any = null;
 let _reliable_sync_document_op_flush: any = null;
+let _peer_replicas_missing: any = null;
 let _free_state: any = null;
 let _free_string: any = null;
 let _version: any = null;
@@ -494,6 +505,18 @@ function bindFunctions(): void {
         _reliable_sync_document_op_push = null;
         _reliable_sync_text_adopt_push = null;
         _reliable_sync_document_op_flush = null;
+    }
+    try {
+        _peer_replicas_missing = lib.func(
+            'agent_doc_peer_replicas_missing',
+            'char*',
+            ['str', 'uint64', 'str'],
+        );
+    } catch (e: any) {
+        // An older cdylib without the export. The controller's Tier 1 fan-out still
+        // covers this extension, so the caller falls back rather than being stranded.
+        console.log(`[agent-doc/native] peer replica pull unavailable: ${e.message}`);
+        _peer_replicas_missing = null;
     }
     try {
         _document_closed_for_editor = lib.func(
@@ -999,6 +1022,49 @@ export function stateSubscribe(
         return raw;
     } catch (e: any) {
         console.warn(`[agent-doc/native] state_subscribe error: ${e.message}`);
+        return null;
+    } finally {
+        if (ptr) _free_string(ptr);
+    }
+}
+
+/**
+ * `#ctrlkillreregister` Tier 3 — which of THIS extension's registrations the
+ * controller currently holds no replica for.
+ *
+ * Killing the controller strands a live editor: hydration restores the durable
+ * liveness plane so the editor still reads as registered, but the relay hub holding
+ * its replica is process-local, died with the old controller, and nothing rehydrates
+ * it. The controller used to push a rebuild request at each survivor — and a push has
+ * to *reach* its endpoint, the failure behind `reload-lib reached 1/4 endpoints`.
+ *
+ * The pull inverts it: the extension is the only process that can create its own
+ * replica, so it asks about itself and repairs. There is no endpoint to fail to
+ * reach, because the asking process is provably alive.
+ *
+ * `heldDocumentHashes` is what the caller already has a replica for. Returns the raw
+ * JSON array of `EditorRegistration` objects, or null when the question could not be
+ * asked at all (ABI missing, controller unreachable) — which is deliberately distinct
+ * from `'[]'` ("asked, nothing to do"). Parity with the JB `PeerReplicaPull`.
+ */
+export function peerReplicasMissing(
+    projectRoot: string,
+    pid: number,
+    heldDocumentHashes: readonly string[],
+): string | null {
+    if (!ensureLoaded(projectRoot)) return null;
+    bindFunctions();
+    if (!_peer_replicas_missing) return null;
+    let ptr: any = null;
+    try {
+        ptr = _peer_replicas_missing(projectRoot, pid, JSON.stringify([...heldDocumentHashes]));
+        if (!ptr) return null;
+        const raw = koffi.decode(ptr, 'char', -1);
+        if (!raw || raw === 'null' || raw === '') return null;
+        return raw;
+    } catch (e: any) {
+        // Never swallow: an editor that cannot ask is one that stays stranded.
+        console.warn(`[agent-doc/native] peer_replicas_missing error: ${e.message}`);
         return null;
     } finally {
         if (ptr) _free_string(ptr);

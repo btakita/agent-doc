@@ -20,9 +20,12 @@ class PluginLifecycleListenerTest {
         assertFalse(source.contains("agent-doc\", \"resync"))
         assertFalse(source.contains("agent-doc\", \"resync\", \"--fix"))
         assertFalse(source.contains("agent-doc-resync"))
+        // `#ctrlkillreregister` Tier 3: startup asks which registrations are actually
+        // stranded rather than re-registering every open document. See
+        // [PeerReplicaPullTest] for why the blind sweep is the wrong startup shape.
         assertTrue(
             source.contains(
-                "CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project, \"plugin-startup\")"
+                "CrdtReplicaManager.pullMissingReplicas(project, \"plugin-startup\")"
             )
         )
         assertFalse(source.contains("openFile("))

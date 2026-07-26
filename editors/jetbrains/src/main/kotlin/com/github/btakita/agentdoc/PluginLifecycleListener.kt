@@ -21,12 +21,17 @@ class PluginLifecycleListener : ProjectManagerListener {
         EditorFactory.getInstance().eventMulticaster.addDocumentListener(TypingTracker, project)
         // Attach markdown buffers as CRDT replicas when the CP endpoint is available.
         CrdtReplicaManager.getInstance(project)
-        // Re-register every already-open markdown document through the
-        // deferred-reconnect path after process startup so a Lazily-retained
-        // response/backlog target cannot remain parked until an operator focus
-        // change. This scans open documents without selecting or focusing any
-        // editor.
-        CrdtReplicaManager.forceRefreshOpenDocumentReplicas(project, "plugin-startup")
+        // `#ctrlkillreregister` Tier 3: ask the controller which of THIS editor's
+        // registrations it holds no replica for, and rebuild exactly those, so a
+        // Lazily-retained response/backlog target cannot remain parked until an
+        // operator focus change. Nothing is selected or focused.
+        //
+        // This replaces the blind re-register of every open markdown document. The
+        // sweep dropped and rebuilt healthy CRDT baselines on every startup — the
+        // lossiest operation the replica manager has — and still missed a stranded
+        // registration whose document was not open in a tab. It remains the fallback
+        // inside `pullMissingReplicas` for when the pull itself cannot be asked.
+        CrdtReplicaManager.pullMissingReplicas(project, "plugin-startup")
         // Start watching for IPC patch files from agent-doc write --ipc
         PatchWatcher.getInstance(project)
         // Highlight agent-doc-specific markdown structures in the editor.

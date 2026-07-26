@@ -3,10 +3,19 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import {
     NativeReplicaNode,
+    peerReplicasMissing,
     reliableSyncDocumentOpFlush,
     reliableSyncDocumentOpPush,
     reliableSyncTextAdoptPush,
 } from './native.js';
+import { peerReplicaRebuildPaths } from './peerReplicaPull.js';
+
+/**
+ * `#ctrlkillreregister` Tier 3: minimum gap between whole-editor missing-replica
+ * pulls. A controller kill makes every open document report transport loss at once,
+ * and one pull already answers for all of them. Mirrors the JetBrains constant.
+ */
+const PEER_REPLICA_PULL_MIN_INTERVAL_MS = 5_000;
 
 export interface ReplicaRegisterAck {
     clientId: number;
@@ -530,6 +539,15 @@ export interface CrdtReplicaManagerOptions {
     resolveDeferredReconnectContent?: (filePath: string, editorText: string) => string | null;
     settleDeferredReconnectContent?: (filePath: string, editorText: string) => void;
     normalizeTemplateStructure?: (text: string) => string | null;
+    /**
+     * `#ctrlkillreregister` Tier 3 — ask the controller which of this editor's
+     * registrations it holds no replica for. Returns the raw FFI JSON, or null when
+     * the question could not be asked. Injectable so the decision is testable
+     * without a live controller; defaults to the native export.
+     */
+    peerReplicasMissing?: (pid: number, heldDocumentHashes: readonly string[]) => string | null;
+    /** This editor process's pid; defaults to `process.pid`. */
+    pid?: number;
     logger?: ReplicaLogger;
 }
 
@@ -553,6 +571,10 @@ export class CrdtReplicaManager {
     private drainQueued = false;
     private drainTimer: ReturnType<typeof setTimeout> | undefined;
     private refreshConnectionEpoch = 0;
+    // `#ctrlkillreregister` Tier 3: transport loss is reported per document, but a
+    // dead controller strands every document at once. One pull answers for all of
+    // them, so the second and third file to notice must not each start their own.
+    private lastPeerReplicaPullAtMs = 0;
     private disposed = false;
 
     constructor(private readonly options: CrdtReplicaManagerOptions) {
@@ -563,10 +585,18 @@ export class CrdtReplicaManager {
 
     start(): void {
         this.disposed = false;
+        const attached: Promise<unknown>[] = [];
         for (const doc of this.options.listDocuments()) {
             this.seedDocument(doc.filePath, doc.text);
-            void this.attachDocument(doc.filePath);
+            attached.push(this.attachDocument(doc.filePath));
         }
+        // `#ctrlkillreregister` Tier 3 safety net, AFTER the normal attach pass:
+        // an editor whose registrations survived in the durable liveness plane can be
+        // stranded in a controller that no longer holds their replicas, and a plain
+        // attach of the currently-open tabs does not necessarily cover them. Running
+        // it after the attaches means a healthy document is already registered by
+        // then, so the controller reports nothing and no live baseline is rebuilt.
+        void Promise.allSettled(attached).then(() => this.pullMissingReplicas('activation'));
     }
 
     dispose(): void {
@@ -591,6 +621,57 @@ export class CrdtReplicaManager {
 
     seedDocument(filePath: string, text: string): void {
         this.shadows.set(filePath, text);
+    }
+
+    /**
+     * `#ctrlkillreregister` Tier 3 — ask the controller which of this editor's
+     * registrations it holds no replica for, and rebuild exactly those.
+     *
+     * `held` is deliberately EMPTY. This editor's own forwarder map is the wrong
+     * evidence: after a controller kill the forwarders still look live here, and
+     * passing them as held would suppress precisely the documents that need repair.
+     * The controller subtracts what its process-local hub can actually serve, which is
+     * the only fact that separates "registered" from "registered and backed".
+     *
+     * A null answer means the question could not be asked (old cdylib, controller
+     * unreachable). There is no blind-sweep fallback here on purpose: unlike the
+     * JetBrains startup path this replaces nothing, so the existing per-document
+     * attach and retry paths remain the fallback and a redundant forced re-register
+     * of healthy replicas would be strictly worse than doing nothing.
+     */
+    async pullMissingReplicas(reason: string): Promise<void> {
+        if (this.disposed) return;
+        const nowMs = Date.now();
+        if (
+            this.lastPeerReplicaPullAtMs > 0 &&
+            nowMs - this.lastPeerReplicaPullAtMs < PEER_REPLICA_PULL_MIN_INTERVAL_MS
+        ) {
+            this.logger.debug(`[crdt-replica] coalesced peer replica pull; reason=${reason}`);
+            return;
+        }
+        this.lastPeerReplicaPullAtMs = nowMs;
+        const pid = this.options.pid ?? process.pid;
+        const ask = this.options.peerReplicasMissing ??
+            ((peerPid: number, held: readonly string[]) =>
+                peerReplicasMissing(this.options.projectRoot, peerPid, held));
+        const paths = peerReplicaRebuildPaths(ask(pid, []), pid);
+        if (paths === null) {
+            this.logger.debug(
+                `[crdt-replica] peer replica pull unavailable; reason=${reason} ` +
+                    'recovery=controller_tier1_fan_out',
+            );
+            return;
+        }
+        if (paths.length === 0) {
+            this.logger.debug(`[crdt-replica] peer replica pull found nothing to rebuild; reason=${reason}`);
+            return;
+        }
+        this.logger.warn(
+            `[crdt-replica] peer replica pull names ${paths.length} stranded registration(s); reason=${reason}`,
+        );
+        for (const filePath of paths) {
+            await this.attachDocument(filePath, undefined, true);
+        }
     }
 
     async attachDocument(filePath: string, text?: string, forceRefresh = false): Promise<boolean> {
@@ -1199,6 +1280,12 @@ export class CrdtReplicaManager {
             this.clearReplicaRetryBackoff(filePath);
             this.logger.debug(`[crdt-replica] controller transport recovered for ${filePath}; reason=${reason}`);
             this.requestRemoteDrain(filePath);
+            // `#ctrlkillreregister` Tier 3: this file recovered by noticing its own
+            // loss, but a controller that lost its hub stranded every registration
+            // this editor holds — including documents nothing is currently draining,
+            // which would otherwise wait for an operator to touch them. Ask once,
+            // about ourselves, and repair the rest now.
+            await this.pullMissingReplicas('controller-transport-recovered');
         } else {
             this.scheduleReplicaRetry(filePath, 'controller-transport-reregister-failed');
         }

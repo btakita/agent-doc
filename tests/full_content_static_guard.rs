@@ -88,7 +88,26 @@ fn vscode_run_agent_doc_uses_jetbrains_route_contract() {
 #[test]
 fn vscode_manifest_exposes_jetbrains_parity_commands() {
     let package_json = "editors/vscode/package.json";
-    assert_source_contains(package_json, "\"version\": \"0.2.56\"");
+    // The invariant is that the manifest version and the version the extension
+    // REPORTS over FFI agree — stale-plugin detection reads the reported one, so a
+    // manifest that drifts from it makes the binary's staleness check lie. Derived
+    // from `native.ts` rather than pinned to a literal: a hardcoded version turns
+    // every routine bump into a failing guard, which trains people to edit the
+    // assertion instead of reading it.
+    let reported_version = {
+        let native = read_source("editors/vscode/src/native.ts");
+        let marker = "export const EDITOR_PLUGIN_VERSION = '";
+        let start = native
+            .find(marker)
+            .expect("native.ts must declare EDITOR_PLUGIN_VERSION")
+            + marker.len();
+        native[start..]
+            .split('\'')
+            .next()
+            .expect("EDITOR_PLUGIN_VERSION must be a quoted literal")
+            .to_string()
+    };
+    assert_source_contains(package_json, &format!("\"version\": \"{reported_version}\""));
     assert_source_contains(package_json, "\"command\": \"agentDoc.fixDocument\"");
     assert_source_contains(package_json, "\"command\": \"agentDoc.loadTmuxWindow\"");
     assert_source_contains(

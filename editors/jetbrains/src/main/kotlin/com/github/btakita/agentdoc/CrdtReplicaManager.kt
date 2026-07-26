@@ -35,6 +35,13 @@ private const val CRDT_REGISTER_FAILURE_BASE_BACKOFF_MS = 1_000L
 private const val CRDT_REGISTER_FAILURE_MAX_BACKOFF_MS = 30_000L
 private const val CRDT_DRAIN_NOOP_RESCHEDULE_BASE_BACKOFF_MS = 100L
 private const val ACK_RECOVERY_REREGISTER_MIN_INTERVAL_MS = 5_000L
+
+/**
+ * `#ctrlkillreregister` Tier 3: minimum gap between whole-editor missing-replica
+ * pulls. A controller kill makes every open document report transport loss at once,
+ * and one pull already answers for all of them.
+ */
+private const val PEER_REPLICA_PULL_MIN_INTERVAL_MS = 5_000L
 // `#crdt-drain-idle-quiet`: back off work that arrived while a no-op drain was
 // already running. The resume callback must consume that retained work without
 // manufacturing another drain-all request; doing so turns one overlap into a
@@ -306,6 +313,10 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     private val templateGuardRecoveryRetryPaths = ConcurrentHashMap.newKeySet<String>()
     private val templateGuardRecoveryFailureCounts = ConcurrentHashMap<String, Int>()
     private val refreshConnectionEpoch = AtomicLong(0)
+    // `#ctrlkillreregister` Tier 3: transport loss is reported per document, but a
+    // dead controller strands every document at once. One pull answers for all of
+    // them, so the second and third file to notice must not each start their own.
+    private val lastPeerReplicaPullAtMs = AtomicLong(0)
     private val disposed = AtomicBoolean(false)
 
     fun start() {
@@ -335,6 +346,25 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
     } catch (_: InterruptedException) {
         Thread.currentThread().interrupt()
         false
+    }
+
+    /**
+     * Claim the next Tier 3 pull window, or report that a recent pull already covers
+     * this caller. Reuses [ackRecoveryReregisterDueUtil]'s interval rule; only the
+     * window differs, because one pull is authoritative for every document.
+     */
+    private fun beginPeerReplicaPull(): Boolean {
+        val nowMs = System.currentTimeMillis()
+        val lastMs = lastPeerReplicaPullAtMs.get()
+        if (!ackRecoveryReregisterDueUtil(
+                lastStartedMs = lastMs.takeIf { it > 0L },
+                nowMs = nowMs,
+                minIntervalMs = PEER_REPLICA_PULL_MIN_INTERVAL_MS,
+            )
+        ) {
+            return false
+        }
+        return lastPeerReplicaPullAtMs.compareAndSet(lastMs, nowMs)
     }
 
     private fun beginAckRecoveryReregister(filePath: String): Boolean {
@@ -1676,6 +1706,12 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
                     "reason=$reason",
             )
             requestRemoteDrain(filePath, "controller-transport-reregistered")
+            // `#ctrlkillreregister` Tier 3: this file recovered by noticing its own
+            // loss, but a controller that lost its hub stranded every registration
+            // this editor holds — including documents nothing is currently draining,
+            // which would otherwise wait for an operator to touch them. Ask once,
+            // about ourselves, and repair the rest now.
+            pullMissingReplicas(project, "controller-transport-recovered")
         } else {
             log.debug(
                 "[crdt-replica] controller transport unavailable for ${File(filePath).name}; " +
@@ -1814,6 +1850,61 @@ class CrdtReplicaManager(private val project: Project) : Disposable, DocumentLis
 
         fun requestTextAdopt(project: Project, filePath: String) {
             instances[project]?.requestTextAdopt(filePath)
+        }
+
+        /**
+         * `#ctrlkillreregister` Tier 3 — ask the controller which of this editor's
+         * registrations it holds no replica for, and rebuild exactly those.
+         *
+         * Replaces the blind "force-refresh every open markdown document" sweep at
+         * startup and after a transport recovery. The sweep was both too much and too
+         * little: it drops and rebuilds healthy CRDT baselines (the lossiest thing
+         * this manager can do), while still missing a registration whose document is
+         * not currently open in a tab.
+         *
+         * `held` is deliberately EMPTY. This editor's own forwarder map is the wrong
+         * evidence: after a controller kill the forwarders still look live here, and
+         * passing them as held would suppress precisely the documents that need
+         * repair. The controller subtracts what its process-local hub can actually
+         * serve, which is the only fact that separates "registered" from "registered
+         * and backed". Re-register storms are already bounded by
+         * [beginAckRecoveryReregister]'s coalescing window.
+         *
+         * A null answer means the question could not be asked (old cdylib, controller
+         * unreachable). Only then does this fall back to the compatibility sweep, so
+         * an editor is never left stranded by the pull's own unavailability.
+         */
+        fun pullMissingReplicas(project: Project, reason: String) {
+            val manager = instances[project] ?: return
+            val root = project.basePath ?: return
+            if (!manager.beginPeerReplicaPull()) {
+                manager.log.debug("[crdt-replica] coalesced peer replica pull; reason=$reason")
+                return
+            }
+            ApplicationManager.getApplication().executeOnPooledThread {
+                if (project.isDisposed) return@executeOnPooledThread
+                val pid = ProcessHandle.current().pid()
+                val json = PeerReplicaPull.missingRegistrationsJson(root, pid, emptyList())
+                val paths = PeerReplicaPull.rebuildPaths(json, pid)
+                if (paths == null) {
+                    manager.log.info(
+                        "[crdt-replica] peer replica pull unavailable; reason=$reason " +
+                            "recovery=controller_tier1_fan_out",
+                    )
+                    forceRefreshOpenDocumentReplicas(project, "$reason-pull-unavailable")
+                    return@executeOnPooledThread
+                }
+                if (paths.isEmpty()) {
+                    manager.log.info("[crdt-replica] peer replica pull found nothing to rebuild; reason=$reason")
+                    return@executeOnPooledThread
+                }
+                manager.log.info(
+                    "[crdt-replica] peer replica pull names ${paths.size} stranded registration(s); reason=$reason",
+                )
+                paths.forEach { filePath ->
+                    forceRefreshOpenDocumentReplica(project, filePath, "$reason-peer-replica-pull")
+                }
+            }
         }
 
         fun forceRefreshOpenDocumentReplicas(project: Project, reason: String) {

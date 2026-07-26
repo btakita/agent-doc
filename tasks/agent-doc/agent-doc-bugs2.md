@@ -88,16 +88,40 @@ Done — the fake `Effect` is gone.
 **What I deliberately did not add.** A standing `Effect` that settles autonomously. It would have to write SQLite from inside a cell-`set` on the controller hot path, and re-entrancy there is a bad trade for no real gain: the consumer asking for the verdict is already the trigger that matters, since `preflight` and `session-check` are precisely when an orphaned intent blocks work. If you want settlement to fire with nobody asking, that is a different (and riskier) change and I would rather scope it explicitly than smuggle it in.
 
 `make check` green (clippy, tests, TLA+). Installed. Committed `91f1bb8d1`. Latest CI run is green.
-<!-- agent:boundary:a2b11584 -->
+
+### Re: Compact Exchange hangs the JB editor; Run Agent Doc is slow — opus-5
+
+> **Queue prompt:** When I run Compact Exchange, the JB editor hangs. Run Agent Doc is slow to add the prompt + slow to submit the prompt.
+
+Partial result, and I want to be exact about which part is real.
+
+**Ruled out.** `CompactExchangeAction` wraps its body in `invokeLater`, so it runs on the EDT — but `runDocumentCommand` already spawns the subprocess and drains its output on a separate `Thread`, so the CLI call is not what blocks the UI thread. The remaining EDT work is `fdm.saveDocument(...)`, and the action's own comment notes a save "can synchronously wake a retained ACK recovery" — that is still a live suspect for the hang, but I have not proven it.
+
+**Measured, and real.** Two paths to the same state, on this project:
+
+| command | path | time |
+|---|---|---|
+| `admin inspect` | controller round-trip (in-memory projection) | **3ms** |
+| `session-check` | in-process work | **1860ms** |
+
+`state.db` is 53MB with 8014 `state_events` rows, and `load_state_backbone_projection` replays all of them in-process. The plugin shells out per action, so every action pays whatever the CLI pays. That is the shape of "slow to add the prompt + slow to submit the prompt".
+
+**The hypothesis was wrong, so I reverted it.** I made `load_state_backbone_projection` read from the live controller (non-launching, falling back to replay when no controller exists), installed, recycled, and re-measured: **2171 / 2209 ms** — no better than the 1860ms baseline, with zero fallbacks logged, so the controller path was genuinely in use. The projection replay is therefore *not* what makes `session-check` slow, and serializing the whole projection over IPC plausibly costs more than the replay it replaced. Shipping it would have been an unproven optimization that reads as a fix, so it is reverted and the tree is clean.
+
+What is actually known: `session_check.initial_integrity_detection` is ~507ms; the other ~1.7s is unattributed. Filed `#sessioncheckprofile` to profile it properly before optimizing anything, because I have now guessed wrong once on this exact question.
+
+Nothing else this cycle touched the repo. Earlier commits from this session — the retained-write settlement derivation, `observe_pending` becoming a derived slot, the read-must-not-claim-authority fix, and the lazily 0.49.0 migration — are all landed and green.
+<!-- agent:boundary:e185face -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
-- ~~⏭️ do [#retainedsettlereactive]~~
+- do [#sessioncheckprofile]
+- ~~do [#retainedsettlereactive]~~
 - ~~do [#reactivemap]~~
-- When I run Compact Exchange, the JB editor hangs. Run Agent Doc is slow to add the prompt + slow to submit the prompt.
+- ~~When I run Compact Exchange, the JB editor hangs. Run Agent Doc is slow to add the prompt + slow to submit the prompt.~~
 - ⏭️ do [#syncownerreactive]
-- do [#jbpluginlazilyeffects]
+- ⏭️ do [#jbpluginlazilyeffects]
 - do [#ctrlkillreregister]
 - do [#steergateidle]
 - 📌 do [#jbcompactcommit]
@@ -135,6 +159,7 @@ Done — the fake `Effect` is gone.
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
+- [ ] [#sessioncheckprofile] session-check takes ~2.2s per invocation and the JetBrains plugin shells out per action, which is what makes Run Agent Doc slow to add + submit a prompt. Attribution is NOT the state-projection ledger replay: routing load_state_backbone_projection through the live controller (3ms round-trip vs 1860ms in-process replay of 8014 state_events) changed session-check timing not at all, so that hypothesis is disproven and the change was reverted rather than shipped unproven. session_check.initial_integrity_detection accounts for ~507ms of it; the remaining ~1.7s is unattributed. Profile session-check properly (per-phase timing around initial_integrity_detection, content resolution, and git) before optimizing anything.
 - [ ] [#syncownerreactive] #agent-doc-bug Owner resolution re-observes per call instead of deriving. Measured 2026-07-25 in ops.log while the pane swap was broken: sync_latency tmux_router elapsed_ms=45063 (budget 1000), gap_window_to_ownership 25620, prune_stash_panes 8027 (budget 250), window_resolution 4708, controller_actor_lookup 4297. Every decision re-shells ps/tmux, which is why observation_cache exists at all: it memoizes raw argv output, which is a cache, not a derivation (its invalidation is 'recreate the context', because there are no edges to invalidate along). Make pane observations Sources in a scope (see stategraphjoin) and the pane->document owner map a Computed over them, so a pane change invalidates the owner map instead of every caller recomputing it. Classification stays a pure function in command_line.rs; it is the OBSERVATION that belongs in the graph.
 - [ ] [#jbpluginlazilyeffects] #agent-doc-feature The JetBrains/VS Code plugin should drive lazily state + Effects, not one-shot CLI commands. Today every editor action (file selected, layout changed, Sync Tmux Pane) shells a fresh agent-doc process that re-observes the world from scratch and returns one answer that is already stale, with no subscription and no invalidation. Keep the CLI supported as an entrypoint, but the plugin path should be: plugin reports an event -> FFI sets a Source in the document scope -> an Effect drives the tmux/pane consequence. Same Shared Foundation rule already in AGENTS.md, applied to observation rather than business logic. Consumes the derived owner map from syncownerreactive, so order it after that.
 - [ ] [#ctrlkillreregister] #agent-doc-bug Killing the controller strands a live editor. Hydration restores the durable liveness plane so the editor still reads as registered, but the relay hub holding its replica is process-local, died with the previous controller, and nothing rehydrates it — leaving attached-with-missing-replica until the plugin happens to re-register, which is why operators reach for an IDE restart. DONE: Tier 1 restart fan-out (34546de4f); Tier 3 replicated derivation registrations_missing_replica/peer_registrations_missing_replica (46f2321ad), controller command peer_replicas_missing, and FFI export agent_doc_peer_replicas_missing so the editor asks about itself and repairs instead of being pushed at. Tier 2 (controller-side Effect) intentionally skipped: it still owns a cross-process push, the failure behind 'reload-lib reached 1/4 endpoints'. REMAINING: have the JetBrains and VS Code plugins call agent_doc_peer_replicas_missing on reconnect/startup, then retire the Tier 1 fan-out as a compatibility shim.

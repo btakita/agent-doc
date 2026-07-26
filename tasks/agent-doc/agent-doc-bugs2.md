@@ -132,7 +132,25 @@ The live log settles it: **573 skips against 22 pushes**, and the timestamps are
 **What this does not fix, which matters given why you asked.** `#ctrlkillreregister` covers a replica that is *missing* after controller death, and the repair now triggers correctly from the editor side. My latency measurement is about the *cost of that repair once triggered*: with the corrected phase labels, `commit_authority` is 11858 ms of a 16866 ms closeout, against `record_committed_baseline` at 88 ms and an internal git timer of 9–19 ms. The correlation is 12 installs → 307 reload/reregister events → 838 full `crdt_replica_register` bootstraps at ~290–326 KB each.
 
 So the remaining problem is that a reload or restart forces a **full** bootstrap where a delta would do. The relay already exposes `canonical_state_vector()` and `CurrentRevision` already carries it, so the editor could send its state vector and receive only what it lacks. Filed as `#replicareloadincremental` with the measurements and a verification method — measure `commit_authority` across a reload with nothing else changed — so it is not re-derived from scratch.
-<!-- agent:boundary:1d281b09 -->
+
+### Re: session cleanup and why dead actors were never purged — opus-5
+
+Cleaned up, and the "not being purged" part had a real root cause rather than a missing sweep.
+
+**Cleanup.** `agent-doc gc` removed 42 stale files and reclaimed **81 MB** from `state.db`. No orphaned temp-root controllers remain — the ones from `make check` runs self-terminated correctly via the serve loop's missing-root check. The fleet is 3 live sessions (`%1` mine, `job-offers` `%4`, `lazily` `%5`), all left alone, plus the 2 dead records. `resync` reported one issue I deliberately did **not** auto-fix: `job-offers.md` (pane `%4`) is in the `stash` window — that is another session's live pane, so moving it is the operator's call via `resync --fix`.
+
+**Root cause of the un-purged dead actors** (`tmux-router` `da78dc4`). `prune_dead_actors` judges a record by its age from `last_transition` against `DEAD_ACTOR_PRUNE_AFTER` (1h). The registry prune was resetting that clock: for every document absent from the incoming registry it wrote a `registry_prune` transition and set `closed`/empty pane/empty window **unconditionally**, including rows already in exactly that state. Each pass therefore recorded a no-op transition and made the record one prune-interval *younger*. No dead actor could ever reach 1h, so none were ever purged.
+
+The evidence from `state.db` is unambiguous — `caller=tmux-router reason=registry_prune gen 1551->1551 pane ->`: same generation, empty-to-empty pane, a transition recording that nothing happened. And the ages named it: both closed actors read **443s, identical to my live document**, because one sweep had just touched all three. The `#actorprune` comment's 251 accumulated rows are this same mechanism.
+
+`already_pruned_closed()` now skips the write when the row is already in the target state, while still deleting the stale `registry_entries` row. A transition log should record transitions; nothing changing is not one.
+
+**Verified on the live system, not just in tests.** After install, three consecutive registry prunes wrote **zero** new transitions for the two closed documents — 312 and 320, unchanged — where each pass previously added one apiece. Their ages now climb (838s → 964s) instead of resetting, so they will age past 3600s and be pruned. Mutation-checked both directions: with the guard disabled three prunes write three transitions, and the test separately asserts that closing a genuinely *live* actor still records its transition, so the guard cannot be widened into silence.
+
+This is the fourth instance today of the same underlying shape — a fact recorded for an event that did not happen, which then defeats a downstream decision. The phantom backlog id, the mislabeled `git_commit` phase, the anonymous relay read, and now a no-op transition that made a retention policy unreachable.
+
+agent-doc: 8153/8153, clippy clean. tmux-router: 135 lib tests, clippy clean. Only `src/registry.rs` staged there — `src/tmux.rs` is a concurrent session's edit.
+<!-- agent:boundary:b5c06e15 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -142,7 +160,6 @@ So the remaining problem is that a reload or restart forces a **full** bootstrap
 - ⏭️ do [#preflightreactive]
 - ⏭️ do [#sessioncheckturnreactive]
 - ⏭️ do [#closeoutwaitchurn]
-- ~~⏭️ do [#ctrlkillreregister]~~
 - ⏭️ do [#steergateidle]
 - ⏭️ 📌 do [#jbcompactcommit]
 - ⏭️ 📌 do [#tmuxsynccrashlog]

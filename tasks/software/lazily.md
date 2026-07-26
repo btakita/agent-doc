@@ -154,6 +154,11 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 
 > **Queue prompt:**
 >
+> do [#lazilybenchmarkregressio]
+
+
+> **Queue prompt:**
+>
 > do [#lzinteropeers]
 
 
@@ -302,7 +307,25 @@ Changed paths: none. Existing dirty `AGENTS.md`, `README.md`, and `build/` in la
 Verification: `make check` passed — build clean, 77/77 tests passed, and runtime coverage reported 42/124 opened with 82 explicitly known-uncovered.
 
 Confidence: high. The staging decision is backed by the runtime manifest and the phase plan, not static source mentions. Escalation: none; this is deliberate product staging, and the item stays actionable through the existing `#lzcscollections`, `#lzcsqueues`, `#lzcscrdt`, `#lzcsipc`, `#lzcssync`, `#lzcstemporal`, `#lzcscluster`, and `#lzcsplane` phases.
-<!-- agent:boundary:67400f9b -->
+
+### Re: Response
+
+Implemented and shipped `#lazilybenchmarkregressio` in lazily-rs.
+
+The scheduled `Regressions` workflow now has a `benchmark-budgets` job on pinned `ubuntu-24.04`: it generates fresh Criterion evidence with `cargo +stable bench --locked --features "instrumentation,async,tokio,thread-safe"`, then runs `make benchmark-check-strict` with a 60-minute timeout.
+
+The strict target now requires evidence, refreshes the deterministic instrumentation profile, and uses a new `--budgets-only` mode. That mode enforces required p50/p95 row presence and deterministic lock-acquisition budgets, but deliberately does not compare machine-dependent wall-clock values in `BENCHMARKS.md`. The ordinary `benchmark-check` still owns generated-report freshness. Spec-compliance coverage asserts the workflow command, pinned runner, strict target flags, and scheduled gate wiring.
+
+Verification passed:
+- workflow YAML parse
+- focused `benchmark_report_harness` test
+- full fresh `cargo bench --locked --features "instrumentation,async,tokio,thread-safe"`
+- `make benchmark-check-strict` against the fresh evidence
+- full `make check` on the normal clean-checkout evidence path
+- `git diff --check`
+
+Pushed lazily-rs commit `d5d3b47` (`ci: enforce benchmark regression budgets`). The latest CI run was queried exactly once and was `in_progress` (run `30225781945`). Committed the root submodule pointer as `b52d6207b` (`lazily: enforce benchmark regression budgets`).
+<!-- agent:boundary:20df3983 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -311,7 +334,7 @@ Confidence: high. The staging decision is backed by the runtime manifest and the
 - ~~do [#lzsignalingnegative]~~
 - ~~do [#lazilyzigport]~~
 - ~~do [#lazilyconformancecoverag]~~
-- do [#lazilybenchmarkregressio]
+- ~~do [#lazilybenchmarkregressio]~~
 - do [#lzqfjs]
 - do [#lzqfports]
 - do [#lzqfzig]
@@ -353,7 +376,6 @@ Confidence: high. The staging decision is backed by the runtime manifest and the
 <!-- agent:backlog priority queue -->
 - [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.
 - [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-26: 42/124 canonical fixtures opened, 82 known-uncovered (reactive-graph 21, collections 10, statechart 7, materialization 3, familysync 1 are covered). The remaining fixtures are genuinely missing product surfaces, not runner-wiring gaps. Keep open and work it down only by shipping the explicit tasks in tasks/software/lazily-cs-parity-plan.md (#lzcscollections, #lzcsqueues, #lzcscrdt, #lzcsipc, #lzcssync, #lzcstemporal, #lzcscluster, #lzcsplane); admit C# to each capability group only when that production surface and canonical replay ship.
-- [ ] [#lazilybenchmarkregressio] lazily-rs: the benchmark regression budgets have NO CI enforcement. ci.yml enumerates individual cargo test invocations and never runs `make check` or `benchmark-check`; regressions.yml runs only the loom model. So every budget in BENCHMARKS.md is enforced solely by whoever remembers to run `make benchmark-check` locally with a populated target/criterion — which, until #lazilyfailstarget, was nobody, because the gate hard-failed on a pruned target dir. Add a scheduled job (regressions.yml already has a nightly cron and is the natural home) that runs `cargo bench` then `make benchmark-check-strict`, so a real regression fails somewhere other than one developer machine. Note the numbers are machine-specific, so the job needs a stable runner class or relative-delta budgets rather than absolute ones
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.

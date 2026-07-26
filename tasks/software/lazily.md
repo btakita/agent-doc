@@ -237,7 +237,68 @@ storage-agnostic claim sees where the reader-kind half is pinned.
 Next head is `#lzqffx` — Phase 2, wiring the queue fixtures into every binding's
 runner against all three flavors. That one lands **before** any implementation, so
 the gap goes red first.
-<!-- agent:boundary:c4f1f513 -->
+
+### Re: Phase 2 — the audit is clean, and the ledger enforces itself — opus-5
+
+Two deliverables, and one honest remainder.
+
+**The cross-binding audit the plan asks for is done, with a clean result.** Phase
+2 item 3 says to grep every queue runner for the `invalidates`-nesting trap — the
+one that made lazily-rs's *map* runner read `invalidates` off the step, always
+find `None`, and never run its assertion once. It is **not present in any queue
+runner**: rs, py and kt all read `expected.invalidates` correctly. A negative
+result, recorded on the item so nobody spends the time again.
+
+The related check turned up one thing worth knowing. **7 of 8 bindings genuinely
+replay the canonical queue corpus** (rs, py, go, dart, zig, kt, js). lazily-cpp
+does not — `test_queue.cpp` transcribes five fixtures by hand and never opens the
+canonical bytes. But it is **honest about it**: its coverage script lists exactly
+those files under `KNOWN_UNCOVERED` with the reason "mirrored by hand … which
+never open the canonical bytes." That is the right pattern, not a false green, so
+I have filed it as `#lzqfcppfx` rather than treating it as a defect found. My
+first read of that grep said "no fixture load" for go as well, which was wrong —
+go uses the shared `loadCollectionFixture` from a sibling file.
+
+**The reference ledger ships in lazily-rs** (`d9e8851`, pushed).
+
+The plan asks for a three-flavor replay with a declared skip ledger — but no
+binding ships a thread-safe or async queue primitive, so a three-flavor replay
+written today would skip two of three flavors entirely. A suite that skips almost
+everything while reporting green is the exact failure this whole phase exists to
+prevent, so a *declared* ledger was not good enough.
+
+**So the ledger is wired to the source, not to a comment.** It greps `src/` for
+each unshipped flavor's type name. The moment Phase 3 adds `ThreadSafeQueueCell`
+or `AsyncQueueCell`, the test goes red, names the runner to extend, and explicitly
+warns against flipping the flag alone. It fails in the other direction too —
+claiming a flavor is shipped when its type is absent is also red — so the ledger
+can neither rot nor overclaim. Both directions mutation-checked: appending a stub
+`ThreadSafeQueueCell` turns it red, flipping `async` to shipped turns it red, both
+restore clean.
+
+Two further guards, each for a failure this family has actually had.
+`ledger_is_not_all_skips` fails if every flavor is unshipped — zig's
+reactive-graph runner established that rule, because "skipped" and "passed" are
+indistinguishable in a summary line. And `shipped_flavor_replays_the_corpus`
+counts fixtures, steps and invalidation matrices and requires all three non-zero:
+an absence guard proves the corpus exists on disk, only a positive count proves
+this binary opened it.
+
+**Wired into `make check` deliberately.** Earlier today I found the collections
+family gate had spent its entire life compiling to `running 0 tests` because no
+make target ran it. An unwired gate and an unenforced ledger are the same defect,
+so this one has its own target and `check` depends on it. `make check`: 634 test
+suites ok, 0 failed; only `benchmark-check` stops it, with the documented
+environmental "no Criterion estimates found".
+
+**The remainder is honest, not a stall.** `#lzqffx` stays open with what is done
+and what is left recorded on it: mirroring the ledger into the other seven
+runners. The rs file is the template and the enforcement trick is the whole
+point — that part is done once, and the rest is mechanical.
+
+Next drainable head is `#lzqfrs` — Phase 3 — but it is gated on this one
+finishing, and I have left that dependency recorded on it.
+<!-- agent:boundary:68b30349 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -294,11 +355,12 @@ the gap goes red first.
 ## Backlog
 
 <!-- agent:backlog priority queue -->
+- [ ] [#lzqfcppfx] lazily-cpp: replay the canonical queue fixtures instead of hand-mirroring them. test_queue.cpp transcribes queuecell_spsc_push_pop / popped_head_observation / mpsc_multi_writer / bounded_backpressure / closure_lifecycle by hand and never opens the canonical bytes — its coverage script declares them KNOWN_UNCOVERED with exactly that reason, so this is honest rather than a false green, but a hand transcription can silently drift from the corpus it claims to mirror. cpp already has the machinery (spec_fixture_text + REQUIRE_FIXTURES_LOADED + the manifest), which is what test_collections_family_conformance.cpp uses, so this is wiring rather than invention. Shrinking that KNOWN_UNCOVERED list is the deliverable — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
 - [ ] [#maphandlecleardependents] MapHandle::clear_dependents exists only on the SYNC handle trait (lazily-rs cell_family.rs:134); the ThreadSafe and Async handle traits have no disposal hook. PARTIALLY RESOLVED 2026-07-26 — the blocker claim was wrong and is now disproven in practice. lazily-cpp shipped it: both thread-safe traits dispose through ctx.context() (BasicThreadSafeContext and AsyncContext each project onto a real Context, so no new primitive was needed), and AsyncSlotHandle gained a clear_dependents that drops the cached value since it has no graph dependents to clear. lazily-cs shipped it too, and found the reason it matters: AsyncComputedMap.Remove never disposed the removed node, so a reader holding the handle kept being served the removed entry's last resolved value. REMAINING: rs's own ThreadSafe/Async handle traits still have no hook; py has none on ANY flavor, so its removes drop the orphaned node without teardown consistently across all three. Note cs also needed a TryGetHandle before the disposal was observable enough to test at all
 - [ ] [#lazilycellfamily] lazily-rs cell_family.rs:344-345 documents the present set as "only grows (deferral, not de-allocation)" ten lines above a `remove` that shrinks it (:325-334). Pre-existing doc bug, independent of any refactor — fix the comment or scope it to the materialization plane.
 - [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
-- [ ] [#lzqffx] lazily-spec + all binding runners: Phase 2 of the queue-family plan — replay the nine collections queue fixtures against all three flavors with a declared skip ledger (zig's reactive-graph runner is the reference: fails if everything skips, ledger must match observation). Add a positive assertion that fixtures ran, mutation-check each runner per flavor, and grep every queue runner for the invalidates-nesting trap (fixtures nest it under steps[].expected.invalidates; lazily-rs read it off the step and silently never asserted). Land this BEFORE any implementation so the gap goes red first. KEPT OPEN DELIBERATELY: this is Phase 2 and is gated on Phase 0 (#lzqfspec) settling the Core surface and the reader-kind design first — the plan's phases have a hard dependency order, and a queue drain that reaches this id before #lzqfspec is out of order, not ready work. Read the 'How these gates fail' section of the plan before writing any runner — plan: tasks/plan-lazily-queue-family-flavors.md
+- [ ] [#lzqffx] lazily-spec + all binding runners: Phase 2 of the queue-family plan — replay the nine collections queue fixtures against all three flavors with a declared skip ledger. PARTIALLY DONE 2026-07-26. (a) The cross-binding invalidates-nesting audit the plan asks for is COMPLETE with a clean result: rs, py and kt all read expected.invalidates correctly, so the trap that silently disabled lazily-rs's MAP assertion is NOT present in any queue runner — do not re-audit. (b) 7 of 8 bindings genuinely replay the canonical queue corpus (rs, py, go, dart, zig, kt, js); lazily-cpp hand-mirrors it in test_queue.cpp and declares that honestly in its KNOWN_UNCOVERED list, so it is not a false green. (c) The reference three-flavor ledger shipped in lazily-rs (commit d9e8851): tests/queue_family_conformance.rs, self-enforcing by grepping src/ for each unshipped flavor's type name, wired into make check. REMAINING: mirror that ledger into the other 7 binding runners. The rs file is the template and the enforcement trick is the whole point — a ledger wired to a comment rots, one wired to the source cannot — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] 🚧 [#lzqfrs] lazily-rs: Phase 3 of the queue-family plan — context prerequisites + reference implementation. ThreadSafeContext needs a multi-root clear_slots equivalent (it has only single-handle clear at thread_safe.rs:3549 — four handles is four frontier walks; verify whether batch() already closes this, do not assume). AsyncContext needs a synchronous-compute computed and a multi-root clear (it has neither; only computed_async at async_context.rs:413). Then ship ThreadSafe/Async QueueCell + TopicCell + WorkQueueCell, each minting its own reader-kind handles on its own graph, Arc<Mutex<S>> storage with invalidation run outside the lock. KEPT OPEN DELIBERATELY: this is Phase 3 and is gated on Phase 1 (#lzqfformal) and Phase 2 (#lzqffx) — the plan requires the per-flavor fixture gate to land BEFORE implementation so the gap goes red first. A drain that reaches this id before those two is out of order, not ready work — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfzig] lazily-zig: the queue family is NOT graph-backed — QueueCell holds a *Context but mints no node; reader-kinds are five u64 version counters callers must poll. It scores green on the coverage row anyway. Make it graph-backed before adding flavors, or the flavor work lands green against nothing. Same finding as zig's sync ReactiveMap; consider one pass for both — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lzqfjs] lazily-js: QueueCell/TopicCell/WorkQueueCell are not reactive at all — src/queue.js takes no context, contains ZERO ctx references, and reports invalidation by diffing a private snapshot. It scores green on the coverage row. Bind the family to a context and mint real reader-kinds, and check whether the collections fixtures are being satisfied by a non-reactive model here the way test/collections.test.js drives src/collections.js instead of the reactive families — plan: tasks/plan-lazily-queue-family-flavors.md

@@ -424,7 +424,7 @@ impl CrdtConvergenceProfile {
     fn render(&mut self, final_state: CrdtConvergenceState) -> String {
         self.tick(final_state);
         let mut totals = self.totals.clone();
-        totals.sort_by(|a, b| b.1.cmp(&a.1));
+        totals.sort_by_key(|(_, total)| std::cmp::Reverse(*total));
         totals
             .iter()
             .filter(|(_, total)| total.as_millis() > 0)

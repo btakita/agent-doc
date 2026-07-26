@@ -753,9 +753,9 @@ pub trait PreflightCycleCompletionEffects {
 ///
 /// `#queueskip`'s own rule is "dispatched last cycle and **came back**
 /// unconsumed". *Came back* is the load-bearing half: the turn ran and committed
-/// a response that simply did not resolve the id, so it left a capture, a
-/// response hash, or a terminal phase behind. A cycle that only ever reached
-/// `preflight_started` and was repaired away hosted nothing and proves nothing.
+/// a response that simply did not resolve the id, so it left a capture or a
+/// response hash behind. A cycle that only ever reached `preflight_started` and
+/// was closed without hosting a response proves nothing about its head.
 ///
 /// Accepting one anyway is what let a **second `agent-doc preflight` in the same
 /// turn** — a mid-turn re-check, a recovery pass, an agent reading the contract
@@ -767,13 +767,22 @@ pub trait PreflightCycleCompletionEffects {
 /// `tasks/agent-doc/agent-doc-bugs2.md`: three preflight runs skipped two heads
 /// and mis-attributed the turn to a third.
 ///
+/// **A terminal phase is not that evidence, and accepting it reopened the bug
+/// this guard exists to close.** Preflight's own step 2 commits the document —
+/// including the `🚧`/`⏭️` queue-marker mutation preflight just made — which
+/// promotes an *empty* `preflight_started` cycle straight to `committed`. So the
+/// re-entrant preflight the guard was written for still satisfied it: reproduced
+/// 2026-07-26 on this same document with the guard already in place
+/// (`document_cycles` rows `cycle-1785091429188` and `cycle-1785091492165`, both
+/// `committed`, neither with a capture in the ledger). Only a capture or a
+/// response hash proves a turn ran; a phase proves only that *something*
+/// committed, and preflight itself is one of the things that commits.
+///
 /// The asymmetry settles the tie. A false skip silently drops real work; a false
 /// non-skip costs one re-dispatch of a dead ref, which the next *completed*
 /// cycle then skips for real. So require the evidence.
 fn prior_cycle_hosted_a_turn(prior: &agent_doc_cycle_state_io::CycleState) -> bool {
-    prior.capture_id.is_some()
-        || prior.response_sha256.is_some()
-        || matches!(prior.phase, agent_doc_turn::CyclePhase::Committed)
+    prior.capture_id.is_some() || prior.response_sha256.is_some()
 }
 
 /// Fold the prior cycle's evidence into the carried skip set.
@@ -782,13 +791,27 @@ fn prior_cycle_hosted_a_turn(prior: &agent_doc_cycle_state_io::CycleState) -> bo
 /// live three-preflight session. `prior_dispatched` is already gated on
 /// [`prior_cycle_hosted_a_turn`]; passing `None` models both "no prior cycle"
 /// and "the prior cycle never ran".
+///
+/// **Progress clears the carried set.** A skip says "this head was dispatched
+/// and came back unconsumed", which is a statement about a *moment* — usually an
+/// unfinished dependency. Retaining it merely because the id is still live makes
+/// it permanent: the head is never selected again, so it can never resolve
+/// itself out of the set, and an operator's top queue item silently stops being
+/// worked. Once any id resolves, the queue has moved and the old stall claim is
+/// stale, so re-offer the skipped heads. By the asymmetry above that costs at
+/// most one re-dispatch each, and a head that really is still stalled is skipped
+/// again by the very next completed cycle.
 fn advance_skipped_queue_head_ids(
     carried: std::collections::HashSet<String>,
     prior_dispatched: Option<&str>,
     prior_resolved: &std::collections::HashSet<String>,
     current_live_ids: &std::collections::HashSet<String>,
 ) -> std::collections::HashSet<String> {
-    let mut fresh = carried;
+    let mut fresh = if prior_resolved.is_empty() {
+        carried
+    } else {
+        std::collections::HashSet::new()
+    };
     if let Some(id) = prior_dispatched
         && !prior_resolved.contains(id)
         && current_live_ids.contains(id)
@@ -5486,9 +5509,21 @@ mod tests {
         )
         .unwrap();
 
-        // Simulate the PRIOR cycle: it dispatched #sy71 (first head) and committed
-        // WITHOUT consuming it (no reap/done recorded).
+        // Simulate the PRIOR cycle: it dispatched #sy71 (first head), CAPTURED a
+        // response, and committed WITHOUT consuming it (no reap/done recorded).
+        // The capture is load-bearing, not decoration: a committed cycle with no
+        // capture is preflight's own step-2 bookkeeping commit, which
+        // `prior_cycle_hosted_a_turn` must reject (`#adpreflightreentryskip`).
         agent_doc_cycle_state_io::start_preflight(&doc, Some(content), Some(content)).unwrap();
+        agent_doc_cycle_state_io::mark_response_captured(
+            &doc,
+            "response_captured",
+            Some(content),
+            Some(content),
+            &agent_doc_hash::content_hash("### Re: prior turn\n\nunconsumed\n"),
+            None,
+        )
+        .unwrap();
         agent_doc_cycle_state_io::mark_committed(&doc, "committed", Some(content), Some(content))
             .unwrap();
 
@@ -10155,8 +10190,19 @@ mod tests {
             Some("cap-1")
         )));
         assert!(prior_cycle_hosted_a_turn(&prior_cycle_json(
-            "committed", None
+            "committed",
+            Some("cap-1")
         )));
+        // The reopened half: preflight's own step-2 commit promotes the EMPTY
+        // cycle it just opened to `committed`, so a terminal phase alone is
+        // satisfied by exactly the re-entrant preflight this guard exists to
+        // reject. Reproduced 2026-07-26 with the guard in place —
+        // `document_cycles` rows cycle-1785091429188 / cycle-1785091492165 were
+        // both `committed` with no capture, and two operator heads were skipped.
+        assert!(
+            !prior_cycle_hosted_a_turn(&prior_cycle_json("committed", None)),
+            "a committed cycle with no capture is preflight's own bookkeeping commit, not a turn"
+        );
     }
 
     #[test]
@@ -10190,6 +10236,43 @@ mod tests {
             id_set(["alpha", "gone"]),
             Some("beta"),
             &id_set(["alpha"]),
+            &live,
+        );
+        assert_eq!(fresh, id_set(["beta"]));
+    }
+
+    #[test]
+    fn a_skip_never_outlives_the_queue_making_progress() {
+        // A carried skip retained purely because its id is still live is a
+        // permanent one: a skipped head is never selected, so it can never
+        // resolve itself out of the set, and the operator's top queue item
+        // silently stops being worked. Any resolved id means the queue moved, so
+        // the stall claim behind the carried skips is stale.
+        let live = id_set(["alpha", "beta", "gamma"]);
+
+        // No progress: carried skips survive, as before.
+        let fresh = advance_skipped_queue_head_ids(
+            id_set(["alpha", "beta"]),
+            None,
+            &std::collections::HashSet::new(),
+            &live,
+        );
+        assert_eq!(fresh, id_set(["alpha", "beta"]));
+
+        // Progress on an unrelated head clears them and re-offers the work.
+        let fresh =
+            advance_skipped_queue_head_ids(id_set(["alpha", "beta"]), None, &id_set(["gamma"]), &live);
+        assert!(
+            fresh.is_empty(),
+            "a completed head must re-offer previously skipped work, not strand it: {fresh:?}"
+        );
+
+        // The head the progressing cycle itself left unconsumed is still skipped
+        // — clearing the carried set must not lose the fresh evidence.
+        let fresh = advance_skipped_queue_head_ids(
+            id_set(["alpha"]),
+            Some("beta"),
+            &id_set(["gamma"]),
             &live,
         );
         assert_eq!(fresh, id_set(["beta"]));

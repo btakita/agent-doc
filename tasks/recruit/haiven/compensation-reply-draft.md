@@ -1,9 +1,23 @@
-# Haiven Compensation Reply — DRAFT v2 (reply to Craig's funding email; not sent)
+# Haiven Compensation Reply — ACTIVE LETTER (send this; not yet sent)
 
-Status: draft for Brian's review. This is now a direct REPLY to Craig Fryar's email
-(seed ~half raised, milestone funding, "flexible, including the possibility of a
-one-time signing bonus," asks where Haiven needs to be on base + options). Tone per
-`mail/contacts/craig-fryar/CLAUDE.md`: concise, data-literate, outcomes-first.
+Status: **the decision is Haiven** (2026-07-26, no trial needed). This is the letter to
+send to Craig. The decline draft (`decline-draft.md`) is superseded and held. Direct
+REPLY to Craig Fryar's email (seed ~half raised, milestone funding, "flexible,
+including the possibility of a one-time signing bonus," asks where Haiven needs to be
+on base + options). Tone per `mail/contacts/craig-fryar/CLAUDE.md`: concise,
+data-literate, outcomes-first.
+
+Send-day notes:
+- Do NOT decline Acadian yet... it stays the live alternative until Haiven's package is
+  agreed and the offer letter is signed. If the recruiter pings, hold honestly
+  ("finalizing another conversation, need a few days") without accepting or declining.
+- Do NOT tell Craig the decision is already made... the letter's existing framing ("I'd
+  rather build with you" + the $205k alternative) is true and keeps the package honest.
+  Deciding you want Haiven is not the same as accepting any package they offer; the
+  floor in the notes below still applies.
+- The working-relationship uncertainty (the one residual unknown) is exactly what the
+  structural asks insure: clawback scoping + cliff protection + severance make a
+  bad-fit discovery survivable on both sides. Hold those asks.
 
 Calibration notes:
 - Base opens at $185k (not the $190k aggressive anchor)... Craig invited the number, so
@@ -26,11 +40,12 @@ Hi Craig,
 
 Thank you for the transparency on the funding position... that kind of candor is
 exactly why this team is attractive, and congratulations on the seed progress and the
-path to the August beta.
+path to the August beta. Apologies for the slow reply: your email deserved a considered
+answer, and I wanted to be certain of mine before giving it to you.
 
 I want to be upfront about how I got to these numbers, because I know an ask like this
 lands heavily on a seed-stage budget, and I don't make it lightly. My alternative is a
-contract seat that annualizes above $205k in cash. I sat down and ran the math on both
+contract seat that annualizes above $205k ($100/hr) in cash. I sat down and ran the math on both
 paths honestly... and I'm mindful that cash is your tight constraint right now, which
 is exactly why this leans on equity and structure instead of asking you to match cash.
 This is the package where choosing Haiven becomes rational on my side of the ledger,
@@ -60,8 +75,9 @@ projects and future independent side work (I'll provide the list and language), 
 core collaboration hours... I'm Eastern and will hold a 12-5pm ET overlap with the
 team, flexing around it.
 
-One timing note: I owe the other party an answer by Sunday evening. If you can respond
-on this framework by then... even informally... I can hold my decision open for you.
+On timing: I'm ready to move quickly. If this framework works for you... even an
+informal "yes, we can get there" is enough... I can give you a final answer within a
+day or two of your reply.
 
 I'll be honest, Craig: I hope the math works, because I'd rather build with you. If
 parts of this framework don't fit where Haiven is right now, tell me which ones... I

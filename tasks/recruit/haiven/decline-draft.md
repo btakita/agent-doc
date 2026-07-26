@@ -1,6 +1,8 @@
-# Haiven Decline + Bounded Offer — DRAFT v3 (not sent)
+# Haiven Decline + Bounded Offer — SUPERSEDED (never sent)
 
-Status: draft for Brian's review. Reshaped per steering: decline the FTE role in good
+Status: **superseded 2026-07-26 — Brian decided to pursue the Haiven role**; the active
+letter is `compensation-reply-draft.md`. Kept as history. Original status: draft for
+Brian's review. Reshaped per steering: decline the FTE role in good
 faith, be open about industry participation + ally intent, and proactively offer the
 1-2 week SDK prototype as a very-low-risk option for Craig. Riza is deliberately NOT
 mentioned (intro contingent on prototype reception + Riza's opt-in).

@@ -412,16 +412,41 @@ Mobile has two forms:
 Each mobile target gets device-level failure testing; a successful desktop build
 does not count as mobile acceptance.
 
-### Wave C — focused indie ecosystems
+### Wave C — broader indie and creator ecosystems
 
-- **Bevy:** Rust crate plus Bevy plugin/resources/events, backed by the shared
-  state-machine and conformance model.
+Wave C should balance qualified market reach, integration cost, and reuse of the
+shared protocol core. Bevy is not a market-coverage anchor; it belongs behind
+engines with broader commercial 2D, mobile, web, and low-code pipelines.
+
+#### Market-balancing candidates
+
+- **GameMaker:** GML-facing package plus native/platform extension shims where
+required. Validate Windows/macOS/Linux, HTML5, Android, and iOS first; console
+exports stay in the access-gated lane.
+- **Cocos Creator:** TypeScript client/component package for its mobile/web
+workflow, with a native bridge only where the target runtime requires it.
+- **Construct 3:** JavaScript/TypeScript addon exposing Haiven actions,
+conditions, expressions, and events, backed by a sample project and web/mobile/
+desktop export validation. Require a named pilot before productizing it.
+
+These candidates still compete through Haiven's qualified pipeline rather than
+receiving automatic implementation commitments. Milestone 0 should score named
+studios, target platforms, launch timing, integration effort, support burden,
+and protocol-core reuse.
+
+#### Pilot-driven specialist candidates
+
 - **MonoGame/FNA:** .NET library compatible with current XNA-style frameworks;
-  target MonoGame rather than discontinued Microsoft XNA.
+target MonoGame rather than discontinued Microsoft XNA.
+- **Bevy:** Rust crate plus Bevy plugin/resources/events, backed by the shared
+state-machine and conformance model. Proceed only for a named pilot or unusually
+strong pipeline evidence.
 - **Clickteam Fusion 2.5:** extension only for a named pilot because exporter and
-  extension constraints vary by runtime.
+extension constraints vary by runtime.
 - **Source SDK:** project-specific C++ integration after license and commercial
-  distribution review.
+distribution review.
+- **Defold, Phaser, or GDevelop:** evaluate when a qualified studio appears or
+when an existing JavaScript/Lua/native core makes the adapter unusually cheap.
 
 ### Console readiness lane
 

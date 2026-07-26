@@ -187,9 +187,9 @@ of the Unity pilot.
 ## Engine and runtime strategy
 
 Engines/frameworks and runtime platforms should be planned separately. Unity,
-Unreal, Godot, Bevy, Clickteam Fusion, MonoGame, and Source are integration
-surfaces; Android, iOS, Windows, macOS, Linux, web, Nintendo, PlayStation, and
-Xbox are runtime/certification targets.
+Unreal, Godot, GameMaker, Cocos Creator, Construct 3, Bevy, Clickteam Fusion,
+MonoGame, and Source are integration surfaces; Android, iOS, Windows, macOS,
+Linux, web, Nintendo, PlayStation, and Xbox are runtime/certification targets.
 
 | Priority | Integration surface | Recommendation |
 |---|---|---|
@@ -197,15 +197,19 @@ Xbox are runtime/certification targets.
 | 2 | **Godot** | Strong indie fit and open ecosystem. Choose GDScript, C#, or a native extension only after pilot-customer discovery. Validate desktop, Android, iOS, and web constraints explicitly. |
 | 2 | **Unreal / C++ + Blueprint** | High-value second major-engine candidate. Expose a Blueprint-friendly facade over a testable C++ core; validate desktop and mobile first. |
 | 2 | **Native mobile** | Add Swift/iOS and Kotlin/Android clients if Haiven expects native companion apps or non-engine mobile titles. Consider React Native only when a concrete product requires it. |
-| 3 | **Bevy / Rust** | Small but technically aligned indie community. A Rust crate can be a clean consumer of the shared protocol/conformance assets. |
-| 3 | **MonoGame / FNA** | Treat this as the modern XNA-family target. Do not invest in a new Microsoft XNA SDK, which was discontinued; serve current .NET indie projects instead. |
+| 3 | **GameMaker** | Stronger market-balancing candidate for commercial 2D indie games. Start with a GML-facing package plus platform extensions where required; validate desktop, mobile, and web before any access-gated console work. |
+| 3 | **Cocos Creator / TypeScript** | Adds a mobile- and web-oriented 2D/3D ecosystem beyond the Unity/Godot/Unreal cluster. Prefer a TypeScript client/component package with native bridges only where the runtime requires them. |
+| 3 | **Construct 3** | Reaches low-code and small-studio web/mobile/desktop projects. Package Haiven as a JavaScript/TypeScript addon with actions, conditions, expressions, and a sample project; proceed after a named pilot confirms demand. |
+| 4 | **MonoGame / FNA** | Treat this as the modern XNA-family target. Do not invest in a new Microsoft XNA SDK, which was discontinued; serve current .NET indie projects instead. |
+| 4 | **Bevy / Rust** | Technically aligned but currently too small to anchor market coverage. Keep a clean Rust crate/plugin design available for a named pilot or unusually strong pipeline evidence. |
 | 4 | **Clickteam Fusion 2.5** | This is the current name for the Multimedia Fusion lineage. Build an extension only after a named studio validates demand and exporter constraints. |
 | 4 | **Source SDK / mods** | Treat as a game/mod-specific C++ integration, not a general modern engine channel. Scope licensing and commercial distribution before implementation. |
 | Access-gated | **Nintendo Switch/Switch 2, PlayStation 5, Xbox Series X\|S** | These are validation and certification lanes across selected engine adapters. They require Haiven or a pilot partner to provide approved developer-program access, platform SDKs, hardware, and NDA-compliant CI. |
 
-Roblox, web/JavaScript, Discord, and other community channels can be evaluated
-alongside this matrix, but should not displace the first engine pilot without
-evidence from Haiven's early developer pipeline.
+Defold, Phaser, GDevelop, Roblox, Discord, and other creator/community channels
+can be evaluated alongside this matrix. They should enter the roadmap through a
+named studio, qualified pipeline evidence, or a low-cost reuse path rather than
+displacing the first engine pilot.
 
 ## Commercial and operating model
 
@@ -260,6 +264,12 @@ after the integration contract and business priority are concrete.
   [console access requirements](https://unity.com/solutions/console)
 - [Unreal Engine packaging and target platforms](https://dev.epicgames.com/documentation/en-us/unreal-engine/packaging-your-project)
 - [Godot supported export platforms and console constraints](https://docs.godotengine.org/en/stable/about/faq.html#which-platforms-are-supported-by-godot)
+- [GameMaker extension packages](https://manual.gamemaker.io/lts/en/The_Asset_Editors/Extensions.htm)
+and [export platforms](https://gamemaker.io/en/blog/export-with-gamemaker)
+- [Cocos Creator TypeScript/JavaScript support](https://docs.cocos.com/creator/3.7/manual/en/scripting/language-support.html)
+and [extension packages](https://docs.cocos.com/creator/3.8/manual/en/editor/extension/create-extension.html)
+- [Construct 3 Addon SDK](https://www.construct.net/en/make-games/manuals/addon-sdk)
+and [publishing targets](https://www.construct.net/en/make-games/manuals/construct-3/overview/publishing-projects)
 - [Bevy platform-specific Android/iOS examples](https://github.com/bevyengine/bevy/blob/main/examples/README.md#platform-specific-examples)
 - [MonoGame supported platforms](https://docs.monogame.net/articles/getting_started/platforms.html)
   and [console-access requirements](https://docs.monogame.net/articles/console_access.html)

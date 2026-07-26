@@ -731,6 +731,16 @@ pub trait PreflightCycleCompletionEffects {
 
     fn commit(&self, file: &Path) -> Result<bool>;
 
+    /// Apply the shared settlement projection before reading the gate
+    /// (`#preflightsettleparity`).
+    ///
+    /// `session-check` reads the derived verdict *and* clears a `Satisfied`
+    /// intent; preflight used to only read it. Sharing the cell without sharing
+    /// the action is what let a satisfied intent block every cycle while
+    /// `session-check` simultaneously reported ok. Idempotent: every verdict
+    /// other than `Satisfied` is a no-op.
+    fn settle_retained_document_write(&self, file: &Path);
+
     fn retained_document_write(&self, file: &Path) -> bool;
 
     fn session_interruption(&self, file: &Path) -> Result<Option<String>>;
@@ -746,6 +756,7 @@ pub fn enforce_cycle_completion(
     // when an older repair accidentally made its closeout cycle look terminal.
     // Give session-check one chance to settle the exact capture, then fail
     // closed before a new preflight can replace its live projection.
+    effects.settle_retained_document_write(file);
     if effects.retained_document_write(file) {
         if let Some(reason) = effects.session_interruption(file)? {
             anyhow::bail!("{}", reason.replace('\n', " "));
@@ -5066,7 +5077,10 @@ mod tests {
     struct TestPreflightCycleCompletionEffects {
         repair_calls: std::cell::Cell<usize>,
         commit_calls: std::cell::Cell<usize>,
-        retained_document_write: bool,
+        settle_calls: std::cell::Cell<usize>,
+        retained_document_write: std::cell::Cell<bool>,
+        /// The `Satisfied` verdict: settling clears the intent.
+        settle_satisfies: bool,
         session_interruption: Option<String>,
     }
 
@@ -5081,8 +5095,15 @@ mod tests {
             Ok(false)
         }
 
+        fn settle_retained_document_write(&self, _file: &Path) {
+            self.settle_calls.set(self.settle_calls.get() + 1);
+            if self.settle_satisfies {
+                self.retained_document_write.set(false);
+            }
+        }
+
         fn retained_document_write(&self, _file: &Path) -> bool {
-            self.retained_document_write
+            self.retained_document_write.get()
         }
 
         fn session_interruption(&self, _file: &Path) -> Result<Option<String>> {
@@ -9950,7 +9971,7 @@ mod tests {
         let doc = dir.path().join("session.md");
         std::fs::write(&doc, "# Session\n").unwrap();
         let effects = TestPreflightCycleCompletionEffects {
-            retained_document_write: true,
+            retained_document_write: std::cell::Cell::new(true),
             session_interruption: Some(
                 "[session-check] INTERRUPTED: binary-owned response delivery is retained"
                     .to_string(),
@@ -9966,6 +9987,61 @@ mod tests {
         );
         assert_eq!(effects.repair_calls.get(), 0);
         assert_eq!(effects.commit_calls.get(), 0);
+    }
+
+    #[test]
+    fn enforce_cycle_completion_applies_the_shared_settlement_before_gating() {
+        // #preflightsettleparity: `session-check` read the shared verdict AND
+        // applied its projection; preflight only read it. A `Satisfied` intent
+        // that no `session-check` had yet cleared then blocked every cycle while
+        // `session-check` simultaneously reported ok — the deadlock observed
+        // 2026-07-26 on tasks/agent-doc/agent-doc-bugs2.md, where the verdict was
+        // `Satisfied` the whole time and nothing in preflight's path ever
+        // applied the clear. Sharing the cell is not sharing the action.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let effects = TestPreflightCycleCompletionEffects {
+            retained_document_write: std::cell::Cell::new(true),
+            settle_satisfies: true,
+            // Present so a regression cannot pass by way of the interruption
+            // branch: if the gate is reached at all, this is the error raised.
+            session_interruption: Some(
+                "[session-check] INTERRUPTED: binary-owned response delivery is retained"
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+
+        enforce_cycle_completion(&doc, &effects)
+            .expect("a satisfied retained intent must not block a new cycle");
+        assert_eq!(
+            effects.settle_calls.get(),
+            1,
+            "the gate must apply the shared settlement projection exactly once before reading"
+        );
+    }
+
+    #[test]
+    fn enforce_cycle_completion_still_blocks_when_settling_cannot_satisfy() {
+        // The other half of #preflightsettleparity: settling is idempotent and a
+        // genuinely `Unsettled` intent must still fail closed. Making the gate
+        // settle first must not turn it into a rubber stamp.
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        std::fs::write(&doc, "# Session\n").unwrap();
+        let effects = TestPreflightCycleCompletionEffects {
+            retained_document_write: std::cell::Cell::new(true),
+            settle_satisfies: false,
+            ..Default::default()
+        };
+
+        let error = enforce_cycle_completion(&doc, &effects).unwrap_err();
+        assert!(
+            error.to_string().contains("remains unsettled"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(effects.settle_calls.get(), 1);
     }
 
     #[test]

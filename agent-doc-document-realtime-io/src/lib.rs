@@ -6048,7 +6048,29 @@ pub fn retained_write_settlement(file: &Path, source: &str) -> SettlementVerdict
 /// intent that the converged document has already satisfied — and one whose
 /// planes could not be observed — are both *not* outstanding writes.
 pub fn retained_write_blocks_new_cycle(file: &Path, source: &str) -> bool {
-    retained_write_settlement(file, source).blocks_new_cycle()
+    let verdict = retained_write_settlement(file, source);
+    // A gate that refuses must say why. Without this the operator sees only
+    // "retained document-write effect remains unsettled" while `session-check`
+    // reports ok, and the cause — which of the two `UnsettledCause`s, and for
+    // which intent — is nowhere on disk. That is what turns a diagnosable
+    // refusal into a poll loop (`#closeoutwaitchurn`).
+    if let agent_doc_state_backbone::retained_write::SettlementVerdict::Unsettled {
+        intent_id,
+        cause,
+    } = &verdict
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "retained_write_blocks_new_cycle file={} source={} intent_id={} cause={}",
+                file.display(),
+                source,
+                intent_id,
+                cause.token(),
+            ),
+        );
+    }
+    verdict.blocks_new_cycle()
 }
 
 /// Settle a retained write whose purpose the converged document already meets:

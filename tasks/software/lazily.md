@@ -495,13 +495,36 @@ It only surfaced because the count disagreed with an independent audit I had alr
 Two notes on the state it exposes. **lazily-cs names 30 of 124** — that is the real state of the newest binding, not a guard defect, and it now cannot drift further without a deliberate decision; filed against the cs parity plan. And **lazily-dart had no Makefile at all**, so its verification was ad-hoc `dart analyze` plus `dart test` with nothing named `check`; it gets one, which is also why the guard had somewhere to hang.
 
 All seven guards run green and are wired into each binding's `check`. Full `make check` verified end-to-end on js and cs; the guard target verified directly in the other five.
-<!-- agent:boundary:c36fb03c -->
+
+### Re: do [#lazilyupgradeconformance] — opus-5
+
+> **Queue prompt:**
+>
+> do [#lazilyupgradeconformance]
+
+
+Two of seven done, both verified clean, and the split is by language capability rather than by effort.
+
+**js and py now prove the bytes were opened.** The static guard catches a fixture nobody mentions; it cannot catch one mentioned in a comment and hand-transcribed, which is the drift found in cpp's queue tests — source names the fixture, bytes are never read, check stays green against a contract the test only claims to follow.
+
+The instrument matters here. js has ~73 `readFileSync` call sites and py ~70 load sites, and I did not touch any of them: js gets a `--require` preload wrapping fs reads, py a `conftest.py` wrapping `Path.read_text`/`Path.open`. That is the **stronger** instrument, not the lazier one — it records what the suite *really* read, so a runner that stops loading a fixture is caught even though its source still names it. Editing call sites would only ever record what each site claims to load.
+
+A missing manifest now **fails**. It does not mean "no fixtures were read"; it means the suite ran without the recorder attached, and passing in that state is the vacuous green this whole line of work exists to prevent.
+
+**Both bindings came back clean** — js opens 121 of 124, py 114 of 124, exactly matching their static counts. So neither had marker-only drift. That is worth having measured rather than assumed, particularly for js, which claims the highest coverage of any binding and where a false claim would have been the most misleading.
+
+Mutation-checked twice each: removing the manifest fails with missing evidence, and deleting a single entry — a runner that still names a fixture but stopped reading it — fails naming that exact fixture. That second mutation is the case the static guard is structurally blind to, so it is the one that proves the upgrade is real rather than cosmetic.
+
+One process note against myself: my first pass at the js script reported success with the old "static check — naming is not replaying" wording, because a heredoc-escaping mismatch meant that one replacement silently did not apply. The functional parts had all landed, so the guard was genuinely runtime — but its own success message was lying about what it had done. I checked which replacements applied rather than trusting that the script ran green, which is the same discipline that caught the `pipefail` inversion earlier in this cycle.
+
+**The remaining five are a different problem, not a smaller one.** rs, go, dart, zig and cs are compiled and offer no interception seam, so each needs a shared fixture-loader helper plus migration of its existing load sites through it. That is genuine per-binding work rather than a bulk edit, so the item is narrowed to those five with the pattern recorded: record ids relative to the conformance root, append rather than truncate because several processes contribute, and fail closed on a missing manifest. Highest value is go (allowlist 9), then rs and dart (13 each); zig (30) and cs (94) claim the least, so a false claim there is the least misleading.
+<!-- agent:boundary:90973d5e -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- do [#lazilyupgradeconformance]
+- ~~do [#lazilyupgradeconformance]~~
 - do [#lazilyconformancecoverag]
 - ~~do [#lazilythreadsafequeuecel]~~
 - ~~do [#lzqfrs]~~
@@ -538,7 +561,7 @@ All seven guards run green and are wired into each binding's `check`. Full `make
 - ~~do [#renametreesource]~~
 - ⏭️ do [#recommendeddecidewhether]
 - ⏭️ do [#lazilycppconformance]
-- ~~🚧 do [#portconformancecoverage]~~
+- ~~do [#portconformancecoverage]~~
 - do [#verifycrdtplaneruntimein]
 - do [#lazilycppsignalingroom]
 - do [#lazilycppcollections]
@@ -560,7 +583,7 @@ All seven guards run green and are wired into each binding's `check`. Full `make
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilyupgradeconformance] lazily: upgrade the conformance-coverage guard from static to runtime in rs, py, js, go, dart, zig, cs. The guard landed 2026-07-26 is STATIC — it greps test sources for each canonical fixture filename, so absence is caught but presence proves nothing. A test can name a fixture in a comment and hand-transcribe its contents, which is precisely the drift found in lazily-cpp queue tests and which this guard cannot see. lazily-kt and lazily-cpp already do it properly: every runner appends the fixtures it actually OPENED to the file named by LAZILY_CONFORMANCE_MANIFEST, flushed at exit, and the script asserts the union. Port that mechanism. Highest value where the allowlist is smallest (js 3, go 9, py 10) because those bindings claim near-total coverage and a false claim there is the most misleading
+- [ ] 🚧 [#lazilyupgradeconformance] lazily: upgrade the conformance-coverage guard from static to runtime in rs, go, dart, zig, cs. DONE 2026-07-26 for js and py, and both proved CLEAN (js opens 121/124, py 114/124 — exactly their static counts, so no marker-only drift). Those two were cheap because the language offers an interception seam: js uses a --require preload wrapping fs reads, py a conftest wrapping Path.read_text/open, so neither needed edits to ~73 / ~70 load sites. The remaining five are compiled and have no such seam — each needs a shared fixture-loader helper plus migration of its existing load sites through it, which is why they are separate work rather than a bulk edit. Pattern to copy: record the id relative to the conformance root, APPEND (multiple processes contribute), and make a MISSING manifest fail as missing evidence rather than pass as no-fixtures-needed. Highest remaining value is go (allowlist 9) then rs (13) and dart (13); zig (30) and cs (94) claim least, so a false claim there is least misleading
 - [ ] [#lazilyconformancecoverag] lazily-cs: the conformance-coverage allowlist is 94 of 124 canonical fixtures — cs names only 30. That is the real state of the newest binding, not a defect in the guard, but it means roughly three quarters of the canonical corpus is unreplayed there. Work the list down against tasks/software/lazily-cs-parity-plan.md; the guard now fails the build if the corpus grows without a matching decision, so the number can only move deliberately
 - [ ] [#lazilythreadsafetopiccel] lazily-rs: ThreadSafeTopicCell + AsyncTopicCell. Same per-flavor rules as #lazilythreadsafequeuecel: own graph, own reader handles, bumps outside the lock, batch() for multi-root invalidation. Topic Core reader kinds per cell-model.md are subscribe/reconnect/disconnect/publish/read/read_stream/advance. Update the flavor ledger in the SAME change, and make the corpus replay against the new flavor rather than only flipping the flag — plan: tasks/plan-lazily-queue-family-flavors.md
 - [ ] [#lazilythreadsafeworkqueu] lazily-rs: ThreadSafeWorkQueueCell + AsyncWorkQueueCell. Core surface is push/claim/ack/nack/reap_expired plus the three independent reader kinds (pending / in-flight / dead-letter). Visibility-timeout redelivery needs a clock seam, which is NOT flavor-specific — reuse the sync one rather than minting a per-flavor clock. Update the flavor ledger in the SAME change and make the corpus replay against the new flavor. KEPT OPEN 2026-07-26: this reached the queue head before its own stated prerequisite existed — it says "same rules as the reference pair", and that pair had not been built. ThreadSafeQueueCell now ships (46d81e4) and IS the pattern to copy: memoized-derive reader kinds on its own graph, Arc<Mutex<S>> storage with invalidation OUTSIDE the lock (holding storage while invalidating inverts lock order against readers and deadlocks), multi-root invalidation via batch(), ledger flag flipped only alongside a real replay, plus an effect-based atomicity test because a step replay cannot see non-atomic invalidation. The THREAD-SAFE half is unblocked now; the async half waits on the AsyncContext prerequisites in #lzqfrs — plan: tasks/plan-lazily-queue-family-flavors.md

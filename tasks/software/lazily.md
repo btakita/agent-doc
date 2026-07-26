@@ -333,13 +333,39 @@ Rename done across all eleven repos, every one CI-green. The release train is qu
 **Verification.** Ten of eleven repos CI-green on their rename commit (lazily-formal has no CI workflow; lazily-rs was still running at the last check and was green locally on its full feature-sliced gate). `sync-coverage.mjs --check` passes family-wide, so no README carries a stale table. Every residual old name is a deprecated alias, its re-export, or an accurate CHANGELOG entry.
 
 **Why the release is a separate item.** It is ten targets across five irreversible publish mechanisms — crates.io, PyPI via wheels CI, GitHub Packages (immutable; a 409 kills the publish outright), npm, and pub.dev — plus tag-and-release for spec, formal, zig, cpp and go. Two things make it a poor fit for the tail of this session: **npm needs your 2FA**, so lazily-js cannot complete unattended; and **lazily-zig's version file is already inconsistent with its own last release** (`build.zig.zon` 0.28.0 against a published v0.29.0), which is pre-existing drift that needs a deliberate decision rather than a bulk bump. Publishing is the one step that cannot be undone, so it gets a clean context rather than the end of a long one. The item carries the per-target mechanism, the proposed minor bumps, and both decisions you already made, so none of it is re-litigated.
-<!-- agent:boundary:e9be75cf -->
+
+### Re: release train — opus-5
+
+All ten targets released. lazily-cs excluded as instructed.
+
+| target | version | registry |
+|---|---|---|
+| lazily-rs | 0.49.0 | crates.io |
+| lazily-py | 0.36.0 | PyPI (mypyc wheel matrix, all arches green) |
+| lazily-js | 0.28.0 | npm — published manually by you |
+| lazily-dart | 0.26.0 | pub.dev |
+| lazily-kt | 0.37.0 | GitHub Packages |
+| lazily-spec / lazily-formal | v0.36.0 | tag + GitHub release |
+| lazily-zig / lazily-go / lazily-cpp | v0.30.0 / v0.22.0 / v0.24.0 | tag + GitHub release |
+
+**The two pre-existing version drifts are now resolved rather than carried forward.** `lazily-zig`'s `build.zig.zon` said 0.28.0 against a published v0.29.0, and `lazily-cpp`'s project version said 0.22.0 against a published v0.23.0 — in both cases the version file had fallen behind its own release. Bumping to 0.30.0 and 0.24.0 puts each file ahead of every published tag instead of reusing a number already out there.
+
+**Two gates caught real problems before anything shipped.**
+
+lazily-rs's `spec_compliance` failed the moment I bumped `Cargo.toml`, because it asserts `BENCHMARKS.md` names the current package version — a deliberate guard against release docs drifting from the manifest. Exactly the class of thing that silently rots otherwise.
+
+`cargo publish` then refused on a dirty `Cargo.lock` (the bump had propagated into it). Rather than pass `--allow-dirty`, I committed the lockfile and **repointed the `v0.49.0` tag at that commit**, so the crate on crates.io and the tag are the same tree rather than the tag trailing by one.
+
+**npm E404'd again, and the cause is worth fixing at the source.** The workflow's OIDC exchange succeeded — provenance was signed and logged to Sigstore — and only the upload was rejected: `E404 PUT https://registry.npmjs.org/@lazily-hub%2flazily-js`. From npm that means the package is not registered to that trusted publisher, or the token lacks scope permission. It is the workflow's *registration* that is wrong, not its code, so this will recur every release until `@lazily-hub/lazily-js` is configured as a trusted publisher on npmjs.com. Registering it once makes future releases unattended; your manual publish confirmed `latest` is 0.28.0.
+
+**`lazily-macros` needed no publish** — 0.23.0 is already on crates.io and the rename never touched it, so the "macros before lazily" ordering constraint was satisfied without a second upload.
+<!-- agent:boundary:d69da519 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~Rename CellMap to SourceMap + SlotMap to ComputedMap + ThreadSafeCellMap to ThreadSafeSourceMap + ThreadSafeSlotMap to ThreadSafeComputedMap + AsyncCellMap to AsyncSourceMap + AsyncSlotMap to AsyncComputedMap. Deprecate the old names. Do this across spec + formal first then implementations in subagents. Release + publish spec + formal + all implementations except lazily-cs.~~ — auto-struck: answered this cycle (#ftstrike)
+- do [#lzjsnpmtrustedpub]
 - ⏭️ do [#lzcsqueues]
 - ⏭️ do [#lzcscrdt]
 - ⏭️ do [#lzcsipc]
@@ -353,7 +379,7 @@ Rename done across all eleven repos, every one CI-green. The release train is qu
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzrenamerelease] lazily: release + publish the SourceMap/ComputedMap rename — spec, formal, rs, py, kt, js, dart, zig, go, cpp (NOT lazily-cs, deliberately excluded). Proposed minor bumps: spec+formal 0.35.0->0.36.0, rs 0.48.1->0.49.0, py 0.35.0->0.36.0, kt 0.36.1->0.37.0, js 0.27.0->0.28.0, dart 0.25.0->0.26.0, zig ->0.30.0, go v0.21.0->v0.22.0, cpp v0.23.0->v0.24.0. Mechanisms differ per target: crates.io (token in passage, macros before lazily), PyPI via the wheels workflow, GitHub Packages for kt (IMMUTABLE - a 409 kills the publish, so the version must be new), npm for js (BLOCKED on operator 2FA), pub.dev for dart (manual OAuth, not 2FA-blocked), tag + gh release for spec/formal/zig/cpp/go. TWO PRE-EXISTING SNAGS: lazily-zig build.zig.zon says 0.28.0 while its published GitHub release is v0.29.0, so the version file is behind its own release and needs a deliberate decision, not a bulk bump; and lazily-cpp's project version likewise trails its v0.23.0 tag. Decisions already made, do not re-litigate: publish lazily-go with the raised Go 1.24 floor (generic type aliases need it), and lazily-cs keeps NO deprecated aliases with its types re-sealed
+- [ ] [#lzjsnpmtrustedpub] lazily-js: register @lazily-hub/lazily-js as a trusted publisher on npmjs.com so release.yml can publish unattended. The workflow is correct — its OIDC exchange succeeds and provenance is signed and logged to Sigstore — but the upload is rejected with E404 PUT https://registry.npmjs.org/@lazily-hub%2flazily-js, meaning npm does not associate the package with that publisher (or the token lacks scope permission). This has now E404'd on two consecutive releases and each time required a manual 'npm publish --access public --otp=<code>' from the operator. Fix is npmjs.com-side configuration, not a code change
 - [ ] [#lzcsqueues] lazily-cs: QueueCell + QueueStorage, TopicCell, WorkQueueCell, RelayCell with BackpressurePolicy/SpillStore/Transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 12-14, 16)
 - [ ] [#lzcscrdt] lazily-cs: TextCrdt + delta sync, SeqCrdt, CrdtTree, LosslessTreeCrdt incl. dotted-frontier anti-entropy and concurrent-merge convergence, LWW/MV registers, PnCounter, CellCrdt; replay crdt-tree + lossless-tree corpora — plan: tasks/software/lazily-cs-parity-plan.md (rows 17-24)
 - [ ] [#lzcsipc] lazily-cs: Snapshot/Delta/CrdtSync wire types validated against the lazily-spec JSON Schemas, ShmBlobArena, BlobBackend zero-copy transport — plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27)
@@ -381,4 +407,5 @@ Rename done across all eleven repos, every one CI-green. The release train is qu
 - 2026-07-25 [#lzcscollections] lazily-cs: rows 2-4 — ThreadSafeSlotMap + AsyncSlotMap materialization and keyed-map sync (membership propagation, materialize-on-ingest, derived alignment); replay the familysync corpus. Row 1 (ReactiveMap core + CellMap/SlotMap + materialization corpus) shipped 2026-07-25 — plan: tasks/software/lazily-cs-parity-plan.md
 - 2026-07-25 [#lzcsfamilysync] lazily-cs: row 4 — keyed-map sync. Per-key LWW registers, materialize-on-ingest (a keyed op for an entry the local replica never registered must MATERIALIZE it from the op's converged register rather than drop it), epoch bumping, idempotent re-ingest, membership-only-grows, and a derived aggregate over the family; replay conformance/familysync/materialize_on_ingest.json — plan: tasks/software/lazily-cs-parity-plan.md
 - 2026-07-25 [#lzcsstatechart] lazily-cs: flat state machine + Harel statecharts; replay the statechart corpus — plan: tasks/software/lazily-cs-parity-plan.md (rows 7-8)
+- 2026-07-25 [#lzrenamerelease] lazily: release + publish the SourceMap/ComputedMap rename — spec, formal, rs, py, kt, js, dart, zig, go, cpp (NOT lazily-cs, deliberately excluded). Proposed minor bumps: spec+formal 0.35.0->0.36.0, rs 0.48.1->0.49.0, py 0.35.0->0.36.0, kt 0.36.1->0.37.0, js 0.27.0->0.28.0, dart 0.25.0->0.26.0, zig ->0.30.0, go v0.21.0->v0.22.0, cpp v0.23.0->v0.24.0. Mechanisms differ per target: crates.io (token in passage, macros before lazily), PyPI via the wheels workflow, GitHub Packages for kt (IMMUTABLE - a 409 kills the publish, so the version must be new), npm for js (BLOCKED on operator 2FA), pub.dev for dart (manual OAuth, not 2FA-blocked), tag + gh release for spec/formal/zig/cpp/go. TWO PRE-EXISTING SNAGS: lazily-zig build.zig.zon says 0.28.0 while its published GitHub release is v0.29.0, so the version file is behind its own release and needs a deliberate decision, not a bulk bump; and lazily-cpp's project version likewise trails its v0.23.0 tag. Decisions already made, do not re-litigate: publish lazily-go with the raised Go 1.24 floor (generic type aliases need it), and lazily-cs keeps NO deprecated aliases with its types re-sealed
 <!-- /agent:done -->

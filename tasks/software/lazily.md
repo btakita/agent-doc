@@ -172,7 +172,24 @@ Proof:
 - commits: Rust `6403b3a`, Zig `c0e8b58`, Python `0a2d6f5`, Kotlin `aea8b58`, JavaScript `5ed7c47`, Dart `0198fed`, Go `f82fd09`, C++ `3d83a61` (all pushed); workspace supervisor commit `00c63466b`.
 - confidence: high.
 - escalation: none.
-<!-- agent:boundary:30558332 -->
+
+### Re: #lzinteropchannels — codex
+
+> **Queue prompt:**
+>
+> do [#lzinteropchannels]
+
+
+Implemented and committed the capability-driven five-channel network suite as `cb0558b02` (`interop: add capability-driven channel matrix`).
+
+- **Behavior:** `transport_matrix` expands every channel over every ordered pair of eligible peers. Peers join automatically only after advertising `transport_links`, the required codec, every requested channel, and a concrete variant. Unsupported or incomplete bindings remain visible as staged and receive no pass credit. `lazily-cs` remains registry-staged.
+- **Changed paths:** `.github/workflows/lazily-network-suite.yml`; `src/lazily-interop/{Makefile,README.md,.gitignore}`; channel scenario and result/scenario schemas; supervisor types/schema/scenario/reference/mutation modules; peer-contract documentation; CLI tests and feature-gate fixtures.
+- **Commands:** `make check` and `make network-suite-pr` in `src/lazily-interop`; JSON/schema parsing; report assertions with `jq`; root `make check`; staged diff validation with `git diff --cached --check` and `tsift diff-digest --cached`.
+- **Verification:** focused crate gate passes (8 unit tests, 3 CLI tests, schema validation, and 11/11 required mutations caught). The PR-tier suite passes: semantic plane runs all eight completed production bindings with only C# staged; transport plane runs all five profiles bidirectionally with 10/10 cells passing and exact sent/received byte parity. A regression fixture with three supported peers proves automatic admission as sender and receiver: 30/30 cells (3×2 ordered pairs×5 channels), with C# staged.
+- **Workspace gate:** root `make check` reached an unrelated pre-existing `src/agent-doc` test compile error: two `CurrentText::Current` initializers omit the newly required `delivery_version` field (`agent-doc-preflight-io/src/lib.rs:5044` and `:5346`). Those out-of-scope edits were preserved.
+- **Confidence:** high for the Lazily interop scope; all local suite, schema, regression, and mutation gates pass.
+- **Escalation:** none. The unrelated workspace compile break is recorded rather than modified.
+<!-- agent:boundary:7f485d92 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -180,7 +197,7 @@ Proof:
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
 - ~~do [#lzinteropcore]~~
 - ~~do [#lzinteropeers]~~
-- do [#lzinteropchannels]
+- ~~do [#lzinteropchannels]~~
 - do [#lzinteropcs]
 - ~~do [#lzwirefrontier]~~
 - do [#lzsignalingnegative]
@@ -227,7 +244,6 @@ Proof:
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lzinteropchannels] Implement the five data-channel profiles, fault scenarios, and PR/merge/nightly CI matrix from `tasks/software/plan-lazily-interop-channel-matrix.md`.
 - [ ] [#lzinteropcs] Add the C# peer to the single network suite after `#lzcsipc` and `#lzcssync` provide real IPC/CRDT surfaces, following `tasks/software/plan-lazily-interop-peer-rollout.md`.
 - [ ] [#lzsignalingnegative] lazily-spec + all bindings: signaling/frames.json and anti_spoof_session.json have no NEGATIVE cases, so nothing anywhere pins that a malformed frame is REJECTED rather than silently defaulted. The schema already closes the tag set (oneOf over 14 branches, each type: {const}, additionalProperties: false), but no fixture drives it. Add a rejects block covering: unknown type value; to and from both present on one frame (the description says they never are); a client frame carrying from (the anti-spoof surface itself); welcome.peers containing the joining peer. This is the portable form of the tag-enum question — the wire contract is the closed tag set plus rejection, not any binding's type shape
 - [ ] [#lazilyzigport] lazily go/rs/zig: port lazily-dart's corrupt-manifest-id check into the other runtime conformance guards. dart found that a recorder can mangle its own evidence (severed ids like sure.json) and make the guard report INTACT fixtures as never opened — a guard that cries wolf gets switched off. Its guard now rejects any recorded id that names no file in the corpus. go, rs and zig all lack that check. Cheap: one loop over the manifest before the coverage comparison

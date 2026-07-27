@@ -78,10 +78,37 @@ The failure had two production causes: the Worker was using a stale REST API-tok
 Deployed Worker version `936721b6-3a97-4051-ba68-3892f61e75ac` from EFS commit `926da811`. Clean-install `make check` and the production dry run passed. Production then returned HTTP 200 with `sent: true` for fresh login-link emails to both Judith Krug and Robert Waldman, and the live Worker tail confirmed both requests completed on that deployed version without email exceptions.
 
 The implementation is pushed on `origin/main` in commits `edc4940a`, `b3e00873`, `0c809925`, and `926da811`.
-<!-- agent:boundary:5e562f36 -->
+
+### Re: Broken production photos and Home navigation — gpt-5
+
+> **Queue prompt:**
+>
+> Please add a Home link in the main navigation.
+
+Fixed, deployed, and pushed.
+
+The image outage came from deployment packaging, not the page renderers: the funded-deal and team photos existed locally, but `.gitignore` excluded them from clean checkouts, so the production Worker never received them. I restored the staging-identical deal photos, tracked the team portraits, created the missing route banners and PNG fallbacks from the existing staging photo library, and added a regression test for the complete public image set.
+
+Production verification now passes:
+
+- All 35 required image URLs on `https://www.equityfundingsource.com` return HTTP 200 with non-empty `image/*` content, including Contact, About/team, Apply, Blog, Funded Deals, logos, and home-hero fallbacks.
+- Home is the first desktop and mobile main-navigation link and receives the active-page state on `/`.
+- The focused public-site suite passed 64 tests.
+- A clean isolated checkout of the exact commit passed `make check`: 2,092 tests, zero failures, plus the app and Worker builds.
+- Production D1 reported no pending migrations before or after deployment and exposed a current Time Travel bookmark.
+- Production is serving Worker version `02ede09a-79d8-4c53-8832-bd8cb77ff1f0`.
+
+Implementation commit `77a8b324` is pushed to `origin/main`. The repo has no GitHub Actions workflow named `CI`, so the required one-time `gh run list --workflow CI --limit 1` check had no run to inspect; the clean local suite is the release evidence.
+
+Wrangler activated the production version but then returned Cloudflare code 10000 while re-synchronizing the already-existing zone route because the production token lacks Workers Routes Edit. The route remained active and the custom domain passed the complete live probe; I recorded the token-permission cleanup as a non-blocking recommended follow-up.
+<!-- agent:boundary:def983f7 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->
+- Please fix all broken photos on https://www.equityfundingsource.com/contact and on the rest of the site. You can copy the photos from staging to production.
+- The about page is missing photos as well.
+- The office hours are 9am-5pm PST.
+- Please add a Home link in the main navigation.
 <!-- /agent:queue -->
 
 ## Backlog
@@ -89,6 +116,7 @@ The implementation is pushed on `origin/main` in commits `edc4940a`, `b3e00873`,
 <!-- agent:backlog priority queue -->
 - [ ] [#efs-deploy-hibernation] [operator-verify] Deploy the worker so #efs-do-hibernation's billing fix is actually live. The code shipped in EFS b75f92ca (2026-07-18 18:23 EDT) but the newest production deployment is version 1b9c8d69 from 2026-07-18 16:03 UTC / 12:03 EDT — SIX HOURS EARLIER. The live worker still runs the non-hibernating rooms, so the ~328,500 GB-s per always-on room is still accruing. Blocked on operator go only because 23 commits sit between the deployed version and HEAD (hibernation, TMO backup/restore/snapshot/orphan tooling, admin binding queue, Dropbox fail-soft, TMO contacts/vesting-gap admin screens), so 'make deploy' ships far more than the DO change and needs a deliberate go. Verify after deploying with 'CLOUDFLARE_API_TOKEN="$(passage show btak/equityfundingsource/cloudflare_api_token | head -1)" bunx wrangler deployments list --name equityfundingsource' and confirm the newest version postdates b75f92ca.
 - [ ] [#tmo-sandbox-purge-apply] [operator-verify] Execute the sandbox purge: TMO_API_TOKEN="$(passage equityfundingsource/tmo/sandbox/api | head -1)" bun ./bin/tmo-sandbox-purge.ts --apply deletes 16 EFS test-debris loans from the TMO sandbox (554466, AVW580, FTM631, ICL909, MBQ435, PIP038, SRV532, TST113, TST323, TST388, TST488, TST766, TST775, TST786, TST788, TST941). UNBLOCKED 2026-07-19: #tmo-snapshot-verify passed — the snapshot tool ran against real TMO sandbox and reported complete=true (loans=18 fundings=5 attachment_metas=20 lenders=1 borrowers=16, zero errors), so the gate command 'bun ./bin/tmo-snapshot.ts --covers <the 16> --out tmp/tmo-before-purge.json' is now known-good. Take that snapshot immediately before purging. Still held on operator go ONLY because DeleteLoan is permanent with no TMO-side undo. Note the snapshot is evidence, not a restore: attachment BYTES are not captured (20 attachment metas across 554466/AVW580/MBQ435/SRV532/TST766 would be unrecoverable), and RecIDs do not round-trip. 1010 (TMO seed) and GQI751 (pinned repro fixture for #dealtab500/#5q7z) are keep-listed in code. Dry run verified 2026-07-18: purge=16 keep=2. Recipes: docs/TMO/delete-loan.md, docs/TMO/snapshot.md.
+- [ ] [#efs-prod-route-token] [recommended] [operator-verify] Grant the EFS production Cloudflare API token Workers Routes Edit for equityfundingsource.com. Production deploys activate the new Worker version, but Wrangler route synchronization returns Cloudflare code 10000; verify a subsequent production deploy exits 0 without changing the existing route.
 <!-- /agent:backlog -->
 
 ## Review

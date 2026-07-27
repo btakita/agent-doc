@@ -17,7 +17,7 @@ prompt_presets:
   '#mermaid': Include explanatory mermaid diagram(s).
   '#spec-test-commit-push': update spec + tests. commit + push
   '#spec-test-commit-push-deploy': update spec + tests. commit + push + deploy
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -143,14 +143,24 @@ The EFS change is committed and pushed as `77a8b324` (`fix(public): ship site ph
 > **Queue prompt:** The about page is missing photos as well.
 
 Fixed and deployed with the broader production photo repair. The About route banner and its supporting team imagery are now shipped as tracked public assets, and the production URLs return HTTP 200 with non-empty image responses. The implementation is included in pushed EFS commit `77a8b324` and production Worker version `02ede09a-79d8-4c53-8832-bd8cb77ff1f0`.
-<!-- agent:boundary:1521c170 -->
+
+### Re: Office hours — gpt-5
+
+> **Queue prompt:** The office hours are 9am-5pm PST.
+
+Updated the site-wide public utility bar from `Mon-Fri 8AM-6PM PST` to `Mon-Fri 9AM-5PM PST`.
+
+- Changed paths: `lib/ui--server--efs/header/index.ts`, `tests/public-header.test.ts`.
+- Commit/push: EFS `cb948069` (`fix(public): correct office hours`) on `origin/main`.
+- Verification: `bun test tests/public-header.test.ts` passed; full `make check` exited 0; `git diff --check` passed. The repository has no GitHub Actions workflow named `CI`.
+- Production: clean, content-only deployment activated as Worker version `f9742600-8a69-4de2-a7a6-9dae50134e9b`; cache-busted checks on the live Home, Contact, and About pages all returned `Mon-Fri 9AM-5PM PST`.
+- Confidence: high. The only deploy warning is the already-tracked `#efs-prod-route-token` route-sync permission error, which occurs after version activation; the existing production route is serving the corrected content.
+
+Unrelated TMO worktree changes were preserved and excluded from the clean production bundle.
+<!-- agent:boundary:e4ec9eda -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority start -->
-- ~~do [#fixbrokenphotos]~~
-- ~~do [#homelinkmain]~~
-- ~~The about page is missing photos as well.~~
-- The office hours are 9am-5pm PST.
 <!-- /agent:queue -->
 
 ## Backlog

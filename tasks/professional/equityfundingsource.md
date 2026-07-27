@@ -101,7 +101,27 @@ Production verification now passes:
 Implementation commit `77a8b324` is pushed to `origin/main`. The repo has no GitHub Actions workflow named `CI`, so the required one-time `gh run list --workflow CI --limit 1` check had no run to inspect; the clean local suite is the release evidence.
 
 Wrangler activated the production version but then returned Cloudflare code 10000 while re-synchronizing the already-existing zone route because the production token lacks Workers Routes Edit. The route remained active and the custom domain passed the complete live probe; I recorded the token-permission cleanup as a non-blocking recommended follow-up.
-<!-- agent:boundary:def983f7 -->
+
+### Re: Response
+
+Fixed and live on the [production site](https://www.equityfundingsource.com/).
+
+- All 35 required images now return valid image content.
+- Home is first in desktop and mobile navigation.
+- Clean `make check`: 2,092 tests, zero failures.
+- Production Worker: `02ede09a-79d8-4c53-8832-bd8cb77ff1f0`.
+- Commit `77a8b324` pushed to `origin/main`.
+- `#fixbrokenphotos` completed and the agent-doc cycle committed successfully.
+
+The Cloudflare token’s route-edit permission issue is tracked as `#efs-prod-route-token`; it did not prevent the existing production route from serving the new version. An unrelated `src/tmux-router` partial-change warning remains untouched.
+
+```txt
+fix(public): ship site photos and Home nav (#fixbrokenphotos)
+
+Track public images in clean deployments, add Home navigation, document the
+asset contract, and test every required production image.
+```
+<!-- agent:boundary:5ea6a767 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->

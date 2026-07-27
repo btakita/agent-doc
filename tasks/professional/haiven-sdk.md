@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: start
+queue: stop
 ---
 
 ## Status
@@ -207,13 +207,76 @@ The roadmap now specifies:
 ### Re: RPG Maker, Ren'Py, and long-tail framing — gpt-5
 
 Added RPG Maker and Ren'Py across the SDK proposal, implementation roadmap, and superrepo design, and corrected Wave C so none of its adapters is presented as a market-balancing anchor.
-<!-- agent:boundary:7083b799 -->
+❯ Would authentication include an in-game login screen or is your impression of Haiven that there is another login mechanism? How would Discord authentication work in a game?
+
+### Re: in-game authentication and Discord — gpt-5
+
+> **Queue prompt:**
+>
+> do [#authenticationhandledsdk]
+
+
+My impression is that **Haiven should own the player account and authentication session**, while each game presents only a lightweight connection surface. Haiven's public site already has a [central username/password sign-in](https://haiven.gg/signin), and its player material describes [one identity, reputation, friends list, and profile that travel across games](https://haiven.gg/players). That strongly suggests a Haiven account is the primary identity. I have not found a published Haiven SDK authentication API, so the exact flow still needs confirmation with Haiven.
+
+The current [WebSocket hub design](../../src/haiven-websocket-hub/DESIGN.md) starts *after* login: it expects a short-lived bearer token before upgrading the connection. Its [auth prototype](../../src/haiven-websocket-hub/auth/auth.go) validates a Haiven JWT, takes the stable player ID from `sub`, and never lets the client assert its own identity. It does not implement a login screen, password verification, or Discord OAuth.
+
+**Recommended player experience:** include an in-game **“Connect to Haiven”** panel, but do not collect Haiven or Discord passwords inside the game. The SDK should be headless with an optional reference panel so every studio can skin it.
+
+```text
+Game UI -> SDK -> Haiven-hosted sign-in/account-link page
+                         |-> Haiven credentials
+                         |-> Discord OAuth (optional)
+                         v
+                  one-time authorization code
+                         v
+Game/SDK <- short-lived Haiven session JWT -> Haiven API/WebSocket hub
+```
+
+The flow would be:
+
+1. The game calls `BeginSignIn(gameId)`. Haiven returns a one-time login attempt, verification URL, and anti-forgery/PKCE material.
+2. The SDK opens the system browser, Discord/Haiven overlay where supported, or displays a QR code and short code for constrained engines and consoles.
+3. The player signs into Haiven on Haiven's hosted page. If already signed in, this can become a one-click “Continue as …” confirmation.
+4. Haiven returns a one-time authorization code through a registered deep link/loopback callback, or the SDK polls the login attempt for RPG Maker, Ren'Py, and other environments where callbacks are awkward.
+5. The code is exchanged for a short-lived, game-scoped Haiven JWT. The hub validates issuer, audience, expiry, subject, game, device/session, and allowed capabilities before opening the socket.
+6. Subsequent launches refresh or silently renew through an opaque Haiven session handle. Logout revokes the Haiven session and disconnects the socket.
+
+A game that already has accounts and a trusted backend can instead link its player ID to a Haiven player once, then exchange the game-server session for a Haiven JWT server-to-server. That avoids repeated UI. A backend-free indie game uses the hosted public-client/PKCE or QR flow; no Haiven or Discord client secret is shipped in the game.
+
+**Discord is optional account linking, not the token presented to Haiven's hub.** The safe path is:
+
+1. The player chooses “Continue with Discord” or “Link Discord” on the Haiven-hosted page.
+2. Discord runs its [OAuth2 authorization-code flow](https://docs.discord.com/developers/topics/oauth2), including `state` validation and PKCE where the client platform requires it.
+3. Discord redirects an authorization code to Haiven. Haiven's backend exchanges the code, reads the Discord user ID with the minimum `identify` scope, and links it to a Haiven player.
+4. Haiven issues its own short-lived game-session JWT. The Discord access token is never accepted as a Haiven WebSocket token and a Discord client secret is never embedded in an SDK.
+5. If the game also wants Discord friends, voice, DMs, or presence, request that separately through the [Discord Social SDK](https://discord.com/developers/docs/social-sdk/authentication.html) with explicit consent. Discord's `bot` installation flow is likewise separate and must not be treated as player authentication.
+
+Discord's Social SDK can show authorization in its Windows overlay when supported, otherwise it uses Discord or a browser; consoles can use a device/QR flow. For RPG Maker and Ren'Py, I would start with Haiven's browser/QR account-link flow rather than require a native Discord Social SDK binding.
+
+Security boundaries:
+
+- Keep access tokens short-lived and in memory where possible.
+- Keep long-lived provider refresh tokens on Haiven's backend. Script-heavy adapters should receive an opaque session handle, not a Discord refresh token in project files.
+- Prefer the `Authorization` header. If a WebSocket runtime forces a query token, make it one-use or extremely short-lived and redact URLs from logs.
+- Use the least Discord scope needed; `identify` is enough for sign-in/linking.
+- Discord identity does not replace Haiven's age-verification, safety, ban, or appeal policy.
+- Account linking must detect collisions and require proof before merging an existing Haiven and Discord identity.
+
+So: **yes, there is a small in-game login/connect experience, but the actual credential and Discord authorization UI should be hosted by Haiven or Discord.** The long-tail SDKs expose the same authentication state machine—signed out, authorizing, exchanging, authenticated, refreshing, expired/revoked—while only their browser/deep-link/QR adapters differ.
+
+**Changed paths:** none outside this agent-doc response.
+
+**Commands and verification:** inspected the current Haiven hub design and JWT verifier, then checked Haiven's public player/sign-in experience and Discord's official OAuth2 and Social SDK authentication documentation. No code, build, or instruction surface changed, so no test suite or CI run was required.
+
+**Confidence:** high in the recommended security boundary and token flow; medium on Haiven's current production login implementation because no public SDK authentication contract is available.
+
+**Escalation:** none. The exchange is large, but I left it uncompacted because the active queue must continue and auto-compaction is not enabled.
+<!-- agent:boundary:bfc75577 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
-<!-- agent:queue priority -->
-- 🚧 do [#authenticationhandledsdk]
+<!-- agent:queue priority start -->
 <!-- /agent:queue -->
 
 ## Backlog
@@ -230,4 +293,5 @@ Added RPG Maker and Ren'Py across the SDK proposal, implementation roadmap, and 
 
 <!-- agent:done -->
 - 2026-07-26 [#rpgmakerren] Add RPG Maker + Ren'Py. These are all long tail. See https://app.sensortower.com/vgi/assets/reports/The_Big_Game_Engines_Report_of_2025.pdf
+- 2026-07-26 [#authenticationhandledsdk] How will authentication be handled for these new SDKs?
 <!-- /agent:done -->

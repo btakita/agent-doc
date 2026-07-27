@@ -256,8 +256,34 @@ Verification:
 C# is admitted only to the causal-receipts schema/projection peer group. `#lzcsplane` remains staged for the general state mirror, command plane, C ABI, permissions/remote ops, session handshake, instrumentation/benchmarks, and the signaling/service/agent-doc/remaining message-passing corpora.
 
 Pre-existing lazily-cs `AGENTS.md`, `README.md`, and untracked `build/` were preserved; unrelated workspace changes were not staged. Confidence is high for this bounded receipt capability. No escalation was required.
-<!-- agent:boundary:5d905d4b -->
-<!-- /agent:exchange -->
+
+### Re: do [#lzcsplane] — gpt-5
+
+Implemented and shipped the next bounded plane slice: strict signaling wire support and an authoritative open-room router.
+
+- Added all 17 schema variants as direction-specific typed client/server frames.
+- Added `SignalingWire`, which round-trips canonical JSON, rejects unknown/extra/server-owned fields, enforces client `to` versus server `from`, applies the interoperable peer-id bound, and rejects welcome rosters containing the joining peer.
+- Added `SignalingRoom`, which maintains a sorted self-excluding roster, stamps forwarded frames from the connection's server-registered peer id, reports unknown targets, and broadcasts leaves deterministically.
+- Added four conformance tests that open both canonical signaling fixtures, replay every frame and every room step, validate encoded frames against `schemas/signaling.json`, and execute every canonical negative case.
+- Removed exactly `signaling/frames.json` and `signaling/anti_spoof_session.json` from the known-uncovered ledger after runtime replay. Coverage is now 61/124, with 63 unsupported fixtures staged.
+- Mutation proof: stamping a forwarded frame with the target id instead of the registered sender id made the anti-spoof transcript fail; the restored implementation passes.
+
+Verification:
+
+- Targeted signaling suite: 4/4 passed.
+- lazily-cs `make check`: 131/131 passed; 61/124 coverage gate passed.
+- lazily-cs `make format-check`: passed.
+- Root: 8,208/8,208 agent-doc tests and all TLA models passed. The unrelated corky suite repeatedly hit the same four fixed-port `AddrInUse` collisions; the initially failing exact corky test passed in isolation earlier in this turn. No corky files were changed.
+- lazily-cs CI for `d663074`: in progress on the one-shot inspection; not polled.
+- Root has no workflow named `CI`.
+- Pushed lazily-cs `d663074`; pushed root pointer `096583963`.
+
+C# is admitted only to the causal-receipts and signaling-wire/open-room peer groups. `SessionHandshake`, the general state mirror, command plane, C ABI, permissions/remote ops, instrumentation/benchmarks, and service/agent-doc/remaining message-passing corpora remain staged behind `#lzcsplane`.
+
+Pre-existing lazily-cs `AGENTS.md`, `README.md`, and untracked `build/` were preserved; unrelated workspace changes were not staged. Confidence is high for this bounded signaling capability. No escalation was required.
+<!-- agent:boundary:a4db164b -->
+<!-- /agent:exchange 
+-->
 
 ## Queue
 

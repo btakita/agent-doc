@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.39
+
+_JetBrains plugin 0.2.300; VS Code extension 0.2.57._
+
+- **Dynamic-context decisions now have a durable, queryable SQLite ledger (`#adctxledger`).** Each cycle records its prompt manifest, harness, pack/chunk identities, source hashes/ranges, and expand/reference/suppression mode in the canonical state database. Manifest rows, injection rows, and cycle state commit atomically; exact retries are idempotent, conflicting reuse fails closed, prior cycles remain append-only, and explicit document/session/cycle clearing affects context memory without deleting lifecycle state. Indexed document/session duplicate lookups and per-cycle diagnostic queries let later prompt assembly avoid replaying a full session while preserving proof of why each chunk was used or suppressed.
+
 ## 0.35.38
 
 _JetBrains plugin 0.2.300; VS Code extension 0.2.57._

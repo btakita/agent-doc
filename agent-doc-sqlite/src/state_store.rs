@@ -826,6 +826,69 @@ ON queue_document_state(state_kind);
             PRIMARY KEY (document_id, cycle_id)
         );
 
+        CREATE TABLE IF NOT EXISTS context_manifest (
+            document_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            cycle_id TEXT NOT NULL,
+            harness TEXT NOT NULL,
+            prompt_fingerprint TEXT NOT NULL,
+            pack_ids_json TEXT NOT NULL,
+            chunk_ids_json TEXT NOT NULL,
+            token_count INTEGER NOT NULL CHECK(token_count >= 0),
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (document_id, cycle_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS context_manifest_session_created
+        ON context_manifest(document_id, session_id, created_at);
+
+        CREATE TABLE IF NOT EXISTS context_injections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            cycle_id TEXT NOT NULL,
+            harness TEXT NOT NULL,
+            pack_id TEXT NOT NULL,
+            chunk_id TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            source_uri TEXT NOT NULL,
+            range_start INTEGER,
+            range_end INTEGER,
+            injected_at INTEGER NOT NULL,
+            injection_mode TEXT NOT NULL CHECK(
+                injection_mode IN (
+                    'expanded',
+                    'referenced',
+                    'skipped_duplicate',
+                    'stale_ignored'
+                )
+            ),
+            CHECK(range_start IS NULL OR range_end IS NULL OR range_start <= range_end),
+            UNIQUE(
+                document_id,
+                cycle_id,
+                pack_id,
+                chunk_id,
+                content_hash,
+                injection_mode
+            )
+        );
+
+        CREATE INDEX IF NOT EXISTS context_injections_document_chunk
+        ON context_injections(document_id, chunk_id, id);
+
+        CREATE INDEX IF NOT EXISTS context_injections_document_content_hash
+        ON context_injections(document_id, content_hash, id);
+
+        CREATE INDEX IF NOT EXISTS context_injections_session_chunk
+        ON context_injections(document_id, session_id, chunk_id, id);
+
+        CREATE INDEX IF NOT EXISTS context_injections_session_content_hash
+        ON context_injections(document_id, session_id, content_hash, id);
+
+        CREATE INDEX IF NOT EXISTS context_injections_cycle_mode
+        ON context_injections(document_id, cycle_id, injection_mode, id);
+
         CREATE TABLE IF NOT EXISTS pending_mutations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             document_id TEXT NOT NULL,

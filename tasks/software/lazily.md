@@ -154,6 +154,11 @@ Implemented capability-driven peer groups. `hello.features` advertises only prod
 
 > **Queue prompt:**
 >
+> do [#lazilyspecdisagrees]
+
+
+> **Queue prompt:**
+>
 > do [#lazilycellfamily]
 
 
@@ -459,7 +464,27 @@ Durable commits:
 - workspace pointer `0f5aa0bab` (`lazily-rs: clarify map presence docs`).
 
 Confidence: high. Escalation: none.
-<!-- agent:boundary:f293206c -->
+
+Confidence: high. Escalation: none.
+### Re: Response
+
+Resolved `#lazilyspecdisagrees` as already completed in the current repositories; no new edit was warranted.
+
+The spec now follows the operator's capability rule consistently:
+
+- `coverage.json` scores Dart's `ThreadSafeComputedMap`, thread-safe context, and thread-safe ReactiveMap Core rows as shipped.
+- Generated `docs/coverage.md` carries the same shipped marks.
+- Note ᵈ explicitly withdraws the former N/A carve-out: Dart and JS ship and conform, so they are admitted today. The separate design question—whether those layers should exist on single-threaded runtimes—remains distinct from status scoring.
+- This resolution entered lazily-spec in existing commit `63e07b4`.
+
+Implementation evidence in lazily-dart:
+
+- `lib/src/thread_safe_reactive_family.dart` defines the run-to-completion flavor, documents the single-isolate premise, uses a reentrant guard, graph-backed membership/order signals, and the SourceMap/ComputedMap specializations.
+- `test/thread_safe_reactive_family_test.dart` proves eager/lazy behavior, transparency, present-set behavior, confluence, and source writes.
+- `dart test test/thread_safe_reactive_family_test.dart` — pass.
+
+This is exactly the staged-capability policy: a shipped, tested implementation joins the feature group; runtime philosophy alone does not stage it. No files changed, no commit or CI query was needed.
+<!-- agent:boundary:395ff4d4 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -474,7 +499,7 @@ Confidence: high. Escalation: none.
 - ~~do [#lzqfzig]~~
 - ~~do [#maphandlecleardependents]~~
 - ~~do [#lazilycellfamily]~~
-- do [#lazilyspecdisagrees]
+- ~~do [#lazilyspecdisagrees]~~
 - do [#lzjsnpmtrustedpub]
 - do [#lzcsqueues]
 - do [#lzcscrdt]
@@ -511,7 +536,6 @@ Confidence: high. Escalation: none.
 - [ ] [#lzinteropcs] Keep lazily-cs visible but registry-staged in the single network suite. After #lzcsipc and #lzcssync ship real schema-validated IPC/CRDT and full-duplex sync surfaces, implement its production interop peer, advertise only the features/codecs/channels/variants it actually supports, then let the capability-driven matrix admit it automatically; stays open until both prerequisites and the C# peer are complete.
 - [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-26: 42/124 canonical fixtures opened, 82 known-uncovered (reactive-graph 21, collections 10, statechart 7, materialization 3, familysync 1 are covered). The remaining fixtures are genuinely missing product surfaces, not runner-wiring gaps. Keep open and work it down only by shipping the explicit tasks in tasks/software/lazily-cs-parity-plan.md (#lzcscollections, #lzcsqueues, #lzcscrdt, #lzcsipc, #lzcssync, #lzcstemporal, #lzcscluster, #lzcsplane); admit C# to each capability group only when that production surface and canonical replay ship.
 - [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
-- [ ] [#lazilyspecdisagrees] lazily-spec disagrees with itself on the Dart thread-safe row: coverage.json marks the ThreadSafeComputedMap row shipped for Dart, while docs/coverage.md:85-87 declares the thread-safe context "not applicable" for Dart (single isolate, no shared mutable heap). Resolve in the spec — this is the same question as whether a thread-safe flavor is meaningful on a single-threaded runtime.
 - [ ] [#firstunificationwire] FIRST, before any unification: wire the collections atomic-move fixtures (cellmap_atomic_move.json, cellmap_independence.json) into every binding replay harness against ALL THREE flavors. Today zig never replays them at all (only doc-comment references at reactive_map.zig:32,:39) and js replays them only against its fourth, non-reactive collections.js model — so the reactive moveTo has no fixture backing anywhere. Without this the unification lands green against nothing. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#prototypeunifiedreactive] Prototype the unified ReactiveMap shape in lazily-zig and lazily-cpp — NOT lazily-cs. cs ships only 13 of 48 coverage rows (35 absent) and has NO thread-safe or async SourceMap at all; its conformance substitutes a hand-locked sync map (MaterializationConformanceTests.cs:305) and a bare Dictionary (:336). Prototyping a unification against two families that do not exist would invent the surface rather than converge one, and cannot surface what breaks. zig and cpp are feature-complete, can unify all three families, and neither exposes maps on its C ABI. Plan: tasks/plan-lazily-reactivemap-unification.md
 - [ ] [#lazilyphaseextract] lazily-rs Phase A: extract the closure-free KeyedOrder<K,H> core (entries + order + membership + present-set + position/keys/len/contains_key + move_to/move_before/move_after) shared by all three families; thin per-model shells keep materialize/observe. Do NOT route through SyncReactiveGraph — its Send+Sync bound is stricter than the concrete Context API and would break Rc-capturing callers. `remove` stays out of the core (monotone present set is fixture- and Lean-backed). Plan: tasks/plan-lazily-reactivemap-unification.md

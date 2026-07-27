@@ -253,7 +253,27 @@ Released artifacts:
 - GitHub release: https://github.com/btakita/agent-doc/releases/tag/v0.35.39
 - Linux binary archive SHA-256: `94aa91150bfbea72e504e8b84ec81f1abff42efe0fec2388e437e8b4908e866a`
 - Local CLI and shared library installed as 0.35.39; JetBrains plugin 0.2.300 reinstalled into the four detected IDE installations
-<!-- agent:boundary:e71e02c9 -->
+
+### Re: managed Codex capability proof — gpt-5.6-sol
+
+Implemented, verified, installed, and released as **agent-doc 0.35.40**.
+
+- Added frontmatter `managed_proof: true` as the only Codex opt-in. Missing or false now yields `NotRequired` even when network, SSH, or `--add-dir` requirements exist; project/global configuration cannot opt a document in. Managed OpenCode behavior is unchanged.
+- Kept `agent-doc-harness::managed_capability_contract_required` as the policy owner and added parse/write/merge plus gate-transition coverage for the new field.
+- Reduced opted-in proof latency by launching Codex proof children with `--ephemeral`, `--ignore-rules`, and `model_reasoning_effort="low"`.
+- When sandboxed Codex needs both network and writable-root proof, it now runs one combined child and validates both existing exact markers. Network-only, writable-only, unrestricted-network, cached-network, SSH, and OpenCode paths retain their prior contracts.
+- Updated the README, normative spec, backend/config/Codex support docs, and the 0.35.40 release notes.
+
+Verification:
+- Focused frontmatter, harness, agent-IO, supervisor-process-IO, combined-child, writable-root, and route proof-status suites passed.
+- `make check` passed all **8,230 tests** (241 skipped) and all TLA+ model checks.
+- The required one-time CI snapshot showed the latest `main` CI run green.
+- `make install-full` and `make install` succeeded; `agent-doc --version` reports `0.35.40`. JetBrains plugin 0.2.300 was installed into four detected IDE installations.
+- Subrepo commit `09b106c37` is pushed to `main`; tag `v0.35.40`, the PyPI manylinux wheel, and the GitHub release with the x86_64 Linux archive are published: https://github.com/btakita/agent-doc/releases/tag/v0.35.40
+- Parent gitlink commit `6e8aa28bc` contains only `src/agent-doc`. Its root push follows this binary-owned closeout so the session-document commit is included.
+
+Confidence: high. The only diagnostics were pre-existing/deprecation warnings; no implementation, test, install, or publish failures remain.
+<!-- agent:boundary:4bd106b2 -->
 <!-- /agent:exchange -->
 ## Queue
 
@@ -297,7 +317,6 @@ Released artifacts:
 
 <!-- agent:backlog priority priority queue -->
 - [ ] [#compactreactiveprojectionverify] [operator-verify] After saving open buffers, restart IntelliJ IDEA 2026.1 onto JetBrains plugin 0.2.300. Type a sustained burst in a large agent-doc session document and confirm IDEA stays responsive; verify the log shows at most one coalesced_exact_editor_adopt_after_quiet recovery per burst rather than per-keystroke exact_editor_adopt_then_atomic_reregister churn. If a native call is deliberately or naturally wedged, confirm it reports the bounded timeout and later plugin work fails fast until restart instead of waiting indefinitely.
-- [x] [#adctxledger] [focused-cycle] Dynamic-context injection ledger Phase 2: implement the durable SQLite schema and helpers for context_injections, atomic per-turn insertion with cycle state, and indexed duplicate/diagnostic queries. Preserve lazily as live in-process state and SQLite as durable replay memory. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxpreflight] [focused-cycle] Dynamic-context injection ledger Phase 3 after #adctxledger: wire preflight/plan to build candidate context snapshots, use tsift context packs when applicable, consult the durable injection ledger, and emit the expanded/referenced/skipped context manifest without replaying unchanged chunks. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxorchestrate] [focused-cycle] Dynamic-context injection ledger Phase 4 after #adctxpreflight: integrate child-dispatch and queue-continuation behavior so context projection/ledger decisions remain correct across orchestration boundaries and do not duplicate injected context. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxcompact] [focused-cycle] Dynamic-context injection ledger Phase 5 after #adctxorchestrate: define and implement Compact Exchange/restart semantics for projected context and the durable ledger, preserving explainable expanded/referenced/skipped diagnostics without replay after compact or process restart. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md

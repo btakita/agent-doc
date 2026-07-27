@@ -273,13 +273,32 @@ Verification:
 - Parent gitlink commit `6e8aa28bc` contains only `src/agent-doc`. Its root push follows this binary-owned closeout so the session-document commit is included.
 
 Confidence: high. The only diagnostics were pre-existing/deprecation warnings; no implementation, test, install, or publish failures remain.
-<!-- agent:boundary:4bd106b2 -->
+
+### Re: Please make the Codex managed capacity proof off by default with an opt-in based on the frontmatter. Please also improve the latency of the managed capacity proof. — gpt-5
+
+> **Queue prompt:**
+>
+> Please make the Codex managed capacity proof off by default with an opt-in based on the frontmatter. Please also improve the latency of the managed capacity proof.
+
+Released and installed agent-doc 0.35.40.
+
+- Codex managed proof is off by default; enable with `managed_proof: true`.
+- Probes now use low reasoning, ephemeral sessions, ignored project rules, and one combined network/write child.
+- All 8,230 tests and formal checks passed.
+- PyPI, GitHub tag/release, subrepo, and parent commits are pushed.
+- `job-offers.md` pane `%23` has no pending draft; its reroute was accepted and the supervisor is healthy.
+- Restart IntelliJ IDEA to activate the installed plugin generation.
+
+[GitHub release v0.35.40](https://github.com/btakita/agent-doc/releases/tag/v0.35.40)
+
+One controller anomaly remains: closeout committed successfully but reported the same free-text queue head again, so I did not execute it twice.
+<!-- agent:boundary:490337e7 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#compactreactiveprojection]~~
-- Please make the Codex managed capacity proof off by default with an opt-in based on the frontmatter. Please also improve the latency of the managed capacity proof.
+- ~~Please make the Codex managed capacity proof off by default with an opt-in based on the frontmatter. Please also improve the latency of the managed capacity proof.~~
 - do [#adctxledger]
 - do [#adctxpreflight]
 - do [#adctxorchestrate]

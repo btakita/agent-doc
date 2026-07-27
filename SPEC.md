@@ -7,6 +7,14 @@
   current document used for response merge, snapshots, and queue reconciliation.
   Replayed operations are cleared only after the reconciled document is written
   successfully (`#pauseddeletetombstone`).
+- Normal preflight publishes typed document observations to one
+  controller-owned per-document `Computed`; short-lived preflight CLI processes
+  consume that projection instead of independently rebuilding output state.
+  Probe mode remains actorless and side-effect free. Effects advance only
+  through `repair -> prior-cycle commit -> derived reads -> baseline checkpoint
+  -> cycle-open`; exhaustive effect identities and the terminal gate make
+  skipped or newly inserted steps fail closed. Cycle-open remains a durable,
+  exactly-once identity rather than computed state (`#preflightreactive`).
 - Hot-path authority is singular and named consistently across the binary and editor plugins: Lazily current owns the live document, and `state.db` owns intent/lifecycle coordination. Normal execution must not read, write, import, scan, or replay filesystem live-buffer, patch-inbox, queue-journal, queue-delete, continuation, capture, cycle, turn-scope, editor-op, transport-health, hook-session, or cooldown state. Snapshot/CRDT files are permitted only as cold recovery projections after the authority is unavailable; they never vote in a live merge. There is no compatibility fallback to retired sidecars.
 - The document write state machine is `IntentCaptured -> CanonicalApplied -> ReplicaAccepted -> ReplicaVisible -> DiskProjected -> Committed`. A transition may advance only one edge after its matching proof, duplicate/reordered events are idempotent, endpoint churn is a self-loop, and no recovery command may skip an edge or reconstruct intent from a projection. Queue deletion uses the same rule: the exact Lazily authority shape is the compare-and-swap base, so a missing historical queue item is deletion—not an input to union/replay.
 - A controller recycle invalidates relay membership even when an editor still holds a cached client. Forced editor refresh must retire that client and issue a fresh registration. Every deferred document write, including an explicitly authorized `--force-disk` projection, retains its full base and target in Lazily state so reconnect restores or component-merges the editor buffer without consulting Git HEAD. Compact Exchange must compose active captured/deferred response lineage before archiving.

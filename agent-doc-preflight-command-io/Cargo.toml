@@ -62,6 +62,7 @@ agent-doc-session-check-io = { path = "../agent-doc-session-check-io", version =
 agent-doc-session-registry-io = { path = "../agent-doc-session-registry-io", version = "0.35.31" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.31" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.31" }
+agent-doc-state-backbone = { path = "../agent-doc-state-backbone", version = "0.35.31" }
 agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.31" }
 agent-doc-turn-scope-io = { path = "../agent-doc-turn-scope-io", version = "0.35.31" }
 agent-doc-workflow = { path = "../agent-doc-workflow", version = "0.35.31" }

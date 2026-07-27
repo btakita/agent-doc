@@ -574,6 +574,16 @@ struct ControllerDocumentGraphs {
         String,
         agent_doc_state_backbone::retained_write::SettlementVerdict,
     >,
+    /// `#preflightreactive`: per-document read observations and the shared
+    /// Computed projection consumed by the short-lived preflight CLI process.
+    preflight_facts: lazily::ThreadSafeSourceMap<
+        String,
+        Option<agent_doc_state_backbone::preflight::PreflightReadFacts>,
+    >,
+    preflight_projection: lazily::ThreadSafeComputedMap<
+        String,
+        agent_doc_state_backbone::preflight::PreflightReadProjection,
+    >,
     /// `#retainedclearreactive` — one settle [`lazily::Effect`] per document,
     /// subscribed to that document's [`Self::verdict`] slot.
     ///
@@ -650,6 +660,8 @@ impl ControllerDocumentGraphs {
             authority: lazily::ThreadSafeSourceMap::new(&ctx),
             disk: lazily::ThreadSafeSourceMap::new(&ctx),
             verdict: lazily::ThreadSafeComputedMap::new(&ctx),
+            preflight_facts: lazily::ThreadSafeSourceMap::new(&ctx),
+            preflight_projection: lazily::ThreadSafeComputedMap::new(&ctx),
             settle_effects: Mutex::new(BTreeMap::new()),
             settle_sink: Arc::new(OnceLock::new()),
             ctx,
@@ -760,6 +772,31 @@ impl ControllerDocumentGraphs {
         // fired from the `set` above. Either way no caller decides to settle.
         self.ensure_settle_effect(document_hash, file);
         verdict
+    }
+
+    /// Refresh this document's preflight read observations and return the
+    /// controller-owned Computed projection. The slot stays subscribed across
+    /// successive preflight CLI invocations for the controller lifetime.
+    fn preflight_projection(
+        &self,
+        document_hash: &str,
+        facts: agent_doc_state_backbone::preflight::PreflightReadFacts,
+    ) -> agent_doc_state_backbone::preflight::PreflightReadProjection {
+        self.preflight_facts
+            .set(&self.ctx, document_hash.to_string(), Some(facts));
+        let facts_map = self.preflight_facts.clone();
+        self.preflight_projection.get_or_insert_with(
+            &self.ctx,
+            document_hash.to_string(),
+            move |ctx, key| {
+                facts_map
+                    .observe(ctx, key)
+                    .flatten()
+                    .as_ref()
+                    .map(agent_doc_state_backbone::preflight::derive_read_projection)
+                    .unwrap_or_default()
+            },
+        )
     }
 
     /// `#retainedclearreactive` — subscribe this document's clear to its verdict.
@@ -1028,6 +1065,15 @@ impl ControllerRuntime {
     ) -> agent_doc_state_backbone::retained_write::SettlementVerdict {
         self.document_graphs
             .verdict(document_hash, file, authority, disk)
+    }
+
+    pub(crate) fn document_preflight_projection(
+        &self,
+        document_hash: &str,
+        facts: agent_doc_state_backbone::preflight::PreflightReadFacts,
+    ) -> agent_doc_state_backbone::preflight::PreflightReadProjection {
+        self.document_graphs
+            .preflight_projection(document_hash, facts)
     }
 
     /// `#lazily-hot-path` W1 — bounded await for the visible-write receipt of
@@ -7723,6 +7769,43 @@ agent:queue\n\
             payload_materialized: true,
             intent_delta_materialized: false,
         }
+    }
+
+    #[test]
+    fn controller_document_graph_keeps_one_reactive_preflight_projection() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let runtime = ControllerRuntime::new_arc(test_bootstrap(&dir)).unwrap();
+        let (_file, document_hash) = retained_test_document(&dir);
+
+        let first = runtime.document_preflight_projection(
+            &document_hash,
+            agent_doc_state_backbone::preflight::PreflightReadFacts {
+                document_hash: "doc-a".to_string(),
+                baseline_hash: "base".to_string(),
+                config_hash: "config".to_string(),
+                diff: Some("+prompt a".to_string()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(first.diff.as_deref(), Some("+prompt a"));
+
+        let second = runtime.document_preflight_projection(
+            &document_hash,
+            agent_doc_state_backbone::preflight::PreflightReadFacts {
+                document_hash: "doc-b".to_string(),
+                baseline_hash: "base".to_string(),
+                config_hash: "config".to_string(),
+                diff: Some("+prompt b".to_string()),
+                ..Default::default()
+            },
+        );
+        assert!(second.current);
+        assert_eq!(second.document_hash, "doc-b");
+        assert_eq!(
+            second.diff.as_deref(),
+            Some("+prompt b"),
+            "updating the source slot must invalidate the existing Computed entry"
+        );
     }
 
     /// The property the item exists for: **nobody calls settle**. Reading the

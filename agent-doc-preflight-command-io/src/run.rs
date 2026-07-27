@@ -23,6 +23,11 @@ use agent_doc_queue::queue_convergence::{
     queue_body_diff_is_non_selected_future_state, realign_baseline_to_converged_queue,
 };
 use agent_doc_run_context_io::AgentDocContextExt;
+use agent_doc_state_backbone::DocumentScope;
+use agent_doc_state_backbone::preflight::{
+    PreflightEffect, PreflightEffectState, PreflightQueueProjection, PreflightReadFacts,
+    PreflightReadState, PreflightRelatedDocumentProjection, PreflightTierProjection,
+};
 use agent_doc_turn::drain_stall::{StallFacts, StallVerdict, classify_stall};
 use agent_doc_turn::op_log::OpsLogEvent;
 use agent_doc_workflow::session_cycle::{compute_user_intent_prompt_changes, derive_turn_scope};
@@ -191,6 +196,14 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         );
     }
     let rc = agent_doc_run_context_io::cycle_context(file.to_path_buf());
+    // `#preflightreactive`: this scope owns the derived read projection and the
+    // effect gate for the whole open document observation. The command remains
+    // the IO adapter; ordering is now a graph dependency, not a comment/line
+    // number contract in this function.
+    let preflight_scope = DocumentScope::new();
+    let preflight_reads = PreflightReadState::new_in(&preflight_scope);
+    let preflight_effects = PreflightEffectState::new_in(&preflight_scope);
+    preflight_effects.observe_authority_current(true);
     let (initial_frontmatter, _) = agent_doc_frontmatter_io::session::parse_for_file_with_context(
         &content,
         file,
@@ -239,9 +252,20 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     }
     let pre_mutation_unresolved_exchange_prompt =
         agent_doc_turn::exchange_tail::unresolved_exchange_prompt_in_content(&content);
+    // Observe owner-turn liveness before repair can close the prior cycle. This
+    // is a derived input to later affectedness classification; using the
+    // post-repair lifecycle would forget that a sibling queue edit arrived
+    // during an already-open owner turn.
+    let entry_cycle_was_open = closeout_cycle_is_open(file).unwrap_or(false);
 
-    // Step 0-pre: interrupted-cycle guard (#cyc1). Use exact persisted cycle
-    // state instead of inferring solely from `ops.log`.
+    // Repair is the first signal-gated effect. Everything through pending
+    // maintenance belongs to this effect boundary; commit cannot start until
+    // this boundary is settled.
+    preflight_effects
+        .require(PreflightEffect::Repair)
+        .context("preflight repair effect gate")?;
+    // Interrupted-cycle guard (#cyc1). Use exact persisted cycle state instead
+    // of inferring solely from `ops.log`.
     let (recovered_prior, committed_prior) = if options.probe {
         (false, false)
     } else {
@@ -486,7 +510,15 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         recovered = true;
     }
 
-    // Step 2: Commit previous cycle.
+    preflight_effects
+        .settle(PreflightEffect::Repair)
+        .context("preflight repair effect settlement")?;
+
+    // Commit of the previous cycle is ready because the repair/maintenance
+    // signal settled, not because this call happens to be below it.
+    preflight_effects
+        .require(PreflightEffect::PriorCycleCommit)
+        .context("preflight prior-cycle commit effect gate")?;
     eprintln!("[preflight] step 2: commit");
     let mut did_commit_this_preflight = committed_prior;
     let committed = committed_prior
@@ -513,6 +545,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             did_commit_this_preflight || committed_prior,
         );
     }
+    preflight_effects
+        .settle(PreflightEffect::PriorCycleCommit)
+        .context("preflight prior-cycle commit effect settlement")?;
 
     if !options.probe && relocate_out_of_exchange_prompt_before_diff(file)? {
         recovered = true;
@@ -927,48 +962,6 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         .as_deref()
         .and_then(diff::parse_slash_command_only_added_diff);
     let no_changes = diff_result.is_none();
-    if !no_changes {
-        if let Some(commands) = slash_command_only_diff_commands.as_ref() {
-            if !options.probe {
-                agent_doc_ops_log_io::log_op(
-                    file,
-                    &format!(
-                        "preflight_slash_command_only_handoff file={} commands={:?}",
-                        file.display(),
-                        commands
-                    ),
-                );
-            }
-            eprintln!(
-                "[preflight] slash command diff {:?} is command-only; skipping preflight_started so the harness/supervisor can submit it without an agent-doc response cycle",
-                commands
-            );
-        } else if options.probe {
-            // `#preflight-probe-side-effect-free`: a pure inspection probe must
-            // not open a `preflight_started` cycle. The probe reports the same
-            // diff/queue state below, but leaving an open cycle behind is the
-            // side effect that later wedges `session-check` (the empty-cycle
-            // churn from the recursive owner-pane diagnostic path).
-            eprintln!("[preflight] probe: skipping preflight_started cycle (inspection only)");
-        } else {
-            let snap = agent_doc_snapshot_io::load_document_baseline(file).unwrap_or(None);
-            let file_content = resolve_current_preflight_document(file, "start_preflight")?;
-            let snap_len = snap.as_ref().map(|s| s.len()).unwrap_or(0);
-            let file_len = file_content.len();
-            agent_doc_controller_io::project_controller::ensure_controller_running_for_file(file)?;
-            agent_doc_cycle_state_io::start_preflight(file, snap.as_deref(), Some(&file_content))?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{} file={} snap_len={} file_len={}",
-                    OpsLogEvent::PreflightDiffStart,
-                    file.display(),
-                    snap_len,
-                    file_len
-                ),
-            );
-        }
-    }
 
     // Step 4c: Annotate the diff with content-source markers.
     let annotated_diff = diff_result.as_ref().and_then(|d| diff::annotate_diff(d));
@@ -1011,14 +1004,6 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let directive_target_ids =
         agent_doc_queue::queue_directive::do_directive_target_ids(&prompt_targets);
     let checkpoint_queue_task_id = directive_target_ids.first().map(String::as_str);
-    if !options.probe {
-        agent_doc_cycle_state_io::record_turn_checkpoint(
-            file,
-            &prompt_targets,
-            checkpoint_queue_task_id,
-            checkpoint_queue_task_id,
-        )?;
-    }
     let mut added_diff_lines = prompt_diff_result
         .as_ref()
         .map(|d| agent_doc_prompt_contract::collect_added_diff_lines(d))
@@ -1086,7 +1071,7 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         }
         _ => None,
     };
-    let active_scope_cycle_is_open = closeout_cycle_is_open(file).unwrap_or(false);
+    let active_scope_cycle_is_open = entry_cycle_was_open;
     let active_turn_affectedness = match (
         active_scope_cycle_is_open,
         semantic_diff.as_ref(),
@@ -1295,26 +1280,6 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
             )
         }
     };
-    if !options.probe && !no_changes {
-        agent_doc_cycle_state_io::record_backlog_capture_requirement(
-            file,
-            backlog_capture_required,
-        )?;
-        agent_doc_cycle_state_io::record_backlog_target_requirements(
-            file,
-            &explicit_backlog_requirements,
-        )?;
-        agent_doc_cycle_state_io::record_expect_done_or_gate_ids(file, &expect_done_or_gate_ids)?;
-        agent_doc_cycle_state_io::record_required_explicit_backlog_item_count(
-            file,
-            required_explicit_backlog_item_count,
-        )?;
-        agent_doc_cycle_state_io::record_required_plan_reference_count(
-            file,
-            required_plan_reference_count,
-        )?;
-    }
-
     // Diff heuristic — counts user-added lines (excluding +++ headers).
     let lines_added = diff_result
         .as_ref()
@@ -1360,6 +1325,172 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     let session_accretion = agent_doc_session_accretion_io::inspect(file)
         .ok()
         .filter(|report| !report.is_healthy());
+
+    // Publish one document-scoped read cut before opening a cycle. The hashes
+    // identify the exact document/baseline/config observations; every
+    // agent-facing field below is read back from this Computed projection.
+    let config_cut = format!(
+        "harness={harness};effective={effective_tier_value};required={};suggested={suggested};agent_model={}",
+        required_tier_value
+            .map(|tier| tier.to_string())
+            .unwrap_or_default(),
+        agent_model.as_deref().unwrap_or_default(),
+    );
+    let mut preflight_read_facts = PreflightReadFacts {
+        document_hash: agent_doc_hash::content_hash(&diff_result_with_current.current),
+        baseline_hash: agent_doc_hash::content_hash(&diff_result_with_current.previous),
+        config_hash: agent_doc_hash::content_hash(&config_cut),
+        diff: diff_result.clone(),
+        queue: PreflightQueueProjection {
+            prompts: queue_state.queue_prompts.clone(),
+            selected_prompts: queue_state.selected_queue_prompts.clone(),
+            active: queue_state.queue_active,
+            deferred: queue_state.queue_deferred,
+            start_at: queue_state.queue_start_at.clone(),
+            trigger: queue_state
+                .queue_trigger
+                .as_ref()
+                .and_then(|trigger| serde_json::to_value(trigger).ok()),
+            halted: queue_state.queue_halted.clone(),
+            paused: queue_state.queue_paused,
+            pause_reason: queue_state.queue_pause_reason.clone(),
+            drainable_head_count: queue_state.queue_drainable_head_count,
+            continuation_required: queue_state.queue_continuation_required,
+            continuation_guidance: None,
+        },
+        tiers: PreflightTierProjection {
+            effective: Some(effective_tier_value.to_string()),
+            required: required_tier_value.map(|tier| tier.to_string()),
+            suggested: Some(suggested.to_string()),
+            agent_model: agent_model.clone(),
+        },
+        claims: claims.clone(),
+        related_documents: linked_changes
+            .iter()
+            .map(|change| PreflightRelatedDocumentProjection {
+                path: change.path.clone(),
+                summary: change.summary.clone(),
+                exists: change.exists,
+            })
+            .collect(),
+        session_accretion: session_accretion
+            .as_ref()
+            .and_then(|report| serde_json::to_value(report).ok()),
+    };
+    preflight_reads.observe(preflight_read_facts.clone());
+    let controller_project_root = agent_doc_project_root_io::project_root_containing(file)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "preflight reactive projection requires a project root for {}",
+                file.display()
+            )
+        })?;
+    // Unit tests run many temporary projects concurrently and intentionally do
+    // not launch a separately-installed controller binary. Production normal
+    // preflight always takes the controller branch; probes remain actorless.
+    let controller_projection_enabled = !options.probe && !cfg!(test);
+    let cycle_read_projection = if !controller_projection_enabled {
+        preflight_reads.projection()
+    } else {
+        agent_doc_controller_io::project_controller::ensure_controller_running_for_file(file)?;
+        agent_doc_controller_io::project_controller::preflight_read_projection(
+            &controller_project_root,
+            file,
+            &preflight_read_facts,
+        )?
+    };
+    if !cycle_read_projection.current {
+        anyhow::bail!(
+            "preflight derived read projection is not current for {}",
+            file.display()
+        );
+    }
+    preflight_effects.observe_derived_reads_current(true);
+    preflight_effects
+        .settle(PreflightEffect::BaselineCheckpoint)
+        .context("preflight baseline checkpoint effect gate")?;
+
+    // Cycle-open remains exactly-once durable state. It is enabled only after
+    // the complete derived read cut and baseline checkpoint signal exist.
+    let cycle_open_required =
+        !options.probe && !no_changes && slash_command_only_diff_commands.is_none();
+    preflight_effects.observe_cycle_open_required(cycle_open_required);
+    if !no_changes {
+        if let Some(commands) = slash_command_only_diff_commands.as_ref() {
+            if !options.probe {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "preflight_slash_command_only_handoff file={} commands={:?}",
+                        file.display(),
+                        commands
+                    ),
+                );
+            }
+            eprintln!(
+                "[preflight] slash command diff {:?} is command-only; skipping preflight_started so the harness/supervisor can submit it without an agent-doc response cycle",
+                commands
+            );
+        } else if options.probe {
+            // `#preflight-probe-side-effect-free`: a pure inspection probe must
+            // not open a `preflight_started` cycle.
+            eprintln!("[preflight] probe: skipping preflight_started cycle (inspection only)");
+        } else {
+            preflight_effects
+                .require(PreflightEffect::CycleOpen)
+                .context("preflight cycle-open effect gate")?;
+            let snap = agent_doc_snapshot_io::load_document_baseline(file).unwrap_or(None);
+            let file_content = resolve_current_preflight_document(file, "start_preflight")?;
+            let snap_len = snap.as_ref().map(|s| s.len()).unwrap_or(0);
+            let file_len = file_content.len();
+            agent_doc_controller_io::project_controller::ensure_controller_running_for_file(file)?;
+            agent_doc_cycle_state_io::start_preflight(file, snap.as_deref(), Some(&file_content))?;
+            preflight_effects
+                .settle(PreflightEffect::CycleOpen)
+                .context("preflight cycle-open effect settlement")?;
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "{} file={} snap_len={} file_len={}",
+                    OpsLogEvent::PreflightDiffStart,
+                    file.display(),
+                    snap_len,
+                    file_len
+                ),
+            );
+        }
+    }
+    preflight_effects
+        .require_complete()
+        .context("preflight effect graph did not reach its terminal projection")?;
+
+    if !options.probe {
+        agent_doc_cycle_state_io::record_turn_checkpoint(
+            file,
+            &prompt_targets,
+            checkpoint_queue_task_id,
+            checkpoint_queue_task_id,
+        )?;
+    }
+    if !options.probe && !no_changes {
+        agent_doc_cycle_state_io::record_backlog_capture_requirement(
+            file,
+            backlog_capture_required,
+        )?;
+        agent_doc_cycle_state_io::record_backlog_target_requirements(
+            file,
+            &explicit_backlog_requirements,
+        )?;
+        agent_doc_cycle_state_io::record_expect_done_or_gate_ids(file, &expect_done_or_gate_ids)?;
+        agent_doc_cycle_state_io::record_required_explicit_backlog_item_count(
+            file,
+            required_explicit_backlog_item_count,
+        )?;
+        agent_doc_cycle_state_io::record_required_plan_reference_count(
+            file,
+            required_plan_reference_count,
+        )?;
+    }
 
     // `#queue-no-stop-unrelated-edit`: compute before owner-pane detection so
     // same-pane recursion signals use only prompt changes that affect this turn.
@@ -1540,6 +1671,18 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
     );
     let queue_continuation_required = effective_continuation.required;
     let queue_continuation_guidance = effective_continuation.guidance;
+    preflight_read_facts.queue.continuation_required = queue_continuation_required;
+    preflight_read_facts.queue.continuation_guidance = queue_continuation_guidance.clone();
+    preflight_reads.observe(preflight_read_facts.clone());
+    let preflight_read_projection = if !controller_projection_enabled {
+        preflight_reads.projection()
+    } else {
+        agent_doc_controller_io::project_controller::preflight_read_projection(
+            &controller_project_root,
+            file,
+            &preflight_read_facts,
+        )?
+    };
 
     // `#qstallguard` Layer B: reconcile the continuation-pending projection recorded by
     // the prior clean closeout (session-check). If drainable work remained, the
@@ -1591,15 +1734,37 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         }
     }
 
+    let projected_linked_changes = preflight_read_projection
+        .related_documents
+        .iter()
+        .map(|change| agent_doc_preflight_io::RelatedDocChange {
+            path: change.path.clone(),
+            summary: change.summary.clone(),
+            exists: change.exists,
+        })
+        .collect();
+    let projected_queue_trigger = preflight_read_projection
+        .queue
+        .trigger
+        .clone()
+        .map(serde_json::from_value)
+        .transpose()
+        .context("failed to decode derived preflight queue trigger")?;
+    let projected_session_accretion = preflight_read_projection
+        .session_accretion
+        .clone()
+        .map(serde_json::from_value)
+        .transpose()
+        .context("failed to decode derived preflight session accretion")?;
     let output = PreflightOutput {
         warnings,
         layout_issues,
         recovered,
         committed,
-        claims,
-        diff: diff_result,
+        claims: preflight_read_projection.claims.clone(),
+        diff: preflight_read_projection.diff.clone(),
         no_changes,
-        linked_changes,
+        linked_changes: projected_linked_changes,
         diff_type: diff_type_str.clone(),
         diff_type_reason: classification.map(|c| c.diff_type_reason),
         annotated_diff,
@@ -1613,9 +1778,9 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         orchestration_request,
         prompt_presets_requested,
         explicit_backlog_targets: explicit_backlog_target_paths,
-        effective_tier: Some(effective_tier_value.to_string()),
-        required_tier: required_tier_value.map(|t| t.to_string()),
-        suggested_tier: Some(suggested.to_string()),
+        effective_tier: preflight_read_projection.tiers.effective.clone(),
+        required_tier: preflight_read_projection.tiers.required.clone(),
+        suggested_tier: preflight_read_projection.tiers.suggested.clone(),
         model_switch: model_switch_name,
         model_switch_tier: model_switch_tier.map(|t| t.to_string()),
         pending_callbacks,
@@ -1626,24 +1791,27 @@ pub fn run_with_options(file: &Path, options: PreflightOptions) -> Result<()> {
         review_count: pending_report.review_count,
         review_gated_count: pending_report.review_gated_count,
         gate_verify: gate_verify_results,
-        agent_model,
-        queue_prompts: queue_state.queue_prompts,
+        agent_model: preflight_read_projection.tiers.agent_model.clone(),
+        queue_prompts: preflight_read_projection.queue.prompts.clone(),
         selected_queue_prompts: if exchange_prompt_preempts_queue {
             Vec::new()
         } else {
-            queue_state.selected_queue_prompts
+            preflight_read_projection.queue.selected_prompts.clone()
         },
-        queue_active: queue_state.queue_active,
-        queue_deferred: queue_state.queue_deferred,
-        queue_start_at: queue_state.queue_start_at,
-        queue_trigger: queue_state.queue_trigger,
-        queue_halted: queue_state.queue_halted,
-        queue_paused: queue_state.queue_paused,
-        queue_pause_reason: queue_state.queue_pause_reason,
-        queue_drainable_head_count: queue_state.queue_drainable_head_count,
-        queue_continuation_required,
-        queue_continuation_guidance,
-        session_accretion,
+        queue_active: preflight_read_projection.queue.active,
+        queue_deferred: preflight_read_projection.queue.deferred,
+        queue_start_at: preflight_read_projection.queue.start_at.clone(),
+        queue_trigger: projected_queue_trigger,
+        queue_halted: preflight_read_projection.queue.halted.clone(),
+        queue_paused: preflight_read_projection.queue.paused,
+        queue_pause_reason: preflight_read_projection.queue.pause_reason.clone(),
+        queue_drainable_head_count: preflight_read_projection.queue.drainable_head_count,
+        queue_continuation_required: preflight_read_projection.queue.continuation_required,
+        queue_continuation_guidance: preflight_read_projection
+            .queue
+            .continuation_guidance
+            .clone(),
+        session_accretion: projected_session_accretion,
         pipeline,
         document_cell_merge_acks,
     };

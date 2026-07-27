@@ -4,10 +4,18 @@
 //! - `run(file)`: executes the full pre-agent preparation sequence for a
 //!   session document and emits a single JSON object to stdout.
 //! - Bails immediately if the file does not exist.
-//! - Step 0 — layout check: calls `check_layout()` to detect tmux structural
-//!   problems (window index, session drift); issues are
-//!   included in output but do not abort the run.
-//! - Step 0-pre — interrupted-cycle guard: inspects persisted cycle state.
+//! - Normal CLI execution publishes typed document observations to one
+//!   controller-owned per-document `Computed`; the short-lived preflight process
+//!   emits output from that projection. Probe mode uses an actorless local
+//!   projection so it remains side-effect free.
+//! - Effects are admitted by typed signals in dependency order:
+//!   repair -> prior-cycle commit -> derived reads -> baseline checkpoint ->
+//!   cycle-open. The terminal gate rejects skipped prerequisites. Cycle-open is
+//!   still a durable exactly-once identity, not computed state.
+//! - The layout check calls `check_layout()` to detect tmux structural problems
+//!   (window index, session drift); issues are included in output but do not
+//!   abort the run.
+//! - The interrupted-cycle guard inspects persisted cycle state.
 //!   For any open prior cycle, preflight auto-attempts `agent_doc_repair_io::run` +
 //!   `git::commit(file)` before diffing again. For an open `preflight_started`
 //!   cycle with no recoverable response and unresolved prompt-bearing drift,

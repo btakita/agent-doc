@@ -1372,6 +1372,7 @@ dependencies = [
  "agent-doc-session-registry-io",
  "agent-doc-snapshot-io",
  "agent-doc-sqlite",
+ "agent-doc-state-backbone",
  "agent-doc-test-support",
  "agent-doc-turn",
  "agent-doc-turn-scope-io",

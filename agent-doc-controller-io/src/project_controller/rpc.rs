@@ -1116,6 +1116,49 @@ pub fn retained_write_settlement(
     )
 }
 
+pub(crate) fn handle_preflight_read_projection(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<agent_doc_state_backbone::preflight::PreflightReadProjection> {
+    let file = request_file(&request)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&file);
+    let facts = serde_json::from_str::<agent_doc_state_backbone::preflight::PreflightReadFacts>(
+        request
+            .diagnostic_payload
+            .as_deref()
+            .context("preflight_read_projection requires facts")?,
+    )
+    .context("preflight_read_projection facts must be valid JSON")?;
+    Ok(runtime.document_preflight_projection(&document_hash, facts))
+}
+
+/// Let the short-lived preflight CLI refresh and read the one controller-owned
+/// projection for `file`.
+pub fn preflight_read_projection(
+    project_root: &Path,
+    file: &Path,
+    facts: &agent_doc_state_backbone::preflight::PreflightReadFacts,
+) -> Result<agent_doc_state_backbone::preflight::PreflightReadProjection> {
+    request_controller(
+        project_root,
+        ControllerRequest {
+            command: "preflight_read_projection".to_string(),
+            file: Some(file.to_path_buf()),
+            session_id: None,
+            pane_id: None,
+            window_id: None,
+            generation: None,
+            state: None,
+            caller: None,
+            reason: None,
+            supervisor_pid: None,
+            supervisor_socket: None,
+            command_kind: None,
+            diagnostic_payload: Some(serde_json::to_string(facts)?),
+        },
+    )
+}
+
 pub fn focus_document_pane(project_root: &Path, file: &Path) -> Result<ControllerTmuxFocusReceipt> {
     #[cfg(any(test, feature = "test-support"))]
     {
@@ -9663,6 +9706,9 @@ pub(crate) fn handle_request_locked(
         "state_subscribe" => controller_envelope(handle_state_subscribe(runtime.as_ref(), request)),
         "retained_write_settlement" => {
             controller_envelope(handle_retained_write_settlement(runtime.as_ref(), request))
+        }
+        "preflight_read_projection" => {
+            controller_envelope(handle_preflight_read_projection(runtime.as_ref(), request))
         }
         "reliable_sync" => controller_envelope(handle_reliable_sync(
             &bootstrap_snapshot.project_root,

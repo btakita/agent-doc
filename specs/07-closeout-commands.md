@@ -304,6 +304,15 @@ must preserve its records and retry later.
 
 `agent-doc preflight <FILE>`
 
+- Normal CLI execution publishes typed read facts (diff/baseline, queue view,
+  tiers, agent model, claims, linked documents, and accretion) into one
+  controller-owned per-document `Computed`, then constructs its JSON output
+  from that projection. `--probe` uses the same derivation actorlessly so it
+  remains side-effect free. Effect signals enforce `repair -> prior-cycle
+  commit -> derived reads -> baseline checkpoint -> cycle-open`; callers cannot
+  skip prerequisites, and newly inserted exhaustive effects must settle before
+  the terminal gate succeeds. Cycle-open stays a durable exactly-once identity
+  rather than a computed value (`#preflightreactive`).
 - Runs interrupted-cycle recovery, repair, commit, claims-log drain, linked-doc inspection, diff computation, and HEAD read in one binary-owned step.
 - Before diffing, preflight must not auto-compact the exchange just because the session is large or churn-heavy. Session-accretion heuristics remain advisory only, and any future automatic compaction/reload path must require an explicit `agent_doc_auto_compact` opt-in in document frontmatter or project `.agent-doc/config.toml`. When that opt-in is absent, `session_accretion.guidance` must not emit imperative `Run agent-doc compact <FILE> --commit` text that an agent could auto-execute; it must instead emit gated phrasing that names the missing opt-in and tells the agent to ask the user before compacting.
 - If the pre-diff tmux layout check detects missing window index `0`, preflight attempts the base-index repair immediately in the active tmux session, re-runs the layout check after a successful repair, and reports only remaining layout issues. It must not defer this repair behind a consecutive-detection counter; when automatic repair cannot run, stderr must name the explicit repair command.

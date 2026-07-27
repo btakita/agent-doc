@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.google.gson.JsonParser
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -154,6 +155,13 @@ class CpRouteClientCommandPlaneTest {
         val payload = inlinePayload(submit)
         assertEquals(true, payload.get("no_autostart").asBoolean)
         assertEquals("automatic", payload.get("caller_kind").asString)
+    }
+
+    @Test
+    fun `only manual sync with autostart waits for terminal completion`() {
+        assertTrue(CpRouteClient.shouldAwaitSyncCompletion("manual", noAutostart = false))
+        assertFalse(CpRouteClient.shouldAwaitSyncCompletion("automatic", noAutostart = false))
+        assertFalse(CpRouteClient.shouldAwaitSyncCompletion("manual", noAutostart = true))
     }
 
     @Test

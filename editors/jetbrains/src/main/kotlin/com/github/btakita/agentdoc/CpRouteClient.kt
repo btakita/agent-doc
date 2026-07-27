@@ -78,6 +78,7 @@ internal object CpRouteClient {
                     filePath = filePath,
                     commandId = commandId,
                     timeoutMs = waitForReadySeconds * 1000 + COMMAND_COMPLETION_GRACE_MS,
+                    commandName = "editor_route",
                 )
             }
         } catch (e: Exception) {
@@ -132,7 +133,19 @@ internal object CpRouteClient {
             controllerCommand = "editor_command_submit_async",
         )
         return try {
-            sendAcceptedCommandSubmitToSocket(socket, request, commandId, "sync_tmux_layout")
+            val accepted =
+                sendAcceptedCommandSubmitToSocket(socket, request, commandId, "sync_tmux_layout")
+            if (accepted.exitCode != 0 || !shouldAwaitSyncCompletion(callerKind, noAutostart)) {
+                accepted
+            } else {
+                awaitCommandSubmitTerminal(
+                    socket = socket,
+                    filePath = focus ?: projectRoot,
+                    commandId = commandId,
+                    timeoutMs = SYNC_COMMAND_COMPLETION_TIMEOUT_MS,
+                    commandName = "sync_tmux_layout",
+                )
+            }
         } catch (e: Exception) {
             log.warn("[sync] command-plane sync_tmux_layout submit failed via ${socket.path}: ${e.message}")
             CpEditorRouteResult(
@@ -141,6 +154,9 @@ internal object CpRouteClient {
             )
         }
     }
+
+    internal fun shouldAwaitSyncCompletion(callerKind: String, noAutostart: Boolean): Boolean =
+        callerKind == "manual" && !noAutostart
 
     fun submitFocusDocumentPane(
         projectRoot: String,
@@ -544,6 +560,7 @@ internal fun resolveCommandSubmitTerminalData(data: JsonObject, commandId: Strin
 private const val SOCKET_REQUEST_TIMEOUT_MS = 60_000L
 private const val COMMAND_COMPLETION_GRACE_MS = 5_000L
 private const val COMMAND_COMPLETION_POLL_MS = 100L
+private const val SYNC_COMMAND_COMPLETION_TIMEOUT_MS = 60_000L
 
     private val socketWatchdog = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "agent-doc-cp-socket-watchdog").apply { isDaemon = true }
@@ -628,6 +645,7 @@ private fun awaitCommandSubmitTerminal(
     filePath: String,
     commandId: String,
     timeoutMs: Long,
+    commandName: String,
 ): CpEditorRouteResult {
     val deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceAtLeast(1))
     while (true) {
@@ -637,7 +655,7 @@ private fun awaitCommandSubmitTerminal(
         if (remainingNanos <= 0) {
             return CpEditorRouteResult(
                 1,
-                "editor_route did not publish a terminal result within ${timeoutMs}ms",
+                "$commandName did not publish a terminal result within ${timeoutMs}ms",
             )
         }
         val sleepMs = minOf(
@@ -648,7 +666,7 @@ private fun awaitCommandSubmitTerminal(
             Thread.sleep(sleepMs)
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-            return CpEditorRouteResult(1, "editor_route completion wait interrupted")
+            return CpEditorRouteResult(1, "$commandName completion wait interrupted")
         }
     }
 }

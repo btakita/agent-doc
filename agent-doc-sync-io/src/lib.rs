@@ -300,6 +300,7 @@ pub trait SyncRuntimeEffects: Send + Sync + 'static {
 
     fn session_check_inspect(&self, file: &Path) -> Result<SyncSessionCheckStatus>;
 
+    #[allow(clippy::too_many_arguments)]
     fn provision_pane(
         &self,
         tmux: &tmux_router::Tmux,
@@ -308,6 +309,7 @@ pub trait SyncRuntimeEffects: Send + Sync + 'static {
         file_path: &str,
         context_session: Option<&str>,
         col_args: &[String],
+        route_after_start: bool,
     ) -> Result<String>;
 }
 
@@ -566,6 +568,7 @@ impl SyncRuntimeEffects for TestSyncRuntimeEffects {
         _file_path: &str,
         _context_session: Option<&str>,
         _col_args: &[String],
+        _route_after_start: bool,
     ) -> Result<String> {
         if let Some(pane) = agent_doc_session_registry_io::lookup(session_id)?
             && tmux.pane_alive(&pane)

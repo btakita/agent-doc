@@ -6,6 +6,12 @@ Use `BREAKING CHANGE:` prefix in version entries to flag incompatible changes.
 
 ## Unreleased
 
+## 0.35.37
+
+_JetBrains plugin 0.2.299; VS Code extension 0.2.57._
+
+- **Manual Sync Tmux Layout now completes a missing-pane create-and-route boundary before reporting success (`#tmuxsyncnewpane`).** Full `agent-doc sync` and manual Project Controller sync resolve the intended tmux session, create and register the pane, wait for its harness to become dispatch-ready, and submit the document reopen in one fallible operation. The JetBrains action waits for the terminal command receipt and surfaces pane/start/route diagnostics directly; automatic and passive sync keep their admission-oriented behavior. Controller, sync/route, and plugin regressions cover manual-versus-automatic routing and terminal feedback.
+
 ## 0.35.36
 
 _JetBrains plugin 0.2.298; VS Code extension 0.2.57._

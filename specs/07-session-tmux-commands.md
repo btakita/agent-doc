@@ -342,7 +342,8 @@ markdown file, sync must expand that one-column projection from the project
 
 ### Sync-specific invariants
 
-- `provision_pane` is the sync-specific pane-creation path. It chooses split direction by column position and does not block on prompt readiness.
+- `provision_pane` is the passive sync-specific pane-creation path. It chooses split direction by column position and does not block on prompt readiness.
+- Full/manual sync uses the strict provision-and-route variant: it resolves and creates the pane in the intended tmux session, registers it, waits for harness dispatch readiness, and submits the document route as one fallible controller command. A readiness or submit failure must keep the terminal command non-applied and expose its diagnostic to the caller.
 - When sync creates new panes it should prefer splitting in the visible `agent-doc` window, not beside a stash pane when a visible anchor exists.
 - Post-sync registration must fail closed if one pane would be mirrored back into the registry for multiple documents.
 - Cross-session stash rescue is intentionally non-destructive: if a live stashed pane belongs to another tmux session, preserve it in place and report the mismatch instead of moving or killing it.

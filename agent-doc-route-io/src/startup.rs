@@ -47,6 +47,7 @@ pub struct RouteStartupEffects {
 /// bound the auto-start dispatch fails closed instead of typing into a
 /// not-yet-submit-ready composer.
 const AUTO_START_DISPATCH_READY_REVERIFY_TIMEOUT: Duration = Duration::from_secs(5);
+const MANUAL_SYNC_ROUTE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExistingStartupRegistrationDecision<'a> {
@@ -200,13 +201,17 @@ const FRESH_ROUTE_AGENT_READY_TIMEOUT: Duration =
 
 /// Editor-origin provisioning creates an interactive document session, not a
 /// one-shot route worker. Layout reconciliation is identified by `skip_wait`;
-/// direct Run Agent Doc requests carry the controller's editor-route attempt id.
-/// Controller/watchdog recovery has neither signal and retains auto-reap.
+/// strict dispatch-only provisioning must also keep the pane alive while the
+/// harness boots; direct Run Agent Doc requests carry the controller's
+/// editor-route attempt id. Controller/watchdog recovery has none of those
+/// signals and retains auto-reap.
 fn route_owned_reap_policy_for_start(
     skip_wait: bool,
+    dispatch_only: bool,
     editor_route_attempt_id: Option<&str>,
 ) -> RouteOwnedReapPolicy {
-    if skip_wait || editor_route_attempt_id.is_some_and(|id| !id.trim().is_empty()) {
+    if skip_wait || dispatch_only || editor_route_attempt_id.is_some_and(|id| !id.trim().is_empty())
+    {
         RouteOwnedReapPolicy::KeepAlive
     } else {
         RouteOwnedReapPolicy::Auto
@@ -295,6 +300,48 @@ pub fn provision_pane(
         context_session,
         true,
         split_before,
+        None,
+        effects,
+    )
+}
+
+/// Provision a missing pane and submit the document route once the harness is ready.
+///
+/// Manual editor sync uses this strict path: creation, registration, and route
+/// submission are one fallible operation, so the controller can publish a terminal
+/// failure instead of leaving a registered pane at an empty harness composer.
+pub fn provision_and_route_pane(
+    tmux: &Tmux,
+    file: &Path,
+    session_id: &str,
+    file_path: &str,
+    context_session: Option<&str>,
+    col_args: &[String],
+    effects: RouteStartupEffects,
+) -> Result<String> {
+    // Manual Sync Tmux Layout is an explicit operator action whose controller
+    // and editor completion budgets are longer than the default 10s
+    // responsiveness ceiling. Share one 30s route deadline across fresh-start
+    // readiness and the dispatch-only recheck so a normally slow Codex boot can
+    // still complete without multiplying phase-local waits.
+    let _wait_for_ready_guard =
+        crate::invocation::WaitForReadyOverrideGuard::set(Some(MANUAL_SYNC_ROUTE_READY_TIMEOUT));
+    let split_before = is_first_column(file, col_args);
+    let harness = resolve_harness_for_file(file);
+    let session_name = resolve_target_session(tmux, context_session, &[], Some(file), &harness);
+    ensure_auto_start_target_session(tmux, context_session, &session_name, &harness)?;
+    auto_start_in_session(
+        tmux,
+        file,
+        session_id,
+        file_path,
+        &session_name,
+        false,
+        split_before,
+        &harness,
+        None,
+        None,
+        true,
         None,
         effects,
     )
@@ -678,6 +725,7 @@ pub fn auto_start_in_session_with_lock_mode(
     // interactive sessions; controller/watchdog recovery remains one-shot/auto.
     let reap_policy = route_owned_reap_policy_for_start(
         skip_wait,
+        dispatch_only,
         agent_doc_controller_io::route_snapshot::editor_route_attempt_id().as_deref(),
     );
     let start_cmd =
@@ -736,7 +784,9 @@ pub fn auto_start_in_session_with_lock_mode(
         );
     } else {
         eprintln!("[route] Waiting for {} to initialize...", harness.binary);
-        let ready = wait_for_agent_ready(tmux, &new_pane, FRESH_ROUTE_AGENT_READY_TIMEOUT, harness);
+        let ready_timeout =
+            crate::invocation::wait_for_ready_override().unwrap_or(FRESH_ROUTE_AGENT_READY_TIMEOUT);
+        let ready = wait_for_agent_ready(tmux, &new_pane, ready_timeout, harness);
         // Fresh-start recovery can clear the early geometry-only binding while
         // the harness is still booting. Re-validate the registration before we
         // dispatch, but keep the deliberately created fresh pane authoritative
@@ -1118,11 +1168,15 @@ mod tests {
     #[test]
     fn editor_origin_startup_is_keep_alive() {
         assert_eq!(
-            route_owned_reap_policy_for_start(false, Some("editor-attempt")),
+            route_owned_reap_policy_for_start(false, false, Some("editor-attempt")),
             RouteOwnedReapPolicy::KeepAlive
         );
         assert_eq!(
-            route_owned_reap_policy_for_start(true, None),
+            route_owned_reap_policy_for_start(true, false, None),
+            RouteOwnedReapPolicy::KeepAlive
+        );
+        assert_eq!(
+            route_owned_reap_policy_for_start(false, true, None),
             RouteOwnedReapPolicy::KeepAlive
         );
     }
@@ -1130,11 +1184,11 @@ mod tests {
     #[test]
     fn controller_recovery_startup_retains_auto_reap() {
         assert_eq!(
-            route_owned_reap_policy_for_start(false, None),
+            route_owned_reap_policy_for_start(false, false, None),
             RouteOwnedReapPolicy::Auto
         );
         assert_eq!(
-            route_owned_reap_policy_for_start(false, Some("  ")),
+            route_owned_reap_policy_for_start(false, false, Some("  ")),
             RouteOwnedReapPolicy::Auto
         );
     }

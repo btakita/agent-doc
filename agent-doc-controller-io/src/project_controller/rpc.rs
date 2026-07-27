@@ -16366,6 +16366,7 @@ mod tests {
             response["payload"]["columns"][0],
             "tasks/one.md,tasks/two.md"
         );
+        assert_eq!(response["payload"]["routes_created_panes"], true);
         assert_eq!(response["projection"]["commands"][0]["status"], "applied");
         assert_eq!(response["projection"]["commands"][0]["terminal"], true);
     }
@@ -16456,6 +16457,7 @@ mod tests {
         assert_eq!(status["exit_code"], 0);
         assert_eq!(status["projection"]["commands"][0]["status"], "applied");
         assert_eq!(status["projection"]["commands"][0]["terminal"], true);
+        assert_eq!(status["payload"]["routes_created_panes"], true);
         assert!(!status["receipt"].is_null());
     }
 
@@ -16872,6 +16874,7 @@ mod tests {
                     focus: Some("tasks/a.md".to_string()),
                     no_autostart: false,
                     exact_visible: false,
+                    caller_kind: "manual".to_string(),
                 })
                 .unwrap(),
             ),

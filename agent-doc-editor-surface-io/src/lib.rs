@@ -257,6 +257,7 @@ fn run_intent_via_controller(root: &Path, intent: &SurfaceIntent) -> Result<Stri
                     // still has protected panes in it.
                     no_autostart: true,
                     exact_visible: true,
+                    caller_kind: "automatic".to_string(),
                 },
             )?;
             serde_json::to_string(&receipt).context("serialize sync receipt")

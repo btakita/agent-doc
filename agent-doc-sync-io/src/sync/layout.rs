@@ -425,6 +425,7 @@ mod tests {
             None,
             AutoStartMode::Full,
             false,
+            false,
             &iso,
         )
         .unwrap();

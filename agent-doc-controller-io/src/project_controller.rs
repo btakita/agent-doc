@@ -199,6 +199,14 @@ pub struct ControllerTmuxLayoutSyncInvocation {
     pub no_autostart: bool,
     #[serde(default)]
     pub exact_visible: bool,
+    #[serde(default)]
+    pub caller_kind: String,
+}
+
+impl ControllerTmuxLayoutSyncInvocation {
+    pub fn routes_created_panes(&self) -> bool {
+        !self.no_autostart && self.caller_kind == "manual"
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,6 +220,7 @@ pub struct ControllerTmuxLayoutSyncReceipt {
     pub focus: Option<String>,
     pub no_autostart: bool,
     pub exact_visible: bool,
+    pub routes_created_panes: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -394,6 +403,7 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
         _project_root: &Path,
         invocation: ControllerTmuxLayoutSyncInvocation,
     ) -> Result<ControllerTmuxLayoutSyncReceipt> {
+        let routes_created_panes = invocation.routes_created_panes();
         Ok(ControllerTmuxLayoutSyncReceipt {
             applied: true,
             reason: "test_runtime".to_string(),
@@ -402,6 +412,7 @@ impl ProjectControllerRuntimeEffects for TestProjectControllerRuntimeEffects {
             focus: invocation.focus,
             no_autostart: invocation.no_autostart,
             exact_visible: invocation.exact_visible,
+            routes_created_panes,
         })
     }
 }
@@ -3341,6 +3352,23 @@ mod tests {
             socket_path(dir.path()),
             dir.path().join(".agent-doc/controller.sock")
         );
+    }
+
+    #[test]
+    fn only_manual_autostart_sync_routes_created_panes() {
+        let invocation =
+            |caller_kind: &str, no_autostart: bool| ControllerTmuxLayoutSyncInvocation {
+                columns: vec!["tasks/one.md".to_string()],
+                window: None,
+                focus: Some("tasks/one.md".to_string()),
+                no_autostart,
+                exact_visible: true,
+                caller_kind: caller_kind.to_string(),
+            };
+
+        assert!(invocation("manual", false).routes_created_panes());
+        assert!(!invocation("automatic", false).routes_created_panes());
+        assert!(!invocation("manual", true).routes_created_panes());
     }
 
     #[test]

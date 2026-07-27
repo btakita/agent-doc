@@ -481,7 +481,15 @@ fn skip_auto_start_for_recent_session_loss(file: &Path, session_id: &str) -> Res
 
 pub fn run(col_args: &[String], window: Option<&str>, focus: Option<&str>) -> Result<()> {
     tracing::debug!(cols = ?col_args, window, focus, "sync::run start");
-    run_with_options(col_args, window, focus, AutoStartMode::Full)
+    run_with_options_internal(
+        col_args,
+        window,
+        focus,
+        AutoStartMode::Full,
+        false,
+        true,
+        &Tmux::default_server(),
+    )
 }
 
 pub fn run_in_project_root(
@@ -497,7 +505,34 @@ pub fn run_in_project_root(
         focus,
         "sync::run_in_project_root start"
     );
-    run_with_options_at_root(project_root, col_args, window, focus, AutoStartMode::Full)
+    run_with_options_internal_at_root(
+        project_root,
+        col_args,
+        window,
+        focus,
+        AutoStartMode::Full,
+        false,
+        true,
+        &Tmux::default_server(),
+    )
+}
+
+pub fn run_provision_only_in_project_root(
+    project_root: &Path,
+    col_args: &[String],
+    window: Option<&str>,
+    focus: Option<&str>,
+) -> Result<()> {
+    run_with_options_internal_at_root(
+        project_root,
+        col_args,
+        window,
+        focus,
+        AutoStartMode::Full,
+        false,
+        false,
+        &Tmux::default_server(),
+    )
 }
 
 fn run_with_options(
@@ -523,6 +558,7 @@ fn run_with_options_at_root(
         window,
         focus,
         auto_start_mode,
+        false,
         false,
         &Tmux::default_server(),
     )
@@ -647,6 +683,7 @@ pub fn run_layout_only_exact_visible_in_project_root(
         focus,
         AutoStartMode::SafePassive,
         true,
+        false,
         &Tmux::default_server(),
     )
 }
@@ -657,7 +694,15 @@ pub fn run_with_tmux(
     focus: Option<&str>,
     tmux: &Tmux,
 ) -> Result<()> {
-    run_with_options_internal(col_args, window, focus, AutoStartMode::Full, false, tmux)
+    run_with_options_internal(
+        col_args,
+        window,
+        focus,
+        AutoStartMode::Full,
+        false,
+        false,
+        tmux,
+    )
 }
 
 fn load_live_authoritative_actor_record_uncached(
@@ -1911,6 +1956,7 @@ fn run_with_options_internal(
     focus: Option<&str>,
     auto_start_mode: AutoStartMode,
     exact_visible_projection: bool,
+    route_created_panes: bool,
     tmux: &Tmux,
 ) -> Result<()> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -1921,6 +1967,7 @@ fn run_with_options_internal(
         focus,
         auto_start_mode,
         exact_visible_projection,
+        route_created_panes,
         tmux,
     )
 }
@@ -1994,6 +2041,7 @@ fn sanitize_cross_root_layout(
     (sanitized, dropped)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_with_options_internal_at_root(
     project_root: &Path,
     col_args: &[String],
@@ -2001,6 +2049,7 @@ fn run_with_options_internal_at_root(
     focus: Option<&str>,
     auto_start_mode: AutoStartMode,
     exact_visible_projection: bool,
+    route_created_panes: bool,
     tmux: &Tmux,
 ) -> Result<()> {
     let window = agent_doc_sync::normalize_scope_arg(window);
@@ -3056,6 +3105,7 @@ fn run_with_options_internal_at_root(
                     &file_str,
                     context_session.as_deref(),
                     col_args,
+                    false,
                 ) {
                     Ok(pane_id) => {
                         eprintln!(
@@ -3407,6 +3457,7 @@ fn run_with_options_internal_at_root(
                 &file_str,
                 context_session.as_deref(),
                 col_args,
+                route_created_panes,
             ) {
                 Ok(pane_id) => {
                     eprintln!(
@@ -3428,6 +3479,14 @@ fn run_with_options_internal_at_root(
                     auto_started_panes.push((pane_id, file_str.clone()));
                 }
                 Err(e) => {
+                    if route_created_panes {
+                        return Err(e).with_context(|| {
+                            format!(
+                                "manual sync failed to create and route pane for {}",
+                                file_path.display()
+                            )
+                        });
+                    }
                     eprintln!(
                         "[sync] warning: auto-start failed for {}: {}",
                         file_path.display(),
@@ -5178,6 +5237,7 @@ mod th {
             Some(requested_doc.to_string_lossy().as_ref()),
             mode,
             false,
+            false,
             &iso,
         )
         .unwrap();
@@ -6425,6 +6485,7 @@ mod tests {
             Some(doc_str.as_str()),
             AutoStartMode::Full,
             false,
+            false,
             &iso,
         )
         .unwrap();
@@ -6498,6 +6559,7 @@ mod tests {
             Some("test:0"),
             Some(doc_str.as_str()),
             AutoStartMode::Full,
+            false,
             false,
             &iso,
         )
@@ -7362,6 +7424,7 @@ mod tests {
             None,
             Some(active_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             false,
             &iso,
         )
@@ -8344,6 +8407,7 @@ mod tests {
             Some(tsift_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
             false,
+            false,
             &iso,
         )
         .unwrap();
@@ -8412,6 +8476,7 @@ mod tests {
             None,
             Some(doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             false,
             &iso,
         )
@@ -8507,6 +8572,7 @@ mod tests {
             None,
             Some(doc_c.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             false,
             &iso,
         )
@@ -8620,6 +8686,7 @@ mod tests {
             None,
             Some(doc_c.to_string_lossy().as_ref()),
             AutoStartMode::Full,
+            false,
             false,
             &iso,
         )
@@ -8756,6 +8823,7 @@ mod tests {
             Some(claudescore_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
             false,
+            false,
             &iso,
         )
         .unwrap();
@@ -8855,6 +8923,7 @@ mod tests {
             Some(new_left_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
             false,
+            false,
             &iso,
         )
         .unwrap();
@@ -8940,6 +9009,7 @@ mod tests {
             None,
             Some(docs_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             false,
             &iso,
         )
@@ -9034,6 +9104,7 @@ mod tests {
             None,
             Some(new_left_doc.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             false,
             &iso,
         )
@@ -9135,6 +9206,7 @@ mod tests {
             None,
             Some(doc_b.to_string_lossy().as_ref()),
             AutoStartMode::SafePassive,
+            false,
             false,
             &iso,
         )

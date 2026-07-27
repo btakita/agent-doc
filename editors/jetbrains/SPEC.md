@@ -62,9 +62,11 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - When that background passive sync is accepted, JetBrains queues one latest-generation `focus_document_pane` command immediately after the sync command. The immediate fast path can legitimately observe `actor_pane_not_visible` while the pane is parked in stash; command-plane ordering makes the post-sync focus retry observe the pane after layout rescue instead of leaving tmux on the previously selected document.
 - If a Project Controller-backed manual `Sync Tmux Layout` terminal outcome later reports that the current layout was preserved because a visible protected pane could not detach yet, the command projection/log must retain the protected pane id, open-cycle phase, and document path so the user can tell which pane is delaying sync. Current controller builds should attach/focus the requested document around the protected pane instead of emitting that deferred-sync marker.
 - Manual `Sync Tmux Layout` submits `agent-doc.sync_tmux_layout.v1` to the Project Controller command plane
-  with `no_autostart=false` and returns after admission; the controller runs the full sync path and repairs
-  window order before reconciliation: `0:agent-doc`, `1:stash`, then adjacent
-  overflow `N:stash` windows. Automatic tab sync stays on
+  with `no_autostart=false` and waits for the terminal command receipt. The controller runs the full sync
+  path and repairs window order before reconciliation: `0:agent-doc`, `1:stash`, then adjacent
+  overflow `N:stash` windows. When the requested document has no pane, that terminal boundary includes
+  pane creation in the resolved tmux session, registration, harness readiness, and document-route submission;
+  any failure is shown with the controller diagnostic. Automatic tab sync stays on
   `agent-doc.sync_tmux_layout.v1` with `no_autostart=true` and must not perform that repair step.
 - If passive `agent-doc sync --no-autostart ...` output from an older build reports that it preserved the current layout because a visible protected pane could not detach yet, JetBrains must treat that as deferred rather than complete for both the generic `[sync] sync preserved...` marker and the safe-passive `[sync] safe passive sync preserved...` marker: leave dedup state unchanged and schedule bounded retries until the requested selection applies or a newer request supersedes it.
 - If a passive sync terminal outcome contains `[sync] safe_passive_sync_lock_contention_retry`, JetBrains must treat the command as deferred, keep the dedup state unchanged, and retry the newest pending automatic selection/layout request rather than waiting for the CLI's full sync-lock budget. Manual `Sync Tmux Layout` uses Project Controller command supersede/admission instead of a long-lived editor-side native sync guard.

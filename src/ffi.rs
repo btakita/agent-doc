@@ -2733,6 +2733,11 @@ pub unsafe extern "C" fn agent_doc_sync_tmux_layout_json(
                 focus,
                 no_autostart: no_autostart != 0,
                 exact_visible: exact_visible != 0,
+                caller_kind: if no_autostart != 0 {
+                    "automatic".to_string()
+                } else {
+                    "manual".to_string()
+                },
             },
         )
     })())

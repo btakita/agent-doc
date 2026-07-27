@@ -38,6 +38,16 @@ class SyncLayoutActionTest {
     }
 
     @Test
+    fun `sync failure message surfaces controller diagnostic`() {
+        assertEquals(
+            "Sync failed: pane creation failed in tmux session agent-doc",
+            SyncLayoutAction.syncFailureMessage(
+                "pane creation failed in tmux session agent-doc",
+            ),
+        )
+    }
+
+    @Test
     fun `sync subprocess timeout returns and marks timed out`() {
         val result = SyncLayoutAction.runCommandWithTimeout(
             listOf("sh", "-c", "sleep 2"),

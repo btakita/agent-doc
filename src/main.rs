@@ -246,6 +246,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
         invocation: agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncInvocation,
     ) -> anyhow::Result<agent_doc_controller_io::project_controller::ControllerTmuxLayoutSyncReceipt>
     {
+        let routes_created_panes = invocation.routes_created_panes();
         let sync_result = if invocation.no_autostart {
             if invocation.exact_visible {
                 agent_doc_sync_io::sync::run_layout_only_exact_visible_in_project_root(
@@ -262,8 +263,15 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                     invocation.focus.as_deref(),
                 )
             }
-        } else {
+        } else if routes_created_panes {
             agent_doc_sync_io::sync::run_in_project_root(
+                project_root,
+                &invocation.columns,
+                invocation.window.as_deref(),
+                invocation.focus.as_deref(),
+            )
+        } else {
+            agent_doc_sync_io::sync::run_provision_only_in_project_root(
                 project_root,
                 &invocation.columns,
                 invocation.window.as_deref(),
@@ -281,6 +289,7 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
                 focus: invocation.focus,
                 no_autostart: invocation.no_autostart,
                 exact_visible: invocation.exact_visible,
+                routes_created_panes,
             },
         )
     }
@@ -401,16 +410,30 @@ impl agent_doc_sync_io::SyncRuntimeEffects for CliSyncRuntimeEffects {
         file_path: &str,
         context_session: Option<&str>,
         col_args: &[String],
+        route_after_start: bool,
     ) -> anyhow::Result<String> {
-        agent_doc_route_io::startup::provision_pane(
-            tmux,
-            file,
-            session_id,
-            file_path,
-            context_session,
-            col_args,
-            agent_doc_route_io::runtime_effects::route_startup_effects(),
-        )
+        let effects = agent_doc_route_io::runtime_effects::route_startup_effects();
+        if route_after_start {
+            agent_doc_route_io::startup::provision_and_route_pane(
+                tmux,
+                file,
+                session_id,
+                file_path,
+                context_session,
+                col_args,
+                effects,
+            )
+        } else {
+            agent_doc_route_io::startup::provision_pane(
+                tmux,
+                file,
+                session_id,
+                file_path,
+                context_session,
+                col_args,
+                effects,
+            )
+        }
     }
 }
 

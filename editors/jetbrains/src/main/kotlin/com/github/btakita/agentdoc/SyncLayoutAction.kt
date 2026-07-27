@@ -129,6 +129,13 @@ class SyncLayoutAction : AnAction() {
                 null
             }
 
+        internal fun syncFailureMessage(output: String): String {
+            val diagnostic = output.trim().ifEmpty {
+                "project controller returned no diagnostic"
+            }
+            return "Sync failed: ${diagnostic.take(500)}"
+        }
+
         internal fun collectVisibleMarkdownFiles(
             files: Array<out com.intellij.openapi.vfs.VirtualFile>,
         ): List<String> = files
@@ -326,7 +333,7 @@ class SyncLayoutAction : AnAction() {
                         if (notify) {
                             TerminalUtil.notifyError(
                                 project,
-                                "Sync failed through the project controller; see IDE log for details.",
+                                syncFailureMessage(receipt.output),
                             )
                         }
                     } else {

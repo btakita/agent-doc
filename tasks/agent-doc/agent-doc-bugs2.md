@@ -1,6 +1,5 @@
 ---
 agent_doc_session: b26b9957-8de6-4eae-bb98-5d7fe4d6b781
-resume: 68af54ca-b852-448f-95ed-24f29b695261
 agent: codex
 claude_model: opus
 agent_doc_format: template
@@ -187,7 +186,17 @@ Delivery:
 - parent gitlink commit `e0b2c7c84` points at 0.35.35 and will be pushed with this document closeout commit.
 
 `#lazilyconcurrentcloseout` is complete and reaped. Confidence: high. Escalation: none.
-<!-- agent:boundary:22c81156 -->
+
+### Re: Session resume cleanup — gpt-5.6-sol
+
+Accepted the removal of the stale Codex `resume` pointer. Preflight recovered the prior stale `preflight_started` cycle, and the session is now free to start with fresh Codex session identity on its next routed run.
+
+The active go-mode queue was preserved unchanged. The binary reported zero drainable heads and no continuation requirement for this cycle, so no queue or backlog item was consumed.
+
+One environment warning remains: the installed agent-doc binary and cdylib predate commit `c37600482` (`fix: preserve exact replay repair CAS`). No code-bearing work was attempted on that stale runtime; rebuild/install from `src/agent-doc` before the next implementation cycle that depends on the latest source.
+
+Changed paths: only this binary-owned session response/frontmatter closeout. Commands/evidence: agent-doc admit, preflight, plan, and document read; `tsift status` reported a fresh index. Verification: preflight recovery and the response-only planning contract completed successfully. Confidence: high. Escalation: none.
+<!-- agent:boundary:a5b6b80d -->
 <!-- /agent:exchange -->
 ## Queue
 

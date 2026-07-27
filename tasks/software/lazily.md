@@ -185,7 +185,27 @@ Pushed commits:
 - root pointer advance `acedeef05`
 
 Unrelated Python worktree state and Zig's pre-existing `AGENTS.md` edit were preserved and excluded from commits.
-<!-- agent:boundary:b923b371 -->
+
+### Re: do [#lazilyconformancecoverag] — gpt-5
+
+> **Queue prompt:**
+>
+> do [#lazilyconformancecoverag]
+
+
+Kept the C# conformance-coverage ledger open, as required by the operator staging policy. This is an umbrella admission ledger, not a parity-complete implementation task.
+
+Fresh verification at lazily-cs `813983e` confirms:
+
+- `make check` passes with 141/141 tests and zero skips.
+- The runtime manifest proves 92/124 canonical fixtures were actually opened.
+- The remaining 32 fixtures are explicitly listed as known-uncovered; the guard rejects both newly unaccounted fixtures and stale allowlist entries.
+- Multi-target package validation passes for `netstandard2.1`, `net8.0`, and `net10.0`.
+
+C# therefore remains eligible only for the exact peer/feature groups whose production surface and canonical replay have shipped. Full peer admission stays blocked by the actionable implementation items `#lzcsqueues`, `#lzcscrdt`, `#lzcsipc`, `#lzcssync`, and `#lzcsplane`; the ledger text now names those dependencies explicitly.
+
+No source paths changed in this cycle. Existing unrelated lazily-cs `AGENTS.md`, `README.md`, and build-tree state were preserved. Confidence is high because the measurement came from the runtime-opened manifest rather than static source references. No escalation is needed.
+<!-- agent:boundary:38bbf6cd -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -194,7 +214,7 @@ Unrelated Python worktree state and Zig's pre-existing `AGENTS.md` edit were pre
 - ~~do [#lzcsnugetpublish]~~
 - ~~do [#lzcspackage]~~
 - ~~do [#asyncplanenever]~~
-- do [#lazilyconformancecoverag]
+- ~~do [#lazilyconformancecoverag]~~
 - /goal Add missing lazily-cs features
 - release + publish all lazily packages
 <!-- /agent:queue -->
@@ -207,7 +227,7 @@ Unrelated Python worktree state and Zig's pre-existing `AGENTS.md` edit were pre
 - [ ] [#lzcsipc] lazily-cs: PARTIAL/STAGED — schema-defined Snapshot/Delta/CrdtSync wire types, exact externally tagged codec, all 10 DeltaOp variants, WireStamp/frontier/CRDT frames, blob descriptors, and Draft 2020-12 validation shipped at 13e8d67. Runtime conformance coverage is now 56/124 with 68 known-uncovered. Admit C# only to Snapshot/Delta/CrdtSync schema and wire peer groups. Still implement ShmBlobArena and executable BlobBackend zero-copy resolution/transport for shm, Arrow, and in-process backends before rows 26-27 admission. Plan: tasks/software/lazily-cs-parity-plan.md (rows 25-27). (stays open: shared-memory arena and zero-copy backend behavior/tests remain.)
 - [ ] [#lzcssync] lazily-cs: PARTIAL/STAGED — storage-independent IOutboxStore/DurableOutbox protocol, InMemoryOutboxStore, fsync append-only FileOutboxStore, monotonic stale-handle cursor recovery, append-before-send crash replay, and canonical outbox_store_protocol/outbox_replay_after_crash replay shipped at b103f80. Runtime coverage is now 58/124 with 66 known-uncovered. Admit C# only to the durable-outbox peer group. Still implement CrdtPlaneRuntime + anti-entropy, resync coordinator, IpcSink/IpcSource, and full-duplex SyncDriver; replay remaining reliable-sync, distributed, and message-passing corpora. Plan rows 28-32. (stays open: CRDT plane runtime, anti-entropy/resync, transports, sync driver, remaining corpora.)
 - [ ] [#lzcsplane] lazily-cs: PARTIAL/STAGED — CausalReceipt/CausalReceipts schema/projection shipped at 967c44e; all 17 typed signaling frames, strict exact codec, authoritative SignalingRoom, anti-spoof server-stamped sender, sorted self-excluding rosters, unknown-target handling, and leave semantics shipped at d663074 with canonical signaling client/server fixture replay. Runtime coverage is now 61/124 with 63 known-uncovered. Admit C# only to the exact causal-receipts and signaling-wire/open-room peer groups. Still implement general state projection/mirror, command-plane-v1, C-ABI FFI boundary, PeerPermissions/RemoteOp, SessionHandshake, instrumentation + benchmarks; replay service, agent-doc, and remaining message-passing corpora. Plan rows 33-39. (stays open: state mirror, command plane, FFI, permissions, handshake, instrumentation/benchmarks, and remaining corpora.)
-- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Fresh runtime measurement 2026-07-27: 92/124 canonical fixtures opened, 32 known-uncovered. Membership (1), coordination (5), presence (3), resilience (4), and service (4) are now runtime-opened at 6afe762 alongside the previously admitted reactive graph, collections, statechart, materialization, queue, IPC, durable-outbox, causal-receipts, signaling, temporal, rate-shaping, and windowing slices. Keep open and work the remaining ledger down only by shipping explicit tasks in tasks/software/lazily-cs-parity-plan.md; admit C# to each capability group only when that production surface and canonical replay ship.
+- [ ] [#lazilyconformancecoverag] lazily-cs: STAGED per operator — incomplete C# surfaces stay out of peer/feature test groups until implemented. Reverified 2026-07-27 at lazily-cs 813983e: 92/124 canonical fixtures are runtime-opened and 32 are explicitly known-uncovered; 141/141 tests, package checks, and the conformance guard pass. Membership, coordination, presence, resilience, and service remain admitted alongside the previously shipped reactive graph, collections, statechart, materialization, queue, IPC, durable-outbox, causal-receipts, signaling, temporal, rate-shaping, and windowing slices. (stays open: close only after #lzcsqueues, #lzcscrdt, #lzcsipc, #lzcssync, and #lzcsplane ship their remaining production surfaces and canonical replays; until then admit C# only to exact feature groups whose implementation and fixture replay are present.)
 <!-- /agent:backlog -->
 
 ## Review

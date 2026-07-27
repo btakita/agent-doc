@@ -114,6 +114,11 @@ pub struct TsiftContextPlan {
     pub test_digest_command: String,
     pub stale_fallback: String,
     pub loaded_context_ledger: LoadedContextLedger,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamic_manifest:
+        Option<agent_doc_prompt_context_io::dynamic_context::DynamicContextSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,7 +207,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
             job_packet_budget_tokens: 0,
             write_scope: Vec::new(),
             required_proof: Vec::new(),
-            tsift_context: tsift_context_plan(file),
+            tsift_context: tsift_context_plan(file, &content, &[]),
             execution_scope: ExecutionScope::Normal,
             repo_actions: Vec::new(),
             required_commands: finalize_placeholder_commands(file, &fm, &[]),
@@ -254,6 +259,7 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     )?;
     let routing = routing_fields(
         file,
+        &content,
         execution_scope,
         &repo_actions,
         &prompt_targets,
@@ -506,6 +512,7 @@ struct RoutingFields {
 
 fn routing_fields(
     file: &Path,
+    document: &str,
     execution_scope: ExecutionScope,
     repo_actions: &[String],
     prompt_targets: &[String],
@@ -554,7 +561,7 @@ fn routing_fields(
         job_packet_budget_tokens: context_budget_tokens,
         write_scope: infer_write_scope(&combined_text),
         required_proof,
-        tsift_context: tsift_context_plan(file),
+        tsift_context: tsift_context_plan(file, document, prompt_targets),
     }
 }
 
@@ -639,7 +646,7 @@ fn infer_write_scope(text: &str) -> Vec<String> {
     scope
 }
 
-fn tsift_context_plan(file: &Path) -> TsiftContextPlan {
+fn tsift_context_plan(file: &Path, document: &str, prompt_targets: &[String]) -> TsiftContextPlan {
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let root = agent_doc_fs::find_project_root(&canonical)
         .unwrap_or_else(|| canonical.parent().unwrap_or(Path::new(".")).to_path_buf());
@@ -695,6 +702,22 @@ fn tsift_context_plan(file: &Path) -> TsiftContextPlan {
             "declare bounded test-output source for this cycle",
         ),
     ]);
+    let mut diagnostics = Vec::new();
+    let dynamic_manifest =
+        match agent_doc_prompt_context_io::dynamic_context::build_dynamic_context_snapshot(
+            file,
+            document,
+            prompt_targets,
+        ) {
+            Ok(manifest) => manifest,
+            Err(err) => {
+                diagnostics.push(format!("dynamic context manifest unavailable: {err:#}"));
+                None
+            }
+        };
+    if let Some(manifest) = &dynamic_manifest {
+        diagnostics.extend(manifest.diagnostics.iter().cloned());
+    }
     TsiftContextPlan {
         status: status.to_string(),
         freshness_policy: "fresh context required for automatic dispatch; manual packets record stale or missing context explicitly".to_string(),
@@ -705,6 +728,8 @@ fn tsift_context_plan(file: &Path) -> TsiftContextPlan {
         test_digest_command,
         stale_fallback: "skip tsift graph/context evidence, continue with parent-owned execution or manual packets, and carry the diagnostic for review".to_string(),
         loaded_context_ledger,
+        dynamic_manifest,
+        diagnostics,
     }
 }
 

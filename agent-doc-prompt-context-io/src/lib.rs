@@ -11,6 +11,8 @@ use agent_doc_workflow::session_cycle::prompt_targets_from_diff;
 
 use std::path::Path;
 
+pub mod dynamic_context;
+
 pub fn build_document_section(
     file: &Path,
     diff_text: &str,
@@ -55,13 +57,21 @@ fn build_document_section_with_remote_host_scope(
         .then(|| agent_doc_response_toc_io::render_prompt_toc(file, doc, &prompt_targets))
         .flatten();
 
-    render_document_section(DocumentSectionContext {
+    let mut section = render_document_section(DocumentSectionContext {
         doc,
         report,
         prompt_targets: &prompt_targets,
         response_toc: response_toc.as_deref(),
         remote_host_scope,
-    })
+    });
+    if let Ok(Some(snapshot)) =
+        dynamic_context::build_dynamic_context_snapshot(file, doc, &prompt_targets)
+        && let Some(dynamic_context) = snapshot.as_prompt_section()
+    {
+        section.push_str("\n\n");
+        section.push_str(&dynamic_context);
+    }
+    section
 }
 
 fn remote_host_scope_for_file(file: &Path, doc: &str) -> String {

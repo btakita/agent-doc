@@ -1548,13 +1548,22 @@ dependencies = [
 name = "agent-doc-prompt-context-io"
 version = "0.35.40"
 dependencies = [
+ "agent-doc-cycle-state-io",
+ "agent-doc-element",
  "agent-doc-frontmatter",
  "agent-doc-frontmatter-io",
+ "agent-doc-fs",
+ "agent-doc-hash",
  "agent-doc-prompt-context",
  "agent-doc-response-toc-io",
  "agent-doc-session-accretion",
+ "agent-doc-sqlite",
  "agent-doc-workflow",
+ "anyhow",
+ "serde",
+ "serde_json",
  "tempfile",
+ "wait-timeout",
 ]
 
 [[package]]

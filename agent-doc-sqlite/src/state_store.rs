@@ -368,6 +368,18 @@ pub fn state_db_path(project_root: &Path) -> PathBuf {
 }
 
 pub fn open_state_db(project_root: &Path) -> Result<Connection> {
+    open_state_db_with_timeout(project_root, STATE_DB_BUSY_TIMEOUT)
+}
+
+/// Open the authoritative state database with a caller-owned contention bound.
+///
+/// Latency-sensitive optional projections use this instead of inheriting the
+/// normal 30-second recovery budget. The schema and corruption guarantees are
+/// identical to [`open_state_db`].
+pub fn open_state_db_with_timeout(
+    project_root: &Path,
+    busy_timeout: Duration,
+) -> Result<Connection> {
     let path = state_db_path(project_root);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -376,7 +388,7 @@ pub fn open_state_db(project_root: &Path) -> Result<Connection> {
     // the normal execution path: doing so would silently discard captured
     // intent and make recovery projections look authoritative. Corruption must
     // fail closed until an explicit repair reconstructs a proven ledger.
-    open_and_init_state_db(&path).with_context(|| {
+    open_and_init_state_db(&path, busy_timeout).with_context(|| {
         format!(
             "authoritative state db {} is unavailable; refusing automatic replacement",
             path.display()
@@ -448,18 +460,16 @@ pub fn reset_state_db_schema_convergence_memo() {
 /// verify `integrity_check`, drop rows whose primary key came back NULL, then
 /// let the registry rebuild from live panes (`agent-doc fix`). Preserve the
 /// corrupt original — it is the only evidence for diagnosing this properly.
-fn open_and_init_state_db(path: &Path) -> Result<Connection> {
+fn open_and_init_state_db(path: &Path, busy_timeout: Duration) -> Result<Connection> {
     let conn =
         Connection::open(path).with_context(|| format!("failed to open {}", path.display()))?;
-    conn.busy_timeout(STATE_DB_BUSY_TIMEOUT)?;
+    conn.busy_timeout(busy_timeout)?;
     let started = Instant::now();
     loop {
         match initialize_state_db_memoizing_shape(&conn, path) {
             Ok(()) => break,
-            Err(error)
-                if is_state_db_lock_error(&error) && started.elapsed() < STATE_DB_BUSY_TIMEOUT =>
-            {
-                let remaining = STATE_DB_BUSY_TIMEOUT.saturating_sub(started.elapsed());
+            Err(error) if is_state_db_lock_error(&error) && started.elapsed() < busy_timeout => {
+                let remaining = busy_timeout.saturating_sub(started.elapsed());
                 std::thread::sleep(STATE_DB_SCHEMA_RETRY_INTERVAL.min(remaining));
             }
             // Corruption is not retryable and not self-explanatory. Attach the

@@ -196,13 +196,34 @@ The active go-mode queue was preserved unchanged. The binary reported zero drain
 One environment warning remains: the installed agent-doc binary and cdylib predate commit `c37600482` (`fix: preserve exact replay repair CAS`). No code-bearing work was attempted on that stale runtime; rebuild/install from `src/agent-doc` before the next implementation cycle that depends on the latest source.
 
 Changed paths: only this binary-owned session response/frontmatter closeout. Commands/evidence: agent-doc admit, preflight, plan, and document read; `tsift status` reported a fresh index. Verification: preflight recovery and the response-only planning contract completed successfully. Confidence: high. Escalation: none.
-<!-- agent:boundary:a5b6b80d -->
+
+### Re: #tmuxsyncnewpane — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> do [#tmuxsyncnewpane]
+
+
+Implemented and released the missing-pane Sync Tmux Layout fix as agent-doc `0.35.37` and JetBrains plugin `0.2.299`.
+
+The thrash came from an optimistic completion boundary: manual Project Controller sync created and registered a pane, but returned success before the harness was ready or the document route was submitted. The JetBrains action waited only for command admission, so delayed failures were invisible and repeated syncs could keep reconciling an empty composer.
+
+Manual sync is now one terminal, fallible operation: resolve the intended tmux session, create/register the missing pane, keep the route-owned supervisor alive during startup, wait up to the shared 30-second readiness deadline, and submit `agent-doc <document>`. The controller receipt records whether created panes were routed, and JetBrains waits for that terminal result and displays the concrete controller diagnostic on failure. Automatic/passive editor reconciliation remains admission-oriented and does not wait or route newly provisioned panes.
+
+Live proof succeeded against `src/boost-client/tasks/monsterrodholders.md` from a clean missing-pane state. `agent-doc sync --col tasks/monsterrodholders.md --focus tasks/monsterrodholders.md` created pane `%43` in tmux session `0`, registered it to the document actor, observed Codex ready after 2.8 seconds, and dispatched through supervisor IPC. `session status` then showed `%43` alive, prompt-ready, supervisor-healthy, and actor-owned; the visible pane contained `› agent-doc tasks/monsterrodholders.md` and began processing the document. The successful proof pane remains alive.
+
+Changed paths: controller/sync/route Rust crates, CLI/FFI wiring, JetBrains command-plane/action code and tests, operator specifications, release metadata, and workspace versions. Commits: agent-doc `5f093b82f` and parent gitlink `5eb351f2a`.
+
+Commands/evidence: focused controller, sync, route, and JetBrains regressions; `cargo check --workspace`; final `make check` (8,225 passed, 241 skipped plus all formal models); `make tmux-ci`; `make install-full` once; final `make install`; live sync/status/tmux/ops-log proof; `agent-doc admin recycle --all-projects`; PyPI and GitHub release publication. The latest required single CI inspection was green.
+
+Verification: green. Confidence: high. Escalation: none. Release: `v0.35.37` is pushed, PyPI `0.35.37` is published, and the GitHub release is live.
+<!-- agent:boundary:e7000df5 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#lazilyconcurrentcloseout]~~
-- do [#tmuxsyncnewpane]
+- ~~do [#tmuxsyncnewpane]~~
 - do [#compactreactiveprojection]
 - do [#adctxledger]
 - do [#adctxpreflight]
@@ -240,7 +261,6 @@ Changed paths: only this binary-owned session response/frontmatter closeout. Com
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#tmuxsyncnewpane] [focused-cycle] Reproduce opening tasks/monsterrodholders.md and invoking Sync Tmux Pane when no pane exists. Trace document actor/route ownership and the tmux pane registry; make Sync Tmux Pane create and associate a new pane in the intended tmux session, submit the document route, and fail visibly if creation cannot complete. Add controller/plugin regression coverage and a live pane proof.
 - [ ] [#compactreactiveprojection] [focused-cycle] Generalize the pass-scoped Lazily CurrentDocument projection already used by session-check into shared compact/commit/closeout infrastructure. Cache derived document, pipeline, and queue projections per CRDT revision/state vector; invalidate on every operator edit; keep Yrs/CRDT as the sole durable text authority. Reuse the recent ThreadSafeQueue and ThreadSafeSourceMap/ThreadSafeComputedMap support, remove remaining duplicate authority resolutions, and add latency plus concurrent-typing tests proving cached projections never hide operator additions or deletions.
 - [ ] [#adctxledger] [focused-cycle] Dynamic-context injection ledger Phase 2: implement the durable SQLite schema and helpers for context_injections, atomic per-turn insertion with cycle state, and indexed duplicate/diagnostic queries. Preserve lazily as live in-process state and SQLite as durable replay memory. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md
 - [ ] [#adctxpreflight] [focused-cycle] Dynamic-context injection ledger Phase 3 after #adctxledger: wire preflight/plan to build candidate context snapshots, use tsift context packs when applicable, consult the durable injection ledger, and emit the expanded/referenced/skipped context manifest without replaying unchanged chunks. Plan: tasks/agent-doc/plan-dynamic-context-injection-ledger.md

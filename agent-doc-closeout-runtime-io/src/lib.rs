@@ -47,6 +47,22 @@ fn current_epoch_secs() -> u64 {
         .as_secs()
 }
 
+pub use agent_doc_controller_io::project_controller::CloseoutCycleWaitOutcome;
+
+/// Subscribe to the controller-owned closeout projection for one bounded
+/// recovery interval. The controller returns immediately when the cycle closes
+/// or its request-scoped owner guard releases.
+pub fn await_closeout_cycle_progress(
+    file: &Path,
+    cycle_id: &str,
+) -> anyhow::Result<CloseoutCycleWaitOutcome> {
+    agent_doc_controller_io::project_controller::await_closeout_cycle_progress_for_file(
+        file,
+        cycle_id,
+        std::time::Duration::from_secs(30),
+    )
+}
+
 fn try_claim_recovery_closeout_owner(
     file: &std::path::Path,
     cycle_id: &str,
@@ -77,7 +93,8 @@ fn try_claim_recovery_closeout_owner(
             owner_id,
         })),
         controller::CloseoutOwnerClaimOutcome::HeldByOther(owner) => Ok(Err(format!(
-            "foreground closeout owner {} pid={} role={} remains active until {}",
+            "foreground closeout operation is already in progress: owner {} pid={} role={}; \
+             recovery follows the cycle's terminal state (lease stopgap expires at {})",
             owner.owner_id, owner.owner_pid, owner.role, owner.expires_secs
         ))),
         controller::CloseoutOwnerClaimOutcome::CycleSuperseded => {

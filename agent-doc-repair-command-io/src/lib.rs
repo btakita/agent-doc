@@ -159,13 +159,52 @@ pub fn run_session_check(file: &Path, codex_final_gate: bool) -> Result<()> {
         // The replay is keyed and idempotent. Retryable or operator-owned
         // outcomes remain durable and are reported by the canonical check
         // below; a committed or superseded replay lets it return cleanly.
-        let _ = resume_captured_finalize(file, &key);
+        let outcome = resume_captured_finalize(file, &key);
+        if let CapturedFinalizeResumeOutcome::Retryable { reason } = &outcome
+            && retryable_closeout_is_owned(reason)
+        {
+            // The conflicting PID is commonly the long-lived route supervisor,
+            // not a short-lived CLI. Follow the exact cycle instead of waiting
+            // for that process or its five-minute lease to disappear.
+            let wait_outcome =
+                agent_doc_closeout_runtime_io::await_closeout_cycle_progress(file, &key.cycle_id);
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "session_check_closeout_cycle_wait file={} cycle_id={} outcome={wait_outcome:?}",
+                    file.display(),
+                    key.cycle_id,
+                ),
+            );
+            let retry_recovery = matches!(
+                &wait_outcome,
+                Ok(
+                    agent_doc_closeout_runtime_io::CloseoutCycleWaitOutcome::OwnerReleased
+                        | agent_doc_closeout_runtime_io::CloseoutCycleWaitOutcome::TimedOut
+                ) | Err(_)
+            );
+            if retry_recovery {
+                // OwnerReleased covers the normal request guard. TimedOut is a
+                // bounded crashed-owner fallback: the retry re-runs the
+                // controller's liveness-aware claim instead of waiting 300s.
+                // A dropped controller transport takes the same self-healing
+                // path because the retry can launch/reconnect the controller.
+                let _ = resume_captured_finalize(file, &key);
+            }
+        }
     }
     agent_doc_session_check_io::run_with_options(
         file,
         codex_final_gate,
         &agent_doc_closeout_runtime_io::session_check_effects(),
     )
+}
+
+fn retryable_closeout_is_owned(reason: &str) -> bool {
+    let lower = reason.to_ascii_lowercase();
+    lower.contains("foreground closeout")
+        || lower.contains("operation is already in progress")
+        || lower.contains("active recovery attempt")
 }
 
 fn resume_captured_finalize_intent(
@@ -279,6 +318,16 @@ mod captured_finalize_resume_tests {
                 "visible user-authored content diverged from the captured baseline"
             ),
             CapturedFinalizeResumeOutcome::NeedsOperator { .. }
+        ));
+    }
+
+    #[test]
+    fn foreground_owner_collision_subscribes_instead_of_waiting_for_the_lease() {
+        assert!(retryable_closeout_is_owned(
+            "foreground closeout operation is already in progress; lease stopgap expires later"
+        ));
+        assert!(!retryable_closeout_is_owned(
+            "visible user-authored content diverged from the captured baseline"
         ));
     }
 }

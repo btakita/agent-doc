@@ -71,6 +71,15 @@ transient control markers (including `no-pending-capture`) may be absent from
 the visible document without making an otherwise complete response eligible
 for replay or partial-line removal. Recovery must leave that response intact.
 
+When `session-check` collides with a foreground closeout for the same captured
+operation, it follows the exact controller-owned cycle projection. The owner
+PID may be a long-lived route supervisor and therefore cannot prove that one
+finalize request is still running. Terminal-cycle and request-owner-release
+facts wake recovery immediately; owner release, controller reconnect, or a
+bounded 30-second crashed-owner fallback retries the keyed operation once.
+Foreground lease expiry remains a safety stopgap, not the normal synchronization
+mechanism.
+
 If a route becomes stale after a turn stage's entry probe—for example, queue
 convergence times out while waiting for a terminal receipt—that stage must
 schedule an automatic safe-boundary editor/supervisor recycle before returning.

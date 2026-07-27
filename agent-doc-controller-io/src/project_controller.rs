@@ -1110,6 +1110,63 @@ impl ControllerRuntime {
         }
     }
 
+    /// Wait for the closeout that currently owns `cycle_id` to stop blocking a
+    /// recovery attempt.
+    ///
+    /// The owner PID may belong to a long-lived route supervisor, so process
+    /// liveness cannot identify the end of one closeout request. The controller
+    /// instead observes the exact cycle projection and wakes on terminal-cycle
+    /// or owner-release facts.
+    fn wait_for_closeout_cycle_progress(
+        &self,
+        document_hash: &str,
+        cycle_id: &str,
+        timeout: Duration,
+    ) -> rpc::CloseoutCycleWaitOutcome {
+        let started = Instant::now();
+        let mut observed_owner_id: Option<String> = None;
+        let mut memory = self.memory.lock();
+        loop {
+            let Some(closeout) = memory
+                .state_projection
+                .document(document_hash)
+                .map(|document| &document.closeout)
+            else {
+                return rpc::CloseoutCycleWaitOutcome::Superseded;
+            };
+            if closeout.cycle_id.as_deref() != Some(cycle_id) {
+                return rpc::CloseoutCycleWaitOutcome::Superseded;
+            }
+            if !closeout
+                .phase
+                .is_some_and(agent_doc_turn::CyclePhase::is_open)
+            {
+                return rpc::CloseoutCycleWaitOutcome::Terminal;
+            }
+
+            let current_owner_id = closeout.owner.as_ref().map(|owner| owner.owner_id.as_str());
+            match observed_owner_id.as_deref() {
+                Some(observed) if current_owner_id != Some(observed) => {
+                    return rpc::CloseoutCycleWaitOutcome::OwnerReleased;
+                }
+                None => {
+                    let Some(current_owner_id) = current_owner_id else {
+                        return rpc::CloseoutCycleWaitOutcome::OwnerReleased;
+                    };
+                    observed_owner_id = Some(current_owner_id.to_string());
+                }
+                _ => {}
+            }
+
+            let elapsed = started.elapsed();
+            if elapsed >= timeout {
+                return rpc::CloseoutCycleWaitOutcome::TimedOut;
+            }
+            self.state_projection_waiters
+                .wait_for(&mut memory, timeout.saturating_sub(elapsed));
+        }
+    }
+
     fn state_subscribe(
         &self,
         document_hash: &str,

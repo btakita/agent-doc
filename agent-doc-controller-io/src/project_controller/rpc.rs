@@ -35,6 +35,10 @@ const CONTROLLER_VISIBLE_WRITE_AWAIT_MAX: Duration = Duration::from_secs(120);
 /// The controller parks on the hub's Lazily convergence cell; there is no polling
 /// cadence and no repeated RPC while the observed revision is unchanged.
 const CONTROLLER_DELIVERY_CONVERGENCE_AWAIT_MAX: Duration = Duration::from_secs(120);
+/// A session-check collision normally resolves as soon as the foreground
+/// closeout publishes a terminal fact. This ceiling bounds the exceptional
+/// crashed-owner path before recovery retries its liveness-aware claim.
+const CONTROLLER_CLOSEOUT_CYCLE_AWAIT_MAX: Duration = Duration::from_secs(30);
 const CONTROLLER_MODEL_PRESSURE_COOLDOWN: Duration = Duration::from_secs(30);
 const CONTROLLER_MODEL_PRESSURE_STATE_KEY: &str = "controller_model_pressure_deadline";
 /// A CP-owned git commit (barrier + stage + commit + boundary reposition) can run
@@ -3077,6 +3081,15 @@ pub fn closeout_owner_lease_secs(role: &str) -> u64 {
     agent_doc_state_backbone::closeout_owner_lease_secs(role)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CloseoutCycleWaitOutcome {
+    Terminal,
+    Superseded,
+    OwnerReleased,
+    TimedOut,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CloseoutOwnerReleaseRequest {
     cycle_id: String,
@@ -3175,6 +3188,45 @@ pub fn release_closeout_owner_for_file(
     request_controller(
         &project_root,
         ControllerRequest::command_plane_submit(submit_json),
+    )
+}
+
+/// Await the end of the closeout request that currently owns `cycle_id`.
+///
+/// This follows controller projection changes rather than the owner PID: route
+/// supervisors are intentionally long-lived after an individual request ends.
+pub fn await_closeout_cycle_progress_for_file(
+    file: &Path,
+    cycle_id: &str,
+    wait: Duration,
+) -> Result<CloseoutCycleWaitOutcome> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)
+        .with_context(|| format!("no project root found for {}", file.display()))?;
+    let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    let wait = wait.min(CONTROLLER_CLOSEOUT_CYCLE_AWAIT_MAX);
+    let payload = serde_json::json!({
+        "cycle_id": cycle_id,
+        "wait_ms": u64::try_from(wait.as_millis()).unwrap_or(u64::MAX),
+    });
+    let request = ControllerRequest {
+        command: "closeout_cycle_progress_await".to_string(),
+        file: Some(canonical),
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some("session_check".to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: Some(payload.to_string()),
+    };
+    request_existing_controller_with_timeout(
+        &project_root,
+        request,
+        wait.saturating_add(CONTROLLER_RPC_TIMEOUT),
     )
 }
 
@@ -9503,6 +9555,9 @@ pub(crate) fn handle_request_locked(
             runtime.as_ref(),
             request,
         )),
+        "closeout_cycle_progress_await" => controller_envelope(
+            handle_closeout_cycle_progress_await(runtime.as_ref(), request),
+        ),
         "command_plane_submit" => {
             // #af88 B enforcement: a command-plane submit persists facts (the
             // durable sink), so refuse it when the caller proves this controller
@@ -11067,6 +11122,7 @@ fn run_closeout_owner_claim(
     };
     runtime.supervisor_recycle_graph.set(recycle);
     runtime.supervisor_recycle_waiters.notify_all();
+    runtime.state_projection_waiters.notify_all();
 
     agent_doc_ops_log_io::log_op(
         file,
@@ -11130,7 +11186,31 @@ fn run_closeout_owner_release(
     };
     runtime.supervisor_recycle_graph.set(recycle);
     runtime.supervisor_recycle_waiters.notify_all();
+    runtime.state_projection_waiters.notify_all();
     Ok(released)
+}
+
+pub(crate) fn handle_closeout_cycle_progress_await(
+    runtime: &ControllerRuntime,
+    request: ControllerRequest,
+) -> Result<CloseoutCycleWaitOutcome> {
+    let file = request_file(&request)?;
+    let canonical = file.canonicalize().unwrap_or(file);
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let payload_json = request_string(&request.diagnostic_payload, "diagnostic_payload")?;
+    let payload: serde_json::Value =
+        serde_json::from_str(&payload_json).context("parse closeout cycle await payload")?;
+    let cycle_id = payload
+        .get("cycle_id")
+        .and_then(|value| value.as_str())
+        .context("closeout cycle await missing cycle_id")?;
+    let wait = payload
+        .get("wait_ms")
+        .and_then(|value| value.as_u64())
+        .map(Duration::from_millis)
+        .unwrap_or(CONTROLLER_CLOSEOUT_CYCLE_AWAIT_MAX)
+        .min(CONTROLLER_CLOSEOUT_CYCLE_AWAIT_MAX);
+    Ok(runtime.wait_for_closeout_cycle_progress(&document_hash, cycle_id, wait))
 }
 
 pub(crate) fn handle_closeout_owner_claim(
@@ -17587,6 +17667,75 @@ mod tests {
                 ..
             }) if owner_id == "owner-2"
         ));
+    }
+
+    /// `#closeoutwaitchurn` — the foreground PID may be the long-lived route
+    /// supervisor. Recovery must wake when that request's owner guard releases,
+    /// not when the process exits or its five-minute lease expires.
+    #[test]
+    fn closeout_cycle_await_wakes_on_request_owner_release() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        std::fs::create_dir_all(dir.path().join("tasks")).unwrap();
+        let doc = dir.path().join("tasks/session.md");
+        std::fs::write(&doc, "body\n").unwrap();
+        let cycle = agent_doc_cycle_state_io::start_preflight(&doc, Some("body\n"), Some("body\n"))
+            .unwrap();
+        let bootstrap = test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap.clone()).unwrap();
+        let owner_id = "long-lived-supervisor";
+        let claim = run_closeout_owner_claim(
+            &bootstrap,
+            &runtime,
+            &doc,
+            CloseoutOwnerClaimRequest {
+                expected_cycle_id: Some(cycle.cycle_id.clone()),
+                owner_id: owner_id.to_string(),
+                owner_pid: std::process::id(),
+                role: "foreground_finalize".to_string(),
+                now_secs: 10,
+                lease_secs: CLOSEOUT_OWNER_LEASE_SECS,
+                allow_dead_owner_takeover: true,
+            },
+        )
+        .unwrap();
+        assert!(matches!(claim, CloseoutOwnerClaimOutcome::Acquired(_)));
+
+        let releaser = Arc::clone(&runtime);
+        let release_bootstrap = bootstrap.clone();
+        let release_doc = doc.clone();
+        let release_cycle = cycle.cycle_id.clone();
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            run_closeout_owner_release(
+                &release_bootstrap,
+                &releaser,
+                &release_doc,
+                CloseoutOwnerReleaseRequest {
+                    cycle_id: release_cycle,
+                    owner_id: owner_id.to_string(),
+                    reason: "request_guard_dropped".to_string(),
+                    released_secs: 11,
+                },
+            )
+            .unwrap();
+        });
+
+        let document_hash = agent_doc_hash::document_id_for_path(&doc);
+        let started = Instant::now();
+        let outcome = runtime.wait_for_closeout_cycle_progress(
+            &document_hash,
+            &cycle.cycle_id,
+            Duration::from_secs(30),
+        );
+        let elapsed = started.elapsed();
+        releaser.join().unwrap();
+
+        assert_eq!(outcome, CloseoutCycleWaitOutcome::OwnerReleased);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "projection release must wake the waiter, not its deadline ({elapsed:?})"
+        );
     }
 
     /// `#restartstderrbleed` — the auto-install child must NOT inherit the

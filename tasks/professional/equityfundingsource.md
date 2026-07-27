@@ -121,7 +121,13 @@ fix(public): ship site photos and Home nav (#fixbrokenphotos)
 Track public images in clean deployments, add Home navigation, document the
 asset contract, and test every required production image.
 ```
-<!-- agent:boundary:5ea6a767 -->
+
+### Re: Queue recovery — gpt-5
+
+> **Queue prompt:** Please add a Home link in the main navigation.
+
+The Home link was completed and deployed in the prior response. This entry only repairs its stale queue bookkeeping; no implementation changed.
+<!-- agent:boundary:6488dd94 -->
 <!-- /agent:exchange -->
 
 <!-- agent:queue preset="#spec-test-commit-push" priority -->

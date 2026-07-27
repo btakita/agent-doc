@@ -3033,6 +3033,12 @@ pub fn normalize_recoverable_response_replay_duplication(content: &str) -> Optio
     {
         normalized = repaired;
     }
+    if !agent_projection_integrity_valid(&normalized)
+        && let Some(repaired) =
+            agent_doc_element::element::repair_duplicated_document_suffix(&normalized)
+    {
+        normalized = repaired;
+    }
     if !agent_projection_integrity_valid(&normalized) {
         normalized = agent_doc_element::element::repair_single_unmatched_duplicate_component_close(
             &normalized,

@@ -217,12 +217,23 @@ fn document_without_matching_resume_id(current: &str, id: &str) -> Result<Option
     Ok(Some(frontmatter::write(&fm, body)?))
 }
 
+fn stale_resume_clear_target(file: &Path, current: &str, id: &str) -> Result<Option<String>> {
+    let normalized =
+        agent_doc_document_realtime_io::normalize_recoverable_response_replay_duplication_for_file(
+            file,
+            current,
+            "start_stale_resume_clear",
+        )?
+        .unwrap_or_else(|| current.to_string());
+    document_without_matching_resume_id(&normalized, id)
+}
+
 fn clear_document_resume_id_if_matches(file: &Path, id: &str) -> Result<bool> {
     let current = agent_doc_document_realtime_io::try_resolve_current_document_content(
         file,
         "start_stale_resume_clear",
     )?;
-    let Some(updated) = document_without_matching_resume_id(&current, id)? else {
+    let Some(updated) = stale_resume_clear_target(file, &current, id)? else {
         return Ok(false);
     };
     agent_doc_document_realtime_io::atomic_write_if_current_through_authority(
@@ -2040,6 +2051,32 @@ mod tests {
             None,
             "a different current resume pointer must survive stale recovery"
         );
+    }
+
+    #[test]
+    fn stale_resume_clear_repairs_exact_duplicated_tail_in_the_same_target() {
+        let file = Path::new("/tmp/stale-resume-suffix-repair.md");
+        let sound = concat!(
+            "---\nagent: codex\nresume: stale-id\n---\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] Root cause, even though the editor owns the cut.\n",
+            "<!-- /agent:review -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let tail = &sound[sound.find(", even though").unwrap()..];
+        let corrupted = format!("{sound}{tail}");
+
+        let updated = stale_resume_clear_target(file, &corrupted, "stale-id")
+            .unwrap()
+            .expect("matching stale pointer and exact suffix are repairable");
+        let (fm, _) = frontmatter::parse(&updated).unwrap();
+        assert_eq!(fm.resume, None);
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&updated),
+            None
+        );
+        assert_eq!(updated.matches("Root cause").count(), 1);
     }
 
     #[test]

@@ -1518,6 +1518,39 @@ pub fn repair_single_unmatched_duplicate_component_close(doc: &str) -> Option<St
         .then_some(repaired)
 }
 
+/// Collapse one exact document suffix that a replica refresh appended after the
+/// already-complete document.
+///
+/// The repair is deliberately narrower than generic deduplication: the retained
+/// prefix must already be structurally sound, the appended bytes must be an
+/// exact suffix of that prefix, and the duplicated suffix must carry agent-doc
+/// structure. Those proofs distinguish binary-owned refresh scaffolding from
+/// repeated operator prose.
+pub fn repair_duplicated_document_suffix(doc: &str) -> Option<String> {
+    structural_corruption_reason(doc)?;
+
+    let line_starts = std::iter::once(0)
+        .chain(
+            doc.match_indices('\n')
+                .map(|(index, _)| index + 1)
+                .filter(|&index| index < doc.len()),
+        )
+        .collect::<Vec<_>>();
+    for split in line_starts.into_iter().rev() {
+        let prefix = &doc[..split];
+        let suffix = &doc[split..];
+        if prefix.len() < suffix.len()
+            || (!suffix.contains("<!-- agent:") && !suffix.contains("<!-- /agent:"))
+            || !prefix.ends_with(suffix)
+            || structural_corruption_reason(prefix).is_some()
+        {
+            continue;
+        }
+        return Some(prefix.to_string());
+    }
+    None
+}
+
 /// Detect structural corruption that must never be adopted as a snapshot base
 /// (`#dupcontent`). Returns `Some(reason)` when the document is corrupt:
 /// - a parse failure (mismatched / unclosed markers),
@@ -3383,6 +3416,55 @@ Fix applied to skip non-agent <!-- sequences.
             )),
             None,
             "documentation inside a code fence is not binary scaffolding"
+        );
+    }
+
+    #[test]
+    fn repair_duplicated_document_suffix_collapses_partial_component_tail() {
+        let sound = concat!(
+            "---\nagent_doc_session: suffix-repair\n---\n\n",
+            "<!-- agent:review -->\n",
+            "- [/] Long diagnosis, even though the live editor owns the cut.\n",
+            "- [/] Keep this operator-authored row.\n",
+            "<!-- /agent:review -->\n\n",
+            "<!-- agent:icebox -->\n",
+            "- [ ] Future item.\n",
+            "<!-- /agent:icebox -->\n\n",
+            "<!-- agent:done -->\n",
+            "<!-- completed work archived -->\n",
+            "<!-- /agent:done -->\n",
+        );
+        let duplicated_tail = sound
+            .find(", even though")
+            .map(|start| &sound[start..])
+            .expect("fixture contains the mid-row suffix");
+        let corrupted = format!("{sound}{duplicated_tail}");
+
+        assert!(structural_corruption_reason(&corrupted).is_some());
+        assert_eq!(
+            repair_duplicated_document_suffix(&corrupted).as_deref(),
+            Some(sound)
+        );
+    }
+
+    #[test]
+    fn repair_duplicated_document_suffix_requires_exact_structural_evidence() {
+        let sound = concat!(
+            "<!-- agent:review -->\n",
+            "- [/] Repeated operator prose.\n",
+            "<!-- /agent:review -->\n",
+        );
+        assert_eq!(
+            repair_duplicated_document_suffix(&format!("{sound}Repeated operator prose.\n")),
+            None,
+            "plain repeated prose is never binary-owned repair authority"
+        );
+        assert_eq!(
+            repair_duplicated_document_suffix(&format!(
+                "{sound}<!-- /agent:review -->\nchanged tail\n"
+            )),
+            None,
+            "a non-exact structural tail must fail closed"
         );
     }
 

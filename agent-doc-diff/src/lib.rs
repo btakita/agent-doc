@@ -2060,11 +2060,13 @@ pub fn detect_orchestration_request(diff: &str) -> Option<OrchestrationRequest> 
             .map(|line| line.trim())
             .filter(|line| !line.is_empty() && parse_markdown_list_item(line).is_none())
             .collect();
-        let trigger_text = if trigger_lines.is_empty() {
-            block.join(" ")
-        } else {
-            trigger_lines.join(" ")
-        };
+        // Orchestration is an explicit batch-level instruction. Do not infer it
+        // from words inside task bodies: a task such as "fix concurrent editor
+        // mutation" describes its subject, not how the batch should execute.
+        if trigger_lines.is_empty() {
+            continue;
+        }
+        let trigger_text = trigger_lines.join(" ");
         let Some(mode) = detect_orchestration_mode(&trigger_text) else {
             continue;
         };
@@ -4356,6 +4358,15 @@ Done.\n\
         let request = detect_orchestration_request(diff).expect("expected orchestration request");
         assert_eq!(request.mode, OrchestrationRequestMode::Parallel);
         assert_eq!(request.task_count, 2);
+    }
+
+    #[test]
+    fn task_subject_does_not_become_an_orchestration_instruction() {
+        let diff = "--- snapshot\n+++ queue\n@@ -0,0 +1,2 @@\n\
++- do [#closeout] Fix concurrent editor mutation.\n\
++- do [#tmux] Open a missing tmux pane.\n";
+
+        assert_eq!(detect_orchestration_request(diff), None);
     }
 
     #[test]

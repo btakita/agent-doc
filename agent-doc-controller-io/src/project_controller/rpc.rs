@@ -10504,12 +10504,99 @@ fn request_editor_replica_rebuild_after_restart(project_root: &Path) {
     }
 }
 
+fn reliable_sync_status_request(caller: &str) -> ControllerRequest {
+    ControllerRequest {
+        command: "reliable_sync_status".to_string(),
+        file: None,
+        session_id: None,
+        pane_id: None,
+        window_id: None,
+        generation: None,
+        state: None,
+        caller: Some(caller.to_string()),
+        reason: None,
+        supervisor_pid: None,
+        supervisor_socket: None,
+        command_kind: None,
+        diagnostic_payload: None,
+    }
+}
+
+fn reliable_sync_status_reports_file_live(
+    status: &ControllerReliableSyncStatusResponse,
+    document_hash: &str,
+) -> bool {
+    status
+        .plane_live_docs
+        .iter()
+        .any(|hash| hash == document_hash)
+        || status
+            .registrations
+            .iter()
+            .any(|registration| registration.document_hash == document_hash)
+}
+
 /// Default-on liveness authority with a durable cold path. The hot path is one
 /// in-memory CRDT projection read. A cold process replays the receiver journal
-/// plus the sender's retained suffix; it never reconciles live-buffer sidecars or
-/// consults a plugin-owner lease or live-buffer filesystem model.
+/// plus the sender's retained suffix. Short-lived clients additionally reconcile
+/// a cold/stale local projection against the already-running controller's Lazily
+/// projection before declaring disk authoritative.
 pub fn reliable_sync_editor_live_for_file(file: &Path) -> bool {
-    agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file)
+    if agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file) {
+        return true;
+    }
+    // The controller owns the authoritative projection. Never ask its socket
+    // from the controller process itself.
+    if agent_doc_crdt_relay_io::process_serves_relay_hub() {
+        return false;
+    }
+    let Some(project_root) = agent_doc_project_root_io::project_root_containing(file) else {
+        return false;
+    };
+    let stream = match connect(&project_root) {
+        Ok(stream) => stream,
+        Err(_) => return false,
+    };
+    let document_hash = agent_doc_hash::document_id_for_path(file);
+    match request_controller_on_stream_with_timeout::<ControllerReliableSyncStatusResponse>(
+        &project_root,
+        reliable_sync_status_request("reliable_sync_editor_live_for_file"),
+        CONTROLLER_CRDT_REVISION_READ_TIMEOUT,
+        stream,
+    ) {
+        Ok(status) => {
+            let live = reliable_sync_status_reports_file_live(&status, &document_hash);
+            if live {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "reliable_sync_liveness_reconciled file={} authority=controller document_hash={}",
+                        file.display(),
+                        document_hash
+                    ),
+                );
+            }
+            live
+        }
+        Err(error) => {
+            // A connected controller whose authority cannot be observed is
+            // unknown, not proof that the editor closed. Fail closed so a
+            // transient recycle/skew cannot authorize a direct disk replace.
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "reliable_sync_liveness_uncertain file={} authority=controller recovery=defer_disk_write error={}",
+                    file.display(),
+                    format!("{error:#}")
+                        .replace('\n', " | ")
+                        .chars()
+                        .take(160)
+                        .collect::<String>()
+                ),
+            );
+            true
+        }
+    }
 }
 
 /// The hot-path CRDT authority for `file` (sidecar-retirement P3/P4). The
@@ -10607,22 +10694,10 @@ fn handle_reliable_sync_status(
 
 /// Client side of the `reliable_sync_status` diagnostic RPC.
 pub fn reliable_sync_status(project_root: &Path) -> Result<ControllerReliableSyncStatusResponse> {
-    let request = ControllerRequest {
-        command: "reliable_sync_status".to_string(),
-        file: None,
-        session_id: None,
-        pane_id: None,
-        window_id: None,
-        generation: None,
-        state: None,
-        caller: Some("reliable_sync_status".to_string()),
-        reason: None,
-        supervisor_pid: None,
-        supervisor_socket: None,
-        command_kind: None,
-        diagnostic_payload: None,
-    };
-    request_controller::<ControllerReliableSyncStatusResponse>(project_root, request)
+    request_controller::<ControllerReliableSyncStatusResponse>(
+        project_root,
+        reliable_sync_status_request("reliable_sync_status"),
+    )
 }
 
 /// Resolve live editor registrations for one document from the controller-owned
@@ -10635,7 +10710,7 @@ pub fn live_editor_registrations_for_file(
     // replica is actually attached. Starting or polling a project controller
     // to prove an already-detached document adds a 45s retry ladder to repair
     // and can steal focus from unrelated operator activity.
-    if !agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached() {
+    if !reliable_sync_editor_live_for_file(file) {
         return Ok(Vec::new());
     }
     let project_root = agent_doc_project_root_io::project_root_containing(file)
@@ -21618,6 +21693,10 @@ mod tests {
             status
                 .plane_live_docs
                 .contains(&"docwire-status".to_string())
+        );
+        assert!(
+            reliable_sync_status_reports_file_live(&status, "docwire-status"),
+            "a short-lived client must honor the controller's live-doc projection even before a replica registration appears"
         );
         let pids = status
             .per_doc_pids

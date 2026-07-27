@@ -2251,34 +2251,6 @@ pub fn apply_canonical_replace_if_attached(
             })?;
         }
 
-        if matches!(
-            query_live_editor_authority(file, source),
-            Ok(agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica)
-        ) {
-            let intent_id = ensure_deferred_document_write_intent(
-                file,
-                expected_current,
-                content,
-                source,
-                DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
-            )?;
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "{source}_crdt_write_deferred file={} intent_id={} content_hash={} targets=0 live_editors=0 recovery=await_editor_replica_no_disk_write reason=missing_relay_model",
-                    file.display(),
-                    intent_id,
-                    agent_doc_hash::content_hash(content),
-                ),
-            );
-            let recycle_status = agent_doc_controller_io::project_controller::
-                schedule_stale_editor_replica_cp_recycle(file, source);
-            return Err(await_editor_replica_no_disk_write(format!(
-                "{source}: retained the canonical write for {} in Lazily state (intent_id={intent_id}), but no editor replica was registered to receive it; disk was not written; supervisor_recycle={recycle_status}; recovery=await_editor_replica_no_disk_write_then_session_check; run only agent-doc session-check for the existing binary-owned capture; do not resubmit finalize, write --commit, or --force-disk",
-                file.display(),
-            )));
-        }
-
         let mut delivery_wait_cursor: Option<(u64, usize)> = None;
         let observed = match observe_live_editor_authority_after_model_ensure(file, source) {
             Ok(current) => Some(current),
@@ -2546,13 +2518,13 @@ pub fn apply_canonical_replace_if_attached(
                         // exact merged target and refresh the supervisor/plugin
                         // bridge at the next safe capture-backed checkpoint.
                         let editor_delivery_worker_stale =
-                agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file)
-                    && agent_doc_controller_io::project_controller::live_editor_registration_for_file(
-                        file,
-                    )
-                    .ok()
-                    .flatten()
-                    .is_none();
+                            agent_doc_controller_io::project_controller::
+                                reliable_sync_editor_live_for_file(file)
+                                && agent_doc_controller_io::project_controller::
+                                    live_editor_registration_for_file(file)
+                                    .ok()
+                                    .flatten()
+                                    .is_none();
                         if editor_delivery_worker_stale {
                             let intent_id = ensure_deferred_document_write_intent(
                                 file,
@@ -3086,8 +3058,11 @@ pub fn normalize_recoverable_response_replay_duplication(content: &str) -> Optio
     // comment makes the document unparseable and blocks every one of them. The
     // boundary is transient binary-owned scaffolding and the repair is lossless,
     // so this cannot touch operator prose.
-    let mut normalized = agent_doc_element::element::repair_malformed_boundary_comment(content)
-        .unwrap_or_else(|| content.to_string());
+    let mut normalized =
+        agent_doc_element::element::repair_malformed_exchange_close_comment(content)
+            .unwrap_or_else(|| content.to_string());
+    normalized = agent_doc_element::element::repair_malformed_boundary_comment(&normalized)
+        .unwrap_or(normalized);
     normalized = agent_doc_merge::response_cell::deduplicate_response_cells(&normalized)
         .ok()
         .flatten()
@@ -3329,10 +3304,11 @@ pub fn reconcile_pending_editor_cut(
 /// Returns `None` when there was no welded marker, so sound documents are never
 /// rewritten.
 fn heal_welded_boundary(content: &str) -> Option<String> {
-    let repaired = agent_doc_element::element::repair_malformed_boundary_comment(content)?;
-    Some(agent_doc_template::reposition_boundary_to_end_clean(
-        &repaired,
-    ))
+    let mut repaired = agent_doc_element::element::repair_malformed_exchange_close_comment(content)
+        .unwrap_or_else(|| content.to_string());
+    repaired = agent_doc_element::element::repair_malformed_boundary_comment(&repaired)
+        .unwrap_or(repaired);
+    (repaired != content).then(|| agent_doc_template::reposition_boundary_to_end_clean(&repaired))
 }
 
 fn canonicalize_and_validate_agent_rebase(

@@ -228,14 +228,23 @@ pub fn normalize_template_structure_or_fail_preserving(
     file: &Path,
     preserve_doc: Option<&str>,
 ) -> Result<String> {
-    let orphan_repaired =
-        agent_doc_element::element::repair_standalone_orphan_comment_terminators(content);
+    let malformed_close_repaired =
+        agent_doc_element::element::repair_malformed_exchange_close_comment(content);
+    if malformed_close_repaired.is_some() {
+        eprintln!(
+            "[write] normalize_template_structure: restored malformed closing exchange marker"
+        );
+    }
+    let repairable_content = malformed_close_repaired.as_deref().unwrap_or(content);
+    let orphan_repaired = agent_doc_element::element::repair_standalone_orphan_comment_terminators(
+        repairable_content,
+    );
     if orphan_repaired.is_some() {
         eprintln!(
             "[write] normalize_template_structure: removed standalone orphan HTML comment terminator"
         );
     }
-    let repairable_content = orphan_repaired.as_deref().unwrap_or(content);
+    let repairable_content = orphan_repaired.as_deref().unwrap_or(repairable_content);
     let lifted = lift_pending_from_exchange_safe(repairable_content, file);
     let deduped_openers = {
         let mut result = lifted;
@@ -652,6 +661,31 @@ mod tests {
 
         assert!(!normalized.contains("\n -->\n"));
         assert!(normalized.contains("Response body."));
+        assert_eq!(
+            agent_doc_element::element::structural_corruption_reason(&normalized),
+            None
+        );
+    }
+
+    #[test]
+    fn normalize_template_structure_repairs_close_without_replacing_operator_queue_cut() {
+        let temp = TempDir::new().unwrap();
+        let file = temp.path().join("doc.md");
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Prompt.\n",
+            "### Re: Prompt. — gpt-5\n\nResponse body.\n",
+            "<!-- /agent:exchange --\n",
+            "<!-- agent:queue -->\n",
+            "- do [#operator-added]\n",
+            "<!-- /agent:queue -->\n",
+        );
+
+        let normalized = normalize_template_structure_or_fail(doc, &file).unwrap();
+
+        assert!(normalized.contains("<!-- /agent:exchange -->\n"));
+        assert!(normalized.contains("- do [#operator-added]\n"));
+        assert!(!normalized.contains("#operator-deleted"));
         assert_eq!(
             agent_doc_element::element::structural_corruption_reason(&normalized),
             None

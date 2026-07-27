@@ -1144,10 +1144,9 @@ fn split_raw_line(raw_line: &str) -> RawLine<'_> {
 /// is also lossless: the terminator is restored and every trailing byte is
 /// preserved on the following line rather than discarded.
 ///
-/// Deliberately scoped to `agent:boundary` only. A truncated *component* marker
-/// (`<!-- agent:exchange`, `<!-- /agent:exchange`) carries attributes and
-/// structural meaning, so guessing its split could silently reshape the document;
-/// those still fail closed.
+/// Deliberately scoped to `agent:boundary` only. Component openers carry
+/// attributes and still fail closed; the attribute-free closing exchange marker
+/// has its own stricter [`repair_malformed_exchange_close_comment`] gate.
 pub fn repair_malformed_boundary_comment(doc: &str) -> Option<String> {
     const PREFIX: &str = "<!-- agent:boundary:";
     let code_ranges = find_code_ranges(doc);
@@ -1217,6 +1216,105 @@ pub fn repair_malformed_boundary_comment(doc: &str) -> Option<String> {
         }
     }
 
+    repaired.then_some(out)
+}
+
+/// Repair the one unambiguous malformed component marker: the closing exchange
+/// marker. Unlike an opener it has no attributes to infer, and it is
+/// binary-owned scaffolding. The repair is allowed only when the document has
+/// exactly one sound exchange opener, no sound close, and exactly one truncated
+/// close outside code/quotes. Any welded remainder is preserved on its own line.
+pub fn repair_malformed_exchange_close_comment(doc: &str) -> Option<String> {
+    const OPEN_PREFIX: &str = "<!-- agent:exchange";
+    const CLOSE_PREFIX: &str = "<!-- /agent:exchange";
+    const CLOSE: &str = "<!-- /agent:exchange -->";
+
+    let code_ranges = find_code_ranges(doc);
+    let quoted_ranges = find_quoted_ranges(doc);
+    let mut offset = 0usize;
+    let mut open_count = 0usize;
+    let mut sound_close_count = 0usize;
+    let mut malformed_close_count = 0usize;
+
+    for raw_line in doc.split_inclusive('\n') {
+        let line_start = offset;
+        offset += raw_line.len();
+        let RawLine {
+            indent,
+            content: trimmed,
+            ..
+        } = split_raw_line(raw_line);
+        let marker_offset = line_start + indent.len();
+        if byte_in_ranges(marker_offset, &code_ranges)
+            || byte_in_ranges(marker_offset, &quoted_ranges)
+        {
+            continue;
+        }
+        if trimmed.starts_with(OPEN_PREFIX) && trimmed.contains("-->") {
+            open_count += 1;
+        }
+        if trimmed.trim() == CLOSE {
+            sound_close_count += 1;
+        } else if trimmed.starts_with(CLOSE_PREFIX) {
+            malformed_close_count += 1;
+        }
+    }
+    if open_count != 1 || sound_close_count != 0 || malformed_close_count != 1 {
+        return None;
+    }
+
+    let mut out = String::with_capacity(doc.len() + 8);
+    let mut repaired = false;
+    offset = 0;
+    for raw_line in doc.split_inclusive('\n') {
+        let line_start = offset;
+        offset += raw_line.len();
+        let RawLine {
+            indent,
+            content: trimmed,
+            newline,
+        } = split_raw_line(raw_line);
+        let marker_offset = line_start + indent.len();
+        if repaired
+            || byte_in_ranges(marker_offset, &code_ranges)
+            || byte_in_ranges(marker_offset, &quoted_ranges)
+            || !trimmed.starts_with(CLOSE_PREFIX)
+            || trimmed.trim() == CLOSE
+        {
+            out.push_str(raw_line);
+            continue;
+        }
+
+        let remainder = &trimmed[CLOSE_PREFIX.len()..];
+        // Do not guess if the prefix is actually a longer component name.
+        if remainder
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | ':'))
+        {
+            return None;
+        }
+        let remainder = remainder.strip_prefix(' ').unwrap_or(remainder);
+        let remainder = match remainder
+            .strip_prefix("--")
+            .or(remainder.strip_prefix("->"))
+        {
+            Some(rest) => rest.strip_prefix('>').unwrap_or(rest),
+            None => remainder.strip_prefix('-').unwrap_or(remainder),
+        };
+        let remainder = remainder.strip_prefix(' ').unwrap_or(remainder);
+
+        repaired = true;
+        out.push_str(indent);
+        out.push_str(CLOSE);
+        if remainder.is_empty() {
+            out.push_str(newline);
+        } else {
+            out.push('\n');
+            out.push_str(remainder);
+            out.push_str(newline);
+        }
+    }
     repaired.then_some(out)
 }
 
@@ -3168,6 +3266,50 @@ Fix applied to skip non-agent <!-- sequences.
         assert_eq!(
             repair_malformed_boundary_comment("```md\n<!-- agent:boundary:abc123> x\n```\n"),
             None
+        );
+    }
+
+    #[test]
+    fn repair_malformed_exchange_close_preserves_concurrent_queue_edits() {
+        let doc = concat!(
+            "<!-- agent:exchange patch=append -->\n",
+            "❯ Prompt.\n",
+            "### Re: Prompt. — gpt-5\n\nAnswered.\n",
+            "<!-- /agent:exchange -- <!-- agent:queue -->\n",
+            "- do [#added-during-closeout]\n",
+            "<!-- /agent:queue -->\n",
+        );
+        let repaired = repair_malformed_exchange_close_comment(doc)
+            .expect("the attribute-free closing marker is unambiguous");
+
+        assert!(repaired.contains("<!-- /agent:exchange -->\n<!-- agent:queue -->\n"));
+        assert!(repaired.contains("- do [#added-during-closeout]\n"));
+        assert_eq!(structural_corruption_reason(&repaired), None);
+    }
+
+    #[test]
+    fn repair_malformed_exchange_close_fails_closed_when_ambiguous() {
+        assert_eq!(
+            repair_malformed_exchange_close_comment("<!-- /agent:exchange --\n"),
+            None,
+            "a close without its matching opener has no repair authority"
+        );
+        assert_eq!(
+            repair_malformed_exchange_close_comment(concat!(
+                "<!-- agent:exchange -->\n",
+                "<!-- /agent:exchange -->\n",
+                "<!-- /agent:exchange --\n",
+            )),
+            None,
+            "a sound close plus malformed close is duplicate structure, not truncation"
+        );
+        assert_eq!(
+            repair_malformed_exchange_close_comment(concat!(
+                "<!-- agent:exchange -->\n",
+                "```md\n<!-- /agent:exchange --\n```\n",
+            )),
+            None,
+            "documentation inside a code fence is not binary scaffolding"
         );
     }
 

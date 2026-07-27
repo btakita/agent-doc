@@ -302,10 +302,16 @@ pub fn build(file: &Path) -> Result<DispatchPlan> {
     }
 
     if let Some(request) = orchestration_request {
+        let task_source = if queue_prompt.is_some() {
+            "--from-queue"
+        } else {
+            "--from-exchange"
+        };
         required_commands.push(format!(
-            "agent-doc orchestrate {} --mode {} --from-exchange",
+            "agent-doc orchestrate {} --mode {} {}",
             file.display(),
-            orchestration_mode_arg(request.mode)
+            orchestration_mode_arg(request.mode),
+            task_source,
         ));
         handoff = HandoffTarget::Orchestrate;
     }
@@ -1104,7 +1110,8 @@ synchronous orcestra
             plan.required_commands
                 .iter()
                 .any(|cmd| cmd.contains("agent-doc orchestrate")
-                    && cmd.contains("--mode sequential")),
+                    && cmd.contains("--mode sequential")
+                    && cmd.contains("--from-exchange")),
             "expected orchestrate handoff command, got: {:?}",
             plan.required_commands
         );
@@ -1221,6 +1228,61 @@ Done.
                 .iter()
                 .any(|cmd| cmd.contains("--done oobpmt")),
             "queue do item should require closeout with --done oobpmt: {:?}",
+            plan.required_commands
+        );
+    }
+
+    #[test]
+    fn build_plan_sources_explicit_queue_orchestration_from_queue() {
+        let _prompt = EnvGuard::unset("AGENT_DOC_HARNESS_PROMPT");
+        let dir = setup_project();
+        let doc = dir.path().join("plan.md");
+        let content = r#"---
+agent_doc_session: test
+agent_doc_format: template
+agent_doc_write: crdt
+queue_active: true
+---
+
+## Exchange
+
+<!-- agent:exchange patch=append -->
+### Re: prior — gpt-5
+
+Done.
+<!-- /agent:exchange -->
+
+<!-- agent:queue auto -->
+---
+Fan out these tasks.
+- do [#first]
+- do [#second]
+---
+<!-- /agent:queue -->
+
+<!-- agent:backlog -->
+- [ ] [#first] First task.
+- [ ] [#second] Second task.
+<!-- /agent:backlog -->
+"#;
+        std::fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let plan = build(&doc).unwrap();
+
+        assert_eq!(plan.handoff, HandoffTarget::Orchestrate, "{plan:?}");
+        assert!(
+            plan.required_commands.iter().any(|cmd| {
+                cmd.contains("agent-doc orchestrate")
+                    && cmd.contains("--mode parallel")
+                    && cmd.contains("--from-queue")
+            }),
+            "queue orchestration must not source historical exchange prose: {:?}",
             plan.required_commands
         );
     }

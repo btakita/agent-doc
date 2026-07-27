@@ -2064,13 +2064,14 @@ fn merge_template_document_model(
 }
 
 fn editor_crdt_authority_attached(file: &Path) -> bool {
-    agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached()
+    agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(file)
+        || agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached()
 }
 
 /// Whether the durable reliable-sync authority says no editor holds `file`.
 /// Relay member count cannot answer this during a transient reattach gap.
 fn write_path_editor_absent(file: &Path) -> bool {
-    !agent_doc_crdt_relay_io::reliable_sync_editor_live_for_file(file)
+    !agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(file)
 }
 
 fn ensure_force_disk_editor_authority_ready(file: &Path) -> Result<()> {

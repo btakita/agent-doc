@@ -1006,11 +1006,12 @@ pub fn repair_replay_force_disk(file: &Path) -> bool {
     repair_replay_force_disk_with_override(file, None)
 }
 
-fn repair_replay_force_disk_with_override(file: &Path, force_disk_override: Option<bool>) -> bool {
-    if let Some(force_disk) = force_disk_override {
-        return force_disk;
-    }
-    !agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached()
+fn repair_replay_force_disk_with_override(_file: &Path, force_disk_override: Option<bool>) -> bool {
+    // Repair replays retained semantic intent through the normal CRDT/CAS write
+    // path. Editor absence inferred by a short-lived client is never sufficient
+    // authority for a second direct document mutation; only the operator's
+    // explicit force-disk escape hatch may request that behavior.
+    force_disk_override == Some(true)
 }
 
 fn replay_orphaned_response_through_strict_write(
@@ -3103,6 +3104,21 @@ mod tests {
         assert!(json.contains("\"reason\": \"agent markers\""));
         assert!(json.contains("\"response_body\": \"response body\""));
         assert!(json.contains("\"payload_sha256\""));
+    }
+
+    #[test]
+    fn retained_repair_replay_never_infers_force_disk() {
+        let file = Path::new("/tmp/agent-doc-retained-repair.md");
+
+        assert!(
+            !repair_replay_force_disk(file),
+            "an inferred editor absence must still replay through CRDT/CAS"
+        );
+        assert!(!repair_replay_force_disk_with_override(file, Some(false)));
+        assert!(
+            repair_replay_force_disk_with_override(file, Some(true)),
+            "only the explicit operator escape hatch may force disk"
+        );
     }
 
     #[test]

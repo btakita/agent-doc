@@ -823,7 +823,11 @@ I confirm all of the stated assumptions, probability bands, vesting/dilution mat
 - Acadian remains the safer primary role. If Haiven becomes a contract, price it to work on cash and negotiate any milestone-vesting option or warrant separately.
 
 **Changed paths:** this session response and `#haivenequitydiligence` in the backlog. **Commands/evidence:** official Haiven and Discord product/scale pages plus Carta dilution data, as cited in the preceding analysis. **Verification:** document-only; confirmed the full probability table and valuation table are present in the exchange. **Confidence:** high on the decision implication; low-to-medium on precise odds without Haiven traction and cap-table data. **Escalation:** inspect the actual grant, current financing, and revenue-share documents before assigning the 1% financial value.
-<!-- agent:boundary:601d24af -->
+
+### Re: Response
+
+<!-- agent-doc maintenance: equity diligence recommendation tracked in backlog -->
+<!-- agent:boundary:52f232b5 -->
 <!-- /agent:exchange -->
 
 ## Queue
@@ -834,6 +838,7 @@ I confirm all of the stated assumptions, probability bands, vesting/dilution mat
 ## Backlog
 
 <!-- agent:backlog queue -->
+- [ ] [#haivenequitydiligence] Before assigning financial value to Haiven's 1%: obtain the actual grant/instrument; fully diluted share count and whether the percentage is pre- or post-current financing; strike price/409A; vesting, cliff, acceleration, and post-termination exercise window; pro forma dilution and liquidation preferences; and separate written revenue-share terms. If contracting, negotiate milestone-vesting options or a warrant separately from the FTE package.
 - [ ] [#haivencall] Tonight 8pm ET: before the call, send Luke + Craig a short heads-up that Acadian is the likely primary engagement and the SDK contract is the preferred Haiven path; on the 30-minute call acknowledge their FTE-comp preparation, hear a brief outline if useful, then spend most of the time testing Milestone 0 fit; do not accept or promise hours/start live
 - [ ] [#sdkcontract] Active path: if Luke + Craig are receptive, send/refine tasks/recruit/haiven/sdk-proposal-2026-07-26.md and scope only Milestone 0; 10–15 hours/week and any start date remain subject to Acadian conflict-of-interest, moonlighting, confidentiality, and IP clearance
 - [ ] [#acadiansend] Acadian is now the preferred primary engagement: resolve #acadianterms, confirm the acceptance deadline, and obtain written moonlighting/conflict/invention-assignment clearance before promising Haiven SDK hours

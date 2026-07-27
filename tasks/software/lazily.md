@@ -8,7 +8,7 @@ agent_doc_write: crdt
 claude_args: --dangerously-skip-permissions
 codex_args: -s danger-full-access
 agent_doc_model_tier: high
-queue: go
+queue: stop
 ---
 
 ## Status
@@ -235,9 +235,9 @@ Verification:
 > do [#recommendedspecdecision]
 
 
-Decision recorded in lazily-spec:
-
-1. Atomic move is Core and binds every execution flavor a binding advertises, not only `SourceMap`. A missing context is staged out of the peer group; an advertised thread-safe/async map that lacks Core is non-conforming. Test runners may not substitute a base-context map, ad hoc mutex, or dictionary.
+Decision recorded in lazily-spec:ing context is staged out of the peer group; an advert
+- [#lazilyrenameinverted]: Auedor te the bhread-sanative-class rename with mypyc and identity migration tfe/s.
+sync map that lacks Core is non-conforming. Test runners may not substitute a base-context map, ad hoc mutex, or dictionary.
 2. Thread-safety is not a binary label. A realm-local `serialized` context can be meaningful when it supplies a distinct linearization boundary, so it joins portable Core feature tests it supports. It does not join `shared-graph` concurrency stress/model-check tests. A binding may declare the context absent instead; a duplicate type alone does not count as support.
 
 This settles the JS/Dart question without pretending either shares one graph across workers/isolates: both are currently classified `serialized`, not `shared-graph`. Their supported Core surfaces remain in the peer suite; incomplete features remain staged.
@@ -250,23 +250,42 @@ Verification:
 - Lean build passed (9 jobs).
 - Aggregate `make check` reached only the pre-existing sibling README coverage-sync drift (Python, Kotlin, Dart, Go, C++); those concurrent sibling files were preserved rather than rewritten. This change did not alter `coverage.json`.
 - Required one-shot CI inspection: run `30235761708` was in progress; not polled.
-<!-- agent:boundary:8f6b61f5 -->
+
+### Re: Response
+
+> **Queue prompt:**
+>
+> do [#lazilyasyncmap]
+
+
+Implemented `#lazilyasyncmap` in `lazily-rs`.
+
+- Made `AsyncSourceMap::observe` and `AsyncComputedMap::observe` generic over the async read surface. `AsyncComputeContext` reads now register dependency edges; bare `AsyncContext` reads remain intentionally untracked.
+- Added nonblocking tracked reads for `AsyncComputed`, preserving the distinction between dependency tracking and awaiting resolution.
+- Changed the shared collections-family async adapter to exercise `map.observe(&actx, key)` directly instead of bypassing the public map API through entry handles.
+- Added regressions for source-entry invalidation, bare-context non-tracking, and propagation through a resolved computed entry.
+
+Verification:
+- focused async-map tests passed
+- shared collections-family conformance passed
+- workspace `make check` passed
+- the `lazily-rs` `make check` code/test phases passed, but its existing benchmark-report freshness gate reports `BENCHMARKS.md` stale; that unrelated generated report was left untouched
+- `lazily-rs` commit `d4e2315` pushed
+- workspace pointer commit `832b7d711` pushed
+- Rust CI run `30236112428` was in progress at the required one-shot check; the workspace has no workflow named `CI`
+
+This promotes Rust’s async map into the tracked entry-read feature peer group through real implementation behavior, while unsupported implementations can continue to remain staged/skipped by capability.
+<!-- agent:boundary:19f6f938 -->
 <!-- /agent:exchange -->
 
 ## Queue
 
 <!-- agent:queue preset="#spec-test-commit-push" priority go -->
-- ~~do [#lazilyasynccomputedmapde]~~
-- ~~do [#lazilytwoimplementations]~~
-- ~~do [#lazilydartcomputedmap]~~
-- ~~do [#recommendedspecdecision]~~
-- do [#lazilyasyncmap]
 <!-- /agent:queue -->
 
 ## Backlog
 
 <!-- agent:backlog priority queue -->
-- [ ] [#lazilyasyncmap] lazily-rs async map: `observe` is still hard-bound to &AsyncContext (the UNTRACKED surface), so reading a keyed async entry from inside a compute cannot subscribe to it. CONFIRMED as a family-wide class, not an rs quirk: the same defect was found and fixed in go (its SINGLE-THREADED map's Keys/Len/ContainsKey called the zero-argument Source.Get(), documented in core.go as an untracked external read — probed directly, a reader still reported 2 after a third key was added), in cs (async Len read a membership cell that was written on every mutation and never read anywhere), and in kt (async Core reads spelled against the bare AsyncContext register no edge; this graph tracks through AsyncComputeContext). All three now take an explicit read surface. rs is the ONLY binding left where a keyed async entry read cannot subscribe. Fix shape is settled and shipped 8 times over: make the read generic over the read surface so a compute view registers the edge and a bare context does not
 <!-- /agent:backlog -->
 
 ## Review

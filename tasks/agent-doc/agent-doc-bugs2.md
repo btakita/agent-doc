@@ -690,13 +690,26 @@ Fixed `#backlogqueuepopulation` in the agent-doc binary. The root cause was that
 Closeout now records a separate mutation-scoped `pending_actionable_ids` set for successful adds and ungates, then insert-only mirrors exactly those ids into an explicit go-mode Queue after consuming the current head. The inserted block is ordered by hard `after=#id` dependencies and then priority, while every pre-existing queue byte remains untouched. It intentionally does not sweep all open backlog items, so queue rows the operator deleted are not resurrected.
 
 Verification passed: all 8,208 tests and every formal model are green. The matching binary, shared library, and JetBrains plugin were installed. Pushed agent-doc commit `59fface06` and parent gitlink commit `087824388`; the inspected CI run is in progress.
-<!-- agent:boundary:e39dbffd -->
+
+### Re: selected-text idle steering — gpt-5.6-sol
+
+> **Queue prompt:**
+>
+> do [#steergateidle]
+
+
+`#steergateidle` is already resolved by the broader editor rerun unification in agent-doc commit `557ef9366`, which is present in the installed and pushed build. That change deleted the selection-specific turn-steering route and its actor-state admission gate. JetBrains Run Agent Doc no longer reads or submits selected text; both idle and active panes receive the same plain `agent-doc <file>` trigger, and the binary's normal route policy decides whether to start, queue, replace, or steer it. Legacy `selected_text` / `steering_id` fields are accepted only for compatibility and normalized to that same plain route.
+
+This also removes the incorrect-state half of the bug rather than trying to make a timeout-derived `ready` trustworthy: selection dispatch no longer performs that separate supervisor-state read, so a failed read cannot become a confident selection-specific rejection. Unavailable normal routing remains an explicit route failure instead of an inferred `ready` result.
+
+Focused verification passed: `command_submit_selected_text_uses_the_plain_editor_route` and the JetBrains `SubmitActionTest`. The current installed build also passed the full 8,208-test suite and all formal models earlier in this queue drain. No new code change was appropriate for this duplicate item.
+<!-- agent:boundary:661c84a2 -->
 <!-- /agent:exchange -->
 ## Queue
 
 <!-- agent:queue priority preset="#spec-test-build-install-commit-push" go -->
 - ~~do [#backlogqueuepopulation]~~
-- do [#steergateidle]
+- ~~do [#steergateidle]~~
 - 📌 do [#jbcompactcommit]
 - 📌 do [#tmuxsynccrashlog]
 - 📌 do [#60ev]
@@ -732,7 +745,6 @@ Verification passed: all 8,208 tests and every formal model are green. The match
 ## Backlog
 
 <!-- agent:backlog priority priority queue -->
-- [ ] [#steergateidle] #agent-doc-bug Selected-text turn steering is gated on an active turn and rejects otherwise ('requires the authoritative pane to have an active turn (actor_state=ready)'). Both halves are wrong per operator: (a) an active turn should not be required — an idle pane should dispatch the selection as a normal trigger, not error; (b) detection was incorrect, a turn WAS active while it reported ready. (b) is corroborated by repeated 'timed out after 5.0s waiting for project controller response' on admin inspect in the same window, so a failed actor-state read may be surfacing as authoritative 'ready'. Fix both: idle becomes a dispatch path, and a failed read fails closed or retries instead of reporting ready. Related #selectedturnsteering.
 - [ ] [#jbedtledgerverify] [operator-verify] Live confirmation for #jbedtledger (plugin 0.2.280, 84d2056ab): Run Agent Doc no longer blocks the UI thread on ledger file I/O. With the IDE restarted onto 0.2.280, trigger Run Agent Doc on a large session document a few times and watch for UI responsiveness during the click (no brief freeze on the action). Then confirm the diagnostics still record correctly: .agent-doc/state/editor-route-attempts/<route>.txt must still show every stage in order (clicked -> save_active_document -> active_document_saved -> route_prepare -> ...) with NO interleaving or missing stages, and the 'thread=' field must still name the CALLING thread (expect AWT-EventQueue for the EDT stages), not 'agent-doc-run-attempt-ledger'. A thread= value of agent-doc-run-attempt-ledger would mean the caller-thread capture regressed and the EDT diagnostic is silently useless. Unit tests pin the structure but cannot prove the live latency win or the real thread names.
 
 - [ ] [#0dsr] [focused-cycle] PRINCIPLE: Run Agent Doc must recover ANY incomplete operation, not just the one that failed. Tagged [focused-cycle] 2026-07-19 — this is WRITE-PATH work whose failure modes are destructive (replaying a stale intent clobbers operator text; broken idempotency double-archives a compact), so it needs fresh context, not a mid-drain slot. MAP (the expensive part, traced 2026-07-19): (1) durable journal = pending_write_journal, agent-doc-state-backbone/src/lib.rs:1433 — deduped by intent_id, entries cleared on DocumentWriteConverged; (2) accessor = pending_document_write_journal, agent-doc-document-realtime-io/src/lib.rs:2824; (3) EXISTING replay = deferred_document_write_reconnect_content, same file :3115 — but triggered only by editor RECONNECT (:1214) and closing cut (:3571), which is the actual gap: a retained intent waits for a reconnect that may never come; (4) settle entry points already exposed to preflight via its effects = settle_retained_committed_projection / settle_retained_captured_projection, agent-doc-closeout-runtime-io/src/lib.rs:170/226/289; (5) the repair step to hook = agent-doc-preflight-command-io/src/run.rs:296, which runs on every Run Agent Doc. IDEMPOTENCY NOTE: intent_id dedup gives you 'do not replay the SAME intent twice' for free, but it does NOT prove replaying a STALE intent over newer content is safe — that guard still has to be designed and is the real risk. Triggering report: compact on tasks/professional/equityfundingsource.md failed with 'CRDT convergence did not settle within 60000ms' and left work retained with no operator surface to resume it.

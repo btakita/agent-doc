@@ -54,6 +54,16 @@ pub fn check_partial_closeout_state_guard(file: &Path) -> Result<GuardResult> {
 /// path relationship plus overlapping changed string literals in tracked
 /// uncommitted or staged companion changes.
 pub fn check_partial_staging_closeout_guard(file: &Path) -> Result<GuardResult> {
+    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(file)? else {
+        return Ok(GuardResult::None);
+    };
+    if !agent_doc_git_io::partial_staging::cycle_committed_beyond_session_document(
+        file,
+        state.started_at,
+    )? {
+        return Ok(GuardResult::None);
+    }
+
     let findings = agent_doc_git_io::partial_staging::companion_findings(file)?;
     if findings.is_empty() {
         return Ok(GuardResult::None);

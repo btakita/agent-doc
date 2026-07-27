@@ -19,6 +19,55 @@ pub struct PartialStagingFinding {
     pub literals: Vec<String>,
 }
 
+/// Whether this cycle committed any path other than its session document.
+///
+/// The partial-staging companion scan is a WARN-only closeout diagnostic for a
+/// cycle that committed source/test work. A document-only closeout cannot have
+/// partially staged a source companion, so enumerating every dirty submodule and
+/// diffing each repository is both semantically irrelevant and expensive.
+pub fn cycle_committed_beyond_session_document(file: &Path, started_at: u64) -> Result<bool> {
+    let start = file.parent().unwrap_or_else(|| Path::new("."));
+    let Some(root) = git_toplevel(start)? else {
+        return Ok(false);
+    };
+    let session_path = file
+        .strip_prefix(&root)
+        .unwrap_or(file)
+        .to_string_lossy()
+        .replace('\\', "/");
+    let since = format!("--since=@{started_at}");
+    let output = Command::new("git")
+        .current_dir(&root)
+        .args([
+            "log",
+            since.as_str(),
+            "--format=",
+            "--name-only",
+            "--diff-filter=ACMRT",
+        ])
+        .output()
+        .with_context(|| format!("failed to inspect cycle commit paths in {}", root.display()))?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let paths = String::from_utf8_lossy(&output.stdout);
+    Ok(committed_paths_include_beyond_session_document(
+        paths.lines(),
+        &session_path,
+    ))
+}
+
+fn committed_paths_include_beyond_session_document<'a>(
+    paths: impl IntoIterator<Item = &'a str>,
+    session_path: &str,
+) -> bool {
+    paths
+        .into_iter()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .any(|path| path != session_path)
+}
+
 pub fn companion_findings(file: &Path) -> Result<Vec<PartialStagingFinding>> {
     let mut findings = Vec::new();
     for repo in candidate_repos(file)? {
@@ -78,7 +127,6 @@ pub fn candidate_repos(file: &Path) -> Result<Vec<PathBuf>> {
     repos.dedup();
     Ok(repos)
 }
-
 
 /// Deduplicated pathspec operands for a diff, so a path listed twice (dirty and
 /// staged) is not passed twice.
@@ -146,11 +194,14 @@ pub fn diff_evidence(repo: &Path) -> Result<Option<PartialStagingDiffEvidence>> 
 
     let committed_diff = git_stdout(
         repo,
-        &diff_args(&["diff", "--unified=0", "HEAD^", "HEAD"], &committed_pathspec),
+        &diff_args(
+            &["diff", "--unified=0", "HEAD^", "HEAD"],
+            &committed_pathspec,
+        ),
     )?
     .unwrap_or_default();
-    let mut dirty_diff =
-        git_stdout(repo, &diff_args(&["diff", "--unified=0"], &dirty_pathspec))?.unwrap_or_default();
+    let mut dirty_diff = git_stdout(repo, &diff_args(&["diff", "--unified=0"], &dirty_pathspec))?
+        .unwrap_or_default();
     if let Some(cached) = git_stdout(
         repo,
         &diff_args(&["diff", "--cached", "--unified=0"], &dirty_pathspec),
@@ -230,6 +281,22 @@ mod tests {
         git(root, &["config", "user.name", "Test"]);
     }
 
+    fn commit_at(root: &Path, message: &str, date: &str) {
+        let output = Command::new("git")
+            .current_dir(root)
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
+            .args(["commit", "-m", message, "--no-verify"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "dated git commit failed in {}: {}",
+            root.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     #[test]
     fn diff_evidence_collects_committed_and_staged_changes() {
         let dir = tempfile::TempDir::new().unwrap();
@@ -271,6 +338,51 @@ mod tests {
         assert_eq!(evidence.dirty_paths, ["tests/render_test.rs"]);
         assert!(evidence.committed_diff.contains("new queue output"));
         assert!(evidence.dirty_diff.contains("new queue output"));
+    }
+
+    #[test]
+    fn cycle_commit_path_gate_skips_document_only_closeout() {
+        assert!(!committed_paths_include_beyond_session_document(
+            ["", "tasks/session.md", "tasks/session.md"],
+            "tasks/session.md",
+        ));
+        assert!(committed_paths_include_beyond_session_document(
+            ["tasks/session.md", "src/render.rs"],
+            "tasks/session.md",
+        ));
+        assert!(committed_paths_include_beyond_session_document(
+            ["src/agent-doc"],
+            "tasks/session.md",
+        ));
+    }
+
+    #[test]
+    fn cycle_commit_probe_runs_only_after_non_document_commit() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        fs::write(root.join("session.md"), "initial\n").unwrap();
+        fs::write(root.join("source.rs"), "initial\n").unwrap();
+        git(root, &["add", "session.md", "source.rs"]);
+        commit_at(root, "initial", "2000-01-01T00:00:00Z");
+
+        fs::write(root.join("session.md"), "closed\n").unwrap();
+        git(root, &["add", "session.md"]);
+        commit_at(root, "document closeout", "2000-01-02T00:00:00Z");
+        assert!(
+            !cycle_committed_beyond_session_document(&root.join("session.md"), 946_728_000,)
+                .unwrap(),
+            "a document-only cycle cannot partially stage a source companion"
+        );
+
+        fs::write(root.join("source.rs"), "changed\n").unwrap();
+        git(root, &["add", "source.rs"]);
+        commit_at(root, "source work", "2000-01-03T00:00:00Z");
+        assert!(
+            cycle_committed_beyond_session_document(&root.join("session.md"), 946_728_000,)
+                .unwrap(),
+            "a source commit in the cycle must enable the companion scan"
+        );
     }
 
     #[test]

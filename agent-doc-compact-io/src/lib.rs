@@ -57,6 +57,10 @@
 //!   sibling-cell edits (including queue item deletions) are rebased into both the live and committed
 //!   targets before snapshot/commit; concurrent edits inside the compacted cell remain fail-closed
 //!   (`#compact-independent-cells`).
+//! - Before deriving a compact target, normal compaction replays any exact base-keyed durable
+//!   editor-op epoch into its semantic input cut. The originally observed bytes remain the
+//!   convergence compare-and-swap base, and the epoch is cleared only after the compact write and
+//!   snapshot succeed (`#compactcachedeletetombstone`).
 //! - Before an editor-IPC `--commit` closeout, `flush_editor_buffer_to_disk_after_compact` asks the
 //!   live editor to save its converged buffer to disk (`save_document` IPC) so the working-tree file
 //!   converges to the compacted content. The plugin applies convergence patches to the in-memory
@@ -435,6 +439,35 @@ pub fn run(
     )
 }
 
+fn clear_replayed_editor_ops_after_compact(file: &Path, replayed: bool) {
+    if !replayed {
+        return;
+    }
+    match agent_doc_op_capture_io::clear_op_capture(file) {
+        Ok(()) => agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "compact_pending_editor_cut_consumed file={} outcome=cleared_after_successful_write",
+                file.display(),
+            ),
+        ),
+        Err(err) => {
+            eprintln!(
+                "[compact] warning: failed to clear replayed editor-op capture for {} after successful write: {err}",
+                file.display(),
+            );
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "compact_pending_editor_cut_clear_failed file={} error={}",
+                    file.display(),
+                    err,
+                ),
+            );
+        }
+    }
+}
+
 /// Execute compaction inside the CP process. This entrypoint is wired only by
 /// the project-controller runtime effect; editor/CLI callers use [`run`].
 pub fn run_in_controller(
@@ -456,29 +489,57 @@ pub fn run_in_controller(
     } else {
         None
     };
-    let write_base_content = (if force_disk {
+    let observed_write_base_content = (if force_disk {
         effects.force_disk_document_content(file, "compact_run_initial_force_disk")
     } else {
         effects.current_document_content(file, "compact_run_initial")
     })
     .with_context(|| format!("failed to read {}", file.display()))?;
+    // `#compactcachedeletetombstone`: a paused editor can have a durable,
+    // base-keyed operator-op epoch even while the controller's visible
+    // projection still equals that epoch's base. Compact must derive its
+    // semantic cut from those ops before parsing any component. Otherwise the
+    // stale queue becomes part of the compacted canonical target, resurrecting
+    // rows the operator deleted and provoking a JetBrains File Cache Conflict.
+    //
+    // Keep the separately observed bytes as the convergence CAS base. The
+    // compact target contains both the replayed operator cut and the exchange
+    // rewrite, so it can be applied atomically from that exact observed base.
+    let pending_editor_cut = if force_disk {
+        None
+    } else {
+        Some(
+            agent_doc_document_realtime_io::reconcile_pending_editor_cut(
+                file,
+                &observed_write_base_content,
+                &observed_write_base_content,
+                "compact",
+            )?,
+        )
+    };
+    let replayed_pending_editor_ops = pending_editor_cut
+        .as_ref()
+        .is_some_and(|cut| cut.replayed_editor_ops);
+    let semantic_base_content = pending_editor_cut
+        .map(|cut| cut.content)
+        .unwrap_or_else(|| observed_write_base_content.clone());
     // Compact is not a repair command. Gate the exact realtime/disk authority
     // before creating tags, composing captures, mutating CRDT state, or
     // committing. This prevents a no-op compact from laundering a malformed
     // document into HEAD.
     agent_doc_lint_io::validate_integrity_on_content_with_logger(
         file,
-        &write_base_content,
+        &semantic_base_content,
         agent_doc_ops_log_io::log_op,
     )?;
     agent_doc_lint_io::run_on_content_with_logger(
         file,
-        &write_base_content,
+        &semantic_base_content,
         None,
         agent_doc_ops_log_io::log_op,
     )?;
 
-    let content = compose_active_capture_for_compaction(file, &write_base_content)?;
+    let content = compose_active_capture_for_compaction(file, &semantic_base_content)?;
 
     let (fm, body) = frontmatter::parse(&content)?;
 
@@ -532,7 +593,7 @@ pub fn run_in_controller(
             Some(n) => run_component_compact_partial(
                 file,
                 &content,
-                &write_base_content,
+                &observed_write_base_content,
                 PartialCompactOptions {
                     target,
                     keep: n,
@@ -544,7 +605,7 @@ pub fn run_in_controller(
             None => run_component_compact_with_options(
                 file,
                 &content,
-                &write_base_content,
+                &observed_write_base_content,
                 target,
                 message,
                 is_crdt,
@@ -594,7 +655,7 @@ pub fn run_in_controller(
             &compacted,
             &compacted,
             &content,
-            &write_base_content,
+            &observed_write_base_content,
             CompactApplyOptions {
                 target_component: None,
                 refresh_crdt: false,
@@ -615,6 +676,11 @@ pub fn run_in_controller(
         );
         inline_targets
     };
+
+    // The durable op epoch is consumed only after the compact target has
+    // crossed the authoritative write and snapshot boundary. Any earlier
+    // validation/convergence failure leaves it available for a retry.
+    clear_replayed_editor_ops_after_compact(file, replayed_pending_editor_ops);
 
     // A no-op compact is not a response-repair escape hatch. In particular,
     // do not use unrelated snapshot/capture drift to manufacture a commit when
@@ -637,7 +703,7 @@ pub fn run_in_controller(
     if commit && !force_disk {
         let disk_is_pre_compact = effects
             .force_disk_document_content(file, "compact_pre_commit_disk_flush_probe")
-            .map(|disk| disk == content)
+            .map(|disk| disk == observed_write_base_content)
             .unwrap_or(false);
         if disk_is_pre_compact {
             flush_editor_buffer_to_disk_after_compact(file, &targets.live, effects);
@@ -4352,6 +4418,149 @@ mod tests {
                 && !ops_log.contains("typed_component_drift")
                 && !ops_log.contains("refusing to auto-adopt committed historical response"),
             "clean exchange-only compact must not trip the historical response drift guard:\n{ops_log}"
+        );
+    }
+
+    #[test]
+    fn compact_replays_pending_queue_delete_before_rewrite_and_consumes_after_success() {
+        use agent_doc_merge::crdt::EditorOp;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        let file = root.join("session.md");
+        let deleted_queue_row = "- [ ] [#struck] resurrected work\n";
+        let kept_queue_row = "- [ ] [#keep] retained work\n";
+        let doc = format!(
+            concat!(
+                "---\nagent_doc_session: test-compact-editor-cut\nagent_doc_format: template\n---\n\n",
+                "## Exchange\n\n",
+                "<!-- agent:exchange patch=append -->\n",
+                "### Re: older — gpt-5\n\nEarlier response.\n\n",
+                "### Re: newer — gpt-5\n\nNewer response.\n",
+                "<!-- /agent:exchange -->\n\n",
+                "## Queue\n\n",
+                "<!-- agent:queue go -->\n",
+                "{}{}",
+                "<!-- /agent:queue -->\n",
+            ),
+            deleted_queue_row, kept_queue_row,
+        );
+        std::fs::write(&file, &doc).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            &doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        let delete_offset = doc.find(deleted_queue_row).unwrap();
+        agent_doc_op_capture_io::record_editor_op(
+            &file,
+            &agent_doc_hash::content_hash(&doc),
+            EditorOp::Delete {
+                offset: delete_offset,
+                len: deleted_queue_row.len(),
+            },
+        )
+        .unwrap();
+
+        run_in_controller(
+            &file,
+            None,
+            Some("exchange"),
+            Some("Compacted summary."),
+            Some("skip"),
+            false,
+            false,
+        )
+        .unwrap();
+
+        let visible = std::fs::read_to_string(&file).unwrap();
+        assert!(visible.contains("Compacted summary."), "{visible}");
+        assert!(!visible.contains(deleted_queue_row), "{visible}");
+        assert!(visible.contains(kept_queue_row), "{visible}");
+        let snapshot = agent_doc_snapshot_io::load_document_baseline(&file)
+            .unwrap()
+            .unwrap();
+        assert!(!snapshot.contains(deleted_queue_row), "{snapshot}");
+        assert!(snapshot.contains(kept_queue_row), "{snapshot}");
+        assert!(
+            agent_doc_op_capture_io::load_op_capture(&file)
+                .unwrap()
+                .is_none(),
+            "a successfully applied compact must consume the replayed editor-op epoch"
+        );
+        let ops_log = std::fs::read_to_string(root.join(".agent-doc/logs/ops.log")).unwrap();
+        assert!(
+            ops_log.contains("compact_pending_editor_cut_replayed")
+                && ops_log.contains("compact_pending_editor_cut_consumed"),
+            "{ops_log}"
+        );
+    }
+
+    #[test]
+    fn compact_preserves_pending_editor_ops_when_replayed_cut_is_invalid() {
+        use agent_doc_merge::crdt::EditorOp;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".agent-doc/snapshots")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/archives")).unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc/logs")).unwrap();
+
+        let file = root.join("session.md");
+        let exchange_close = "<!-- /agent:exchange -->\n";
+        let doc = concat!(
+            "---\nagent_doc_session: test-compact-editor-cut-failure\nagent_doc_format: template\n---\n\n",
+            "## Exchange\n\n",
+            "<!-- agent:exchange patch=append -->\n",
+            "### Re: response — gpt-5\n\nResponse.\n",
+            "<!-- /agent:exchange -->\n",
+        );
+        std::fs::write(&file, doc).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &file,
+            doc,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        agent_doc_op_capture_io::record_editor_op(
+            &file,
+            &agent_doc_hash::content_hash(doc),
+            EditorOp::Delete {
+                offset: doc.find(exchange_close).unwrap(),
+                len: exchange_close.len(),
+            },
+        )
+        .unwrap();
+
+        let err = run_in_controller(
+            &file,
+            None,
+            Some("exchange"),
+            Some("Compacted summary."),
+            Some("skip"),
+            false,
+            false,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("component")
+                || err.to_string().contains("marker")
+                || err.to_string().contains("integrity"),
+            "{err:#}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), doc);
+        assert!(
+            agent_doc_op_capture_io::load_op_capture(&file)
+                .unwrap()
+                .is_some(),
+            "a failed compact must retain the editor-op epoch for recovery"
         );
     }
 

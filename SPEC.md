@@ -7,6 +7,11 @@
   current document used for response merge, snapshots, and queue reconciliation.
   Replayed operations are cleared only after the reconciled document is written
   successfully (`#pauseddeletetombstone`).
+- Compact Exchange derives its semantic input from the same exact base-keyed
+  durable editor-op cut before parsing the exchange. It retains the originally
+  observed authority bytes as its compare-and-swap base, atomically lands operator
+  deletes with the compact rewrite, and consumes the op epoch only after the
+  authoritative write and snapshot succeed (`#compactcachedeletetombstone`).
 - Normal preflight publishes typed document observations to one
   controller-owned per-document `Computed`; short-lived preflight CLI processes
   consume that projection instead of independently rebuilding output state.

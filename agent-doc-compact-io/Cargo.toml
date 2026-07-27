@@ -33,6 +33,8 @@ agent-doc-merge-io = { path = "../agent-doc-merge-io", version = "0.35.31" }
 agent-doc-ops-log-io = { path = "../agent-doc-ops-log-io", version = "0.35.31" }
 agent-doc-project-root-io = { path = "../agent-doc-project-root-io", version = "0.35.31" }
 agent-doc-controller-io = { path = "../agent-doc-controller-io", version = "0.35.31" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.31" }
+agent-doc-op-capture-io = { path = "../agent-doc-op-capture-io", version = "0.35.31" }
 agent-doc-session-accretion-io = { path = "../agent-doc-session-accretion-io", version = "0.35.31" }
 agent-doc-snapshot-io = { path = "../agent-doc-snapshot-io", version = "0.35.31" }
 agent-doc-sqlite = { path = "../agent-doc-sqlite", version = "0.35.31" }
